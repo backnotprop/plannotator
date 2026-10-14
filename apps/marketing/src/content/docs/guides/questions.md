@@ -98,8 +98,8 @@ Holds up: staging deploy; release notes
 ```
 
 - `Stopped: <why>`: the agent cannot go on until you answer. The thread goes first, under **Stopped on you**. Agents are told to write it only when they truly cannot continue.
-- `Holds up: <work>; <work>`: the agent goes on, and the named work waits on your answer. The thread shows under **Holding up work**.
-- A negative value (`no`, `none`, `n/a`, a dash) means no stop: `Stopped: no` leaves the question under **Waiting on you**, and a `Holds up:` entry `none` holds nothing up.
+- `Holds up: <work>; <work>`: the agent goes on, and the named work waits on your answer. The thread shows under **Holding up work**, unless a question also says `Stopped:`, which wins.
+- A negative value (`no`, `none`, `n/a`, a dash) means no stop: `Stopped: no` is read as if the line were not there, and a `Holds up:` entry `none` holds nothing up.
 
 ## Teaching your agent to ask
 

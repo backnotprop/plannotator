@@ -96,7 +96,7 @@ export const SEND_BODY_DESCRIPTION = [
   "",
   "Two Inbox-only lines a question block can carry, each on its own line after the question:",
   `- \`Stopped: <why>\` only when you truly cannot go on until this is answered: the thread goes first in the person's list, under "${sectionLabel("stopped")}". Otherwise leave the line out. A negative value (\`no\`, \`none\`, \`n/a\`, \`-\`) means no stop, so never write \`Stopped: no\`.`,
-  `- \`Holds up: <work>; <work>\` names the work that waits on the answer while you go on: the list shows it under "${sectionLabel("holding")}". A \`none\` entry holds nothing up.`,
+  `- \`Holds up: <work>; <work>\` names the work that waits on the answer while you go on: listed under "${sectionLabel("holding")}" (a \`Stopped:\` line wins). A \`none\` entry holds nothing up.`,
   "",
   INBOX_STOP_EXAMPLE,
 ].join("\n");

@@ -254,7 +254,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "Use it for:",
     "",
     "- A question you cannot settle from the code or the conversation, which can wait for an answer.",
-    "- A blocker: say what stops you (a `Stopped:` line, below). When other work remains, use `Holds up:` instead and go on with it.",
+    "- A blocker: say what stops you (a `Stopped:` line, below). When you can go on with other work, leave `Stopped:` out and name what waits in `Holds up:`; a question that stops you can carry both.",
     "- Long work you finished while the person was away: one short summary, with the files to look at in `attachments`.",
     "- A plan, document, HTML prototype or diagram the person should read and annotate (`attachments`).",
     "- A guided review of a finished code change (get_guide_brief, then submit_guide).",
