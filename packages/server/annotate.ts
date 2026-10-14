@@ -1102,7 +1102,7 @@ export async function startAnnotateServer(
                 { status: 400 },
               );
             }
-            return handleOpenIn(req, { resolveRoot: getReferenceRootPaths });
+            return handleOpenIn(req, { resolveRoot: getReferenceRootPaths, serverSession });
           }
 
           // API: Update now (the update toast and the Options menu): the install script, once.

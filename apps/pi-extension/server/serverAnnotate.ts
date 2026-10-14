@@ -65,7 +65,7 @@ import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
 import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
-import { getAvailableOpenInApps, openFileInApp } from "./open-in-apps.ts";
+import { getAvailableOpenInApps, handleOpenInRequest } from "./open-in-apps.ts";
 
 import { getRepoInfo } from "./project.ts";
 import {
@@ -95,7 +95,7 @@ import {
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
-import { folderSessionAssetAllowed, htmlAssetContext, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, resolveOpenInTarget } from "../generated/html-assets-node.ts";
+import { folderSessionAssetAllowed, htmlAssetContext, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
@@ -1132,30 +1132,9 @@ export async function startAnnotateServer(options: {
 				json(res, { ok: false, error: "Open in app is unavailable for this source" }, 400);
 				return;
 			}
-			try {
-				const body = await parseBody(req);
-				const filePath = body.filePath;
-				if (typeof filePath !== "string" || !filePath) {
-					json(res, { ok: false, error: "Missing filePath" }, 400);
-					return;
-				}
-				const appId = typeof body.appId === "string" ? body.appId : undefined;
-				// Confine opens to the same reference roots /api/doc serves from,
-				// so any linked doc the user can view can also be opened.
-				const abs = resolveOpenInTarget(filePath, null, getReferenceRootPaths);
-				if (abs == null) {
-					json(res, { ok: false, error: "Path is outside the allowed directory" }, 403);
-					return;
-				}
-				const result = await openFileInApp(abs, appId);
-				json(res, result, 200);
-			} catch (err) {
-				json(
-					res,
-					{ ok: false, error: err instanceof Error ? err.message : "Failed to open file" },
-					500,
-				);
-			}
+			// Confine opens to the same reference roots /api/doc serves from,
+			// so any linked doc the user can view can also be opened.
+			await handleOpenInRequest(req, res, { serverSession, resolveRoot: getReferenceRootPaths });
 		} else if (url.pathname === "/api/draft") {
 			if (req.method === "POST") {
 				try {

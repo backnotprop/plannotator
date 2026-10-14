@@ -26,6 +26,12 @@
  * middle, last, ids: { <name>: <attachment id> } }`). Without it the seed is
  * exactly as before. With `phones` instead, the Inbox serves phones (see
  * `machine.json` below); the seed is the same.
+ *
+ * With a fourth argument `sent-multi`, each project also gets a message
+ * holding a pick-any question (with a recommendation) and a pick-one
+ * question, where the person sent an answer to the pick-any one only
+ * (`Toasts`, not the recommendation) and kept the other open; the world adds
+ * `sentMulti` (the message id).
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -158,8 +164,31 @@ type World = {
   filed: string;
   attachment: string;
   files?: { thread: string; first: string; middle: string; last: string; ids: Record<string, string> };
+  sentMulti?: string;
   news: string[];
 };
+const SENT_MULTI = [
+  "Two things before the release:",
+  "",
+  ":::question-multi",
+  "Which indicators ship?",
+  "",
+  "- [ ] Dot",
+  "- [ ] Banner",
+  "- [ ] Toasts",
+  "",
+  "Recommended: Dot, Banner",
+  ":::",
+  "",
+  ":::question",
+  "Which channel announces it?",
+  "",
+  "- [ ] Blog",
+  "- [ ] Changelog",
+  "",
+  "Recommended: Changelog",
+  ":::",
+].join("\n");
 const worlds: World[] = [];
 for (let i = 0; i < count; i++) {
   const root = join(projectsDir, `billing-${i}`);
@@ -204,8 +233,21 @@ for (let i = 0; i < count; i++) {
     const last = store.sendMessage({ project_id: project.id, author: headerAuthor, body: "The listing draft is attached.", reply_to: first.id, attachments: one }).message;
     files = { thread: first.id, first: first.id, middle: middle.id, last: last.id, ids: Object.fromEntries([...three, ...one].map((a) => [a.name, a.id])) };
   }
+  let sentMulti: string | undefined;
+  if (extra === "sent-multi") {
+    const sentAuthor = { ...author, session: `ses_sm${i}` };
+    const message = store.sendMessage({ project_id: project.id, author: sentAuthor, body: SENT_MULTI }).message;
+    const multi = store.questionsOf(message.id).find((q) => q.kind === "multi")!;
+    store.sendReply(message.id, {
+      idempotency_key: `sent-multi-${i}`,
+      skip_unanswered: false,
+      questions: [{ key: multi.key, revision: multi.revision, answer: { v: 1, key: multi.key, kind: multi.kind, prompt: multi.prompt, selected: ["Toasts"] } }],
+    });
+    sentMulti = message.id;
+  }
   worlds.push({
     ...(files ? { files } : {}),
+    ...(sentMulti ? { sentMulti } : {}),
     project: project.id,
     stopped: stopped.id,
     waiting: waiting.id,

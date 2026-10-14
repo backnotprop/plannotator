@@ -28,6 +28,8 @@ import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../worke
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { fileKind } from '@plannotator/core/file-kind';
+import { getFileKindOrder } from '../utils/fileKindTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
@@ -60,6 +62,9 @@ import {
   clearItemSearchHighlights,
   swapActiveSearchHighlight,
 } from '../utils/reviewSearchHighlight';
+
+/** The left panel's file order the all-files surface follows. */
+export type AllFilesOrder = 'tree' | 'kind' | 'list';
 
 /**
  * AllFilesCodeView (migration phases P1 + P2 + P3 + P4)
@@ -328,8 +333,9 @@ export interface AllFilesCodeViewProps {
    *  lets repeated requests for the same path fire again. */
   fileScrollTarget?: { filePath: string; token: number } | null;
   // Which left panel drives the item order: 'tree' (folders-first visual
-  // order) or 'list' (files array verbatim — the sections view's order).
-  fileOrder?: 'tree' | 'list';
+  // order), 'kind' (the tree split into Code / Tests / Generated blocks) or
+  // 'list' (files array verbatim — the sections view's order).
+  fileOrder?: AllFilesOrder;
   // Collapse-all lives in the dock tab strip: register the toggle handler and
   // mirror the collapsed flag so the header button can drive/reflect it.
   registerCollapseAllToggle?: (toggle: (() => void) | null) => void;
@@ -806,11 +812,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // order verbatim — which the sections view already arranged top-down
   // (committed → staged → unstaged → untracked). Scrolling this surface then
   // always tracks the visible left-panel list one-to-one.
+  const kindOrderGenerated = fileOrder === 'kind' ? generatedFiles : undefined;
+  const kindOrderKey = useMemo(
+    () => (kindOrderGenerated ? [...kindOrderGenerated].sort().join('\n') : ''),
+    [kindOrderGenerated],
+  );
   const visualOrder = useMemo(() => {
     if (fileOrder === 'list') return files.map((_, index) => index);
+    if (fileOrder === 'kind') return getFileKindOrder(files, kindOrderGenerated);
     const tree = buildFileTree(files);
     return getVisualFileOrder(tree);
-  }, [files, fileOrder]);
+    // The generated set is content-keyed (kindOrderKey): an equal set from a
+    // refreshed payload must not reorder or remount anything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, fileOrder, kindOrderKey]);
 
   // `initialItems` + the identity maps are recomputed whenever the file set
   // changes. CodeView is uncontrolled (the Diffshub pattern) and only seeds
@@ -2773,6 +2788,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         editDisabledReason={editDisabledReason}
         isViewed={viewedFiles?.has(filePath)}
         isGenerated={generatedFiles?.has(filePath) === true}
+        isTest={fileKind(filePath, generatedFiles) === 'test'}
         renderMarkdownView={previewable ? (fit) => previewControl!.renderViewControl({ file, ...fit }) : undefined}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         showViewedControl={showViewedControls}

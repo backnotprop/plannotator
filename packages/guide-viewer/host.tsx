@@ -64,6 +64,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
   onRevealFile?: (path: string) => void;
   /** Host-owned global search: the active match is routed to its chapter so an offscreen file mounts first. */
   activeSearchMatch?: GuideActiveSearchMatch | null;
+  /**
+   * Paths the host knows are generated (the review server's `generatedFiles`).
+   * Optional: without it the built-in name list decides (lockfiles, minified
+   * files, source maps). Used only to sort a chapter's files by kind.
+   */
+  generatedFiles?: ReadonlySet<string>;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

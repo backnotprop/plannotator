@@ -15,7 +15,8 @@
     "./GuideFileCard": "./GuideFileCard.tsx",
     "./GuideViewportManager": "./GuideViewportManager.tsx",
     "./GuideSkeleton": "./GuideSkeleton.tsx",
-    "./GuideViewer": "./GuideViewer.tsx"
+    "./GuideViewer": "./GuideViewer.tsx",
+    "./FileKindIcon": "./FileKindIcon.tsx"
   },
   "files": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
   "dependencies": {
