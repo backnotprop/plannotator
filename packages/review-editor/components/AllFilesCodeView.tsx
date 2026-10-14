@@ -30,9 +30,6 @@ import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { fileKind } from '@plannotator/core/file-kind';
 import { getFileKindOrder } from '../utils/fileKindTree';
-
-/** The left panel's file order the all-files surface follows. */
-export type AllFilesOrder = 'tree' | 'kind' | 'list';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
@@ -65,6 +62,9 @@ import {
   clearItemSearchHighlights,
   swapActiveSearchHighlight,
 } from '../utils/reviewSearchHighlight';
+
+/** The left panel's file order the all-files surface follows. */
+export type AllFilesOrder = 'tree' | 'kind' | 'list';
 
 /**
  * AllFilesCodeView (migration phases P1 + P2 + P3 + P4)

@@ -138,6 +138,33 @@ describe('FileTree kind blocks', () => {
     expect(header(el, 'generated').getAttribute('aria-expanded')).toBe('true');
   });
 
+  test.skipIf(!hasDom)('a file that becomes active by any route opens its folded block', async () => {
+    // index 0 is bun.lock (Generated). A new file list never opens a block.
+    const el = await mount(<Tree activeFileIndex={0} />);
+    expect(header(el, 'generated').getAttribute('aria-expanded')).toBe('false');
+
+    // An annotation or search jump: the app changes the active file.
+    await act(async () => root?.render(<Tree activeFileIndex={2} />));
+    await act(async () => header(el, 'test').click());
+    await act(async () => root?.render(<Tree activeFileIndex={1} />));
+    expect(header(el, 'test').getAttribute('aria-expanded')).toBe('true');
+
+    // The all-files scroll highlight reaching bun.lock.
+    await act(async () => root?.render(<Tree activeFileIndex={1} isAllFilesActive scrollHighlightIndex={2} />));
+    expect(header(el, 'generated').getAttribute('aria-expanded')).toBe('false');
+    await act(async () => root?.render(<Tree activeFileIndex={1} isAllFilesActive scrollHighlightIndex={0} />));
+    expect(header(el, 'generated').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test.skipIf(!hasDom)('hide-viewed hides a block whose files are all hidden, header included', async () => {
+    const viewed = new Set(['src/sync/__tests__/retry.test.ts', 'tests/e2e/sync.spec.ts']);
+    const el = await mount(<Tree hideViewedFiles viewedFiles={viewed} />);
+    expect(blocks(el)).toEqual(['code', 'generated']);
+    // The active file stays shown, so its block does too.
+    await act(async () => root?.render(<Tree hideViewedFiles viewedFiles={viewed} activeFileIndex={4} />));
+    expect(blocks(el)).toEqual(['code', 'test', 'generated']);
+  });
+
   test.skipIf(!hasDom)('the Tree controls popover carries the Group by kind switch', async () => {
     let toggles = 0;
     const el = await mount(

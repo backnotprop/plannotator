@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState, useMemo } from 'react';
+import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
   AvailableBranches,
@@ -280,32 +280,26 @@ export const FileTree: React.FC<FileTreeProps> = ({
       }
 
       const visualPos = visualOrder.indexOf(activeFileIndex);
-      // Moving onto a file in a folded kind block opens the block, the way a
-      // folded folder opens for the file it holds.
-      const select = (index: number) => {
-        if (kindBlocks && files[index]) setKindFolded(fileKind(files[index].path, generatedFiles), false);
-        onSelectFile(index);
-      };
 
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
         if (visualPos < visualOrder.length - 1) {
-          select(visualOrder[visualPos + 1]);
+          onSelectFile(visualOrder[visualPos + 1]);
         }
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         if (visualPos > 0) {
-          select(visualOrder[visualPos - 1]);
+          onSelectFile(visualOrder[visualPos - 1]);
         }
       } else if (e.key === 'Home') {
         e.preventDefault();
-        select(visualOrder[0]);
+        onSelectFile(visualOrder[0]);
       } else if (e.key === 'End') {
         e.preventDefault();
-        select(visualOrder[visualOrder.length - 1]);
+        onSelectFile(visualOrder[visualOrder.length - 1]);
       }
     },
-    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile, kindBlocks, files, generatedFiles, setKindFolded],
+    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile],
   );
 
   useEffect(() => {
@@ -333,6 +327,21 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const activePath = files[activeFileIndex]?.path;
   const activeExpansionPath =
     kindBlocks && activePath ? kindFolderPath(fileKind(activePath, generatedFiles), activePath) : activePath;
+
+  // A file that becomes active by any route (j/k, a click in all-files, the
+  // scroll highlight, an annotation or search jump) opens its folded kind
+  // block, the way folded folders open for the active file. Only a change
+  // opens a block, and a new file list never does, so Generated stays folded
+  // when a diff loads.
+  const scrollPath = isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path : undefined;
+  const revealedRef = useRef<{ files: DiffFile[]; active?: string; scroll?: string } | null>(null);
+  useEffect(() => {
+    const before = revealedRef.current;
+    revealedRef.current = { files, active: activePath, scroll: scrollPath };
+    if (!before || before.files !== files || !kindBlocks) return;
+    if (activePath && activePath !== before.active) setKindFolded(fileKind(activePath, generatedFiles), false);
+    if (scrollPath && scrollPath !== before.scroll) setKindFolded(fileKind(scrollPath, generatedFiles), false);
+  }, [files, activePath, scrollPath, kindBlocks, generatedFiles, setKindFolded]);
 
   // Folder open/closed state is the shared diff-file-tree hook (expand all on a
   // new tree, keep the active file's ancestors open), the same one the
@@ -609,6 +618,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
               {kindBlocks
                 ? kindBlocks.map((block) => {
                     const folded = foldedKinds.has(block.kind);
+                    // Hide-viewed hides a viewed row unless it is the active
+                    // one; a block with no row left hides its header too.
+                    if (hideViewedFiles && block.paths.every((path) => viewedFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
+                      return null;
+                    }
                     return (
                       <div key={block.kind} className="mb-1" data-file-kind-block={block.kind}>
                         <PanelSectionHeader
