@@ -3,6 +3,7 @@ import {
   canonicalQuestionAnswer,
   emptyQuestionAnswer,
   isQuestionAnswerEmpty,
+  isRecommendedQuestionAnswer,
   questionStatus,
   recommendedQuestionAnswer,
   type IndexedQuestion,
@@ -312,6 +313,20 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const settled = status === 'settled';
   const settledLabels = question.choices.filter((c) => c.settled).map((c) => c.label);
   const hasRecommendation = question.choices.some((c) => c.recommended) || !!question.suggestedText;
+  // "Accept recommended" stays offered on a pick-any question until the
+  // answer is exactly the recommendation: ticking one box must not take away
+  // the one click that ticks the rest. A pick-one or text question answered
+  // any way, and a question with a settled choice, offer it no more.
+  const offerAccept = !readOnly && hasRecommendation && !settled && (
+    !answered
+    || (question.kind === 'multi'
+      && !question.choices.some((c) => c.settled)
+      && !isRecommendedQuestionAnswer(
+        answer!,
+        question.choices.filter((c) => c.recommended).map((c) => c.label),
+        question.suggestedText,
+      ))
+  );
   const selected = answered || skipped ? answer!.selected : settledLabels;
   const base = answer ?? emptyQuestionAnswer(indexed);
 
@@ -720,7 +735,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {/* Plannotator's own footer (no host actions, no save bar) keeps the
               Accept button as the one right-aligned item. */}
           {!hasHostFooter && !dirty ? (
-            !readOnly && !answered && !settled && hasRecommendation && (
+            offerAccept && (
               <button
                 type="button"
                 onClick={acceptRecommended}
@@ -731,7 +746,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             )
           ) : (
             <div className="ml-auto flex items-center gap-1">
-              {!readOnly && !answered && !settled && hasRecommendation && (
+              {offerAccept && (
                 <button
                   type="button"
                   onClick={acceptRecommended}

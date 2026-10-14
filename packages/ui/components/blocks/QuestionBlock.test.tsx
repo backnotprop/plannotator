@@ -67,7 +67,7 @@ Transport?
 
 let latest: Annotation[] = [];
 
-function Harness({ markdown, readOnly = false, initial = [], statusLabel }: { markdown: string; readOnly?: boolean; initial?: Annotation[]; statusLabel?: QuestionBlockProps['statusLabel'] }) {
+function Harness({ markdown, readOnly = false, initial = [], statusLabel, footer }: { markdown: string; readOnly?: boolean; initial?: Annotation[]; statusLabel?: QuestionBlockProps['statusLabel']; footer?: QuestionBlockProps['renderFooter'] }) {
   const blocks = parseMarkdownToBlocks(markdown);
   const index = indexQuestionBlocks(blocks);
   const [annotations, setAnnotations] = useState<Annotation[]>(initial);
@@ -88,6 +88,7 @@ function Harness({ markdown, readOnly = false, initial = [], statusLabel }: { ma
             questionAnswer={question ? answers.get(question.question.key) : undefined}
             onAnswerQuestion={readOnly ? undefined : onAnswer}
             questionStatusLabel={statusLabel}
+            renderQuestionFooter={footer}
           />
         );
       })}
@@ -214,6 +215,54 @@ describe('QuestionBlock', () => {
     expect(answerOf(2)?.text).toBe('Two phones, one offline.');
     // A settled question has no Accept recommended.
     expect(button(cards(el)[3], 'Accept recommended')).toBeUndefined();
+  });
+
+  // The owner's 2026-10-14 report: ticking one box of a pick-any question
+  // hid "Accept recommended", so the rest of the recommendation took a click
+  // per box. It stays while the picks differ from the recommendation.
+  for (const [where, footer] of [
+    ['its own footer', undefined],
+    ['a host footer', () => <span>host action</span>],
+  ] as const) {
+    test.skipIf(!hasDom)(`multi: Accept recommended stays until the picks are exactly the recommendation (${where})`, async () => {
+      const el = await mount(<Harness markdown={DOC} footer={footer} />);
+      const card = () => cards(el)[1];
+      await click(rowText(card(), 'Toasts'));
+      expect(answerOf(1)?.selected).toEqual(['Toasts']);
+      expect(button(card(), 'Accept recommended')).toBeDefined();
+      await click(rowText(card(), 'Dot'));
+      expect(button(card(), 'Accept recommended')).toBeDefined();
+      await click(button(card(), 'Add note')!);
+      await type(card().querySelector<HTMLTextAreaElement>('textarea')!, 'banner can wait');
+      await type(card().querySelector<HTMLInputElement>('input[type="text"]')!, 'A sound');
+
+      // Accept sets exactly the recommendation: extra ticks and Other go, the note stays.
+      await click(button(card(), 'Accept recommended')!);
+      expect(answerOf(1)).toMatchObject({ selected: ['Dot', 'Banner'], note: 'banner can wait' });
+      expect(answerOf(1)?.other).toBeUndefined();
+      expect(button(card(), 'Accept recommended')).toBeUndefined();
+
+      // Unticking one brings it back.
+      await click(rowText(card(), 'Banner'));
+      expect(button(card(), 'Accept recommended')).toBeDefined();
+    });
+  }
+
+  test.skipIf(!hasDom)('single: a pick of another choice still hides Accept recommended', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    await click(rowText(cards(el)[0], 'Nowhere'));
+    expect(button(cards(el)[0], 'Accept recommended')).toBeUndefined();
+  });
+
+  test.skipIf(!hasDom)('multi: a read-only card offers no Accept recommended, whatever its answer', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    await click(rowText(cards(el)[1], 'Toasts'));
+    const saved = latest;
+    await act(async () => root!.unmount());
+    host!.remove();
+    const ro = await mount(<Harness markdown={DOC} readOnly initial={saved} />);
+    expect(cards(ro)[1].getAttribute('data-question-status')).toBe('answered');
+    expect(button(cards(ro)[1], 'Accept recommended')).toBeUndefined();
   });
 
   test.skipIf(!hasDom)('Skip clears the answer but keeps a note; Unskip restores an open question', async () => {
