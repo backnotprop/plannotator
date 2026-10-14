@@ -5,6 +5,7 @@
  * (SearchPalette.tsx) draws these; the DOM tests read them too.
  */
 
+import type { ComposeAction } from '../compose/model';
 import {
   INBOX_SEARCH_GROUPS,
   type InboxSearchFrom,
@@ -26,11 +27,13 @@ export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string
 /** One option of the listbox. */
 export type SearchOption =
   | { kind: 'row'; group: InboxSearchGroupId | 'recent'; row: InboxSearchRow }
+  // Compose's actions (the "Actions" group): "New message…" and "Message <host> in <project>".
+  | { kind: 'action'; action: ComposeAction }
   | { kind: 'more'; group: InboxSearchGroupId; total: number; shown: number }
   | { kind: 'recent-q'; q: string };
 
 export interface SearchGroupView {
-  id: InboxSearchGroupId | 'recent' | 'recent-searches';
+  id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions';
   heading: string;
   /** The group's total when it holds more than it shows (the heading's quiet count). */
   total: number | null;

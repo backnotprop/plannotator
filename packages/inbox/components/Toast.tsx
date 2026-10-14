@@ -12,6 +12,8 @@ export interface InboxToastModel {
   warn?: boolean;
   onUndo?: () => void;
   onReply?: () => void;
+  /** One more action (compose: Open the thread just sent, or Drafts). */
+  action?: { label: string; onPress: () => void };
 }
 
 /**
@@ -28,6 +30,11 @@ export function InboxToast({ toast, onDismiss, phone = false }: { toast: InboxTo
         {toast.sub && <small>{toast.sub}</small>}
       </div>
       <div className="ib-tacts">
+        {toast.action && (
+          <button type="button" className="ib-tb" onClick={toast.action.onPress} data-toast-action="">
+            {toast.action.label}
+          </button>
+        )}
         {toast.onReply && (
           <button type="button" className="ib-tb" onClick={toast.onReply} data-toast-reply="">
             Reply
@@ -89,6 +96,10 @@ function PhoneToast({ toast, onDismiss }: { toast: InboxToastModel; onDismiss: (
       {toast.onUndo ? (
         <button type="button" className="ib-tb" onClick={toast.onUndo} data-toast-undo="">
           Undo
+        </button>
+      ) : toast.action ? (
+        <button type="button" className="ib-tb" onClick={toast.action.onPress} data-toast-action="">
+          {toast.action.label}
         </button>
       ) : (
         <button type="button" className="ib-tb ib-tx" onClick={onDismiss} aria-label="Dismiss">

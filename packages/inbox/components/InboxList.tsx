@@ -35,6 +35,17 @@ export interface InboxListProps {
   scope?: string | null;
   /** Opens search: on a phone, the list header's search icon (inbox.css shows it there only). */
   onSearch?: (opener: HTMLElement) => void;
+  /** Opens compose: on a phone, the list header's compose icon beside search (inbox.css shows it there only). */
+  onCompose?: (opener: HTMLElement) => void;
+}
+
+/**
+ * Whom a row is about: the agent that wrote the thread, or, for a thread the
+ * person started (compose), the agent it is addressed to (`addressee`), so the
+ * row draws that agent's mark and name, never the person's.
+ */
+export function rowAgent(row: InboxListRow): InboxListRow['author'] {
+  return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
 }
 
 function badgeOf(row: InboxListRow): string | null {
@@ -45,7 +56,8 @@ function badgeOf(row: InboxListRow): string | null {
 
 /** The subject cell's words: a Sent row says where its reply is (the agent reads it when it checks). */
 function subjectOf(row: InboxListRow): string {
-  if (row.section === 'sent') return `Saved for ${agentName(row.author)}. It sees it when it checks.`;
+  // A thread the person started keeps its own subject in Sent; its count cell says whom it went to.
+  if (row.section === 'sent' && !row.addressee) return `Saved for ${agentName(rowAgent(row))}. It sees it when it checks.`;
   return row.subject ?? '(no subject)';
 }
 
@@ -54,6 +66,7 @@ function countOf(row: InboxListRow): string {
   if (row.section === 'quiet' && row.resolved_at !== null && row.back_from_archive !== true) return 'Archived';
   if (row.section === 'quiet' && (row.read_at ?? null) !== null) return 'Read';
   if (row.answered_not_sent) return 'Answered, not sent';
+  if (row.section === 'sent' && row.addressee) return `To ${agentName(rowAgent(row))}`;
   return questionCount(row.questions.open);
 }
 
@@ -119,7 +132,7 @@ function WideRow({ row, selected, filtered, onOpen }: { row: InboxListRow; selec
       {!filtered && <span>{badgeEl}</span>}
       <span className="ib-subj">
         {filtered && badgeEl}
-        <AuthorMark author={row.author} />
+        <AuthorMark author={rowAgent(row)} />
         <SubjectLine row={row} />
       </span>
       <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{countOf(row)}</span>
@@ -144,7 +157,7 @@ function RowWithAction({ row, onMarkRead, children }: { row: InboxListRow; onMar
           type="button"
           className="ib-ract"
           data-row-mark-read=""
-          title={`Mark read (E): out of the top until ${agentName(row.author)} writes again`}
+          title={`Mark read (E): out of the top until ${agentName(rowAgent(row))} writes again`}
           aria-label={`Mark read: ${row.subject ?? '(no subject)'}`}
           onClick={(event) => {
             event.stopPropagation();
@@ -172,13 +185,13 @@ function NarrowRow({ row, selected, filtered, onOpen }: { row: InboxListRow; sel
       data-section={row.section}
     >
       <div className="ib-l1">
-        <span className="ib-p" dir="auto" data-clip="">{filtered ? agentName(row.author) : row.project.name}</span>
+        <span className="ib-p" dir="auto" data-clip="">{filtered ? agentName(rowAgent(row)) : row.project.name}</span>
         {count && <span className={`ib-c${row.section === 'quiet' ? ' ib-qlabel' : ''}`}>{count}</span>}
         <span className={`ib-t${count ? '' : ' ib-alone'}`}>{shortTime(row.last_at)}</span>
       </div>
       <div className="ib-l2">
         {badge && <span className="ib-badge">{badge}</span>}
-        <AuthorMark author={row.author} />
+        <AuthorMark author={rowAgent(row)} />
         <SubjectLine row={row} />
       </div>
     </button>
@@ -205,8 +218,8 @@ function PhoneRow({ row, filtered, onOpen }: { row: InboxListRow; filtered: bool
       data-section={row.section}
     >
       <span className="ib-m1">
-        <AuthorMark author={row.author} />
-        <span className="ib-p" dir="auto" data-clip="">{filtered ? agentName(row.author) : row.project.name}</span>
+        <AuthorMark author={rowAgent(row)} />
+        <span className="ib-p" dir="auto" data-clip="">{filtered ? agentName(rowAgent(row)) : row.project.name}</span>
         <span className="ib-t">{shortTime(row.last_at)}</span>
       </span>
       <span className="ib-m2" dir="auto">{subjectOf(row)}</span>
@@ -275,6 +288,11 @@ export function InboxList(props: InboxListProps) {
         {props.onSearch && (
           <button type="button" className="ib-lhead-search" data-open-search="" aria-label="Search" aria-haspopup="dialog" onClick={(event) => props.onSearch?.(event.currentTarget)}>
             <Icon name="search" size={20} />
+          </button>
+        )}
+        {props.onCompose && (
+          <button type="button" className="ib-lhead-compose" data-open-compose="" aria-label="New message" aria-haspopup="dialog" onClick={(event) => props.onCompose?.(event.currentTarget)}>
+            <Icon name="compose" size={20} />
           </button>
         )}
       </div>

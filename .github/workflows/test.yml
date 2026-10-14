@@ -146,6 +146,8 @@ jobs:
           packages/inbox/attachmentSteppingSave.test.tsx
           packages/inbox/listColumn.test.tsx
           packages/inbox/endedSession.test.tsx
+          packages/inbox/compose.test.tsx
+          packages/inbox/composeThread.test.tsx
           packages/inbox/markRead.test.tsx
           packages/inbox/fileBack.test.tsx
           packages/inbox/archived.test.tsx

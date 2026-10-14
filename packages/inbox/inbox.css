@@ -1946,3 +1946,174 @@ dialog.ib-sp::backdrop { background: oklch(0 0 0 / 0.45); }
   dialog.ib-sp[data-phone] .ib-sp-menu { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); top: auto; max-width: none; max-height: 60vh; padding: 6px; border-radius: 12px; }
   dialog.ib-sp[data-phone] .ib-sp-mi { height: 44px; font-size: 15px; }
 }
+
+/* ───────────── Compose: a new message to a connected agent (approval record "inbox-compose-to-agent") ───────────── */
+/* The sidebar's Search entry and, at its right, the compose icon (32 px): one row, the entry keeps its look. */
+.ib-sp-entryrow { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; flex: none; }
+.pn-inbox .ib-sp-entryrow .ib-sp-entry { margin: 0; flex: 1; min-width: 0; width: auto; }
+.pn-inbox .ib-compose-btn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 7px; border: 1px solid var(--ib-line); background: var(--ib-band); color: var(--muted-foreground); }
+.pn-inbox .ib-compose-btn:hover { color: var(--foreground); border-color: var(--border); }
+.pn-inbox .ib-compose-btn svg.ib-ic { width: 16px; height: 16px; }
+/* A phone's list header (and the Drafts page): the compose icon beside search. */
+.pn-inbox .ib-lhead-compose { display: none; }
+
+/* The dialog: pinned to the upper part of the window like the search palette, 680 px wide. */
+.pn-inbox dialog.ib-cp, dialog.ib-cp {
+  position: fixed; inset: auto 0; top: max(16px, 12vh); margin: 0 auto; width: min(680px, calc(100vw - 32px)); max-width: none; max-height: calc(100vh - max(16px, 12vh) - 16px); padding: 0; border: 0;
+  background: var(--popover); color: var(--popover-foreground, var(--foreground)); border-radius: 10px; overflow: visible; font-size: 14px; line-height: 1.45;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent), 0 24px 60px -20px oklch(0 0 0 / 0.55), 0 8px 18px -10px oklch(0 0 0 / 0.35);
+}
+dialog.ib-cp[open] { display: flex; flex-direction: column; }
+dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
+:root.light dialog.ib-cp::backdrop { background: oklch(0.2 0.02 260 / 0.28); }
+@media (prefers-reduced-motion: no-preference) {
+  dialog.ib-cp[open] { animation: ib-sp-in 150ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  dialog.ib-cp[open]::backdrop { animation: ib-sp-fade 150ms ease-out; }
+}
+.ib-cp-to { position: relative; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 14px 6px 16px; border-bottom: 1px solid var(--ib-line); flex: none; }
+.ib-cp-tol { color: var(--muted-foreground); font-size: 13.5px; flex: none; }
+.pn-inbox .ib-cp-tobtn { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; height: 34px; padding: 0 8px; border-radius: 7px; border: 0; background: transparent; color: var(--foreground); font-size: 14px; text-align: left; }
+.pn-inbox .ib-cp-tobtn:hover:not(:disabled), .pn-inbox .ib-cp-tobtn[aria-expanded="true"] { background: color-mix(in oklch, var(--muted) 70%, transparent); }
+.pn-inbox .ib-cp-tobtn:disabled { color: var(--muted-foreground); }
+.ib-cp-tobtn b { font-weight: 650; white-space: nowrap; }
+.ib-cp-tobtn s { font-weight: 600; color: var(--muted-foreground); }
+.ib-cp-tod { color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp-tobtn > svg.ib-ic { color: var(--muted-foreground); flex: none; }
+.ib-cp-none-to { display: inline-flex; align-items: center; gap: 7px; color: var(--muted-foreground); font-size: 14px; padding: 0 8px; }
+.ib-cp-dsaved { margin-left: auto; flex: none; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; }
+
+/* The To picker: anchored under the To line, over the message. */
+.ib-cp-picker { position: absolute; top: 46px; left: 52px; z-index: 40; width: min(560px, calc(100% - 64px)); display: flex; flex-direction: column; max-height: min(480px, 62vh); background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28); overflow: hidden; }
+.ib-cp-filter { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--ib-line); color: var(--muted-foreground); flex: none; }
+.pn-inbox .ib-cp-filter input { flex: 1; min-width: 0; height: 40px; border: 0; outline: none; background: transparent; color: var(--foreground); font: inherit; font-size: 14px; }
+.ib-cp-list { overflow-y: auto; overscroll-behavior: contain; padding: 4px 6px 6px; }
+.ib-cp-group + .ib-cp-group { margin-top: 4px; }
+.ib-cp-gh { display: flex; align-items: baseline; gap: 8px; padding: 10px 8px 4px; font-size: 11.5px; letter-spacing: 0.06em; color: var(--muted-foreground); min-width: 0; }
+.ib-cp-gh b { text-transform: uppercase; font-weight: 600; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.ib-cp-path { letter-spacing: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; direction: ltr; }
+.ib-cp-cur { letter-spacing: 0; font-size: 12px; font-weight: 650; color: var(--primary); flex: none; }
+.ib-cp-opt { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 5px 8px; border-radius: 7px; cursor: default; user-select: none; }
+.ib-cp-opt.ib-hl { background: color-mix(in oklch, var(--muted) 80%, transparent); }
+:root.light .ib-cp-opt.ib-hl { background: var(--muted); }
+.ib-cp-ot { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ib-cp-o1 { font-size: 14px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-cp-o1 b { color: var(--foreground); font-weight: 550; }
+.ib-cp-o2 { font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-cp-busy { flex: none; font-size: 12px; font-weight: 600; color: var(--muted-foreground); padding: 2px 8px; border-radius: 999px; }
+.ib-cp-busy.ib-on { color: var(--primary); background: color-mix(in oklch, var(--primary) 14%, transparent); }
+.ib-cp-busy.ib-on::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: currentColor; transform: translateY(-1px); }
+.ib-cp-check { width: 18px; flex: none; color: var(--primary); display: inline-flex; }
+.ib-cp-none { padding: 14px 10px; font-size: 13px; color: var(--muted-foreground); }
+.ib-cp-pickfoot { flex: none; padding: 9px 14px; border-top: 1px solid var(--ib-line); font-size: 12.5px; color: var(--muted-foreground); }
+.ib-cp-pickhead { display: none; }
+
+/* Notes under To: no agent running, or the session a draft was for has ended. */
+.ib-cp-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--ib-line); background: var(--ib-band); font-size: 13px; color: var(--muted-foreground); flex: none; }
+.ib-cp-note > svg { flex: none; margin-top: 2px; }
+.ib-cp-note b { color: var(--foreground); font-weight: 600; }
+.ib-cp-note p { margin: 2px 0 0; line-height: 1.5; }
+.ib-cp-note .ib-btn { margin-top: 8px; }
+.ib-cp-note.ib-warn > svg { color: var(--warning); }
+
+/* The message, its files and the subject it starts with. */
+.ib-cp-body { padding: 12px 16px 10px; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+.pn-inbox .ib-cp-text { display: block; width: 100%; min-height: 150px; max-height: 320px; field-sizing: content; resize: none; border: 0; outline: none; background: transparent; color: var(--foreground); font: inherit; font-size: 15px; line-height: 1.6; padding: 0; }
+.ib-cp-text::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.ib-cp-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
+.ib-cp-file { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); min-width: 0; }
+.ib-cp-file .ib-fi { width: 30px; height: 30px; border-radius: 7px; background: var(--muted); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); flex: none; overflow: hidden; }
+.ib-cp-file .ib-fi.ib-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.ib-cp-file .ib-att-text { flex: 1; min-width: 0; }
+.ib-cp-file .ib-nm { font-size: 13.5px; font-weight: 550; }
+.ib-cp-file .ib-kd { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-cp-file.ib-refused { border-color: color-mix(in oklch, var(--destructive) 55%, var(--border)); background: color-mix(in oklch, var(--destructive) 5%, var(--card)); }
+.ib-cp-ferr { font-size: 12px; color: var(--destructive); line-height: 1.4; }
+.ib-cp-prog { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 6%); overflow: hidden; }
+.ib-cp-prog i { display: block; height: 100%; background: var(--primary); transition: width 120ms linear; }
+.pn-inbox .ib-cp-fx { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 0; background: transparent; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; }
+.pn-inbox .ib-cp-fx:hover { background: var(--muted); color: var(--foreground); }
+.ib-cp-subj { margin-top: 10px; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-cp-subj b { color: var(--foreground); font-weight: 600; }
+.ib-cp-error { padding: 0 16px 8px; font-size: 12.5px; color: var(--destructive); flex: none; }
+.ib-cp-conflict { display: inline-flex; gap: 12px; margin-left: 10px; }
+.pn-inbox .ib-cp-conflict .ib-lnk { margin-top: 0; }
+
+/* The footer: attach, the saved line, the status line, Save draft and Send. */
+.ib-cp-foot, .ib-cp-ask { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 12px 10px 10px; border-top: 1px solid var(--ib-line); flex: none; flex-wrap: wrap; }
+.ib-cp-foot .ib-sp, .ib-cp-ask .ib-sp { flex: 1; }
+.ib-cp-ask { background: var(--ib-band); font-size: 13.5px; font-weight: 550; padding-left: 16px; border-radius: 0 0 10px 10px; }
+.pn-inbox .ib-cp-clip { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; position: relative; }
+.pn-inbox .ib-cp-clip:hover, .pn-inbox .ib-cp-clip:focus-within { background: var(--muted); color: var(--foreground); }
+.ib-cp-savedline { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted-foreground); }
+.ib-cp-savedline svg { color: var(--success, oklch(0.72 0.17 150)); }
+.pn-inbox .ib-cp-del { border: 0; background: none; color: var(--muted-foreground); font-size: 12.5px; padding: 4px 6px; border-radius: 6px; }
+.pn-inbox .ib-cp-del:hover { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 8%, transparent); }
+.ib-cp-status { font-size: 12.5px; color: var(--muted-foreground); text-align: right; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp-foot { flex-wrap: nowrap; }
+.ib-cp-foot > .ib-btn { flex: none; }
+.pn-inbox .ib-cp-foot .ib-btn.ib-pri .ib-kbd { color: inherit; border: 0; padding: 0; font-family: inherit; font-size: 12.5px; opacity: 0.8; letter-spacing: 0.04em; }
+.ib-cp-drop { position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 2px dashed color-mix(in oklch, var(--primary) 60%, transparent); background: color-mix(in oklch, var(--popover) 88%, var(--primary)); color: var(--primary); font-weight: 600; pointer-events: none; }
+
+/* "Send to another session", under a message no session took. */
+.ib-delivered[data-delivery="undelivered"] { color: color-mix(in oklch, var(--warning) 70%, var(--foreground)); }
+.ib-delivered[data-delivery="undelivered"] svg { color: var(--warning); flex: none; }
+.ib-readdress { position: relative; margin-top: 8px; }
+.ib-menu.ib-readdress-pop { position: absolute; left: 0; top: calc(100% + 4px); width: 340px; padding: 6px; z-index: 20; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22); }
+
+/* The Drafts page (the Decisions page's frame). */
+.ib-drafts-n { color: var(--muted-foreground); font-size: 14px; }
+.ib-drafts-empty { color: var(--muted-foreground); font-size: 14px; }
+.ib-draft { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--ib-hair); }
+.pn-inbox .ib-draft-open { flex: 1; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) max-content; align-items: center; gap: 14px; padding: 12px 8px 12px 0; border: 0; background: none; text-align: left; color: var(--foreground); }
+.pn-inbox .ib-draft-open:hover { background: color-mix(in oklch, var(--muted) 30%, transparent); }
+.ib-draft-mk { width: 36px; height: 36px; border-radius: 9px; background: var(--muted); display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
+.ib-draft-mk .ib-mk.ib-big { background: transparent; }
+.ib-draft-t { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.ib-draft-to { font-size: 13px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-draft-to b { color: var(--foreground); font-weight: 600; }
+.ib-draft-s { font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-draft-sn { font-size: 13.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-draft-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; }
+.ib-draft-when { display: inline-flex; align-items: center; gap: 3px; }
+.pn-inbox .ib-draft-del { flex: none; width: 32px; height: 32px; border-radius: 7px; border: 0; background: none; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; }
+.pn-inbox .ib-draft-del:hover { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 8%, transparent); }
+
+/* A phone (PHONE_QUERY): compose is a full-screen sheet with Cancel · title · Send (or Save draft); the picker a second sheet. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-lhead-compose { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex: none; border-radius: 8px; color: var(--foreground); background: none; border: 0; }
+  .ib-lhead .ib-lhead-search + .ib-lhead-compose { margin-left: 0; }
+  .ib-lhead .ib-lhead-compose:only-of-type { margin-left: auto; }
+  .ib-drafts .ib-dh .ib-lhead-compose { margin-left: auto; }
+  .ib-sp-entryrow { margin-bottom: 8px; }
+  .pn-inbox .ib-compose-btn { width: 44px; height: 44px; }
+  .pn-inbox dialog.ib-cp[data-phone], dialog.ib-cp[data-phone] { inset: 0; top: 0; width: 100%; height: var(--ib-vvh, 100%); max-height: none; border-radius: 0; box-shadow: none; background: var(--card); animation: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  dialog.ib-cp[data-phone]::backdrop { animation: none; }
+  .ib-cp-bar { display: flex; align-items: center; height: 52px; padding: 0 6px; border-bottom: 1px solid var(--ib-line); flex: none; }
+  .ib-cp-bar h2 { flex: 1; text-align: center; margin: 0; font-size: 17px; font-weight: 650; }
+  .pn-inbox .ib-cp-barb { min-width: 44px; height: 44px; padding: 0 10px; border: 0; background: none; color: var(--primary); font-size: 16px; }
+  .pn-inbox .ib-cp-barb.ib-strong { font-weight: 650; }
+  .ib-cp-to { min-height: 56px; }
+  .pn-inbox .ib-cp-tobtn { height: 44px; font-size: 16px; }
+  .ib-cp-tod { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .ib-cp-body { flex: 1; }
+  .pn-inbox .ib-cp-text { font-size: 16px; min-height: 200px; max-height: none; }
+  .ib-cp-files { grid-template-columns: 1fr; }
+  .ib-cp-subj { white-space: nowrap; }
+  .ib-cp-foot { min-height: 52px; }
+  .pn-inbox .ib-cp-clip { width: 44px; height: 44px; }
+  .ib-cp-ask { flex-wrap: wrap; border-radius: 0; }
+  .ib-cp-ask > span:first-child { flex-basis: 100%; }
+  .ib-cp-picker[data-phone] { position: fixed; inset: 0; top: 0; left: 0; width: 100%; max-height: none; height: var(--ib-vvh, 100%); border-radius: 0; border: 0; box-shadow: none; background: var(--card); padding-top: env(safe-area-inset-top); z-index: 60; }
+  .ib-cp-picker[data-phone] .ib-cp-pickhead { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 6px; border-bottom: 1px solid var(--ib-line); font-weight: 650; }
+  .pn-inbox .ib-cp-back { display: inline-flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border: 0; background: none; color: var(--primary); font-size: 16px; }
+  .pn-inbox .ib-cp-filter input { height: 48px; font-size: 16px; }
+  .ib-cp-picker[data-phone] .ib-cp-list { flex: 1; }
+  .ib-cp-opt { min-height: 56px; }
+  .ib-draft-open { grid-template-columns: 36px minmax(0, 1fr); }
+  .pn-inbox .ib-draft-open { padding: 14px 0; align-items: start; }
+  .ib-draft-s { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+  .ib-draft-sn { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .ib-draft-meta { grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; }
+  .pn-inbox .ib-draft-del { width: 44px; height: 44px; }
+  .ib-menu.ib-readdress-pop { width: min(340px, calc(100vw - 40px)); }
+}

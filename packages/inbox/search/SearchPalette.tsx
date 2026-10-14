@@ -20,7 +20,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow } from '@plannotator/core/inbox-search';
 import { saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
-import { Icon } from '../icons';
+import { HostMark, Icon } from '../icons';
+import { actionLabel, busyWord, sessionTitle, type ComposeAction } from '../compose/model';
 import {
   FROM_OPTIONS,
   NO_FILTERS,
@@ -64,6 +65,13 @@ export interface SearchPaletteProps {
   onClose: (reason: 'dismissed' | 'opened') => void;
   /** Open a result in this tab: the window writes the hash (a new history entry) and lands on the message. */
   onOpenResult: (hash: string, land: SearchLanding | null) => void;
+  /**
+   * Compose's actions for the words typed (the Actions group, above the
+   * results): "New message…", "Message <host> in <project>". Absent: none.
+   */
+  actions?: (q: string) => ComposeAction[];
+  /** An action chosen: the palette closes and the window opens compose. */
+  onAction?: (action: ComposeAction) => void;
 }
 
 type FilterKind = keyof SearchFilters;
@@ -198,7 +206,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 }
 
 export default function SearchPalette(props: SearchPaletteProps) {
-  const { open, phone, currentProject, projects, onClose, onOpenResult } = props;
+  const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
@@ -339,7 +347,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
   };
 
   // ── options ──
-  const groups: SearchGroupView[] = useMemo(() => (answered && !answered.model.indexing ? searchGroups(answered.model, expanded) : []), [answered, expanded]);
+  const groups: SearchGroupView[] = useMemo(() => {
+    if (!answered || answered.model.indexing) return [];
+    const found = searchGroups(answered.model, expanded);
+    const actionList = actions ? actions(answered.q) : [];
+    // The Actions group sits above everything, Recent searches included.
+    return actionList.length > 0 ? [{ id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) }, ...found] : found;
+  }, [answered, expanded, actions]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
@@ -405,6 +419,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (!option || !answered) return;
     if (option.kind === 'more') {
       void expand(option, index);
+      return;
+    }
+    if (option.kind === 'action') {
+      close('opened');
+      onAction?.(option.action);
       return;
     }
     if (option.kind === 'recent-q') {
@@ -703,6 +722,20 @@ export default function SearchPalette(props: SearchPaletteProps) {
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p" dir="auto" title={option.q}>
                       {option.q}
+                    </span>
+                  </span>
+                </div>
+              );
+            }
+            if (option.kind === 'action') {
+              const action = option.action;
+              return (
+                <div key={action.kind === 'new' ? 'action-new' : `action-${action.target.session}`} className="ib-sp-row" {...common} data-compose-action={action.kind}>
+                  {action.kind === 'new' ? <Icon name="compose" className="ib-sp-mk" /> : <HostMark host={action.target.host} />}
+                  <span className="ib-sp-rs">
+                    <span className="ib-sp-p">{actionLabel(action)}</span>
+                    <span className="ib-sp-s">
+                      {action.kind === 'new' ? 'Start a thread with a live agent' : `${sessionTitle(action.target).split(' · ')[1]} · ${busyWord(action.target).toLowerCase()}`}
                     </span>
                   </span>
                 </div>

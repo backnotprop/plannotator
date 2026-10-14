@@ -72,6 +72,11 @@ import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, useStack } from './stack';
 import { backTo, pushScreen } from './history';
 import { adoptSavedTheme, inboxThemeSync } from './theme';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
+import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { DraftsPage } from './compose/DraftsPage';
+import { useComposeSessions } from './compose/useComposeSessions';
+import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
+import type { DraftView } from './api';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, except the theme, which goes to config.json `theme`
@@ -95,6 +100,10 @@ configurePlannotatorUI({
 });
 
 const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
+/** The session the person last sent a new message to (compose preselects it while it is live). */
+const COMPOSE_LAST_COOKIE = 'plannotator-inbox-compose-last';
+/** How often the Drafts page reads its drafts again, so each chip follows its session. */
+const DRAFTS_REFRESH_MS = 10_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
 const SEEN_RETRIES = 5;
 const SEEN_RETRY_MS = 1000;
@@ -103,7 +112,7 @@ const WHATS_NEW_RETRIES = 15;
 const WHATS_NEW_RETRY_MS = 1000;
 
 interface Route {
-  page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
+  page: 'inbox' | 'settings' | 'decisions' | 'whats-new' | 'drafts';
   /** The release whose notes the What's new page shows (`#whats-new=0.28.12`). */
   version?: string | null;
   project: string | null;
@@ -136,6 +145,7 @@ function routeOf(fullHash: string): Route {
   if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair };
   const params = new URLSearchParams(hash);
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
+  if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
   if (params.has('decisions')) {
     return { page: 'decisions', project: params.get('decisions') || null, thread: null, decision: params.get('decision') };
   }
@@ -156,6 +166,7 @@ function hashOf(route: Route): string {
   let hash = '';
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
+  else if (route.page === 'drafts') hash = 'drafts';
   else if (route.page === 'decisions') {
     const params = new URLSearchParams();
     params.set('decisions', route.project ?? '');
@@ -389,6 +400,16 @@ function Inbox() {
   const searchOpener = useRef<HTMLElement | null>(null);
   /** The landing a search result asked for: the query's words to highlight in that message, a question's card to focus. */
   const searchLanding = useRef<SearchLanding | null>(null);
+  /**
+   * Compose (a new message to a connected agent): open with what it starts
+   * from (a draft, a session), and the drafts not sent (the sidebar's Drafts
+   * row, the Drafts page).
+   */
+  const [compose, setCompose] = useState<ComposeRequest | null>(null);
+  const composeOpener = useRef<HTMLElement | null>(null);
+  const [drafts, setDrafts] = useState<DraftView[] | null>(null);
+  const [draftsError, setDraftsError] = useState<string | null>(null);
+  const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
   /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
   const [toast, setToast] = useState<InboxToastModel | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -614,6 +635,26 @@ function Inbox() {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
+
+  const refreshDrafts = useCallback(async () => {
+    try {
+      const next = await inboxApi.drafts();
+      setDrafts(next.drafts);
+      setDraftsError(null);
+    } catch (cause) {
+      setDraftsError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+  useEffect(() => {
+    void refreshDrafts();
+  }, [refreshDrafts]);
+  // The Drafts page follows each draft's session (live, ended) while it is open.
+  useEffect(() => {
+    if (route.page !== 'drafts') return;
+    void refreshDrafts();
+    const timer = setInterval(() => void refreshDrafts(), DRAFTS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [route.page, refreshDrafts]);
 
   /** Read the agents; while `plannotator inbox` is still connecting them, read again until it is done. */
   const refreshAgents = useCallback(async () => {
@@ -926,6 +967,87 @@ function Inbox() {
     // Otherwise a new history entry: Back returns to where the search started (on a phone, the list).
     writeRoute(next, sameThread ? { replace: true } : {});
   };
+  // ── Compose: a new message to a connected agent (compose/ComposeDialog.tsx) ──
+  const openCompose = (request: ComposeRequest, opener?: HTMLElement | null) => {
+    composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setCompose(request);
+  };
+  const closeCompose = () => {
+    setCompose(null);
+    const opener = composeOpener.current;
+    composeOpener.current = null;
+    requestAnimationFrame(() => {
+      if (opener && opener.isConnected && opener.getClientRects().length > 0) opener.focus();
+    });
+  };
+  const composeSent = (sent: ComposeSent) => {
+    closeCompose();
+    // While a thread is open its list holds still; with none, the new row shows at once.
+    void refreshList(!routeRef.current.thread, true);
+    if (sent.fromDraft) void refreshDrafts();
+    showToast(
+      {
+        text: `Sent to ${hostLabel(sent.host)} in ${sent.projectName}.`,
+        short: `Sent to ${hostLabel(sent.host)}.`,
+        sub: 'It takes it as its next turn.',
+        action: { label: 'Open', onPress: () => {
+          dismissToast();
+          go({ page: 'inbox', project: routeRef.current.page === 'inbox' ? routeRef.current.project : null, thread: sent.threadId });
+        } },
+      },
+      7000,
+    );
+  };
+  const lastSentRef = useRef(lastSent);
+  const rememberSent = (session: string) => {
+    lastSentRef.current = session;
+    setLastSent(session);
+    storage.setItem(COMPOSE_LAST_COOKIE, session);
+  };
+  const composeSaved = (draft: DraftView) => {
+    closeCompose();
+    setDrafts((current) => [draft, ...(current ?? []).filter((d) => d.id !== draft.id)]);
+    void refreshDrafts();
+    showToast({
+      text: 'Draft saved. It waits under Drafts and never sends itself.',
+      short: 'Draft saved.',
+      action: { label: 'Drafts', onPress: () => {
+        dismissToast();
+        go({ page: 'drafts', project: null, thread: null });
+      } },
+    });
+  };
+  /** Delete a draft, with Undo: the window re-creates it from what it still holds (no soft delete on the server). */
+  const deleteDraft = async (draft: DraftView, alreadyDeleted = false) => {
+    if (!alreadyDeleted) {
+      try {
+        await inboxApi.deleteDraft(draft.id);
+      } catch (cause) {
+        showToast({ text: cause instanceof Error ? cause.message : 'The draft was not deleted.', warn: true });
+        return;
+      }
+    }
+    setDrafts((current) => (current ?? []).filter((d) => d.id !== draft.id));
+    void refreshDrafts();
+    showToast({
+      text: 'Draft deleted.',
+      onUndo: () => {
+        dismissToast();
+        void inboxApi
+          .saveDraft(draft.id, { body: draft.body, to: draft.to, project: draft.project, files: draft.files.map((f) => f.upload_id), base: null })
+          .then(() => refreshDrafts())
+          .then(() => say('Draft restored.'))
+          .catch(() => showToast({ text: 'The draft could not be restored.', warn: true }));
+      },
+    });
+  };
+  // The palette's Actions group reads the live sessions while it is open.
+  const { model: paletteSessions } = useComposeSessions(searchOpen);
+  const paletteActions = useCallback(
+    (q: string): ComposeAction[] => composeActions(q, composeTargets(paletteSessions?.projects ?? []), lastSentRef.current),
+    [paletteSessions],
+  );
+
   /** The thread landed on the message `msg=` named: drop it from the hash, so a reload does not jump again. */
   const landed = () => {
     searchLanding.current = null;
@@ -1537,6 +1659,13 @@ function Inbox() {
     }
   }, [stack.thread, stack.decision, view, route.thread, route.decision, phone]);
 
+  // The project compose treats as current: the list's filter, else the open thread's.
+  const composeCurrent = (() => {
+    const id = route.page === 'inbox' ? (route.project ?? thread?.project.id ?? null) : null;
+    const folder = id ? projects.find((p) => p.id === id) : null;
+    return folder ? { id: folder.id, root: folder.root, name: folder.name } : thread && route.thread ? { id: thread.project.id, root: thread.project.root, name: thread.project.name } : null;
+  })();
+
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;
   if (route.page === 'settings') {
@@ -1626,6 +1755,17 @@ function Inbox() {
     );
   } else if (route.page === 'decisions') {
     main = <div className="ib-listcol" />;
+  } else if (route.page === 'drafts') {
+    main = (
+      <DraftsPage
+        drafts={drafts}
+        error={draftsError}
+        phone={phone}
+        onOpen={(draft) => openCompose({ draft })}
+        onDelete={(draft) => void deleteDraft(draft)}
+        onCompose={(opener) => openCompose({}, opener)}
+      />
+    );
   } else if (!latest || !shown) {
     main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
   } else if (firstRun) {
@@ -1665,6 +1805,7 @@ function Inbox() {
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
           onSearch={(opener) => openSearch(opener)}
+          onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
         />
         )}
@@ -1698,7 +1839,7 @@ function Inbox() {
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
             seenThrough={look?.threadId === thread.thread_id ? look.through : null}
             onSeen={(through) => seenOnSight(thread.thread_id, through)}
-            covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen}
+            covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || compose !== null}
             backLabel={filterProject?.name ?? 'Inbox'}
             phone={phone}
             stacked={stack.thread}
@@ -1753,6 +1894,9 @@ function Inbox() {
             restarting={restarting}
             updated={updated}
             onSearch={(opener) => openSearch(opener)}
+            onCompose={(opener) => openCompose({}, opener)}
+            draftsCount={drafts?.length ?? 0}
+            onDrafts={() => go({ page: 'drafts', project: null, thread: null })}
             onInbox={() => go({ page: 'inbox', project: null, thread: null })}
             onProject={(projectId) => go({ page: 'inbox', project: projectId, thread: null })}
             onSettings={() => go({ page: 'settings', project: null, thread: null })}
@@ -1831,7 +1975,28 @@ function Inbox() {
         projects={projects}
         onClose={closeSearch}
         onOpenResult={openSearchResult}
+        actions={paletteActions}
+        onAction={(action) => openCompose(action.kind === 'message' ? { session: action.target.session } : {}, searchOpener.current)}
       />
+      {compose && (
+        <ComposeDialog
+          request={compose}
+          phone={phone}
+          current={composeCurrent}
+          lastSent={lastSent}
+          home={settings?.home ?? null}
+          onSent={(sent) => {
+            rememberSent(sent.session);
+            composeSent(sent);
+          }}
+          onSaved={composeSaved}
+          onDeleted={(draft) => {
+            closeCompose();
+            void deleteDraft(draft, true);
+          }}
+          onClose={closeCompose}
+        />
+      )}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

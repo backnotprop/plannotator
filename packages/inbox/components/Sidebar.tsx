@@ -12,7 +12,7 @@ import { UpdateButton } from './Updates';
 import { openSearchAriaKeys, openSearchHint } from '../search/searchShortcut';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
+  page: 'inbox' | 'settings' | 'decisions' | 'whats-new' | 'drafts';
   projectId: string | null;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
@@ -31,6 +31,11 @@ export interface SidebarProps {
    * under the Tater mark. No key hint, because no key opens it. Absent: no entry.
    */
   onSearch?: (opener: HTMLElement) => void;
+  /** Compose (a new message to a connected agent): the icon button beside Search. Absent: no button. */
+  onCompose?: (opener: HTMLElement) => void;
+  /** Drafts not sent: the Drafts row shows only while there are some. */
+  draftsCount?: number;
+  onDrafts?: () => void;
   onInbox: () => void;
   onProject: (projectId: string) => void;
   onSettings: () => void;
@@ -94,6 +99,7 @@ export function Sidebar(props: SidebarProps) {
         <span>Inbox</span>
       </div>
       {props.onSearch && (
+        <div className="ib-sp-entryrow">
         <button
           type="button"
           className="ib-sp-entry"
@@ -114,6 +120,24 @@ export function Sidebar(props: SidebarProps) {
             {openSearchHint()}
           </kbd>
         </button>
+        {props.onCompose && (
+          <button
+            type="button"
+            className="ib-compose-btn"
+            data-open-compose=""
+            aria-label="New message"
+            title="New message"
+            aria-haspopup="dialog"
+            onClick={(event) => {
+              const opener = event.currentTarget;
+              setOpenMobile(false);
+              props.onCompose?.(opener);
+            }}
+          >
+            <Icon name="compose" />
+          </button>
+        )}
+        </div>
       )}
       <button
         type="button"
@@ -136,6 +160,19 @@ export function Sidebar(props: SidebarProps) {
         Decisions
         {props.decisionsCount > 0 && <span className="ib-n">{formatCount(props.decisionsCount)}</span>}
       </button>
+      {(props.draftsCount ?? 0) > 0 && props.onDrafts && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'drafts' ? ' ib-on' : ''}`}
+          onClick={pick(props.onDrafts)}
+          aria-current={props.page === 'drafts' ? 'page' : undefined}
+          data-drafts-nav=""
+        >
+          <Icon name="doc" />
+          Drafts
+          <span className="ib-n">{formatCount(props.draftsCount ?? 0)}</span>
+        </button>
+      )}
       <div className="ib-side-label">Projects</div>
       <div className="ib-projs" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {firstRun ? (
