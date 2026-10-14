@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -84,7 +85,7 @@ async function shot(name: string): Promise<void> {
 
 function startInbox(args: string[]): string {
   // PATH: the fake first, then this Node; no system directory, so no real tailscale is ever reachable.
-  const env = { PATH: `${world.bin}:${dirname(process.execPath)}`, HOME: world.root, PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_BROWSER: 'none', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
+  const env = { PATH: `${world.bin}:${dirname(process.execPath)}`, HOME: world.root, PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
   const started = spawnSync(binary, ['inbox', '--background', ...args], { env, encoding: 'utf8', timeout: 60_000 });
   // Every start's pid, before anything can fail: the teardown signals each one.
   rememberInboxOf(world.dataDir);

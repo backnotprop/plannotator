@@ -14,7 +14,10 @@ import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "../generated/favicon.ts"
 import { getServerConfig } from "../generated/config.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
+import { crossOriginRefusalBody } from "../generated/request-origin.ts";
+import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
+import { isSameOriginRequest } from "./request-origin-guard.ts";
 import {
 	type BearConfig,
 	type IntegrationResult,
@@ -335,11 +338,21 @@ export function handleReferenceSkillContentRequest(res: Res, url: URL): void {
 	}
 }
 
-/** Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers. */
+/**
+ * Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers.
+ * Mirrors packages/server/shared-handlers.ts handleSaveNotes: another site's
+ * page is refused (403) and a stale tab's `serverSession` (409) before
+ * anything is written or opened.
+ */
 export async function handleSaveNotesRequest(
 	req: IncomingMessage,
 	res: Res,
+	options: { serverSession?: string } = {},
 ): Promise<void> {
+	if (!isSameOriginRequest(req)) {
+		json(res, crossOriginRefusalBody(), 403);
+		return;
+	}
 	const results: {
 		obsidian?: IntegrationResult;
 		bear?: IntegrationResult;
@@ -347,6 +360,10 @@ export async function handleSaveNotesRequest(
 	} = {};
 	try {
 		const body = await parseBody(req);
+		if (options.serverSession !== undefined && checkServerSession(body, options.serverSession) === "mismatch") {
+			json(res, serverSessionMismatchBody(), 409);
+			return;
+		}
 		const promises: Promise<void>[] = [];
 		const obsConfig = body.obsidian as ObsidianConfig | undefined;
 		const bearConfig = body.bear as BearConfig | undefined;

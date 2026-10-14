@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "os";
 import { join } from "path";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
+import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 
 const serverDir = import.meta.dir;
 const cliEntry = join(serverDir, "index.ts");
@@ -250,7 +251,7 @@ describe("annotate CLI on an occupied fixed port", () => {
           PLANNOTATOR_DATA_DIR: dataDir,
           PLANNOTATOR_REMOTE: "1",
           PLANNOTATOR_PORT: String(blocker.port),
-          PLANNOTATOR_BROWSER: "none",
+          PLANNOTATOR_BROWSER: NO_BROWSER,
         },
         stdout: "pipe",
         stderr: "pipe",

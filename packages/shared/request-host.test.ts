@@ -5,9 +5,40 @@ import {
   hostNotAllowedMessage,
   isAllowedRequestHost,
   isIpLiteralHostname,
+  isOriginNamedInAllowedHosts,
   machineHostnames,
   parseAllowedHosts,
 } from "./request-host";
+
+// The cross-origin write guard's one exception: a plain-HTTP reverse proxy that
+// rewrites Host. Failures it catches: `*` silently turning the write guard off,
+// or a named proxy hostname being refused its own decisions.
+describe("isOriginNamedInAllowedHosts", () => {
+  const named = parseAllowedHosts("review.example.com, .corp.example");
+  test("an Origin whose hostname is named, exactly or by suffix, passes when the browser sent no fetch metadata", () => {
+    expect(isOriginNamedInAllowedHosts("http://review.example.com", null, named)).toBe(true);
+    expect(isOriginNamedInAllowedHosts("http://review.example.com:8080", undefined, named)).toBe(true);
+    expect(isOriginNamedInAllowedHosts("http://plans.corp.example", null, named)).toBe(true);
+    expect(isOriginNamedInAllowedHosts("http://corp.example", null, named)).toBe(true);
+  });
+  test("an unnamed Origin, Origin null and a missing Origin do not pass", () => {
+    expect(isOriginNamedInAllowedHosts("http://evil.example", null, named)).toBe(false);
+    expect(isOriginNamedInAllowedHosts("http://review.example.com.evil.example", null, named)).toBe(false);
+    expect(isOriginNamedInAllowedHosts("null", null, named)).toBe(false);
+    expect(isOriginNamedInAllowedHosts(null, null, named)).toBe(false);
+    expect(isOriginNamedInAllowedHosts("not a url", null, named)).toBe(false);
+  });
+  test("`*` never widens it", () => {
+    expect(isOriginNamedInAllowedHosts("http://evil.example", null, parseAllowedHosts("*"))).toBe(false);
+    expect(isOriginNamedInAllowedHosts("http://evil.example", null, parseAllowedHosts("*, review.example.com"))).toBe(false);
+    expect(isOriginNamedInAllowedHosts("http://review.example.com", null, parseAllowedHosts("*, review.example.com"))).toBe(true);
+  });
+  test("a request the browser marked with fetch metadata is never let through here", () => {
+    for (const site of ["cross-site", "same-site", "none", "same-origin"]) {
+      expect([site, isOriginNamedInAllowedHosts("http://review.example.com", site, named)]).toEqual([site, false]);
+    }
+  });
+});
 
 const local = { remote: false };
 const remote = { remote: true };

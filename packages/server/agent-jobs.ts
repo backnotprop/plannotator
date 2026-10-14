@@ -31,6 +31,9 @@ import {
 import { resolveGuideLaunchInstructions } from "@plannotator/shared/guide-instructions-store";
 import { gitColorFreeEnvironment } from "@plannotator/shared/review-core";
 import type { GuideLaunchReview } from "@plannotator/shared/guide-format";
+import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
+import { isSameOriginRequest } from "./request-origin-guard";
+import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
 export type { AgentJobInfo, AgentJobEvent, AgentCapabilities } from "@plannotator/shared/agent-jobs";
 
@@ -96,6 +99,12 @@ export interface AgentJobHandlerOptions {
   getServerUrl: () => string;
   /** Returns the working directory for spawned processes. */
   getCwd: () => string;
+  /**
+   * This server's stale-tab nonce (packages/core/server-session.ts). A launch
+   * whose body, or a kill whose `?serverSession=` query, names a different
+   * one is refused with 409 before anything starts or stops; absent passes.
+   */
+  serverSession?: string;
   /**
    * Build the command server-side for a given provider.
    * Return an object with the command to spawn (and optional output path for result ingestion).
@@ -582,6 +591,23 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
         return Response.json(await buildCapabilitiesResponse());
       }
 
+      // Launching and killing jobs start and stop processes on this machine:
+      // another site's page is refused (the servers also do this before any
+      // route; repeated so the handler is safe wherever it is mounted), and a
+      // kill from a stale tab too. A launch's session is checked on its body.
+      if ((url.pathname === JOBS || url.pathname.startsWith(JOBS + "/")) && (req.method === "POST" || req.method === "DELETE")) {
+        if (!isSameOriginRequest(req)) {
+          return Response.json(crossOriginRefusalBody(), { status: 403 });
+        }
+        if (
+          req.method === "DELETE" &&
+          options.serverSession !== undefined &&
+          checkServerSession({ serverSession: url.searchParams.get("serverSession") ?? undefined }, options.serverSession) === "mismatch"
+        ) {
+          return Response.json(serverSessionMismatchBody(), { status: 409 });
+        }
+      }
+
       // --- SSE stream ---
       if (url.pathname === JOBS_STREAM && req.method === "GET") {
         handlerOptions?.disableIdleTimeout?.();
@@ -650,7 +676,11 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
             "provider", "command", "label",
             "engine", "model", "reasoningEffort", "effort", "thinking", "fastMode",
             "reviewProfileId", "repairOf", "instructions",
+            "serverSession",
           ]);
+          if (options.serverSession !== undefined && checkServerSession(body, options.serverSession) === "mismatch") {
+            return Response.json(serverSessionMismatchBody(), { status: 409 });
+          }
           if (body && typeof body === "object") {
             const unknown = Object.keys(body).filter((k) => !KNOWN_JOB_FIELDS.has(k));
             if (unknown.length > 0) {

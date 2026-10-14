@@ -15,6 +15,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { refuseCrossOriginWrite } from "./request-origin-guard";
 import { getRepoInfo } from "./repo";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
@@ -870,6 +871,9 @@ export async function startAnnotateServer(
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Then no write from another site, before any route (request-origin-guard.ts).
+          const originRefusal = refuseCrossOriginWrite(req);
+          if (originRefusal) return originRefusal;
 
           const url = new URL(req.url);
 
@@ -1088,7 +1092,7 @@ export async function startAnnotateServer(
             if (/^https?:\/\//i.test(filePath)) {
               return Response.json({ available: false, apps: [] });
             }
-            return handleOpenInApps();
+            return handleOpenInApps({ exposed: options.tailnetPublished === true });
           }
 
           // API: Open the annotated file in an app. A URL source has no local
@@ -1102,7 +1106,7 @@ export async function startAnnotateServer(
                 { status: 400 },
               );
             }
-            return handleOpenIn(req, { resolveRoot: getReferenceRootPaths, serverSession });
+            return handleOpenIn(req, { resolveRoot: getReferenceRootPaths, serverSession, exposed: options.tailnetPublished === true });
           }
 
           // API: Update now (the update toast and the Options menu): the install script, once.
@@ -1533,7 +1537,7 @@ export async function startAnnotateServer(
 
           // API: Save notes to external integrations (Obsidian, Bear, Octarine)
           if (url.pathname === "/api/save-notes" && req.method === "POST") {
-            return handleSaveNotes(req);
+            return handleSaveNotes(req, { serverSession });
           }
 
           // Favicon

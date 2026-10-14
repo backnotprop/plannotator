@@ -10,7 +10,8 @@
  * only: after an Inbox restart a session is live again at its next poll.
  *
  * A session is in a thread's project when its `project_path` resolves to the
- * project's root (realpath, then git toplevel, as send_message does), or, for
+ * project's root (the resolution send_message uses: realpath, then the
+ * repository, a linked worktree counting as its main repository), or, for
  * a connection that does not say where it works, when it wrote in that
  * project.
  *
@@ -118,17 +119,16 @@ export function createInboxLiveSessions(options: {
       entry.lastSeen = now();
     };
   };
-  /** project_path to its root, resolved once per path (it spawns git). */
-  const roots = new Map<string, Promise<string | null>>();
-
+  /**
+   * project_path to its project's root. The Inbox passes its shared
+   * project-root cache (packages/server/inbox-project-root.ts), which asks
+   * git once per folder, so every poll after the first answers from memory
+   * and a session agrees with where its sends land (a linked worktree's
+   * session is in its main repository's project).
+   */
   const rootOf = (path: unknown): Promise<string | null> => {
     if (typeof path !== "string" || !path) return Promise.resolve(null);
-    let pending = roots.get(path);
-    if (!pending) {
-      pending = options.resolveRoot(path).catch(() => null);
-      roots.set(path, pending);
-    }
-    return pending;
+    return options.resolveRoot(path).catch(() => null);
   };
 
   const applyState = (entry: SeenSession, body: Record<string, unknown>, at: number) => {

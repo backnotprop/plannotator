@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { stubHookDistHtml } from "./hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, mustSignalInbox, stopProvenInboxes } from "./inbox-process";
+import { NO_BROWSER } from "./no-browser";
 import { assertSandboxedDataDir, refuseRealDataDir } from "./real-data-dir";
 
 export { removeStubbedHtml } from "./hook-dist-stub";
@@ -102,7 +103,7 @@ export function worldEnv(w: InboxWorld): Record<string, string> {
     HOME: w.home,
     PATH: w.path,
     PLANNOTATOR_DATA_DIR: w.dataDir,
-    PLANNOTATOR_BROWSER: "none",
+    PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_BIN: "",
     // Never the hosted relay (tests/setup/feedback-archive-off.ts says why).
     PLANNOTATOR_RELAY_URL: process.env.PLANNOTATOR_RELAY_URL || "http://127.0.0.1:9",
