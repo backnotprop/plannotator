@@ -2068,8 +2068,10 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 
 /* The message, its files and the subject it starts with. */
 .ib-cp-body { padding: 12px 16px 10px; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
-.pn-inbox .ib-cp-text { display: block; width: 100%; min-height: 150px; max-height: 320px; field-sizing: content; resize: none; border: 0; outline: none; background: transparent; color: var(--foreground); font: inherit; font-size: 15px; line-height: 1.6; padding: 0; }
-.ib-cp-text::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+/* Compose's message: the Inbox composer field (.ib-rtext and its mirror) at compose's metrics; both must match. */
+.pn-inbox .ib-cp-field .ib-rtext, .pn-inbox .ib-cp-field .ib-rmirror { min-height: 150px; max-height: 320px; font-size: 15px; line-height: 1.6; padding: 0; }
+.ib-cp-field .ib-rtext::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.ib-cp-field [data-skill-human-only-notice] { padding: 6px 0 0; }
 .ib-cp-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
 .ib-cp-file { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); min-width: 0; }
 .ib-cp-file .ib-fi { width: 30px; height: 30px; border-radius: 7px; background: var(--muted); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); flex: none; overflow: hidden; }
@@ -2149,7 +2151,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .pn-inbox .ib-cp-tobtn { height: 44px; font-size: 16px; }
   .ib-cp-tod { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .ib-cp-body { flex: 1; }
-  .pn-inbox .ib-cp-text { font-size: 16px; min-height: 200px; max-height: none; }
+  .pn-inbox .ib-cp-field .ib-rtext, .pn-inbox .ib-cp-field .ib-rmirror { font-size: 16px; min-height: 200px; max-height: none; }
   .ib-cp-files { grid-template-columns: 1fr; }
   .ib-cp-subj { white-space: nowrap; }
   .ib-cp-foot { min-height: 52px; }

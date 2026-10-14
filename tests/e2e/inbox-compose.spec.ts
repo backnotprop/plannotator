@@ -354,7 +354,7 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     // The message went (the session was live): no draft was left.
     await expect(mobile.locator('[data-draft-id]')).toHaveCount(0);
     await mobile.locator('.ib-drafts [data-open-compose], .ib-drafts .ib-lhead-compose').first().click();
-    await mobile.locator('dialog[data-compose] [data-compose-text]').fill('A draft kept from a phone.');
+    await mobile.locator('dialog[data-compose] [data-compose-text] textarea').fill('A draft kept from a phone.');
     await mobile.locator('dialog[data-compose] [data-compose-cancel]').click();
     await mobile.locator('dialog[data-compose] [data-compose-keep]').click();
     await expect(mobile.locator('[data-draft-id]')).toHaveCount(1);

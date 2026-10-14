@@ -22,6 +22,8 @@ import { HostMark, Icon } from '../icons';
 import { ComposeFileTiles, useComposeFiles } from './ComposeFiles';
 import { ToPicker } from './ToPicker';
 import { useComposeSessions } from './useComposeSessions';
+import { InboxComposerField } from '../components/ComposerField';
+import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import {
   NOTHING_SENT_NO_AGENT,
   busyWord,
@@ -187,9 +189,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
     setBusy('send');
     try {
+      // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
+      const skills = await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
       const result = await inboxApi.startThread({
         to: { host: target.host, session: target.session },
-        body,
+        body: withSkillsBlock(body, skills),
         idempotency_key: sendKey.current,
         uploads: uploadIds,
         ...(draft ? { draft_id: draft.id } : {}),
@@ -259,7 +263,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
 
   // ── keys ──
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
-    if (event.nativeEvent.isComposing) return;
+    // A key the skill picker took (Escape closing it, Enter on a row) is not the dialog's.
+    if (event.nativeEvent.isComposing || event.defaultPrevented) return;
     if (event.key === 'Escape') {
       // Never the window's Escape (it would close the thread under the dialog).
       event.preventDefault();
@@ -445,19 +450,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
         </div>
       )}
       <div className="ib-cp-body">
-        <textarea
-          ref={textRef}
-          className="ib-cp-text"
-          aria-label="Message"
-          aria-describedby={statusId}
-          placeholder="Write an idea or a request. It starts a new thread."
-          value={body}
-          onChange={(event) => {
-            setBody(event.target.value);
-            if (error) setError(null);
-          }}
-          data-compose-text=""
-        />
+        {/* The Inbox's composer field (#1914): the / and $ skill picker; the Send composes the block. */}
+        <div className="ib-cp-field" data-compose-text="">
+          <InboxComposerField
+            textareaRef={textRef}
+            ariaLabel="Message"
+            ariaDescribedBy={statusId}
+            destination="your message"
+            placeholder="Write an idea or a request. It starts a new thread."
+            value={body}
+            onChange={(value) => {
+              setBody(value);
+              if (error) setError(null);
+            }}
+          />
+        </div>
         <ComposeFileTiles
           files={files.files}
           onRemove={(key) => {

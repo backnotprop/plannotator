@@ -15,6 +15,9 @@
  *   (the per-comment list is off in the Inbox);
  * - New message: a clicked row inserts, and the session's wake carries the
  *   block ("this message");
+ * - compose (a message the person starts): the picker in its field, Escape
+ *   closing the picker before the dialog, the block on the Send, and the new
+ *   thread folding it behind "Skills:";
  * - an agent's message is never folded, whatever it says.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
@@ -84,7 +87,7 @@ async function readLine(): Promise<string> {
   return line.trim();
 }
 
-const TESTS = 5;
+const TESTS = 6;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -376,4 +379,47 @@ test.skipIf(!hasDom)('a comment on an attached file: its skill rides the one blo
   const { splitInboxSkillsBlock } = await import('@plannotator/core/skill-reference-block');
   const ranges = skillReferenceRanges(el.querySelector(`[data-message-id="${reply.id}"]`)!, splitInboxSkillsBlock(reply.body)!.skills);
   expect([...ranges.plain, ...ranges.human]).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('compose (a message you start): the field takes a skill, the Send carries the block, and the new thread folds it behind "Skills:"', async () => {
+  const projectRoot = (await threadOf(world.stopped)).thread.project.root;
+  await poll('ses_compose', projectRoot);
+  const el = await renderApp(`#thread=${world.stopped}`);
+  act(() => (el.querySelector('[data-open-compose]') as HTMLButtonElement).click());
+  const dialog = () => document.querySelector('dialog[data-compose]');
+  await until(() => !!dialog()?.querySelector('.ib-cp-tobtn:not([data-loading])'), 'compose');
+  act(() => (dialog()!.querySelector('.ib-cp-tobtn') as HTMLButtonElement).click());
+  await until(() => dialog()!.querySelector('[data-compose-session="ses_compose"]') !== null, 'the picker');
+  act(() => (dialog()!.querySelector('[data-compose-session="ses_compose"]') as HTMLElement).click());
+  const field = dialog()!.querySelector('[data-compose-text] textarea.ib-rtext') as HTMLTextAreaElement;
+  expect(field.getAttribute('aria-label')).toBe('Message');
+  await type(field, 'Plan the retry budget. /rea');
+  await until(() => rows().join() === 'readback', 'the skill picker');
+  // Escape closes the picker only, never the dialog.
+  await press(field, 'Escape');
+  expect(menu()).toBeNull();
+  expect(dialog()).not.toBeNull();
+  await type(field, 'Plan the retry budget. /readback it first.');
+  await until(() => dialog()!.querySelector('[data-skill-human-only-notice]') !== null, 'the human-only line');
+  expect(dialog()!.querySelector('[data-skill-human-only-notice]')!.textContent).toContain('included with your message');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'the Send');
+
+  const woken = await poll('ses_compose', projectRoot);
+  const command = woken.commands.find((c) => c.body.startsWith('Plan the retry budget.')) as { body: string; type?: string; thread_id?: string };
+  expect(command.type).toBe('message');
+  expect(command.body.startsWith('Plan the retry budget. /readback it first.\n\n**Skills referenced**')).toBe(true);
+  expect(command.body).toContain('State what I am asking for, in clear words, so I can confirm.');
+
+  // The thread the person started folds the block behind one quiet line.
+  await act(async () => {
+    window.location.hash = `#thread=${command.thread_id}`;
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => el.querySelector(`[data-message-id="${command.thread_id}"] [data-skills-line]`) !== null, 'the Skills line');
+  const message = el.querySelector(`[data-message-id="${command.thread_id}"]`)!;
+  const line = message.querySelector('[data-skills-line]') as HTMLDetailsElement;
+  expect(line.open).toBe(false);
+  expect(line.querySelector('summary')!.textContent).toContain('Skills: readback');
+  expect(message.textContent!.replace(line.textContent!, '')).not.toContain('State what I am asking for');
 });
