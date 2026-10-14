@@ -115,6 +115,18 @@ describe("a thread the person starts", () => {
     expect(reopened.listRows()).toEqual(store.listRows());
   });
 
+  test("a reply in it before the agent answered goes to the session it is addressed to (and follows a re-address)", () => {
+    const { store, project } = world();
+    const { message } = store.startPersonThread({ project_id: project.id, body: "Add a retry budget.", to: claude, idempotency_key: "k" });
+    const more = store.sendReply(message.id, { words: "And log each retry.", idempotency_key: "r1" });
+    expect(store.pendingReplies("ses_live").map((m) => m.id)).toEqual([message.id, more.reply.id]);
+    expect(store.pendingReplies("ses_other")).toEqual([]);
+    store.recordDelivery(message.id, claude);
+    store.readdressMessage(more.reply.id, { host: "pi", session: "ses_pi" });
+    expect(store.pendingReplies("ses_live")).toEqual([]);
+    expect(store.pendingReplies("ses_pi").map((m) => m.id)).toEqual([more.reply.id]);
+  });
+
   test("lastThreadsBySession names the thread each session last wrote in", () => {
     const { store, project } = world();
     const a = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "First thread", subject: "First" });
