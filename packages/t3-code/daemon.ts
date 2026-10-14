@@ -202,7 +202,18 @@ export async function serveDaemon(options: AdapterOptions, threadId: string): Pr
         process.exit(0);
       }
     }, Math.min(5000, Math.max(250, Math.floor(idleMs / 4))));
-    cleanup = () => { clearInterval(timer); reviews.dispose(); bridge.dispose(); server.stop(true); void client.close(); rmSync(join(directory, "daemon.json"), { force: true }); rmSync(lock, { recursive: true, force: true }); };
+    // Unregister before the server stops answering. Otherwise there is a
+    // window in which /health fails while daemon.json still names this live
+    // pid: a status check reads "not running" over a registry that is still
+    // there, and a command arriving then starts a worker that finds the lock
+    // held by a live but silent pid and refuses to start. The lock goes
+    // first, so a new worker never has its lock removed by this one, and the
+    // registry is removed only while it is still this worker's.
+    const unregister = () => {
+      rmSync(lock, { recursive: true, force: true });
+      if (readRegistry(options, threadId)?.token === token) rmSync(join(directory, "daemon.json"), { force: true });
+    };
+    cleanup = () => { unregister(); clearInterval(timer); reviews.dispose(); bridge.dispose(); server.stop(true); void client.close(); };
     process.once("SIGTERM", () => { cleanup?.(); process.exit(0); });
     process.once("SIGINT", () => { cleanup?.(); process.exit(0); });
     reviews.start();
