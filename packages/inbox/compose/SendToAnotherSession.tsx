@@ -1,8 +1,23 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { InboxApiError, inboxApi, type LiveSessionsModel } from '../api';
-import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
-import { busyWord, hostLabel } from './model';
+import { busyWord, hostLabel, startedLine } from './model';
+
+/** After a move: the moved message's delivery line, else the thread's heading; never the page. */
+function focusAfterMove(messageId: string): void {
+  const target = () =>
+    document.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(messageId)}"] [data-delivery]`) ?? document.querySelector<HTMLElement>('.ib-pane .ib-subject');
+  const attempt = (left: number) => {
+    const el = target();
+    if (el?.isConnected) {
+      el.focus();
+      if (document.activeElement === el) return;
+    }
+    // The thread re-renders after the move; try again on the next tasks for a moment.
+    if (left > 0) setTimeout(() => attempt(left - 1), 16);
+  };
+  attempt(20);
+}
 
 /**
  * "Send to another session" (compose): a message of the person's that the
@@ -68,6 +83,8 @@ export function SendToAnotherSession({
       await inboxApi.readdress(messageId, { host: chosen.host, session: chosen.session });
       setOpen(false);
       await onMoved();
+      // The choice goes with the move: focus goes to the message's delivery line, else the thread's heading.
+      focusAfterMove(messageId);
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'It was not moved; try again.');
       void onReload();
@@ -124,7 +141,7 @@ export function SendToAnotherSession({
                 <HostMark host={session.host} />
                 <span>
                   <span className="ib-t">
-                    {hostLabel(session.host)} · started {whenTime(session.started_at)}
+                    {hostLabel(session.host)} · {startedLine(session)}
                   </span>
                   <span className="ib-d">{busyWord(session)}</span>
                 </span>

@@ -2009,7 +2009,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   </ul>
                 )}
                 {message === last && delivered && (
-                  <div className="ib-delivered" data-delivery={delivered.state}>
+                  // tabIndex -1: Send to another session puts focus here once it moved the message.
+                  <div className="ib-delivered" data-delivery={delivered.state} tabIndex={-1}>
                     <Icon name={delivered.state === 'undelivered' ? 'warn' : 'ended' in delivered && delivered.ended ? 'clock' : 'check'} size={14} />
                     {delivered.text}
                   </div>

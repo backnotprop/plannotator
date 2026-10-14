@@ -145,6 +145,10 @@ test.skipIf(!hasDom)('the session stopped before it took it: Not delivered, and 
   await settle();
   expect(posted).toEqual([{ path: `/api/inbox/messages/${ROOT_ID}/to`, body: { to: { host: 'pi', session: 'ses_pi' } } }]);
   expect(changed).toBe(1);
+  // The choice is gone with the move: focus lands on the message's delivery line, never the page.
+  for (let i = 0; i < 20 && document.activeElement === document.body; i++) await settle();
+  expect(el.querySelector('[data-readdress-choice]')).toBeNull();
+  expect(document.activeElement).toBe(el.querySelector(`[data-message-article="${ROOT_ID}"] [data-delivery]`));
 });
 
 test.skipIf(!hasDom)('delivered: the line says so, and nothing offers to move it', async () => {
