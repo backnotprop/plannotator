@@ -26,6 +26,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent } from '../../scripts/inbox-sim';
 import { E2E_MAGIC, fakeTailscale } from './fake-tailscale';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -60,7 +61,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-settings-e2e-');
   const ts = fakeTailscale(join(root, 'ts'));
-  const env = { PATH: `${ts}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: 'none', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_INBOX_PHONES: '1' };
+  const env = { PATH: `${ts}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_INBOX_PHONES: '1' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   // One agent thread, so "← Inbox" has somewhere to return to.

@@ -79,6 +79,7 @@ import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/upd
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { createInboxSearchRoutes } from "./inbox-search";
+import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -1536,6 +1537,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Search: a read route (and the recent searches the window writes on opening a result).
       const searched = await search.handle(req, url);
       if (searched) return searched;
+      // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
+      const skills = inboxSkillsRoute(req, url);
+      if (skills) return skills;
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
       if (threadMatch && req.method === "GET") {

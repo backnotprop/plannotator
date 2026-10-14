@@ -109,6 +109,7 @@
     "./loopback-host": "./loopback-host.ts",
     "./request-origin": "./request-origin.ts",
     "./request-host": "./request-host.ts",
+    "./local-image": "./local-image.ts",
     "./host-control": "./host-control.ts",
     "./live-probe": "./live-probe.ts",
     "./live-proxy-node": "./live-proxy-node.ts",

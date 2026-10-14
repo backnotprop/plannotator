@@ -20,6 +20,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { NO_BROWSER } from '../../tests/helpers/no-browser';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -70,7 +71,7 @@ beforeAll(async () => {
       ...process.env,
       DOM_TESTS: '0',
       PLANNOTATOR_DATA_DIR: join(dir, 'data'),
-      PLANNOTATOR_BROWSER: '/usr/bin/true',
+      PLANNOTATOR_BROWSER: NO_BROWSER,
       PLANNOTATOR_INBOX_CONNECT: '0',
       PLANNOTATOR_INBOX_TAILSCALE: '',
       OPEN_IN_PLATFORM: 'mac',

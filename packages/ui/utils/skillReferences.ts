@@ -14,6 +14,13 @@
  * pre-feature behavior byte-for-byte.
  */
 
+import {
+  REVIEWER_SKILL_AUDIENCE,
+  skillInstructionsIncludedNote,
+  skillsReferencedHeading,
+  type SkillBlockAudience,
+} from '@plannotator/core/skill-reference-block';
+
 export type SkillRootId = 'claude' | 'codex' | 'universal';
 
 export interface SkillCatalogEntry {
@@ -331,8 +338,8 @@ export function resetSkillContentsForExport(): void {
   exportContents.clear();
 }
 
-const HUMAN_ONLY_EXPORT_NOTE =
-  'human-invocation-only: you cannot invoke this skill; the reviewer included it as context';
+const humanOnlyExportNote = (audience: SkillBlockAudience): string =>
+  `human-invocation-only: you cannot invoke this skill; the ${audience.requester} included it as context`;
 
 /**
  * The structural forms the injection block itself uses: the BEGIN/END markers
@@ -392,9 +399,9 @@ export function neutralizeSkillMarkerLines(body: string): string {
  *  and labeled so it can never read as the reviewer's own words. Body lines
  *  that imitate the markers are neutralized (see neutralizeSkillMarkerLines)
  *  so the body cannot close the block early or forge a sibling block. */
-function injectedSkillSection(name: string, body: SkillExportContent): string {
+function injectedSkillSection(name: string, body: SkillExportContent, audience: SkillBlockAudience): string {
   let out = `--- BEGIN SKILL INSTRUCTIONS: ${name} ---\n`;
-  out += `This skill cannot be invoked by a model, so its instructions are included here at the reviewer's request. Follow them when acting on this feedback.\n`;
+  out += `This skill cannot be invoked by a model, so its instructions are included here at the ${audience.requester}'s request. Follow them when acting on this ${audience.subject}.\n`;
   out += `Skill directory: ${body.dir}\n`;
   out += `Resolve any relative paths in the instructions below (e.g. references/, scripts/, assets/) against that absolute directory; your working directory is not the skill directory.\n\n`;
   out += `${neutralizeSkillMarkerLines(body.content)}\n`;
@@ -438,38 +445,68 @@ export function skillReferenceExportBlock(
 ): string {
   if (!text) return '';
   const refs = extractSkillReferences(text, exportCatalog);
-  if (refs.length === 0) return '';
+  return renderSkillReferencesBlock(refs, {
+    contentOf: (name) => exportContents.get(name),
+    injectedNames,
+    external: options?.external,
+  });
+}
 
-  const external = options?.external === true;
+/** What `renderSkillReferencesBlock` needs besides the references themselves. */
+export interface SkillReferencesBlockOptions {
+  /** The SKILL.md body of a human-only skill, when it is to be injected; undefined falls back to the name + directory line. */
+  contentOf?: (name: string) => SkillExportContent | undefined;
+  /** Per-export dedupe (see skillReferenceExportBlock). */
+  injectedNames?: Set<string>;
+  /** A comment that did not come from the person in this UI: never injects (see skillReferenceExportBlock). */
+  external?: boolean;
+  /** Who is asking, about what. Default: the reviewer, about this feedback (Plannotator's export). */
+  audience?: SkillBlockAudience;
+}
+
+/**
+ * The block itself, for references a caller already resolved: the export
+ * above per comment, and a host that composes ONE block per message (the
+ * Plannotator Inbox, with `INBOX_REPLY_SKILL_AUDIENCE`). '' when `refs` is
+ * empty. Same rules and markers as skillReferenceExportBlock.
+ */
+export function renderSkillReferencesBlock(
+  refs: readonly SkillCatalogEntry[],
+  options: SkillReferencesBlockOptions = {},
+): string {
+  if (refs.length === 0) return '';
+  const { injectedNames } = options;
+  const audience = options.audience ?? REVIEWER_SKILL_AUDIENCE;
+  const external = options.external === true;
   const toInject: Array<{ name: string; body: SkillExportContent }> = [];
-  let out = `**Skills referenced** (the reviewer is asking you to invoke these skills when acting on this feedback):\n`;
+  let out = `${skillsReferencedHeading(audience)}\n`;
   for (const ref of refs) {
     if (!ref.humanOnly) {
       out += `- \`${ref.name}\`\n`;
       continue;
     }
-    const body = exportContents.get(ref.name);
+    const body = options.contentOf?.(ref.name);
     if (body && injectedNames?.has(ref.name)) {
       // Already injected earlier in this export (necessarily by a reviewer-
       // written comment) — true regardless of who references it now.
-      out += `- \`${ref.name}\` (cannot be invoked by a model; its instructions are included earlier in this feedback)\n`;
+      out += `- \`${ref.name}\` (cannot be invoked by a model; its instructions are included earlier in this ${audience.subject})\n`;
     } else if (external) {
       // Tool-submitted comment: name + directory, never verbatim injection.
       out += ref.dir
         ? `- \`${ref.name}\` (cannot be invoked by a model; this comment came from an external tool, so its instructions are not included — SKILL.md is in ${ref.dir})\n`
-        : `- \`${ref.name}\` (${HUMAN_ONLY_EXPORT_NOTE})\n`;
+        : `- \`${ref.name}\` (${humanOnlyExportNote(audience)})\n`;
     } else if (body) {
       injectedNames?.add(ref.name);
       toInject.push({ name: ref.name, body });
-      out += `- \`${ref.name}\` (cannot be invoked by a model; its instructions are included below at the reviewer's request)\n`;
+      out += `- \`${ref.name}\` (cannot be invoked by a model; ${skillInstructionsIncludedNote(audience)})\n`;
     } else if (ref.dir) {
       out += `- \`${ref.name}\` (cannot be invoked by a model; its instructions could not be included, read SKILL.md in ${ref.dir} and follow it)\n`;
     } else {
-      out += `- \`${ref.name}\` (${HUMAN_ONLY_EXPORT_NOTE})\n`;
+      out += `- \`${ref.name}\` (${humanOnlyExportNote(audience)})\n`;
     }
   }
   for (const { name, body } of toInject) {
-    out += `\n${injectedSkillSection(name, body)}`;
+    out += `\n${injectedSkillSection(name, body, audience)}`;
   }
   return out;
 }

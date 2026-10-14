@@ -334,6 +334,16 @@ describe("exportReviewFeedback", () => {
     expect(highlighted).toBeGreaterThan(note);
   });
 
+  it("fences quoted code with more backticks than any run in it, so a ``` line in the code cannot end the quote", () => {
+    const result = exportReviewFeedback([
+      ann({ text: "Fix the example", selectedText: "Example:\n```\nnpm i\n```", originalCode: "a ```` b", suggestedCode: "no ticks" }),
+    ]);
+    expect(result).toContain("**Highlighted text:**\n````\nExample:\n```\nnpm i\n```\n````\n");
+    expect(result).toContain("**Replaces:**\n`````\na ```` b\n`````\n");
+    // Code without a backtick run keeps the three-backtick fence, byte for byte.
+    expect(result).toContain("**Suggested code:**\n```\nno ticks\n```\n");
+  });
+
   it("omits the Highlighted text block when there is no selectedText", () => {
     const result = exportReviewFeedback([ann()]);
     expect(result).not.toContain("**Highlighted text:**");
