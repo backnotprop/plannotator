@@ -1,5 +1,5 @@
 import { piUpdateAdvert } from "./update-advert.ts";
-import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { randomUUID } from "node:crypto";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { createServer } from "node:http";
@@ -9,6 +9,7 @@ import { countUnsentDraftComments, hostSessionClosedEvent, type HostCloseOutcome
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
+import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import {
 	type ArchivedPlan,
 	generateSlug,
@@ -319,6 +320,8 @@ export async function startPlanReviewServer(options: {
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
+		// Then no write from another site, before any route (request-origin-guard.ts).
+		if (refuseCrossOriginWrite(req, res)) return;
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
@@ -476,8 +479,17 @@ export async function startPlanReviewServer(options: {
 			url.pathname === "/api/plan/vscode-diff" &&
 			req.method === "POST"
 		) {
+			// Opens an editor on this machine: another site's page and a stale tab are refused.
+			if (!isSameOriginOrNoOrigin(req.headers.origin ?? null, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
+				json(res, crossOriginRefusalBody(), 403);
+				return;
+			}
 			try {
 				const body = await parseBody(req);
+				if (checkServerSession(body, serverSession) === "mismatch") {
+					json(res, serverSessionMismatchBody(), 409);
+					return;
+				}
 				const baseVersion = body.baseVersion as number;
 				if (!baseVersion) {
 					json(res, { error: "Missing baseVersion" }, 400);
@@ -511,7 +523,7 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname === "/favicon.png") {
 			handleFavicon(res);
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
-			await handleSaveNotesRequest(req, res);
+			await handleSaveNotesRequest(req, res, { serverSession });
 		} else if (url.pathname === "/api/approve" && req.method === "POST") {
 			let body: Record<string, unknown> = {};
 			try {

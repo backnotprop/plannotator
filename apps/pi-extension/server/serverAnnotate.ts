@@ -24,6 +24,7 @@ import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/h
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
+import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "../generated/annotate-history.ts";
 import { htmlDiff } from "../generated/html-diff.ts";
@@ -91,6 +92,7 @@ import {
 	encodeHtmlAssetPath,
 	htmlAssetBaseHref,
 	htmlAssetDocumentHeaders,
+	htmlAssetHeaders,
 	isFramedEmbeddedDocumentRequest,
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
@@ -251,9 +253,7 @@ function createHtmlAssetRegistry(folderPath?: string) {
 							"Access-Control-Allow-Origin": "*",
 						}
 					: {
-							"Content-Type": contentType,
-							"Cache-Control": "no-store",
-							"X-Content-Type-Options": "nosniff",
+							...htmlAssetHeaders(contentType),
 							"Access-Control-Allow-Origin": "*",
 						},
 			);
@@ -851,6 +851,8 @@ export async function startAnnotateServer(options: {
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
+		// Then no write from another site, before any route (request-origin-guard.ts).
+		if (refuseCrossOriginWrite(req, res)) return;
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
@@ -1387,7 +1389,7 @@ export async function startAnnotateServer(options: {
 				json(res, { error: message }, 500);
 			}
 		} else if (url.pathname === "/api/save-notes" && req.method === "POST") {
-			await handleSaveNotesRequest(req, res);
+			await handleSaveNotesRequest(req, res, { serverSession });
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
 		} else if (isFramedEmbeddedDocumentRequest(firstHeader(req.headers["sec-fetch-dest"]), url.pathname)) {

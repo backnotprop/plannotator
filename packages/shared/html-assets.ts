@@ -313,6 +313,32 @@ export function htmlAssetDocumentHeaders(csp: string): Record<string, string> {
   };
 }
 
+/**
+ * Asset types a browser renders as a scriptable DOCUMENT when one is opened
+ * directly (a top-level tab, a frame): SVG and XML (an XHTML-namespaced `.xml`
+ * runs its scripts). Served from the session's own origin, such a file could
+ * otherwise run script with this session's cookies and API.
+ */
+const SCRIPTABLE_ASSET_TYPES = /^(image\/svg\+xml|application\/xml)\b/i;
+
+/** The policy those assets get: an opaque origin with no scripts. */
+export const HTML_ASSET_SCRIPTABLE_CSP = "sandbox";
+
+/**
+ * Headers for a support asset (not an embedded HTML document). SVG and XML get
+ * `Content-Security-Policy: sandbox`, so one opened directly cannot run script
+ * on the session origin; as an `<img>` (or CSS background) an SVG never runs
+ * script and still loads exactly as before. Every asset gets `nosniff`.
+ */
+export function htmlAssetHeaders(contentType: string): Record<string, string> {
+  return {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    ...(SCRIPTABLE_ASSET_TYPES.test(contentType) ? { "Content-Security-Policy": HTML_ASSET_SCRIPTABLE_CSP } : {}),
+  };
+}
+
 function stripUrlSuffix(value: string): string {
   return splitPathSuffix(value).path;
 }

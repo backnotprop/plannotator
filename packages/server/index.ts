@@ -12,12 +12,13 @@
  *                        "opencode", "codex", "copilot-cli", "gemini-cli", "pi", "oh-my-pi".
  */
 
-import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { refuseCrossOriginWrite } from "./request-origin-guard";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -364,6 +365,9 @@ export async function startPlannotatorServer(
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Then no write from another site, before any route (request-origin-guard.ts).
+          const originRefusal = refuseCrossOriginWrite(req);
+          if (originRefusal) return originRefusal;
 
           const url = new URL(req.url);
 
@@ -533,8 +537,15 @@ export async function startPlannotatorServer(
 
           // API: Open plan diff in VS Code
           if (url.pathname === "/api/plan/vscode-diff" && req.method === "POST") {
+            // Opens an editor on this machine: another site's page and a stale tab are refused.
+            if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+              return Response.json(crossOriginRefusalBody(), { status: 403 });
+            }
             try {
               const body = (await req.json()) as { baseVersion: number };
+              if (checkServerSession(body, serverSession) === "mismatch") {
+                return Response.json(serverSessionMismatchBody(), { status: 409 });
+              }
 
               if (!body.baseVersion) {
                 return Response.json({ error: "Missing baseVersion" }, { status: 400 });
@@ -637,7 +648,7 @@ export async function startPlannotatorServer(
 
           // API: Save to notes (decoupled from approve/deny)
           if (url.pathname === "/api/save-notes" && req.method === "POST") {
-            return handleSaveNotes(req);
+            return handleSaveNotes(req, { serverSession });
           }
 
           // API: Approve plan
