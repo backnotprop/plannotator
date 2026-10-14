@@ -442,8 +442,13 @@ export interface ThreadPaneProps {
   stacked?: boolean;
   /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
   fileStacked?: boolean;
-  /** This page came through the tailnet ("Over your tailnet"): "Open in" is a new tab only, never an app on the computer. */
-  remote?: boolean;
+  /**
+   * This page came through the tailnet ("Over your tailnet"): "Open in" is a
+   * new tab only, never an app on the computer. Null until the settings say
+   * where the page is: no "Open in" yet, so a tailnet page never asks for the
+   * local app list.
+   */
+  remote?: boolean | null;
   /**
    * A file open beside the thread on a desktop hides the list and the
    * sidebar: the header then leads with `‹ Inbox` (`backLabel`), which closes
@@ -494,7 +499,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
 
 export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, landing = null, onLanded }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
-  const openIn: OpenInSurface = phone || remote ? 'tab' : 'apps';
+  const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
   const asker = agentName(root.author);
   // Archived (resolved). What an agent wrote after the archive line behaves as

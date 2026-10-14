@@ -91,6 +91,7 @@ import {
 	encodeHtmlAssetPath,
 	htmlAssetBaseHref,
 	htmlAssetDocumentHeaders,
+	htmlAssetHeaders,
 	isFramedEmbeddedDocumentRequest,
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
@@ -251,9 +252,8 @@ function createHtmlAssetRegistry(folderPath?: string) {
 							"Access-Control-Allow-Origin": "*",
 						}
 					: {
-							"Content-Type": contentType,
-							"Cache-Control": "no-store",
-							"X-Content-Type-Options": "nosniff",
+							// Sandboxed: an SVG or XML asset opened as a document never runs script on this origin (mirrors the Bun route).
+							...htmlAssetHeaders(contentType),
 							"Access-Control-Allow-Origin": "*",
 						},
 			);

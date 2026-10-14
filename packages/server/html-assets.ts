@@ -7,6 +7,7 @@ import {
   encodeHtmlAssetPath,
   htmlAssetBaseHref,
   htmlAssetDocumentHeaders,
+  htmlAssetHeaders,
   isFramedEmbeddedDocumentRequest,
   resolveHtmlAssetRoute,
   rewriteHtmlAssetReferences,
@@ -192,9 +193,8 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
       }
       return new Response(file, {
         headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "no-store",
-          "X-Content-Type-Options": "nosniff",
+          // Sandboxed: an SVG or XML asset opened as a document never runs script on this origin.
+          ...htmlAssetHeaders(contentType),
           "Access-Control-Allow-Origin": "*",
         },
       });

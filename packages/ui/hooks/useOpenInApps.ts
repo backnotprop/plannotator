@@ -27,28 +27,38 @@ export interface OpenInAppsAnswer {
 
 const loads = new Map<string, Promise<OpenInAppsAnswer>>();
 
-/** The apps a route answers, fetched once per URL for the page. A failed read is not kept: the next caller asks again. */
+/**
+ * The apps a route answers, fetched once per URL for the page. Only an
+ * answer the route gave is kept: a failed read or a non-OK status (a
+ * restarting server, a route this server lacks) is not, so the next caller
+ * asks again.
+ */
 export function loadOpenInApps(url: string): Promise<OpenInAppsAnswer> {
   let load = loads.get(url);
   if (!load) {
+    const unavailable = (): OpenInAppsAnswer => {
+      loads.delete(url);
+      return { available: false, apps: [] };
+    };
     load = fetch(url)
       .then(async (response) => {
-        if (!response.ok) return { available: false, apps: [] };
+        if (!response.ok) return unavailable();
         const data = (await response.json()) as Partial<OpenInAppsAnswer>;
         const platform = data.platform === 'mac' || data.platform === 'win' || data.platform === 'linux' ? data.platform : undefined;
         return { available: data.available === true, apps: Array.isArray(data.apps) ? data.apps : [], ...(platform ? { platform } : {}) };
       })
-      .catch(() => {
-        loads.delete(url);
-        return { available: false, apps: [] };
-      });
+      .catch(unavailable);
     loads.set(url, load);
   }
   return load;
 }
 
-/** The detected apps from `url`, or null while they load. `enabled: false` reads nothing (and answers null). */
-export function useOpenInApps(url: string, enabled = true): OpenInAppsAnswer | null {
+/**
+ * The detected apps from `url`, or null while they load. `enabled: false`
+ * reads nothing (and answers null). A new `retryKey` asks again after a read
+ * that did not answer; a kept answer comes back at once.
+ */
+export function useOpenInApps(url: string, enabled = true, retryKey?: string): OpenInAppsAnswer | null {
   const [answer, setAnswer] = useState<OpenInAppsAnswer | null>(null);
   useEffect(() => {
     if (!enabled) return;
@@ -59,7 +69,7 @@ export function useOpenInApps(url: string, enabled = true): OpenInAppsAnswer | n
     return () => {
       cancelled = true;
     };
-  }, [url, enabled]);
+  }, [url, enabled, retryKey]);
   return enabled ? answer : null;
 }
 

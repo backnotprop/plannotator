@@ -471,6 +471,17 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   await expect(tab.frameLocator('#detail').locator('#detail-text')).toHaveText("Charge detail from the attachment's own folder");
   // Opaque origin, no network: the page still cannot read the Inbox.
   await expect(tab.locator('#probe')).toHaveText('inbox api refused');
+  // Top-level, the page's response CSP is its only sandbox: navigating its own tab
+  // to a sibling SVG must not escape it. The SVG carries its own sandbox, so its
+  // script never runs and the Inbox API is never reached from this origin.
+  writeFileSync(
+    join(world.billing, 'proto', 'escape.svg'),
+    `<svg xmlns="http://www.w3.org/2000/svg"><text id="t" y="20">svg</text><script>document.documentElement.setAttribute('data-ran','yes');fetch('/api/inbox/threads').then(function(){document.documentElement.setAttribute('data-read','yes')})</script></svg>`,
+  );
+  const escape = await tab.goto(new URL('escape.svg', tab.url()).href);
+  expect(escape!.headers()['content-security-policy']).toBe("sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:");
+  await tab.waitForTimeout(300);
+  expect(await tab.evaluate(() => [document.documentElement.getAttribute('data-ran'), document.documentElement.getAttribute('data-read')])).toEqual([null, null]);
   await tab.close();
 
   await pane.getByRole('button', { name: 'Exit full screen' }).click();

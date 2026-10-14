@@ -379,7 +379,15 @@ export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
  * The check before the current file is handed to an app ("Open in"): the
  * one check every read takes (`checkCurrent`), and for an image or a PDF its
  * first bytes must still be that kind, read through the same descriptor
- * rules as a read (a swap after the check is refused). Nothing else is read.
+ * rules as a read. Nothing else is read.
+ *
+ * What it guarantees is the state at the moment of the check. The app is
+ * then handed the PATH (an app cannot take a descriptor), so a swap in the
+ * few milliseconds between this check and the launch is not refused here;
+ * only someone who can already write that folder (the agent itself) could
+ * do it. The per-kind policy (`inboxOpenInPolicy`) is what bounds that: the
+ * OS default only ever gets a path whose own extension is an image, a PDF
+ * or a plain text format, so a swapped-in file still opens by that extension.
  */
 export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attachment: InboxAttachment): Promise<CurrentCheck> {
   const check = checkCurrent(attachment);

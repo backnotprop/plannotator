@@ -1706,7 +1706,7 @@ function Inbox() {
             phone={phone}
             stacked={stack.thread}
             fileStacked={stack.file}
-            remote={(settings?.via ?? 'local') === 'tailnet'}
+            remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             onBackToList={(fileName) => {
               // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
               const root = rootRef.current;

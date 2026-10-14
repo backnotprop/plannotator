@@ -313,6 +313,34 @@ export function htmlAssetDocumentHeaders(csp: string): Record<string, string> {
   };
 }
 
+/**
+ * The policy EVERY non-HTML asset from the route gets. The route is on the
+ * session's own origin, and a browser renders several asset types as a
+ * scriptable document when one is opened directly (a top-level tab, a
+ * frame): SVG, and XML (an XHTML-namespaced `.xml` runs its scripts). A page
+ * in a top-level tab (the Inbox's new-tab page, or an asset URL pasted into a
+ * tab) has only its response CSP as a sandbox, so it can navigate its own tab
+ * to a sibling `.svg`; without a policy there, that SVG ran script on the
+ * session origin with its API. `sandbox` gives any such document an opaque
+ * origin and no script, and `default-src 'none'` lets it fetch nothing but
+ * its inline styles and same-origin or data: images. A response CSP does not
+ * apply to a subresource load, so `<img src>`, CSS, fonts, `<script src>`
+ * and media load exactly as before. Every type gets it, not a list of
+ * "scriptable" ones, so a type a browser renders as a document tomorrow is
+ * covered too.
+ */
+export const HTML_ASSET_SUBRESOURCE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:";
+
+/** Headers for a support asset (anything but an embedded HTML document): its type, the sandbox policy above, nosniff. */
+export function htmlAssetHeaders(contentType: string): Record<string, string> {
+  return {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": HTML_ASSET_SUBRESOURCE_CSP,
+  };
+}
+
 function stripUrlSuffix(value: string): string {
   return splitPathSuffix(value).path;
 }

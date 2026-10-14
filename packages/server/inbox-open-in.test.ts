@@ -285,6 +285,28 @@ describe("Inbox Open in: the new-tab page", () => {
     expect((await fetch(`${base}${location.replace("page.html", ".draft.html")}`)).status).toBe(404);
   });
 
+  test("the page cannot leave its sandbox by navigating its tab to a sibling SVG or XML: every non-HTML asset is sandboxed too", async () => {
+    // Top-level, the response CSP is the page's only sandbox. A sibling .svg
+    // (or XHTML .xml) opened as a document would otherwise run script on the
+    // Inbox's origin and reach its API; it carries its own sandbox with no script.
+    const { dataDir, project } = world();
+    writeFileSync(join(project, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/api/inbox/threads")</script></svg>');
+    writeFileSync(join(project, "data.xml"), '<html xmlns="http://www.w3.org/1999/xhtml"><script>fetch("/api/inbox/threads")</script></html>');
+    const server = await start(dataDir);
+    const ids = await attach(server, project, ["page.html"]);
+    const base = `http://127.0.0.1:${server.port}`;
+    const location = (await fetch(`${base}/api/inbox/attachments/${ids["page.html"]}/page`, { redirect: "manual" })).headers.get("location")!;
+    for (const name of ["chart.svg", "data.xml", "shot.png"]) {
+      const asset = await fetch(`${base}${location.replace("page.html", name)}`, { headers: { "Sec-Fetch-Dest": "document", "Sec-Fetch-Site": "same-origin" } });
+      expect([name, asset.status, asset.headers.get("content-security-policy")]).toEqual([
+        name,
+        200,
+        "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:",
+      ]);
+      expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+  });
+
   test("sent: the bytes the agent sent, with a <base href> at its folder, under the same sandbox", async () => {
     const { dataDir, project } = world();
     const server = await start(dataDir);

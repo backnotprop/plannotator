@@ -27,7 +27,8 @@ const ERROR_MS = 4000;
 
 /** Everything a control needs: the menu, and picking from it. */
 function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent') {
-  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL);
+  // A read that did not answer (a restarting Inbox) is asked again for the next file.
+  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, attachment.id);
   const [remembered, remember] = useRememberedOpenInApp();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);

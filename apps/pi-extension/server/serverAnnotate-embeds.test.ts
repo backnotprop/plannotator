@@ -90,6 +90,36 @@ describe("pi annotate server: embedded local documents", () => {
 
 	// The bug: the catch-all answering a nested-document request with the
 	// editor app, so every embed rendered a second Plannotator.
+	test("every non-HTML asset carries the sandbox CSP and nosniff: an SVG or XML opened as a document runs no script here", async () => {
+		const dir = siteDir("svg");
+		const pagePath = join(dir, "page.html");
+		const html = '<!doctype html><html><body><img src="chart.svg"></body></html>';
+		writeFileSync(pagePath, html, "utf-8");
+		writeFileSync(join(dir, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/api/plan")</script></svg>', "utf-8");
+		writeFileSync(join(dir, "data.xml"), '<html xmlns="http://www.w3.org/1999/xhtml"><script>1</script></html>', "utf-8");
+		writeFileSync(join(dir, "logo.png"), Buffer.from("89504e470d0a1a0a", "hex"));
+		const server = await startAnnotateServer({ markdown: "", filePath: pagePath, htmlContent: MINIMAL_HTML, rawHtml: html, renderHtml: true });
+		try {
+			const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { rawHtml?: string };
+			const base = plan.rawHtml!.match(/<base href="([^"]+)"/)![1];
+			for (const [name, type] of [
+				["chart.svg", "image/svg+xml"],
+				["data.xml", "application/xml; charset=utf-8"],
+				["logo.png", "image/png"],
+			] as const) {
+				const response = await fetch(`${server.url}${base}${name}`);
+				expect([name, response.status, response.headers.get("content-type")]).toEqual([name, 200, type]);
+				expect([name, response.headers.get("content-security-policy")]).toEqual([
+					name,
+					"sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:",
+				]);
+				expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+			}
+		} finally {
+			server.stop();
+		}
+	});
+
 	test("a framed request for an unknown path gets a 404 document, never the app", async () => {
 		await withSession("framed", async ({ url }) => {
 			const response = await fetch(`${url}/prototype-slash.html`, {

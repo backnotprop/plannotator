@@ -41,6 +41,36 @@ describe("annotate raw HTML assets", () => {
     expect(await imageResponse?.text()).toBe("png-bytes");
   });
 
+  test("every non-HTML asset carries the sandbox CSP and nosniff: an SVG or XML opened as a document runs no script on the session origin", async () => {
+    // A page in a top-level tab has only its response CSP as a sandbox, so it can
+    // navigate its own tab to a sibling .svg; without a policy there, that SVG ran
+    // script on this origin. As a subresource (<img>, CSS) the policy does not apply.
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-html-assets-svg-"));
+    const htmlPath = join(dir, "page.html");
+    const html = '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><img src="chart.svg"></body></html>';
+    writeFileSync(htmlPath, html, "utf-8");
+    writeFileSync(join(dir, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/api/plan")</script></svg>', "utf-8");
+    writeFileSync(join(dir, "data.xml"), '<html xmlns="http://www.w3.org/1999/xhtml"><script>1</script></html>', "utf-8");
+    writeFileSync(join(dir, "style.css"), "body { color: red; }", "utf-8");
+    writeFileSync(join(dir, "app.js"), "1", "utf-8");
+    const assets = createHtmlAssetRegistry();
+    const base = assets.rewriteHtml(html, htmlPath).match(/<base href="([^"]+)"/)![1]!;
+    for (const name of ["chart.svg", "data.xml", "style.css", "app.js"]) {
+      const url = new URL(`${base}${name}`, "http://localhost");
+      const response = await assets.handle(new Request(String(url)), url);
+      expect([name, response?.status, response?.headers.get("content-security-policy")]).toEqual([
+        name,
+        200,
+        "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:",
+      ]);
+      expect(response?.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+    // The page itself keeps its document policy (scripts run, at an opaque origin).
+    const page = new URL(`${base}page.html`, "http://localhost");
+    expect((await assets.handle(new Request(String(page)), page))?.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("folder HTML loads parent-relative CSS and scripts and shares their bytes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-folder-assets-"));
     mkdirSync(join(dir, "lessons"));
