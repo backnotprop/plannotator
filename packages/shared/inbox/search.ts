@@ -49,6 +49,7 @@ import {
   type InboxSearchThreadRow,
 } from "@plannotator/core/inbox-search";
 import { findQuestionBlocks, QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
+import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import {
   inboxAgentName,
   isInboxNote,
@@ -154,9 +155,14 @@ export function forEachInboxSearchBodyLine(markdown: string, visit: (line: strin
   }
 }
 
-/** The person's own words in a reply: not the generated first line, not the answers section. */
+/**
+ * The person's own words in a reply: not the generated first line, not the
+ * answers section, and not the skills block the window pastes at the end (a
+ * human-only skill's SKILL.md text, which the person did not write; the
+ * `$name` they typed stays in their words, so the reply is still found by it).
+ */
 export function inboxSearchReplyText(body: string): string {
-  const lines = body.split(/\r?\n/);
+  const lines = withoutInboxSkillsBlock(body).split(/\r?\n/);
   const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join("\n");
   return inboxSearchBodyText(kept.replace(/^\s*(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.\s*/, ""));
@@ -1188,7 +1194,7 @@ export class InboxSearchIndex {
    */
   private bestMessageText(message: InboxMessage, terms: readonly string[]): { text: string; question: { key: string; replaced: boolean } | null } {
     const candidates: { text: string; question: { key: string; replaced: boolean } | null }[] = [];
-    if (message.author.kind === "person") candidates.push({ text: inboxSearchReplyText(nearFirstHit(message.body, terms)), question: null });
+    if (message.author.kind === "person") candidates.push({ text: inboxSearchReplyText(nearFirstHit(withoutInboxSkillsBlock(message.body), terms)), question: null });
     else {
       candidates.push({ text: inboxSearchBodyText(nearFirstHit(message.body, terms)), question: null });
       for (const q of this.store.questionsOf(message.id)) {

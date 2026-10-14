@@ -94,6 +94,20 @@ describe("text the index reads", () => {
     const body = "Answered 2 questions, skipped 1.\n\nAdd jitter, please.\n\n## Answers to your questions\n\n1. Keep the budget? Yes";
     expect(inboxSearchReplyText(body)).toBe("Add jitter, please.");
   });
+
+  test("a reply that pasted a skill's SKILL.md: the person's words (with the $name they typed), not the skill's text", () => {
+    const body = [
+      "Please run /readback first.",
+      "",
+      "**Skills referenced** (the person is asking you to invoke these skills when acting on this reply):",
+      "- `readback` (cannot be invoked by a model; its instructions are included below at the person's request)",
+      "",
+      "--- BEGIN SKILL INSTRUCTIONS: readback ---",
+      "State what I am asking for, in clear words.",
+      "--- END SKILL INSTRUCTIONS: readback ---",
+    ].join("\n");
+    expect(inboxSearchReplyText(body)).toBe("Please run /readback first.");
+  });
 });
 
 describe("groups and rows", () => {

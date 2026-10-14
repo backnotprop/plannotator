@@ -9,6 +9,7 @@
 import { isInboxNote, type InboxMessageWire, type InboxQuestion, type InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from '@plannotator/core/question-block';
 import { INBOX_STILL_OPEN_LINE, sliceText } from '@plannotator/core/inbox-questions';
+import { withoutInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -154,10 +155,11 @@ const ANSWERS_HEADING_LINE = new RegExp(`^#{1,6}\\s+${QUESTION_ANSWERS_HEADING}\
  * "Answered N questions, skipped M." and
  * everything from the "Answers to your questions" heading on (the answers,
  * then the annotations' feedback), or, on a reply that answered nothing,
- * from the "No questions answered yet; …" line on.
+ * from the "No questions answered yet; …" line on, and the skills block the
+ * window pasted at the end (a human-only skill's SKILL.md text).
  */
 export function replyWords(body: string): string {
-  const lines = body.split(/\r?\n/);
+  const lines = withoutInboxSkillsBlock(body).split(/\r?\n/);
   const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()) || INBOX_STILL_OPEN_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join('\n');
   return kept.replace(/^\s*(?:Answered \d+ questions?(?:, skipped \d+)?|Skipped \d+ questions?)\.\s*/, '');
@@ -177,7 +179,7 @@ export function foldSnippet(message: InboxMessageWire, messages: readonly InboxM
     if (words) return { kind: 'words', text: words };
     const sent = messages.flatMap((m) => (m.questions ?? []).filter((q) => q.sent_reply_id === message.id && q.answer !== null));
     if (sent.length > 0) return { kind: 'answers', parts: answeredParts(sent) };
-    return { kind: 'words', text: firstWords(message.body) };
+    return { kind: 'words', text: firstWords(withoutInboxSkillsBlock(message.body)) };
   }
   const questions = (message.questions ?? []).filter(live);
   if (questions.length > 0 && questions.every((q) => q.state === 'sent' && q.answer !== null)) {

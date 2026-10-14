@@ -81,6 +81,18 @@ async function requestCatalog(): Promise<SkillCatalogEntry[]> {
   }
 }
 
+// Whether a fetched catalog is registered for the per-comment feedback export
+// (skillReferenceExportBlock). Default on: Plannotator's exporters list each
+// comment's references. A host that composes ONE block per message itself
+// (the Plannotator Inbox) turns it off, so a comment's `$name` stays plain
+// text in its export instead of carrying a second "Skills referenced" list.
+let exportRegistration = true;
+
+export function setSkillCatalogExportRegistration(on: boolean): void {
+  exportRegistration = on;
+  if (!on) setSkillCatalogForExport([]);
+}
+
 let cached: { at: number; skills: SkillCatalogEntry[] } | null = null;
 let inflight: Promise<SkillCatalogEntry[]> | null = null;
 // Bumped by resetSkillCatalogCache. A request that resolves after a reset (or
@@ -111,7 +123,7 @@ export function fetchSkillCatalog(): Promise<SkillCatalogEntry[]> {
     } else {
       cached = { at: Date.now(), skills: cached.skills };
     }
-    setSkillCatalogForExport(cached.skills);
+    if (exportRegistration) setSkillCatalogForExport(cached.skills);
     return cached.skills;
   });
   inflight = promise;
@@ -138,6 +150,7 @@ export function primeSkillCatalog(): void {
  */
 export function resetSkillCatalogCache(): void {
   generation++;
+  exportRegistration = true;
   cached = null;
   inflight = null;
   contentRequests.clear();

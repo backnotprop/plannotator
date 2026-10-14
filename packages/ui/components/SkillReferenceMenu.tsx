@@ -215,6 +215,8 @@ const SkillIcon: React.FC = () => (
 
 interface HumanOnlySkillNoticeProps {
   skills: SkillCatalogEntry[];
+  /** What the instructions go with. Default: "your feedback" (a comment). The Inbox says "your reply" or "your message". */
+  destination?: string;
 }
 
 /**
@@ -227,7 +229,7 @@ interface HumanOnlySkillNoticeProps {
  * toggles), and assistive tech alike. It pairs with the dotted-underline
  * marker the composer overlay paints on human-only tokens.
  */
-export const HumanOnlySkillNotice: React.FC<HumanOnlySkillNoticeProps> = ({ skills }) => {
+export const HumanOnlySkillNotice: React.FC<HumanOnlySkillNoticeProps> = ({ skills, destination = 'your feedback' }) => {
   if (skills.length === 0) return null;
   const names = skills.map((s) => s.name).join(', ');
   return (
@@ -240,12 +242,12 @@ export const HumanOnlySkillNotice: React.FC<HumanOnlySkillNoticeProps> = ({ skil
         {skills.length === 1 ? (
           <>
             <span className="font-mono">{names}</span> cannot be invoked by a model, so
-            its instructions will be included with your feedback.
+            its instructions will be included with {destination}.
           </>
         ) : (
           <>
             <span className="font-mono">{names}</span> cannot be invoked by a model, so
-            their instructions will be included with your feedback.
+            their instructions will be included with {destination}.
           </>
         )}
       </p>
