@@ -633,20 +633,33 @@ for (const phone of [
       const toast = page.locator('[data-inbox-toast]');
       await expect(toast).toBeVisible();
       await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
+      // A phone's short form: "Read", no Reply (the foot has it), no Z hint.
+      await expect(toast.locator('.ib-tlead')).toHaveText('Read');
+      await expect(toast.getByRole('button')).toHaveCount(1);
+      await expect(toast.locator('kbd')).toHaveCount(0);
       await shot(page, '14-toast');
-      const [toastBox, footBox, lines] = await Promise.all([
+      const [toastBox, footBox, lines, undoTarget] = await Promise.all([
         toast.boundingBox(),
         pane.locator('.ib-pfoot').boundingBox(),
-        // The text's line boxes (one rect per line).
-        toast.locator('.ib-tline').evaluate((el) => {
+        // The text's line boxes: the lead and the detail sit on one baseline, so their tops lie within a
+        // few pixels of each other (a wrapped second line would start a whole line lower).
+        toast.locator('.ib-tsay').evaluate((el) => {
           const range = document.createRange();
           range.selectNodeContents(el);
-          return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+          const tops = [...range.getClientRects()].map((r) => r.top);
+          return Math.max(...tops) - Math.min(...tops) < 8 ? 1 : 2;
+        }),
+        // Undo's hit area: the button grown by its ::after box.
+        toast.locator('[data-toast-undo]').evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const after = getComputedStyle(el, '::after');
+          return Math.min(box.height - parseFloat(after.top) - parseFloat(after.bottom), box.width - parseFloat(after.left) - parseFloat(after.right));
         }),
       ]);
       // One line (44 px, not the 171 px of three wrapped lines), clear of the foot.
       expect(toastBox!.height).toBeLessThanOrEqual(48);
       expect(lines).toBe(1);
+      expect(undoTarget).toBeGreaterThanOrEqual(44);
       expect(toastBox!.y + toastBox!.height).toBeLessThanOrEqual(footBox!.y);
       // The thread's banner says the rest; Undo puts it back.
       await expect(pane.locator('[data-read-line]')).toBeVisible();
