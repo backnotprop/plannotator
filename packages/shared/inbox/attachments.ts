@@ -169,6 +169,16 @@ async function scanHandle(handle: FileHandle, sink?: (chunk: Buffer) => Promise<
   return { sha256: hash.digest("hex"), size, head: Buffer.concat(headParts), text };
 }
 
+/** A file's sha256, size, first bytes and whether it is UTF-8 text with no NUL (one async pass, never whole in memory). */
+export async function scanInboxFile(path: string): Promise<{ sha256: string; size: number; head: Buffer; text: boolean }> {
+  const handle = await open(path, OPEN_FLAGS);
+  try {
+    return await scanHandle(handle);
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
 /** The first bytes of a file handle. */
 async function readHead(handle: FileHandle): Promise<Buffer> {
   const buffer = Buffer.alloc(INBOX_ATTACHMENT_HEAD_BYTES);

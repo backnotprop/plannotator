@@ -309,7 +309,26 @@ class OpenCode2Wakes {
       notify: (message) => {
         console.error(`[Plannotator] ${message}`);
       },
+      // The session's folder (its `location.directory`, looked up once), so the Inbox lists it under its project.
+      projectPath: () => this.directory(sessionID),
     };
+  }
+
+  private readonly directories = new Map<string, Promise<string | null>>();
+
+  private directory(sessionID: string): Promise<string | null> {
+    let pending = this.directories.get(sessionID);
+    if (!pending) {
+      pending = (async () => {
+        try {
+          return (await this.v2.session?.get?.({ sessionID }))?.location?.directory ?? this.v2.location?.directory ?? null;
+        } catch {
+          return this.v2.location?.directory ?? null;
+        }
+      })();
+      this.directories.set(sessionID, pending);
+    }
+    return pending;
   }
 }
 

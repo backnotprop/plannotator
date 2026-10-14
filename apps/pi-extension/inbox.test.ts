@@ -17,7 +17,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { INBOX_REMINDER_TEXT, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "./generated/inbox/connection.ts";
+import { INBOX_NEW_THREAD_INSTRUCTION, INBOX_REMINDER_TEXT, INBOX_WAKE_INSTRUCTION, inboxWakeText } from "./generated/inbox/connection.ts";
 import { entriesCarryReminder, PI_INBOX_REMINDER_CUSTOM_TYPE } from "./inbox.ts";
 import { INBOX_INSTALL_TEXT } from "./generated/inbox/agent-link.ts";
 import {
@@ -350,6 +350,42 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		w.proof(`the wake's answer (send_message with reply_to ${replyId}) landed in thread ${asked.thread_id}: Replied`);
 		await Bun.sleep(3_000);
 		expect(wakes(pi)).toHaveLength(1);
+	}, 120_000);
+
+	test("compose: Pi's poll carries its folder, so a session that never wrote is listed under its project; a thread the person starts for it arrives with the new-thread line and the answer lands in it", async () => {
+		const w = world("02b-compose-new-thread");
+		knob(w, true);
+		startInbox(w);
+		const m = model(askingScript());
+		const pi = await openPi(w, m);
+		await ask(pi, "hello");
+		const { port } = registry(w);
+		const listed = await waitFor("the Pi session in the live list", async () => {
+			const model = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/sessions`)).json()) as {
+				projects: { project: { root: string }; sessions: { session: string; host: string; busy: boolean | null }[] }[];
+			};
+			return model.projects.find((group) => group.project.root === w.project)?.sessions.find((s) => s.session === pi.sessionId) ?? null;
+		});
+		expect(listed).toMatchObject({ host: "pi", busy: false });
+		w.proof(`listed under ${w.project} before it wrote: ${JSON.stringify(listed)}`);
+
+		const health = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as { serverSession: string };
+		const response = await fetch(`http://127.0.0.1:${port}/api/inbox/messages`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+			body: JSON.stringify({ serverSession: health.serverSession, to: { host: "pi", session: pi.sessionId }, body: "Idea: a retry budget for the relay.", idempotency_key: "pi-compose-1" }),
+		});
+		expect(response.status).toBe(200);
+		const message = ((await response.json()) as { message: { id: string; thread_id: string } }).message;
+		const wake = await waitFor("the new-thread wake", () => wakes(pi)[0]);
+		expect(wake.split("\n")[1]).toBe(INBOX_NEW_THREAD_INSTRUCTION);
+		expect(wake).toBe(inboxWakeText({ type: "message", new_thread: true, id: message.id, subject: "Idea: a retry budget for the relay.", body: "Idea: a retry budget for the relay." }));
+		const answered = await waitFor("the answer in the person's thread", async () => {
+			const last = (await thread(w, message.thread_id)).messages.at(-1);
+			return last?.author.kind === "agent" ? last : null;
+		});
+		expect(answered.author.session).toBe(pi.sessionId);
+		w.proof(`the wake:\n${wake}\n\nthe answer landed in ${message.thread_id}`);
 	}, 120_000);
 
 	test("a typed prompt goes first, and a prompt typed into the wake's turn takes it over: one delivery, no abort", async () => {

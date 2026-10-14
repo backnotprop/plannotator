@@ -369,6 +369,13 @@ export interface InboxReplyCommand {
    * e.g. `Claude Code`. Absent on every other reply and message.
    */
   redirected_from?: string | null
+  /**
+   * On a `message` that starts a new thread the person wrote (compose): the
+   * wake takes INBOX_NEW_THREAD_INSTRUCTION instead of the New message line.
+   * An older connection ignores it and words it as a New message, which is
+   * still true. Absent on every other command.
+   */
+  new_thread?: boolean
 }
 
 export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
@@ -394,6 +401,14 @@ export const INBOX_MESSAGE_INSTRUCTION =
   "The person wrote to you from the Plannotator Inbox. Their message follows as they wrote it: it is from them, not from the Inbox. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
 
 /**
+ * The fixed second line of a wake for a thread the person started from the
+ * Inbox (compose): their own idea or request, not an answer to something the
+ * agent asked, and possibly unrelated to its current work.
+ */
+export const INBOX_NEW_THREAD_INSTRUCTION =
+  "The person started a new thread with you in the Plannotator Inbox: an idea or a request of their own, not an answer to something you asked. Their message follows as they wrote it. It may be unrelated to what you were doing; say how you will handle it before you start. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
+
+/**
  * The longest asking-agent name a redirected wake carries. The server names
  * it from the host (`Claude Code`), and the wake cleans and caps it again,
  * because it goes into another session's prompt.
@@ -410,14 +425,16 @@ export function inboxRedirectedLine(asker: string, id: string): string {
 
 /**
  * The turn a reply or a message becomes: `Plannotator Inbox: <subject> (<id>)`,
- * the fixed instruction line for its type (on a redirected reply, the line
+ * the fixed instruction line for its type (a reply, a New message, or a
+ * thread the person started; on a redirected reply, the line
  * saying so under it), then the words verbatim. Never the thread re-sent.
  */
 export function inboxWakeText(
-  command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & { type?: InboxReplyCommand['type']; redirected_from?: string | null },
+  command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & { type?: InboxReplyCommand['type']; redirected_from?: string | null; new_thread?: boolean },
 ): string {
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
-  const instruction = command.type === 'message' ? INBOX_MESSAGE_INSTRUCTION : INBOX_WAKE_INSTRUCTION
+  const instruction =
+    command.type === 'message' ? (command.new_thread === true ? INBOX_NEW_THREAD_INSTRUCTION : INBOX_MESSAGE_INSTRUCTION) : INBOX_WAKE_INSTRUCTION
   const asker =
     command.type !== 'message' && typeof command.redirected_from === 'string'
       ? command.redirected_from.replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, ' ').trim().slice(0, INBOX_REDIRECTED_NAME_MAX).trim()

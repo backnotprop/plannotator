@@ -117,6 +117,7 @@ import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { inboxMessageImageRoute } from "./inbox-message-images";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
+import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
@@ -339,6 +340,13 @@ const ERROR_STATUS: Record<string, number> = {
   guide_not_found: 404,
   // New message (step 8).
   session_not_live: 409,
+  // Compose: a new thread the person starts (packages/server/inbox-compose.ts).
+  already_delivered: 409,
+  not_addressed: 422,
+  draft_conflict: 409,
+  upload_refused: 422,
+  upload_too_large: 413,
+  upload_not_found: 404,
   // Over your tailnet (packages/server/inbox-tailscale.ts).
   tailscale_env_decides: 409,
   tailscale_unavailable: 409,
@@ -1152,15 +1160,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ? inboxAgentName({ kind: "agent", host: asked.author.host, name: null })
           : "agent"
         : null;
+    // Files the person attached (compose): each named with its path, so the agent can open it.
+    const attached = (reply.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`);
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",
       id: reply.id,
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
       subject: store.threadSubject(reply.thread_id),
-      body: reply.body,
+      body: attached.length > 0 ? `${reply.body}\n\n${attached.join("\n")}` : reply.body,
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
+      // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).
+      ...(reply.started_by_person && reply.thread_id === reply.id ? { new_thread: true } : {}),
     };
   };
 
@@ -1245,6 +1257,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     serverSession,
     resolveRoot: async (path) => (await resolveInboxProjectRoot(path)).root,
   });
+
+  // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
+  const compose = createInboxCompose({
+    store,
+    serverSession,
+    live,
+    resolveProject,
+    readBody: (req) => readBody(req),
+    json,
+  });
+  compose.sweep();
+  const uploadSweep = setInterval(() => compose.sweep(), INBOX_UPLOAD_SWEEP_MS);
+  (uploadSweep as { unref?: () => void }).unref?.();
 
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
@@ -1512,6 +1537,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Search: a read route (and the recent searches the window writes on opening a result).
       const searched = await search.handle(req, url);
       if (searched) return searched;
+
+      // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
+      const composed = await compose.route(req, url);
+      if (composed) return composed;
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
       if (threadMatch && req.method === "GET") {
@@ -1789,6 +1818,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     connectStop.abort();
     updates.stop();
     search.dispose();
+    clearInterval(uploadSweep);
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its

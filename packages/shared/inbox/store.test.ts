@@ -111,7 +111,14 @@ type Op =
   // An agent read the thread (read_thread, or wait_for_reply handed it the reply).
   | { op: "agentRead"; target: number }
   // The Undo window passed: the server tells the asking agent what a Mark read set aside.
-  | { op: "tell"; target: number };
+  | { op: "tell"; target: number }
+  // The person starts a thread addressed to a live session (compose, POST /api/inbox/messages).
+  | { op: "personStart"; root: number; key: string; session: string; body: string }
+  // The addressed session's connection delivered what the person sent it in the thread (bridge `delivered`).
+  | { op: "deliver"; target: number };
+
+/** What the person writes when they start a thread (compose). */
+const PERSON_BODIES = ["Idea: group the list by session.", "Add a retry budget to the relay."] as const;
 
 const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ op: fc.constant("send" as const), root: fc.nat(2), body: bodyArb, key: fc.option(fc.constantFrom("a", "b", "c"), { nil: null }) }),
@@ -125,14 +132,25 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ op: fc.constant("read" as const), target: fc.nat(), read: fc.boolean() }),
   fc.record({ op: fc.constant("agentRead" as const), target: fc.nat() }),
   fc.record({ op: fc.constant("tell" as const), target: fc.nat() }),
+  fc.record({
+    op: fc.constant("personStart" as const),
+    root: fc.nat(2),
+    key: fc.constantFrom("p1", "p2", "p3"),
+    session: fc.constantFrom("ses_a", "ses_b"),
+    body: fc.constantFrom(...PERSON_BODIES),
+  }),
+  fc.record({ op: fc.constant("deliver" as const), target: fc.nat() }),
 );
 
 /** What one op did: wrote, wrote nothing (no target, or no question to pick), replayed a key, or was refused with a code. */
 type Outcome = "ok" | "noop" | "replayed" | `refused:${string}`;
 
-/** The message an op aims at (every op but `send`): the n-th message an agent wrote, wrapping. */
+/**
+ * The message an op aims at (every op but `send` and `personStart`): the n-th
+ * message an agent wrote or the person started a thread with, wrapping.
+ */
 function targetOf(op: Op, messageIds: readonly string[]): string | undefined {
-  return op.op === "send" ? undefined : messageIds[op.target % Math.max(1, messageIds.length)];
+  return op.op === "send" || op.op === "personStart" ? undefined : messageIds[op.target % Math.max(1, messageIds.length)];
 }
 
 /**
@@ -231,6 +249,19 @@ function run(store: InboxStore, op: Op, messageIds: string[]): Outcome {
         if (!target) return "noop";
         store.tellSetAside(threadOf(target), 0);
         return "ok";
+      case "personStart": {
+        const project = store.ensureProject({ name: `repo${op.root}`, root: `/work/repo${op.root}` });
+        const result = store.startPersonThread({ project_id: project.id, body: op.body, to: { host: "test", session: op.session }, idempotency_key: op.key });
+        if (result.replayed) return "replayed";
+        messageIds.push(result.message.id);
+        return "ok";
+      }
+      case "deliver": {
+        if (!target) return "noop";
+        const waiting = store.thread(threadOf(target))!.messages.filter((m) => m.author.kind === "person" && m.to && !m.delivery);
+        for (const message of waiting) store.recordDelivery(message.id, message.to!);
+        return waiting.length > 0 ? "ok" : "noop";
+      }
     }
   } catch (error) {
     if (!(error instanceof InboxError)) throw error;
@@ -413,7 +444,8 @@ describe("InboxStore invariants", () => {
       | { op: "reply"; target: number; session: string | null; thread: string | null }
       | { op: "resolve"; target: number; resolved: boolean }
       | { op: "seen"; target: number }
-      | { op: "personReply"; target: number; key: string };
+      | { op: "personReply"; target: number; key: string }
+      | { op: "personStart"; project: number; key: string; session: string };
     const routeOpArb: fc.Arbitrary<RouteOp> = fc.oneof(
       {
         arbitrary: fc.record({
@@ -430,6 +462,8 @@ describe("InboxStore invariants", () => {
       { arbitrary: fc.record({ op: fc.constant("resolve" as const), target: fc.nat(), resolved: fc.boolean() }), weight: 2 },
       fc.record({ op: fc.constant("seen" as const), target: fc.nat() }),
       fc.record({ op: fc.constant("personReply" as const), target: fc.nat(), key: fc.constantFrom("p1", "p2", "p3") }),
+      // A thread the person starts (compose): it must never become a session's default thread.
+      fc.record({ op: fc.constant("personStart" as const), project: fc.nat(1), key: fc.constantFrom("c1", "c2", "c3"), session: fc.constantFrom("ses_a", "ses_b") }),
     );
 
     fc.assert(
@@ -467,6 +501,10 @@ describe("InboxStore invariants", () => {
             } else if (op.op === "seen") {
               const target = pick(op.target);
               if (target) store.markSeen(store.message(target)!.thread_id);
+            } else if (op.op === "personStart") {
+              const project = store.ensureProject({ name: `repo${op.project}`, root: `/work/repo${op.project}` });
+              const r = store.startPersonThread({ project_id: project.id, body: "an idea", to: { host: "test", session: op.session }, idempotency_key: op.key });
+              if (!r.replayed) ids.push(r.message.id);
             } else {
               const target = pick(op.target);
               if (target) store.sendReply(target, { words: "ok", idempotency_key: op.key });
@@ -496,7 +534,9 @@ describe("InboxStore invariants", () => {
           if (m.reply_to) {
             expected = threadOf.get(m.reply_to)!;
           } else if (m.author.kind === "person") {
-            throw new Error("a person's message always replies");
+            // Only a thread the person started has no reply_to: it is its own root.
+            expect(m.started_by_person).toBe(true);
+            expected = m.id;
           } else {
             const name = m.thread_name ?? null;
             const candidate =
@@ -659,6 +699,23 @@ function stateOpArbOf(body: fc.Arbitrary<string>, agentKeys: boolean): fc.Arbitr
     { arbitrary: fc.record({ op: fc.constant("resolve" as const), target: fc.nat(), resolved: fc.boolean() }), weight: 3 },
     { arbitrary: fc.record({ op: fc.constant("agentRead" as const), target: fc.nat() }), weight: 2 },
     { arbitrary: fc.record({ op: fc.constant("tell" as const), target: fc.nat() }), weight: 2 },
+    // Threads the person starts and their delivery, in the property runs only
+    // (the generated trace fixtures were drawn without them).
+    ...(agentKeys
+      ? [
+          {
+            arbitrary: fc.record({
+              op: fc.constant("personStart" as const),
+              root: fc.nat(1),
+              key: fc.constantFrom("p1", "p2", "p3"),
+              session: fc.constantFrom("ses_a", "ses_b"),
+              body: fc.constantFrom(...PERSON_BODIES),
+            }),
+            weight: 1,
+          },
+          { arbitrary: fc.record({ op: fc.constant("deliver" as const), target: fc.nat() }), weight: 1 },
+        ]
+      : []),
   );
 }
 
@@ -696,6 +753,8 @@ interface ModelMessage {
   questions: ModelQuestion[];
   /** The person's Send keys on this message (a replayed key writes nothing). */
   replyKeys: Set<string>;
+  /** A thread the person started: addressed to a session, until that session's connection delivers it. */
+  addressed?: { delivered: boolean };
 }
 
 interface ModelThread {
@@ -724,6 +783,8 @@ class ThreadStateModel {
   private readonly byMessage = new Map<string, { thread: ModelThread; message: ModelMessage }>();
   /** An agent's idempotency key per project, and the body it was first sent with. */
   private readonly keyed = new Map<string, string>();
+  /** The person's compose keys (one namespace across projects), and the body each first sent. */
+  private readonly personKeyed = new Map<string, string>();
   /** The newest unnamed thread each agent session started, per project. */
   private readonly sessionRoots = new Map<string, string>();
   private created: readonly string[] = [];
@@ -919,6 +980,22 @@ class ThreadStateModel {
   }
 
   private event(op: Op, target: string | undefined, store: InboxStore, tick: number): Outcome {
+    if (op.op === "personStart") {
+      // Compose: a new thread, the person's root, addressed to a session. It
+      // is no session's default thread, so routing never joins it.
+      const body = this.personKeyed.get(op.key);
+      if (body !== undefined) return body === op.body ? "replayed" : "refused:idempotency_key_reused";
+      const id = this.created[this.used]!;
+      const thread: ModelThread = { id, messages: [], seen: 0, read: null, seenBeforeRead: undefined, resolved: false, archive: 0, checked: 0, told: new Set() };
+      this.threads.set(id, thread);
+      this.addPerson(thread, tick, null);
+      const root = thread.messages[0]!;
+      root.addressed = { delivered: false };
+      // An op can aim at it, as at an agent message.
+      this.agentMessages.push(root);
+      this.personKeyed.set(op.key, op.body);
+      return "ok";
+    }
     if (op.op === "send") {
       const project = `repo${op.root}`;
       const key = op.key?.trim() || null;
@@ -1082,6 +1159,18 @@ class ThreadStateModel {
           for (const q of qs) thread.told.add(q.id);
         }
         return "ok";
+      case "deliver": {
+        // A delivery counts as the agent having read the thread up to that message.
+        const waiting = thread.messages.filter((m) => m.addressed && !m.addressed.delivered);
+        for (const m of waiting) {
+          m.addressed!.delivered = true;
+          thread.checked = Math.max(thread.checked, m.tick);
+        }
+        return waiting.length > 0 ? "ok" : "noop";
+      }
+      case "personStart":
+      case "send":
+        return "noop";
     }
   }
 }
@@ -1411,7 +1500,10 @@ type TraceEvent =
   // `through` (seen only, optional): the look stops at that agent message (`through_seq`).
   | { type: "seen" | "mark_read" | "unread" | "archive" | "unarchive" | "agent_read" | "set_aside_note"; thread: string; through?: string }
   | { type: "pick"; message: string; key: string; choice?: string; text?: string }
-  | { type: "send"; message: string; words: string; skip_unanswered: boolean };
+  | { type: "send"; message: string; words: string; skip_unanswered: boolean }
+  // The person starts a thread addressed to a session (compose), and its delivery.
+  | { type: "person_thread"; project: string; session: string; body: string }
+  | { type: "delivered"; thread: string };
 
 interface TraceDef {
   name: string;
@@ -1459,7 +1551,7 @@ class TraceLabels {
 function traceOp(event: TraceEvent, world: StateWorld, labels: TraceLabels, step: number): Op {
   const at = (label: string) => {
     const i = world.ids.indexOf(labels.id(label));
-    if (i < 0) throw new Error(`${label} is not an agent message`);
+    if (i < 0) throw new Error(`${label} is not an agent message or a thread the person started`);
     return i;
   };
   switch (event.type) {
@@ -1502,12 +1594,20 @@ function traceOp(event: TraceEvent, world: StateWorld, labels: TraceLabels, step
       return { op: "agentRead", target: at(event.thread) };
     case "set_aside_note":
       return { op: "tell", target: at(event.thread) };
+    case "person_thread": {
+      const root = /^repo(\d)$/.exec(event.project);
+      if (!root) throw new Error(`project ${event.project}: repo0 or repo1`);
+      return { op: "personStart", root: Number(root[1]), key: `person-${step}`, session: event.session, body: event.body };
+    }
+    case "delivered":
+      return { op: "deliver", target: at(event.thread) };
   }
 }
 
 /** The trace event a generated op is, before it runs (null for an op that aims at nothing). */
 function traceEventOf(op: Op, world: StateWorld, labels: TraceLabels): TraceEvent | null {
   if (op.op === "send") return { type: "agent_message", project: `repo${op.root}`, session: op.session ?? null, reply_to: null, body: op.body };
+  if (op.op === "personStart") return { type: "person_thread", project: `repo${op.root}`, session: op.session, body: op.body };
   const target = targetOf(op, world.ids);
   if (!target) return null;
   const message = world.store.message(target)!;
@@ -1541,6 +1641,8 @@ function traceEventOf(op: Op, world: StateWorld, labels: TraceLabels): TraceEven
       return { type: "agent_read", thread };
     case "tell":
       return { type: "set_aside_note", thread };
+    case "deliver":
+      return { type: "delivered", thread };
   }
 }
 
@@ -1624,6 +1726,7 @@ const REPLY = (reply_to: string, body: string, supersedes?: string[]): TraceEven
 const ON = (type: Extract<TraceEvent, { thread: string }>["type"], thread: string): TraceEvent => ({ type, thread });
 const SEEN_THROUGH = (thread: string, through: string): TraceEvent => ({ type: "seen", thread, through });
 const PICK = (message: string, key: string, choice: string): TraceEvent => ({ type: "pick", message, key, choice });
+const PERSON = (body: string, session = "ses_a", project = "repo0"): TraceEvent => ({ type: "person_thread", project, session, body });
 const SEND = (message: string, words: string, skip_unanswered: boolean): TraceEvent => ({ type: "send", message, words, skip_unanswered });
 
 const HAND_TRACES: TraceDef[] = [
@@ -1788,6 +1891,22 @@ const HAND_TRACES: TraceDef[] = [
       REPLY("m1", STATE_BODIES.news),
       ROOT(STATE_BODIES.news, null, "repo1"),
       SEEN_THROUGH("t1", "m5"),
+    ],
+  },
+  {
+    name: "hand-19-person-started-thread",
+    description:
+      "The person starts a thread addressed to a session (Sent); its delivery moves it to Quiet; the agent's reply_to answer lands in it (New), and a look makes it Quiet. The session's message without reply_to starts its own thread: a thread the person started is no session's default thread. A second person thread waits in Sent until delivered.",
+    events: [
+      PERSON(PERSON_BODIES[0]),
+      ON("delivered", "t1"),
+      REPLY("m1", STATE_BODIES.news),
+      ON("seen", "t1"),
+      ROOT(STATE_BODIES.ask, "ses_a"),
+      PERSON(PERSON_BODIES[1], "ses_b"),
+      REPLY("m4", STATE_BODIES.ask),
+      ON("mark_read", "t3"),
+      ON("delivered", "t3"),
     ],
   },
 ];

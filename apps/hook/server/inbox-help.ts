@@ -306,6 +306,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "## Where replies go",
     "",
     `- With the \`${INBOX_TOOL_NAME}\` tool in Claude Code, Pi or OpenCode 2, the person's reply arrives in your session by itself as a new message once the session is idle, starting with the line \`Plannotator Inbox: <subject> (<reply id>)\`. End your turn instead of waiting. To answer, send_message with \`reply_to\` set to that id. The person can also write to a live session first; it arrives the same way.`,
+    "- The person can start a new thread with your session from the Inbox: an idea or a request of their own, not an answer to anything you asked, and it may have nothing to do with your current work. It arrives the same way, and its second line says so. Say how you will handle it before you start, and answer with `reply_to` set to the id on its first line, so your answer lands in that thread. Files they attached are listed under their words as `Attached: <name> (<path>)`; open them by path.",
     `- Replies come back to the session that sent the message: send with your \`${INBOX_TOOL_NAME}\` tool; inside Claude Code or Pi, a command your session runs also carries the session's identity.`,
     "- OpenCode 1 has the tool but no wake, and nothing wakes an MCP client: call wait_for_reply, or read_thread later.",
     "- The reply is the person's answer to you: their words, then an \"Answers to your questions\" section, then their annotations on any attached files.",
