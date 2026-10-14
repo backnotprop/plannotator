@@ -3,7 +3,7 @@
  * under DOM_TESTS=1 happy-dom replaces the test process's Response, which
  * Bun.serve cannot answer with, so the server lives here instead.
  *
- *   bun tests/helpers/inbox-dom-server.ts <data dir> <projects dir> <count> [news | header-files]
+ *   bun tests/helpers/inbox-dom-server.ts <data dir> <projects dir> <count> [news | header-files | phones | whats-new]
  *
  * Seeds `count` projects (one per test, since the window keeps the first
  * server session it saw), each with a thread an agent is stopped on (two
@@ -31,6 +31,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startInboxServer } from "../../packages/server/inbox";
 import { recordInboxAttachments } from "../../packages/shared/inbox/attachments";
+import { writeUpdateState } from "../../packages/shared/update-check";
 import { refuseRealDataDir } from "./real-data-dir";
 
 const [dataDir, projectsDir, countArg, extra] = process.argv.slice(2);
@@ -114,11 +115,34 @@ const pairingProbes = {
     (command === "openssl" && machine().noOpenssl) || (command !== "openssl" && machine().noBonjour) ? null : `/usr/bin/${command}`,
   firewall: () => (machine().firewall ?? "off") as "off" | "on" | "block_all" | "unknown",
 };
+/**
+ * With a fourth argument `whats-new`: this Inbox is 0.28.19 and the one before
+ * it ran 0.28.18 (the install script run by hand: no notes saved), and the
+ * release API is a fake on loopback here (PLANNOTATOR_UPDATE_API_URL), never
+ * GitHub. PLANNOTATOR_UPDATE_CHECK from the test's env still applies.
+ */
+const whatsNewMode = extra === "whats-new";
+if (whatsNewMode) {
+  writeUpdateState({ inboxVersion: "0.28.18" }, dataDir);
+  const releaseApi = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(req) {
+      const path = new URL(req.url).pathname;
+      if (path.endsWith("/releases/latest")) return Response.json({ tag_name: "v0.28.19", body: "" });
+      const m = /\/releases\/tags\/v(\d+\.\d+\.\d+)$/.exec(path);
+      if (!m) return new Response("not found", { status: 404 });
+      return Response.json({ tag_name: `v${m[1]}`, body: `## What's New in v${m[1]}\n\nWhat ${m[1]} brings to the Inbox.\n\n## Install / Update\n` });
+    },
+  });
+  process.env.PLANNOTATOR_UPDATE_API_URL = `http://127.0.0.1:${releaseApi.port}/releases/latest`;
+}
 const server = await startInboxServer({
   dataDir,
   setAsideDelayMs: 60_000,
   phones: phonesMode,
   ...(phonesMode ? { tailscale, pairingProbes } : {}),
+  ...(whatsNewMode ? { version: "0.28.19", binaryPath: null } : {}),
 });
 const store = server.store;
 type World = {

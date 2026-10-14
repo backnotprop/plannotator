@@ -98,6 +98,9 @@ const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
 const SEEN_RETRIES = 5;
 const SEEN_RETRY_MS = 1000;
+/** The What's new page asks again this often while the server fetches the notes (its request gives up after 10 s). */
+const WHATS_NEW_RETRIES = 15;
+const WHATS_NEW_RETRY_MS = 1000;
 
 interface Route {
   page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
@@ -675,7 +678,10 @@ function Inbox() {
             if (routeRef.current.page === 'decisions') void refreshDecisions(decisionsProjectOf(routeRef.current, latestRef.current));
           }, 80);
         },
-        onStatus: (next) => setUpdate(next),
+        onStatus: (next, nextUpdated) => {
+          setUpdate(next);
+          if (nextUpdated !== undefined) setUpdated(nextUpdated);
+        },
       });
     })();
     return () => {
@@ -1266,14 +1272,28 @@ function Inbox() {
   useEffect(() => {
     if (!whatsNewVersion) return;
     let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     setWhatsNew(null);
     setWhatsNewError(null);
-    inboxApi
-      .whatsNew(whatsNewVersion)
-      .then((model) => !cancelled && setWhatsNew(model))
-      .catch((cause) => !cancelled && setWhatsNewError(cause instanceof Error ? cause.message : String(cause)));
+    // Notes this machine never saved are fetched from GitHub by the server,
+    // which answers `notes_loading` while that takes longer than it waits.
+    const load = (attempt: number) => {
+      inboxApi
+        .whatsNew(whatsNewVersion)
+        .then((model) => !cancelled && setWhatsNew(model))
+        .catch((cause) => {
+          if (cancelled) return;
+          if (cause instanceof InboxApiError && cause.code === 'notes_loading' && attempt < WHATS_NEW_RETRIES) {
+            retry = setTimeout(() => load(attempt + 1), WHATS_NEW_RETRY_MS);
+            return;
+          }
+          setWhatsNewError(cause instanceof Error ? cause.message : String(cause));
+        });
+    };
+    load(0);
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
     };
   }, [whatsNewVersion]);
 

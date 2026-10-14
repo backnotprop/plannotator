@@ -133,6 +133,7 @@ jobs:
           packages/inbox/issueRefs.test.tsx
           packages/inbox/attachmentKinds.test.tsx
           packages/inbox/updates.test.tsx
+          packages/inbox/whatsNewLink.test.tsx
           packages/inbox/replaced.test.tsx
           packages/inbox/threadFolding.test.tsx
           packages/inbox/seenOnSight.test.tsx

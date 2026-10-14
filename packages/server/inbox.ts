@@ -211,7 +211,10 @@ export interface InboxServerOptions {
    * release fetch, the installer, whether the binary is the install script's,
    * the sessions list and the clock. Defaults: the real ones. Tests inject.
    */
-  updates?: Pick<InboxUpdatesOptions, "fetchRelease" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion">;
+  updates?: Pick<
+    InboxUpdatesOptions,
+    "fetchRelease" | "fetchReleaseTag" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion"
+  >;
   /**
    * The window: the built single-file app (`apps/hook/dist/inbox.html`, which
    * the binary embeds). Absent (a source run before `build:hook`, the server
@@ -1096,7 +1099,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         send(`retry: 2000\nevent: hello\ndata: ${JSON.stringify({ serverSession, cursor: store.cursor() })}\n\n`);
         if (cursor !== null) for (const line of store.changesSince(cursor)) sendLine(line);
         const unsubscribe = store.subscribe(sendLine);
-        const onStatus = () => send(`event: status\ndata: ${JSON.stringify({ update: updates.current() })}\n\n`);
+        // `updated` (additive): the "What's new in X" link appears or goes once its notes are fetched or cannot be.
+        const onStatus = () => send(`event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated() })}\n\n`);
         statusListeners.add(onStatus);
         const heartbeat = setInterval(() => send(": ping\n\n"), SSE_HEARTBEAT_MS);
         cleanup = () => {
@@ -1396,8 +1400,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (via === "tailnet") return localOnly();
         if (path === "/api/inbox/whats-new") {
           if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-          const notes = updates.whatsNew(url.searchParams.get("version") ?? "");
-          return notes ? json(notes) : json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+          // Notes this machine never saved (a version installed outside the
+          // Inbox) are fetched by the release's tag, waited for at most 3 s;
+          // past that the page is told to ask again (503 notes_loading).
+          const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
+          if (answer.kind === "notes") return json(answer.notes);
+          if (answer.kind === "loading") {
+            const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
+            res.headers.set("Retry-After", "1");
+            return res;
+          }
+          return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
         }
         if (path === "/api/inbox/update" && req.method === "GET") return json(updates.details());
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);

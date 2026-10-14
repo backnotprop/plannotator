@@ -550,7 +550,11 @@ export interface AttachmentView {
  */
 export function subscribeInboxEvents(
   cursor: number,
-  handlers: { onRecord: (event: InboxEvent | null) => void; onStatus: (update: InboxHealth['update']) => void },
+  handlers: {
+    onRecord: (event: InboxEvent | null) => void;
+    /** `updated` is undefined from an Inbox older than the field (the "What's new in X" link stays as the list said). */
+    onStatus: (update: InboxHealth['update'], updated?: string | null) => void;
+  },
 ): () => void {
   const source = new EventSource(`/api/inbox/events?cursor=${cursor}`);
   source.addEventListener('record', (event) => {
@@ -564,7 +568,8 @@ export function subscribeInboxEvents(
   });
   source.addEventListener('status', (event) => {
     try {
-      handlers.onStatus((JSON.parse((event as MessageEvent<string>).data) as { update: InboxHealth['update'] }).update);
+      const data = JSON.parse((event as MessageEvent<string>).data) as { update: InboxHealth['update']; updated?: string | null };
+      handlers.onStatus(data.update, 'updated' in data ? (data.updated ?? null) : undefined);
     } catch {
       // A malformed frame changes nothing.
     }

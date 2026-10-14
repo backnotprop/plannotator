@@ -117,6 +117,11 @@ export interface UpdateState {
   hintShownAt?: number;
   /** The version the Inbox last ran, to tell "just updated" on its first start after. */
   inboxVersion?: string;
+  /**
+   * One release's notes fetched by its tag (fetchReleaseNotesFor), per
+   * version: claimed before the request, so concurrent processes ask once.
+   */
+  notesFetch?: Record<string, { attemptedAt: number; failedAt?: number; error?: string }>;
 }
 
 export function updateCheckPaths(dataDir: string = getPlannotatorDataDir()) {
@@ -280,6 +285,11 @@ export function readReleaseNotes(version: string, dataDir?: string): ReleaseNote
   }
 }
 
+/** Notes a person can read: a stored file whose "What's New" part is empty counts as missing. */
+export function hasReleaseNotesContent(notes: ReleaseNotes | null): notes is ReleaseNotes {
+  return !!notes && notes.notes.trim() !== "";
+}
+
 /** The first paragraph of the notes, as plain-ish text, for a dialog's summary. */
 export function releaseSummary(notes: string): string {
   for (const para of notes.split(/\n{2,}/)) {
@@ -327,13 +337,20 @@ export function isAllowedOverrideUrl(raw: string): boolean {
 }
 
 /**
- * One unauthenticated GET. GitHub receives the IP address and this user
- * agent; the version is deliberately not in it.
+ * One release by its tag (`…/releases/tags/vX.Y.Z`): the release API URL with
+ * its last segment (`latest`) replaced, so PLANNOTATOR_UPDATE_API_URL points
+ * both requests at the same fake or mirror. Null for a version that is not X.Y.Z.
  */
-export async function fetchLatestRelease(
-  url: string = releaseApiUrl(),
-  fetchImpl: typeof fetch = fetch,
-): Promise<FetchReleaseResult> {
+export function releaseTagApiUrl(version: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const v = normalizeStableVersion(version);
+  return v ? new URL(`tags/v${v}`, releaseApiUrl(env)).toString() : null;
+}
+
+/** One unauthenticated GET of a release object, read loosely. */
+async function fetchReleaseObject(
+  url: string,
+  fetchImpl: typeof fetch,
+): Promise<{ ok: true; release: FetchedRelease; draft: boolean; prerelease: boolean } | { ok: false; error: string }> {
   try {
     const res = await fetchImpl(url, {
       headers: { accept: "application/vnd.github+json", "user-agent": "plannotator-update-check" },
@@ -341,10 +358,11 @@ export async function fetchLatestRelease(
     });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     const body = (await res.json()) as { tag_name?: unknown; draft?: unknown; prerelease?: unknown; published_at?: unknown; body?: unknown };
-    if (body.draft === true || body.prerelease === true) return { ok: false, error: "the latest release is not a stable release" };
     if (typeof body.tag_name !== "string") return { ok: false, error: "no tag_name in the answer" };
     return {
       ok: true,
+      draft: body.draft === true,
+      prerelease: body.prerelease === true,
       release: {
         tag: body.tag_name,
         ...(typeof body.published_at === "string" && { publishedAt: body.published_at }),
@@ -354,6 +372,30 @@ export async function fetchLatestRelease(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * One unauthenticated GET. GitHub receives the IP address and this user
+ * agent; the version is deliberately not in it.
+ */
+export async function fetchLatestRelease(
+  url: string = releaseApiUrl(),
+  fetchImpl: typeof fetch = fetch,
+): Promise<FetchReleaseResult> {
+  const result = await fetchReleaseObject(url, fetchImpl);
+  if (!result.ok) return result;
+  if (result.draft || result.prerelease) return { ok: false, error: "the latest release is not a stable release" };
+  return { ok: true, release: result.release };
+}
+
+/** One unauthenticated GET of the release tagged `vX.Y.Z`, with the same client rules as the daily check. */
+export async function fetchReleaseByTag(version: string, fetchImpl: typeof fetch = fetch): Promise<FetchReleaseResult> {
+  const url = releaseTagApiUrl(version);
+  if (!url) return { ok: false, error: "not a stable version" };
+  const result = await fetchReleaseObject(url, fetchImpl);
+  if (!result.ok) return result;
+  if (result.draft) return { ok: false, error: "the release is a draft" };
+  return { ok: true, release: result.release };
 }
 
 export interface ReleaseCheckDeps {
@@ -435,6 +477,94 @@ export function scheduleReleaseCheck(deps: ReleaseCheckDeps, then?: (outcome: Re
       .catch((err) => updateLog(`check failed: ${err instanceof Error ? err.message : String(err)}`, deps.dataDir));
   }, 0);
   (timer as { unref?: () => void }).unref?.();
+}
+
+// ---------------------------------------------------------------------------
+// One release's notes, by its tag
+// ---------------------------------------------------------------------------
+
+/** How many versions `notesFetch` remembers. */
+const NOTES_FETCH_REMEMBERED = 10;
+
+/**
+ * Whether one version's notes may be asked for now: once, then after a
+ * failure no sooner than 6 h, and after an answer that carried no "What's
+ * New" part no sooner than 24 h (the release body is edited after publishing).
+ * Never in a loop.
+ */
+export function isNotesFetchDue(state: UpdateState, version: string, now: number): boolean {
+  const record = state.notesFetch?.[version];
+  const at = record?.attemptedAt;
+  if (!record || typeof at !== "number" || !Number.isFinite(at) || at > now) return true;
+  return now - at >= (record.failedAt ? RELEASE_CHECK_RETRY_MS : RELEASE_CHECK_INTERVAL_MS);
+}
+
+export interface ReleaseNotesFetchDeps {
+  version: string;
+  dataDir?: string;
+  now?: () => number;
+  /** The knob (resolveUpdateCheck): off, nothing is asked. */
+  enabled: () => boolean;
+  fetchRelease?: (version: string) => Promise<FetchReleaseResult>;
+}
+
+export type ReleaseNotesFetchOutcome =
+  | { outcome: "present"; notes: ReleaseNotes }
+  | { outcome: "disabled" | "not-due" }
+  | { outcome: "fetched"; notes: ReleaseNotes }
+  | { outcome: "failed"; error: string };
+
+/**
+ * The notes for one version, fetched by its tag when they are missing (a
+ * release installed before the daily check saw it, or a check made before the
+ * release existed) or stored without a "What's New" part (saved before the
+ * release body was edited). Saved to `update-notes/<version>.json` like the
+ * daily check's. Never throws.
+ */
+export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise<ReleaseNotesFetchOutcome> {
+  const dataDir = deps.dataDir;
+  const version = normalizeStableVersion(deps.version);
+  if (!version) return { outcome: "failed", error: "not a stable version" };
+  const stored = readReleaseNotes(version, dataDir);
+  if (hasReleaseNotesContent(stored)) return { outcome: "present", notes: stored };
+  if (!deps.enabled()) return { outcome: "disabled" };
+  const now = (deps.now ?? Date.now)();
+  const record = (patch: { attemptedAt: number; failedAt?: number; error?: string }) =>
+    patchUpdateState((s) => {
+      const entries = Object.entries({ ...(s.notesFetch ?? {}), [version]: patch })
+        .filter(([, r]) => r && typeof r.attemptedAt === "number")
+        .sort((a, b) => b[1].attemptedAt - a[1].attemptedAt)
+        .slice(0, NOTES_FETCH_REMEMBERED);
+      return { ...s, notesFetch: Object.fromEntries(entries) };
+    }, dataDir);
+  try {
+    if (!isNotesFetchDue(readUpdateState(dataDir), version, now)) return { outcome: "not-due" };
+    // Claim the attempt before the network call so concurrent processes ask once.
+    record({ attemptedAt: now });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    updateLog(`could not write update-state.json: ${error}`, dataDir);
+    return { outcome: "failed", error };
+  }
+  const result = await (deps.fetchRelease ?? ((v: string) => fetchReleaseByTag(v)))(version);
+  const tag = result.ok ? normalizeStableVersion(result.release.tag) : null;
+  if (!result.ok || tag !== version) {
+    const error = result.ok ? `the release answered for ${JSON.stringify(result.release.tag).slice(0, 80)}` : result.error;
+    updateLog(`could not read the release notes for ${version} (${error}); next try in 6h`, dataDir);
+    try {
+      record({ attemptedAt: now, failedAt: now, error: error.slice(0, 200) });
+    } catch {}
+    return { outcome: "failed", error };
+  }
+  const release = result.release;
+  const { notes, highlights } = extractReleaseNotes(release.body);
+  const saved: ReleaseNotes = { version, ...(release.publishedAt && { publishedAt: release.publishedAt }), notes, highlights };
+  try {
+    writeReleaseNotes(saved, dataDir);
+  } catch (err) {
+    updateLog(`could not save the release notes: ${err instanceof Error ? err.message : String(err)}`, dataDir);
+  }
+  return { outcome: "fetched", notes: saved };
 }
 
 // ---------------------------------------------------------------------------

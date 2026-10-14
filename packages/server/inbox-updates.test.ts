@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxUpdate } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
-import { readUpdateState, writeUpdateState, type FetchReleaseResult } from "@plannotator/shared/update-check";
+import { readUpdateState, writeReleaseNotes, writeUpdateState, type FetchReleaseResult } from "@plannotator/shared/update-check";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUsedBefore, startInboxServer, type InboxServer } from "./inbox";
 import { deriveInboxUpdate } from "./inbox-updates";
@@ -66,6 +66,12 @@ const latest = (tag = "v0.28.12"): (() => Promise<FetchReleaseResult>) => async 
   return { ok: true, release: { tag, publishedAt: "2026-10-11T00:00:00Z", body: BODY } };
 };
 
+/** A release by its tag, with notes (the What's new link's fetch). */
+const tagged = (): ((version: string) => Promise<FetchReleaseResult>) => async (version) => ({
+  ok: true,
+  release: { tag: `v${version}`, body: `## What's New in v${version}\n\nNotes for ${version}.\n\n## Install / Update\n` },
+});
+
 async function start(overrides: Parameters<typeof startInboxServer>[0] = {}): Promise<InboxServer> {
   const server = await startInboxServer({
     dataDir,
@@ -74,6 +80,7 @@ async function start(overrides: Parameters<typeof startInboxServer>[0] = {}): Pr
     healthTickMs: 40,
     updates: {
       fetchRelease: latest(),
+      fetchReleaseTag: tagged(),
       isManaged: () => true,
       listSessions: () => [],
       launchInstaller: (launch) => {
@@ -240,6 +247,129 @@ describe("Remind me tomorrow, Settings, What's new", () => {
     server.stop();
     const again = await start();
     expect((await (await fetch(`http://127.0.0.1:${again.port}/api/inbox/threads`)).json()).updated).toBeNull();
+  });
+});
+
+describe("What's new for a version installed outside the Inbox (no notes saved)", () => {
+  // A fake release API on loopback, reached the way the Inbox reaches GitHub
+  // (PLANNOTATOR_UPDATE_API_URL), so the default tag fetch runs for real.
+  let api: ReturnType<typeof Bun.serve>;
+  let tagRequests: string[];
+  let answer: (version: string) => Response | Promise<Response>;
+  let savedUrl: string | undefined;
+
+  beforeEach(() => {
+    tagRequests = [];
+    answer = (version) =>
+      Response.json({ tag_name: `v${version}`, body: `## What's New in v${version}\n\nWhat ${version} brings.\n\n## Install / Update\n` });
+    api = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        const m = /\/releases\/tags\/v(\d+\.\d+\.\d+)$/.exec(path);
+        if (!m) return new Response("not found", { status: 404 });
+        tagRequests.push(m[1]!);
+        return answer(m[1]!);
+      },
+    });
+    savedUrl = process.env.PLANNOTATOR_UPDATE_API_URL;
+    process.env.PLANNOTATOR_UPDATE_API_URL = `http://127.0.0.1:${api.port}/releases/latest`;
+    // The Inbox ran 0.28.9 before; this run is 0.28.10, installed by the script run by hand.
+    writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
+  });
+
+  afterEach(() => {
+    api.stop(true);
+    if (savedUrl === undefined) delete process.env.PLANNOTATOR_UPDATE_API_URL;
+    else process.env.PLANNOTATOR_UPDATE_API_URL = savedUrl;
+  });
+
+  /** The real tag fetch (no fetchReleaseTag stub). */
+  const startReal = (extra: { whatsNewWaitMs?: number } = {}) =>
+    start({
+      updates: { fetchRelease: latest(), isManaged: () => true, listSessions: () => [], launchInstaller: () => {}, ...extra },
+    });
+  const listUpdated = async (server: InboxServer) =>
+    ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads`)).json()) as { updated: string | null }).updated;
+  const whatsNew = (server: InboxServer, version: string) =>
+    fetch(`http://127.0.0.1:${server.port}/api/inbox/whats-new?version=${version}`);
+
+  test("the link shows, and the page gets the notes fetched by the release's tag, asked once", async () => {
+    const server = await startReal();
+    expect(await listUpdated(server)).toBe("0.28.10");
+    const res = await whatsNew(server, "0.28.10");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ version: "0.28.10", current: "0.28.10", notes: "What 0.28.10 brings." });
+    expect((await whatsNew(server, "0.28.10")).status).toBe(200);
+    expect(tagRequests).toEqual(["0.28.10"]);
+    expect(await listUpdated(server)).toBe("0.28.10");
+  });
+
+  test("update checks off and no notes saved: no link, no request", async () => {
+    process.env.PLANNOTATOR_UPDATE_CHECK = "0";
+    const server = await startReal();
+    expect(await listUpdated(server)).toBeNull();
+    const res = await whatsNew(server, "0.28.10");
+    expect(res.status).toBe(404);
+    expect((await res.json()).code).toBe("notes_not_found");
+    await Bun.sleep(150); // a few health ticks
+    expect(tagRequests).toEqual([]);
+  });
+
+  test("update checks off but the notes are saved: the link shows", async () => {
+    process.env.PLANNOTATOR_UPDATE_CHECK = "0";
+    writeReleaseNotes({ version: "0.28.10", notes: "Saved before.", highlights: [] }, dataDir);
+    const server = await startReal();
+    expect(await listUpdated(server)).toBe("0.28.10");
+    expect((await (await whatsNew(server, "0.28.10")).json()).notes).toBe("Saved before.");
+    expect(tagRequests).toEqual([]);
+  });
+
+  test("the fetch fails: the link goes away and the page is not asked to wait for nothing", async () => {
+    answer = () => new Response("rate limited", { status: 403 });
+    const server = await startReal();
+    expect(await waitFor(() => listUpdated(server), (v) => v === null)).toBeNull();
+    expect((await whatsNew(server, "0.28.10")).status).toBe(404);
+    // One attempt, then the 6 h back-off: the tick and the route ask no more.
+    await Bun.sleep(150);
+    expect(tagRequests).toEqual(["0.28.10"]);
+  });
+
+  test("a slow answer: the route says notes_loading, and the next ask gets the notes", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    answer = async (version) => {
+      await gate;
+      return Response.json({ tag_name: `v${version}`, body: `## What's New in v${version}\n\nLate notes.\n` });
+    };
+    const server = await startReal({ whatsNewWaitMs: 50 });
+    const first = await whatsNew(server, "0.28.10");
+    expect(first.status).toBe(503);
+    expect(first.headers.get("retry-after")).toBe("1");
+    expect((await first.json()).code).toBe("notes_loading");
+    release();
+    const later = await waitFor(
+      async () => (await whatsNew(server, "0.28.10")).status,
+      (status) => status === 200,
+    );
+    expect(later).toBe(200);
+    expect(tagRequests).toEqual(["0.28.10"]);
+  });
+
+  test("notes saved without a What's New part (before the release body was edited) are fetched again", async () => {
+    writeReleaseNotes({ version: "0.28.10", notes: "", highlights: [] }, dataDir);
+    const server = await startReal();
+    expect(await listUpdated(server)).toBe("0.28.10");
+    expect((await (await whatsNew(server, "0.28.10")).json()).notes).toBe("What 0.28.10 brings.");
+    expect(tagRequests).toEqual(["0.28.10"]);
+  });
+
+  test("a version this Inbox has no reason to show is never fetched", async () => {
+    const server = await startReal();
+    expect((await whatsNew(server, "0.27.1")).status).toBe(404);
+    await whatsNew(server, "0.28.10");
+    expect(tagRequests).toEqual(["0.28.10"]);
   });
 });
 
