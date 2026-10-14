@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState, useMemo } from 'react';
+import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
   AvailableBranches,
@@ -10,6 +10,9 @@ import type {
   WorktreeInfo,
 } from '@plannotator/shared/types';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { buildFileKindBlocks, kindFolderPath, type FileKindBlock } from '../utils/fileKindTree';
+import { fileKind, type FileKind } from '@plannotator/core/file-kind';
+import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKindIcon';
 import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
 import { FileTreeNodeItem } from './FileTreeNode';
 import { BaseBranchPicker } from './BaseBranchPicker';
@@ -25,8 +28,15 @@ import { Paperclip } from 'lucide-react';
 
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
+import { PanelSectionHeader, DiffCounts } from './FileRowBits';
 
 interface FileTreeProps {
+  /** Split the tree into Code / Tests / Generated blocks when the change holds
+   *  two or more kinds ("Group by kind" in Tree controls). */
+  groupByKind?: boolean;
+  onToggleGroupByKind?: () => void;
+  /** The server's generated set: which files form the Generated block. */
+  generatedFiles?: ReadonlySet<string>;
   /** Markdown files shown rendered, Changes or Read (an eye after the name). */
   markdownPreviewedPaths?: ReadonlySet<string>;
   files: DiffFile[];
@@ -130,6 +140,9 @@ interface FileTreeProps {
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  groupByKind = false,
+  onToggleGroupByKind,
+  generatedFiles,
   markdownPreviewedPaths,
   files,
   activeFileIndex,
@@ -212,7 +225,26 @@ export const FileTree: React.FC<FileTreeProps> = ({
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
-  const tree = useMemo(() => buildFileTree(files), [files]);
+  // Kind blocks (Code / Tests / Generated) when the switch is on and the change
+  // holds two or more kinds; null keeps today's single tree.
+  const kindBlocks = useMemo(
+    () => (groupByKind ? buildFileKindBlocks(files, generatedFiles) : null),
+    [files, groupByKind, generatedFiles],
+  );
+  // Every block's nodes in block order: the expansion state and j/k order run
+  // over this one list, so they follow the blocks.
+  const tree = useMemo(() => (kindBlocks ? kindBlocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, kindBlocks]);
+  // Folding a block hides it in the tree only. Generated starts folded.
+  const [foldedKinds, setFoldedKinds] = useState<ReadonlySet<FileKind>>(() => new Set(['generated']));
+  const setKindFolded = useCallback((kind: FileKind, folded: boolean) => {
+    setFoldedKinds((prev) => {
+      if (prev.has(kind) === folded) return prev;
+      const next = new Set(prev);
+      if (folded) next.add(kind);
+      else next.delete(kind);
+      return next;
+    });
+  }, []);
 
   // Since-base sidecar lookup for per-row lifecycle markers + stage buttons.
   const getSectionEntry = useMemo(() => {
@@ -290,6 +322,27 @@ export const FileTree: React.FC<FileTreeProps> = ({
     [annotationCountMap],
   );
 
+  // Inside kind blocks a folder path is scoped to its block, so the active
+  // file's path is too (its ancestors are then the block's folders).
+  const activePath = files[activeFileIndex]?.path;
+  const activeExpansionPath =
+    kindBlocks && activePath ? kindFolderPath(fileKind(activePath, generatedFiles), activePath) : activePath;
+
+  // A file that becomes active by any route (j/k, a click in all-files, the
+  // scroll highlight, an annotation or search jump) opens its folded kind
+  // block, the way folded folders open for the active file. Only a change
+  // opens a block, and a new file list never does, so Generated stays folded
+  // when a diff loads.
+  const scrollPath = isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path : undefined;
+  const revealedRef = useRef<{ files: DiffFile[]; active?: string; scroll?: string } | null>(null);
+  useEffect(() => {
+    const before = revealedRef.current;
+    revealedRef.current = { files, active: activePath, scroll: scrollPath };
+    if (!before || before.files !== files || !kindBlocks) return;
+    if (activePath && activePath !== before.active) setKindFolded(fileKind(activePath, generatedFiles), false);
+    if (scrollPath && scrollPath !== before.scroll) setKindFolded(fileKind(scrollPath, generatedFiles), false);
+  }, [files, activePath, scrollPath, kindBlocks, generatedFiles, setKindFolded]);
+
   // Folder open/closed state is the shared diff-file-tree hook (expand all on a
   // new tree, keep the active file's ancestors open), the same one the
   // embeddable @plannotator/ui DiffFileTree uses.
@@ -299,7 +352,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
     areAllFoldersExpanded,
     toggleFolder: handleToggleFolder,
     toggleAllFolders: handleToggleAllFolders,
-  } = useDiffFileTreeExpansion(tree, files[activeFileIndex]?.path);
+  } = useDiffFileTreeExpansion(tree, activeExpansionPath);
 
   const panelControls = (
     <PanelControlsRow
@@ -322,8 +375,40 @@ export const FileTree: React.FC<FileTreeProps> = ({
       onToggleShowStageControls={onToggleShowStageControls}
       autoViewed={autoViewed}
       onToggleAutoViewed={onToggleAutoViewed}
+      groupByKind={groupByKind}
+      onToggleGroupByKind={onToggleGroupByKind}
     />
   );
+
+  const rowActiveIndex =
+    isAllFilesActive || isSemanticDiffActive || isCallFlowActive || isPROverviewActive || isPRArtifactsActive
+      ? -1
+      : activeFileIndex;
+  const renderNodes = (nodes: typeof tree) =>
+    nodes.map((node) => (
+      <FileTreeNodeItem
+        key={node.type === 'file' ? node.path : `folder:${node.path}`}
+        node={node}
+        expandedFolders={expandedFolders}
+        onToggleFolder={handleToggleFolder}
+        activeFileIndex={rowActiveIndex}
+        scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
+        onSelectFile={onSelectFile}
+        onDoubleClickFile={onDoubleClickFile}
+        viewedFiles={viewedFiles}
+        onToggleViewed={onToggleViewed}
+        showViewedControls={showViewedControls}
+        hideViewedFiles={hideViewedFiles}
+        getAnnotationCount={getAnnotationCount}
+        stagedFiles={stagedFiles}
+        repoRoot={repoRoot}
+        getSectionEntry={getSectionEntry}
+        onStageFile={onStageFile}
+        stagingFile={stagingFile}
+        showStageControls={showStageControls}
+        markdownPreviewedPaths={markdownPreviewedPaths}
+      />
+    ));
 
   const searchField = isSearchVisible ? (
     <PanelSearchField
@@ -530,43 +615,49 @@ export const FileTree: React.FC<FileTreeProps> = ({
             )
           ) : (
             <>
-              {tree.map((node) => (
-                <FileTreeNodeItem
-                  key={node.type === 'file' ? node.path : `folder:${node.path}`}
-                  node={node}
-                  expandedFolders={expandedFolders}
-                  onToggleFolder={handleToggleFolder}
-                  activeFileIndex={
-                    isAllFilesActive ||
-                    isSemanticDiffActive ||
-                    isCallFlowActive ||
-                    isPROverviewActive ||
-                    isPRArtifactsActive
-                      ? -1
-                      : activeFileIndex
-                  }
-                  scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
-                  onSelectFile={onSelectFile}
-                  onDoubleClickFile={onDoubleClickFile}
-                  viewedFiles={viewedFiles}
-                  onToggleViewed={onToggleViewed}
-                  showViewedControls={showViewedControls}
-                  hideViewedFiles={hideViewedFiles}
-                  getAnnotationCount={getAnnotationCount}
-                  stagedFiles={stagedFiles}
-                  repoRoot={repoRoot}
-                  getSectionEntry={getSectionEntry}
-                  onStageFile={onStageFile}
-                  stagingFile={stagingFile}
-                  showStageControls={showStageControls}
-                  markdownPreviewedPaths={markdownPreviewedPaths}
-                />
-              ))}
+              {kindBlocks
+                ? kindBlocks.map((block) => {
+                    const folded = foldedKinds.has(block.kind);
+                    // Hide-viewed hides a viewed row unless it is the active
+                    // one; a block with no row left hides its header too.
+                    if (hideViewedFiles && block.paths.every((path) => viewedFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
+                      return null;
+                    }
+                    return (
+                      <div key={block.kind} className="mb-1" data-file-kind-block={block.kind}>
+                        <PanelSectionHeader
+                          label={FILE_KIND_LABELS[block.kind]}
+                          collapsed={folded}
+                          onToggle={() => setKindFolded(block.kind, !folded)}
+                          icon={<FileKindIcon kind={block.kind} />}
+                        >
+                          <KindBlockCounts block={block} viewedFiles={viewedFiles} />
+                        </PanelSectionHeader>
+                        {!folded && renderNodes(block.tree)}
+                      </div>
+                    );
+                  })
+                : renderNodes(tree)}
             </>
           )}
         </div>
       </OverlayScrollArea>
     </aside>
+  );
+};
+
+/** A kind block header's tail: file count, then viewed/total and +/-. */
+const KindBlockCounts: React.FC<{ block: FileKindBlock; viewedFiles: Set<string> }> = ({ block, viewedFiles }) => {
+  const total = block.paths.length;
+  const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
+  return (
+    <>
+      <span className="text-[11px] tabular-nums text-muted-foreground/70">{total}</span>
+      <span className="ml-auto flex items-center gap-1.5 text-[10px] tabular-nums">
+        <span title={`${viewed} of ${total} viewed`}>{viewed}/{total}</span>
+        <DiffCounts additions={block.additions} deletions={block.deletions} />
+      </span>
+    </>
   );
 };
 

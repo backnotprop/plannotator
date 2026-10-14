@@ -32,6 +32,8 @@ export function PanelControlsRow({
   onToggleShowStageControls,
   autoViewed = true,
   onToggleAutoViewed,
+  groupByKind = true,
+  onToggleGroupByKind,
 }: {
   stagedCount?: number;
   isSearchVisible?: boolean;
@@ -56,6 +58,10 @@ export function PanelControlsRow({
    *  unchanged. */
   autoViewed?: boolean;
   onToggleAutoViewed?: () => void;
+  /** Tree view only: split the tree into Code / Tests / Generated blocks.
+   *  Without the handler the switch row is not rendered. */
+  groupByKind?: boolean;
+  onToggleGroupByKind?: () => void;
 }) {
   const copyLabel =
     copyRawDiffStatus === "success"
@@ -269,91 +275,40 @@ export function PanelControlsRow({
                   <div className="px-2 pb-1.5 pt-1">
                     <div className="text-xs font-medium">Tree controls</div>
                   </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={showViewedControls}
+                  <TreeSwitch
+                    label="Viewed controls"
+                    description="Per-file viewed buttons"
+                    checked={showViewedControls}
                     onClick={() => {
                       // Hiding the only filter affordance must never leave the
                       // file list silently filtered.
                       if (showViewedControls && hideViewedFiles) onToggleHideViewed?.();
                       onToggleShowViewedControls();
                     }}
-                    className="flex w-full items-center gap-3 rounded px-2 py-2 text-left hover:bg-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-xs">Viewed controls</span>
-                      <span className="block text-[10px] leading-snug text-muted-foreground">
-                        Per-file viewed buttons
-                      </span>
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full border px-0.5 ${
-                        showViewedControls
-                          ? "justify-end border-primary/70 bg-primary"
-                          : "justify-start border-border bg-muted"
-                      }`}
-                    >
-                      <span
-                        className={`h-2.5 w-2.5 rounded-full ${showViewedControls ? "bg-primary-foreground" : "bg-muted-foreground/70"}`}
-                      />
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={showStageControls}
+                  />
+                  <TreeSwitch
+                    label="Git add controls"
+                    description="Stage buttons and status markers"
+                    checked={showStageControls}
                     onClick={onToggleShowStageControls}
-                    className="flex w-full items-center gap-3 rounded px-2 py-2 text-left hover:bg-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-xs">Git add controls</span>
-                      <span className="block text-[10px] leading-snug text-muted-foreground">
-                        Stage buttons and status markers
-                      </span>
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full border px-0.5 ${
-                        showStageControls
-                          ? "justify-end border-primary/70 bg-primary"
-                          : "justify-start border-border bg-muted"
-                      }`}
-                    >
-                      <span
-                        className={`h-2.5 w-2.5 rounded-full ${showStageControls ? "bg-primary-foreground" : "bg-muted-foreground/70"}`}
-                      />
-                    </span>
-                  </button>
+                  />
                   {onToggleAutoViewed && (
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={autoViewed}
+                    <TreeSwitch
+                      label="Auto-mark viewed"
+                      description="Check files off as you scroll past"
+                      checked={autoViewed}
                       onClick={onToggleAutoViewed}
-                      className="flex w-full items-center gap-3 rounded px-2 py-2 text-left hover:bg-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
                       data-review-auto-viewed-toggle
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-xs">Auto-mark viewed</span>
-                        <span className="block text-[10px] leading-snug text-muted-foreground">
-                          Check files off as you scroll past
-                        </span>
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full border px-0.5 ${
-                          autoViewed
-                            ? "justify-end border-primary/70 bg-primary"
-                            : "justify-start border-border bg-muted"
-                        }`}
-                      >
-                        <span
-                          className={`h-2.5 w-2.5 rounded-full ${autoViewed ? "bg-primary-foreground" : "bg-muted-foreground/70"}`}
-                        />
-                      </span>
-                    </button>
+                    />
+                  )}
+                  {onToggleGroupByKind && (
+                    <TreeSwitch
+                      label="Group by kind"
+                      description="Code, tests and generated files apart"
+                      checked={groupByKind}
+                      onClick={onToggleGroupByKind}
+                      data-review-group-by-kind-toggle
+                    />
                   )}
                 </Popover.Popup>
               </Popover.Positioner>
@@ -370,6 +325,50 @@ export function PanelControlsRow({
             : ""}
       </span>
     </div>
+  );
+}
+
+/** One switch row of the Tree controls popover. */
+function TreeSwitch({
+  label,
+  description,
+  checked,
+  onClick,
+  ...rest
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onClick: () => void;
+} & { [key: `data-${string}`]: boolean | undefined }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded px-2 py-2 text-left hover:bg-muted focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary/60"
+      {...rest}
+    >
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs">{label}</span>
+        <span className="block text-[10px] leading-snug text-muted-foreground">
+          {description}
+        </span>
+      </span>
+      <span
+        aria-hidden="true"
+        className={`flex h-4 w-7 flex-shrink-0 items-center rounded-full border px-0.5 ${
+          checked
+            ? "justify-end border-primary/70 bg-primary"
+            : "justify-start border-border bg-muted"
+        }`}
+      >
+        <span
+          className={`h-2.5 w-2.5 rounded-full ${checked ? "bg-primary-foreground" : "bg-muted-foreground/70"}`}
+        />
+      </span>
+    </button>
   );
 }
 
