@@ -53,6 +53,8 @@ const END_RE = /^--- END SKILL INSTRUCTIONS: (.+) ---$/;
 /** One skill the block names. */
 export interface InboxSkillReference {
   name: string;
+  /** Only a person can invoke it (its list line says "cannot be invoked by a model"). */
+  humanOnly: boolean;
   /** Its SKILL.md text is in the block (a human-only skill whose instructions went with the message). */
   included: boolean;
   /** UTF-8 bytes of its instructions section (BEGIN to END), 0 when not included. */
@@ -72,49 +74,85 @@ export interface InboxSkillsSplit {
 
 const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
 
+/** A fenced code block's opening or closing line (CommonMark: up to 3 spaces, then 3+ backticks or tildes). */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+
+/**
+ * The rest of a candidate block after its heading (`lines[from]` on), when
+ * it is exactly what the window composes: list lines, then only blank lines
+ * and BEGIN/END sections for skills the list says are included, each once
+ * and closed, to the end of the body. Null for anything else.
+ */
+function readBlockTail(lines: readonly string[], from: number): InboxSkillReference[] | null {
+  const skills: InboxSkillReference[] = [];
+  let i = from;
+  for (; i < lines.length; i++) {
+    const match = LIST_LINE_RE.exec(lines[i]!);
+    if (!match) break;
+    const note = match[2]!;
+    skills.push({
+      name: match[1]!,
+      humanOnly: note.includes('cannot be invoked by a model') || note.includes('human-invocation-only'),
+      included: note.includes('its instructions are included below'),
+      bytes: 0,
+    });
+  }
+  if (skills.length === 0) return null;
+  const byName = new Map(skills.map((s) => [s.name, s]));
+  const seen = new Set<string>();
+  let open: { name: string; start: number } | null = null;
+  for (; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (open) {
+      const end = END_RE.exec(line);
+      if (end && end[1] === open.name) {
+        byName.get(open.name)!.bytes = utf8Bytes(lines.slice(open.start, i + 1).join('\n'));
+        open = null;
+      }
+      continue;
+    }
+    if (line.trim() === '') continue;
+    // Anything else after the list (the person's words, more feedback) means this is not the window's block.
+    const begin = BEGIN_RE.exec(line);
+    if (!begin || !byName.get(begin[1]!)?.included || seen.has(begin[1]!)) return null;
+    seen.add(begin[1]!);
+    open = { name: begin[1]!, start: i };
+  }
+  return open ? null : skills;
+}
+
 /**
  * The skills block at the END of a person's Inbox message, or null.
  *
- * The block is the last thing the window composes, so it runs from the
- * first line that is exactly the Inbox heading, standing at the start of the
- * body or after a blank line and followed by at least one list line, to the
- * end. The first, not the last: a pasted SKILL.md may quote the heading, and
- * the person's own words before the block never hold it by accident. Anything
- * else (an agent's message, a heading quoted mid-text, Plannotator's reviewer
- * wording) is null and the body reads whole. The caller decides whose message
+ * The window composes the block last, so it is accepted only in exactly that
+ * shape: a line that is the Inbox heading, at the start of the body or after
+ * a blank line, NOT inside fenced code, followed by list lines and then
+ * nothing but blank lines and BEGIN/END sections for skills the list names,
+ * running to the end of the body. Text an agent wrote that a reply quotes (a
+ * guided-review comment's code fences, an annotation's quote) can therefore
+ * never fold the person's own words behind "Skills: …": a heading in a fence
+ * is ignored, and one followed by anything else is not a block. Plannotator's
+ * reviewer wording is not an Inbox heading. The caller decides whose message
  * it is: only the person's own messages carry a block the window composed.
  */
 export function splitInboxSkillsBlock(body: string): InboxSkillsSplit | null {
-  const lines = body.split('\n');
+  const lines = body.split('\n').map((line) => line.replace(/\r$/, ''));
+  let fence: string | null = null;
   for (let at = 0; at < lines.length; at++) {
-    const heading = INBOX_HEADING_RE.exec(lines[at]!.replace(/\r$/, ''));
-    if (!heading) continue;
-    if (at > 0 && lines[at - 1]!.trim() !== '') continue;
-    const skills: InboxSkillReference[] = [];
-    let i = at + 1;
-    for (; i < lines.length; i++) {
-      const match = LIST_LINE_RE.exec(lines[i]!.replace(/\r$/, ''));
-      if (!match) break;
-      skills.push({ name: match[1]!, included: match[2]!.includes('its instructions are included below'), bytes: 0 });
+    const line = lines[at]!;
+    const marker = FENCE_RE.exec(line)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = null;
+      continue;
     }
-    if (skills.length === 0) continue;
-    // Size each instructions section the list says is included.
-    const byName = new Map(skills.map((s) => [s.name, s]));
-    let open: { name: string; start: number } | null = null;
-    for (; i < lines.length; i++) {
-      const line = lines[i]!.replace(/\r$/, '');
-      if (!open) {
-        const begin = BEGIN_RE.exec(line);
-        if (begin) open = { name: begin[1]!, start: i };
-        continue;
-      }
-      const end = END_RE.exec(line);
-      if (end && end[1] === open.name) {
-        const skill = byName.get(open.name);
-        if (skill?.included) skill.bytes += utf8Bytes(lines.slice(open.start, i + 1).join('\n'));
-        open = null;
-      }
+    if (marker) {
+      fence = marker;
+      continue;
     }
+    const heading = INBOX_HEADING_RE.exec(line);
+    if (!heading || (at > 0 && lines[at - 1]!.trim() !== '')) continue;
+    const skills = readBlockTail(lines, at + 1);
+    if (!skills) continue;
     return {
       before: lines.slice(0, at).join('\n').trimEnd(),
       block: lines.slice(at).join('\n').trimEnd(),

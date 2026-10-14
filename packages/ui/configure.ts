@@ -12,6 +12,7 @@ import { setWebMcpPolicy, type WebMcpPolicy } from './webmcp/policy';
 import { setMathRendererLoader, type MathRenderer, type MathRendererLoader } from './utils/math';
 import { setIdentityGenerator, type IdentityGenerator } from './utils/generateIdentity';
 import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
+import { setSkillInstructionsDestination } from './components/SkillReferenceMenu';
 import { setFenceThemeResolver, type FenceThemeResolver } from './utils/syntaxTheme';
 import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
@@ -73,6 +74,12 @@ export interface PlannotatorUIConfig {
    * `$name` stays plain text in its export.
    */
   skillReferenceExport?: boolean;
+  /**
+   * What a composer's "Includes skill instructions" line says a human-only
+   * skill's instructions go with. Default: "your feedback". The Plannotator
+   * Inbox, where a comment rides a reply, says "your reply".
+   */
+  skillInstructionsDestination?: string;
   serverSync?: ServerSyncFn;
   /**
    * WebMCP provider policy: `{ enabled, namePrefix }`. Default: enabled
@@ -128,6 +135,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.skillCatalogTransport) setSkillCatalogTransport(config.skillCatalogTransport);
   if (config.skillContentTransport) setSkillContentTransport(config.skillContentTransport);
   if (config.skillReferenceExport !== undefined) setSkillCatalogExportRegistration(config.skillReferenceExport);
+  if (config.skillInstructionsDestination) setSkillInstructionsDestination(config.skillInstructionsDestination);
   if (config.serverSync) configStore.setServerSync(config.serverSync);
   if (config.webmcp) setWebMcpPolicy(config.webmcp);
   if (config.mathRendererLoader) setMathRendererLoader(config.mathRendererLoader);

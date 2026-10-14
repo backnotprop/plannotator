@@ -621,7 +621,6 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox svg.ib-dm { width: 13px; height: 13px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linejoin: round; }
 .ib-deccard h4 svg.ib-dm { stroke: var(--primary); stroke-width: 2; }
 
-/* "Settled: <text>" under a card whose answer recorded a decision */
 /* The quiet "Skills: …" line under a person's message (components/SkillsLine.tsx): the pasted skills block, folded. */
 .ib-skills { margin: 6px 0 0; font-size: 13px; color: var(--muted-foreground); }
 .ib-skills > summary { list-style: none; display: inline-flex; align-items: flex-start; gap: 7px; cursor: pointer; border-radius: 4px; }
@@ -634,6 +633,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-skills[open] .ib-skills-t::after { content: 'Hide'; }
 .ib-skills > summary:hover .ib-skills-t::after { text-decoration: underline; text-underline-offset: 2px; }
 .ib-skills-block { margin: 8px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.55; color: var(--foreground); background: var(--muted); border-radius: 6px; }
+/* "Settled: <text>" under a card whose answer recorded a decision */
 .ib-settled { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 0; font-size: 13.5px; }
 .ib-settled svg.ib-dm { margin-top: 4px; color: var(--muted-foreground); }
 .ib-settled a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
@@ -1444,8 +1444,8 @@ pre code.pn-code[data-keep-layout] {
   .ib-cfield [data-skill-menu] { left: -1px; right: -1px; margin-bottom: 10px; }
   .ib-cfield [data-skill-menu-list] { max-height: min(198px, var(--ib-vvh, 100dvh) * 0.4) !important; }
   .ib-cfield [data-skill-item] { min-height: 44px; flex-wrap: wrap; row-gap: 0; align-content: center; }
-  .ib-cfield [data-skill-item] > span:nth-of-type(2) { order: 3; flex-basis: 100%; padding-left: 26px; font-size: 12.5px; }
-  .ib-cfield [data-skill-item] > span:nth-of-type(3) { margin-left: auto; }
+  .ib-cfield [data-skill-item-part="description"] { order: 3; flex-basis: 100%; padding-left: 26px; font-size: 12.5px; }
+  .ib-cfield [data-skill-item-part="root"] { margin-left: auto; }
   .ib-cfield [data-skill-human-only-notice] > summary { min-height: 44px; }
   .ib-skills > summary { min-height: 44px; align-items: center; }
   .ib-rfoot { flex-wrap: wrap; }
@@ -1950,6 +1950,10 @@ dialog.ib-sp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-sp-indexing { padding: 2px 8px 6px; font-size: 12px; color: var(--muted-foreground); }
 /* The query's words in the message a result landed on (CSS Custom Highlight API: no DOM change). */
 ::highlight(ib-search-hit) { background-color: color-mix(in oklch, var(--primary) 30%, transparent); color: var(--foreground); }
+/* A skill reference in the person's sent message (skillHighlight.ts), the composer's token look: the
+   primary on a light wash, a human-only one also underlined dotted. */
+::highlight(ib-skill-ref) { color: var(--primary); background-color: color-mix(in oklch, var(--primary) 10%, transparent); }
+::highlight(ib-skill-ref-human) { color: var(--primary); background-color: color-mix(in oklch, var(--primary) 10%, transparent); text-decoration: underline dotted color-mix(in oklch, var(--primary) 60%, transparent); }
 
 /* A phone (PHONE_QUERY): a full-screen sheet; the input row pinned at the top with Cancel, the chips scroll sideways. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {

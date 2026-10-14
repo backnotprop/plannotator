@@ -26,7 +26,7 @@
  */
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, type SkillBlockAudience } from '@plannotator/core/skill-reference-block';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
-import { fetchSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
+import { fetchSkillCatalog, normalizeSkillContent } from '@plannotator/ui/utils/skillCatalog';
 import {
   extractSkillReferences,
   renderSkillReferencesBlock,
@@ -78,13 +78,6 @@ export function composeInboxSkillsBlock(
   return renderSkillReferencesBlock(refs, { contentOf: (name) => pasted.get(name), audience }).trimEnd();
 }
 
-function readSkillContent(raw: unknown): SkillExportContent | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const { content, truncated, dir, path } = raw as Record<string, unknown>;
-  if (typeof content !== 'string' || !content || typeof dir !== 'string' || !dir || typeof path !== 'string' || !path) return undefined;
-  return { content, truncated: truncated === true, dir, path };
-}
-
 /** What `inboxSkillsBlock` reads; the window's own routes by default, a test's stand-ins otherwise. */
 export interface InboxSkillSources {
   catalog: () => Promise<SkillCatalogEntry[]>;
@@ -95,7 +88,7 @@ const windowSources: InboxSkillSources = {
   catalog: fetchSkillCatalog,
   content: async (name) => {
     try {
-      return readSkillContent((await inboxApi.skillContent(name)).skill);
+      return normalizeSkillContent((await inboxApi.skillContent(name)).skill) ?? undefined;
     } catch {
       // Unreadable now: the skill is named with its folder instead.
       return undefined;

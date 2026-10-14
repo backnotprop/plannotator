@@ -35,6 +35,8 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  // Host configuration, not cache: the reset leaves it alone, so a test that turns it off puts it back.
+  setSkillCatalogExportRegistration(true);
   resetSkillCatalogCache();
   resetSkillCatalogTransport();
   resetSkillContentTransport();
@@ -311,6 +313,10 @@ describe('setSkillCatalogExportRegistration (a host that composes one block per 
     setSkillCatalogExportRegistration(false);
     setSkillCatalogTransport(async () => [{ name: 'write-better', root: 'claude', humanOnly: false }]);
     expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['write-better']);
+    expect(skillReferenceExportBlock('use $write-better')).toBe('');
+    // A cache reset is not a reconfiguration: the host's choice stands.
+    resetSkillCatalogCache();
+    await fetchSkillCatalog();
     expect(skillReferenceExportBlock('use $write-better')).toBe('');
   });
 

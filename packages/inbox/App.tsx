@@ -94,6 +94,8 @@ configurePlannotatorUI({
   // A Send composes ONE skills block for the whole message (skills.ts), so a
   // comment's `$name` stays plain text in the attachments' feedback.
   skillReferenceExport: false,
+  // A comment on an attached file rides the person's next reply.
+  skillInstructionsDestination: 'your reply',
   uploadTransport: {
     upload: async () => {
       throw new Error('Images cannot be added to a comment in the Inbox.');

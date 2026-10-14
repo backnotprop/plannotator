@@ -269,6 +269,12 @@ test.skipIf(!hasDom)('the reply box: the picker, the underline and its line, Esc
   expect(viewerText).toContain('Please run /readback first');
   expect(viewerText).not.toContain('State what I am asking for');
   expect(viewerText).not.toContain('Skills referenced');
+  // The sent words paint the references the block names, as the composer did (never inside the folded block).
+  const { skillReferenceRanges } = await import('./skillHighlight');
+  const { splitInboxSkillsBlock } = await import('@plannotator/core/skill-reference-block');
+  const ranges = skillReferenceRanges(message, splitInboxSkillsBlock(reply.body)!.skills);
+  expect(ranges.human.map((r) => r.toString())).toEqual(['/readback']);
+  expect(ranges.plain.map((r) => r.toString())).toEqual(['$write-better']);
   // Opened, it shows exactly what the agent got.
   act(() => {
     line.open = true;

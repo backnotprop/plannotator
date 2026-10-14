@@ -44,6 +44,7 @@ import {
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField } from './ComposerField';
 import { SkillsLine } from './SkillsLine';
+import { paintSkillReferences } from '../skillHighlight';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 
@@ -266,6 +267,12 @@ export function MessageBody({
     body.addEventListener('load', onLoad, true);
     return () => body.removeEventListener('load', onLoad, true);
   }, []);
+  // The skills the block names are painted in the person's words, as the composer painted them.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !skills) return;
+    return paintSkillReferences(message.id, body, skills.skills);
+  }, [message.id, skills]);
   // A link to a file this message attached opens it beside the thread; any
   // other local link is inert text (links.ts). Kept stable across renders,
   // so raw-HTML blocks do not redraw their links on every pick.

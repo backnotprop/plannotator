@@ -150,7 +150,6 @@ export function primeSkillCatalog(): void {
  */
 export function resetSkillCatalogCache(): void {
   generation++;
-  exportRegistration = true;
   cached = null;
   inflight = null;
   contentRequests.clear();
@@ -189,7 +188,8 @@ export function resetSkillContentTransport(): void {
   contentTransport = defaultContentTransport;
 }
 
-function normalizeSkillContent(raw: unknown): SkillExportContent | null {
+/** A raw `{ content, truncated, dir, path }` record as an export content, or null when any part is missing. */
+export function normalizeSkillContent(raw: unknown): SkillExportContent | null {
   if (!raw || typeof raw !== 'object') return null;
   const { content, truncated, dir, path } = raw as Record<string, unknown>;
   if (typeof content !== 'string' || !content) return null;
