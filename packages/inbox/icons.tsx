@@ -71,6 +71,8 @@ const PATHS = {
     'M15.042 21.672 13.684 16.6m0 0-2.51 2.225.569-9.47 5.227 7.917-3.286-.672ZM12 2.25V4.5m5.834.166-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243-1.59-1.59',
   // Mark read (Heroicons outline check-circle), and a Send's skip (arrow-uturn-right).
   checkCircle: 'M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  // The "Sound off" toast (Heroicons outline speaker-x-mark).
+  mute: 'M17.25 9.75 19.5 12m0 0 2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6 4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.009 9.009 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z',
   forward: 'm15 15 6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3',
   // Folded messages (Heroicons outline rectangle-stack): the "N earlier messages" fold.
   stack:

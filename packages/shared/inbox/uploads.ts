@@ -27,7 +27,6 @@ import {
   constants,
   copyFileSync,
   existsSync,
-  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -40,11 +39,35 @@ import {
 } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
-import { inboxAttachmentId, inboxAttachmentNameRefusal, inboxId, isInboxId, type InboxAttachment, type InboxUpload } from "@plannotator/core/inbox-types";
+import {
+  inboxAttachmentId,
+  inboxAttachmentNameRefusal,
+  inboxId,
+  isInboxId,
+  THREAD_NAME_BIDI,
+  THREAD_NAME_CONTROL,
+  type InboxAttachment,
+  type InboxUpload,
+} from "@plannotator/core/inbox-types";
 import { decideInboxAttachmentKind, inboxBlobPath, inboxBlobsDir, scanInboxFile } from "./attachments";
 import { InboxError } from "./schema";
 
 export const INBOX_UPLOADS_DIR = "uploads";
+
+/**
+ * The lines an agent reads under a message's words for the files the person
+ * attached, each with its path so the agent can open it: `Attached: name (path)`.
+ * Empty when it carries none. The wake and `wait_for_reply` both append them.
+ */
+export function inboxAttachedLines(message: { attachments?: readonly InboxAttachment[] | null }): string {
+  return (message.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`).join("\n");
+}
+
+/** The words an agent reads for a person's message: its body, then `inboxAttachedLines`. */
+export function inboxBodyForAgent(message: { body: string; attachments?: readonly InboxAttachment[] | null }): string {
+  const attached = inboxAttachedLines(message);
+  return attached ? `${message.body}\n\n${attached}` : message.body;
+}
 const PENDING_DIR = "pending";
 /** The most one uploaded file may hold (decision 1a: under the Inbox's 128 MiB request bound). */
 export const INBOX_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
@@ -71,7 +94,9 @@ export function inboxUploadNameRefusal(name: unknown): string | null {
   if (typeof name !== "string" || name.trim() === "") return "A file needs a name.";
   if (name === "." || name === "..") return "Not a file name.";
   if (/[/\\]/.test(name)) return "A file name cannot hold a path separator.";
-  if (/[\u0000-\u001f\u007f]/.test(name)) return "A file name cannot hold control characters.";
+  // The thread-name sets: C0 and C1 controls, line and paragraph separators, bidi controls.
+  if (THREAD_NAME_CONTROL.test(name)) return "A file name cannot hold control characters or line breaks.";
+  if (THREAD_NAME_BIDI.test(name)) return "A file name cannot hold bidirectional control characters.";
   if (Buffer.byteLength(name, "utf8") > INBOX_UPLOAD_NAME_MAX_BYTES) return `A file name is at most ${INBOX_UPLOAD_NAME_MAX_BYTES} bytes.`;
   const dotenv = inboxAttachmentNameRefusal(name);
   if (dotenv) return "Not attached: .env files often hold secrets.";
@@ -192,10 +217,14 @@ export async function receiveInboxUpload(
 }
 
 /**
- * The uploads a message carries, as attachment records: each blob linked to
- * `uploads/<att_id>/<name>` (read-only; a copy where hard links fail), its
- * realpath the record's path, so the agent opens a real file with its real
- * name. Every id is checked before anything is linked.
+ * The uploads a message carries, as attachment records: each blob copied to
+ * `uploads/<att_id>/<name>` (a clone where the filesystem has them, so it
+ * costs no space; read-only outside Windows), its realpath the record's path,
+ * so the agent opens a real file with its real name. A copy, never a hard
+ * link: an agent that writes to its file must not change the stored blob the
+ * window shows as the version sent. Every id is checked before anything is
+ * written. `removeInboxAttachmentFiles` takes them back when the message is
+ * not written after all.
  */
 export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unknown[], at: string): InboxAttachment[] {
   const uploads = ids.map((id, index) => {
@@ -214,15 +243,15 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
       made.push(dir);
       const target = join(dir, upload.name);
       const blob = inboxBlobPath(inboxDirPath, upload.sha256);
-      try {
-        linkSync(blob, target);
-      } catch {
-        copyFileSync(blob, target);
-      }
-      try {
-        chmodSync(target, 0o400);
-      } catch {
-        // Best effort (Windows, a filesystem without modes).
+      copyFileSync(blob, target, constants.COPYFILE_FICLONE);
+      // Read-only, so the file reads as the version sent. Not on Windows,
+      // where a read-only file cannot be deleted by the sweep.
+      if (process.platform !== "win32") {
+        try {
+          chmodSync(target, 0o400);
+        } catch {
+          // Best effort (a filesystem without modes).
+        }
       }
       const real = realpathSync(target);
       return {
@@ -243,6 +272,14 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
     for (const dir of made) rmSync(dir, { recursive: true, force: true });
     if (error instanceof InboxError) throw error;
     throw new InboxError("upload_not_found", "An uploaded file could not be attached; attach it again.");
+  }
+}
+
+/** Remove the files `inboxUploadAttachments` wrote, for a message that was not written (a replay, a refusal). */
+export function removeInboxAttachmentFiles(inboxDirPath: string, attachments: readonly InboxAttachment[]): void {
+  for (const attachment of attachments) {
+    if (!ATTACHMENT_DIR_RE.test(attachment.id)) continue;
+    rmSync(join(uploadsDir(inboxDirPath), attachment.id), { recursive: true, force: true });
   }
 }
 

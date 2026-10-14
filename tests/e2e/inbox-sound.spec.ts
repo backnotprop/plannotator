@@ -384,7 +384,7 @@ test('after an update the dialog shows once: in one of two tabs opened together,
   await expect.poll(() => rings(shown)).toBe(before + 1);
   await dialog.getByRole('button', { name: 'Turn it off' }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(shown.locator('[data-inbox-toast]')).toHaveText('Sound off.');
+  await expect(shown.locator('[data-inbox-toast]')).toHaveText('Sound off');
   await expect.poll(() => config(updated).inboxSound).toEqual({ dialogShownFor: VERSION, enabled: false });
   await shot(shown, 'dialog-turned-off-toast');
 

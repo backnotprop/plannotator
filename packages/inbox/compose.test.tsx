@@ -210,7 +210,7 @@ test.skipIf(!hasDom)('Keep draft: the sidebar\'s Drafts row and the Drafts page 
   act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   await until(() => el.querySelector('[data-drafts-nav]')?.textContent === 'Drafts1', 'the Drafts row');
-  expect(document.querySelector('[data-inbox-toast]')?.textContent).toContain('Draft saved. It waits under Drafts and never sends itself.');
+  expect(document.querySelector('[data-inbox-toast]')?.textContent).toContain('It waits under Drafts and never sends itself.');
 
   act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
   await until(() => el.querySelectorAll('[data-draft-id]').length === 1, 'the draft row');

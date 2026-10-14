@@ -1066,6 +1066,9 @@ class ThreadStateModel {
         }
         message.replyKeys.add(op.key);
         this.addPerson(thread, tick, null);
+        // More words on the person's own root (a thread they started) go where
+        // it is addressed: the store stamps its `to`, so only a delivery settles them.
+        if (message.addressed) thread.messages[thread.messages.length - 1]!.addressed = { delivered: false };
         return "ok";
       }
       case "resolve":

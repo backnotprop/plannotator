@@ -232,7 +232,7 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
   await page.keyboard.press('Escape');
   await dialog.locator('[data-compose-keep]').click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('[data-inbox-toast]')).toContainText('Draft saved. It waits under Drafts and never sends itself.');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('It waits under Drafts and never sends itself.');
   const nav = page.locator('[data-drafts-nav]');
   await expect(nav).toContainText('Drafts1');
   await nav.click();
@@ -287,7 +287,7 @@ test('an agent connects: the draft reopens with To prefilled; Send starts a thre
   await dialog.locator('[data-compose-send]').click();
   await expect(dialog).toHaveCount(0);
   const toast = page.locator('[data-inbox-toast]');
-  await expect(toast).toContainText('Sent to Claude Code in ledger.');
+  await expect(toast).toContainText('in ledger. It takes it as its next turn.');
   // The draft is gone; with none left, so is the sidebar row.
   await expect(page.locator('[data-drafts-nav]')).toHaveCount(0);
   await toast.locator('[data-toast-action]').click();

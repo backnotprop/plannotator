@@ -105,6 +105,22 @@ Settings lists each agent found on this computer with up to three switches: **Re
 
 How to write questions is described in [Questions in Plans and Documents](/docs/guides/questions/). The Inbox reads the same `:::question` blocks.
 
+In the Inbox a question block can carry two more lines, each on its own line after the question. `Stopped: <why>` says the agent cannot go on until you answer: the thread goes first, under **Stopped on you**. `Holds up: <work>; <work>` names the work that waits while the agent goes on: the thread shows under **Holding up work**, unless a question also says `Stopped:`, which wins.
+
+```markdown
+:::question
+Which database password should I use for staging?
+
+Stopped: can't run the migration without it
+Holds up: staging deploy; release notes
+
+- [ ] The one in 1Password "staging-db"
+- [ ] Make a new one
+:::
+```
+
+Agents are told to write `Stopped:` only when they truly cannot continue. A negative value (`no`, `none`, `n/a`, a dash) means no stop, so `Stopped: no` is read as if the line were not there, and a `Holds up:` entry `none` holds nothing up. `plannotator inbox --help` and the `send_message` tool's `body` field teach agents both lines.
+
 ## Connecting your agent
 
 ### Claude Code

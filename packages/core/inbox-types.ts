@@ -75,12 +75,12 @@ export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is strin
 /** The longest `thread` name send_message takes, in characters. */
 export const INBOX_THREAD_NAME_MAX = 120;
 
-const THREAD_NAME_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+export const THREAD_NAME_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 /**
  * Bidi controls (LRE..RLO, LRI..PDI, LRM, RLM, ALM) reorder the text around
  * them, so a name holding one can draw as another name in the list.
  */
-const THREAD_NAME_BIDI = /\p{Bidi_Control}/u;
+export const THREAD_NAME_BIDI = /\p{Bidi_Control}/u;
 /** Code points that draw as nothing (zero-width space and joiners, BOM, variation selectors...). */
 const THREAD_NAME_INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
 

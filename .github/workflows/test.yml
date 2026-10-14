@@ -154,8 +154,9 @@ jobs:
           packages/inbox/decisionsPicker.test.tsx
           packages/inbox/openStaysPut.test.tsx
           packages/inbox/phoneList.test.tsx
-          packages/inbox/toastPhone.test.tsx
+          packages/inbox/toast.test.tsx
           packages/inbox/attachmentsHeader.test.tsx
+          packages/inbox/sentQuestionLocked.test.tsx
           packages/inbox/themeToggle.test.tsx
           packages/inbox/agentNoteDialog.test.tsx
           packages/inbox/agentsSettings.test.tsx
@@ -208,6 +209,7 @@ jobs:
           packages/review-editor/components/MarkdownViewMenu.test.tsx
           packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
           packages/guide-viewer/GuideSectionCard.test.tsx
+          packages/guide-viewer/GuideSectionCard.fileKinds.test.tsx
           packages/guide-viewer/GuideView.test.tsx
           packages/guide-viewer/GuideViewportManager.test.tsx
           packages/review-editor/components/guide/GuideExportButton.test.tsx
@@ -227,6 +229,8 @@ jobs:
           packages/review-editor/components/CallFlowTreeView.interaction.test.tsx
           packages/review-editor/components/PanelChrome.test.tsx
           packages/review-editor/components/FileTree.search-placement.test.tsx
+          packages/review-editor/components/FileTree.fileKinds.test.tsx
+          packages/review-editor/components/FileHeader.fileKind.test.tsx
           packages/review-editor/components/FileTreeNode.controls.test.tsx
           packages/ui/components/Settings.analysis.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx

@@ -8,7 +8,7 @@
  * plain HTTP calls with the registry's token, never a real agent.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -22,6 +22,7 @@ import {
   parseInboxBridgeCommands,
 } from "@plannotator/shared/inbox/connection";
 import { inboxId } from "@plannotator/core/inbox-types";
+import { INBOX_WAKE_INSTRUCTION, inboxContinuesLine } from "@plannotator/shared/inbox/connection";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -201,6 +202,70 @@ describe("a thread the person starts", () => {
     expect(late.status).toBe(409);
     expect(((await late.json()) as { code: string }).code).toBe("already_delivered");
   });
+
+  test("more words before the agent answered reach only its session: another agent's read_thread or wait_for_reply settles nothing", async () => {
+    const { server, client, billing } = await setup();
+    await poll(server, "ses-a", "claude-code", billing);
+    const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
+    const more = await post(server, `/api/inbox/messages/${sent.message.id}/reply`, { words: "And log each retry.", idempotency_key: "r1" });
+    expect(more.status).toBe(200);
+    const follow = ((await more.json()) as { reply: InboxMessage }).reply;
+    expect(follow.to).toMatchObject({ session: "ses-a" });
+
+    // An unrelated agent reads the thread and waits on it.
+    await client.callTool({ name: "read_thread", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-x" } });
+    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-x", timeout_seconds: 1 } })) as {
+      structuredContent: { status: string };
+    };
+    expect(waited.structuredContent.status).toBe("waiting");
+
+    expect((await poll(server, "ses-a", "claude-code", billing)).map((c) => c.id)).toEqual([sent.message.id, follow.id]);
+    // Its own wait_for_reply gets the words (and settles them).
+    const mine = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-a", timeout_seconds: 1 } })) as {
+      structuredContent: { status: string; reply: { message_id: string } };
+    };
+    expect(mine.structuredContent).toMatchObject({ status: "replied" });
+  });
+
+  test("more words moved to a session that has seen nothing of the thread wake it with the line to read the thread first", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-a", "claude-code", billing);
+    const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: sent.message.id });
+    const follow = ((await (await post(server, `/api/inbox/messages/${sent.message.id}/reply`, { words: "And log each retry.", idempotency_key: "r1" })).json()) as { reply: InboxMessage }).reply;
+    // ses-a took the thread: its follow-up wakes it as a plain reply.
+    const [own] = await poll(server, "ses-a", "claude-code", billing);
+    expect(own).toMatchObject({ type: "reply", id: follow.id });
+    expect(own!.continues_thread).toBeUndefined();
+
+    await poll(server, "ses-b", "pi", billing);
+    expect((await post(server, `/api/inbox/messages/${follow.id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);
+    const [moved] = await poll(server, "ses-b", "pi", billing);
+    expect(moved).toMatchObject({ id: follow.id, continues_thread: true });
+    const lines = inboxWakeText(moved!).split("\n");
+    expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
+    expect(lines[2]).toBe(inboxContinuesLine(follow.id));
+
+    // An archived thread is not re-addressed.
+    expect((await post(server, `/api/inbox/messages/${sent.message.id}/resolve`, { resolved: true })).status).toBe(200);
+    const archived = await post(server, `/api/inbox/messages/${follow.id}/to`, { to: { host: "claude-code", session: "ses-a" } });
+    expect(((await archived.json()) as { code: string }).code).toBe("thread_resolved");
+  });
+
+  test("two Sends racing with one key write one message, one answers replayed, and no copied file is left behind", async () => {
+    const { server, billing, dataDir } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) ids.push(((await (await upload(server, "notes.md", "# Notes")).json()) as { upload: InboxUpload }).upload.upload_id);
+    const answers = (await Promise.all(
+      ids.map(async (id) => (await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See notes.", idempotency_key: "same", uploads: [id] })).json()),
+    )) as { replayed: boolean; message: InboxMessage }[];
+    expect(answers.map((a) => a.replayed).sort()).toEqual([false, true]);
+    expect(new Set(answers.map((a) => a.message.id)).size).toBe(1);
+    const kept = answers[0]!.message.attachments!.map((a) => a.id);
+    const onDisk = readdirSync(join(dataDir, "inbox", "uploads")).filter((name) => name.startsWith("att_"));
+    expect(onDisk).toEqual(kept);
+  });
 });
 
 describe("uploads", () => {
@@ -224,6 +289,11 @@ describe("uploads", () => {
       expect(statSync(attachment.path).mode & 0o222).toBe(0);
     }
     expect(readFileSync(attachments[0]!.path, "utf8")).toBe("# Notes\n\nThe export.");
+    // A copy, not a link: an agent that writes to its file does not change the version sent.
+    chmodSync(attachments[0]!.path, 0o600);
+    writeFileSync(attachments[0]!.path, "changed by the agent");
+    expect(readFileSync(join(dataDir, "inbox", "blobs", attachments[0]!.sent_sha256), "utf8")).toBe("# Notes\n\nThe export.");
+    writeFileSync(attachments[0]!.path, "# Notes\n\nThe export.");
     // The pending records are gone; the blobs stay with the message.
     expect(existsSync(join(dataDir, "inbox", "uploads", "pending", `${notes.upload_id}.json`))).toBe(false);
 
@@ -238,7 +308,7 @@ describe("uploads", () => {
 
   test("the dotenv family, path separators and control characters are refused, and nothing is kept", async () => {
     const { server, dataDir } = await setup();
-    for (const name of [".env", "prod.env", ".env.local", "a/b.txt", "..", "x\ny.txt"]) {
+    for (const name of [".env", "prod.env", ".env.local", "a/b.txt", "..", "x\ny.txt", "x\u0085y.txt", "x\u2028y.txt", "evil\u202egnp.txt"]) {
       const response = await upload(server, name, "SECRET=1");
       expect(response.status).toBe(422);
       expect(((await response.json()) as { code: string }).code).toBe("upload_refused");

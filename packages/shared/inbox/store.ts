@@ -1706,6 +1706,11 @@ export class InboxStore {
     // If any of these writes fails, the questions written so far are put back
     // as they were (on disk, repairUnsentAnswers does the same at the next
     // start), so a failed Send never leaves answers "sent" with no reply.
+    // Another live session takes it (the asking one ended), or, for more words
+    // on a message of the person's own (a thread they started, before the agent
+    // answered), the session that message is addressed to now. Stamped on the
+    // line, so only that session is handed it and only its delivery settles it.
+    const to = input.to ?? (message.author.kind === "person" && message.to ? message.to : undefined);
     const reply: InboxMessage = {
       id: replyId,
       project_id: message.project_id,
@@ -1717,8 +1722,7 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
-      // Another live session takes it: handed only to that session, like a New message.
-      ...(input.to ? { to: { host: input.to.host, session: input.to.session } } : {}),
+      ...(to ? { to: { host: to.host, session: to.session } } : {}),
     };
     try {
       for (const record of updated) this.appendQuestion(record, at);
@@ -2254,9 +2258,6 @@ export class InboxStore {
   private isFor(message: InboxMessage, session: string): boolean {
     if (message.to) return message.to.session === session;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
-    // A reply to a thread the person started (more words before the agent
-    // answered) goes to the session that thread is addressed to now.
-    if (asked?.author.kind === "person" && asked.started_by_person && asked.to) return asked.to.session === session;
     return asked?.author.kind === "agent" && asked.author.session === session;
   }
 
@@ -2387,15 +2388,13 @@ export class InboxStore {
   readdressMessage(messageId: string, to: InboxAddressee | null): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-    // Addressed: its own `to`, or a reply in a thread the person started (it goes where the thread does).
-    const parent = message.reply_to ? this.messages.get(message.reply_to) : undefined;
-    const current = message.to ?? (parent?.started_by_person ? parent.to : null) ?? null;
-    if (message.author.kind !== "person" || !current || isInboxNote(message)) {
+    if (message.author.kind !== "person" || !message.to || isInboxNote(message)) {
       throw new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
     }
     if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
+    if (this.isResolved(message.thread_id)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     if (!to) throw new InboxError("session_not_live", "That session is not live any more: nothing was changed. Pick another live session.");
-    if (message.to && message.to.session === to.session && message.to.host === to.host) return message;
+    if (message.to.session === to.session && message.to.host === to.host) return message;
     const at = this.stamp();
     const next: InboxMessage = { ...message, to: { host: to.host, session: to.session } };
     this.appendMessage(next, at);

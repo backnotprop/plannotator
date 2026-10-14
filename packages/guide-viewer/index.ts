@@ -17,3 +17,4 @@ export { GuideFileCard, estimateDiffHeight } from './GuideFileCard';
 export { GuideViewportProvider, useGuideFileWindow, GUIDE_MAX_MOUNTED_CODE_VIEWS } from './GuideViewportManager';
 export { GuideSectionSkeleton } from './GuideSkeleton';
 export { GuideViewer, type GuideViewerProps } from './GuideViewer';
+export { FileKindIcon, FILE_KIND_LABELS } from './FileKindIcon';

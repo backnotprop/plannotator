@@ -116,6 +116,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { inboxMessageImageRoute } from "./inbox-message-images";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
+import { inboxBodyForAgent } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
@@ -1160,19 +1161,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ? inboxAgentName({ kind: "agent", host: asked.author.host, name: null })
           : "agent"
         : null;
-    // Files the person attached (compose): each named with its path, so the agent can open it.
-    const attached = (reply.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`);
+    // More words in a thread the person started, handed to a session that has
+    // seen nothing of it (the person moved them there): read the thread first.
+    const root = store.message(reply.thread_id);
+    const continues =
+      !!reply.to &&
+      reply.thread_id !== reply.id &&
+      !!root?.started_by_person &&
+      root.delivery?.session !== reply.to.session &&
+      !store.thread(reply.thread_id)?.messages.some((m) => m.author.kind === "agent" && m.author.session === reply.to!.session);
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",
       id: reply.id,
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
       subject: store.threadSubject(reply.thread_id),
-      body: attached.length > 0 ? `${reply.body}\n\n${attached.join("\n")}` : reply.body,
+      body: inboxBodyForAgent(reply),
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
       // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).
       ...(reply.started_by_person && reply.thread_id === reply.id ? { new_thread: true } : {}),
+      ...(continues && !redirected ? { continues_thread: true } : {}),
     };
   };
 

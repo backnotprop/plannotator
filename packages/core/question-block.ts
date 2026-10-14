@@ -412,6 +412,45 @@ const matchRecommendation = (
       });
       if (hits.every((h) => h !== -1)) return [...new Set(hits)];
     }
+    // A choice written whole in the list, `— description` included, whose
+    // description holds the separator (`Comments — one line of work, could
+    // ship first`): the split above cuts it in two and `could ship first`
+    // names nothing. Join neighbouring parts back, but only into a span that
+    // is EXACTLY a choice's full text, label or name (never its head alone,
+    // which would let `A — cheap, B` swallow B), and only when every part
+    // ends up covered.
+    for (const sep of [/(\s*;\s*)/, /(\s*,\s*|\s+(?:and|&|\+)\s+)/i]) {
+      const pieces = text.split(sep);
+      const parts = pieces.filter((_, i) => i % 2 === 0).map((p) => p.trim());
+      if (parts.length < 2 || parts.some((p) => !p)) continue;
+      const span = (from: number, to: number) => pieces.slice(from * 2, to * 2 + 1).join('');
+      const single = (i: number): number => {
+        const hit = match(parts[i]);
+        if (hit !== -1) return hit;
+        const head = match(splitLabel(parts[i]).label);
+        return head !== -1 ? head : letteredHit(parts[i]);
+      };
+      const memo = new Map<number, number[] | null>();
+      const cover = (from: number): number[] | null => {
+        if (from === parts.length) return [];
+        if (memo.has(from)) return memo.get(from)!;
+        let found: number[] | null = null;
+        for (let to = parts.length - 1; to > from && !found; to--) {
+          const hit = match(span(from, to));
+          const rest = hit !== -1 ? cover(to + 1) : null;
+          if (rest) found = [hit, ...rest];
+        }
+        if (!found) {
+          const hit = single(from);
+          const rest = hit !== -1 ? cover(from + 1) : null;
+          if (rest) found = [hit, ...rest];
+        }
+        memo.set(from, found);
+        return found;
+      };
+      const hits = cover(0);
+      if (hits) return [...new Set(hits)];
+    }
   }
   const lettered = letteredHit(text);
   return lettered !== -1 ? [lettered] : [];
