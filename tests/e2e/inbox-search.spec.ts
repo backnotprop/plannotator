@@ -34,6 +34,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
 import { seedSearchWorld, type SearchWorld } from './inbox-search-world';
 
 const repo = resolve(__dirname, '../..');
@@ -76,7 +77,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-search-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: '/usr/bin/true', PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();

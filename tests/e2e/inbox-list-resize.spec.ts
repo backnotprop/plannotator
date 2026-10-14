@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:f
 import { join, resolve } from 'node:path';
 import { DEMO_MESSAGES, SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -75,7 +76,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
-  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: 'none' };
+  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   // The data dir this run hands the binary is its own temp folder, never the person's.
   expect(env.PLANNOTATOR_DATA_DIR.startsWith(root)).toBe(true);
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });

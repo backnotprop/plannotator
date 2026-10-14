@@ -2,6 +2,7 @@ import { afterAll } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NO_BROWSER } from "../helpers/no-browser";
 
 /**
  * Sandbox every test-run store before production modules capture their paths.
@@ -58,3 +59,12 @@ process.env.PLANNOTATOR_UPDATE_API_URL = "http://127.0.0.1:9/releases/latest";
 // The install script the update wrapper downloads: never the real one. A closed
 // loopback port refuses at once, so an unintended Update now fails fast.
 process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = "http://127.0.0.1:9/install.sh";
+
+// Every session a test starts, in this process or in a child that inherits
+// this environment, runs a program that exits at once instead of a browser.
+// Not a sentinel such as `none`: packages/server/browser.ts reads those as
+// unset and opens the system default browser (tests/helpers/no-browser.ts).
+// Overrides a contributor's own value too (a VS Code terminal sets one that
+// routes every session into an editor tab). Tests of the browser launch set
+// and restore their own value inside their bodies.
+process.env.PLANNOTATOR_BROWSER = NO_BROWSER;

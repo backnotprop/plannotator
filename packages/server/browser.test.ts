@@ -70,6 +70,7 @@ describe("shouldTryRemoteBrowserFallback", () => {
 
   test("true for remote sessions when PLANNOTATOR_BROWSER is a no-op sentinel", () => {
     clearEnv();
+    // no-browser-guard: sentinel under test (in process; nothing is launched)
     process.env.PLANNOTATOR_BROWSER = "none";
     expect(shouldTryRemoteBrowserFallback(true)).toBe(true);
   });

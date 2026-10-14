@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 import { readInboxAgents } from "@plannotator/server/inbox-agents";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
+import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 
 const entry = resolve(import.meta.dir, "index.ts");
@@ -42,7 +43,7 @@ function envOf(w: FakeAgents, extra: Record<string, string> = {}): Record<string
   return {
     ...w.env,
     PLANNOTATOR_DATA_DIR: join(w.home, ".plannotator"),
-    PLANNOTATOR_BROWSER: "none",
+    PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
     PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_UPDATE_API_URL: "http://127.0.0.1:9/releases/latest",
