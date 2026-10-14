@@ -330,7 +330,7 @@ export async function recordInboxAttachments(inboxDirPath: string, paths: readon
   });
 }
 
-type CurrentCheck = { ok: true; stat: Stats } | { ok: false; unavailable: InboxAttachmentUnavailable };
+export type CurrentCheck = { ok: true; stat: Stats } | { ok: false; unavailable: InboxAttachmentUnavailable };
 
 const missing = (message: string): { ok: false; unavailable: InboxAttachmentUnavailable } => ({ ok: false, unavailable: { code: "attachment_missing", message } });
 const changedType = (message: string): { ok: false; unavailable: InboxAttachmentUnavailable } => ({
@@ -342,9 +342,11 @@ const changedType = (message: string): { ok: false; unavailable: InboxAttachment
  * The one check before the current file is read, for every route that reads
  * it (the window's and, through it, the phone's door): the recorded realpath
  * still leads to itself, the named symlink still points there, it is a
- * regular file, and its name is not of the dotenv family.
+ * regular file, and its name is not of the dotenv family. Exported for the
+ * routes that hand the file to something other than a read: the new-tab
+ * page and the "Open in" launcher (packages/server/inbox-open-in.ts).
  */
-function checkCurrent(attachment: InboxAttachment): CurrentCheck {
+export function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   let real: string;
   try {
     real = realpathSync(attachment.path);
@@ -371,6 +373,23 @@ function checkCurrent(attachment: InboxAttachment): CurrentCheck {
   const refusal = inboxAttachmentNameRefusal(attachment.path);
   if (refusal) return changedType(refusal);
   return { ok: true, stat };
+}
+
+/**
+ * The check before the current file is handed to an app ("Open in"): the
+ * one check every read takes (`checkCurrent`), and for an image or a PDF its
+ * first bytes must still be that kind, read through the same descriptor
+ * rules as a read (a swap after the check is refused). Nothing else is read.
+ */
+export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attachment: InboxAttachment): Promise<CurrentCheck> {
+  const check = checkCurrent(attachment);
+  if (!check.ok) return check;
+  const kind = readInboxAttachmentKind(attachment.kind);
+  if (kind !== "image" && kind !== "pdf") return check;
+  const opened = await openInboxAttachmentVersion(inboxDirPath, attachment, "current");
+  if (!opened.ok) return { ok: false, unavailable: { code: opened.code, message: opened.message } };
+  await opened.handle.close().catch(() => {});
+  return check;
 }
 
 /** Whether a file's first bytes still read as the kind it was sent as (an image stays an image, a PDF a PDF). */

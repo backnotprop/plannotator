@@ -30,6 +30,7 @@ import { whenTime, formatBytes } from '../format';
 import { titleIfClipped } from '../clipTitle';
 import { useRefRepo } from '../links';
 import { ImageAttachmentView } from './ImageAttachmentView';
+import { OpenInControl, type OpenInSurface } from './OpenIn';
 import { AttachmentStepper, type StepSource } from './AttachmentStepper';
 import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepKeyIntent, type AttachmentStep } from '../stepping';
 import { Icon } from '../icons';
@@ -95,6 +96,11 @@ export interface AttachmentPaneProps {
    * header's Comments button instead of a column beside the file.
    */
   phone?: boolean;
+  /**
+   * "Open in" (OpenIn.tsx): the split button on this computer (`apps`), the
+   * new-tab icon through the tailnet or on a phone (`tab`). Absent: neither.
+   */
+  openIn?: OpenInSurface;
 }
 
 /**
@@ -623,6 +629,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         </span>
         <span className="ib-sp" />
         {isHtml && <HtmlSurfaceControls armed={armed} onToggleArmed={props.readOnly ? undefined : () => setArmed((v) => !v)} />}
+        {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
         <a
           className="ib-btn ib-sm ib-ghost"
           href={attachmentDownloadUrl(attachment, effectiveVersion)}

@@ -279,12 +279,16 @@ describe("the device door, on the binary", () => {
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
 
-  test("what the door never answers: settings, restart, /mcp, the bridge, control, raw bytes, project delete, decision retire, pairing, the device list, search", async () => {
+  test("what the door never answers: settings, restart, /mcp, the bridge, control, raw bytes, project delete, decision retire, pairing, the device list, search, Open in", async () => {
     for (const [method, path] of [
       ["GET", "settings"],
       // Search is the window's only (the approved brief's D6): the iPhone app needs its own search design first.
       ["GET", "search"],
       ["POST", "search/recent"],
+      // "Open in" launches an app on the computer: never from a phone (and no new-tab page there either).
+      ["POST", "open-in"],
+      ["GET", "open-in/apps"],
+      ["GET", "attachments/att_x/page"],
       ["POST", "restart"],
       ["POST", "mcp"],
       ["POST", "bridge/poll"],

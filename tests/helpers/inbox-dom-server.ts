@@ -32,10 +32,20 @@
  * question, where the person sent an answer to the pick-any one only
  * (`Toasts`, not the recommendation) and kept the other open; the world adds
  * `sentMulti` (the message id).
+ *
+ * With `open-in`, "Open in" launches nothing: a recording launcher (platform
+ * `OPEN_IN_PLATFORM`, default mac; apps Finder, VS Code, Cursor, Zed) appends
+ * each launch to `<data dir>/launches.jsonl`. Each project also gets a thread
+ * with page.html, plan.md, build.zip, shot.png and gone.md (deleted after it
+ * was sent: missing); the world adds `openIn` (`{ thread, ids: { <name>: <id> } }`).
+ * The Inbox is published over the tailnet by a scripted `tailscale`, and the
+ * first line adds `tailnet: { listener, host, login }`: a request to that
+ * loopback port with that Host and login is one `tailscale serve` hands over.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startInboxServer } from "../../packages/server/inbox";
+import type { InboxOpenInLauncher } from "../../packages/server/inbox-open-in";
 import { recordInboxAttachments } from "../../packages/shared/inbox/attachments";
 import { writeUpdateState } from "../../packages/shared/update-check";
 import { refuseRealDataDir } from "./real-data-dir";
@@ -143,11 +153,30 @@ if (whatsNewMode) {
   });
   process.env.PLANNOTATOR_UPDATE_API_URL = `http://127.0.0.1:${releaseApi.port}/releases/latest`;
 }
+const openInMode = extra === "open-in";
+/** Records each launch instead of starting an app. */
+const recordLaunch = (app: string, path: string) => {
+  appendFileSync(join(dataDir, "launches.jsonl"), `${JSON.stringify({ app, path })}\n`);
+  return Promise.resolve({ ok: true as const });
+};
+const openInLauncher: InboxOpenInLauncher = {
+  platform: (process.env.OPEN_IN_PLATFORM ?? "mac") as "mac" | "win" | "linux",
+  apps: () => [
+    { id: "reveal", label: "Finder", kind: "file-manager", icon: "finder" },
+    { id: "vscode", label: "VS Code", kind: "editor", icon: "vscode" },
+    { id: "cursor", label: "Cursor", kind: "editor", icon: "cursor" },
+    { id: "zed", label: "Zed", kind: "editor", icon: "zed" },
+  ],
+  reveal: (path) => recordLaunch("reveal", path),
+  openWithApp: (app, path) => recordLaunch(app.id, path),
+  openWithSystemDefault: (path) => recordLaunch("default", path),
+};
 const server = await startInboxServer({
   dataDir,
   setAsideDelayMs: 60_000,
   phones: phonesMode,
   ...(phonesMode ? { tailscale, pairingProbes } : {}),
+  ...(openInMode ? { openInLauncher, tailscale, publishTailnet: true } : {}),
   ...(whatsNewMode ? { version: "0.28.19", binaryPath: null } : {}),
 });
 const store = server.store;
@@ -165,6 +194,7 @@ type World = {
   attachment: string;
   files?: { thread: string; first: string; middle: string; last: string; ids: Record<string, string> };
   sentMulti?: string;
+  openIn?: { thread: string; ids: Record<string, string> };
   news: string[];
 };
 const SENT_MULTI = [
@@ -245,7 +275,21 @@ for (let i = 0; i < count; i++) {
     });
     sentMulti = message.id;
   }
+  let openIn: World["openIn"];
+  if (openInMode) {
+    const names = ["page.html", "plan.md", "build.zip", "shot.png", "gone.md"];
+    writeFileSync(join(root, "page.html"), "<!doctype html><title>Checkout</title><h1>Checkout</h1>\n");
+    writeFileSync(join(root, "plan.md"), "# Rollout plan\n\nShip it.\n");
+    writeFileSync(join(root, "build.zip"), Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0xff, 0xfe]));
+    writeFileSync(join(root, "shot.png"), Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex"));
+    writeFileSync(join(root, "gone.md"), "# Gone\n");
+    const sentFiles = await recordInboxAttachments(store.dir, names, { base: root, at: new Date().toISOString() });
+    const thread = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_o${i}` }, body: "The page, the plan and the build are attached.", attachments: sentFiles }).message;
+    unlinkSync(join(root, "gone.md"));
+    openIn = { thread: thread.id, ids: Object.fromEntries(sentFiles.map((a, n) => [names[n]!, a.id])) };
+  }
   worlds.push({
+    ...(openIn ? { openIn } : {}),
     ...(files ? { files } : {}),
     ...(sentMulti ? { sentMulti } : {}),
     project: project.id,
@@ -266,7 +310,8 @@ for (let i = 0; i < count; i++) {
       : [],
   });
 }
-process.stdout.write(`${JSON.stringify({ port: server.port, worlds })}\n`);
+const tailnet = openInMode ? { listener: server.tailscale.listenerPort(), host: `macbook.tail0000.ts.net:${server.port}`, login: "ramos@example.com" } : undefined;
+process.stdout.write(`${JSON.stringify({ port: server.port, worlds, ...(tailnet ? { tailnet } : {}) })}\n`);
 // An agent writing while a test runs.
 void (async () => {
   for await (const line of console) {

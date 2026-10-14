@@ -460,6 +460,19 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   await expect(pane.locator('[data-strip-chip]')).toHaveText('3 annotations');
   await shot('2.4-html-full-screen-marker-pinned');
 
+  // "Open in" → Browser (the split button's left half on an HTML file): the page in
+  // a tab of its own, from its own folder, under the same sandbox. Only the new tab
+  // is driven here; no app is ever launched by this spec.
+  const [tab] = await Promise.all([world.context.waitForEvent('page'), pane.locator('[data-open-in-primary="browser"]').click()]);
+  await tab.waitForLoadState();
+  expect(new URL(tab.url()).pathname).toMatch(/^\/api\/html-assets\/[0-9a-f]{16}\/admin-view\.html$/);
+  await expect(tab.locator('#retry-all')).toHaveText('Retry all (40)');
+  await expect.poll(() => tab.locator('#badge').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(88);
+  await expect(tab.frameLocator('#detail').locator('#detail-text')).toHaveText("Charge detail from the attachment's own folder");
+  // Opaque origin, no network: the page still cannot read the Inbox.
+  await expect(tab.locator('#probe')).toHaveText('inbox api refused');
+  await tab.close();
+
   await pane.getByRole('button', { name: 'Exit full screen' }).click();
   await expect(pane).not.toHaveClass(/ib-full/);
   await pane.getByRole('button', { name: 'Close admin-view.html' }).click();

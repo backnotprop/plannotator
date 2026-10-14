@@ -115,6 +115,7 @@ import { createInboxRepoCache } from "./inbox-repos";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { inboxMessageImageRoute } from "./inbox-message-images";
+import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
@@ -248,6 +249,11 @@ export interface InboxServerOptions {
    * (packages/server/inbox-tailscale.ts). Default false.
    */
   publishTailnet?: boolean;
+  /**
+   * How "Open in" launches an attachment's app (packages/server/inbox-open-in.ts).
+   * Default: this host's launcher. Tests pass a recording one, so no real app starts.
+   */
+  openInLauncher?: InboxOpenInLauncher;
   /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /**
@@ -331,6 +337,10 @@ const ERROR_STATUS: Record<string, number> = {
   attachment_changed_type: 409,
   attachment_not_text: 415,
   attachment_not_image: 415,
+  attachment_not_html: 415,
+  // "Open in" (packages/server/inbox-open-in.ts): an app the per-kind policy refuses, or one not installed.
+  open_not_allowed: 422,
+  app_not_available: 422,
   attachment_too_large: 413,
   annotation_not_allowed: 422,
   annotation_not_found: 404,
@@ -1268,6 +1278,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const localOnly = () =>
     json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
 
+  /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
+  const openInRoute = createInboxOpenInRoute({
+    store,
+    serverSession,
+    readBody,
+    json,
+    localOnly,
+    launcher: options.openInLauncher ?? systemOpenInLauncher(),
+  });
+
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
     // and the owner's Tailscale login before handing the request here.
@@ -1647,6 +1667,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // (packages/server/inbox-message-images.ts).
       const image = inboxMessageImageRoute(req, url, store);
       if (image) return image;
+
+      // "Open in": an attachment in its own app, by id only (packages/server/inbox-open-in.ts).
+      const opened = await openInRoute(req, path, via);
+      if (opened) return opened;
 
       // Step 2: attachments by id, annotations, the HTML asset route, delete
       // thread and delete project (packages/server/inbox-attachments.ts).
