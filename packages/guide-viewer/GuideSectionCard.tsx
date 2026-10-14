@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { GuideSection } from '@plannotator/core/guide';
+import { fileKind, groupByFileKind, type FileKind } from '@plannotator/core/file-kind';
 import type { DiffFile } from './types';
+import { FILE_KIND_LABELS, FileKindIcon } from './FileKindIcon';
 import { renderMarkdownProse } from './renderMarkdownProse';
 import { useGuideHost } from './host';
 import { GuideFileCard } from './GuideFileCard';
@@ -61,6 +63,17 @@ function FileChip({
   );
 }
 
+/** "Tests 2" / "Generated 1" above a kind's chips, shown only when a chapter mixes kinds. */
+function KindSubhead({ kind, count }: { kind: FileKind; count: number }) {
+  return (
+    <div data-guide-kind-subhead={kind} className="flex items-center gap-1.5 px-0.5 pt-1 text-[10.5px] font-medium text-muted-foreground">
+      <FileKindIcon kind={kind} />
+      <span>{FILE_KIND_LABELS[kind]}</span>
+      <span className="tabular-nums text-muted-foreground/60">{count}</span>
+    </div>
+  );
+}
+
 interface GuideSectionCardProps {
   section: GuideSection;
   files: DiffFile[];
@@ -110,6 +123,18 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     }
     return summaries;
   }, [section.diffs]);
+
+  // Within the chapter, files come together by kind (code, tests, generated),
+  // keeping the author's order inside each kind. Chips and diff cards share it.
+  const chipGroups = useMemo(
+    () => groupByFileKind(section.diffs, (ref) => ref.file, host.generatedFiles),
+    [section.diffs, host.generatedFiles],
+  );
+  const orderedFiles = useMemo(
+    () => groupByFileKind(files, (file) => file.path, host.generatedFiles).flatMap((group) => group.items),
+    [files, host.generatedFiles],
+  );
+  const showKinds = chipGroups.length > 1;
 
   const targetBelongsHere = revealTarget && section.diffs.some((ref) => ref.file === revealTarget.filePath)
     ? revealTarget
@@ -205,15 +230,20 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
 
             {section.diffs.length > 0 && (
               <div className="mt-5 space-y-1.5 md:min-h-[84px] md:overflow-y-auto md:overflow-x-hidden">
-                {section.diffs.map((ref) => (
-                  <FileChip
-                    key={ref.file}
-                    filePath={ref.file}
-                    summary={ref.summary}
-                    file={filesByPath.get(ref.file)}
-                    active={focusedFile === ref.file}
-                    onClick={() => onRequestReveal(ref.file)}
-                  />
+                {chipGroups.map((group) => (
+                  <React.Fragment key={group.kind}>
+                    {showKinds && group.kind !== 'code' && <KindSubhead kind={group.kind} count={group.items.length} />}
+                    {group.items.map((ref) => (
+                      <FileChip
+                        key={ref.file}
+                        filePath={ref.file}
+                        summary={ref.summary}
+                        file={filesByPath.get(ref.file)}
+                        active={focusedFile === ref.file}
+                        onClick={() => onRequestReveal(ref.file)}
+                      />
+                    ))}
+                  </React.Fragment>
                 ))}
               </div>
             )}
@@ -221,12 +251,13 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
         </div>
 
         <div className="min-w-0 space-y-4 bg-muted/[0.07] px-1.5 py-3 md:px-4 md:py-4">
-          {files.length > 0 ? (
-            files.map((file) => (
+          {orderedFiles.length > 0 ? (
+            orderedFiles.map((file) => (
               <GuideFileCard
                 key={file.path}
                 file={file}
                 summary={summaryByPath.get(file.path)}
+                kind={fileKind(file.path, host.generatedFiles)}
                 focused={focusedFile === file.path}
                 revealTarget={targetBelongsHere}
                 onActivate={onActivate}

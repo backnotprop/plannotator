@@ -2409,7 +2409,7 @@ export async function startReviewServer(
                 { status: 400 },
               );
             }
-            return handleOpenIn(req, { resolveRoot: resolveOpenInRoot });
+            return handleOpenIn(req, { resolveRoot: resolveOpenInRoot, serverSession });
           }
 
           // API: cheap staleness probe — has the underlying VCS state changed

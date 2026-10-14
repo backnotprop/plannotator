@@ -205,7 +205,7 @@ test.skipIf(!hasDom)('archive the open thread: its row stays until the person le
   await until(() => window.location.hash === `#thread=${world.waiting}`, 'the thread opened');
   await until(() => listRow(el, world.waiting) !== null, 'the row back in the list');
   await until(() => el.querySelector('[aria-label="Archive the thread"]') !== null, 'the thread open, not archived');
-  expect(el.querySelector('[data-inbox-toast]')?.textContent).toContain('Moved back to your Inbox');
+  expect(el.querySelector('[data-inbox-toast]')?.textContent).toContain('Back in your Inbox');
   const archived = JSON.parse((await loopback('/api/inbox/threads/archived')).text) as { total: number };
   expect(archived.total).toBe(0);
 });

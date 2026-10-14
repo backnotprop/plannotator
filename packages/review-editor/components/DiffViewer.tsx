@@ -219,6 +219,8 @@ interface DiffViewerProps {
    * header "generated" tag. The single-file surface never collapses for it:
    * opening a file as its own tab is already an explicit request to see it. */
   isGenerated?: boolean;
+  /** A test file: a flask after the name in the header. */
+  isTest?: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   isStaged?: boolean;
@@ -318,6 +320,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   onToggleViewed,
   showViewedControls = true,
   isGenerated = false,
+  isTest = false,
   collapsed = false,
   onToggleCollapsed,
   isStaged = false,
@@ -955,6 +958,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         oldPath={oldPath}
         isViewed={isViewed}
         isGenerated={isGenerated}
+        isTest={isTest}
         onToggleViewed={onToggleViewed}
         showViewedControl={showViewedControls}
         collapseToggle={onToggleCollapsed && (

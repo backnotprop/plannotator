@@ -82,7 +82,7 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 13;
+const TESTS = 14;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -289,9 +289,12 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   expect(head().textContent).toContain('Read');
   expect(el.querySelector('[data-read-line]')?.textContent).toContain('2 questions were closed unanswered');
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
-  expect(toast.textContent).toContain('will move to Quiet');
-  expect(toast.textContent).toContain('Claude Code was stopped on it.');
+  expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');
+  expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
   expect(toast.querySelector('[data-toast-reply]')).not.toBeNull();
+  // The window's live region says it once, as sentences (the toast itself is not a live region).
+  await until(() => document.querySelector('[data-inbox-live]')?.textContent === 'Marked read. Claude Code was stopped. Press Z to undo.', 'the live region');
+  expect(toast.getAttribute('role')).toBeNull();
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['closed', 'closed']);
   expect(await serverSection(ids.stopped)).toBe('quiet');
   // The row keeps its place while the thread is open.
@@ -339,12 +342,42 @@ test.skipIf(!hasDom)('the row hover action marks read without opening the thread
   expect(el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent).toBe('1');
   // A plain toast: no warning, no Reply.
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
-  expect(toast.textContent).toContain('It comes back when Claude Code writes again.');
+  expect(toast.textContent).toContain('Moved to Quiet');
   expect(toast.querySelector('[data-toast-reply]')).toBeNull();
   // Quiet is folded: open it, and the row says why it is there, with no action of its own.
   act(() => (el.querySelector('[data-section-id="quiet"] .ib-band') as HTMLButtonElement).click());
   expect(el.querySelector(`[data-row="${ids.waiting}"] .ib-c`)?.textContent).toBe('Read');
   expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`)).toBeNull();
+});
+
+test.skipIf(!hasDom)('with another thread open, marking a row read names that row, never words that read as the open thread', async () => {
+  const el = await renderApp(`#thread=${ids.stopped}`);
+  await until(() => el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`) !== null, 'the row action');
+  // The row action names its row: "Mark read: <subject>".
+  const subject = el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`)?.getAttribute('aria-label')?.replace(/^Mark read: /, '');
+  expect(subject).toBeTruthy();
+  const toastSays = () => {
+    const toast = document.querySelector('[data-inbox-toast]');
+    return toast ? [toast.querySelector('.ib-tlead')?.textContent, toast.querySelector('.ib-tdetail')?.textContent] : null;
+  };
+
+  // The row's hover action.
+  act(() => (el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`) as HTMLButtonElement).click());
+  await until(() => toastSays() !== null, 'the toast');
+  expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${ids.waiting}/read`);
+  expect(toastSays()).toEqual(['Marked read', `“${subject}”`]);
+  // The open thread was not marked.
+  expect((el.querySelector('[data-mark-read]') as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false');
+  press('z');
+  await until(() => posted.at(-1)!.path === `/api/inbox/threads/${ids.waiting}/unread` && toastSays() === null, 'Undo');
+
+  // E on the row the keyboard is on says the same.
+  const rowButton = el.querySelector(`.ib-listcol [data-row="${ids.waiting}"] button:not([data-row-mark-read])`) as HTMLButtonElement;
+  act(() => rowButton.focus());
+  press('e', rowButton);
+  await until(() => toastSays() !== null, 'the toast after E');
+  expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${ids.waiting}/read`);
+  expect(toastSays()).toEqual(['Marked read', `“${subject}”`]);
 });
 
 test.skipIf(!hasDom)("the warning toast's Reply moves the thread back and opens the reply box", async () => {

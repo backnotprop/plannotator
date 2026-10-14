@@ -7,6 +7,7 @@
     "./agents": "./agents.ts",
     "./diff-paths": "./diff-paths.ts",
     "./diff-files": "./diff-files.ts",
+    "./file-kind": "./file-kind.ts",
     "./guide": "./guide.ts",
     "./guide-format": "./guide-format.ts",
     "./guide-prompt": "./guide-prompt.ts",

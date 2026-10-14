@@ -30,64 +30,17 @@
  */
 
 import type { ReviewGitRuntime } from "./review-core";
+import { DEFAULT_GENERATED_PATTERNS, isDefaultGeneratedPath } from "@plannotator/core/file-kind";
 
 export const GENERATED_ATTRIBUTE = "linguist-generated";
 
 /** Same bound as review-core's stdin-driven git callers (`cat-file --batch-check`). */
 const CHECK_ATTR_TIMEOUT_MS = 5000;
 
-/**
- * Built-in name-based generated defaults — files GitHub's linguist collapses
- * without any `.gitattributes`. Exact entries match a path's last segment
- * verbatim; `*.`-prefixed entries match by extension suffix (at least one
- * character before the suffix, so a bare `.min.js` dotfile does not match).
- * Explicit `.gitattributes` always refines this list in both directions.
- */
-export const DEFAULT_GENERATED_PATTERNS: readonly string[] = [
-  // JavaScript ecosystems
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "bun.lock",
-  "bun.lockb",
-  // Other language ecosystems
-  "Cargo.lock",
-  "Gemfile.lock",
-  "composer.lock",
-  "poetry.lock",
-  "uv.lock",
-  "Pipfile.lock",
-  "go.sum",
-  "flake.lock",
-  "packages.lock.json",
-  // Build artifacts
-  "*.min.js",
-  "*.min.css",
-  "*.map",
-];
-
-const DEFAULT_EXACT_NAMES = new Set(
-  DEFAULT_GENERATED_PATTERNS.filter((p) => !p.startsWith("*.")),
-);
-const DEFAULT_SUFFIXES = DEFAULT_GENERATED_PATTERNS.filter((p) =>
-  p.startsWith("*."),
-).map((p) => p.slice(1)); // "*.min.js" -> ".min.js"
-
-/**
- * Does the path's LAST segment match a built-in generated default? Pure and
- * git-free, so it also serves the non-git degrade modes (piped patches,
- * workspace multi-repo folder-prefixed paths, PR worktrees, jj, GitButler,
- * P4) where attribute lookup is unavailable.
- */
-export function isDefaultGeneratedPath(path: string): boolean {
-  const name = path.slice(path.lastIndexOf("/") + 1);
-  if (name.length === 0) return false;
-  if (DEFAULT_EXACT_NAMES.has(name)) return true;
-  return DEFAULT_SUFFIXES.some(
-    (suffix) => name.length > suffix.length && name.endsWith(suffix),
-  );
-}
+// The built-in name list and its matcher live in @plannotator/core so the
+// review client (file kinds in the tree and Guided Reviews) and this server
+// module share one list.
+export { DEFAULT_GENERATED_PATTERNS, isDefaultGeneratedPath };
 
 /**
  * Name-based detection alone — the built-in defaults with no attribute

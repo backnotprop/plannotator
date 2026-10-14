@@ -197,3 +197,25 @@ export function resolveRevealIcon(platform: OpenInPlatform): string {
 export function getOpenInApp(id: string): OpenInApp | undefined {
   return OPEN_IN_APPS.find((app) => app.id === id);
 }
+
+export type OpenInAppIdCheck =
+  | { ok: true; app: OpenInApp }
+  | { ok: false; error: string };
+
+/**
+ * Validate the `appId` of a POST /api/open-in request (both runtimes).
+ *
+ * The id must name a catalog entry. There is no implicit "system default"
+ * launch: handing an arbitrary file to the OS default handler can run it
+ * (`.command`, `.app`, `.terminal` on macOS, scripts and executables
+ * elsewhere), and the UI always sends a catalog id (the reveal entry at
+ * least), so a missing or unknown id is refused with 400 instead.
+ */
+export function checkOpenInAppId(raw: unknown): OpenInAppIdCheck {
+  if (typeof raw !== 'string' || raw === '') {
+    return { ok: false, error: 'Missing appId' };
+  }
+  const app = getOpenInApp(raw);
+  if (!app) return { ok: false, error: 'Unknown app' };
+  return { ok: true, app };
+}

@@ -90,8 +90,9 @@ export const ReviewGuideHost: React.FC<{ children: React.ReactNode }> = ({ child
       revealFile: state.guideRevealFile,
       onRevealFile: state.onGuideRevealFile,
       activeSearchMatch: state.allFilesActiveSearchMatch,
+      generatedFiles: state.generatedFiles,
     }),
-    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch],
+    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles],
   );
 
   return <GuideHostProvider value={value}>{children}</GuideHostProvider>;

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FileKind } from '@plannotator/core/file-kind';
 import type { DiffFile } from './types';
+import { FileKindIcon } from './FileKindIcon';
 import { useGuideHost } from './host';
 import { renderInlineMarkdown } from './renderInlineMarkdown';
 import { useGuideFileWindow } from './GuideViewportManager';
@@ -12,6 +14,8 @@ function estimateDiffHeight(patch: string): number {
 interface GuideFileCardProps {
   file: DiffFile;
   summary?: string;
+  /** The file's kind: a generated file starts folded, a test shows the flask while unmounted. */
+  kind?: FileKind;
   focused: boolean;
   revealTarget: { filePath: string; token: number } | null;
   onActivate: (filePath: string) => void;
@@ -25,6 +29,7 @@ interface GuideFileCardProps {
 export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   file,
   summary,
+  kind,
   focused,
   revealTarget,
   onActivate,
@@ -32,7 +37,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const { DiffRenderer, getDiffRendererProps } = useGuideHost();
   const shellRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionRef = useRef(0);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(kind === 'generated');
   const fileList = useMemo(() => [file], [file]);
   const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused);
   const diffHeight = useMemo(() => estimateDiffHeight(file.patch), [file.patch]);
@@ -111,7 +116,9 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
         ) : (
           <div className="flex h-full flex-col" aria-hidden="true">
             <div className="flex h-[33px] flex-shrink-0 items-center border-b border-border/40 px-3 font-mono text-[11px] text-muted-foreground/70">
-              <span className="min-w-0 flex-1 truncate">{file.path}</span>
+              <span className="min-w-0 truncate">{file.path}</span>
+              {kind === 'test' && <FileKindIcon kind="test" className="ml-1.5 flex-shrink-0" />}
+              <span className="flex-1" />
               <span className="ml-2 flex-shrink-0">
                 {file.additions > 0 && <span className="text-emerald-600 dark:text-emerald-400">+{file.additions}</span>}
                 {file.deletions > 0 && <span className="ml-1 text-red-600/80 dark:text-red-400/80">-{file.deletions}</span>}

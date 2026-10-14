@@ -3,6 +3,7 @@ import { ChevronDown, Check, Copy, MoreHorizontal } from 'lucide-react';
 import { AppIcon } from './icons/AppIcon';
 import { getLastOpenInApp, setLastOpenInApp } from '../utils/storage';
 import { copyTextToClipboard } from '../utils/clipboard';
+import { noteServerSessionMismatch, withServerSession } from '../utils/serverSession';
 import type { OpenInKind } from '@plannotator/core/open-in-apps';
 import {
   DropdownMenu,
@@ -141,8 +142,13 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
       const res = await fetch('/api/open-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filePath, base: base ?? null, appId }),
+        // The stale-tab guard: a server that took over this port refuses it.
+        body: JSON.stringify(withServerSession({ filePath, base: base ?? null, appId })),
       });
+      if (await noteServerSessionMismatch(res)) {
+        flashError('This review was replaced. Reload the page.');
+        return;
+      }
       const data = (await res.json().catch(() => null)) as
         | { ok: boolean; error?: string }
         | null;

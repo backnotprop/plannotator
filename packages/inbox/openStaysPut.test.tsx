@@ -423,7 +423,7 @@ test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row wi
   await until(() => el.querySelector('[data-mark-read]') !== null && !(el.querySelector('[data-mark-read]') as HTMLButtonElement).disabled, 'Mark read');
   act(() => (el.querySelector('[data-mark-read]') as HTMLButtonElement).click());
   await until(() => document.querySelector('[data-inbox-toast]') !== null, 'the toast');
-  expect(document.querySelector('[data-inbox-toast]')!.textContent).toContain('will move to Quiet');
+  expect(document.querySelector('[data-inbox-toast]')!.textContent).toContain('Moves to Quiet');
   expect(sectionOfRow(el, asked)).toBe('waiting');
   closeThread();
   await wait(SETTLE_BEAT_MS + 60);
