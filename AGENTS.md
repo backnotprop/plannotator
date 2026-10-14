@@ -105,134 +105,15 @@ History saves independently of the `planSave` user setting (which controls decis
 
 ## Feedback Archive
 
-Every review submitted through a Plannotator decision is durably archived at
-decision-settlement time, so a submission survives an agent-side timeout, a
-closed terminal, or a `planSave` setting the user turned off. One deliberate
-exception: a review posted straight to GitHub, GitLab or Bitbucket with `POST
-/api/pr-action` is delivered to the platform and is **not** archived locally
-yet (a named follow-up). Layout, per project (same `{project}` key as
-`history/`):
+How every submitted review is durably archived at decision-settlement time, the per-project layout and JSONL line format, and the one exception for reviews posted straight to a Git host.
 
-```
-${PLANNOTATOR_DATA_DIR}/feedback/{project}/
-  index.jsonl                                  # append-only, authoritative, schema v1
-  records/2026-08-31T14-22-07-511Z-review-feedback.md   # human-readable sidecar
-```
-
-The JSONL line is self-contained (`v`, `ts`, `client`, `clientVersion?`,
-`project`, `origin`, `surface`, `decision`, `target`, `feedback`,
-`annotations`, `counts`, `recordFile`) so an analyzer never has to open a
-sidecar; the markdown sidecar exists because the rest of the data dir is
-greppable markdown and is written only for records that carry content. Bare
-approvals, LGTMs, and dismissals are decision-only lines with no sidecar.
-
-**This index is shared, not Plannotator-private.** Several tools that share the
-data dir append to the SAME `feedback/{project}/index.jsonl`, separated by the
-`client` field on each line rather than by separate files. Known writers today:
-`plannotator` (this repo) and `plannotator-tui`, the Rust terminal client;
-`herdr-annotate` is reserved for a possible future Lite writer. Treat `client`
-as an open set, never an enum to validate against. Practical consequences: the
-line shape is a cross-tool contract, so fields are **added, never repurposed**;
-other clients suffix their id onto their sidecar filenames
-(`{stamp}-{surface}-{decision}-plannotator-tui.md`), so the `records/`
-directory holds more filename shapes than this repo writes and `recordFile` is
-the only valid handle to a sidecar (nothing may parse the name); and unknown
-fields must be ignored rather than rejected.
-
-Two optional fields are declared in v1 but not populated here, so their names
-are reserved across every client: `target.agent` (`{ host?, session?,
-transcript? }`) is the provenance for surfaces whose subject is an agent
-session rather than a file or a diff, such as annotate-last, and
-`clientVersion` is the writing client's own version where it knows it
-(`packages/shared` has no runtime-agnostic version constant, so this repo
-leaves it unset rather than reading `package.json` from a vendored module).
-
-Everything is written by one shared module, `packages/shared/feedback-archive.ts`
-(vendored to Pi as `apps/pi-extension/generated/feedback-archive.ts`), which
-resolves the data dir per call and **never throws**: a failed archive write is
-logged, degrades silently for the user, and keeps the annotation draft as the
-recovery copy. The append happens BEFORE `deleteDraft`, generalizing the #678
-ordering to every surface. Call sites: `packages/server/index.ts`
-(`/api/approve`, `/api/deny`), `packages/server/review.ts` (`/api/feedback`,
-`/api/exit`), `packages/server/annotate.ts` (`persistSubmittedDecision`,
-`/api/exit`), and the three Pi mirrors in `apps/pi-extension/server/`.
-
-Invariants worth keeping: records never contain patch bytes or a second copy of
-the plan (identity and a version-file reference instead); repeat decisions
-append rather than overwrite (unlike the legacy `plans/` snapshot, which is
-keyed by slug and status and is left alone); annotation `source` / `author`
-provenance is preserved so external, agent, and WebMCP findings stay
-distinguishable from the human's own comments; and `feedback` is listed in
-`PURGE_OWNED_TOP_LEVEL` (`packages/server/uninstall.ts`) so uninstall purge
-removes it. Controls and the privacy/retention note are in the
-`PLANNOTATOR_FEEDBACK_HISTORY` row of the environment table above. The read
-path in v1 is the files on disk (`jq` over `index.jsonl`, `grep` over
-`records/`); there is no CLI reader or UI surface yet.
-
-Details that surprise people:
-
-- **Index durability is a practical guarantee, not a formal one.** One record
-  is always exactly one line, and the whole line is handed to a single
-  append-mode write. That write is not one syscall (`appendFileSync` loops
-  internally until its buffer is drained); what holds in practice is that an
-  `O_APPEND` write of a line-sized buffer completes without interleaving on a
-  local filesystem. NFS and SMB do not promise even that, and a genuine
-  interleave damages **both** records that raced, not just the later one. The
-  backstop is the reader: unparsable lines are skipped, so everything else in
-  the file still reads. With several clients writing one index, this caveat is
-  worth knowing rather than assuming away.
-- **Readers gate on structure, not version.** `parseFeedbackIndex` keeps any
-  line that parses and carries a numeric `v`, so a newer writer's lines are
-  still returned; an analyzer that depends on v1 semantics should filter
-  `v <= 1` itself. Since fields are only added and never repurposed, a `v2`
-  would signal a real shape change rather than the arrival of new keys.
-- **Folder-session records name the folder, not the open document.** A folder
-  annotate session submits one body of feedback for the session, so
-  `target.filePath` is the session's folder. The record's `annotations` hold
-  every document's comments (not only the open one's), and each comment made
-  on a document other than the session's own target carries the additive
-  `documentPath` field naming that document (absent means the session's own
-  target or message; distinct from `file`, a code annotation's file).
-- **Records of a review of several files name every file.** Surface
-  `annotate-bundle` (additive), no `target.filePath`, and the additive
-  `target.documents: [{ path, annotationCount }]` in review order; every
-  comment on a file carries its `documentPath`.
-- **URL-session records store the full URL, query string included**, because
-  that is the page that was reviewed. A URL carrying a token in its query is
-  therefore written to disk; the opt-out is the control for that.
-- **`target.review.cwd` is provenance, not a durable handle.** A PR review
-  started with `--local` records a per-PR pool checkout that is cleaned up when
-  the session ends; `target.review.pr` plus `gitRef` are the identity that
-  survives.
-- **Project bucketing prefers the caller's `project` option** (the `project`
-  field on `ReviewServerOptions`, mirroring the annotate server), falling back
-  to deriving a name from the review cwd. The fallback is wrong in PR mode,
-  where there is no `gitContext` and `--local` points `agentCwd` at
-  `pool/pr-<n>`, so every CLI entry point passes `detectProjectName()`.
-- **The test suite turns the archive off** through the `tests/setup/feedback-archive-off.ts`
-  preload in `bunfig.toml`, because most server tests boot a real server
-  without redirecting `PLANNOTATOR_DATA_DIR` and would otherwise write into the
-  contributor's own data dir. Tests that need the archive opt back in inside
-  their own test bodies.
+Details: [docs/overview/feedback-archive.md](docs/overview/feedback-archive.md) — read it before working on Feedback Archive.
 
 ## Plan Diff
 
-When a user denies a plan and Claude resubmits, the UI shows what changed between versions. A `+N/-M` badge appears below the document card; clicking it toggles between normal view and diff view.
+How the UI shows what changed between plan versions: the diff engine, the Classic, Rendered and Raw view modes, base-version state, and diff annotations.
 
-**Diff engine** (`packages/ui/utils/planDiffEngine.ts`): Uses the `diff` npm package (`diffLines()`) to compute line-level diffs. Groups consecutive remove+add into "modified" blocks. Returns `PlanDiffBlock[]` and `PlanDiffStats`.
-
-**Three view modes** (toggle via `PlanDiffModeSwitcher`; `planDiffMode` in `packages/editor/App.tsx` defaults to `classic`):
-- **Classic** (`PlanCleanDiffView`, block-level, old above new): Color-coded left borders — green (added), red (removed/strikethrough), yellow (modified). The default.
-- **Rendered** (`PlanCleanDiffView` with `wordLevel`, experimental): the same view with word-level inline highlighting.
-- **Raw** (`PlanRawDiffView`): Monospace `+/-` lines, git-style
-
-**State** (`packages/ui/hooks/usePlanDiff.ts`): Manages base version selection, diff computation, and version fetching. The server sends `previousPlan` with the initial `/api/plan` response; the hook auto-diffs against it. Users can select any prior version from the sidebar Version Browser.
-
-**Diff annotations:** The clean diff view supports block-level annotation — hover over added/removed/modified sections to annotate entire blocks. Annotations carry a `diffContext` field (`added`/`removed`/`modified`). Exported feedback includes `[In diff content]` labels. A diff annotation's `blockId` is `diff-block-N` (N indexes the diff against the selected base, not a document block), so the export cannot place it in the document: diff comments print together AFTER the document's other comments, in diff order (`sortAnnotationsInDocumentOrder` in `packages/ui/utils/parser.ts`); a document with no diff comments sorts exactly as before.
-
-**Annotation hook** (`packages/ui/hooks/useAnnotationHighlighter.ts`): Annotation infrastructure used by `Viewer.tsx`. Manages web-highlighter lifecycle, toolbar/popover state, annotation creation, text-based restoration, and scroll-to-selected. The diff view uses its own block-level hover system instead.
-
-**Sidebar** (`packages/ui/hooks/useSidebar.ts`): Shared left sidebar with three tabs — Table of Contents, Version Browser, and Archive. The "Auto-open Sidebar" setting controls whether it opens on load (TOC tab only). In archive mode, the sidebar opens to the Archive tab automatically.
+Details: [docs/overview/plan-diff.md](docs/overview/plan-diff.md) — read it before working on Plan Diff.
 
 ## Portable Guided Reviews
 
@@ -340,19 +221,9 @@ An agent can ask the reviewer a question inside a plan or document with a `:::qu
 
 ## WebMCP (browser-agent tools)
 
-The design document lives outside the tree (it is not checked in); the user-facing reference is `apps/marketing/src/content/docs/reference/webmcp-tools.md`. Phase 1 makes plan review and every annotate surface a WebMCP **provider**: a browser-integrated agent (Chrome/Edge origin trial, `chrome://flags/#enable-webmcp-testing` or `--enable-features=WebMCPTesting` locally; agent-embedded browsers unflagged) calls in-page tools instead of scraping the DOM. Code review (phase 2) and consuming the annotated app's own tools (phase 3) are not built.
+The WebMCP tools that plan review and annotate sessions expose to browser agents: the engine in `packages/ui/webmcp/`, the tool catalog, the rules (decisions stay human), folder sessions and `inReplyTo`.
 
-**Shape (mirrors the shortcut system).** Engine in `packages/ui/webmcp/`: `modelContext.ts` is the ONLY file that spells `document.modelContext`, `registerTool`, `getTools`, `executeTool`, `toolchange` and the annotation hints (local structural types, no `webmcp-types` dependency, no `declare global`); `toolset.ts` (tool specs, the `{ ok, data, nudges, error? }` envelope, `runTool`, a per-document registry with reconcile-by-name and one `AbortController` per tool, since unregistration is only by abort); `changes.ts` (per-annotation `seq`, tombstones, per-tab watermark with `since` override, `claimOwn` so the agent's own writes are never "new" to it); `nudges.ts` (the twelve codes: `annotations_new`, `annotations_removed`, `replies_new`, `composer_open`, `source_stale`, `document_edited`, `comment_only_surface`, `page_changed`, `other_document_active`, `pending_unsent`, `session_decided`, `truncated`; messages are static strings, document and comment text never enter a message); `useToolset.ts` (React hook; handlers read through refs so a re-render never touches `registerTool`); `policy.ts` (the `webmcp` seam on `configurePlannotatorUI`, `{ enabled, namePrefix }`, default enabled with prefix `plannotator.`). Catalog in `packages/editor/webmcp/`: `documentTools.ts` builds the tools over a narrow `DocumentToolAdapter` (never imports App), `documentText.ts` holds the pure outline / windowing / quote-resolution helpers, `useDocumentWebMcp.ts` builds the adapter over App state through one ref.
-
-**What is exposed.** `read_document` (the whole situation in one zero-argument call: session, text windowed at 16k chars cut at a block boundary with `textRange.nextOffset`, outline with per-section counts, every annotation with quote, context, `isNew` and thread ids, `otherDocuments`, nudges; `readOnlyHint` + `untrustedContentHint`), `add_comments` (1..20 items; anchoring cascade `inReplyTo` inherits the parent anchor, then `quote` resolved by text search with `section` to disambiguate, `ambiguous` returns candidate contexts, then `section` alone anchors on the heading, else a document-level note; `requestId` idempotency), `update_comment`, `remove_comments` (`destructiveHint`, ignored by today's dictionary on purpose), `reveal`, `nudge_user` (one transient banner, 280 chars, not persisted, not exported, dismissible), and `list_documents` in folder sessions only. Write tools are absent on archive and after the human's decision. Every tool-created comment is stamped `author` and `source: "browser-agent"` and renders exactly like an external-annotation comment.
-
-**Rules.** (1) Decisions are human: there is no tool that approves, denies, submits feedback, closes the session, stages files or marks viewed, and there is no confirmation seam; the catalog test pins the names. (2) Ownership: the agent may update or remove only comments the tracker `claimOwn`ed in THIS page load (`AnnotationChangeTracker.isOwn`), never merely comments whose `source` reads `browser-agent`: `POST /api/external-annotations` accepts any `source`, so a stamp alone would let another tool's findings become agent-editable. Consequence: after a reload, the agent's earlier comments (restored from the draft) are read-only to it, like the human's; it replies instead. A `requestId` replayed after the human removed the comment it created answers `conflict` and never re-creates it. (3) Zero footprint without WebMCP: `resolveModelContext` runs once per mount; when `document.modelContext` is absent nothing is built, registered, rendered, fetched, scheduled or written. The opt-out is deliberately NOT a settings-registry entry: `configStore.ensureLoaded` seeds every registry default into a cookie on first settings access, on every surface including the guides.show viewer, so the preference lives in `packages/ui/webmcp/preference.ts`, is read lazily, and writes `plannotator-webmcp-tools=false` only when the user opts out (turning the tools back on removes the cookie). The phase-1 PR's A/B proof compared DOM shell, requests, console, timer counts and the cookie jar between the main and branch builds in a browser without the API and found no difference, and the portable viewer bundle is byte-identical to main. (4) Indicator policy: nothing visible appears merely because the API exists; only after the first successful tool call does the header show the small "Agent" affordance (`data-webmcp-indicator`). (5) Iframes: Plannotator never registers tools inside the untrusted frames, the srcdoc viewer keeps `sandbox="allow-scripts"` with no `allow` attribute and the live-app iframe gets no `allow="tools"`, so a framed page cannot register or impersonate tools (`packages/ui/webmcp/iframeIsolation.test.ts` pins this at source level; in Chrome both frames answer `NotAllowedError` for `getTools` and `registerTool`). (6) Opt-out: Settings > General > "Agent tools" (row shown only when the API exists) aborts every registration when off. (7) No server changes: the Pi and OpenCode builds get the feature through the built HTML.
-
-**Folder sessions.** `list_documents` walks the file browser's loaded directories (`fileBrowser.dirs`, absolute path = `${dir.path}/${node.path}`, vault dirs excluded) so every document is listed, not only the ones already visited. The agent learns that the human navigated from `document.path` on its next response, not from a sibling flag: siblings exclude the open path, and after a sidebar click `fileBrowser.activeFile` equals `linkedDoc.filepath`, so a sibling with `open: true` (and with it `openedSinceLastRead` and the "opened" branch of `other_document_active`) exists only transiently, during the load window between the click and the document commit. `reveal { path }` answers `not_found` at once for a path that is neither in the folder tree nor in the linked-doc cache; otherwise it navigates (folder sessions through App's file-browser selection handler, so the active file, the doc URL and the linked document stay in step) and WAITS for the commit that makes that path the open document (an effect settles the waiter, and the linked-doc `error` state settles it early when the load fails, so a bad path never runs out the 5s timeout) before looking the comment or section up; reading state right after the `await` would see the pre-navigation document. After a tool mutation the adapter overlays the pending write on the last committed annotation list (`applyOverlay`) so the response's nudges and the new comment's `seq` reflect the mutation even though `setAnnotations` has not committed yet; the agent's own removals are claimed (`claimRemoved`) so they are never reported back to it as `annotations_removed`. Still not reachable in phase 1: `composerOpen` for a sibling (the composer is detected from the DOM of the open document only, so `other_document_active` never fires for a composer in another document), and writes to a sibling that is not open (see below).
-
-**`inReplyTo`.** One additive field on `Annotation`: a reply inherits its parent's anchor, renders indented under it in the annotations panel (`threadReplies` in `AnnotationPanel.tsx`), and exports nested under the parent's entry (`**Replies:**` block in `exportAnnotations`); an annotation without it renders and exports byte-identically to before. The threading rule is shared (`resolveReplyParents` in `packages/core/annotation-threads.ts`): an annotation is a reply only when its target is a different annotation in the same list and the parent chain never returns to it; orphans, self-references, and every member of a cycle render and export as roots in original order, so nothing is ever dropped and the export's header count equals what is emitted. `PATCH /api/external-annotations` refuses an `inReplyTo` that is self, missing, or would close a cycle (`validateReplyTarget`, both runtimes, `400`). Drafts carry it (annotations are opaque JSON to the draft transport); share links deliberately do not (a reply shares as a plain comment on the same quote, the existing text-restore contract, pinned by `sharing.inReplyTo.test.ts`). Known limitation: comments on a sibling document that is not open answer `not_available` with a hint to `reveal { path }` first, because the linked-doc cache is a copy.
-
-Docs: `apps/marketing/src/content/docs/reference/webmcp-tools.md` (the user-facing reference) and the manual five-flow checklist in `tests/UI-TESTING.md`.
+Details: [docs/overview/webmcp-browser-agent-tools.md](docs/overview/webmcp-browser-agent-tools.md) — read it before working on WebMCP (browser-agent tools).
 
 ## Keyboard Shortcuts
 
