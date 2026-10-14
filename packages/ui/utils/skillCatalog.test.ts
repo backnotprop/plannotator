@@ -6,6 +6,7 @@ import {
   resetSkillCatalogCache,
   resetSkillCatalogTransport,
   resetSkillContentTransport,
+  setSkillCatalogExportRegistration,
   setSkillCatalogTransport,
   setSkillContentTransport,
 } from './skillCatalog';
@@ -34,6 +35,8 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  // Host configuration, not cache: the reset leaves it alone, so a test that turns it off puts it back.
+  setSkillCatalogExportRegistration(true);
   resetSkillCatalogCache();
   resetSkillCatalogTransport();
   resetSkillContentTransport();
@@ -302,5 +305,24 @@ describe('primeSkillContentsForExport', () => {
     const block = skillReferenceExportBlock('$plannotator-review');
     expect(block).not.toContain('# ghost');
     expect(block).toContain('read SKILL.md in /skills/plannotator-review and follow it');
+  });
+});
+
+describe('setSkillCatalogExportRegistration (a host that composes one block per message)', () => {
+  test('off: the picker still gets the catalog, and a comment exports its `$name` as plain text', async () => {
+    setSkillCatalogExportRegistration(false);
+    setSkillCatalogTransport(async () => [{ name: 'write-better', root: 'claude', humanOnly: false }]);
+    expect((await fetchSkillCatalog()).map((s) => s.name)).toEqual(['write-better']);
+    expect(skillReferenceExportBlock('use $write-better')).toBe('');
+    // A cache reset is not a reconfiguration: the host's choice stands.
+    resetSkillCatalogCache();
+    await fetchSkillCatalog();
+    expect(skillReferenceExportBlock('use $write-better')).toBe('');
+  });
+
+  test('on (the default): the export lists the reference', async () => {
+    setSkillCatalogTransport(async () => [{ name: 'write-better', root: 'claude', humanOnly: false }]);
+    await fetchSkillCatalog();
+    expect(skillReferenceExportBlock('use $write-better')).toContain('- `write-better`');
   });
 });

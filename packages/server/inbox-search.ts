@@ -26,7 +26,7 @@ import { INBOX_SEARCH_QUERY_MAX } from "@plannotator/core/inbox-search";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import {
   INBOX_SEARCH_GROUPS,
   INBOX_SEARCH_LIMIT_MAX,
@@ -65,19 +65,9 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 }
 
-const CROSS_SITE_BODY = { error: "Cross-origin requests are not accepted.", code: "cross_origin" };
-
-/**
- * A request another site, or another localhost port, made: `Sec-Fetch-Site`
- * says cross-site or same-site, or an Origin names another page. The
- * attachment and message-image routes refuse the same way. A request with
- * neither header (a non-browser client) and the window's own page pass.
- */
-function crossSite(req: Request): boolean {
-  const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
-  if (site === "cross-site" || site === "same-site") return true;
-  return !isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", site ?? null);
-}
+const CROSS_SITE_BODY = INBOX_CROSS_SITE_BODY;
+/** A request another site, or another localhost port, made (inbox-cross-site.ts). */
+const crossSite = isCrossSiteRequest;
 
 /** The recent searches on disk, newest first; anything unreadable reads as none. */
 export function readRecentSearches(storeDir: string): string[] {

@@ -161,6 +161,8 @@ jobs:
           packages/inbox/settingsSections.test.tsx
           packages/inbox/searchPalette.test.tsx
           packages/inbox/searchShortcut.test.tsx
+          packages/inbox/skillReferences.test.tsx
+          packages/ui/components/HumanOnlySkillNotice.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx
