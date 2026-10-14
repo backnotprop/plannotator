@@ -37,9 +37,9 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
@@ -56,7 +56,6 @@ import {
   type InboxProjectRepo,
 } from "@plannotator/core/inbox-types";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
   INBOX_TOOL_HOSTS,
   loadConfig,
@@ -112,6 +111,7 @@ import {
 } from "./inbox-decisions";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
+import { createInboxProjectRoots } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { inboxMessageImageRoute } from "./inbox-message-images";
@@ -386,29 +386,8 @@ function tokensEqual(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** The project root for a path an agent named: realpath, then its git toplevel. */
-export async function resolveInboxProjectRoot(path: string): Promise<{ root: string; name: string }> {
-  if (typeof path !== "string" || !isAbsolute(path)) {
-    throw new InboxError("validation_error", "project_path: must be an absolute path.", { field: "project_path" });
-  }
-  let real: string;
-  try {
-    real = realpathSync(path);
-    if (!statSync(real).isDirectory()) throw new Error("not a directory");
-  } catch {
-    throw new InboxError("validation_error", "project_path: no such folder.", { field: "project_path" });
-  }
-  let root = real;
-  try {
-    const proc = Bun.spawn(["git", "-C", real, "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (code === 0 && out.trim()) root = realpathSync(out.trim());
-  } catch {
-    // No git: the folder is the project.
-  }
-  const name = extractRepoName(root) ?? extractDirName(root) ?? "project";
-  return { root, name };
-}
+/** The project root for a path an agent named (the rules: packages/server/inbox-project-root.ts). */
+export { resolveInboxProjectRoot } from "./inbox-project-root";
 
 function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], preferred: number | null): { server: ReturnType<typeof Bun.serve>; portChanged: boolean } {
   const serve = (port: number) =>
@@ -514,9 +493,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // when a project is first seen, never while a request waits (inbox-repos.ts).
   const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
 
+  // Where a path an agent named files its messages: its repository (a linked
+  // worktree folds into its main repository's project) or the folder, cached
+  // per folder (packages/server/inbox-project-root.ts). One cache for sends,
+  // live sessions and the message-image route, so they always agree.
+  const projectRoots = createInboxProjectRoots();
   const projectLocks = new Map<string, Promise<InboxProject>>();
   const resolveProject = async (path: string): Promise<InboxProject> => {
-    const { root, name } = await resolveInboxProjectRoot(path);
+    const { root, name } = await projectRoots.resolve(path);
     const existing = store.projectByRoot(root);
     if (existing) return existing;
     void repos.refresh(root);
@@ -536,6 +520,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         store,
         baseUrl: () => baseUrl,
         resolveProject,
+        projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
         // An open wait_for_reply keeps its session present (never "ended").
@@ -1243,7 +1228,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const live = createInboxLiveSessions({
     store,
     serverSession,
-    resolveRoot: async (path) => (await resolveInboxProjectRoot(path)).root,
+    resolveRoot: async (path) => (await projectRoots.resolve(path)).root,
   });
 
   let stopRequested = false;
@@ -1645,7 +1630,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // #1813: an image a message's body shows, read from its project
       // (packages/server/inbox-message-images.ts).
-      const image = inboxMessageImageRoute(req, url, store);
+      const image = await inboxMessageImageRoute(req, url, store, projectRoots);
       if (image) return image;
 
       // Step 2: attachments by id, annotations, the HTML asset route, delete

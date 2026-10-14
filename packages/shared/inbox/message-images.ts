@@ -15,8 +15,10 @@
  *     ico apng, `isReviewImagePath`), before anything is read.
  *  3. A relative path resolves against the folder the agent sent from
  *     (`base_path`, kept on the message when it is a subfolder of the
- *     project), else the project root; an absolute one is taken as it is.
- *     Its realpath must sit inside the project root (a realpath itself), so
+ *     project or a linked worktree of its repository), else the project
+ *     root; an absolute one is taken as it is. Its realpath must sit inside
+ *     the project root (a realpath itself), or inside the linked worktree
+ *     the message was sent from when the caller checked it is one, so
  *     `../` and a symlink that leaves the project are refused alike, while
  *     an absolute path spelled through a symlinked prefix (macOS `/tmp`,
  *     really `/private/tmp`) is judged by where it really leads. A path
@@ -117,9 +119,17 @@ function hasScheme(src: string): boolean {
 /**
  * Read one image a message shows. `root` is the project's root (a realpath);
  * `base` the folder relative paths start from (the message's `base_path`, or
- * the root). Never throws.
+ * the root). `worktree`, when the caller checked that the message was sent
+ * from a linked worktree of the project's repository (outside its root), is
+ * that folder: images in it are the message's too. Never throws.
  */
-export function readInboxMessageImage(input: { body: string; root: string; base?: string | null; path: string | null }): InboxMessageImageResult {
+export function readInboxMessageImage(input: {
+  body: string;
+  root: string;
+  base?: string | null;
+  worktree?: string | null;
+  path: string | null;
+}): InboxMessageImageResult {
   const src = input.path;
   if (typeof src !== "string" || src === "") return refuse(400, "validation_error", "path: required.");
   if (src.length > INBOX_MESSAGE_IMAGE_PATH_MAX || /[\u0000-\u001f\u007f]/.test(src)) {
@@ -136,11 +146,21 @@ export function readInboxMessageImage(input: { body: string; root: string; base?
   } catch {
     return refuse(404, "image_missing", "The message's project is no longer on disk.");
   }
+  // Where the message's images may be: its project, and the linked worktree it was sent from.
+  const areas = [root];
+  if (input.worktree) {
+    try {
+      areas.push(realpathSync(input.worktree));
+    } catch {
+      // The worktree is gone (cleaned up): only the project is left.
+    }
+  }
+  const inArea = (path: string) => areas.some((area) => isInside(path, area));
   let base = root;
   if (input.base) {
     try {
       const real = realpathSync(input.base);
-      if (isInside(real, root)) base = real;
+      if (inArea(real)) base = real;
     } catch {
       // The folder the agent sent from is gone: paths start at the root.
     }
@@ -157,11 +177,11 @@ export function readInboxMessageImage(input: { body: string; root: string; base?
     } catch {
       // Not on disk under this spelling: one that leaves the project is
       // refused as such; otherwise the next spelling is tried.
-      if (!isInside(named, root)) return refuse(403, "outside_project", "That image is outside the message's project.");
+      if (!inArea(named)) return refuse(403, "outside_project", "That image is outside the message's project.");
       continue;
     }
     // Judged by where the path really leads, never by its spelling.
-    if (!isInside(real, root)) return refuse(403, "outside_project", "That image leads outside the message's project.");
+    if (!inArea(real)) return refuse(403, "outside_project", "That image leads outside the message's project.");
     const read = readImageFile(real);
     if (!read.ok) return read;
     const bytes = read.bytes;

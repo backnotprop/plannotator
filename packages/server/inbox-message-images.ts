@@ -6,7 +6,9 @@
  *
  * Every decision is in packages/shared/inbox/message-images.ts: the path
  * must be an image the message's own body references, inside the message's
- * project (realpath, so `../` and symlink escapes are refused), an image by
+ * project or the linked worktree it was sent from (realpath, so `../` and
+ * symlink escapes are refused; the worktree is checked again here through
+ * the project-root cache, packages/server/inbox-project-root.ts), an image by
  * extension and by its magic bytes, at most 10 MB. This file adds the
  * transport: a cross-site request is refused before anything is read, and
  * every answer carries nosniff, a sandbox CSP and a same-origin CORP, so
@@ -14,9 +16,11 @@
  * directly never runs.
  */
 
+import { realpathSync } from "node:fs";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImage } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { isInsideFolder, type InboxProjectRoots } from "./inbox-project-root";
 
 export const INBOX_MESSAGE_IMAGE_ROUTE = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/image$/;
 
@@ -33,8 +37,25 @@ function refuse(status: number, code: string, error: string): Response {
   });
 }
 
+/**
+ * The linked worktree a message was sent from, when its `base_path` lies
+ * outside the project's root: checked again now (the folder still folds into
+ * this project), never taken from the record alone. Null otherwise.
+ */
+async function sentFromWorktree(base: string | null | undefined, root: string, projectRoots: InboxProjectRoots | undefined): Promise<string | null> {
+  if (!base || !projectRoots) return null;
+  try {
+    if (isInsideFolder(realpathSync(base), root)) return null;
+    const resolved = await projectRoots.resolve(base);
+    return resolved.worktree !== null && resolved.root === root ? resolved.worktree : null;
+  } catch {
+    // Gone, or no longer a folder: the project root is all there is.
+    return null;
+  }
+}
+
 /** Answers the image route, or null when the path is not it. */
-export function inboxMessageImageRoute(req: Request, url: URL, store: InboxStore): Response | null {
+export async function inboxMessageImageRoute(req: Request, url: URL, store: InboxStore, projectRoots?: InboxProjectRoots): Promise<Response | null> {
   const match = INBOX_MESSAGE_IMAGE_ROUTE.exec(url.pathname);
   if (!match) return null;
   if (req.method !== "GET" && req.method !== "HEAD") return refuse(405, "method_not_allowed", "Use GET.");
@@ -52,6 +73,7 @@ export function inboxMessageImageRoute(req: Request, url: URL, store: InboxStore
     body: message.body,
     root: project.root,
     base: message.base_path ?? null,
+    worktree: await sentFromWorktree(message.base_path, project.root, projectRoots),
     path: url.searchParams.get("path"),
   });
   if (!result.ok) return refuse(result.status, result.code, result.error);
