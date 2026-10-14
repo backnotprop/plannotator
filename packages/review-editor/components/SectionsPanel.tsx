@@ -18,7 +18,10 @@ import {
   DiffCounts,
   CommittedDot,
   TruncatedPath,
+  PanelSectionHeader,
 } from './FileRowBits';
+import { fileKind } from '@plannotator/core/file-kind';
+import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { SearchFileGroup } from './FileTree';
 import type { ReviewSearchFileGroup, ReviewSearchMatch } from '../utils/reviewSearch';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
@@ -45,6 +48,8 @@ interface SectionItem {
 
 interface SectionsPanelProps {
   files: DiffFile[];
+  /** The server's generated set, so a generated file never reads as a test. */
+  generatedFiles?: ReadonlySet<string>;
   sections: SinceBaseSections;
   width?: number;
   activeFileIndex: number;
@@ -135,6 +140,8 @@ const SectionRow: React.FC<{
   isScrollActive: boolean;
   isViewed: boolean;
   annotationCount: number;
+  /** A test file: a flask after the path (the status view keeps its sections). */
+  isTest: boolean;
   onSelect: () => void;
   onDoubleClick?: () => void;
   onToggleViewed?: () => void;
@@ -153,6 +160,7 @@ const SectionRow: React.FC<{
   isScrollActive,
   isViewed,
   annotationCount,
+  isTest,
   onSelect,
   onDoubleClick,
   onToggleViewed,
@@ -195,6 +203,7 @@ const SectionRow: React.FC<{
           ) : null)}
         <ChangeTypeLetter status={file.status} oldPath={file.oldPath} untracked={item.group === 'untracked'} />
         <TruncatedPath path={file.path} />
+        {isTest && <FileKindIcon kind="test" size={11} title="Test file" />}
         <AnnotationBadge count={annotationCount} />
       </div>
       <DiffCounts additions={file.additions} deletions={file.deletions} />
@@ -204,6 +213,7 @@ const SectionRow: React.FC<{
 
 export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   files,
+  generatedFiles,
   sections,
   width,
   activeFileIndex,
@@ -450,6 +460,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
         }
         isViewed={viewedFiles.has(item.file.path)}
         annotationCount={annotationCounts.get(item.file.path) ?? 0}
+        isTest={fileKind(item.file.path, generatedFiles) === 'test'}
         onSelect={() => onSelectFile(item.index)}
         onDoubleClick={onDoubleClickFile ? () => onDoubleClickFile(item.index) : undefined}
         onToggleViewed={onToggleViewed ? () => onToggleViewed(item.file.path) : undefined}
@@ -464,21 +475,11 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
     ));
 
   const sectionHeader = (group: SectionGroup) => (
-    <button
-      onClick={() => toggleSection(group)}
-      className="w-full flex items-center gap-1.5 px-2 py-1.5 text-muted-foreground hover:text-foreground transition-colors"
-    >
-      <svg
-        className={`w-2.5 h-2.5 transition-transform ${collapsed.has(group) ? '-rotate-90' : ''}`}
-        fill="none"
-        viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={2}
-      >
-        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-      </svg>
-      <span className="text-[11px] font-medium">{SECTION_META[group].label}</span>
-    </button>
+    <PanelSectionHeader
+      label={SECTION_META[group].label}
+      collapsed={collapsed.has(group)}
+      onToggle={() => toggleSection(group)}
+    />
   );
 
   const panelControls = (

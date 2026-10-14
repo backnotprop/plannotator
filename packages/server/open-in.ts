@@ -23,7 +23,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import {
   OPEN_IN_APPS,
-  getOpenInApp,
+  checkOpenInAppId,
   resolveRevealLabel,
   resolveRevealIcon,
   type OpenInApp,
@@ -31,6 +31,8 @@ import {
   type OpenInPlatform,
 } from "@plannotator/shared/open-in-apps";
 import { resolveOpenInTarget } from "@plannotator/shared/html-assets-node";
+import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isRemoteSession } from "./remote";
 
 export type OpenInLaunchResult = { ok: true } | { ok: false; error: string };
@@ -181,24 +183,6 @@ function spawnDetached(
 }
 
 /**
- * Launch the system-default handler for a path.
- */
-function openSystemDefault(target: string): Promise<OpenInLaunchResult> {
-  const platform = currentPlatform();
-  if (platform === "mac") {
-    return runArgv("open", [target], "default app");
-  }
-  if (platform === "win") {
-    // `start` is a cmd builtin; the empty-string title arg avoids the quoted
-    // target being treated as a window title.
-    return runArgv("cmd", ["/c", "start", "", path.basename(target)], "default app", {
-      cwd: path.dirname(target),
-    });
-  }
-  return runArgv("xdg-open", [target], "default app");
-}
-
-/**
  * Reveal a file in the OS file manager.
  */
 function revealFile(absPath: string): Promise<OpenInLaunchResult> {
@@ -264,22 +248,17 @@ function openWithApp(
 }
 
 /**
- * Open a file in the given app (by catalog id). An unknown or undefined id
- * falls back to the OS default handler.
+ * Open a file in the given app (by catalog id). A missing or unknown id is a
+ * failure, never a launch: there is deliberately no fallback to the OS
+ * default handler, which could execute the file (see checkOpenInAppId).
  */
 export async function openFileInApp(
   absPath: string,
-  appId?: string,
+  appId: string,
 ): Promise<OpenInLaunchResult> {
-  if (!appId) {
-    return openSystemDefault(absPath);
-  }
-
-  const app = getOpenInApp(appId);
-  if (!app) {
-    // Unknown id — fall back to system default.
-    return openSystemDefault(absPath);
-  }
+  const checked = checkOpenInAppId(appId);
+  if (!checked.ok) return { ok: false, error: checked.error };
+  const app = checked.app;
 
   if (app.kind === "file-manager") {
     return revealFile(absPath);
@@ -395,10 +374,18 @@ export interface HandleOpenInOptions {
    * several roots (annotate passes the session's reference roots).
    */
   resolveRoot?: () => string | string[];
+  /**
+   * This server's stale-tab nonce (packages/core/server-session.ts). A body
+   * carrying a different `serverSession` is refused with 409 before anything
+   * launches; a body without one is accepted.
+   */
+  serverSession?: string;
 }
 
 /**
- * POST /api/open-in handler. Resolves + containment-checks the target via
+ * POST /api/open-in handler. Refuses another site's page (including the
+ * sandboxed annotated-HTML frame, which sends `Origin: null`) and a stale tab,
+ * requires a catalog `appId`, resolves + containment-checks the target via
  * resolveOpenInTarget (shared), then launches via openFileInApp.
  */
 export async function handleOpenIn(
@@ -412,11 +399,38 @@ export async function handleOpenIn(
     );
   }
 
+  // Launching an app is a state change on the user's machine: a page on
+  // another site must never reach it with a preflight-free text/plain POST.
+  if (
+    !isSameOriginOrNoOrigin(
+      req.headers.get("origin"),
+      new URL(req.url).host,
+      req.headers.get("sec-fetch-site"),
+    )
+  ) {
+    return Response.json(
+      { ok: false, error: "Cross-origin requests are not allowed" },
+      { status: 403 },
+    );
+  }
+
   let body: { filePath?: unknown; base?: unknown; appId?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return Response.json({ ok: false, error: "Invalid request" }, { status: 400 });
+  }
+  if (!body || typeof body !== "object") {
+    return Response.json({ ok: false, error: "Invalid request" }, { status: 400 });
+  }
+
+  // Stale-tab guard: a tab left open on a reused port must not launch apps
+  // for a session it never showed. Missing is accepted.
+  if (
+    options.serverSession !== undefined &&
+    checkServerSession(body, options.serverSession) === "mismatch"
+  ) {
+    return Response.json(serverSessionMismatchBody(), { status: 409 });
   }
 
   const filePath = typeof body.filePath === "string" ? body.filePath : "";
@@ -424,14 +438,17 @@ export async function handleOpenIn(
     return Response.json({ ok: false, error: "Missing filePath" }, { status: 400 });
   }
   const base = typeof body.base === "string" ? body.base : null;
-  const appId = typeof body.appId === "string" ? body.appId : undefined;
+  const app = checkOpenInAppId(body.appId);
+  if (!app.ok) {
+    return Response.json({ ok: false, error: app.error }, { status: 400 });
+  }
 
   const abs = resolveOpenInTarget(filePath, base, options.resolveRoot);
   if (abs == null) {
     return Response.json({ ok: false, error: "Access denied" }, { status: 403 });
   }
 
-  const result = await openFileInApp(abs, appId);
+  const result = await openFileInApp(abs, app.app.id);
   // A failed launch is a valid request with the result in the body (ok:false),
   // not a server error — return 200 and let the client read `ok`. Matches Pi.
   return Response.json(result);

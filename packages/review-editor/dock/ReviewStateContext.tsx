@@ -245,7 +245,7 @@ export interface ReviewState {
   onAllFilesFileScrolledPast: (filePath: string) => void;
   isAllFilesActive: boolean;
   // Which left panel drives the all-files item order ('list' = sections order).
-  allFilesOrder: 'tree' | 'list';
+  allFilesOrder: import('../components/AllFilesCodeView').AllFilesOrder;
   // All-files collapse-all toggle — the AllFilesCodeView registers its handler
   // here; the dock header's button (ReviewDockRightActions) invokes it.
   allFilesAllCollapsed: boolean;

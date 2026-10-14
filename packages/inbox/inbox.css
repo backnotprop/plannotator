@@ -1300,22 +1300,37 @@ pre code.pn-code[data-keep-layout] {
 .pn-inbox .ib-rw .ib-nrow + .ib-ract { top: 8px; transform: none; height: 26px; }
 /* Quiet rows say why they are there: Read, Archived. */
 .ib-c.ib-qlabel { color: var(--muted-foreground); }
-/* The toast, over the bottom of the window. */
-.ib-toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30; display: flex; width: max-content; align-items: center; gap: 12px; min-height: 42px; max-width: min(620px, calc(100% - 32px)); padding: 8px 8px 8px 14px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.55); font-size: 13.5px; animation: ib-toast-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+/* The toast (design record "inbox-toast"): one 40 px line in the look of Plannotator's other (Sonner) toasts.
+   Toast.tsx centers it over the open pane, 12 px above its foot, or over the list near its bottom; this is
+   the fallback (the window's bottom center). */
+.ib-toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 30; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(520px, calc(100% - 32px)); height: 40px; padding: 0 6px 0 12px; border-radius: 8px; background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.04); font-size: 13px; line-height: 20px; white-space: nowrap; animation: ib-toast-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+:root:not(.light) .ib-toast { box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
 @keyframes ib-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .ib-toast > .ib-ic { color: var(--muted-foreground); flex: none; }
-.ib-toast .ib-tmsg { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.ib-toast .ib-tmsg small { color: var(--muted-foreground); font-size: 12.5px; }
-.ib-toast .ib-tacts { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
-.pn-inbox .ib-toast .ib-tb { height: 28px; padding: 0 10px; border-radius: 6px; color: var(--primary); font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
-.pn-inbox .ib-toast .ib-tb:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
-.pn-inbox .ib-toast .ib-tx { color: var(--muted-foreground); width: 28px; justify-content: center; padding: 0; }
+.ib-toast.ib-toast-warn > .ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
+.ib-toast.ib-toast-solo { padding-right: 14px; }
+/* Over a full-screen file (.ib-view.ib-full is z-index 40): above it, just over its foot strip. */
+.ib-toast.ib-toast-file { z-index: 41; }
+.ib-toast .ib-tsay { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ib-toast .ib-tlead { font-weight: 500; flex: none; }
+.ib-toast .ib-tdetail { color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-toast .ib-tdetail::before { content: "·"; margin-right: 6px; }
+.ib-toast .ib-tacts { display: flex; align-items: center; gap: 2px; margin-left: auto; padding-left: 4px; flex: none; }
+.pn-inbox .ib-toast .ib-tghost, .pn-inbox .ib-toast .ib-tundo { height: 26px; border-radius: 5px; font-size: 12.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.pn-inbox .ib-toast .ib-tghost { padding: 0 8px; color: var(--foreground); }
+.pn-inbox .ib-toast .ib-tghost:hover { background: var(--muted); }
+.pn-inbox .ib-toast .ib-tundo { padding: 0 6px 0 9px; background: var(--foreground); color: var(--card); }
+.pn-inbox .ib-toast .ib-tundo:hover { background: color-mix(in oklch, var(--foreground) 88%, var(--card)); }
+.ib-toast .ib-tundo kbd { font-family: var(--font-mono); font-size: 10.5px; line-height: 14px; padding: 0 4px; border: 1px solid color-mix(in oklch, var(--card) 40%, transparent); border-radius: 4px; opacity: 0.6; }
+/* An error keeps its message whole: it may wrap. */
+.ib-toast.ib-toast-wrap { height: auto; min-height: 40px; padding-top: 9px; padding-bottom: 9px; white-space: normal; }
+.ib-toast-wrap .ib-tsay { overflow-wrap: anywhere; }
+.ib-toast-wrap .ib-tlead { flex: 1 1 auto; min-width: 0; font-weight: 400; }
 @media (prefers-reduced-motion: reduce) { .ib-toast { animation: none; } }
 /* A phone: the toast spans the window above the home indicator, and the key hints go. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-wide { display: none; }
   .ib-toast { left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom)); transform: none; width: auto; max-width: none; animation: none; }
-  .pn-inbox .ib-toast .ib-tb, .pn-inbox .ib-toast .ib-tx { height: 44px; min-width: 44px; }
 }
 
 /* ───────────── A window too narrow for two panes ─────────────
@@ -1608,12 +1623,13 @@ pre code.pn-code[data-keep-layout] {
 
 /* ── Phone polish (follow-ups to the phone layout) ── */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* The toast: Undo beside its words, above the thread's foot whatever the foot's height (Toast.tsx measures
-     it). A short note (Read, Archived) is one line; anything else, an error, wraps. */
-  .ib-toast.ib-toast-phone { min-height: 44px; padding: 0 2px 0 14px; gap: 10px; }
-  .ib-toast-phone .ib-tline { flex: 1; min-width: 0; padding: 7px 0; overflow-wrap: anywhere; }
-  .ib-toast-phone .ib-tline.ib-tone { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .pn-inbox .ib-toast-phone .ib-tb { flex: none; }
+  /* The toast: one 44 px line and Undo (a 44 px target), above the thread's foot whatever the foot's height
+     (Toast.tsx measures it). An error wraps. */
+  .ib-toast.ib-toast-phone { height: 44px; padding: 0 4px 0 14px; font-size: 14px; }
+  .ib-toast.ib-toast-phone.ib-toast-solo { padding-right: 14px; }
+  .ib-toast.ib-toast-phone.ib-toast-wrap { height: auto; min-height: 44px; }
+  .pn-inbox .ib-toast-phone .ib-tundo { position: relative; height: 36px; padding: 0 12px; font-size: 14px; }
+  .pn-inbox .ib-toast-phone .ib-tundo::after { content: ""; position: absolute; inset: -4px; }
   /* The file's reply strip: "ride your next Send" wraps under itself rather than being cut. */
   .ib-vfoot-row .ib-sp { white-space: normal; text-overflow: clip; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   /* 44 px hit areas for small controls that keep their look: the reply's

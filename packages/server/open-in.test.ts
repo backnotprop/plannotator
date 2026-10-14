@@ -139,6 +139,38 @@ async function waitForPidFile(path: string, timeoutMs = 5000): Promise<number> {
   throw new Error(`timed out waiting for ${path}`);
 }
 
+describe("openFileInApp app ids", () => {
+  launchTest("a missing or unknown id is a failure and runs no launcher (no OS-default fallback)", async () => {
+    const shimDir = makeDir();
+    const log = join(shimDir, "launches.log");
+    for (const name of ["open", "xdg-open", "code"]) {
+      const shim = join(shimDir, name);
+      writeFileSync(shim, `#!/bin/sh\necho "${name} $*" >> "${log}"\nexit 0\n`);
+      chmodSync(shim, 0o755);
+    }
+    const target = join(makeDir(), "run.command");
+    writeFileSync(target, "#!/bin/sh\n");
+
+    const oldPath = process.env.PATH;
+    process.env.PATH = shimDir;
+    try {
+      for (const appId of ["", "default", "not-an-app"]) {
+        const result = await openFileInApp(target, appId);
+        expect([appId, result.ok]).toEqual([appId, false]);
+      }
+    } finally {
+      process.env.PATH = oldPath;
+    }
+    let launched = "";
+    try {
+      launched = readFileSync(log, "utf-8");
+    } catch {
+      /* never written: nothing launched */
+    }
+    expect(launched).toBe("");
+  });
+});
+
 describe("openFileInApp launch semantics", () => {
   launchTest(
     "a lingering launcher returns ok within the grace and runs detached from the server's process group",
