@@ -1312,7 +1312,10 @@ describe("pi review server", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(generatedDraft),
       });
-      expect(lateDraftSave.status).toBe(200);
+      // Local Git now has a stable draft target: stale writes are explicitly
+      // rejected, and must still leave the submitted draft tombstoned.
+      expect(lateDraftSave.status).toBe(409);
+      expect(await lateDraftSave.json()).toMatchObject({ ok: false, draftGeneration: 5 });
       const lateDraftLoad = await fetch(`${server.url}/api/draft`);
       expect(lateDraftLoad.status).toBe(404);
       expect(await lateDraftLoad.json()).toEqual({ found: false, draftGeneration: 5 });

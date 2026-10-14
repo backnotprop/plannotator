@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contentHash, getDraftDir, loadDraft, saveDraft } from "./draft";
-import { createReviewDraftSession, deleteReviewDraft, loadReviewDraft, prDraftTargetKey, reviewDraftState, saveReviewDraft } from "./review-draft";
+import { createReviewDraftSession, deleteReviewDraft, loadReviewDraft, localReviewDraftKeys, prDraftTargetKey, reviewDraftState, saveReviewDraft } from "./review-draft";
 import type { PRMetadata } from "./pr-types";
 
 const github: PRMetadata = {
@@ -242,4 +242,37 @@ describe("reviewDraftState (#1590 review, item 2)", () => {
     saveReviewDraft({ patchKey: P1, targetKey: B }, draft(7));
     expect(reviewDraftState({ patchKey: P2, targetKey: B })).toEqual({ found: true, draftGeneration: 7 });
   });
+});
+
+test('editing or deleting a previous local target\'s sidebar comment persists back to that target', () => {
+  const session = createReviewDraftSession();
+  const a = localReviewDraftKeys(P1, 'local-a');
+  const b = localReviewDraftKeys(P1, 'local-b');
+  const onA = { id: 'a', text: 'original', localReviewTarget: a.targetKey };
+  const onB = { id: 'b', text: 'keep', localReviewTarget: b.targetKey };
+  session.save(a, { codeAnnotations: [onA], viewedFiles: ['a.ts'], autoViewSuppressed: ['later.ts'], draftGeneration: 1 }, 'page-1');
+  session.save(b, { codeAnnotations: [{ ...onA, text: 'edited from B' }, onB], viewedFiles: ['b.ts'], autoViewSuppressed: [], draftGeneration: 2 }, 'page-1');
+  const edited = loadReviewDraft(a);
+  expect(edited.found && edited.draft.codeAnnotations).toEqual([{ ...onA, text: 'edited from B' }]);
+  expect(edited).toMatchObject({ draft: { viewedFiles: ['a.ts'], autoViewSuppressed: ['later.ts'] } });
+  session.save(b, { codeAnnotations: [onB], draftGeneration: 3 }, 'page-1');
+  const deleted = loadReviewDraft(a);
+  expect(deleted.found && deleted.draft.codeAnnotations).toEqual([]);
+  expect(deleted).toMatchObject({ draft: { viewedFiles: ['a.ts'], autoViewSuppressed: ['later.ts'] } });
+  expect(loadReviewDraft(b)).toMatchObject({ found: true, draft: { codeAnnotations: [onB] } });
+  session.remove(b, 4, 'page-1');
+  expect(loadReviewDraft(a).found).toBe(false);
+  expect(loadReviewDraft(b).found).toBe(false);
+});
+
+test('a local caller without a page id cannot erase another target by omission or cleanup', () => {
+  const session = createReviewDraftSession();
+  const a = localReviewDraftKeys(P1, 'local-a');
+  const b = localReviewDraftKeys(P1, 'local-b');
+  session.save(a, draft(1));
+  session.save(b, draft(2));
+  expect(loadReviewDraft(a)).toMatchObject({ draft: { codeAnnotations: [{ id: 'a1' }] } });
+  session.remove(b, 3);
+  session.settle(b, 4);
+  expect(loadReviewDraft(a)).toMatchObject({ draft: { codeAnnotations: [{ id: 'a1' }] } });
 });

@@ -13,7 +13,7 @@ import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/h
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
-import { createReviewDraftSession, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
+import { createReviewDraftSession, localGitDraftTargetKey, localReviewDraftKeys, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "../generated/feedback-archive.ts";
@@ -527,14 +527,16 @@ export async function startReviewServer(options: {
 	let originalPRGitRef = options.gitRef;
 	let originalPRError = options.error;
 	let currentPRDiffScope: PRDiffScope = "layer";
-	// Draft keys for the diff on screen (#1590), mirroring the Bun server:
-	// patch key only outside PR mode (unchanged behavior), plus the PR's stable
-	// target key in PR mode. Read late — a PR switch or scope change moves both.
+	// Draft keys for the displayed snapshot (#1590), mirroring Bun. Local Git
+	// identity is captured with the snapshot, never re-read on a draft write.
 	const reviewDrafts = createReviewDraftSession();
-	const currentDraftKeys = (): ReviewDraftKeys => ({
-		patchKey: draftKey,
-		targetKey: isPRMode && prMeta ? prDraftTargetKey(prMeta, currentPRDiffScope) : null,
-	});
+	let localDraftTarget: string | null = null;
+	const currentDraftKeys = (): ReviewDraftKeys => {
+		const patchKey = draftKey;
+		return isPRMode && prMeta
+			? { patchKey, targetKey: prDraftTargetKey(prMeta, currentPRDiffScope) }
+			: localReviewDraftKeys(patchKey, localDraftTarget);
+	};
 	// Monotonic guard for PR scope/switch state writes. Scope requests now park
 	// on long awaits (checkout warmup, full recompute) — a request that resumed
 	// after a NEWER scope select or pr-switch must not overwrite their state.
@@ -562,6 +564,8 @@ export async function startReviewServer(options: {
 	// different commits. A caller-pinned base (`--base` via
 	// initialBaseExplicit) seeds it for the same reason.
 	let baseExplicitlyChosen = options.initialBaseExplicit === true;
+	// Session-wide opt-out, resolved before draft identity and startup probes.
+	const remoteCheckEnabled = resolveGitRemoteCheck(options.gitRemoteCheck === false, loadConfig());
 	const resolveReviewBase = (
 		requestedBase?: string,
 		explicitlyChosen = baseExplicitlyChosen,
@@ -672,8 +676,17 @@ export async function startReviewServer(options: {
 	// Captured once at startup: either by the initial fingerprint capture below
 	// or, when the caller already supplied a fingerprint, right after it.
 	let progressSnapshot: ReturnType<typeof captureProgress> = Promise.resolve(null);
-	const captureDiffFingerprint = (knownFingerprint?: string): void => {
+	const captureDraftTarget = (base = currentBase) => isPRMode || options.diffType === STATIC_PATCH_DIFF_TYPE ? Promise.resolve(null) : localGitDraftTargetKey({
+		diffType: currentDiffType,
+		base,
+		defaultBase: remoteCheckEnabled && !baseExplicitlyChosen ? detectedCompareTarget() : undefined,
+		cwd: options.gitContext ? options.gitContext.cwd ?? process.cwd() : undefined,
+		vcsType: sessionVcsType,
+		workspaceRoot: workspace?.root,
+	}, reviewRuntime.runGit);
+	const captureDiffFingerprint = (knownFingerprint?: string, knownDraftTarget?: string | null): void => {
 		progressSnapshot = captureProgress();
+		if (knownDraftTarget !== undefined) localDraftTarget = knownDraftTarget;
 		// A fingerprint capture marks a committed review-view change. Stop work
 		// for the prior snapshot even when the new view cannot run CallDiff.
 		callFlowService.cancelAll();
@@ -696,8 +709,13 @@ export async function startReviewServer(options: {
 			}
 		});
 	};
+	// Host control is synchronous too: resolve identity before serving, then
+	// publish each new target atomically with its patch at a snapshot change.
+	localDraftTarget = await captureDraftTarget();
 	if (currentFingerprint === null) captureDiffFingerprint();
-	else progressSnapshot = captureProgress();
+	else {
+		progressSnapshot = captureProgress();
+	}
 
 	// --- Base staleness vs the remote (mirrors Bun review.ts) -----------------
 	// `origin/<default>` is GitHub's state as of the last fetch. The startup
@@ -710,10 +728,6 @@ export async function startReviewServer(options: {
 	// Interval policy (base cadence + failure backoff) is shared with the Bun
 	// runtime in review-core so the two cannot drift.
 	let remoteBaseCheckIntervalMs = REMOTE_BASE_CHECK_INTERVAL_MS;
-	// Session-wide opt-out (#1553): `--no-git-remote-check`, PLANNOTATOR_GIT_REMOTE_CHECK,
-	// or `{ "gitRemoteCheck": false }`. Resolved ONCE so a config edit mid-session
-	// cannot start network traffic the user opted out of at launch.
-	const remoteCheckEnabled = resolveGitRemoteCheck(options.gitRemoteCheck === false, loadConfig());
 	// Session shape: a plain local git review, so a remote base exists to talk
 	// about at all. Kept separate from the opt-out because an EXPLICIT Fetch is
 	// the user asking for the network — the opt-out is about the automatic
@@ -906,6 +920,7 @@ export async function startReviewServer(options: {
 								gitCwd,
 								{ hideWhitespace: currentHideWhitespace, captureFileIdentities: true },
 							);
+							const rebuiltDraftTarget = await captureDraftTarget(remote);
 							if (!baseEverSwitched) {
 								currentBase = remote;
 								currentPatch = rebuilt.patch;
@@ -919,7 +934,7 @@ export async function startReviewServer(options: {
 								// new id and stay fresh. That per-client signal is what lets
 								// the fingerprint re-baseline unconditionally here.
 								draftKey = contentHash(currentPatch);
-								captureDiffFingerprint();
+								captureDiffFingerprint(undefined, rebuiltDraftTarget);
 							}
 						} catch {
 							/* keep the initial base+patch — they still match each other */
@@ -2352,6 +2367,7 @@ export async function startReviewServer(options: {
 			const servedPRDiffScope = currentPRDiffScope;
 			const servedSnapshotId = currentSnapshotId();
 			const servedGitContext = clientGitContext;
+			const servedDraftTarget = localDraftTarget;
 			const sections = await buildSectionsSidecar(servedBase, servedDiffType as string);
 			const commitInfo = await buildCommitInfoSidecar(servedDiffType as string);
 			const generatedFiles = await buildGeneratedFilesSidecar(servedPatch, servedDiffType as string);
@@ -2361,6 +2377,7 @@ export async function startReviewServer(options: {
 				aiEnabled,
 				gitRef: servedGitRef,
 				snapshotId: servedSnapshotId,
+				localDraftTarget: servedDraftTarget,
 				origin: options.origin ?? "pi",
 				mode: isWorkspaceMode ? "workspace" : undefined,
 				diffType: hasLocalAccess || isWorkspaceMode || isStaticPatchMode ? servedDiffType : undefined,
@@ -2816,6 +2833,11 @@ export async function startReviewServer(options: {
 					getSemanticDiffAdvert(newType as DiffType),
 					getCallFlowAdvert(newType as DiffType),
 				]);
+				const nextDraftTarget = isPRMode ? null : await localGitDraftTargetKey({
+					diffType: newType, base: nextBase, cwd: options.gitContext?.cwd ?? process.cwd(),
+					defaultBase: remoteCheckEnabled && !nextBaseExplicitlyChosen ? detectedCompareTarget() : undefined,
+					vcsType: sessionVcsType,
+				}, reviewRuntime.runGit);
 				// Final guard: a newer switch during trailing awaits wins.
 				if (switchEpoch !== diffSwitchEpoch) {
 					json(res, { superseded: true });
@@ -2862,7 +2884,7 @@ export async function startReviewServer(options: {
 				if (updatedContext && sessionVcsType === "gitbutler") {
 					currentContextRevision = updatedContextRevision ?? "";
 				}
-				captureDiffFingerprint(result.fingerprint);
+				captureDiffFingerprint(result.fingerprint, nextDraftTarget);
 				json(res, {
 					rawPatch: currentPatch,
 					// Snapshot args: robust against a future await sneaking in
@@ -2870,6 +2892,8 @@ export async function startReviewServer(options: {
 					aiReviewContext: buildCurrentAiReviewContext(result.patch, currentBase),
 					gitRef: currentGitRef,
 					snapshotId: currentSnapshotId(),
+					localDraftTarget: nextDraftTarget,
+					...(nextDraftTarget && { draftState: reviewDrafts.state(localReviewDraftKeys(draftKey, nextDraftTarget)) }),
 					approvalNotesSupported,
 					serverSession,
 					imagePreviewSupported,
@@ -3868,7 +3892,12 @@ export async function startReviewServer(options: {
 			});
 			json(res, result.body, result.status);
 		} else if (url.pathname === "/api/draft") {
-			await handleReviewDraftRequest(req, res, currentDraftKeys(), reviewDrafts);
+			const keys = currentDraftKeys();
+			if (url.searchParams.has("target") && url.searchParams.get("target") !== keys.targetKey) {
+				json(res, { code: "draft_target_changed", error: "Review draft target changed" }, 409);
+				return;
+			}
+			await handleReviewDraftRequest(req, res, keys, reviewDrafts);
 		} else if (url.pathname === "/favicon.png") {
 			handleFavicon(res);
 		} else if (
@@ -3953,7 +3982,7 @@ export async function startReviewServer(options: {
 			// Decision-only line: dismissal rate is behavior data, and a
 			// contentless failure must not change the legacy draft behavior.
 			archiveReviewSubmission("", [], "dismissed");
-			reviewDrafts.settle(currentDraftKeys(), readDraftGenerationFromUrl(req));
+			reviewDrafts.settle(currentDraftKeys(), readDraftGenerationFromUrl(req), url.searchParams.get("client"));
 			resolveDecision({ approved: false, feedback: '', annotations: [], exit: true });
 			json(res, { ok: true });
 		} else if (url.pathname === "/api/feedback" && req.method === "POST") {
@@ -3985,7 +4014,7 @@ export async function startReviewServer(options: {
 					annotationList,
 					approved ? (hasContent ? "approved-with-notes" : "lgtm") : "feedback",
 				);
-				if (durable) reviewDrafts.settle(currentDraftKeys(), readDraftGenerationFromBody(body));
+				if (durable) reviewDrafts.settle(currentDraftKeys(), readDraftGenerationFromBody(body), url.searchParams.get("client"));
 				resolveDecision({
 					approved,
 					feedback: feedbackText,

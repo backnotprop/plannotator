@@ -216,8 +216,8 @@ export function handleDraftRequest(
 }
 
 /**
- * Code-review /api/draft (#1590). Mirrors the Bun review route: outside PR
- * mode the keys carry only the patch hash and every call degrades to the
+ * Code-review /api/draft (#1590). Mirrors the Bun review route: unsupported
+ * surfaces carry only the patch hash and every call degrades to the
  * plain draft functions, byte-identical to handleDraftRequest.
  */
 export function handleReviewDraftRequest(
@@ -226,12 +226,13 @@ export function handleReviewDraftRequest(
 	keys: ReviewDraftKeys,
 	drafts: ReturnType<typeof createReviewDraftSession>,
 ): Promise<void> | void {
+	const clientId = new URL(req.url ?? "/", "http://localhost").searchParams.get("client");
 	if (req.method === "POST") {
 		return parseBody(req)
 			.then((body) => {
-				const saved = drafts.save(keys, body);
-				// PR mode reports a rejected (stale-generation) save; local
-				// reviews keep the historical always-ok response.
+				const saved = drafts.save(keys, body, clientId);
+				// Target-backed drafts report stale saves; unsupported surfaces
+				// retain the historical always-ok response.
 				if (!saved && keys.targetKey) {
 					json(res, { ok: false, error: "stale draft generation", ...drafts.state(keys) }, 409);
 					return;
@@ -244,10 +245,10 @@ export function handleReviewDraftRequest(
 				json(res, { error: message }, 500);
 			});
 	} else if (req.method === "DELETE") {
-		drafts.remove(keys, readDraftGenerationFromUrl(req));
+		drafts.remove(keys, readDraftGenerationFromUrl(req), clientId);
 		json(res, { ok: true });
 	} else {
-		const loaded = drafts.load(keys);
+		const loaded = drafts.load(keys, clientId);
 		if (loaded.found) {
 			json(res, loaded.draft);
 			return;
