@@ -113,7 +113,9 @@
 .pn-inbox .ib-pmore:focus-visible { outline-offset: 0; }
 .ib-projrow:hover .ib-pmore, .ib-projrow:has(:focus-visible) .ib-pmore, .ib-projrow[data-menu] .ib-pmore { opacity: 1; }
 .ib-projrow:hover .ib-proj, .ib-projrow:has(:focus-visible) .ib-proj, .ib-projrow[data-menu] .ib-proj { padding-right: 32px; }
-.ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { display: none; }
+/* The count steps aside for ⋯ for the eye only: it stays in the row button's accessible name ("pando 1"), which a
+   screen reader announces exactly when keyboard focus lands on the row. */
+.ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ib-projrow:hover .ib-proj:not(.ib-on) { background: color-mix(in oklch, var(--muted) 45%, transparent); }
 .ib-projrow[data-menu] .ib-proj:not(.ib-on) { background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); }
 .ib-projrow[data-menu] .ib-pmore { color: var(--foreground); }
@@ -1605,7 +1607,7 @@ pre code.pn-code[data-keep-layout] {
   /* The project menu on a phone: ⋯ always shown (a 44 px target after the count), the menu a sheet from the
      bottom edge titled by the project, with 48 px items. No right-click and no long-press. */
   .ib-projrow > .ib-proj, .ib-projrow:has(:focus-visible) > .ib-proj, .ib-projrow[data-menu] > .ib-proj { padding-right: 46px; }
-  .ib-projrow .ib-proj .ib-n, .ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { display: inline; }
+  .ib-projrow .ib-proj .ib-n, .ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: static; width: auto; height: auto; margin: 0 0 0 auto; overflow: visible; clip-path: none; }
   .pn-inbox .ib-pmore { opacity: 1; top: 0; right: 0; width: 44px; height: 44px; border-radius: 8px; }
   .ib-pmore .ib-ic { width: 20px; height: 20px; }
   .ib-pm-scrim { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 0.3); }

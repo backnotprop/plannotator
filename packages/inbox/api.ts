@@ -49,6 +49,8 @@ export interface ProjectBatchAnswer<B> {
   batch: B;
   threads: InboxListRow[];
   replayed: boolean;
+  /** The batch stopped partway: `batch` names what it changed (Undo covers those); the rest did not change. */
+  error?: { code: string; message: string };
 }
 
 export interface ListModel {

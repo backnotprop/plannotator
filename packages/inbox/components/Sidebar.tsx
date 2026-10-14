@@ -165,7 +165,10 @@ export function Sidebar(props: SidebarProps) {
         {firstRun ? (
           <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
         ) : shown.length === 0 ? (
-          <div className="ib-side-empty" data-projects-hidden="">Nothing open. Archived projects are in Settings → Archived.</div>
+          <div className="ib-side-empty" data-projects-hidden="">
+            {/* Projects whose threads were deleted rather than archived are not in Settings → Archived. */}
+            {props.projects.some((project) => (project.archived ?? 0) > 0) ? 'Nothing open. Archived projects are in Settings → Archived.' : 'Nothing open.'}
+          </div>
         ) : (
           shown.map((project) => {
             const n = props.projectCounts.get(project.id) ?? 0;

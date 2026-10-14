@@ -1101,14 +1101,18 @@ function Inbox() {
     const openThread = routeRef.current.thread;
     let taken: string[];
     let undo: () => Promise<unknown>;
+    /** The batch stopped partway: Undo still covers what it changed, and the toast says the rest did not change. */
+    let incomplete: string | null = null;
     try {
       if (action === 'read') {
         const answer = await inboxApi.markProjectRead(projectId, newBatchId());
         taken = answer.batch.read;
+        incomplete = answer.error?.message ?? null;
         undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read);
       } else {
         const answer = await inboxApi.archiveProject(projectId, newBatchId());
         taken = [...answer.batch.resolved, ...answer.batch.read];
+        incomplete = answer.error?.message ?? null;
         undo = () => inboxApi.unarchiveProject(projectId, answer.batch);
         // The list leaves archived threads out; while a thread is open each taken row stays where it is,
         // shown archived, and goes when the person leaves the thread (as the single Archive does).
@@ -1123,12 +1127,15 @@ function Inbox() {
     }
     await afterWrite();
     if (taken.length === 0) {
-      say(action === 'read' ? `Nothing in ${name} waits on you.` : `Nothing in ${name} to archive.`);
+      if (incomplete) showToast({ icon: 'warn', lead: `${name} did not change`, detail: incomplete, wrap: true });
+      else say(action === 'read' ? `Nothing in ${name} waits on you.` : `Nothing in ${name} to archive.`);
       return;
     }
-    const copy = projectBatchToast(action, name, before.filter((row) => taken.includes(row.thread_id)));
+    const copy = projectBatchToast(action, name, taken.length, before.filter((row) => taken.includes(row.thread_id)));
     showToast({
       ...copy,
+      // Stopped partway: the warning, and why, whole (it may wrap); Undo still covers what did apply.
+      ...(incomplete ? { icon: 'warn' as const, detail: `${incomplete} · ${name}`, wrap: true } : {}),
       onUndo: () => {
         void (async () => {
           try {

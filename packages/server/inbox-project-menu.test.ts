@@ -173,6 +173,57 @@ describe("the project menu's routes", () => {
     expect(bad.status).toBe(422);
   });
 
+  test("a write that fails partway: what applied is answered (with its notes and Undo), flagged, and remembered for the batch_id", async () => {
+    const w = await setup();
+    const real = w.store.markRead.bind(w.store);
+    let calls = 0;
+    // The second Mark read of the loop fails, as a disk error would.
+    w.store.markRead = ((threadId: string, read: boolean) => {
+      calls += 1;
+      if (read && calls === 2) throw new Error("EIO: the disk went away");
+      return real(threadId, read);
+    }) as typeof w.store.markRead;
+    const res = await post(w.server, `/api/inbox/projects/${w.billing}/read`, { batch_id: "b-partial" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { batch: { read: string[] }; error?: { code: string; message: string } };
+    expect(body.batch.read).toHaveLength(1);
+    expect(body.error?.code).toBe("batch_incomplete");
+    // The cause stays in the server's log, never the page.
+    expect(body.error?.message).not.toContain("EIO");
+    const applied = body.batch.read[0]!;
+    expect(w.store.listRow(applied)!.read_at).not.toBeNull();
+    // A retry with the same batch_id answers the same partial answer and writes nothing.
+    const cursor = w.store.cursor();
+    const retry = (await (await post(w.server, `/api/inbox/projects/${w.billing}/read`, { batch_id: "b-partial" })).json()) as typeof body & { replayed: boolean };
+    expect(retry.replayed).toBe(true);
+    expect(retry.batch.read).toEqual(body.batch.read);
+    expect(w.store.cursor()).toBe(cursor);
+    w.store.markRead = real;
+    // The thread that applied gets its set-aside note.
+    await Bun.sleep(DELAY + 200);
+    expect(w.store.thread(applied)!.messages.some((m) => m.body.startsWith(INBOX_SET_ASIDE_HEADING))).toBe(applied !== w.news);
+    // Its Undo covers exactly what applied.
+    const undo = (await (await post(w.server, `/api/inbox/projects/${w.billing}/unread`, { threads: body.batch.read })).json()) as { skipped: string[] };
+    expect(undo.skipped).toEqual([]);
+    expect(w.store.listRow(applied)!.read_at ?? null).toBeNull();
+  });
+
+  test("Archive all that fails partway answers the threads it resolved", async () => {
+    const w = await setup();
+    const real = w.store.resolveThread.bind(w.store);
+    let calls = 0;
+    w.store.resolveThread = ((id: string, resolved: boolean) => {
+      calls += 1;
+      if (resolved && calls === 3) throw new Error("ENOSPC");
+      return real(id, resolved);
+    }) as typeof w.store.resolveThread;
+    const body = (await (await post(w.server, `/api/inbox/projects/${w.billing}/resolve`, { resolved: true })).json()) as { batch: { resolved: string[]; read: string[] }; error?: { code: string } };
+    w.store.resolveThread = real;
+    expect(body.batch.resolved).toHaveLength(2);
+    expect(body.error?.code).toBe("batch_incomplete");
+    for (const id of body.batch.resolved) expect(w.store.message(id)!.resolved_at).not.toBeNull();
+  });
+
   test("an Undo touches only the threads it names, and only this project's", async () => {
     const w = await setup();
     // The other project's thread named in billing's Undo: skipped, untouched.

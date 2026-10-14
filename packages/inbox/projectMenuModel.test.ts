@@ -68,11 +68,16 @@ test('projectsWithReadable: a project counts when single Mark read is offered on
 });
 
 describe('projectBatchToast', () => {
+  test("the count is the server's: a thread taken that the window's last read did not hold still counts", () => {
+    const copy = projectBatchToast('archive', 'pando', 3, [row({})]);
+    expect(copy.lead).toBe('Archived 3 threads');
+  });
+
   const asks = (over: Partial<InboxListRow['questions']>) => ({ open: 1, picked: 0, sent: 0, closed: 0, stopped: false, holds_up: [] as string[], prompt: 'Q?', ...over });
 
   test('Mark all as read: the count, the questions it closed; a phone line', () => {
     const rows = [row({ section: 'waiting', questions: asks({ open: 2 }) }), row({ questions: asks({ open: 0, picked: 1 }), answered_not_sent: true })];
-    const copy = projectBatchToast('read', 'pando', rows);
+    const copy = projectBatchToast('read', 'pando', rows.length, rows);
     expect(copy.lead).toContain('2 threads');
     expect(copy.detail).toContain('pando');
     expect(copy.detail).toContain('3 questions');
@@ -83,23 +88,23 @@ describe('projectBatchToast', () => {
   });
 
   test('an agent stopped, or work held up, makes it a warning naming that', () => {
-    const stopped = projectBatchToast('read', 'pando', [row({ section: 'stopped', questions: asks({ stopped: true }) }), row({})]);
+    const stopped = projectBatchToast('read', 'pando', 2, [row({ section: 'stopped', questions: asks({ stopped: true }) }), row({})]);
     expect(stopped.icon).toBe('warn');
     expect(stopped.detail).toContain('Claude Code was stopped');
-    const two = projectBatchToast('archive', 'pando', [row({ section: 'stopped', questions: asks({ stopped: true }) }), row({ section: 'stopped', questions: asks({ stopped: true }) })]);
+    const two = projectBatchToast('archive', 'pando', 2, [row({ section: 'stopped', questions: asks({ stopped: true }) }), row({ section: 'stopped', questions: asks({ stopped: true }) })]);
     expect(two.detail).toContain('2 agents were stopped');
-    const held = projectBatchToast('read', 'pando', [row({ section: 'holding', questions: asks({ holds_up: ['deploy', 'billing'] }) })]);
+    const held = projectBatchToast('read', 'pando', 1, [row({ section: 'holding', questions: asks({ holds_up: ['deploy', 'billing'] }) })]);
     expect(held.icon).toBe('warn');
     expect(held.detail).toContain('2 things');
   });
 
   test('Archive all says the project comes back, with nothing closed; one thread is singular', () => {
-    const copy = projectBatchToast('archive', 'ux-meeting', [row({ section: 'quiet', unseen: 0 })]);
+    const copy = projectBatchToast('archive', 'ux-meeting', 1, [row({ section: 'quiet', unseen: 0 })]);
     expect(copy.lead).toBe('Archived 1 thread');
     expect(copy.detail).toContain('ux-meeting');
     expect(copy.icon).toBe('archive');
     // The warning or the questions come before the project, so a long project name is what "…" cuts.
-    const warned = projectBatchToast('archive', 'a-very-long-project-name', [row({ section: 'stopped', questions: asks({ stopped: true }) })]);
+    const warned = projectBatchToast('archive', 'a-very-long-project-name', 1, [row({ section: 'stopped', questions: asks({ stopped: true }) })]);
     expect(warned.detail.indexOf('was stopped')).toBeLessThan(warned.detail.indexOf('a-very-long-project-name'));
   });
 });

@@ -50,15 +50,18 @@ export interface ProjectBatchToast {
 }
 
 /**
- * The toast after a batch, from the rows as they were before it (`rows`:
- * the threads the batch took), in the approved one-line toast style
+ * The toast after a batch: `taken` is how many threads the server says the
+ * batch took (its answer's ids), and `rows` the list's rows for those as they
+ * were before it (the window may not have every one: a thread that arrived
+ * since its last read), which give the warning and the questions closed. In
+ * the approved one-line toast style
  * (`.product/approved/inbox-toast/`: an icon, a bold lead, a muted detail
  * cut with "…"). The detail leads with what matters most (a warning, then
  * the questions closed), then the project, so a long project name is what
  * the "…" cuts.
  */
-export function projectBatchToast(action: ProjectAction, projectName: string, rows: readonly InboxListRow[]): ProjectBatchToast {
-  const threads = plural(rows.length, 'thread');
+export function projectBatchToast(action: ProjectAction, projectName: string, taken: number, rows: readonly InboxListRow[]): ProjectBatchToast {
+  const threads = plural(taken, 'thread');
   // Questions still waiting on the person in the threads taken: Mark read and the archive close them.
   const questions = rows.reduce((sum, row) => sum + row.questions.open + row.questions.picked, 0);
   const stopped = rows.filter((row) => row.questions.stopped && row.questions.open > 0);

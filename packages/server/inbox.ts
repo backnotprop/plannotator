@@ -1610,10 +1610,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const rows = (ids: readonly string[]) => ids.map((id) => store.listRow(id)).filter((row): row is InboxListRow => row !== null);
         const folder = () => projectFolders().find((p) => p.id === projectId) ?? null;
         let answer: Record<string, unknown>;
+        // A batch that stopped partway (a write failed): the threads it changed get their notes, and the
+        // answer names them with `error`, so the window offers Undo for what did apply and says the rest
+        // did not change. The cause goes to stderr, never the page.
+        const incomplete = (error: string | undefined) => {
+          if (error === undefined) return {};
+          process.stderr.write(`Inbox: the project menu's batch on ${projectId} stopped partway: ${error}\n`);
+          return { error: { code: "batch_incomplete", message: "Stopped partway; the other threads did not change." } };
+        };
         if (action === "read") {
-          const batch = markProjectRead(store, projectId);
+          const { error, ...batch } = markProjectRead(store, projectId);
           for (const id of batch.read) scheduleSetAside(id);
-          answer = { project: folder(), batch, threads: rows(batch.read) };
+          answer = { project: folder(), batch, threads: rows(batch.read), ...incomplete(error) };
         } else if (action === "unread") {
           const ids = threadIdList(body.threads, "threads");
           const result = unmarkProjectRead(store, projectId, ids);
@@ -1621,10 +1629,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         } else {
           if (body.resolved !== undefined && typeof body.resolved !== "boolean") throw new InboxError("validation_error", "resolved: must be a boolean.", { field: "resolved" });
           if (body.resolved !== false) {
-            const batch = archiveProject(store, projectId);
+            const { error, ...batch } = archiveProject(store, projectId);
             // A came-back thread sent back by Mark read: its set-aside note, as for the single action.
             for (const id of batch.read) scheduleSetAside(id);
-            answer = { project: folder(), batch, threads: rows([...batch.resolved, ...batch.read]) };
+            answer = { project: folder(), batch, threads: rows([...batch.resolved, ...batch.read]), ...incomplete(error) };
           } else {
             const named = body.threads;
             if (!named || typeof named !== "object" || Array.isArray(named)) {

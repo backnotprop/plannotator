@@ -111,7 +111,8 @@ export function ProjectRow(props: ProjectRowProps) {
 function ProjectMenuItems({ name, readable, onAction }: { name: string; readable: boolean; onAction: (action: ProjectAction) => void }) {
   return (
     <>
-      <div className="ib-pm-title" dir="auto">
+      {/* The popup is named by the project already (aria-label): the title is for the eye only. */}
+      <div className="ib-pm-title" dir="auto" aria-hidden="true">
         {name}
       </div>
       <Menu.Item className="ib-pmi" label="Mark all as read" disabled={!readable} onClick={() => onAction('read')} data-project-action="read">

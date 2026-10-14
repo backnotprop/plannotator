@@ -101,9 +101,16 @@ test('the keyboard reaches ⋯, Enter opens the menu, Escape gives focus back', 
   const more = billing.locator('.ib-pmore');
   await expect(more).toHaveCSS('opacity', '0');
   await billing.locator('.ib-proj').focus();
+  // The count steps aside for ⋯ for the eye only: a screen reader still hears it with the project.
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(billing.locator('.ib-proj')).toBeFocused();
+  await expect(more).toHaveCSS('opacity', '1');
+  await expect(billing.locator('.ib-proj')).toHaveAccessibleName('billing 2');
   await page.keyboard.press('Tab');
   await expect(more).toBeFocused();
   await expect(more).toHaveCSS('opacity', '1');
+  await expect(billing.locator('.ib-proj')).toHaveAccessibleName('billing 2');
   await page.keyboard.press('Enter');
   const menu = page.locator('[data-project-menu]');
   await expect(menu).toBeVisible();

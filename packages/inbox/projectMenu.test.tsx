@@ -375,4 +375,30 @@ test.skipIf(!hasDom)('a phone: ⋯ always shown on every row, the menu a sheet t
   const positioner = menu()!.closest('.ib-pm-pos')!;
   expect(positioner.hasAttribute('data-phone')).toBe(true);
   expect(menu()!.querySelector('.ib-pm-title')!.textContent).toBe(projectRow()!.querySelector('.ib-name')!.textContent);
+  // The popup is named by the project; the title is for the eye only.
+  expect(menu()!.querySelector('.ib-pm-title')!.getAttribute('aria-hidden')).toBe('true');
+  expect(menu()!.getAttribute('aria-label')).toBe(projectRow()!.querySelector('.ib-name')!.textContent);
+});
+
+test.skipIf(!hasDom)('every project hidden with nothing archived (threads deleted): the line does not send the person to Settings → Archived', async () => {
+  const { Sidebar } = await import('./components/Sidebar');
+  const { SidebarProvider } = await import('./shell/sidebar');
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  const folder = { id: 'prj_gone', key: 'gone-abc123', name: 'gone', root: '/tmp/gone', created_at: '2026-10-14T10:00:00.000Z', threads: 0, unread: 0, listed: 0, archived: 0 };
+  const noop = () => {};
+  const draw = (archived: number) =>
+    act(() =>
+      root!.render(
+        <SidebarProvider>
+          <Sidebar page="inbox" projectId={null} inboxCount={0} decisionsCount={0} projects={[{ ...folder, archived }]} projectCounts={new Map()} update={null} restarting={false} updated={null} onInbox={noop} onProject={noop} onSettings={noop} onDecisions={noop} onUpdate={noop} onWhatsNew={noop} onProjectAction={noop} />
+        </SidebarProvider>,
+      ),
+    );
+  root = createRoot(host);
+  draw(0);
+  expect(document.querySelector('[data-projects-hidden]')!.textContent).toBe('Nothing open.');
+  draw(2);
+  expect(document.querySelector('[data-projects-hidden]')!.textContent).toBe('Nothing open. Archived projects are in Settings → Archived.');
 });

@@ -31,6 +31,12 @@ import type { InboxStore } from "./store";
 export interface ProjectReadBatch {
   /** The threads marked read, in list order. */
   read: string[];
+  /**
+   * The loop stopped partway (a write failed): the threads above are the
+   * ones it changed, which the Undo and the set-aside notes still cover; the
+   * rest did not change. Absent when every thread was done.
+   */
+  error?: string;
 }
 
 export interface ProjectArchiveBatch {
@@ -38,6 +44,13 @@ export interface ProjectArchiveBatch {
   resolved: string[];
   /** The threads that came back from the archive, marked read (back to the archive). */
   read: string[];
+  /** As for ProjectReadBatch: the loop stopped partway. */
+  error?: string;
+}
+
+/** Why a write in the loop failed, for the server's log (never the page). */
+function failure(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export interface ProjectUndoResult {
@@ -57,7 +70,12 @@ export function markProjectRead(store: InboxStore, projectId: string): ProjectRe
   const read: string[] = [];
   for (const row of projectRows(store, projectId)) {
     if (!inboxRowOffersMarkRead(row)) continue;
-    store.markRead(row.thread_id, true);
+    try {
+      store.markRead(row.thread_id, true);
+    } catch (error) {
+      // A failed write stops the batch; what was done stays done, and is answered so it can be undone.
+      return { read, error: failure(error) };
+    }
     read.push(row.thread_id);
   }
   return { read };
@@ -69,12 +87,16 @@ export function archiveProject(store: InboxStore, projectId: string): ProjectArc
   const read: string[] = [];
   for (const row of projectRows(store, projectId)) {
     if (inboxRowArchived(row)) continue;
-    if (row.resolved_at !== null) {
-      store.markRead(row.thread_id, true);
-      read.push(row.thread_id);
-    } else {
-      store.resolveThread(row.thread_id, true);
-      resolved.push(row.thread_id);
+    try {
+      if (row.resolved_at !== null) {
+        store.markRead(row.thread_id, true);
+        read.push(row.thread_id);
+      } else {
+        store.resolveThread(row.thread_id, true);
+        resolved.push(row.thread_id);
+      }
+    } catch (error) {
+      return { resolved, read, error: failure(error) };
     }
   }
   return { resolved, read };
