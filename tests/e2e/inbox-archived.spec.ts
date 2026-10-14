@@ -61,9 +61,16 @@ async function listed(page: Page): Promise<string[]> {
   return page.locator('.ib-lbody [data-row]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-row') ?? ''));
 }
 
+/**
+ * Unfold Quiet, every caller's list holds it. Waits for the band first: right
+ * after a reload the list may not be drawn yet, and a bare count() then read 0,
+ * skipped the click, and left Quiet folded (its rows missing from `listed`).
+ */
 const openQuiet = async (page: Page) => {
   const band = page.locator('[data-section-id="quiet"] .ib-band');
-  if ((await band.count()) && (await band.getAttribute('aria-expanded')) !== 'true') await band.click();
+  await expect(band).toBeVisible();
+  if ((await band.getAttribute('aria-expanded')) !== 'true') await band.click();
+  await expect(band).toHaveAttribute('aria-expanded', 'true');
 };
 
 /** Archive a thread through the window's own route (the thread id is its first message's). */
