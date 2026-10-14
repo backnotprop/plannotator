@@ -48,23 +48,35 @@ export interface MarkReadToast {
 }
 
 /**
+ * Where the thread marked read was when the person marked it:
+ * - `open`: it is the thread open on screen (its header names it);
+ * - `held`: another thread is open, so the list holds still (settle.ts) and
+ *   the row has not moved yet;
+ * - `list`: no thread is open, and the row has moved.
+ */
+export type MarkReadPlace = 'open' | 'held' | 'list';
+
+/**
  * The toast after Mark read (design record "inbox-toast", approved
- * 2026-10-14), from the row as it was before (`before`). `deferred`: a thread
- * is open, so the list holds still and the row moves when the list next
- * settles (settle.ts); the toast says where it goes (the header names the
- * thread). From a row, the subject says which one moved. What the agent is
- * told is the thread's Read banner's to say.
+ * 2026-10-14), from the row as it was before (`before`). On the open thread
+ * it says where the row goes (the header names the thread); on any other row
+ * the subject says which one, since the toast sits over the open thread's
+ * pane. What the agent is told is the thread's Read banner's to say.
  */
 export function markReadToast(
   before: Pick<InboxListRow, 'subject' | 'author' | 'questions'> & { resolved_at?: string | null },
-  deferred = false,
+  place: MarkReadPlace,
 ): MarkReadToast {
+  const subject = `“${before.subject ?? '(no subject)'}”`;
+  const warn = before.questions.stopped || before.questions.holds_up.length > 0;
+  // Another thread is open: name the row marked, or the toast reads as if the open thread was.
+  if (place === 'held') return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn };
   if (before.questions.stopped) return { lead: 'Marked read', phoneLead: 'Read', detail: `${agentName(before.author)} was stopped`, warn: true };
   if (before.questions.holds_up.length > 0) {
     return { lead: 'Marked read', phoneLead: 'Read', detail: `Held up ${plural(before.questions.holds_up.length, 'thing')}`, warn: true };
   }
   // A thread that came back from the archive goes back there; any other goes to Quiet.
   const archived = (before.resolved_at ?? null) !== null;
-  if (deferred) return { lead: 'Marked read', phoneLead: 'Read', detail: archived ? 'Goes back to Archived' : 'Moves to Quiet', warn: false };
-  return { lead: archived ? 'Back in Archived' : 'Moved to Quiet', detail: `“${before.subject ?? '(no subject)'}”`, warn: false };
+  if (place === 'open') return { lead: 'Marked read', phoneLead: 'Read', detail: archived ? 'Goes back to Archived' : 'Moves to Quiet', warn: false };
+  return { lead: archived ? 'Back in Archived' : 'Moved to Quiet', detail: subject, warn: false };
 }

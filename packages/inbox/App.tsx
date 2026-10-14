@@ -1001,7 +1001,7 @@ function Inbox() {
   const showToast = (next: Omit<InboxToastModel, 'id'>, ms = MARK_READ_UNDO_MS) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ ...next, id: Date.now() });
-    say(toastSpeech(next));
+    say(toastSpeech(next, phone));
     toastTimer.current = setTimeout(() => {
       toastTimer.current = null;
       setToast(null);
@@ -1023,7 +1023,9 @@ function Inbox() {
   const markRead = async (threadId: string, read: boolean) => {
     const before = rowOf(threadId);
     // With a thread open the list holds still: the row moves to Quiet when the list next settles.
-    const deferred = routeRef.current.thread !== null;
+    const open = routeRef.current.thread;
+    const deferred = open !== null;
+    const place = threadId === open ? 'open' : deferred ? 'held' : 'list';
     try {
       await inboxApi.markRead(threadId, read);
     } catch (cause) {
@@ -1038,7 +1040,7 @@ function Inbox() {
       return;
     }
     if (!before) return;
-    const { warn, ...copy } = markReadToast(before, deferred);
+    const { warn, ...copy } = markReadToast(before, place);
     showToast({
       ...copy,
       icon: warn ? 'warn' : 'check',
@@ -1823,7 +1825,7 @@ function Inbox() {
           onClosed={() => setAgentNote('shown')}
         />
       )}
-      {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} />}
+      {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} threadRouted={route.page === 'inbox' && !!route.thread} />}
       <SearchHost
         mounted={searchMounted}
         open={searchOpen}

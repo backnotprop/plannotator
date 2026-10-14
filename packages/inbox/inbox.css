@@ -1275,6 +1275,8 @@ pre code.pn-code[data-keep-layout] {
 .ib-toast > .ib-ic { color: var(--muted-foreground); flex: none; }
 .ib-toast.ib-toast-warn > .ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }
 .ib-toast.ib-toast-solo { padding-right: 14px; }
+/* Over a full-screen file (.ib-view.ib-full is z-index 40): above it, just over its foot strip. */
+.ib-toast.ib-toast-file { z-index: 41; }
 .ib-toast .ib-tsay { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .ib-toast .ib-tlead { font-weight: 500; flex: none; }
 .ib-toast .ib-tdetail { color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
