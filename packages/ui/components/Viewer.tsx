@@ -265,6 +265,12 @@ export interface ViewerProps {
    *  (a host whose message holds one sent and one open question). Absent:
    *  every question follows `readOnly`. */
   questionDecisionLocked?: (question: IndexedQuestion) => boolean;
+  /** Per question, true draws that card read-only, as under `readOnly` (no
+   *  picks, no Other, no note, no Skip, no Accept recommended, and its
+   *  decision tag a plain tag), while the other questions stay answerable (a
+   *  host whose message holds one sent and one open question). Absent: every
+   *  question follows `readOnly`. */
+  questionReadOnly?: (question: IndexedQuestion) => boolean;
   /** `'none'` hides each question card's own status tag (Open / Answered /
    *  Settled / Skipped) so the host can draw its own; the decision tags stay.
    *  Default `'card'`. */
@@ -696,6 +702,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionDecisionLocked,
+  questionReadOnly,
   questionStatusTag,
   questionStatusLabel,
   renderQuestionCard,
@@ -1683,14 +1690,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   question={question}
                   questionTotal={questionIndex.total}
                   questionAnswer={question ? answersByKey.get(question.question.key) : undefined}
-                  onAnswerQuestion={readOnly ? undefined : onAnswerQuestion}
-                  onSaveQuestionAnswer={readOnly ? undefined : onSaveQuestionAnswer}
+                  onAnswerQuestion={readOnly || (question && questionReadOnly?.(question)) ? undefined : onAnswerQuestion}
+                  onSaveQuestionAnswer={readOnly || (question && questionReadOnly?.(question)) ? undefined : onSaveQuestionAnswer}
                   saveQuestionAnswerLabel={saveQuestionAnswerLabel}
                   renderQuestionFooter={renderQuestionFooter}
                   questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
                   questionDecisionScope={questionDecisionScope}
-                  onToggleQuestionDecisionRecording={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onToggleQuestionDecisionRecording}
-                  onOpenQuestionDecision={readOnly || (question && questionDecisionLocked?.(question)) ? undefined : onOpenQuestionDecision}
+                  onToggleQuestionDecisionRecording={readOnly || (question && (questionDecisionLocked?.(question) || questionReadOnly?.(question))) ? undefined : onToggleQuestionDecisionRecording}
+                  onOpenQuestionDecision={readOnly || (question && (questionDecisionLocked?.(question) || questionReadOnly?.(question))) ? undefined : onOpenQuestionDecision}
                   questionStatusTag={questionStatusTag}
                   questionStatusLabel={questionStatusLabel}
                   renderQuestionBelowPrompt={renderQuestionBelowPrompt}

@@ -315,6 +315,19 @@ export function MessageBody({
     },
     [message.questions],
   );
+  // The whole card, per question: only an open or picked question can be
+  // answered. A sent one, one a Mark read or the archive closed, and a
+  // replaced one draw read-only (no ticks, no Accept recommended, no Skip),
+  // even while another question in the same message is still open. The store
+  // would take a new pick on a sent question (it goes back to picked), but the
+  // window does not offer it (adr/implementation/inbox-thread-state.md, Pick).
+  const answerLocked = useCallback(
+    (question: IndexedQuestion) => {
+      const wire = message.questions?.find((q) => q.key === question.question.key);
+      return wire !== undefined && wire.state !== 'open' && wire.state !== 'picked';
+    },
+    [message.questions],
+  );
 
   // A pick not sent yet tags its card "Not sent", not "Answered" (the footer says when it was picked);
   // a sent answer, and a question a Mark read closed, keep the card's own tag.
@@ -354,6 +367,7 @@ export function MessageBody({
         onToggleQuestionDecisionRecording={onToggleDecision}
         onOpenQuestionDecision={onOpenDecision}
         questionDecisionLocked={locked}
+        questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}

@@ -10,18 +10,23 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { dirname, join } from "node:path";
 import os from "node:os";
 
+import { resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
 	OPEN_IN_APPS,
-	getOpenInApp,
+	checkOpenInAppId,
 	resolveRevealIcon,
 	resolveRevealLabel,
 	type OpenInApp,
 	type OpenInKind,
 	type OpenInPlatform,
 } from "../generated/open-in-apps.ts";
+import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
+import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
+import { json, parseJsonBody } from "./helpers.ts";
 
 function currentPlatform(): OpenInPlatform {
 	switch (process.platform) {
@@ -233,23 +238,19 @@ function spawnDetached(
 }
 
 /**
- * Launch `absPath` in the app identified by `appId` (defaults / unknown ->
- * the OS default handler). Mirrors the Bun-side launch semantics exactly.
+ * Launch `absPath` in the app identified by `appId`. A missing or unknown id
+ * is a failure, never a launch: there is deliberately no fallback to the OS
+ * default handler, which could execute the file (see checkOpenInAppId).
+ * Mirrors the Bun-side launch semantics exactly.
  */
 export function openFileInApp(
 	absPath: string,
-	appId?: string,
+	appId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	const platform = currentPlatform();
-	const app = appId ? getOpenInApp(appId) : undefined;
-
-	// Unknown or undefined appId -> OS default handler on the file.
-	if (!app) {
-		if (platform === "mac") return run("open", [absPath], "Default app");
-		if (platform === "win")
-			return run("cmd", ["/c", "start", "", basename(absPath)], "Default app", { cwd: dirname(absPath) });
-		return run("xdg-open", [absPath], "Default app");
-	}
+	const checked = checkOpenInAppId(appId);
+	if (!checked.ok) return Promise.resolve({ ok: false, error: checked.error });
+	const app = checked.app;
 
 	if (app.kind === "file-manager") {
 		// Reveal the file in the OS file manager.
@@ -295,4 +296,64 @@ export function openFileInApp(
 	if (!app.linux?.bin)
 		return Promise.resolve({ ok: false, error: `${app.label} is not available on this platform.` });
 	return run(app.linux.bin, [absPath], app.label);
+}
+
+/**
+ * POST /api/open-in for the Pi annotate and review servers, mirroring
+ * handleOpenIn in packages/server/open-in.ts. The caller has already refused
+ * the session shapes that have no local file (remote, URL source, static
+ * patch, committed GitButler view). In order: another site's page (including
+ * the sandboxed annotated-HTML frame, which sends `Origin: null`) is 403, a
+ * stale tab's `serverSession` is 409, a missing `filePath` or a missing or
+ * unknown `appId` is 400, a path outside `resolveRoot` is 403; then the app
+ * launches and the result rides a 200.
+ */
+export async function handleOpenInRequest(
+	req: IncomingMessage,
+	res: ServerResponse,
+	options: { serverSession: string; resolveRoot: () => string | string[] },
+): Promise<void> {
+	if (!isSameOriginOrNoOrigin(req.headers.origin ?? null, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
+		json(res, { ok: false, error: "Cross-origin requests are not allowed" }, 403);
+		return;
+	}
+	try {
+		let body: unknown;
+		try {
+			body = await parseJsonBody(req);
+		} catch {
+			json(res, { ok: false, error: "Invalid request" }, 400);
+			return;
+		}
+		if (!body || typeof body !== "object") {
+			json(res, { ok: false, error: "Invalid request" }, 400);
+			return;
+		}
+		// Stale-tab guard: a tab left open on a reused port must not launch apps
+		// for a session it never showed. Missing is accepted.
+		if (checkServerSession(body, options.serverSession) === "mismatch") {
+			json(res, serverSessionMismatchBody(), 409);
+			return;
+		}
+		const { filePath, appId } = body as { filePath?: unknown; appId?: unknown };
+		if (typeof filePath !== "string" || !filePath) {
+			json(res, { ok: false, error: "Missing filePath" }, 400);
+			return;
+		}
+		const app = checkOpenInAppId(appId);
+		if (!app.ok) {
+			json(res, { ok: false, error: app.error }, 400);
+			return;
+		}
+		// Resolve against the server-supplied roots only (never a client `base`),
+		// then containment-check.
+		const abs = resolveOpenInTarget(filePath, null, options.resolveRoot);
+		if (abs == null) {
+			json(res, { ok: false, error: "Path is outside the allowed directory" }, 403);
+			return;
+		}
+		json(res, await openFileInApp(abs, app.app.id), 200);
+	} catch (err) {
+		json(res, { ok: false, error: err instanceof Error ? err.message : "Failed to open file" }, 500);
+	}
 }

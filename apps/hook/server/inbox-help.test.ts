@@ -160,6 +160,11 @@ describe("the guide against what it describes", () => {
     expect(question!.parsed.context).toContain("[The load test](load-test.html)");
   });
 
+  test("it states the bare-negative rule for Stopped: and Holds up:", () => {
+    expect(help).toContain("A negative value (`no`, `none`, `n/a`, a dash) means no stop, so never write `Stopped: no`.");
+    expect(help).toContain("An entry that is only `none` (or another negative word) holds nothing up.");
+  });
+
   test("its replacing example reads as a question with a Replaces: id, never as its prompt", () => {
     expect(help).toContain(`\`\`\`markdown\n${INBOX_REPLACES_EXAMPLE}\n\`\`\``);
     const [question, ...rest] = parseInboxQuestionBlocks(INBOX_REPLACES_EXAMPLE);
