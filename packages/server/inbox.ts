@@ -111,7 +111,7 @@ import {
 } from "./inbox-decisions";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
-import { createInboxProjectRoots } from "./inbox-project-root";
+import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { inboxMessageImageRoute } from "./inbox-message-images";
@@ -250,6 +250,8 @@ export interface InboxServerOptions {
   publishTailnet?: boolean;
   /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
+  /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
+  projectRootGit?: InboxGitRunner;
   /**
    * How long after a Mark read the asking agents are told what it closed (the
    * window's Undo lasts 7 s). Default `INBOX_SET_ASIDE_DELAY_MS`. Tests shorten it.
@@ -309,6 +311,7 @@ function json(body: unknown, status = 200): Response {
 
 const ERROR_STATUS: Record<string, number> = {
   validation_error: 422,
+  project_unresolved: 503,
   message_not_found: 404,
   thread_not_found: 404,
   project_not_found: 404,
@@ -497,12 +500,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // worktree folds into its main repository's project) or the folder, cached
   // per folder (packages/server/inbox-project-root.ts). One cache for sends,
   // live sessions and the message-image route, so they always agree.
-  const projectRoots = createInboxProjectRoots();
+  const projectRoots = createInboxProjectRoots(options.projectRootGit ? { git: options.projectRootGit } : {});
   const projectLocks = new Map<string, Promise<InboxProject>>();
   const resolveProject = async (path: string): Promise<InboxProject> => {
-    const { root, name } = await projectRoots.resolve(path);
+    const { root, name, folder, settled } = await projectRoots.resolve(path);
     const existing = store.projectByRoot(root);
     if (existing) return existing;
+    if (!settled) {
+      // git ran past its time limit, so `root` is a guess. A project the
+      // store would keep forever is never made from it: the nearest existing
+      // project holding the folder, else the agent is told to try again.
+      const holder = nearestProjectHolding(store.listProjects(), folder);
+      if (holder) return holder;
+      throw new InboxError(
+        "project_unresolved",
+        `Could not tell which project ${folder} belongs to: git did not answer in time. Nothing was sent or saved; try the same call again.`,
+        { field: "project_path" },
+      );
+    }
     void repos.refresh(root);
     // One creation per root even when two calls race through the await above.
     let pending = projectLocks.get(root);

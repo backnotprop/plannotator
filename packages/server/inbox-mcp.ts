@@ -295,6 +295,31 @@ export async function sendProject(context: InboxMcpContext, input: { reply_to?: 
 }
 
 /**
+ * The project a thread read from `path` covers (read_thread's list,
+ * wait_for_reply without ids), and the projects whose threads it lists: that
+ * project, plus the project an Inbox from before worktrees folded into their
+ * repository made for the very worktree `path` is in (keyed by the
+ * worktree's toplevel). Without it, an agent that asked from a worktree
+ * before the upgrade would never find the person's reply after it: its
+ * thread stays in that project, while `path` now resolves to the main one.
+ */
+async function threadReadScope(context: InboxMcpContext, path: string): Promise<{ project: InboxProject; projectIds: Set<string> }> {
+  const project = await context.resolveProject(path);
+  const projectIds = new Set([project.id]);
+  const resolved = await context.projectRootOf?.(path).catch(() => null);
+  const earlier = resolved?.worktree ? context.store.projectByRoot(resolved.worktree) : null;
+  if (earlier) projectIds.add(earlier.id);
+  return { project, projectIds };
+}
+
+/** The list rows of `projectIds` (every project when null), of one session's threads when given. */
+function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | null, session: string | null) {
+  if (projectIds === null) return store.listRows({ session });
+  if (projectIds.size === 1) return store.listRows({ projectId: [...projectIds][0]!, session });
+  return store.listRows({ session }).filter((row) => projectIds.has(row.project.id));
+}
+
+/**
  * The folder an agent sent from, when it is not the project's root
  * (`InboxMessage.base_path`): relative image paths in its body, and links to
  * its attachments, start there. Kept when it is a subfolder of the project,
@@ -451,11 +476,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           );
         }
         if (!input.project_path) throw new InboxError("validation_error", "project_path: required to list threads (or pass thread_id).");
-        const project = await context.resolveProject(input.project_path);
+        const { project, projectIds } = await threadReadScope(context, input.project_path);
         const session = input.agent_session?.trim() || null;
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
-        let threads = store.listRows({ projectId: project.id, session: askedBy === "me" ? session : null });
+        let threads = listScopedRows(store, projectIds, askedBy === "me" ? session : null);
         // A thread an agent wrote in after its archive line still takes a reply: listed like an open one.
         if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null || t.agent_after_archive === true);
         const limit = input.limit ?? 20;
@@ -521,9 +546,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           } else {
             const session = input.agent_session?.trim();
             if (!session) throw new InboxError("validation_error", "thread_id: required (or agent_session, to wait on every thread you asked).");
-            const projectId = input.project_path ? (await context.resolveProject(input.project_path)).id : null;
-            threadIds = store
-              .listRows({ projectId, session })
+            const projectIds = input.project_path ? (await threadReadScope(context, input.project_path)).projectIds : null;
+            threadIds = listScopedRows(store, projectIds, session)
               .filter((t) => t.resolved_at === null || t.agent_after_archive === true)
               .map((t) => t.thread_id);
           }

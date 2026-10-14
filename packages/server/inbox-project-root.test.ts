@@ -7,10 +7,17 @@
  * kept out (GIT_CONFIG_GLOBAL=/dev/null, set and restored per test).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInboxProjectRoots, resolveInboxProjectRoot, type InboxGitRunner } from "./inbox-project-root";
+import {
+  createInboxProjectRoots,
+  inboxGitRunner,
+  inboxProjectRootGitEnv,
+  nearestProjectHolding,
+  resolveInboxProjectRoot,
+  type InboxGitRunner,
+} from "./inbox-project-root";
 
 const scratch: string[] = [];
 const ENV_KEYS = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"] as const;
@@ -47,6 +54,14 @@ function git(cwd: string, ...args: string[]): string {
   return result.stdout.toString();
 }
 
+/** git as a runner, for scripted runners that answer some calls themselves. */
+function createRealRunnerFor(): InboxGitRunner {
+  return async (args, cwd) => {
+    const result = Bun.spawnSync(["git", ...args], { cwd, env: GIT_ENV, stdout: "pipe", stderr: "pipe" });
+    return { exitCode: result.exitCode, stdout: result.stdout.toString() };
+  };
+}
+
 function tempRoot(): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-project-root-")));
   scratch.push(root);
@@ -71,24 +86,25 @@ describe("resolveInboxProjectRoot", () => {
     const root = tempRoot();
     const notes = join(root, "notes");
     mkdirSync(notes);
-    expect(await resolveInboxProjectRoot(notes)).toEqual({ root: notes, name: "notes", folder: notes, worktree: null });
+    expect(await resolveInboxProjectRoot(notes)).toEqual({ root: notes, name: "notes", folder: notes, worktree: null, settled: true });
   });
 
   test("a subfolder of a repository files under its toplevel", async () => {
     const { main } = repoWithWorktree(tempRoot());
     const resolved = await resolveInboxProjectRoot(join(main, "src"));
-    expect(resolved).toEqual({ root: main, name: "api", folder: join(main, "src"), worktree: null });
+    expect(resolved).toEqual({ root: main, name: "api", folder: join(main, "src"), worktree: null, settled: true });
   });
 
   test("a linked worktree, and any folder in it, folds into the main repository", async () => {
     const { main, worktree } = repoWithWorktree(tempRoot());
-    expect(await resolveInboxProjectRoot(worktree)).toEqual({ root: main, name: "api", folder: worktree, worktree });
+    expect(await resolveInboxProjectRoot(worktree)).toEqual({ root: main, name: "api", folder: worktree, worktree, settled: true });
     mkdirSync(join(worktree, "src", "deep"), { recursive: true });
     expect(await resolveInboxProjectRoot(join(worktree, "src", "deep"))).toEqual({
       root: main,
       name: "api",
       folder: join(worktree, "src", "deep"),
       worktree,
+      settled: true,
     });
   });
 
@@ -96,7 +112,7 @@ describe("resolveInboxProjectRoot", () => {
     const { main } = repoWithWorktree(tempRoot());
     const agent = join(main, ".claude", "worktrees", "agent-aa0c12ba3edf0ee3f");
     git(main, "worktree", "add", "-q", agent, "-b", "agent");
-    expect(await resolveInboxProjectRoot(agent)).toEqual({ root: main, name: "api", folder: agent, worktree: agent });
+    expect(await resolveInboxProjectRoot(agent)).toEqual({ root: main, name: "api", folder: agent, worktree: agent, settled: true });
   });
 
   test("symlinks on either side: the worktree reached through a link, and a main repository reached through one", async () => {
@@ -152,7 +168,7 @@ describe("resolveInboxProjectRoot", () => {
     writeFileSync(join(container, ".git"), "gitdir: ./.bare\n");
     const branch = join(container, "main");
     git(container, "worktree", "add", "-q", branch, "main");
-    expect(await resolveInboxProjectRoot(branch)).toEqual({ root: container, name: "tool", folder: branch, worktree: branch });
+    expect(await resolveInboxProjectRoot(branch)).toEqual({ root: container, name: "tool", folder: branch, worktree: branch, settled: true });
   });
 
   test("a main repository that was moved: the worktree is its own project until `git worktree repair`", async () => {
@@ -161,7 +177,7 @@ describe("resolveInboxProjectRoot", () => {
     const moved = join(root, "api-moved");
     renameSync(main, moved);
     // The worktree's link points at the old place: git cannot open it, so the folder (its toplevel) is the project.
-    expect(await resolveInboxProjectRoot(worktree)).toEqual({ root: worktree, name: "api-wt", folder: worktree, worktree: null });
+    expect(await resolveInboxProjectRoot(worktree)).toEqual({ root: worktree, name: "api-wt", folder: worktree, worktree: null, settled: true });
     git(moved, "worktree", "repair", worktree);
     expect(await resolveInboxProjectRoot(worktree)).toMatchObject({ root: moved, worktree });
   });
@@ -195,6 +211,65 @@ describe("resolveInboxProjectRoot", () => {
   });
 });
 
+describe("the real git runner", () => {
+  /** Run `body` with PATH holding only `bin`, restored after. */
+  async function withPath<T>(bin: string, body: () => Promise<T>): Promise<T> {
+    const previous = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      return await body();
+    } finally {
+      if (previous === undefined) delete process.env.PATH;
+      else process.env.PATH = previous;
+    }
+  }
+
+  test("a git that runs past the time limit is killed and gives no answer; the resolution is not settled", async () => {
+    const root = tempRoot();
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "git"), "#!/bin/sh\nexec /bin/sleep 5\n");
+    chmodSync(join(bin, "git"), 0o755);
+    const folder = join(root, "work");
+    mkdirSync(folder);
+    const started = Date.now();
+    const resolved = await withPath(bin, () => resolveInboxProjectRoot(folder, { git: inboxGitRunner(200) }));
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(resolved).toMatchObject({ root: folder, worktree: null, settled: false });
+  });
+
+  test("no git on this machine is an answer: the folder is the project, settled", async () => {
+    const root = tempRoot();
+    const empty = join(root, "empty-bin");
+    mkdirSync(empty);
+    // A worktree, so a git that still ran would fold it and the test would see it.
+    const { worktree } = repoWithWorktree(root);
+    const resolved = await withPath(empty, () => resolveInboxProjectRoot(worktree, { git: inboxGitRunner(2_000) }));
+    expect(resolved).toMatchObject({ root: worktree, worktree: null, settled: true });
+  });
+
+  test("GIT_DIR and its kin in the Inbox's environment are cleared: the folder's own repository answers", async () => {
+    const root = tempRoot();
+    const { main, worktree } = repoWithWorktree(root);
+    const { main: other } = repoWithWorktree(root, "other");
+    const keys = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    process.env.GIT_DIR = join(other, ".git");
+    process.env.GIT_WORK_TREE = other;
+    process.env.GIT_INDEX_FILE = join(other, ".git", "index");
+    process.env.GIT_COMMON_DIR = join(other, ".git");
+    try {
+      expect(await resolveInboxProjectRoot(worktree)).toMatchObject({ root: main, worktree, settled: true });
+      expect(inboxProjectRootGitEnv()).not.toHaveProperty("GIT_DIR");
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+});
+
 describe("git answers that do not fit", () => {
   test("a git too old for --git-common-dir echoes the flag back: the toplevel is the project", async () => {
     const { main, worktree } = repoWithWorktree(tempRoot());
@@ -203,30 +278,38 @@ describe("git answers that do not fit", () => {
     expect(await resolveInboxProjectRoot(worktree, { git: oldGit })).toMatchObject({ root: worktree, worktree: null });
   });
 
-  test("no git at all: the folder is the project", async () => {
+  test("git gives no answer: the folder is the guess, marked unsettled", async () => {
     const { worktree } = repoWithWorktree(tempRoot());
     const none: InboxGitRunner = async () => null;
-    expect(await resolveInboxProjectRoot(join(worktree, "src"), { git: none })).toMatchObject({ root: join(worktree, "src"), worktree: null });
+    expect(await resolveInboxProjectRoot(join(worktree, "src"), { git: none })).toMatchObject({ root: join(worktree, "src"), worktree: null, settled: false });
+  });
+
+  test("the worktree answered but its main repository's git did not: the worktree's toplevel, unsettled", async () => {
+    const { main, worktree } = repoWithWorktree(tempRoot());
+    const real = createRealRunnerFor();
+    const halfway: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
+    expect(await resolveInboxProjectRoot(worktree, { git: halfway })).toMatchObject({ root: worktree, worktree: null, settled: false });
+  });
+
+  test("nearestProjectHolding picks the deepest project root that holds the folder", () => {
+    const projects = [{ root: "/r" }, { root: "/r/api" }, { root: "/r/api-wt" }, { root: "/other" }];
+    expect(nearestProjectHolding(projects, "/r/api/src")).toEqual({ root: "/r/api" });
+    expect(nearestProjectHolding(projects, "/r/api-wt")).toEqual({ root: "/r/api-wt" });
+    expect(nearestProjectHolding(projects, "/r/apiary")).toEqual({ root: "/r" });
+    expect(nearestProjectHolding(projects, "/elsewhere")).toBeNull();
   });
 });
 
 describe("createInboxProjectRoots", () => {
   /** A runner that counts calls and can be switched off. */
   function countingGit() {
-    const real = createRealRunner();
+    const real = createRealRunnerFor();
     const state = { calls: 0, down: false };
     const runner: InboxGitRunner = async (args, cwd) => {
       state.calls += 1;
       return state.down ? null : real(args, cwd);
     };
     return { runner, state };
-  }
-
-  function createRealRunner(): InboxGitRunner {
-    return async (args, cwd) => {
-      const result = Bun.spawnSync(["git", ...args], { cwd, env: GIT_ENV, stdout: "pipe", stderr: "pipe" });
-      return { exitCode: result.exitCode, stdout: result.stdout.toString() };
-    };
   }
 
   test("each folder asks git once; a fresh answer is used as it is", async () => {

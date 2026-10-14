@@ -43,16 +43,20 @@
  * Each git runs off the request's critical path once per folder: answers are
  * cached per realpath (`createInboxProjectRoots`), refreshed in the
  * background once older than `INBOX_PROJECT_ROOT_TTL_MS`, and each git is
- * bounded by `INBOX_PROJECT_ROOT_GIT_TIMEOUT_MS`. An answer git could not give
- * (the time limit, a missing git) is used once and never cached, so the next
- * call asks again.
+ * bounded by `INBOX_PROJECT_ROOT_GIT_TIMEOUT_MS`, run without the variables
+ * that would point it at another repository (`GIT_DIR` and its kin). An
+ * answer git could not give (the time limit) is marked `settled: false`,
+ * used once and never cached, so the next call asks again; the Inbox then
+ * files into an existing project that holds the folder, or refuses with
+ * `project_unresolved` rather than make a project from a guess
+ * (packages/server/inbox.ts, `resolveProject`). A machine without git at all
+ * is an answer: every folder is its own project, as before.
  */
 
 import { realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { runtime } from "./git";
 
 /** One git run for a project root never takes longer than this. */
 export const INBOX_PROJECT_ROOT_GIT_TIMEOUT_MS = 3_000;
@@ -73,24 +77,72 @@ export interface InboxProjectRoot {
    * folded into its main repository's project (`root`), else null.
    */
   worktree: string | null;
+  /**
+   * Every git this answer needed answered. False when one ran past the time
+   * limit (or could not start for a reason other than git being absent):
+   * `root` is then a guess (the folder, or a worktree's own toplevel), never
+   * cached, and the Inbox does not make a new project from it.
+   */
+  settled: boolean;
 }
 
 /**
- * One git run in `cwd`: its exit code and stdout, or null when git could not
- * answer at all (not installed, killed at the time limit).
+ * One git run in `cwd`: its exit code and stdout, or null when git gave no
+ * answer (killed at the time limit, could not start). A git that is not
+ * installed is an answer: exit 127, so the folder is the project.
  */
 export type InboxGitRunner = (args: readonly string[], cwd: string) => Promise<{ exitCode: number; stdout: string } | null>;
 
-/** The real git, bounded, never prompting, with its process group killed at the time limit. */
+/**
+ * Variables that would point git at another repository than the folder's
+ * own, whatever its cwd (an Inbox started from a git hook, or from a shell
+ * that exported them): cleared for every project-root git.
+ */
+export const INBOX_PROJECT_ROOT_GIT_ENV_CLEARED = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"] as const;
+
+/** The environment project-root gits run with: the Inbox's own, without the repository overrides, never prompting. */
+export function inboxProjectRootGitEnv(environment: Readonly<Record<string, string | undefined>> = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(environment)) if (value !== undefined) env[key] = value;
+  for (const key of INBOX_PROJECT_ROOT_GIT_ENV_CLEARED) delete env[key];
+  env.GIT_TERMINAL_PROMPT = "0";
+  return env;
+}
+
+/**
+ * The real git: `rev-parse` only (it reads, starts no other process and
+ * never prompts), killed at the time limit, its stderr ignored.
+ */
 export function inboxGitRunner(timeoutMs = INBOX_PROJECT_ROOT_GIT_TIMEOUT_MS): InboxGitRunner {
   return async (args, cwd) => {
+    let proc: ReturnType<typeof Bun.spawn>;
     try {
-      const result = await runtime.runGit([...args], { cwd, timeoutMs, interaction: "forbid" });
-      // Killed by a signal (the time limit): no answer. git's own errors exit 1 or 128.
-      if (result.exitCode > 128) return null;
-      return { exitCode: result.exitCode, stdout: result.stdout };
+      proc = Bun.spawn(["git", ...args], {
+        cwd,
+        env: inboxProjectRootGitEnv(),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "ignore",
+        windowsHide: true,
+      });
+    } catch (error) {
+      // No git on this machine: an answer (the folder is the project), not a failure to retry.
+      return (error as NodeJS.ErrnoException).code === "ENOENT" ? { exitCode: 127, stdout: "" } : null;
+    }
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGKILL");
+    }, timeoutMs);
+    try {
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout as ReadableStream).text(), proc.exited]);
+      // Killed (the time limit, or any signal): no answer. git's own errors exit 1 or 128.
+      if (timedOut || exitCode > 128) return null;
+      return { exitCode, stdout };
     } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
     }
   };
 }
@@ -112,6 +164,15 @@ export function inboxProjectFolder(path: string): string {
 /** Whether `path` is `root` or inside it (both realpaths). */
 export function isInsideFolder(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+}
+
+/** Of `projects`, the one whose root holds `folder` most closely (the deepest root), or null. */
+export function nearestProjectHolding<T extends { root: string }>(projects: readonly T[], folder: string): T | null {
+  let best: T | null = null;
+  for (const project of projects) {
+    if (isInsideFolder(folder, project.root) && (!best || project.root.length > best.root.length)) best = project;
+  }
+  return best;
 }
 
 type GitAnswer = { kind: "answer"; lines: string[] } | { kind: "refused" } | { kind: "unavailable" };
@@ -209,8 +270,8 @@ async function resolveFolder(folder: string, git: InboxGitRunner): Promise<Resol
 }
 
 function rootFor(folder: string, resolved: Resolved): InboxProjectRoot {
-  const { root, worktree } = resolved;
-  return { root, name: extractRepoName(root) ?? extractDirName(root) ?? "project", folder, worktree };
+  const { root, worktree, settled } = resolved;
+  return { root, name: extractRepoName(root) ?? extractDirName(root) ?? "project", folder, worktree, settled };
 }
 
 /**
