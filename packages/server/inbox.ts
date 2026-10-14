@@ -1174,6 +1174,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       reply.thread_id !== reply.id &&
       !!root?.started_by_person &&
       root.delivery?.session !== reply.to.session &&
+      // The root goes to this session too (not taken yet, maybe in the same poll): it opens the thread.
+      root.to?.session !== reply.to.session &&
       !store.thread(reply.thread_id)?.messages.some((m) => m.author.kind === "agent" && m.author.session === reply.to!.session);
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",

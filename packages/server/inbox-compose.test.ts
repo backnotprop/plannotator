@@ -277,6 +277,26 @@ describe("a thread the person starts", () => {
     expect(((await archived.json()) as { code: string }).code).toBe("thread_resolved");
   });
 
+  test("the root and a follow-up for the same session in one poll: no 'another session' line, also after both are moved there", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-a", "claude-code", billing);
+    const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
+    const follow = ((await (await post(server, `/api/inbox/messages/${sent.message.id}/reply`, { words: "And log each retry.", idempotency_key: "r1" })).json()) as { reply: InboxMessage }).reply;
+    const both = await poll(server, "ses-a", "claude-code", billing);
+    expect(both.map((c) => c.id)).toEqual([sent.message.id, follow.id]);
+    expect(both[1]!.continues_thread).toBeUndefined();
+
+    // Both moved to B before anyone took them: B gets the root first, so the follow-up needs no line either.
+    await poll(server, "ses-b", "pi", billing);
+    for (const id of [sent.message.id, follow.id]) {
+      expect((await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);
+    }
+    const moved = await poll(server, "ses-b", "pi", billing);
+    expect(moved.map((c) => c.id)).toEqual([sent.message.id, follow.id]);
+    expect(moved[0]).toMatchObject({ new_thread: true });
+    expect(moved[1]!.continues_thread).toBeUndefined();
+  });
+
   test("two Sends racing with one key write one message, one answers replayed, and no copied file is left behind", async () => {
     const { server, billing, dataDir } = await setup();
     await poll(server, "ses-pi", "pi", billing);
