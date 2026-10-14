@@ -26,6 +26,8 @@ configurePlannotatorUI({
   aiTransport,
   skillCatalogTransport,       // skill-reference catalog for comment composers
   skillContentTransport,       // human-only skill contents for feedback injection
+  skillReferenceExport,        // false: no per-comment "Skills referenced" list (a host composing one block per message)
+  skillInstructionsDestination, // what the human-only line says instructions go with (default "your feedback")
   serverSync,
   webmcp,                      // browser-agent (WebMCP) provider policy: { enabled, namePrefix }
   mathRendererLoader,          // how KaTeX loads when no renderer is registered before first math render

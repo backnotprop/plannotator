@@ -30,6 +30,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join, resolve } from 'node:path';
 import { createFakeAgents, type FakeAgents } from '../helpers/fake-agents';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -58,7 +59,7 @@ function envFor(fake: FakeAgents, root: string, extra: Record<string, string> = 
   return {
     ...fake.env,
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
-    PLANNOTATOR_BROWSER: 'none',
+    PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
     PLANNOTATOR_INBOX_CONNECT: '1',
     PLANNOTATOR_INBOX_PHONES: '0',

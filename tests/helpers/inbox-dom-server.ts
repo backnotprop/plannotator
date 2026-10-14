@@ -38,7 +38,7 @@ import { join } from "node:path";
 import { startInboxServer } from "../../packages/server/inbox";
 import { recordInboxAttachments } from "../../packages/shared/inbox/attachments";
 import { writeUpdateState } from "../../packages/shared/update-check";
-import { refuseRealDataDir } from "./real-data-dir";
+import { isScratchDataDir, refuseRealDataDir } from "./real-data-dir";
 
 const [dataDir, projectsDir, countArg, extra] = process.argv.slice(2);
 const withNews = extra === "news";
@@ -52,6 +52,14 @@ refuseRealDataDir(dataDir, "inbox-dom-server.ts");
 // startInboxServer reads and writes config.json through getPlannotatorDataDir()
 // even when it is given dataDir: point the env at the same scratch folder.
 process.env.PLANNOTATOR_DATA_DIR = dataDir;
+// The composers' skill picker reads the global skill folders under HOME (and
+// CLAUDE_CONFIG_DIR, CODEX_HOME, XDG_CONFIG_HOME): only a scratch HOME's,
+// never the person's. A test that wants skills writes them under its HOME.
+const scratchHome = isScratchDataDir(process.env.HOME?.trim() || "/") ? process.env.HOME!.trim() : join(dataDir, "home");
+process.env.HOME = scratchHome;
+process.env.CLAUDE_CONFIG_DIR = join(scratchHome, ".claude");
+process.env.CODEX_HOME = join(scratchHome, ".codex");
+process.env.XDG_CONFIG_HOME = join(scratchHome, ".config");
 
 const STOPPED = [
   "Before I build the invoice list:",

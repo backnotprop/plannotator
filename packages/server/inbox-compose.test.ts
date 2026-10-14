@@ -25,6 +25,31 @@ import { inboxId } from "@plannotator/core/inbox-types";
 import { INBOX_WAKE_INSTRUCTION, inboxContinuesLine } from "@plannotator/shared/inbox/connection";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
 import { startInboxServer, type InboxServer } from "./inbox";
+import type { InboxGitRunner } from "./inbox-project-root";
+
+/** git with no user or system config, for the worktree tests' own repositories. */
+const GIT_ENV = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_AUTHOR_NAME: "Test",
+  GIT_AUTHOR_EMAIL: "test@example.com",
+  GIT_COMMITTER_NAME: "Test",
+  GIT_COMMITTER_EMAIL: "test@example.com",
+};
+function git(cwd: string, ...args: string[]): void {
+  const result = Bun.spawnSync(["git", "-c", "init.defaultBranch=main", ...args], { cwd, env: GIT_ENV, stdout: "pipe", stderr: "pipe" });
+  if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+}
+
+/** The Inbox's git (rev-parse) for these tests: no user or system config, and no env mutation. */
+const quietGit = (): InboxGitRunner => async (args, cwd) => {
+  const env: Record<string, string | undefined> = { ...GIT_ENV };
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"]) delete env[key];
+  const proc = Bun.spawn(["git", ...args], { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+  return { exitCode, stdout };
+};
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -36,7 +61,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup() {
+async function setup(projectRootGit?: InboxGitRunner) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-compose-")));
   roots.push(root);
   const ledger = join(root, "ledger");
@@ -44,7 +69,7 @@ async function setup() {
   mkdirSync(ledger, { recursive: true });
   mkdirSync(billing, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir });
+  const server = await startInboxServer({ dataDir, ...(projectRootGit ? { projectRootGit } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-compose-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -265,6 +290,56 @@ describe("a thread the person starts", () => {
     const kept = answers[0]!.message.attachments!.map((a) => a.id);
     const onDisk = readdirSync(join(dataDir, "inbox", "uploads")).filter((name) => name.startsWith("att_"));
     expect(onDisk).toEqual(kept);
+  });
+});
+
+describe("worktrees and a slow git (#1919)", () => {
+  test("a session working in a linked worktree is listed under, and its thread lands in, the main repository's project", async () => {
+    const { server, ledger } = await setup(quietGit());
+    const repo = join(ledger, "api");
+    mkdirSync(repo, { recursive: true });
+    git(ledger, "init", "-q", repo);
+    writeFileSync(join(repo, "README.md"), "api\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-qm", "init");
+    const worktree = join(ledger, "api-wt");
+    git(repo, "worktree", "add", "-q", worktree, "-b", "feature");
+
+    await poll(server, "ses-wt", "claude-code", worktree);
+    const listed = await sessions(server);
+    expect(listed.projects.map((p) => [p.project.root, p.sessions.map((s) => s.session)])).toEqual([[repo, ["ses-wt"]]]);
+    const response = await post(server, "/api/inbox/messages", { to: { session: "ses-wt" }, body: "Try the retry budget here.", idempotency_key: "c1" });
+    expect(response.status).toBe(200);
+    const sent = (await response.json()) as { project: { root: string } };
+    expect(sent.project.root).toBe(repo);
+    expect(server.store.listProjects().map((p) => p.root)).toEqual([repo]);
+  });
+
+  test("git too slow to tell the project: the Send is refused with project_unresolved and a message to try again; nothing is written", async () => {
+    const real = quietGit();
+    let slow = false;
+    const runner: InboxGitRunner = async (args, cwd) => {
+      if (!slow) return real(args, cwd);
+      await Bun.sleep(20);
+      return null;
+    };
+    const { server, billing, dataDir } = await setup(runner);
+    slow = true;
+    await poll(server, "ses-pi", "pi", billing);
+    const file = ((await (await upload(server, "notes.md", "# Notes")).json()) as { upload: InboxUpload }).upload;
+    const before = server.store.cursor();
+    const refused = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Hello", idempotency_key: "c1", uploads: [file.upload_id] });
+    expect(refused.status).toBe(503);
+    const body = (await refused.json()) as { code: string; error: string };
+    expect(body.code).toBe("project_unresolved");
+    expect(body.error).toContain("try the same call again");
+    expect(server.store.cursor()).toBe(before);
+    expect(server.store.listProjects()).toEqual([]);
+    // The upload is still pending, so the same Send can go once git answers.
+    expect(existsSync(join(dataDir, "inbox", "uploads", "pending", `${file.upload_id}.json`))).toBe(true);
+    slow = false;
+    const again = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Hello", idempotency_key: "c1", uploads: [file.upload_id] });
+    expect(again.status).toBe(200);
   });
 });
 

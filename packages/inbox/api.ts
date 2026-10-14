@@ -453,6 +453,10 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
 }
 
 export const inboxApi = {
+  /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */
+  skills: () => get<{ skills?: unknown }>('/api/inbox/skills'),
+  /** One human-only skill's SKILL.md, read when the person sends a message that references it. */
+  skillContent: (name: string) => get<{ skill?: unknown }>(`/api/inbox/skills/content?name=${encodeURIComponent(name)}`),
   // Archived threads leave the window's list (Settings lists them): an older
   // window and the phone, which ask without this, still get them in Quiet.
   list: () => get<ListModel>('/api/inbox/threads?archived=exclude'),

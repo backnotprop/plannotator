@@ -182,11 +182,12 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
             }`}
           >
             <SkillIcon />
-            <span className="shrink-0 font-semibold text-foreground">{item.name}</span>
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {/* data-skill-item-part: a host's styling hook (the Inbox lays a row out in two lines on a phone). */}
+            <span data-skill-item-part="name" className="shrink-0 font-semibold text-foreground">{item.name}</span>
+            <span data-skill-item-part="description" className="min-w-0 flex-1 truncate text-muted-foreground">
               {item.description ?? ''}
             </span>
-            <span className="shrink-0 pl-3 text-xs text-muted-foreground/80">
+            <span data-skill-item-part="root" className="shrink-0 pl-3 text-xs text-muted-foreground/80">
               {ROOT_LABELS[item.root]}
             </span>
           </button>
@@ -215,6 +216,26 @@ const SkillIcon: React.FC = () => (
 
 interface HumanOnlySkillNoticeProps {
   skills: SkillCatalogEntry[];
+  /**
+   * What the instructions go with. Default: the host's (`setSkillInstructionsDestination`),
+   * else "your feedback". The Inbox says "your reply" or "your message".
+   */
+  destination?: string;
+}
+
+// Module-level seam (see packages/ui/CLAUDE.md): what every composer's
+// human-only line says the instructions go with, unless the composer says.
+// Plannotator's comments go with "your feedback"; the Inbox's comments on
+// attached files ride a reply.
+const DEFAULT_DESTINATION = 'your feedback';
+let defaultDestination = DEFAULT_DESTINATION;
+
+export function setSkillInstructionsDestination(destination: string): void {
+  defaultDestination = destination || DEFAULT_DESTINATION;
+}
+
+export function resetSkillInstructionsDestination(): void {
+  defaultDestination = DEFAULT_DESTINATION;
 }
 
 /**
@@ -227,8 +248,9 @@ interface HumanOnlySkillNoticeProps {
  * toggles), and assistive tech alike. It pairs with the dotted-underline
  * marker the composer overlay paints on human-only tokens.
  */
-export const HumanOnlySkillNotice: React.FC<HumanOnlySkillNoticeProps> = ({ skills }) => {
+export const HumanOnlySkillNotice: React.FC<HumanOnlySkillNoticeProps> = ({ skills, destination }) => {
   if (skills.length === 0) return null;
+  destination ??= defaultDestination;
   const names = skills.map((s) => s.name).join(', ');
   return (
     <details data-skill-human-only-notice="true" className="group mt-1 px-1">
@@ -240,12 +262,12 @@ export const HumanOnlySkillNotice: React.FC<HumanOnlySkillNoticeProps> = ({ skil
         {skills.length === 1 ? (
           <>
             <span className="font-mono">{names}</span> cannot be invoked by a model, so
-            its instructions will be included with your feedback.
+            its instructions will be included with {destination}.
           </>
         ) : (
           <>
             <span className="font-mono">{names}</span> cannot be invoked by a model, so
-            their instructions will be included with your feedback.
+            their instructions will be included with {destination}.
           </>
         )}
       </p>

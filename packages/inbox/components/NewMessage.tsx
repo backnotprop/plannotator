@@ -3,6 +3,8 @@ import { INBOX_HOST_NAMES, type InboxThread } from '@plannotator/core/inbox-type
 import { InboxApiError, inboxApi, type LiveSession, type LiveSessionsModel } from '../api';
 import { whenTime, tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
+import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { InboxComposerField } from './ComposerField';
 
 /**
  * New message (record 5.x, PLAN step 8; owner Q4: "just another button next
@@ -203,7 +205,9 @@ export function NewMessageComposer({
     setSending(true);
     setError(null);
     try {
-      await inboxApi.newMessage(thread.thread_id, { session: target.session, body, idempotency_key: key.current });
+      // The skills the words reference ride at the end, as one block (skills.ts).
+      const skills = await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
+      await inboxApi.newMessage(thread.thread_id, { session: target.session, body: withSkillsBlock(body, skills), idempotency_key: key.current });
       await onSent();
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
@@ -219,14 +223,13 @@ export function NewMessageComposer({
         <span className="ib-mut">(live session, {target.busy ? 'working' : 'idle'})</span>
       </div>
       <div className="ib-rbox">
-        <textarea
-          ref={textRef}
-          className="ib-rtext"
-          aria-label={`New message to ${name}`}
+        <InboxComposerField
+          textareaRef={textRef}
+          ariaLabel={`New message to ${name}`}
           placeholder="Write a message"
+          destination="your message"
           value={text}
-          rows={2}
-          onChange={(event) => setText(event.target.value)}
+          onChange={setText}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();

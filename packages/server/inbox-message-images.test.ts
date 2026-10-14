@@ -282,7 +282,9 @@ test("a base_path gone by serve time, or outside the project, falls back to the 
   expect(server.store.message(sent.message_id)?.base_path).toBe(sub);
   rmSync(sub, { recursive: true, force: true });
   expect((await image(server, sent.message_id, ".walkthrough/shots/after.png")).status).toBe(200);
-  // A base_path outside the project (a record no send writes) is never used.
+  // A base_path outside the project is never used unless the caller checked it
+  // is a linked worktree folded into the project (`worktree`; see
+  // inbox-worktree-projects.test.ts).
   const result = readInboxMessageImage({ body: "![a](.walkthrough/shots/after.png)", root: project, base: join(project, ".."), path: ".walkthrough/shots/after.png" });
   expect(result.ok).toBe(true);
 });

@@ -57,6 +57,8 @@ describe("pi annotate server: embedded local documents", () => {
 			'<!doctype html><html><head></head><body><iframe data-src="embed.html"></iframe></body></html>';
 		writeFileSync(pagePath, html, "utf-8");
 		writeFileSync(join(dir, "embed.html"), "<html><body>EMBEDDED_SIBLING</body></html>", "utf-8");
+		writeFileSync(join(dir, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>', "utf-8");
+		writeFileSync(join(dir, "logo.png"), "png-bytes", "utf-8");
 
 		const server = await startAnnotateServer({
 			markdown: "",
@@ -85,6 +87,20 @@ describe("pi annotate server: embedded local documents", () => {
 			expect(response.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
 			expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 			expect(await response.text()).toContain("EMBEDDED_SIBLING");
+		});
+	});
+
+	// An SVG opened directly is a scriptable document on the session's origin.
+	test("serves an SVG asset with a sandbox CSP and nosniff; a PNG gets no CSP", async () => {
+		await withSession("svg", async ({ url, base }) => {
+			const svg = await fetch(`${url}${base}chart.svg`);
+			expect(svg.status).toBe(200);
+			expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+			expect(svg.headers.get("content-security-policy")).toBe("sandbox");
+			expect(svg.headers.get("x-content-type-options")).toBe("nosniff");
+			const png = await fetch(`${url}${base}logo.png`);
+			expect(png.status).toBe(200);
+			expect(png.headers.get("content-security-policy")).toBeNull();
 		});
 	});
 

@@ -4037,7 +4037,7 @@ const App: React.FC = () => {
     const autoSavePromise = fetch('/api/save-notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(withServerSession(body)),
     })
       .then(res => res.json())
       .then(data => {
@@ -5628,8 +5628,12 @@ const App: React.FC = () => {
       const res = await fetch('/api/save-notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(withServerSession(body)),
       });
+      if (await noteServerSessionMismatch(res)) {
+        toast.error('This review was replaced. Reload the page.');
+        return;
+      }
       const data = await res.json();
       const result = data.results?.[target];
       if (result?.success) {

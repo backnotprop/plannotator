@@ -5,6 +5,7 @@
  */
 
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
+import { codeFenceFor } from '@plannotator/core/markdown-structure';
 import { cutText } from '@plannotator/core/inbox-questions';
 import { readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
@@ -298,6 +299,12 @@ export function recordQuote(record: InboxAnnotationRecord): string {
 
 export const GUIDE_FEEDBACK_TITLE = 'Feedback on the guided review';
 
+/** Quoted code in a fence no line of it can close (the review app's `fenced`). */
+function fenced(code: string): string {
+  const fence = codeFenceFor(code);
+  return `${fence}\n${code}\n${fence}\n`;
+}
+
 /**
  * One comment as the review app's export writes it (exportReviewFeedback in
  * packages/review-editor/utils/exportFeedback.ts, line scope): the line range
@@ -315,9 +322,9 @@ function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
   let output = `${heading} ${range} (${comment.side})${token}\n`;
   if (comment.text) output += `${prefix}${comment.text}\n`;
   else if (prefix) output += `${prefix.trimEnd()}\n`;
-  if (comment.selectedText) output += `\n**Highlighted text:**\n\`\`\`\n${comment.selectedText}\n\`\`\`\n`;
-  if ((comment.suggestedCode || comment.text) && comment.originalCode) output += `\n**Replaces:**\n\`\`\`\n${comment.originalCode}\n\`\`\`\n`;
-  if (comment.suggestedCode) output += `\n**Suggested code:**\n\`\`\`\n${comment.suggestedCode}\n\`\`\`\n`;
+  if (comment.selectedText) output += `\n**Highlighted text:**\n${fenced(comment.selectedText)}`;
+  if ((comment.suggestedCode || comment.text) && comment.originalCode) output += `\n**Replaces:**\n${fenced(comment.originalCode)}`;
+  if (comment.suggestedCode) output += `\n**Suggested code:**\n${fenced(comment.suggestedCode)}`;
   return `${output}\n`;
 }
 

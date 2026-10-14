@@ -41,6 +41,51 @@ describe("annotate raw HTML assets", () => {
     expect(await imageResponse?.text()).toBe("png-bytes");
   });
 
+  // An SVG (or XML) opened directly in a tab is a scriptable document on the
+  // session's origin; the sandbox CSP gives it an opaque origin and no script.
+  // As an <img> it never ran script, so it loads exactly as before.
+  test("serves SVG and XML assets with a sandbox CSP and nosniff; other assets get no CSP", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-html-assets-svg-"));
+    try {
+      const htmlPath = join(dir, "page.html");
+      const html = '<!doctype html><html><body><img src="./chart.svg"><img src="./logo.png"></body></html>';
+      writeFileSync(htmlPath, html, "utf-8");
+      writeFileSync(join(dir, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>', "utf-8");
+      writeFileSync(join(dir, "logo.png"), "png-bytes", "utf-8");
+      writeFileSync(join(dir, "data.xml"), "<root/>", "utf-8");
+
+      const assets = createHtmlAssetRegistry();
+      const rawHtml = assets.rewriteHtml(html, htmlPath);
+      const get = async (name: string) => {
+        const path = rawHtml.match(new RegExp(`"([^"]+${name.replace(".", "\\.")})"`))?.[1];
+        expect(path).toBeTruthy();
+        const url = new URL(path!, "http://localhost");
+        return assets.handle(new Request(String(url)), url);
+      };
+
+      const svg = await get("chart.svg");
+      expect(svg?.status).toBe(200);
+      expect(svg?.headers.get("content-type")).toBe("image/svg+xml");
+      expect(svg?.headers.get("content-security-policy")).toBe("sandbox");
+      expect(svg?.headers.get("x-content-type-options")).toBe("nosniff");
+
+      // An XML file in the same folder, reached the way a page's <base href>
+      // reaches it: the SVG's token with another name.
+      const svgPath = rawHtml.match(/"([^"]+chart\.svg)"/)![1];
+      const xmlUrl = new URL(svgPath.replace(/chart\.svg$/, "data.xml"), "http://localhost");
+      const xml = await assets.handle(new Request(String(xmlUrl)), xmlUrl);
+      expect(xml?.status).toBe(200);
+      expect(xml?.headers.get("content-security-policy")).toBe("sandbox");
+
+      const png = await get("logo.png");
+      expect(png?.status).toBe(200);
+      expect(png?.headers.get("content-security-policy")).toBeNull();
+      expect(png?.headers.get("x-content-type-options")).toBe("nosniff");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("folder HTML loads parent-relative CSS and scripts and shares their bytes", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-folder-assets-"));
     mkdirSync(join(dir, "lessons"));
