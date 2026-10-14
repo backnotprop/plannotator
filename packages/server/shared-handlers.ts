@@ -18,6 +18,9 @@ import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
 import { listReferenceSkills, readReferenceSkillContent } from "./review-skill-loader";
+import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
+import { isSameOriginRequest } from "./request-origin-guard";
+import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -317,8 +320,28 @@ export async function handleServerReady(
   }
 }
 
-/** Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers. */
-export async function handleSaveNotes(req: Request): Promise<Response> {
+export interface HandleSaveNotesOptions {
+  /**
+   * This server's stale-tab nonce (packages/core/server-session.ts). A body
+   * carrying a different `serverSession` is refused with 409 before anything
+   * is written or opened; a body without one is accepted.
+   */
+  serverSession?: string;
+}
+
+/**
+ * Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers.
+ *
+ * Writes a file into the vault the body names and opens `bear://` /
+ * `octarine://` URLs, so it refuses another site's page (the servers also do
+ * this before routing; repeated here so the handler is safe wherever it is
+ * mounted) and a stale tab.
+ */
+export async function handleSaveNotes(req: Request, options: HandleSaveNotesOptions = {}): Promise<Response> {
+  if (!isSameOriginRequest(req)) {
+    return Response.json(crossOriginRefusalBody(), { status: 403 });
+  }
+
   const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult } = {};
 
   try {
@@ -327,6 +350,10 @@ export async function handleSaveNotes(req: Request): Promise<Response> {
       bear?: BearConfig;
       octarine?: OctarineConfig;
     };
+
+    if (options.serverSession !== undefined && checkServerSession(body, options.serverSession) === "mismatch") {
+      return Response.json(serverSessionMismatchBody(), { status: 409 });
+    }
 
     const promises: Promise<void>[] = [];
     if (body.obsidian?.vaultPath && body.obsidian?.plan) {

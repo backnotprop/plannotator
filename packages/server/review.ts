@@ -13,6 +13,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { refuseCrossOriginWrite } from "./request-origin-guard";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsFileBytesForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
 import { basename } from "node:path";
@@ -1332,6 +1333,7 @@ export async function startReviewServer(
     mode: "review",
     getServerUrl: () => agentApiUrl,
     getCwd: resolveAgentCwd,
+    serverSession,
 
     async buildCommand(provider, config) {
       // Snapshot ALL launch-relevant state before any await: waiting out the
@@ -2032,6 +2034,9 @@ export async function startReviewServer(
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Then no write from another site, before any route (request-origin-guard.ts).
+          const originRefusal = refuseCrossOriginWrite(req);
+          if (originRefusal) return originRefusal;
 
           const url = new URL(req.url);
 
@@ -2384,7 +2389,7 @@ export async function startReviewServer(
             // advertise no apps: the client hides the control rather than
             // offering to open a same-named file from an unrelated checkout.
             if (isStaticPatchMode) return Response.json({ available: false, apps: [] });
-            return handleOpenInApps();
+            return handleOpenInApps({ exposed: options.tailnetPublished === true });
           }
 
           // API: Open a file in an app. Resolves the repo-relative `git diff`
@@ -2409,7 +2414,7 @@ export async function startReviewServer(
                 { status: 400 },
               );
             }
-            return handleOpenIn(req, { resolveRoot: resolveOpenInRoot, serverSession });
+            return handleOpenIn(req, { resolveRoot: resolveOpenInRoot, serverSession, exposed: options.tailnetPublished === true });
           }
 
           // API: cheap staleness probe — has the underlying VCS state changed

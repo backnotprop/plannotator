@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HTML_ASSET_SUBRESOURCE_CSP } from "../generated/html-assets.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 
 const MINIMAL_HTML = "<html><body>PLANNOTATOR_APP_SHELL</body></html>";
@@ -57,6 +58,8 @@ describe("pi annotate server: embedded local documents", () => {
 			'<!doctype html><html><head></head><body><iframe data-src="embed.html"></iframe></body></html>';
 		writeFileSync(pagePath, html, "utf-8");
 		writeFileSync(join(dir, "embed.html"), "<html><body>EMBEDDED_SIBLING</body></html>", "utf-8");
+		writeFileSync(join(dir, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>', "utf-8");
+		writeFileSync(join(dir, "logo.png"), "png-bytes", "utf-8");
 
 		const server = await startAnnotateServer({
 			markdown: "",
@@ -88,8 +91,22 @@ describe("pi annotate server: embedded local documents", () => {
 		});
 	});
 
-	// The bug: the catch-all answering a nested-document request with the
-	// editor app, so every embed rendered a second Plannotator.
+	// An SVG opened directly is a scriptable document on the session's origin;
+	// every non-HTML asset gets the sandbox, the PNG too (an <img> load ignores it).
+	test("serves an SVG asset and a PNG with the sandbox CSP and nosniff", async () => {
+		await withSession("svg", async ({ url, base }) => {
+			const svg = await fetch(`${url}${base}chart.svg`);
+			expect(svg.status).toBe(200);
+			expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+			expect(svg.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
+			expect(svg.headers.get("x-content-type-options")).toBe("nosniff");
+			const png = await fetch(`${url}${base}logo.png`);
+			expect(png.status).toBe(200);
+			expect(png.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
+			expect(png.headers.get("x-content-type-options")).toBe("nosniff");
+		});
+	});
+
 	test("every non-HTML asset carries the sandbox CSP and nosniff: an SVG or XML opened as a document runs no script here", async () => {
 		const dir = siteDir("svg");
 		const pagePath = join(dir, "page.html");
@@ -120,6 +137,8 @@ describe("pi annotate server: embedded local documents", () => {
 		}
 	});
 
+	// The bug: the catch-all answering a nested-document request with the
+	// editor app, so every embed rendered a second Plannotator.
 	test("a framed request for an unknown path gets a 404 document, never the app", async () => {
 		await withSession("framed", async ({ url }) => {
 			const response = await fetch(`${url}/prototype-slash.html`, {

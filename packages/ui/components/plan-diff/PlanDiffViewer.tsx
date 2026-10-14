@@ -17,6 +17,7 @@ import { PlanCleanDiffView } from "./PlanCleanDiffView";
 import { PlanRawDiffView } from "./PlanRawDiffView";
 import { PlanDiffBadge } from "./PlanDiffBadge";
 import { VSCodeIcon } from "./VSCodeIcon";
+import { noteServerSessionMismatch, withServerSession } from "../../utils/serverSession";
 
 interface PlanDiffViewerProps {
   diffBlocks: PlanDiffBlock[];
@@ -44,8 +45,12 @@ const defaultOpenVscodeDiff = async (
     const res = await fetch("/api/plan/vscode-diff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ baseVersion }),
+      // The stale-tab guard (a no-op for a host that never adopted a session).
+      body: JSON.stringify(withServerSession({ baseVersion })),
     });
+    if (await noteServerSessionMismatch(res)) {
+      return { error: "This review was replaced. Reload the page." };
+    }
     const data = (await res.json()) as { ok?: boolean; error?: string };
     if (!res.ok || data.error) {
       return { error: data.error || "Failed to open VS Code diff" };

@@ -37,9 +37,9 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
@@ -56,7 +56,6 @@ import {
   type InboxProjectRepo,
 } from "@plannotator/core/inbox-types";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import {
   INBOX_TOOL_HOSTS,
   loadConfig,
@@ -112,6 +111,7 @@ import {
 } from "./inbox-decisions";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
+import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { inboxMessageImageRoute } from "./inbox-message-images";
@@ -256,6 +256,8 @@ export interface InboxServerOptions {
   openInLauncher?: InboxOpenInLauncher;
   /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
+  /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
+  projectRootGit?: InboxGitRunner;
   /**
    * How long after a Mark read the asking agents are told what it closed (the
    * window's Undo lasts 7 s). Default `INBOX_SET_ASIDE_DELAY_MS`. Tests shorten it.
@@ -315,6 +317,7 @@ function json(body: unknown, status = 200): Response {
 
 const ERROR_STATUS: Record<string, number> = {
   validation_error: 422,
+  project_unresolved: 503,
   message_not_found: 404,
   thread_not_found: 404,
   project_not_found: 404,
@@ -396,29 +399,8 @@ function tokensEqual(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** The project root for a path an agent named: realpath, then its git toplevel. */
-export async function resolveInboxProjectRoot(path: string): Promise<{ root: string; name: string }> {
-  if (typeof path !== "string" || !isAbsolute(path)) {
-    throw new InboxError("validation_error", "project_path: must be an absolute path.", { field: "project_path" });
-  }
-  let real: string;
-  try {
-    real = realpathSync(path);
-    if (!statSync(real).isDirectory()) throw new Error("not a directory");
-  } catch {
-    throw new InboxError("validation_error", "project_path: no such folder.", { field: "project_path" });
-  }
-  let root = real;
-  try {
-    const proc = Bun.spawn(["git", "-C", real, "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    if (code === 0 && out.trim()) root = realpathSync(out.trim());
-  } catch {
-    // No git: the folder is the project.
-  }
-  const name = extractRepoName(root) ?? extractDirName(root) ?? "project";
-  return { root, name };
-}
+/** The project root for a path an agent named (the rules: packages/server/inbox-project-root.ts). */
+export { resolveInboxProjectRoot } from "./inbox-project-root";
 
 function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], preferred: number | null): { server: ReturnType<typeof Bun.serve>; portChanged: boolean } {
   const serve = (port: number) =>
@@ -524,11 +506,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // when a project is first seen, never while a request waits (inbox-repos.ts).
   const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
 
+  // Where a path an agent named files its messages: its repository (a linked
+  // worktree folds into its main repository's project) or the folder, cached
+  // per folder (packages/server/inbox-project-root.ts). One cache for sends,
+  // live sessions and the message-image route, so they always agree.
+  const projectRoots = createInboxProjectRoots(options.projectRootGit ? { git: options.projectRootGit } : {});
   const projectLocks = new Map<string, Promise<InboxProject>>();
   const resolveProject = async (path: string): Promise<InboxProject> => {
-    const { root, name } = await resolveInboxProjectRoot(path);
+    const { root, name, folder, settled } = await projectRoots.resolve(path);
     const existing = store.projectByRoot(root);
     if (existing) return existing;
+    if (!settled) {
+      // git ran past its time limit, so `root` is a guess. A project the
+      // store would keep forever is never made from it: the nearest existing
+      // REPOSITORY project holding the folder (its root has a `.git`; read
+      // from disk, no git), else the agent is told to try again. A folder
+      // project (`~`, a notes folder) never takes a guess: a new worktree or
+      // repository under it would be filed there for good.
+      const repositories = store.listProjects().filter((project) => existsSync(join(project.root, ".git")));
+      const holder = nearestProjectHolding(repositories, folder);
+      if (holder) return holder;
+      throw new InboxError(
+        "project_unresolved",
+        `Could not tell which project ${folder} belongs to: git did not answer in time. Nothing was sent or saved; try the same call again.`,
+        { field: "project_path" },
+      );
+    }
     void repos.refresh(root);
     // One creation per root even when two calls race through the await above.
     let pending = projectLocks.get(root);
@@ -546,6 +549,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         store,
         baseUrl: () => baseUrl,
         resolveProject,
+        projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
         // An open wait_for_reply keeps its session present (never "ended").
@@ -1253,7 +1257,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const live = createInboxLiveSessions({
     store,
     serverSession,
-    resolveRoot: async (path) => (await resolveInboxProjectRoot(path)).root,
+    resolveRoot: async (path) => (await projectRoots.resolve(path)).root,
   });
 
   let stopRequested = false;
@@ -1665,7 +1669,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // #1813: an image a message's body shows, read from its project
       // (packages/server/inbox-message-images.ts).
-      const image = inboxMessageImageRoute(req, url, store);
+      const image = await inboxMessageImageRoute(req, url, store, projectRoots);
       if (image) return image;
 
       // "Open in": an attachment in its own app, by id only (packages/server/inbox-open-in.ts).
