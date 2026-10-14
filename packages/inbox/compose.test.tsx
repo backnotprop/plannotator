@@ -35,6 +35,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
+/** When set, the server's answer to a compose Send (POST /api/inbox/messages) is this instead. */
+let sendAnswer: { status: number; body: Record<string, unknown> } | null = null;
 
 function loopback(path: string, method = 'GET', body?: string, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -103,6 +105,9 @@ beforeEach(() => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? String(init.body) : undefined;
     if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
+    if (sendAnswer && method === 'POST' && path === '/api/inbox/messages') {
+      return new Response(JSON.stringify(sendAnswer.body), { status: sendAnswer.status, headers: { 'Content-Type': 'application/json' } });
+    }
     const answer = await loopback(path, method, body);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -251,4 +256,24 @@ test.skipIf(!hasDom)('a live session: To is prefilled, Send starts the thread ad
   const sections = (JSON.parse((await loopback('/api/inbox/threads')).text) as { sections: InboxListSection[] }).sections;
   const row = sections.flatMap((s) => s.threads).find((t) => t.subject === 'Idea: group the list by session.')!;
   expect(row).toMatchObject({ section: 'sent', addressee: { host: 'claude-code', session: 'ses_live_dom' } });
+});
+
+test.skipIf(!hasDom)('git too slow to tell the project (project_unresolved): the dialog stays with the words and says to press Send again', async () => {
+  await poll('ses_live_dom', 'claude-code', projects[0]!);
+  const el = await renderApp();
+  await openCompose(el);
+  await until(() => dialog()!.querySelector('[data-compose-to^="ses_"]') !== null, 'To prefilled');
+  type('Plan the retry budget.');
+  sendAnswer = { status: 503, body: { code: 'project_unresolved', error: 'Could not tell which project /x belongs to: git did not answer in time. Nothing was sent or saved; try the same call again.' } };
+  try {
+    act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+    await until(() => dialog()!.querySelector('[data-compose-error]') !== null, 'the error');
+  } finally {
+    sendAnswer = null;
+  }
+  expect(dialog()!.querySelector('[data-compose-error]')!.textContent).toBe('Could not tell which project that session works in: git did not answer in time. Nothing was sent; press Send again.');
+  expect((dialog()!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Plan the retry budget.');
+  key('Escape');
+  act(() => (dialog()!.querySelector('[data-compose-discard]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'compose closed');
 });

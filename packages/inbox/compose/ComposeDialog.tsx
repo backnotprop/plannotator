@@ -203,6 +203,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
         setError('That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.');
+      } else if (cause instanceof InboxApiError && cause.code === 'project_unresolved') {
+        // git did not answer in time (#1919): the server's words are for an agent; the person presses Send again.
+        setError('Could not tell which project that session works in: git did not answer in time. Nothing was sent; press Send again.');
       } else setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
     } finally {
       setBusy(null);
