@@ -248,6 +248,37 @@ describe('QuestionBlock', () => {
     });
   }
 
+  test.skipIf(!hasDom)('multi recommending only a suggestion: a tick hides Accept recommended, as before', async () => {
+    // Once answered, the Suggested line is gone, so Accept would clear the
+    // ticks for text the card no longer shows.
+    const el = await mount(<Harness markdown={`:::question-multi\nWhich indicators ship?\n\n- [ ] Dot\n- [ ] Banner\n\nRecommended: a sound, nothing visual\n:::\n`} />);
+    const card = () => cards(el)[0];
+    expect(button(card(), 'Accept recommended')).toBeDefined();
+    await click(rowText(card(), 'Dot'));
+    expect(answerOf(0)?.selected).toEqual(['Dot']);
+    expect(button(card(), 'Accept recommended')).toBeUndefined();
+  });
+
+  test.skipIf(!hasDom)('after Accept recommended focus moves to the first checked choice, or the field it filled', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    const accept = button(cards(el)[1], 'Accept recommended')!;
+    accept.focus();
+    await click(accept);
+    const first = cards(el)[1].querySelector<HTMLInputElement>('input:checked')!;
+    expect(first.closest('label')!.textContent).toContain('Dot');
+    // Compared as a boolean: printing a DOM node on failure crashes bun.
+    expect(document.activeElement === first).toBe(true);
+    await act(async () => root!.unmount());
+    host!.remove();
+
+    const suggested = await mount(<Harness markdown={`:::question\nPick\n\n- [ ] A\n- [ ] B\n\nRecommended: something else entirely\n:::\n`} />);
+    const use = button(cards(suggested)[0], 'Accept recommended')!;
+    use.focus();
+    await click(use);
+    expect(document.activeElement === cards(suggested)[0].querySelector('input[type="text"]')).toBe(true);
+    expect((document.activeElement as HTMLInputElement).value).toBe('something else entirely');
+  });
+
   test.skipIf(!hasDom)('single: a pick of another choice still hides Accept recommended', async () => {
     const el = await mount(<Harness markdown={DOC} />);
     await click(rowText(cards(el)[0], 'Nowhere'));

@@ -109,6 +109,14 @@ iOS background execution is unreliable.
     expect(none.suggestedText).toBe("Beta, Alpha — cheap, fast, Delta");
   });
 
+  test("lettered plain bullets: a whole lettered choice with a comma in its description is joined back too", () => {
+    // Before the join, the split failed (`steady` names nothing) and the final
+    // lettered fallback named only `a.`; now both are named.
+    const q = parseQuestionBlock("question-multi", "Which?\n\n- a. Alpha\n- b. Beta — slow, steady\n\nRecommended: a. Alpha first, b. Beta — slow, steady")!;
+    expect(q.choices.map((c) => [c.label, c.recommended])).toEqual([["a. Alpha", true], ["b. Beta", true]]);
+    expect(q.suggestedText).toBeUndefined();
+  });
+
   test("a recommendation that names no choice becomes a suggested answer", () => {
     const q = parseQuestionBlock("question", `Pick\n- [ ] A\n- [ ] B\nRecommended: something else entirely`)!;
     expect(q.choices.every((c) => !c.recommended)).toBe(true);

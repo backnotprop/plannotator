@@ -318,8 +318,9 @@ export function MessageBody({
   // The whole card, per question: only an open or picked question can be
   // answered. A sent one, one a Mark read or the archive closed, and a
   // replaced one draw read-only (no ticks, no Accept recommended, no Skip),
-  // even while another question in the same message is still open; the
-  // server would refuse an edit to any of them.
+  // even while another question in the same message is still open. The store
+  // would take a new pick on a sent question (it goes back to picked), but the
+  // window does not offer it (adr/implementation/inbox-thread-state.md, Pick).
   const answerLocked = useCallback(
     (question: IndexedQuestion) => {
       const wire = message.questions?.find((q) => q.key === question.question.key);

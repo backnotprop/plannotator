@@ -1,4 +1,4 @@
-import React, { useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
   emptyQuestionAnswer,
@@ -289,6 +289,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const noteOpen = notePinned ?? !!answer?.note?.trim();
   const pressRef = useRef<{ x: number; y: number; touch: boolean } | null>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLFieldSetElement>(null);
+  // Accept recommended (and Use) go away once clicked: focus moves to what
+  // the click filled in, never to the page.
+  const focusAfterAcceptRef = useRef(false);
   const lastPickRef = useRef<{ label: string; before: QuestionAnswer | undefined; at: number } | null>(null);
 
   const inline = (text: string) => (
@@ -313,13 +317,17 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const settled = status === 'settled';
   const settledLabels = question.choices.filter((c) => c.settled).map((c) => c.label);
   const hasRecommendation = question.choices.some((c) => c.recommended) || !!question.suggestedText;
-  // "Accept recommended" stays offered on a pick-any question until the
-  // answer is exactly the recommendation: ticking one box must not take away
-  // the one click that ticks the rest. A pick-one or text question answered
-  // any way, and a question with a settled choice, offer it no more.
+  // "Accept recommended" stays offered on a pick-any question whose
+  // recommendation names choices until the answer is exactly those choices:
+  // ticking one box must not take away the one click that ticks the rest. A
+  // pick-one or text question answered any way, a question with a settled
+  // choice, and a pick-any question recommending only a suggestion (whose
+  // Suggested line goes once the card is answered, so Accept would clear the
+  // ticks for something no longer shown) offer it no more.
   const offerAccept = !readOnly && hasRecommendation && !settled && (
     !answered
     || (question.kind === 'multi'
+      && question.choices.some((c) => c.recommended)
       && !question.choices.some((c) => c.settled)
       && !isRecommendedQuestionAnswer(
         answer!,
@@ -380,8 +388,25 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
 
   const acceptRecommended = () => {
     const next = recommendedQuestionAnswer(indexed, base);
-    if (next) commit(next);
+    if (!next) return;
+    focusAfterAcceptRef.current = true;
+    commit(next);
   };
+  // Runs after the render that drew the accepted answer (and once more at
+  // most, should the host not redraw it): the first checked choice, else the
+  // field holding the suggestion.
+  useEffect(() => {
+    if (!focusAfterAcceptRef.current) return;
+    focusAfterAcceptRef.current = false;
+    const card = cardRef.current;
+    if (!card) return;
+    // Focus still on something in the card (the button was not removed): leave it.
+    const active = document.activeElement;
+    if (active && active !== document.body && card.contains(active)) return;
+    const target = card.querySelector<HTMLElement>('input:checked:not(:disabled)')
+      ?? card.querySelector<HTMLElement>('textarea:not(:disabled), input[type="text"]:not(:disabled)');
+    target?.focus({ preventScroll: true });
+  });
 
   const toggleNote = () => {
     const opening = !noteOpen;
@@ -468,6 +493,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
 
   return (
     <fieldset
+      ref={cardRef}
       className={cx(
         'question-block my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
         // Native radios/checkboxes follow the theme's mode. ThemeProvider marks
