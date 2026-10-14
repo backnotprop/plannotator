@@ -18,6 +18,7 @@ import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyForAgent } from "@plannotator/shared/inbox/uploads";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { recordAgentDecision } from "./inbox-decisions";
@@ -239,17 +240,19 @@ function replyResult(store: InboxStore, reply: InboxMessage, base: string): Tool
   store.markAgentChecked(reply.thread_id, cursor);
   const questions = reply.reply_to ? store.questionsOf(reply.reply_to) : [];
   const subject = store.threadSubject(reply.thread_id);
+  // The files the person attached are named with their paths, as the wake names them.
+  const body = inboxBodyForAgent(reply);
   return {
     content: [
       {
         type: "text",
-        text: `The person replied in thread ${reply.thread_id}${subject ? ` (${subject})` : ""}:\n\n${reply.body}`,
+        text: `The person replied in thread ${reply.thread_id}${subject ? ` (${subject})` : ""}:\n\n${body}`,
       },
     ],
     structuredContent: {
       status: "replied",
       thread_id: reply.thread_id,
-      reply: { message_id: reply.id, reply_to: reply.reply_to, body: reply.body, created_at: reply.created_at },
+      reply: { message_id: reply.id, reply_to: reply.reply_to, body, created_at: reply.created_at },
       questions,
       cursor,
       url: threadUrl(base, reply.thread_id),

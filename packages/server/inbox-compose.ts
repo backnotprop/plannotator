@@ -32,7 +32,14 @@ import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionM
 import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft } from "@plannotator/shared/inbox/drafts";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxUploadAttachments, INBOX_UPLOAD_MAX_BYTES, receiveInboxUpload, removeInboxUploads, sweepInboxUploads } from "@plannotator/shared/inbox/uploads";
+import {
+  inboxUploadAttachments,
+  INBOX_UPLOAD_MAX_BYTES,
+  receiveInboxUpload,
+  removeInboxAttachmentFiles,
+  removeInboxUploads,
+  sweepInboxUploads,
+} from "@plannotator/shared/inbox/uploads";
 import type { createInboxLiveSessions } from "./inbox-sessions";
 
 /** How often pending uploads are swept (each sweep drops those older than a day that no draft names). */
@@ -121,17 +128,31 @@ export function createInboxCompose(options: {
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
     const attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
-    const result = store.startPersonThread({
-      project_id: project.id,
-      body: body.body,
-      to: { host: target.host, session: target.session },
-      idempotency_key: key,
-      attachments,
-    });
+    let result: ReturnType<InboxStore["startPersonThread"]>;
+    try {
+      result = store.startPersonThread({
+        project_id: project.id,
+        body: body.body,
+        to: { host: target.host, session: target.session },
+        idempotency_key: key,
+        attachments,
+      });
+    } catch (error) {
+      removeInboxAttachmentFiles(store.dir, attachments);
+      throw error;
+    }
+    // Another Send with this key landed while this one waited on the project:
+    // its message stands, and the files written for this one are not used.
+    if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
     if (body.draft_id !== undefined) deleteInboxDraft(store.dir, body.draft_id);
-    return json({ thread_id: result.message.thread_id, message: result.message, project: { id: project.id, name: project.name, root: project.root }, replayed: false });
+    return json({
+      thread_id: result.message.thread_id,
+      message: result.message,
+      project: { id: project.id, name: project.name, root: project.root },
+      replayed: result.replayed,
+    });
   };
 
   /** "Send to another session": a message no session took yet, to a live session of its thread's project. */

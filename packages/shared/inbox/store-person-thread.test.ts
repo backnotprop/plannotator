@@ -119,12 +119,20 @@ describe("a thread the person starts", () => {
     const { store, project } = world();
     const { message } = store.startPersonThread({ project_id: project.id, body: "Add a retry budget.", to: claude, idempotency_key: "k" });
     const more = store.sendReply(message.id, { words: "And log each retry.", idempotency_key: "r1" });
+    // Stamped with where it goes, on the line itself.
+    expect(more.reply.to).toEqual(claude);
     expect(store.pendingReplies("ses_live").map((m) => m.id)).toEqual([message.id, more.reply.id]);
     expect(store.pendingReplies("ses_other")).toEqual([]);
+    // Another agent reading the thread settles nothing addressed to this session.
+    store.markAgentChecked(message.thread_id);
+    expect(store.pendingReplies("ses_live").map((m) => m.id)).toEqual([message.id, more.reply.id]);
     store.recordDelivery(message.id, claude);
     store.readdressMessage(more.reply.id, { host: "pi", session: "ses_pi" });
     expect(store.pendingReplies("ses_live")).toEqual([]);
     expect(store.pendingReplies("ses_pi").map((m) => m.id)).toEqual([more.reply.id]);
+    // An archived thread is not re-addressed.
+    store.resolveThread(message.thread_id, true);
+    expect(code(() => store.readdressMessage(more.reply.id, claude))).toBe("thread_resolved");
   });
 
   test("lastThreadsBySession names the thread each session last wrote in", () => {
