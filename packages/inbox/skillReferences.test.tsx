@@ -370,4 +370,10 @@ test.skipIf(!hasDom)('a comment on an attached file: its skill rides the one blo
   expect(reply.body.match(/\*\*Skills referenced\*\*/g)).toHaveLength(1);
   expect(reply.body.indexOf('Feedback on the attached files')).toBeLessThan(reply.body.indexOf('**Skills referenced**'));
   expect(reply.body).toContain('State what I am asking for, in clear words, so I can confirm.');
+  // Only the person's own words are painted: the `$readback` quoted in the attached-file feedback is not.
+  await until(() => el.querySelector(`[data-message-id="${reply.id}"] [data-skills-line]`) !== null, 'the Skills line');
+  const { skillReferenceRanges } = await import('./skillHighlight');
+  const { splitInboxSkillsBlock } = await import('@plannotator/core/skill-reference-block');
+  const ranges = skillReferenceRanges(el.querySelector(`[data-message-id="${reply.id}"]`)!, splitInboxSkillsBlock(reply.body)!.skills);
+  expect([...ranges.plain, ...ranges.human]).toHaveLength(0);
 });

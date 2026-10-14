@@ -74,9 +74,6 @@ export interface InboxSkillsSplit {
 
 const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
 
-/** A fenced code block's opening or closing line (CommonMark: up to 3 spaces, then 3+ backticks or tildes). */
-const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
-
 /**
  * The rest of a candidate block after its heading (`lines[from]` on), when
  * it is exactly what the window composes: list lines, then only blank lines
@@ -124,32 +121,33 @@ function readBlockTail(lines: readonly string[], from: number): InboxSkillRefere
 /**
  * The skills block at the END of a person's Inbox message, or null.
  *
- * The window composes the block last, so it is accepted only in exactly that
- * shape: a line that is the Inbox heading, at the start of the body or after
- * a blank line, NOT inside fenced code, followed by list lines and then
- * nothing but blank lines and BEGIN/END sections for skills the list names,
- * running to the end of the body. Text an agent wrote that a reply quotes (a
- * guided-review comment's code fences, an annotation's quote) can therefore
- * never fold the person's own words behind "Skills: …": a heading in a fence
- * is ignored, and one followed by anything else is not a block. Plannotator's
- * reviewer wording is not an Inbox heading. The caller decides whose message
- * it is: only the person's own messages carry a block the window composed.
+ * The window composes the block last, so it is the LAST line that is the
+ * Inbox heading (at the start of the body or after a blank line) whose tail
+ * is exactly the window's shape: list lines, then nothing but blank lines and
+ * closed BEGIN/END sections for skills the list includes, to the end of the
+ * body. Scanning from the end is what makes text an agent wrote, and the
+ * person's reply quotes (a guided-review comment's diff lines, an
+ * annotation's quote), unable to fold the person's own words:
+ *
+ * - the real block is always last; nothing agent-written follows it, so an
+ *   earlier fake heading, even one whose unterminated BEGIN would run on to
+ *   the real END line, is never the one chosen;
+ * - a heading inside a real block's SKILL.md body cannot validate: its
+ *   marker lookalikes are neutralized, and the section's own END line breaks
+ *   the tail;
+ * - with no real block, agent text is always followed by the exporter's own
+ *   text (a closing fence, the next section), so a fake block never reaches
+ *   the end.
+ *
+ * Fence parity is not used: the agent controls it (a diff line that is just
+ * ``` closes a quote's fence). Plannotator's reviewer wording is not an Inbox
+ * heading. The caller decides whose message it is: only the person's own
+ * messages carry a block the window composed.
  */
 export function splitInboxSkillsBlock(body: string): InboxSkillsSplit | null {
   const lines = body.split('\n').map((line) => line.replace(/\r$/, ''));
-  let fence: string | null = null;
-  for (let at = 0; at < lines.length; at++) {
-    const line = lines[at]!;
-    const marker = FENCE_RE.exec(line)?.[1];
-    if (fence) {
-      if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = null;
-      continue;
-    }
-    if (marker) {
-      fence = marker;
-      continue;
-    }
-    const heading = INBOX_HEADING_RE.exec(line);
+  for (let at = lines.length - 1; at >= 0; at--) {
+    const heading = INBOX_HEADING_RE.exec(lines[at]!);
     if (!heading || (at > 0 && lines[at - 1]!.trim() !== '')) continue;
     const skills = readBlockTail(lines, at + 1);
     if (!skills) continue;

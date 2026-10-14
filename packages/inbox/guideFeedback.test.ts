@@ -56,6 +56,17 @@ describe('guided-review comments as feedback', () => {
     expect(guideCommentSections(comments)).toBe(exportReviewFeedback(comments).replace(/^# Code Review Feedback\n\n/, ''));
   });
 
+  test('quoted code holding a ``` run gets a longer fence, in both exporters alike', () => {
+    const tricky: CodeAnnotation[] = [
+      { id: 't', type: 'suggestion', scope: 'line', filePath: 'README.md', lineStart: 4, lineEnd: 6, side: 'new', text: 'Fix the fence.', selectedText: 'Example:\n```\nnpm i\n```', originalCode: 'x ```` y', suggestedCode: 'plain', createdAt: 5 },
+    ];
+    const sections = guideCommentSections(tricky);
+    expect(sections).toBe(exportReviewFeedback(tricky).replace(/^# Code Review Feedback\n\n/, ''));
+    expect(sections).toContain('**Highlighted text:**\n````\nExample:\n```\nnpm i\n```\n````\n');
+    expect(sections).toContain('**Replaces:**\n`````\nx ```` y\n`````\n');
+    expect(sections).toContain('**Suggested code:**\n```\nplain\n```\n');
+  });
+
   test('each guided review gets its own section under the heading, after the attached files', () => {
     const text = guideFeedback([record(comments[0]!), record(comments[2]!, 'Second guide', 'msg_2')]);
     expect(text.match(/^# Feedback on the guided review$/gm)).toHaveLength(2);
