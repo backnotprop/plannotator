@@ -509,8 +509,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!settled) {
       // git ran past its time limit, so `root` is a guess. A project the
       // store would keep forever is never made from it: the nearest existing
-      // project holding the folder, else the agent is told to try again.
-      const holder = nearestProjectHolding(store.listProjects(), folder);
+      // REPOSITORY project holding the folder (its root has a `.git`; read
+      // from disk, no git), else the agent is told to try again. A folder
+      // project (`~`, a notes folder) never takes a guess: a new worktree or
+      // repository under it would be filed there for good.
+      const repositories = store.listProjects().filter((project) => existsSync(join(project.root, ".git")));
+      const holder = nearestProjectHolding(repositories, folder);
       if (holder) return holder;
       throw new InboxError(
         "project_unresolved",

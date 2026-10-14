@@ -304,3 +304,30 @@ test("when git does not answer in time, no project is made from a guess: the age
   expect(beside.content[0]!.text).toStartWith("project_unresolved:");
   expect(server.store.listProjects().map((p) => p.root)).toEqual([main]);
 });
+
+test("a folder project holding the worktree (a project at ~) never takes a guess: the send is refused, not filed there", async () => {
+  // `root` plays ~: no repository, and both `api` and its worktree `api-wt` live under it.
+  const { root, worktree, dataDir } = world();
+  const real = inboxGitRunner();
+  let slow = false;
+  const git: InboxGitRunner = async (args, cwd) => {
+    if (!slow) return real(args, cwd);
+    await Bun.sleep(20);
+    return null;
+  };
+  const server = await start(dataDir, git);
+  const client = await agent(server);
+  const home = await send(client, { project_path: root, body: "Notes from the home folder.", agent_session: "ses_home" });
+  expect(home.project.root).toBe(root);
+
+  // A new worktree, and git past its time limit: ~ holds the folder but is no repository.
+  slow = true;
+  const refused = (await client.callTool({
+    name: "send_message",
+    arguments: { project_path: worktree, body: "From the worktree.", agent_session: "ses_wt" },
+  })) as { isError?: boolean; content: { text: string }[] };
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0]!.text).toStartWith("project_unresolved:");
+  expect(server.store.listRows({ projectId: home.project.id }).map((row) => row.thread_id)).toEqual([home.thread_id]);
+  expect(server.store.listProjects().map((p) => p.root)).toEqual([root]);
+});

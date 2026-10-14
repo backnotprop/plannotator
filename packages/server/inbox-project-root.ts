@@ -96,14 +96,25 @@ export type InboxGitRunner = (args: readonly string[], cwd: string) => Promise<{
 /**
  * Variables that would point git at another repository than the folder's
  * own, whatever its cwd (an Inbox started from a git hook, or from a shell
- * that exported them): cleared for every project-root git.
+ * that exported them), and the ones that inject config into one git run
+ * (`git -c`'s `GIT_CONFIG_PARAMETERS`, and `GIT_CONFIG_COUNT` with its
+ * `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`): cleared for every
+ * project-root git.
  */
-export const INBOX_PROJECT_ROOT_GIT_ENV_CLEARED = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"] as const;
+export const INBOX_PROJECT_ROOT_GIT_ENV_CLEARED = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+] as const;
+const GIT_CONFIG_ENTRY = /^GIT_CONFIG_(KEY|VALUE)_\d+$/;
 
-/** The environment project-root gits run with: the Inbox's own, without the repository overrides, never prompting. */
+/** The environment project-root gits run with: the Inbox's own, without the repository and config overrides, never prompting. */
 export function inboxProjectRootGitEnv(environment: Readonly<Record<string, string | undefined>> = process.env): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(environment)) if (value !== undefined) env[key] = value;
+  for (const [key, value] of Object.entries(environment)) if (value !== undefined && !GIT_CONFIG_ENTRY.test(key)) env[key] = value;
   for (const key of INBOX_PROJECT_ROOT_GIT_ENV_CLEARED) delete env[key];
   env.GIT_TERMINAL_PROMPT = "0";
   return env;

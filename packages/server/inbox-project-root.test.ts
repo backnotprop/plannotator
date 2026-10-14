@@ -261,6 +261,17 @@ describe("the real git runner", () => {
     try {
       expect(await resolveInboxProjectRoot(worktree)).toMatchObject({ root: main, worktree, settled: true });
       expect(inboxProjectRootGitEnv()).not.toHaveProperty("GIT_DIR");
+      // Config injected for one run goes too; the config file pointers stay.
+      expect(
+        inboxProjectRootGitEnv({
+          PATH: "/usr/bin",
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_PARAMETERS: "'core.worktree'='/elsewhere'",
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "core.worktree",
+          GIT_CONFIG_VALUE_0: "/elsewhere",
+        }),
+      ).toEqual({ PATH: "/usr/bin", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0" });
     } finally {
       for (const key of keys) {
         if (previous[key] === undefined) delete process.env[key];
