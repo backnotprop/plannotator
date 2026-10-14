@@ -16,7 +16,7 @@ import { isAbsolute, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
-import { INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
+import { INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxLine, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -64,6 +64,42 @@ export const SEND_MESSAGE_DESCRIPTION = [
  */
 export const SUPERSEDES_DESCRIPTION =
   "Earlier questions in this thread that no longer apply, so the person cannot answer them any more. Withdraw your own questions that are still open (read_thread state open or picked; a sent, skipped or closed one is refused) this way as the thread moves on: when this message replaces them, makes them moot or follows up on them, or the person's reply settled them in words, so they stop keeping the thread at the top of the person's list. \"<message id>/<key>\" for one question (read_thread gives each question's key) or \"<message id>\" for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To replace one with a particular new question, put `Replaces: <message id>/<key>` in that question's block instead. The person's pick on a superseded question is never sent. Every id must name an open question of the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_supersedes, lists the thread's open questions.";
+
+/**
+ * The Inbox-only `Stopped:` / `Holds up:` lines, as a whole block. The body
+ * field's description carries it; inbox.test.ts parses it with the store's
+ * own parser.
+ */
+export const INBOX_STOP_EXAMPLE = [
+  ":::question",
+  "Which database password should I use for staging?",
+  "",
+  "Stopped: can't run the migration without it",
+  "Holds up: staging deploy; release notes",
+  "",
+  "- [ ] The one in 1Password \"staging-db\"",
+  "- [ ] Make a new one",
+  ":::",
+].join("\n");
+
+/**
+ * send_message's `body`, as an agent reads it. The `Stopped:` and `Holds up:`
+ * lines live here, not in QUESTION_AUTHORING_GUIDE (shared with plan review,
+ * where they mean nothing) and not in send_message's own description (cut at
+ * 2,048 characters, already filled by the guide): a field description reaches
+ * the model whole, and the `plannotator_inbox` tool carries it on its `body`.
+ */
+const sectionLabel = (id: InboxSectionId): string => INBOX_SECTIONS.find((section) => section.id === id)?.label ?? id;
+
+export const SEND_BODY_DESCRIPTION = [
+  "The message, markdown. Question blocks render as answerable cards.",
+  "",
+  "Two Inbox-only lines a question block can carry, each on its own line after the question:",
+  `- \`Stopped: <why>\` only when you truly cannot go on until this is answered: the thread goes first in the person's list, under "${sectionLabel("stopped")}". Otherwise leave the line out. A negative value (\`no\`, \`none\`, \`n/a\`, \`-\`) means no stop, so never write \`Stopped: no\`.`,
+  `- \`Holds up: <work>; <work>\` names the work that waits on the answer while you go on: the list shows it under "${sectionLabel("holding")}". A \`none\` entry holds nothing up.`,
+  "",
+  INBOX_STOP_EXAMPLE,
+].join("\n");
 
 const PROJECT_PATH_DESCRIPTION =
   "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.";
@@ -341,9 +377,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       description: SEND_MESSAGE_DESCRIPTION,
       inputSchema: z
         .object({
-          body: z.string().min(1).describe(
-            "The message, markdown. Question blocks render as answerable cards. In a block, add `Stopped: <why>` only for a question that leaves you nothing else to work on (otherwise leave the line out, never `Stopped: no`); `Holds up: <work>; <work>` names the work that waits while you go on.",
-          ),
+          body: z.string().min(1).describe(SEND_BODY_DESCRIPTION),
           ...SEND_ROUTING_FIELDS,
           attachments: z
             .array(z.string())

@@ -2382,6 +2382,7 @@ Sorting and the rest:
 - Answers: success is `structuredContent` plus one line. A refusal is `isError` with `<snake_code>: <message>`.
 - `wait_for_reply` returns a reply as soon as it lands, or `{ status: "waiting", cursor }` after 50 s.
 - `supersedes` (send_message, submit_guide) is described in its own field (`SUPERSEDES_DESCRIPTION`), which reaches the model whole; send_message's description is cut at 2,048 characters and stays the question guide. `plannotator inbox --help` documents it and the `Replaces:` line ("Only in the Inbox", `INBOX_REPLACES_EXAMPLE`).
+- The Inbox-only `Stopped:` / `Holds up:` lines (with the bare-negative rule and an example, `INBOX_STOP_EXAMPLE`) are taught in send_message's `body` field (`SEND_BODY_DESCRIPTION`), which reaches the model whole and rides the `plannotator_inbox` tool's `body`; never in `QUESTION_AUTHORING_GUIDE`, which plan review shares and the skill copies byte for byte.
 
 **Server routes** are listed under "Inbox Server" in "Server API".
 
