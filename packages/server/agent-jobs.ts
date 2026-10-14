@@ -31,7 +31,8 @@ import {
 import { resolveGuideLaunchInstructions } from "@plannotator/shared/guide-instructions-store";
 import { gitColorFreeEnvironment } from "@plannotator/shared/review-core";
 import type { GuideLaunchReview } from "@plannotator/shared/guide-format";
-import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
+import { isSameOriginRequest } from "./request-origin-guard";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
 export type { AgentJobInfo, AgentJobEvent, AgentCapabilities } from "@plannotator/shared/agent-jobs";
@@ -595,7 +596,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       // route; repeated so the handler is safe wherever it is mounted), and a
       // kill from a stale tab too. A launch's session is checked on its body.
       if ((url.pathname === JOBS || url.pathname.startsWith(JOBS + "/")) && (req.method === "POST" || req.method === "DELETE")) {
-        if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+        if (!isSameOriginRequest(req)) {
           return Response.json(crossOriginRefusalBody(), { status: 403 });
         }
         if (

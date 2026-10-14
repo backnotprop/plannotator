@@ -18,7 +18,8 @@ import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
 import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
 import { listReferenceSkills, readReferenceSkillContent } from "./review-skill-loader";
-import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
+import { isSameOriginRequest } from "./request-origin-guard";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
@@ -337,7 +338,7 @@ export interface HandleSaveNotesOptions {
  * mounted) and a stale tab.
  */
 export async function handleSaveNotes(req: Request, options: HandleSaveNotesOptions = {}): Promise<Response> {
-  if (!isSameOriginOrNoOrigin(req.headers.get("origin"), new URL(req.url).host, req.headers.get("sec-fetch-site"))) {
+  if (!isSameOriginRequest(req)) {
     return Response.json(crossOriginRefusalBody(), { status: 403 });
   }
 

@@ -11,9 +11,11 @@
  *
  * Passes: a request with no Origin (a non-browser client such as an agent's
  * curl, the VS Code extension host, the Claude Code mod), the session's own
- * page, and the VS Code panel's cookie proxy (`Sec-Fetch-Site: same-origin`).
- * GET, HEAD and OPTIONS are left to their routes. The Pi mirror is
- * apps/pi-extension/server/request-origin-guard.ts.
+ * page, the VS Code panel's cookie proxy (`Sec-Fetch-Site: same-origin`), and
+ * an Origin whose hostname `PLANNOTATOR_ALLOWED_HOSTS` names explicitly (a
+ * plain-HTTP reverse proxy that rewrites Host; `*` does not count, see
+ * `isOriginNamedInAllowedHosts`). GET, HEAD and OPTIONS are left to their
+ * routes. The Pi mirror is apps/pi-extension/server/request-origin-guard.ts.
  */
 
 import {
@@ -21,11 +23,24 @@ import {
   isSameOriginOrNoOrigin,
   isStateChangingMethod,
 } from "@plannotator/shared/request-origin";
+import { ALLOWED_HOSTS_ENV, isOriginNamedInAllowedHosts, parseAllowedHosts } from "@plannotator/shared/request-host";
+
+/**
+ * Whether a request may change state: no Origin, the session's own origin,
+ * the VS Code proxy, or an Origin named in PLANNOTATOR_ALLOWED_HOSTS (read on
+ * each call).
+ */
+export function isSameOriginRequest(req: Request): boolean {
+  const origin = req.headers.get("origin");
+  const site = req.headers.get("sec-fetch-site");
+  const host = req.headers.get("host") ?? new URL(req.url).host;
+  if (isSameOriginOrNoOrigin(origin, host, site)) return true;
+  return isOriginNamedInAllowedHosts(origin, site, parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]));
+}
 
 /** A 403 response when a state-changing request came from another site, else null. */
 export function refuseCrossOriginWrite(req: Request): Response | null {
   if (!isStateChangingMethod(req.method)) return null;
-  const host = req.headers.get("host") ?? new URL(req.url).host;
-  if (isSameOriginOrNoOrigin(req.headers.get("origin"), host, req.headers.get("sec-fetch-site"))) return null;
+  if (isSameOriginRequest(req)) return null;
   return Response.json(crossOriginRefusalBody(), { status: 403 });
 }

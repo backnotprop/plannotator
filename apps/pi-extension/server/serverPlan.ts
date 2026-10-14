@@ -9,7 +9,7 @@ import { countUnsentDraftComments, hostSessionClosedEvent, type HostCloseOutcome
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
-import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
+import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import {
 	type ArchivedPlan,
 	generateSlug,
@@ -480,7 +480,7 @@ export async function startPlanReviewServer(options: {
 			req.method === "POST"
 		) {
 			// Opens an editor on this machine: another site's page and a stale tab are refused.
-			if (!isSameOriginOrNoOrigin(req.headers.origin ?? null, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
+			if (!isSameOriginRequest(req)) {
 				json(res, crossOriginRefusalBody(), 403);
 				return;
 			}

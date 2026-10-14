@@ -18,7 +18,7 @@ import type { Origin } from "@plannotator/shared/agents";
 import { resolve } from "path";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
-import { refuseCrossOriginWrite } from "./request-origin-guard";
+import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
 import { openEditorDiff } from "./ide";
 import {
   saveToObsidian,
@@ -538,7 +538,7 @@ export async function startPlannotatorServer(
           // API: Open plan diff in VS Code
           if (url.pathname === "/api/plan/vscode-diff" && req.method === "POST") {
             // Opens an editor on this machine: another site's page and a stale tab are refused.
-            if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+            if (!isSameOriginRequest(req)) {
               return Response.json(crossOriginRefusalBody(), { status: 403 });
             }
             try {

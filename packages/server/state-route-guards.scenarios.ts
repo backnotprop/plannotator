@@ -105,6 +105,7 @@ export function defineStateRouteScenarios(runtime: string, start: StartStateRout
       "PLANNOTATOR_AI",
       "PLANNOTATOR_INBOX_CONNECT",
       "PLANNOTATOR_FEEDBACK_HISTORY",
+      "PLANNOTATOR_ALLOWED_HOSTS",
       "SSH_TTY",
       "SSH_CONNECTION",
     ],
@@ -224,6 +225,55 @@ export function defineStateRouteScenarios(runtime: string, start: StartStateRout
       const answer = await call("POST", "/api/save-notes", {}, {});
       expect(answer.status).toBe(200);
       expect(answer.body?.ok).toBe(true);
+    });
+  });
+
+  // A plain-HTTP reverse proxy that rewrites Host (nginx's default proxy_pass):
+  // the page's Origin is the proxy's public name, Host is the upstream, and the
+  // browser sends no Sec-Fetch-Site over plain HTTP to a non-localhost address.
+  describe(`${runtime}: an Origin named in PLANNOTATOR_ALLOWED_HOSTS (a plain-HTTP proxy that rewrites Host)`, () => {
+    const proxied = { origin: "http://review.example.com" };
+    const routes: Array<[string, unknown, number]> = [
+      // [path, body, status once past the guards]
+      ["/api/save-notes", {}, 200],
+      ["/api/plan/vscode-diff", {}, 400],
+    ];
+
+    test("a named hostname (exact or .suffix) passes the guard and the route checks", async () => {
+      for (const setting of ["review.example.com", ".example.com", "other.example, review.example.com:8080"]) {
+        await setUp("plan");
+        process.env.PLANNOTATOR_ALLOWED_HOSTS = setting;
+        for (const [path, body, status] of routes) {
+          const answer = await call("POST", path, proxied, { ...(body as object), serverSession });
+          expect([setting, path, answer.status]).toEqual([setting, path, status]);
+        }
+        server?.stop();
+        server = null;
+        environment.restore();
+      }
+    });
+
+    test("`*` does not widen it, an unnamed Origin is refused, and fetch metadata still wins", async () => {
+      await setUp("plan");
+      for (const [setting, headers] of [
+        ["*", proxied],
+        ["other.example", proxied],
+        ["review.example.com", { origin: "http://review.example.com.evil.example" }],
+        ["review.example.com", { ...proxied, "sec-fetch-site": "cross-site" }],
+        ["review.example.com", { origin: "null" }],
+      ] as Array<[string, Record<string, string>]>) {
+        process.env.PLANNOTATOR_ALLOWED_HOSTS = setting;
+        for (const [path] of routes) {
+          const answer = await call("POST", path, headers, { serverSession });
+          expect([setting, JSON.stringify(headers), path, answer.status, answer.body?.code]).toEqual([
+            setting,
+            JSON.stringify(headers),
+            path,
+            403,
+            "cross_origin",
+          ]);
+        }
+      }
     });
   });
 

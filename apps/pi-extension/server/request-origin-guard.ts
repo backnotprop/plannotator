@@ -4,7 +4,8 @@
  * Mirrors packages/server/request-origin-guard.ts: every Pi server (plan,
  * review, annotate) runs it right after the Host allowlist, before any route,
  * and refuses a POST, PUT, PATCH or DELETE that a page on another site sent
- * with 403 before anything is read or launched.
+ * with 403 before anything is read or launched. An Origin whose hostname
+ * PLANNOTATOR_ALLOWED_HOSTS names explicitly (not `*`) also passes.
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -13,11 +14,18 @@ import {
 	isSameOriginOrNoOrigin,
 	isStateChangingMethod,
 } from "../generated/request-origin.ts";
+import { ALLOWED_HOSTS_ENV, isOriginNamedInAllowedHosts, parseAllowedHosts } from "../generated/request-host.ts";
 
-/** Whether a request may change state: same origin, the VS Code proxy, or no Origin. */
+/**
+ * Whether a request may change state: no Origin, the session's own origin,
+ * the VS Code proxy, or an Origin named in PLANNOTATOR_ALLOWED_HOSTS (read on
+ * each call).
+ */
 export function isSameOriginRequest(req: IncomingMessage): boolean {
 	const origin = typeof req.headers.origin === "string" ? req.headers.origin : null;
-	return isSameOriginOrNoOrigin(origin, req.headers.host ?? "", req.headers["sec-fetch-site"]);
+	const site = req.headers["sec-fetch-site"];
+	if (isSameOriginOrNoOrigin(origin, req.headers.host ?? "", site)) return true;
+	return isOriginNamedInAllowedHosts(origin, site, parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]));
 }
 
 /** Answers 403 and returns true when a state-changing request came from another site. */
