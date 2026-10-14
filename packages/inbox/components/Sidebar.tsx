@@ -6,6 +6,9 @@ import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
 import { useSidebar } from '../shell/sidebar';
+import { usePhone } from '../phone';
+import { shownProjects, type ProjectAction } from '../projectMenu';
+import { ProjectRow } from './ProjectRow';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { UpdateButton } from './Updates';
@@ -21,6 +24,12 @@ export interface SidebarProps {
   projects: readonly ProjectFolder[];
   /** Rows waiting on the person, per project id. */
   projectCounts: ReadonlyMap<string, number>;
+  /**
+   * The project menu (design record "inbox-project-menu"): the projects where
+   * Mark all as read has something to do, and the action. Absent: no menu.
+   */
+  projectsReadable?: ReadonlySet<string>;
+  onProjectAction?: (projectId: string, action: ProjectAction) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -81,7 +90,21 @@ function useMoreBelow<T extends HTMLElement>(deps: unknown) {
 export function Sidebar(props: SidebarProps) {
   const firstRun = props.projects.length === 0;
   const { setOpenMobile } = useSidebar();
-  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(props.projects.length);
+  const phone = usePhone();
+  // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
+  const held = props.page === 'inbox' ? props.projectId : null;
+  const shown = shownProjects(props.projects, held);
+  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(shown.length);
+  const inboxRef = useRef<HTMLButtonElement>(null);
+  /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
+  const actedOn = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = actedOn.current;
+    if (!id || shown.some((p) => p.id === id)) return;
+    actedOn.current = null;
+    const active = document.activeElement;
+    if (!active || active === document.body || !active.isConnected) inboxRef.current?.focus({ preventScroll: true });
+  });
   const pick = (go: () => void) => () => {
     setOpenMobile(false);
     go();
@@ -116,6 +139,7 @@ export function Sidebar(props: SidebarProps) {
         </button>
       )}
       <button
+        ref={inboxRef}
         type="button"
         className={`ib-nav${props.page === 'inbox' && props.projectId === null ? ' ib-on' : ''}`}
         onClick={pick(props.onInbox)}
@@ -140,22 +164,44 @@ export function Sidebar(props: SidebarProps) {
       <div className="ib-projs" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {firstRun ? (
           <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
+        ) : shown.length === 0 ? (
+          <div className="ib-side-empty" data-projects-hidden="">Nothing open. Archived projects are in Settings → Archived.</div>
         ) : (
-          props.projects.map((project) => {
+          shown.map((project) => {
             const n = props.projectCounts.get(project.id) ?? 0;
             const on = props.page === 'inbox' && props.projectId === project.id;
+            if (!props.onProjectAction) {
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  className={`ib-proj${n === 0 ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
+                  onClick={pick(() => props.onProject(project.id))}
+                  aria-current={on ? 'page' : undefined}
+                  title={project.root}
+                >
+                  <span className="ib-name" dir="auto">{project.name}</span>
+                  {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
+                </button>
+              );
+            }
             return (
-              <button
+              <ProjectRow
                 key={project.id}
-                type="button"
-                className={`ib-proj${n === 0 ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
-                onClick={pick(() => props.onProject(project.id))}
-                aria-current={on ? 'page' : undefined}
-                title={project.root}
-              >
-                <span className="ib-name" dir="auto">{project.name}</span>
-                {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
-              </button>
+                project={project}
+                count={n}
+                on={on}
+                held={project.listed === 0}
+                readable={props.projectsReadable?.has(project.id) ?? false}
+                phone={phone}
+                onOpen={pick(() => props.onProject(project.id))}
+                onAction={(action) => {
+                  actedOn.current = project.id;
+                  // On a phone the navigation sheet closes, so the toast and the list are in view.
+                  setOpenMobile(false);
+                  props.onProjectAction?.(project.id, action);
+                }}
+              />
             );
           })
         )}

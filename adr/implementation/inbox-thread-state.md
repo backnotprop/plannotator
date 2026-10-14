@@ -77,6 +77,9 @@ A came-back thread is in the sections in both views and is not in the archived l
 | Archive | `POST /api/inbox/messages/:id/resolve` `{ resolved: true }` | `resolved_at`. No write when already resolved |
 | Unarchive | the same, `{ resolved: false }` | `resolved_at` cleared; a Mark read made after the archive line is cleared in the same root line |
 | Agent read your reply | `read_thread`, `wait_for_reply` | `agent_checked_seq` |
+| Mark all as read (a project) | `POST /api/inbox/projects/:id/read` | Mark read on every thread of the project single Mark read is offered on (open or come back, something waiting on the person): exactly the lines each single Mark read writes. Each thread's set-aside note goes on its own |
+| Archive all (a project) | `POST /api/inbox/projects/:id/resolve` `{ resolved: true }` | Archive on every listed open thread of the project; Mark read on one that came back. Exactly the single actions' lines |
+| Their Undo | `…/unread` `{ threads }`, `…/resolve` `{ resolved: false, threads }` | Undo or Unarchive on exactly the threads the batch named, as the single actions write them |
 
 ## Transition table
 
@@ -115,6 +118,8 @@ Checked after every step of every sequence, on the store's own output:
 Invariant 7 is mostly circular for the first two counts: `waitingCount` counts the rows in Stopped, Holding and Waiting, and `unread` is defined from the section, so they check the counting code rather than the rules. The Decisions count is the real check: the model keeps its own account of which questions record a decision and which have one.
 
 The model also predicts every event's outcome (written, nothing to do, a replayed key, or the refusal code), which thread every message lands in, every question's state and every row's section, unseen count, read and came-back flags, `last_at` and `last_agent_at`. The store must match it exactly on every field after every step. (Until A, B and C below were fixed, the model derived each row under two look rules, the store's and the intended one, and recorded the difference; they are one rule now.)
+
+The project menu's batches (design record "inbox-project-menu", approved 2026-10-14; `packages/shared/inbox/project-batch.ts`) add no rule: each is a loop over the single actions above, run synchronously. `store.test.ts` ("the project menu's batches") has the model decide on its own which threads a batch takes, apply the single rules thread by thread, and check every invariant after every batch and every Undo between generated steps; a batch undone back to back gives the project's rows back exactly (invariants 4 and 5, per project). After Mark all as read nothing in the project waits on the person; after Archive all nothing of it is listed, which is what hides the project in the window's sidebar (derived from the folders' `listed`, never stored).
 
 ## Counts
 

@@ -631,6 +631,28 @@ export interface InboxListSection {
   threads: InboxListRow[];
 }
 
+/** Something in the thread waits on the person: a question, or news they have not looked at. */
+export function inboxRowWaitsOnPerson(row: Pick<InboxListRow, "section" | "unseen" | "answered_not_sent">): boolean {
+  return (
+    row.section === "stopped" ||
+    row.section === "holding" ||
+    row.section === "waiting" ||
+    (row.section === "new" && (row.unseen > 0 || row.answered_not_sent))
+  );
+}
+
+/**
+ * Mark read is offered on the thread (the list row's hover action, and each
+ * thread a project's "Mark all as read" takes): something waits on the
+ * person, and the thread is open or came back from the archive (Mark read
+ * sends a came-back thread back to the archive).
+ */
+export function inboxRowOffersMarkRead(
+  row: Pick<InboxListRow, "section" | "unseen" | "answered_not_sent" | "resolved_at" | "back_from_archive">,
+): boolean {
+  return (row.resolved_at === null || row.back_from_archive === true) && inboxRowWaitsOnPerson(row);
+}
+
 export interface InboxThread {
   thread_id: string;
   /**

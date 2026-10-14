@@ -115,6 +115,7 @@
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/store": "./inbox/store.ts",
     "./inbox/list": "./inbox/list.ts",
+    "./inbox/project-batch": "./inbox/project-batch.ts",
     "./inbox/search": "./inbox/search.ts",
     "./inbox/registry": "./inbox/registry.ts",
     "./inbox/devices": "./inbox/devices.ts",
