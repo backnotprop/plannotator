@@ -3,6 +3,18 @@ import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { getMRLabel, getMRNumberLabel, getDisplayRepo } from '@plannotator/shared/pr-types';
 import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { artifactAnchorLabel } from './artifactAnnotations';
+import { codeFenceFor } from '@plannotator/core/markdown-structure';
+
+/**
+ * Quoted code in a fence longer than any backtick run in it (CommonMark), so
+ * a ``` line in the code can never close the quote early. Unchanged (three
+ * backticks) for code without such a run. The Inbox's guideCommentEntry
+ * writes the same (packages/inbox/guideFeedback.test.ts keeps them equal).
+ */
+function fenced(code: string): string {
+  const fence = codeFenceFor(code);
+  return `${fence}\n${code}\n${fence}\n`;
+}
 
 /**
  * Format a conventional comment prefix per the Conventional Comments spec:
@@ -276,7 +288,7 @@ function formatSelectedTextBlock(ann: CodeAnnotation): string {
   if (ann.selectedTextFromEdits) {
     output += `_The highlighted text below includes the reviewer's in-progress edits; the line range above anchors to the current file lines that region replaces (approximate)._\n`;
   }
-  output += `\n**Highlighted text:**\n\`\`\`\n${ann.selectedText}\n\`\`\`\n`;
+  output += `\n**Highlighted text:**\n${fenced(ann.selectedText)}`;
   return output;
 }
 
@@ -294,10 +306,10 @@ function formatSelectedTextBlock(ann: CodeAnnotation): string {
 function formatSuggestionBlocks(ann: CodeAnnotation): string {
   let output = '';
   if ((ann.suggestedCode || ann.text) && ann.originalCode) {
-    output += `\n**Replaces:**\n\`\`\`\n${ann.originalCode}\n\`\`\`\n`;
+    output += `\n**Replaces:**\n${fenced(ann.originalCode)}`;
   }
   if (ann.suggestedCode) {
-    output += `\n**Suggested code:**\n\`\`\`\n${ann.suggestedCode}\n\`\`\`\n`;
+    output += `\n**Suggested code:**\n${fenced(ann.suggestedCode)}`;
   }
   return output;
 }

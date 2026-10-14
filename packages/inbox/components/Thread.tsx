@@ -42,6 +42,11 @@ import {
   type RouteState,
 } from './ReplyRoute';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
+import { InboxComposerField } from './ComposerField';
+import { SkillsLine } from './SkillsLine';
+import { paintSkillReferences } from '../skillHighlight';
+import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 
 const noop = () => {};
 /** The agent superseded the question this call named (`422 question_superseded`). */
@@ -241,7 +246,12 @@ export function MessageBody({
   /** The "Replaces …" line under a question's prompt, or null. */
   renderReplacesLine?: (key: string) => React.ReactNode;
 }) {
-  const blocks = useMemo(() => parseMarkdownToBlocks(message.body, { frontmatter: false }), [message.body]);
+  // A person's message ends with the skills block the window pasted when it
+  // was sent: folded behind one quiet line (SkillsLine). An agent's message
+  // is shown whole, whatever it says.
+  const skills = useMemo(() => (message.author.kind === 'person' ? splitInboxSkillsBlock(message.body) : null), [message.author.kind, message.body]);
+  const shown = skills ? skills.before : message.body;
+  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false }), [shown]);
   const refRepo = useRefRepo(repo);
   // A tall screenshot in the body shows its top, cropped like the gallery's
   // (inbox.css); a click still opens it whole.
@@ -257,6 +267,12 @@ export function MessageBody({
     body.addEventListener('load', onLoad, true);
     return () => body.removeEventListener('load', onLoad, true);
   }, []);
+  // The skills the block names are painted in the person's words, as the composer painted them.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !skills) return;
+    return paintSkillReferences(message.id, body, skills.skills);
+  }, [message.id, skills]);
   // A link to a file this message attached opens it beside the thread; any
   // other local link is inert text (links.ts). Kept stable across renders,
   // so raw-HTML blocks do not redraw their links on every pick.
@@ -344,7 +360,7 @@ export function MessageBody({
     <div className="ib-body" data-message-id={message.id} ref={bodyRef}>
       <Viewer
         blocks={blocks}
-        markdown={message.body}
+        markdown={shown}
         annotations={NO_ANNOTATIONS}
         onAddAnnotation={noop}
         onSelectAnnotation={noop}
@@ -372,6 +388,7 @@ export function MessageBody({
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
       />
+      {skills && <SkillsLine split={skills} />}
     </div>
   );
 }
@@ -1355,8 +1372,12 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       }
       if (!sendKeys.current) sendKeys.current = new Map(targets.map((t) => [t.message.id, crypto.randomUUID()]));
       const notRecorded: { key: string; message: string }[] = [];
-      // The words and the annotations ride the last reply, after its picks.
-      const feedback = pendingAnnotations.length > 0 ? await buildFeedback(pendingAnnotations) : '';
+      // The words and the annotations ride the last reply, after its picks;
+      // the skills they reference ride it too, as one block at its end
+      // (skills.ts: a human-only skill's SKILL.md pasted in, its folder named).
+      const annotationsFeedback = pendingAnnotations.length > 0 ? await buildFeedback(pendingAnnotations) : '';
+      const skills = await inboxSkillsBlock([words, ...annotationSkillTexts(pendingAnnotations)], INBOX_REPLY_SKILL_AUDIENCE);
+      const feedback = withSkillsBlock(annotationsFeedback, skills);
       for (const [index, target] of targets.entries()) {
         const last = index === targets.length - 1;
         const result = await inboxApi.reply(target.message.id, {
@@ -2042,15 +2063,14 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
             </div>
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             <div className="ib-rbox">
-              <textarea
-                ref={textRef}
-                className="ib-rtext"
-                aria-label={`Reply to ${asker}`}
-                aria-describedby={showAskerNote ? noteId : undefined}
+              <InboxComposerField
+                textareaRef={textRef}
+                ariaLabel={`Reply to ${asker}`}
+                ariaDescribedBy={showAskerNote ? noteId : undefined}
                 placeholder="Write a reply"
+                destination="your reply"
                 value={box.text}
-                rows={2}
-                onChange={(event) => setBox({ open: true, text: event.target.value })}
+                onChange={(text) => setBox({ open: true, text })}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();

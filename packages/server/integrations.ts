@@ -20,6 +20,7 @@ import {
 	buildHashtags,
 	buildBearContent,
 	detectObsidianVaults,
+	obsidianFolderEscapesVault,
 } from "@plannotator/shared/integrations-common";
 import { resolveUserPath } from "@plannotator/shared/resolve-file";
 
@@ -121,8 +122,11 @@ export async function saveToObsidian(
 			};
 		}
 
-		// Build target folder path
+		// Build target folder path (always inside the vault)
 		const folderName = folder.trim() || "plannotator";
+		if (obsidianFolderEscapesVault(folderName)) {
+			return { success: false, error: `Folder must be inside the vault: ${folderName}` };
+		}
 		const targetFolder = join(normalizedVault, folderName);
 
 		// Create folder if it doesn't exist (guard for Bun mkdirSync regression)

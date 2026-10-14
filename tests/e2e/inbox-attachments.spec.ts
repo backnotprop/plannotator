@@ -154,9 +154,13 @@ function pageFrame(page: Page): FrameLocator {
   return page.frameLocator('[data-attachment-pane] iframe').first();
 }
 
-/** Plannotator's comment composer (CommentPopover), once it is open. */
+/**
+ * Plannotator's comment composer (CommentPopover), once it is open. Scoped to
+ * the popover: the reply box is the same composer textarea (ComposerTokenTextarea)
+ * and can come later in the DOM.
+ */
 function composer(page: Page) {
-  return page.locator('textarea[data-pn-mobile-editable="true"]').last();
+  return page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last();
 }
 
 /** Drag-select `text` inside the open markdown document with the real mouse. */

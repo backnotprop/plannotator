@@ -351,14 +351,25 @@ export function getAvailableOpenInApps(): AvailableOpenInApp[] {
 }
 
 /**
+ * Whether open-in is off for this session: remote mode, or a session
+ * published over the tailnet (`--tailscale`), which other devices reach. A
+ * launch opens an app on THIS machine for whoever sent it, so it is offered
+ * only to a session only this computer reaches (the update route's
+ * `update_exposed` rule).
+ */
+function openInExposed(exposed: boolean | undefined): boolean {
+  return isRemoteSession() || exposed === true;
+}
+
+/**
  * GET /api/open-in/apps handler.
  *
- * `available` is false in remote/headless sessions (the UI hides the control
- * entirely). `apps` is the host-filtered catalog (always includes 'reveal');
- * empty when unavailable.
+ * `available` is false in remote/headless sessions and in sessions published
+ * over the tailnet (`exposed`; the UI hides the control entirely). `apps` is
+ * the host-filtered catalog (always includes 'reveal'); empty when unavailable.
  */
-export function handleOpenInApps(): Response {
-  if (isRemoteSession()) {
+export function handleOpenInApps(options: { exposed?: boolean } = {}): Response {
+  if (openInExposed(options.exposed)) {
     return Response.json({ available: false, apps: [] });
   }
   return Response.json({ available: true, apps: getAvailableOpenInApps() });
@@ -380,6 +391,11 @@ export interface HandleOpenInOptions {
    * launches; a body without one is accepted.
    */
   serverSession?: string;
+  /**
+   * The session is published over the tailnet (`--tailscale`): other devices
+   * reach it, so nothing is launched (400), as in remote mode.
+   */
+  exposed?: boolean;
 }
 
 /**
@@ -392,9 +408,9 @@ export async function handleOpenIn(
   req: Request,
   options: HandleOpenInOptions = {},
 ): Promise<Response> {
-  if (isRemoteSession()) {
+  if (openInExposed(options.exposed)) {
     return Response.json(
-      { ok: false, error: "Open in app is unavailable in remote sessions" },
+      { ok: false, error: "Open in app is unavailable in sessions other devices can reach" },
       { status: 400 },
     );
   }

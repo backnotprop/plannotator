@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import { storage } from '@plannotator/ui/utils/storage';
+import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import {
   InboxApiError,
@@ -78,16 +79,24 @@ import { parseSettingsHash, settingsHash, type SettingsSection } from './setting
 // the page's own cookies, except the theme, which goes to config.json `theme`
 // through the Inbox's settings route so plan review follows it (theme.ts).
 // WebMCP is off.
-// No image uploads and no skill catalog either: a comment's image would need
-// an upload route the Inbox does not have, so the composer says so instead of
-// posting nowhere.
+// No image uploads either: a comment's image would need an upload route the
+// Inbox does not have, so the composer says so instead of posting nowhere.
 configurePlannotatorUI({
   serverSync: inboxThemeSync,
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
-  // Skill references in comments read the host's skills; the Inbox has none to offer.
-  skillCatalogTransport: async () => [],
+  // The `/` and `$` skill picker (composers and comments on attached files)
+  // lists this computer's global skills (approval "inbox-skill-references").
+  skillCatalogTransport: async () => {
+    const { skills } = await inboxApi.skills();
+    return Array.isArray(skills) ? (skills as SkillCatalogEntry[]) : [];
+  },
+  // A Send composes ONE skills block for the whole message (skills.ts), so a
+  // comment's `$name` stays plain text in the attachments' feedback.
+  skillReferenceExport: false,
+  // A comment on an attached file rides the person's next reply.
+  skillInstructionsDestination: 'your reply',
   uploadTransport: {
     upload: async () => {
       throw new Error('Images cannot be added to a comment in the Inbox.');

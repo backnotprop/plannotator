@@ -30,6 +30,16 @@ export interface IntegrationResult {
 }
 
 /**
+ * Whether an Obsidian folder setting would leave the vault: any `..` segment
+ * (either separator) does. The folder is a path INSIDE the vault ("plannotator",
+ * "Projects/plans"); `join(vault, "../x")` would otherwise write beside it.
+ * A leading separator is harmless (`join` keeps it inside the vault).
+ */
+export function obsidianFolderEscapesVault(folder: string): boolean {
+	return folder.split(/[\\/]+/).some((segment) => segment.trim() === "..");
+}
+
+/**
  * Detect Obsidian vaults by reading Obsidian's config file
  * Returns array of vault paths found on the system
  */

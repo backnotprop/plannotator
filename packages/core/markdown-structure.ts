@@ -321,6 +321,19 @@ export function codeFenceCloseIndex(lines: string[], i: number): number {
 }
 
 /**
+ * The backtick fence for quoting `code` in a fenced block: three backticks,
+ * or one more than the longest backtick run in the code (CommonMark), so no
+ * line of the code can close the block early. Exporters that quote text an
+ * agent or a diff wrote use it, so that text can never end the quote and
+ * pass for the writer's own markdown.
+ */
+export function codeFenceFor(code: string): string {
+  let longest = 0;
+  for (const run of code.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
+  return '`'.repeat(Math.max(3, longest + 1));
+}
+
+/**
  * Display math opened at line `i` with `$$` or `\[`: the body lines, the
  * index of the line holding the close, and any text after the close (which
  * the block parser re-reads as its own line). Null when no close exists on

@@ -27,6 +27,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -61,9 +62,16 @@ async function listed(page: Page): Promise<string[]> {
   return page.locator('.ib-lbody [data-row]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-row') ?? ''));
 }
 
+/**
+ * Unfold Quiet, every caller's list holds it. Waits for the band first: right
+ * after a reload the list may not be drawn yet, and a bare count() then read 0,
+ * skipped the click, and left Quiet folded (its rows missing from `listed`).
+ */
 const openQuiet = async (page: Page) => {
   const band = page.locator('[data-section-id="quiet"] .ib-band');
-  if ((await band.count()) && (await band.getAttribute('aria-expanded')) !== 'true') await band.click();
+  await expect(band).toBeVisible();
+  if ((await band.getAttribute('aria-expanded')) !== 'true') await band.click();
+  await expect(band).toHaveAttribute('aria-expanded', 'true');
 };
 
 /** Archive a thread through the window's own route (the thread id is its first message's). */
@@ -88,7 +96,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-archived-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: 'none' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();

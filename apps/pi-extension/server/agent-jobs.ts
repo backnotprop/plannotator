@@ -36,6 +36,9 @@ import {
 	type MarkerModel,
 } from "../generated/marker-review.ts";
 import { json, parseBody } from "./helpers.ts";
+import { crossOriginRefusalBody } from "../generated/request-origin.ts";
+import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
+import { isSameOriginRequest } from "./request-origin-guard.ts";
 
 // ---------------------------------------------------------------------------
 // Route prefixes
@@ -89,6 +92,12 @@ export interface AgentJobHandlerOptions {
 	 */
 	getServerUrl: () => string;
 	getCwd: () => string;
+	/**
+	 * This server's stale-tab nonce, read per request (late-bound: the review
+	 * server makes it after this handler). A launch whose body, or a kill whose
+	 * `?serverSession=` query, names a different one is refused with 409.
+	 */
+	getServerSession?: () => string;
 	/** Build the command server-side for a given provider. */
 	buildCommand?: (provider: string, config?: Record<string, unknown>) => Promise<{
 		command: string[];
@@ -549,6 +558,26 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 				return true;
 			}
 
+			// Launching and killing jobs start and stop processes on this machine:
+			// another site's page is refused (the servers also do this before any
+			// route), and a kill from a stale tab too. A launch's session is checked
+			// on its body. Mirrors packages/server/agent-jobs.ts.
+			if ((url.pathname === JOBS || url.pathname.startsWith(JOBS + "/")) && (req.method === "POST" || req.method === "DELETE")) {
+				if (!isSameOriginRequest(req)) {
+					json(res, crossOriginRefusalBody(), 403);
+					return true;
+				}
+				const expected = options.getServerSession?.();
+				if (
+					req.method === "DELETE" &&
+					expected !== undefined &&
+					checkServerSession({ serverSession: url.searchParams.get("serverSession") ?? undefined }, expected) === "mismatch"
+				) {
+					json(res, serverSessionMismatchBody(), 409);
+					return true;
+				}
+			}
+
 			// --- SSE stream ---
 			if (url.pathname === JOBS_STREAM && req.method === "GET") {
 				res.writeHead(200, {
@@ -613,7 +642,13 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						"provider", "command", "label",
 						"engine", "model", "reasoningEffort", "effort", "thinking", "fastMode",
 						"reviewProfileId", "repairOf", "instructions",
+						"serverSession",
 					]);
+					const expectedSession = options.getServerSession?.();
+					if (expectedSession !== undefined && checkServerSession(body, expectedSession) === "mismatch") {
+						json(res, serverSessionMismatchBody(), 409);
+						return true;
+					}
 					if (body && typeof body === "object") {
 						const unknown = Object.keys(body).filter((k) => !KNOWN_JOB_FIELDS.has(k));
 						if (unknown.length > 0) {

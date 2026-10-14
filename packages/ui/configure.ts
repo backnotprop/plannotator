@@ -7,11 +7,12 @@ import { setFileTreeBackend, type FileTreeBackend } from './hooks/useFileBrowser
 import { setDraftTransport, type DraftTransport } from './hooks/useAnnotationDraft';
 import { setExternalAnnotationTransport, type ExternalAnnotationTransport } from './hooks/useExternalAnnotations';
 import { setAITransport, type AITransport } from './hooks/useAIChat';
-import { setSkillCatalogTransport, setSkillContentTransport, type SkillCatalogTransport, type SkillContentTransport } from './utils/skillCatalog';
+import { setSkillCatalogExportRegistration, setSkillCatalogTransport, setSkillContentTransport, type SkillCatalogTransport, type SkillContentTransport } from './utils/skillCatalog';
 import { setWebMcpPolicy, type WebMcpPolicy } from './webmcp/policy';
 import { setMathRendererLoader, type MathRenderer, type MathRendererLoader } from './utils/math';
 import { setIdentityGenerator, type IdentityGenerator } from './utils/generateIdentity';
 import { setAlertIconRenderer, type AlertIconRenderer } from './components/blocks/AlertBlock';
+import { setSkillInstructionsDestination } from './components/SkillReferenceMenu';
 import { setFenceThemeResolver, type FenceThemeResolver } from './utils/syntaxTheme';
 import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
@@ -66,6 +67,19 @@ export interface PlannotatorUIConfig {
   skillCatalogTransport?: SkillCatalogTransport;
   /** Human-only skill contents request for feedback injection. Default: `GET /api/skills/content?name=` on the page origin. */
   skillContentTransport?: SkillContentTransport;
+  /**
+   * Register the fetched skill catalog for the per-comment feedback export
+   * (each comment's "Skills referenced" list). Default: true. A host that
+   * composes one block per message itself passes false, so a comment's
+   * `$name` stays plain text in its export.
+   */
+  skillReferenceExport?: boolean;
+  /**
+   * What a composer's "Includes skill instructions" line says a human-only
+   * skill's instructions go with. Default: "your feedback". The Plannotator
+   * Inbox, where a comment rides a reply, says "your reply".
+   */
+  skillInstructionsDestination?: string;
   serverSync?: ServerSyncFn;
   /**
    * WebMCP provider policy: `{ enabled, namePrefix }`. Default: enabled
@@ -120,6 +134,8 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.aiTransport) setAITransport(config.aiTransport);
   if (config.skillCatalogTransport) setSkillCatalogTransport(config.skillCatalogTransport);
   if (config.skillContentTransport) setSkillContentTransport(config.skillContentTransport);
+  if (config.skillReferenceExport !== undefined) setSkillCatalogExportRegistration(config.skillReferenceExport);
+  if (config.skillInstructionsDestination) setSkillInstructionsDestination(config.skillInstructionsDestination);
   if (config.serverSync) configStore.setServerSync(config.serverSync);
   if (config.webmcp) setWebMcpPolicy(config.webmcp);
   if (config.mathRendererLoader) setMathRendererLoader(config.mathRendererLoader);

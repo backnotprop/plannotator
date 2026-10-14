@@ -13,6 +13,7 @@ import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/h
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
+import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { createReviewDraftSession, prDraftTargetKey, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveSharingEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGuideShareUrl, resolveGitRemoteCheck, resolveReviewProgress } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
@@ -1351,6 +1352,7 @@ export async function startReviewServer(options: {
 		mode: "review",
 		getServerUrl: () => agentApiUrl,
 		getCwd: resolveAgentCwd,
+		getServerSession: () => serverSession,
 
 		async buildCommand(provider, config) {
 			// Snapshot every mutable review selector before any await. A concurrent
@@ -2022,6 +2024,8 @@ export async function startReviewServer(options: {
 	const server = createServer(async (req, res) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
+		// Then no write from another site, before any route (request-origin-guard.ts).
+		if (refuseCrossOriginWrite(req, res)) return;
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;

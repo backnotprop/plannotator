@@ -12,6 +12,7 @@ import { getBearSettings } from '../utils/bear';
 import { getOctarineSettings } from '../utils/octarine';
 import { wrapFeedbackForAgent } from '../utils/parser';
 import { copyTextToClipboard } from '../utils/clipboard';
+import { noteServerSessionMismatch, withServerSession } from '../utils/serverSession';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
 /** POST body shape sent to the notes endpoint (mirrors what the Notes tab builds today). */
@@ -31,8 +32,12 @@ async function defaultSaveToNotes(body: SaveToNotesPayload): Promise<SaveToNotes
   const res = await fetch('/api/save-notes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    // The stale-tab guard (a no-op for a host that never adopted a session).
+    body: JSON.stringify(withServerSession(body)),
   });
+  if (await noteServerSessionMismatch(res)) {
+    return { results: Object.fromEntries(Object.keys(body).map((k) => [k, { success: false, error: 'This review was replaced. Reload the page.' }])) };
+  }
   return res.json();
 }
 
