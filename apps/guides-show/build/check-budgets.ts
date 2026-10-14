@@ -10,7 +10,9 @@ import path from 'node:path';
 import type { ViewerManifest } from './manifest-plugin';
 
 const BUDGETS = {
-  jsGzipBytes: 400 * 1024,
+  // 401: +1 KB for file kinds in Guided Reviews (owner-approved, design record
+  // "review-file-kinds": the classifier, its icons and the chapter subheads).
+  jsGzipBytes: 401 * 1024,
   cssGzipBytes: 64 * 1024,
 };
 

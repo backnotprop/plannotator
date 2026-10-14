@@ -145,6 +145,8 @@ import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
 import { useDiffFreshness } from './hooks/useDiffFreshness';
 import { useAutoViewed } from './hooks/useAutoViewed';
+import { useGroupByKind } from './hooks/useGroupByKind';
+import type { AllFilesOrder } from './components/AllFilesCodeView';
 import { useReviewProgress } from './hooks/useReviewProgress';
 import { resolveDiffSwitchUnviews } from './utils/autoViewed';
 import { needsAutoViewedNotice, markAutoViewedNoticeSeen, turnOffAutoViewed, toggleAutoViewed } from './utils/autoViewedNotice';
@@ -2930,8 +2932,11 @@ const ReviewApp: React.FC = () => {
   const effectivePanelView = resolvePanelView(panelView, { sectionsAvailable, commitsCapable });
 
   // The all-files surface mirrors whichever left panel is showing: sections
-  // order when the sections view is active, tree order otherwise.
-  const allFilesOrder: 'tree' | 'list' = effectivePanelView === 'sections' ? 'list' : 'tree';
+  // order when the sections view is active, the tree's kind blocks when it is
+  // grouped by kind, tree order otherwise (the commits view never regroups).
+  const [groupByKind, toggleGroupByKind] = useGroupByKind();
+  const allFilesOrder: AllFilesOrder =
+    effectivePanelView === 'sections' ? 'list' : effectivePanelView === 'tree' && groupByKind ? 'kind' : 'tree';
 
   // Git add/staging logic
   const handleFileViewedFromStage = useCallback(
@@ -5515,6 +5520,7 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <SectionsPanel
+                generatedFiles={generatedFiles}
                 files={files}
                 sections={sections!}
                 width={fileTreeResize.width}
@@ -5609,6 +5615,9 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <FileTree
+                groupByKind={groupByKind}
+                onToggleGroupByKind={toggleGroupByKind}
+                generatedFiles={generatedFiles}
                 markdownPreviewedPaths={markdownPreview?.previewedPaths}
                 files={files}
                 activeFileIndex={activeFileIndex}

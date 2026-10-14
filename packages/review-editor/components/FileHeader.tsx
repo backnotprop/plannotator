@@ -4,6 +4,7 @@ import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import type { DiffFileStatus } from '../types';
+import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 
 interface FileHeaderProps {
   /** Read-only host: no open-in affordance (it probes the review server). */
@@ -51,6 +52,8 @@ interface FileHeaderProps {
    * "generated" tag next to the +/- counts. Collapse seeding is the owner's
    * concern; this prop is display-only. */
   isGenerated?: boolean;
+  /** A test file (`fileKind` is 'test'): a flask after the name. Display-only. */
+  isTest?: boolean;
   /**
    * A Markdown file's view control (Source / Changes / Read), drawn by the
    * caller so read-only hosts (the guides.show viewer) never carry it.
@@ -141,6 +144,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   compactTouchLayout,
   readOnly = false,
   isGenerated = false,
+  isTest = false,
   renderMarkdownView,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
@@ -231,6 +235,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             </>
           )}
         </span>
+        {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
         {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
           <span className="flex-none ml-2 flex items-center gap-1.5 text-xs leading-none">
             {additions > 0 && <span className="font-mono text-success">+{additions}</span>}
