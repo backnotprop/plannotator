@@ -2516,7 +2516,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/deny`           | POST   | Deny plan (body: feedback, planSave, answersOnly?, serverSession?). `answersOnly: true` (a boolean, nothing else) rides the decision so the consumer sends `plan.answered` instead of the denied prompt; see "Question blocks" |
 | `/api/save-notes`     | POST   | Save to external note apps (Obsidian, Bear, Octarine) |
 | `/api/update`         | POST   | Update now from the update toast or the Options menu (compiled CLI, the binary the install script manages): the install script for the newest known release, detached, once (`update.lock`). Loopback Host with this port and same origin only, never for a remote-mode or `--tailscale` session, body `{ serverSession? }`; `403` / `409 { code }` when it cannot run (see the `PLANNOTATOR_UPDATE_CHECK` row). Also on the review and annotate servers |
-| `/api/image`          | GET    | Serve image by path query param            |
+| `/api/image`          | GET    | Serve image by path query param. Every answer carries `Content-Security-Policy: sandbox; …`, `nosniff` and `Cross-Origin-Resource-Policy: same-origin` (`packages/shared/local-image.ts`, both runtimes), so an SVG opened directly runs no script |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/obsidian/vaults`| GET    | Detect available Obsidian vaults           |
 | `/api/skills`         | GET    | List global agent skills for comment skill references (`{ skills: [{ name, root, description?, humanOnly, dir }] }`) |
@@ -2562,7 +2562,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/git-add`        | POST   | Stage/unstage a file (body: `{ filePath, undo? }`) |
 | `/api/review-progress?snapshot=<snapshotId>` | GET/POST | Load or save durable viewed-file progress. GET returns `{ available, key?, fingerprints?, viewedFiles?, suppressedFiles? }`; POST takes `{ key, changes: [{ path, fingerprint, viewed }] }`. Stale snapshots return 409. |
 | `/api/feedback`       | POST   | Submit review (body: feedback, annotations, agentSwitch, platform?, serverSession?). `platform: true` (boolean only) marks the status post the PR-platform path sends after `/api/pr-action`; it rides onto the decision, where the Claude Code mod logs it instead of starting a turn and OpenCode, Pi, CLI stdout and Amp deliver the status line verbatim without the request-changes suffix. Never infer it from empty `annotations` (see "Host result file") |
-| `/api/image`          | GET    | Serve image by path query param            |
+| `/api/image`          | GET    | Serve image by path query param (sandboxed headers, see the plan server row) |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/draft`          | GET/POST/DELETE | Auto-save annotation drafts to survive server crashes |
 | `/api/editor-annotations` | GET | List editor annotations (VS Code only) |
@@ -2622,7 +2622,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/save-notes`     | POST   | Save to external note apps (Obsidian, Bear, Octarine) |
 | `/api/html-assets/<token>/<path>` | GET | Serve relative support assets for raw HTML annotation sessions, and the sibling `.html`/`.htm` documents an annotated page EMBEDS (`<iframe>`/`<embed>`/`<object>`/`<frame>`). The served page carries a `<base href>` pointing here, which is what makes relative URLs — including ones a script assigns at runtime — resolve against the document's own directory. The token's root is that directory, or in an `annotate-folder` session the selected folder (so `../` reaches siblings inside it; outside the page's own directory, hidden paths and the dotenv family are then `404`). HTML responses carry `Content-Security-Policy: sandbox allow-scripts` (no `allow-same-origin`, so an embed can never call this session's API) plus `nosniff`, and honour the 2MB annotate cap; a framed or `.html` failure renders a small 404 document naming the file rather than JSON or the app. See "Embedded local documents" under Annotation System. |
 | `/api/share-html`     | GET    | Lazily prepare portable raw HTML for sharing (`?path=<html-file>` optional) |
-| `/api/image`          | GET    | Serve image by path query param            |
+| `/api/image`          | GET    | Serve image by path query param (sandboxed headers, see the plan server row) |
 | `/api/upload`         | POST   | Upload image, returns `{ path, originalName }` |
 | `/api/doc`            | GET    | Serve linked .md/.mdx/.html file or code file (`?path=<path>&base=<dir>`). A diagram source carries the same `renderAs: "mermaid" \| "graphviz"` with its raw text as `markdown`, so folder navigation opens it in the diagram viewer too |
 | `/api/doc/exists`     | POST   | Batch-validate code-file paths (body: `{ paths: string[], base?: string }`) |

@@ -16,6 +16,7 @@ import { listReferenceSkills, readReferenceSkillContent } from "../generated/rev
 
 import { crossOriginRefusalBody } from "../generated/request-origin.ts";
 import { checkServerSession, serverSessionMismatchBody } from "../generated/server-session.ts";
+import { localImageContentType, localImageResponseHeaders } from "../generated/local-image.ts";
 import { json, parseBody, send, toWebRequest } from "./helpers.ts";
 import { isSameOriginRequest } from "./request-origin-guard.ts";
 import {
@@ -43,20 +44,6 @@ const ALLOWED_IMAGE_EXTENSIONS = new Set([
 	"tif",
 	"avif",
 ]);
-
-const IMAGE_CONTENT_TYPES: Record<string, string> = {
-	png: "image/png",
-	jpg: "image/jpeg",
-	jpeg: "image/jpeg",
-	gif: "image/gif",
-	webp: "image/webp",
-	svg: "image/svg+xml",
-	bmp: "image/bmp",
-	ico: "image/x-icon",
-	tiff: "image/tiff",
-	tif: "image/tiff",
-	avif: "image/avif",
-};
 
 const UPLOAD_DIR = join(tmpdir(), "plannotator");
 
@@ -102,16 +89,15 @@ function validateUploadExtension(fileName: string): {
 	return { valid: true, ext };
 }
 
-function getImageContentType(filePath: string): string {
-	return (
-		IMAGE_CONTENT_TYPES[getExtension(filePath)] || "application/octet-stream"
-	);
-}
+// Every /api/image answer carries the sandbox CSP, nosniff and CORP (see
+// generated/local-image.ts): an SVG opened directly must not run script on the
+// session origin.
+const TEXT_HEADERS = localImageResponseHeaders("text/plain; charset=utf-8");
 
 export function handleImageRequest(res: Res, url: URL): void {
 	const imagePath = url.searchParams.get("path");
 	if (!imagePath) {
-		send(res, "Missing path parameter", 400, { "Content-Type": "text/plain" });
+		send(res, "Missing path parameter", 400, TEXT_HEADERS);
 		return;
 	}
 
@@ -121,9 +107,12 @@ export function handleImageRequest(res: Res, url: URL): void {
 		try {
 			if (!existsSync(validation.resolved)) return false;
 			const data = readFileSync(validation.resolved);
-			send(res, data, 200, {
-				"Content-Type": getImageContentType(validation.resolved),
-			});
+			send(
+				res,
+				data,
+				200,
+				localImageResponseHeaders(localImageContentType(validation.resolved)),
+			);
 			return true;
 		} catch {
 			return false;
@@ -143,13 +132,11 @@ export function handleImageRequest(res: Res, url: URL): void {
 
 	const validation = validateImagePath(imagePath);
 	if (!validation.valid) {
-		send(res, validation.error || "Invalid image path", 403, {
-			"Content-Type": "text/plain",
-		});
+		send(res, validation.error || "Invalid image path", 403, TEXT_HEADERS);
 		return;
 	}
 
-	send(res, "File not found", 404, { "Content-Type": "text/plain" });
+	send(res, "File not found", 404, TEXT_HEADERS);
 }
 
 export async function handleUploadRequest(
