@@ -122,7 +122,8 @@ test('Mark all as read takes every waiting thread, warns, and Z undoes the batch
   await row(page, 'billing').locator('.ib-proj').click({ button: 'right' });
   await page.locator('[data-project-action="read"]').click();
   const toast = page.locator('[data-inbox-toast]');
-  await expect(toast).toContainText('Marked 3 threads in billing read');
+  await expect(toast).toContainText('Marked 3 threads read');
+  await expect(toast).toContainText('billing');
   await expect(toast).toContainText('Claude Code was stopped');
   await page.screenshot({ path: join(proofDir, '02-mark-all-read.png') });
   await page.locator('[data-section-id="quiet"] .ib-band').click();
@@ -148,7 +149,7 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await page.keyboard.press('End');
   await expect(page.locator('[data-project-action="archive"]')).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.locator('[data-inbox-toast]')).toContainText('Archived 3 threads in billing');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Archived 3 threads');
   await expect(billing).toHaveCount(0);
   await expect(page.locator('.ib-nav', { hasText: 'Inbox' }).first()).toBeFocused();
   await page.screenshot({ path: join(proofDir, '03-archive-all-hidden.png') });

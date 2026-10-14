@@ -245,7 +245,8 @@ test.skipIf(!hasDom)('Mark all as read: one batch, the warning toast, and one Un
   const call = posted.find((p) => p.path === `/api/inbox/projects/${ids.project}/read`)!;
   expect(typeof call.body.batch_id).toBe('string');
   // An agent was stopped on one of them: the warning, and no Reply (several threads).
-  expect(toast()!.textContent).toContain(`Marked 6 threads in ${name} read`);
+  expect(toast()!.textContent).toContain('Marked 6 threads read');
+  expect(toast()!.textContent).toContain(name);
   expect(toast()!.textContent).toContain('Claude Code was stopped');
   expect(toast()!.querySelector('[data-toast-reply]')).toBeNull();
   const after = await serverSections();
@@ -274,7 +275,8 @@ test.skipIf(!hasDom)('Archive all hides the project; the toast Undo brings it ba
   await openMenu();
   await choose('archive');
   await until(() => !!toast(), 'the toast');
-  expect(toast()!.textContent).toContain(`Archived 6 threads in ${name}`);
+  expect(toast()!.textContent).toContain('Archived 6 threads');
+  expect(toast()!.textContent).toContain(name);
   await until(() => projectRow() === null, 'the project to leave the sidebar');
   // Focus never falls to the page.
   expect(document.activeElement).not.toBe(document.body);

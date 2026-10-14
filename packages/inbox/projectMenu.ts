@@ -39,48 +39,41 @@ export function projectsWithReadable(sections: readonly InboxListSection[]): Set
 }
 
 export interface ProjectBatchToast {
-  /** The lead: what happened. */
-  text: string;
-  /** The detail: the warning, the questions closed, or when it comes back. */
-  sub: string;
-  /** A phone's one line. */
-  short: string;
+  /** The bold first words: what happened ("Marked 3 threads read", "Archived 5 threads"). */
+  lead: string;
+  /** A phone's lead ("Read" replaces "Marked read": "3 threads read"). */
+  phoneLead: string;
+  /** The muted rest of the line: the warning, the questions closed, or when it comes back, then the project. */
+  detail: string;
   /** An agent was stopped or held up on a thread the batch took: the warning icon (no Reply: several threads). */
-  warn: boolean;
+  icon: 'warn' | 'check' | 'archive';
 }
 
 /**
  * The toast after a batch, from the rows as they were before it (`rows`:
- * the threads the batch took). Worded in the approved one-line toast style
- * (`.product/approved/inbox-toast/`): a lead and a short detail, no periods.
+ * the threads the batch took), in the approved one-line toast style
+ * (`.product/approved/inbox-toast/`: an icon, a bold lead, a muted detail
+ * cut with "…"). The detail leads with what matters most (a warning, then
+ * the questions closed), then the project, so a long project name is what
+ * the "…" cuts.
  */
 export function projectBatchToast(action: ProjectAction, projectName: string, rows: readonly InboxListRow[]): ProjectBatchToast {
-  const n = rows.length;
-  const threads = plural(n, 'thread');
+  const threads = plural(rows.length, 'thread');
   // Questions still waiting on the person in the threads taken: Mark read and the archive close them.
   const questions = rows.reduce((sum, row) => sum + row.questions.open + row.questions.picked, 0);
   const stopped = rows.filter((row) => row.questions.stopped && row.questions.open > 0);
   const holds = rows.reduce((sum, row) => sum + (row.questions.open > 0 ? row.questions.holds_up.length : 0), 0);
-  const closed = questions > 0 ? `Closed ${plural(questions, 'open question')}` : '';
   let warning = '';
   if (stopped.length === 1) warning = `${agentName(stopped[0]!.author)} was stopped`;
   else if (stopped.length > 1) warning = `${stopped.length} agents were stopped`;
   else if (holds > 0) warning = `Held up ${plural(holds, 'thing')}`;
-  const warn = warning !== '';
+  const closed = questions > 0 ? `Closed ${plural(questions, 'question')}` : '';
+  const why = warning || closed || (action === 'read' ? 'Back when an agent writes' : 'Back when an agent writes there');
+  const detail = `${why} · ${projectName}`;
   if (action === 'read') {
-    return {
-      text: `Marked ${threads} in ${projectName} read`,
-      sub: warning || closed || 'They come back when an agent writes',
-      short: `${threads} read`,
-      warn,
-    };
+    return { lead: `Marked ${threads} read`, phoneLead: `${threads} read`, detail, icon: warning ? 'warn' : 'check' };
   }
-  return {
-    text: `Archived ${threads} in ${projectName}`,
-    sub: warning || closed || 'The project comes back when an agent writes there',
-    short: `${projectName} archived`,
-    warn,
-  };
+  return { lead: `Archived ${threads}`, phoneLead: `Archived ${threads}`, detail, icon: warning ? 'warn' : 'archive' };
 }
 
 /** A key for one batch, so a retried request answers what the first did (the server's `batch_id`). */

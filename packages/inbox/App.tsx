@@ -1118,7 +1118,7 @@ function Inbox() {
         }
       }
     } catch (cause) {
-      showToast({ text: cause instanceof Error ? cause.message : 'The project did not change.', warn: true });
+      showToast({ icon: 'warn', lead: cause instanceof Error ? cause.message : 'The project did not change.', wrap: true });
       return;
     }
     await afterWrite();
@@ -1134,7 +1134,7 @@ function Inbox() {
           try {
             await undo();
           } catch (cause) {
-            showToast({ text: cause instanceof Error ? cause.message : 'The project did not change.', warn: true });
+            showToast({ icon: 'warn', lead: cause instanceof Error ? cause.message : 'The project did not change.', wrap: true });
             return;
           }
           await afterWrite();
@@ -1143,7 +1143,6 @@ function Inbox() {
         })();
       },
     });
-    say(`${copy.text}. ${copy.sub}.`);
   };
 
   /**
