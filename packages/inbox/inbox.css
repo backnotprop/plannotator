@@ -2071,10 +2071,12 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-drop { position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 2px dashed color-mix(in oklch, var(--primary) 60%, transparent); background: color-mix(in oklch, var(--popover) 88%, var(--primary)); color: var(--primary); font-weight: 600; pointer-events: none; }
 
 /* "Send to another session", under a message no session took. */
-.ib-delivered[data-delivery="undelivered"] { color: color-mix(in oklch, var(--warning) 70%, var(--foreground)); }
+.ib-delivered[data-delivery="undelivered"] { color: var(--foreground); }
 .ib-delivered[data-delivery="undelivered"] svg { color: var(--warning); flex: none; }
 .ib-readdress { position: relative; margin-top: 8px; }
-.ib-menu.ib-readdress-pop { position: absolute; left: 0; top: calc(100% + 4px); width: 340px; padding: 6px; z-index: 20; background: var(--popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22); }
+.ib-readdress .ib-route .ib-gl { clear: both; }
+.pn-inbox .ib-cp-tobtn[data-loading] { cursor: progress; color: var(--muted-foreground); }
+.ib-readdress .ib-routeform { max-width: 460px; }
 
 /* The Drafts page (the Decisions page's frame). */
 .ib-drafts-n { color: var(--muted-foreground); font-size: 14px; }
@@ -2126,10 +2128,11 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-cp-picker[data-phone] .ib-cp-list { flex: 1; }
   .ib-cp-opt { min-height: 56px; }
   .ib-draft-open { grid-template-columns: 36px minmax(0, 1fr); }
-  .pn-inbox .ib-draft-open { padding: 14px 0; align-items: start; }
+  .pn-inbox .ib-draft-open { padding: 14px 0 14px 12px; align-items: start; }
+  .ib-drafts .ib-drafts-empty, .ib-drafts > .ib-error { margin-inline: 16px; }
+  .ib-drafts .ib-draft { padding-right: 4px; }
   .ib-draft-s { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
   .ib-draft-sn { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .ib-draft-meta { grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; }
   .pn-inbox .ib-draft-del { width: 44px; height: 44px; }
-  .ib-menu.ib-readdress-pop { width: min(340px, calc(100vw - 40px)); }
 }

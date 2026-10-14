@@ -407,6 +407,8 @@ function Inbox() {
    */
   const [compose, setCompose] = useState<ComposeRequest | null>(null);
   const composeOpener = useRef<HTMLElement | null>(null);
+  /** Where focus goes once compose closes or a draft row goes: the opener, else `focusFallback(next)`. */
+  const pendingFocus = useRef<{ opener: HTMLElement | null; next: string | null } | null>(null);
   const [drafts, setDrafts] = useState<DraftView[] | null>(null);
   const [draftsError, setDraftsError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
@@ -972,19 +974,58 @@ function Inbox() {
     composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setCompose(request);
   };
-  const closeCompose = () => {
+  /**
+   * The draft after this one in the Drafts list (else the one before), for
+   * focus once it leaves the list: sent, deleted or discarded.
+   */
+  const draftNeighbour = (draftId: string): string | null => {
+    const list = drafts ?? [];
+    const index = list.findIndex((d) => d.id === draftId);
+    if (index < 0) return null;
+    return (list[index + 1] ?? list[index - 1])?.id ?? null;
+  };
+  /**
+   * Focus somewhere real once what had it is gone: the draft row named, else
+   * the Drafts heading, else a New message button. Never left on the page.
+   */
+  const focusFallback = (draftId: string | null) => {
+    // The Drafts page is the page on screen when it has these; the New message
+    // buttons are several (sidebar, a phone's list header), so the shown one.
+    const row = draftId ? document.querySelector<HTMLElement>(`[data-draft-id="${CSS.escape(draftId)}"] .ib-draft-open`) : null;
+    if (row) return row.focus();
+    const heading = document.querySelector<HTMLElement>('[data-drafts-page] h1');
+    if (heading) return heading.focus();
+    for (const button of document.querySelectorAll<HTMLElement>('[data-open-compose]')) {
+      button.focus();
+      if (document.activeElement === button) return;
+    }
+  };
+  // Runs after the render that closed compose or dropped a draft row, so the DOM is the new one.
+  useEffect(() => {
+    const pending = pendingFocus.current;
+    if (!pending || compose) return;
+    pendingFocus.current = null;
+    const { opener, next } = pending;
+    // A hidden opener (a closed phone sheet) does not take focus; then the fallback.
+    if (opener?.isConnected) opener.focus();
+    if (opener && document.activeElement === opener) return;
+    focusFallback(next);
+  });
+  /** Close compose; focus goes back to what opened it, or, when that is gone (a draft row), `focusFallback(next)`. */
+  const closeCompose = (next: string | null = null) => {
     setCompose(null);
-    const opener = composeOpener.current;
+    // After the render that closes it (and drops a sent draft's row): see the effect below.
+    pendingFocus.current = { opener: composeOpener.current, next };
     composeOpener.current = null;
-    requestAnimationFrame(() => {
-      if (opener && opener.isConnected && opener.getClientRects().length > 0) opener.focus();
-    });
   };
   const composeSent = (sent: ComposeSent) => {
-    closeCompose();
+    // A draft sent leaves the list now; focus goes to the next one.
+    const next = sent.draftId ? draftNeighbour(sent.draftId) : null;
+    if (sent.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== sent.draftId));
+    closeCompose(next);
     // While a thread is open its list holds still; with none, the new row shows at once.
     void refreshList(!routeRef.current.thread, true);
-    if (sent.fromDraft) void refreshDrafts();
+    if (sent.draftId) void refreshDrafts();
     showToast(
       {
         icon: 'check',
@@ -1020,6 +1061,8 @@ function Inbox() {
   };
   /** Delete a draft, with Undo: the window re-creates it from what it still holds (no soft delete on the server). */
   const deleteDraft = async (draft: DraftView, alreadyDeleted = false) => {
+    const next = draftNeighbour(draft.id);
+    const hadFocus = document.activeElement instanceof HTMLElement && !!document.activeElement.closest(`[data-draft-id="${CSS.escape(draft.id)}"]`);
     if (!alreadyDeleted) {
       try {
         await inboxApi.deleteDraft(draft.id);
@@ -1029,6 +1072,8 @@ function Inbox() {
       }
     }
     setDrafts((current) => (current ?? []).filter((d) => d.id !== draft.id));
+    // The row held focus (its delete button): the next row takes it.
+    if (hadFocus) pendingFocus.current = { opener: null, next };
     void refreshDrafts();
     showToast({
       icon: 'check',
@@ -1766,7 +1811,7 @@ function Inbox() {
         drafts={drafts}
         error={draftsError}
         phone={phone}
-        onOpen={(draft) => openCompose({ draft })}
+        onOpen={(draft, opener) => openCompose({ draft }, opener)}
         onDelete={(draft) => void deleteDraft(draft)}
         onCompose={(opener) => openCompose({}, opener)}
       />
@@ -1996,10 +2041,10 @@ function Inbox() {
           }}
           onSaved={composeSaved}
           onDeleted={(draft) => {
-            closeCompose();
+            closeCompose(draftNeighbour(draft.id));
             void deleteDraft(draft, true);
           }}
-          onClose={closeCompose}
+          onClose={() => closeCompose()}
         />
       )}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">

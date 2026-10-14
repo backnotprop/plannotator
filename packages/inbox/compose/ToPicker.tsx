@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { HostMark, Icon } from '../icons';
 import { tildePath } from '../format';
-import { busyWord, filterGroups, hostLabel, lastLine, sessionTitle, type ComposeGroup, type ComposeTarget } from './model';
+import { busyWord, filterGroups, hostLabel, lastLine, startedLine, type ComposeGroup, type ComposeTarget } from './model';
 
 /**
  * The To picker (compose): a filter field over one listbox of live sessions,
@@ -28,7 +28,12 @@ export function ToPicker({
   const [query, setQuery] = useState('');
   const shown = useMemo(() => filterGroups(groups, query), [groups, query]);
   const options = useMemo(() => shown.flatMap((group) => group.sessions), [shown]);
-  const [hl, setHl] = useState(0);
+  // The highlight follows a session, not a row number: the list is read again
+  // every 5 s, and a re-read that moves rows must not move the highlight.
+  const [hlSession, setHlSession] = useState<string | null>(null);
+  const found = options.findIndex((t) => t.session === hlSession);
+  const hl = found >= 0 ? found : 0;
+  const setHl = (index: number) => setHlSession(options[index]?.session ?? null);
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const optionId = (i: number) => `ib-cp-o-${uid}-${i}`;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +43,7 @@ export function ToPicker({
   useLayoutEffect(() => {
     const at = options.findIndex((t) => t.session === selected);
     setHl(query === '' && at >= 0 ? at : 0);
+    // Only the filter moves it; the re-read keeps the session it is on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
   useEffect(() => inputRef.current?.focus(), []);
@@ -68,7 +74,7 @@ export function ToPicker({
       event.preventDefault();
       if (options.length === 0) return;
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      setHl((current) => (current + step + options.length) % options.length);
+      setHl((hl + step + options.length) % options.length);
       return;
     }
     if (event.key === 'Enter') {
@@ -132,7 +138,7 @@ export function ToPicker({
                     id={optionId(i)}
                     role="option"
                     aria-selected={i === hl}
-                    aria-label={`${hostLabel(target.host)}, ${sessionTitle(target).split(' · ')[1]}, ${busyWord(target).toLowerCase()}, ${lastLine(target)}`}
+                    aria-label={`${hostLabel(target.host)}, ${startedLine(target)}, ${busyWord(target).toLowerCase()}, ${lastLine(target)}`}
                     className={`ib-cp-opt${i === hl ? ' ib-hl' : ''}`}
                     data-compose-session={target.session}
                     onPointerMove={() => i !== hl && setHl(i)}
@@ -142,7 +148,7 @@ export function ToPicker({
                     <HostMark host={target.host} />
                     <span className="ib-cp-ot">
                       <span className="ib-cp-o1">
-                        <b>{hostLabel(target.host)}</b> · {sessionTitle(target).split(' · ')[1]}
+                        <b>{hostLabel(target.host)}</b> · {startedLine(target)}
                       </span>
                       <span className="ib-cp-o2" dir="auto">
                         {lastLine(target)}

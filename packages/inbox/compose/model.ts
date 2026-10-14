@@ -76,7 +76,12 @@ export function preselect(
 
 /** "Claude Code · started 9:12 AM". */
 export function sessionTitle(target: Pick<ComposeTarget, 'host' | 'started_at'>): string {
-  return `${hostLabel(target.host)} · started ${whenTime(target.started_at)}`;
+  return `${hostLabel(target.host)} · ${startedLine(target)}`;
+}
+
+/** "started 2:41 PM": when the session started, without its host. */
+export function startedLine(target: Pick<ComposeTarget, 'started_at'>): string {
+  return `started ${whenTime(target.started_at)}`;
 }
 
 /** "Last: Inbox search, part 2 · 2:41 PM", or "Hasn't written in the Inbox yet". */
@@ -139,7 +144,10 @@ export function statusLine(input: {
   anyLive: boolean;
   ended: InboxDraftTo | null;
   projectName: string | null;
+  /** The live sessions are not read yet. */
+  loading?: boolean;
 }): string {
+  if (input.loading) return 'Looking for live agents…';
   if (input.target) {
     const name = hostLabel(input.target.host);
     return input.target.busy ? `${name} is working; it takes this when its turn ends.` : `${name} takes it as its next turn.`;
@@ -159,16 +167,30 @@ export function draftChip(draft: Pick<InboxDraft, 'to'> & { status: 'live' | 'en
   return 'No agent chosen';
 }
 
-/** The words that open "New message…" from the palette, and the host and project names that open "Message <host> in <project>". */
-const ACTION_WORDS = ['new', 'message', 'idea', 'ask', 'send', 'compose', 'write', 'draft', 'request'];
+/** The words that open "New message…" from the palette (the brief's list). */
+const ACTION_WORDS = ['new', 'message', 'idea', 'ask', 'send'];
+
+/** A typed word that calls an action: the whole word, or 3 letters or more of its start ("mes", not "me"). */
+const callsAction = (word: string): boolean => ACTION_WORDS.some((action) => action === word || (word.length >= 3 && action.startsWith(word)));
+
+/**
+ * The query names an action word whole ("new", "send"): its actions sit above
+ * the search results. Otherwise they sit below any results.
+ */
+export function namesActionWord(query: string): boolean {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .some((word) => ACTION_WORDS.includes(word));
+}
 
 export type ComposeAction = { kind: 'new' } | { kind: 'message'; target: ComposeTarget };
 
 /**
  * The palette's Actions group. An empty query: "New message…" and the session
  * the person last sent to, while it is live. Typed words: "New message…" when
- * a word starts one of the action words, and each live session whose host or
- * project matches every word (at most 4).
+ * a word is one of the action words or 3 letters or more of one's start, and
+ * each live session whose host or project matches every word (at most 4).
  */
 export function composeActions(query: string, targets: readonly ComposeTarget[], last: string | null): ComposeAction[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -177,13 +199,13 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
     return [{ kind: 'new' }, ...(lastTarget ? [{ kind: 'message' as const, target: lastTarget }] : [])];
   }
   const out: ComposeAction[] = [];
-  if (words.some((word) => ACTION_WORDS.some((action) => action.startsWith(word) && word.length >= 2))) out.push({ kind: 'new' });
+  if (words.some(callsAction)) out.push({ kind: 'new' });
   const named = targets.filter((target) => {
     const hay = `${hostLabel(target.host)} ${target.host} ${target.project.name}`.toLowerCase();
-    return words.every((word) => hay.includes(word) || ACTION_WORDS.some((action) => action.startsWith(word)));
+    return words.every((word) => hay.includes(word) || callsAction(word));
   });
   // Only when a word names the session (not the action words alone).
-  const naming = words.filter((word) => !ACTION_WORDS.some((action) => action.startsWith(word)));
+  const naming = words.filter((word) => !callsAction(word));
   if (naming.length > 0) for (const target of named.slice(0, 4)) out.push({ kind: 'message', target });
   return out;
 }

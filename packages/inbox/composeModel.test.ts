@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxComposeProject } from '@plannotator/core/inbox-types';
-import { actionLabel, composeActions, composeGroups, composeTargets, draftChip, filterGroups, isDirty, preselect, statusLine } from './compose/model';
+import { actionLabel, composeActions, composeGroups, composeTargets, draftChip, filterGroups, isDirty, namesActionWord, preselect, statusLine } from './compose/model';
 
 const session = (id: string, host: string, extra: Partial<InboxComposeProject['sessions'][number]> = {}) => ({
   session: id,
@@ -52,6 +52,7 @@ describe('To', () => {
     expect(statusLine({ target: oc!, anyLive: true, ended: null, projectName: null })).toBe('OpenCode is working; it takes this when its turn ends.');
     expect(statusLine({ target: composeTargets(PROJECTS)[1]!, anyLive: true, ended: null, projectName: null })).toBe('Claude Code takes it as its next turn.');
     expect(statusLine({ target: null, anyLive: true, ended: null, projectName: 'ledger' })).toBe('Choose an agent to send it.');
+    expect(statusLine({ target: null, anyLive: false, ended: null, projectName: 'ledger', loading: true })).toBe('Looking for live agents…');
     expect(statusLine({ target: null, anyLive: false, ended: null, projectName: 'ledger' })).toBe('No agent is running in ledger.');
     expect(statusLine({ target: null, anyLive: true, ended: { host: 'pi', session: 's', project_root: null, project_name: null, started_at: null }, projectName: null })).toBe('That session has ended.');
   });
@@ -90,5 +91,15 @@ describe('the palette\'s Actions', () => {
     expect(composeActions('pi', targets, null).map(actionLabel)).toEqual(['Message Pi in plannotator', 'Message Pi in billing']);
     expect(composeActions('message billing', targets, null).map(actionLabel)).toEqual(['New message…', 'Message Pi in billing']);
     expect(composeActions('relay timeout', targets, null)).toEqual([]);
+  });
+
+  test('a word calls an action whole or by 3 letters of its start; two letters, or words off the brief\'s list, do not', () => {
+    const offersNew = (q: string) => composeActions(q, targets, null).some((a) => a.kind === 'new');
+    for (const word of ['re', 'co', 'me', 'as', 'compose', 'draft', 'write']) expect(offersNew(word)).toBe(false);
+    expect(composeActions('mes', targets, null).map(actionLabel)).toEqual(['New message…']);
+    expect(composeActions('sen', targets, null).map(actionLabel)).toEqual(['New message…']);
+    expect(namesActionWord('send it')).toBe(true);
+    expect(namesActionWord('mes')).toBe(false);
+    expect(namesActionWord('newsletter')).toBe(false);
   });
 });

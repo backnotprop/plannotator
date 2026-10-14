@@ -50,7 +50,8 @@ export interface ComposeSent {
   session: string;
   host: string;
   projectName: string;
-  fromDraft: boolean;
+  /** The draft it was sent from (it is deleted with the Send), or null. */
+  draftId: string | null;
 }
 
 export interface ComposeDialogProps {
@@ -115,9 +116,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
-  const [said, setSaid] = useState('');
   const [dropping, setDropping] = useState(false);
-  const say = (text: string) => setSaid((last) => (last === text ? `${text} ` : text));
 
   // The idempotency key of one Send: new whenever what would be sent changes.
   const sendKey = useRef(crypto.randomUUID());
@@ -169,10 +168,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
 
   // ── sending ──
   const send = async () => {
-    if (busy) return;
+    // Still reading the live sessions: nothing to say yet, the status line says it.
+    if (busy || !model) return;
     setError(null);
     if (!target) {
-      say(NOTHING_SENT_NO_AGENT);
+      // The error is an alert, which says it: no second announcement.
       setError(anyLive ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
       return;
     }
@@ -194,7 +194,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         uploads: uploadIds,
         ...(draft ? { draft_id: draft.id } : {}),
       });
-      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, fromDraft: draft !== null });
+      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null });
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
@@ -274,9 +274,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   const sendable = !!target;
-  const saveOffered = !sendable;
+  // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
+  const loading = !model;
+  const saveOffered = !sendable && !loading;
   const title = draft ? 'Draft' : 'New message';
-  const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName });
+  const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
 
   const toRow = (
@@ -299,10 +301,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
               ? `To: ${hostLabel(target.host)} in ${target.project.name}, ${busyWord(target).toLowerCase()}. Change`
               : endedNote
                 ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
-                : 'To: choose an agent'
+                : loading
+                  ? 'To: looking for live agents'
+                  : 'To: choose an agent'
           }
-          onClick={() => setPicker((open) => !open)}
-          disabled={!model || (!anyLive && !endedNote)}
+          aria-disabled={loading || undefined}
+          data-loading={loading ? '' : undefined}
+          // Focusable while the sessions are read (Tab still reaches it); it opens once they are.
+          onClick={() => !loading && setPicker((open) => !open)}
+          disabled={!loading && !anyLive && !endedNote}
         >
           {target ? (
             <>
@@ -565,9 +572,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
           Drop files to attach
         </div>
       )}
-      <div className="ib-sr" role="status" aria-live="polite" data-compose-live="">
-        {said}
-      </div>
     </dialog>
   );
 }

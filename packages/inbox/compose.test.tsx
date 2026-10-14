@@ -218,8 +218,12 @@ test.skipIf(!hasDom)('Keep draft: the sidebar\'s Drafts row and the Drafts page 
   expect(row.querySelector('[data-draft-chip]')?.textContent).toBe('No agent chosen');
   expect(row.textContent).toContain('Idea: group the list by session.');
 
-  act(() => (row.querySelector('[data-draft-delete]') as HTMLButtonElement).click());
+  // From the keyboard: the delete button has focus; with no other draft it goes to the Drafts heading, never the page.
+  const del = row.querySelector('[data-draft-delete]') as HTMLButtonElement;
+  act(() => del.focus());
+  act(() => del.click());
   await until(() => el.querySelectorAll('[data-draft-id]').length === 0, 'the row gone');
+  await until(() => document.activeElement === el.querySelector('[data-drafts-page] h1'), 'focus on the Drafts heading');
   expect(await drafts()).toEqual([]);
   act(() => (document.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
   await until(() => el.querySelectorAll('[data-draft-id]').length === 1, 'the draft back');
@@ -239,7 +243,9 @@ test.skipIf(!hasDom)('a live session: To is prefilled, Send starts the thread ad
   const send = posted.find((p) => p.path === '/api/inbox/messages')!;
   expect(send.body).toMatchObject({ to: { host: 'claude-code', session: 'ses_live_dom' }, body: 'Idea: group the list by session.' });
   expect(typeof send.body.draft_id).toBe('string');
-  expect(document.querySelector('[data-inbox-toast]')?.textContent).toContain('Sent to Claude Code in');
+  expect(document.querySelector('[data-inbox-toast]')?.textContent).toContain('Sent to Claude Code');
+  // The row that opened it is gone: focus goes to the Drafts heading (no other draft), never the page.
+  await until(() => document.activeElement === el.querySelector('[data-drafts-page] h1'), 'focus on the Drafts heading');
   expect(await drafts()).toEqual([]);
   await until(() => el.querySelector('[data-drafts-nav]') === null, 'no Drafts row');
   const sections = (JSON.parse((await loopback('/api/inbox/threads')).text) as { sections: InboxListSection[] }).sections;

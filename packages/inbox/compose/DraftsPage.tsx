@@ -21,7 +21,7 @@ export function DraftsPage({
   drafts: readonly DraftView[] | null;
   error: string | null;
   phone: boolean;
-  onOpen: (draft: DraftView) => void;
+  onOpen: (draft: DraftView, opener: HTMLElement) => void;
   onDelete: (draft: DraftView) => void;
   onCompose: (opener: HTMLElement) => void;
 }) {
@@ -30,7 +30,7 @@ export function DraftsPage({
     <section className="ib-dpage ib-drafts" aria-label="Drafts" data-drafts-page="">
       <div className="ib-dh">
         <SidebarTrigger />
-        <h1>Drafts</h1>
+        <h1 tabIndex={-1}>Drafts</h1>
         {list.length > 0 && <span className="ib-drafts-n">{list.length} not sent</span>}
         {phone && (
           <button type="button" className="ib-lhead-compose" aria-label="New message" aria-haspopup="dialog" onClick={(event) => onCompose(event.currentTarget)}>
@@ -48,7 +48,7 @@ export function DraftsPage({
           const files = draft.files.length;
           return (
             <div className="ib-draft" role="listitem" key={draft.id} data-draft-id={draft.id} data-draft-status={draft.status}>
-              <button type="button" className="ib-draft-open" onClick={() => onOpen(draft)} aria-label={`Open draft: ${subject}. ${draftChip(draft)}. Saved ${whenTime(draft.updated_at)}`}>
+              <button type="button" className="ib-draft-open" onClick={(event) => onOpen(draft, event.currentTarget)} aria-label={`Open draft: ${subject}. ${draftChip(draft)}. Saved ${whenTime(draft.updated_at)}`}>
                 <span className="ib-draft-mk">{draft.to ? <HostMark host={draft.to.host} big /> : <Icon name="doc" size={17} />}</span>
                 <span className="ib-draft-t">
                   <span className="ib-draft-to" dir="auto">

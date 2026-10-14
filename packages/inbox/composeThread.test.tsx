@@ -134,9 +134,14 @@ test.skipIf(!hasDom)('the session stopped before it took it: Not delivered, and 
   const open = el.querySelector('[data-readdress-open]') as HTMLButtonElement;
   act(() => open.click());
   await settle();
-  const pick = el.querySelector('[data-readdress-session="ses_pi"]') as HTMLButtonElement;
+  // The ended-session reply's radio rows: the first live session is selected, focus on it.
+  const pick = el.querySelector('[data-readdress-session="ses_pi"]') as HTMLLabelElement;
   expect(pick.textContent).toContain('Pi · started');
-  act(() => pick.click());
+  const radio = pick.querySelector('input[type=radio]') as HTMLInputElement;
+  expect(radio.checked).toBe(true);
+  expect(document.activeElement).toBe(radio);
+  expect(el.querySelector('[role=menu]')).toBeNull();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
   await settle();
   expect(posted).toEqual([{ path: `/api/inbox/messages/${ROOT_ID}/to`, body: { to: { host: 'pi', session: 'ses_pi' } } }]);
   expect(changed).toBe(1);
@@ -149,4 +154,38 @@ test.skipIf(!hasDom)('delivered: the line says so, and nothing offers to move it
   expect(el.querySelector('[data-readdress]')).toBeNull();
   // Nothing waits, so the window does not ask about the session.
   expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the To picker keeps its highlight on the same session when the 5 s re-read moves the rows', async () => {
+  const { ToPicker } = await import('./compose/ToPicker');
+  const target = (session: string, host: string, project: { id: string; name: string; root: string }) => ({
+    session,
+    host,
+    project,
+    started_at: '2026-10-14T09:12:00.000Z',
+    last_seen_at: '2026-10-14T15:00:00.000Z',
+    busy: false,
+    idle_since: null,
+    last_thread: null,
+  });
+  const p = { id: 'prj_p', name: 'plannotator', root: '/src/plannotator' };
+  const a = target('ses-a', 'claude-code', p);
+  const b = target('ses-b', 'pi', p);
+  const el = document.createElement('div');
+  document.body.appendChild(el);
+  const picker = createRoot(el);
+  const draw = (sessions: (typeof a)[]) =>
+    act(() => picker.render(<ToPicker groups={[{ project: p, current: true, sessions }]} selected={null} home={null} phone={false} onPick={() => {}} onClose={() => {}} />));
+  draw([a, b]);
+  const highlighted = () => el.querySelector('.ib-cp-opt.ib-hl')?.textContent ?? '';
+  expect(highlighted()).toContain('Claude Code');
+  act(() => {
+    el.querySelector('input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  });
+  expect(highlighted()).toContain('Pi');
+  // The re-read puts Pi first: the highlight stays on Pi, not on row 2.
+  draw([b, a]);
+  expect(highlighted()).toContain('Pi');
+  act(() => picker.unmount());
+  el.remove();
 });

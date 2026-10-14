@@ -405,3 +405,41 @@ test.skipIf(!hasDom)('the landing highlight finds the words in the text, not in 
   const ranges = searchHitRanges(article, ['retry', 'budget', 'resume']);
   expect(ranges.map((r) => r.toString())).toEqual(['retry', 'retry', 'budget', 'Résumé']);
 });
+
+test.skipIf(!hasDom)("compose's Actions: below real results unless the words name an action; shown while the index builds", async () => {
+  const { composeActions } = await import('./compose/model');
+  const headings = () => [...host!.querySelectorAll('[role="group"]')].map((g) => host!.querySelector(`#${g.getAttribute('aria-labelledby')}`)!.textContent);
+  respond = async (call) => {
+    const q = call.url.searchParams.get('q') ?? '';
+    return q === 'idle' ? answer({ q: 'idle', indexing: true }) : q ? results(q) : answer({});
+  };
+  await act(async () => {
+    root!.render(
+      <SearchPalette
+        open
+        phone={false}
+        currentProject={null}
+        projects={[{ ...project, root: '/src/plannotator' }]}
+        onClose={(reason) => closed.push(reason)}
+        onOpenResult={(hash, land) => opened.push({ hash, land })}
+        actions={(q) => (q === 'idle' ? [{ kind: 'new' }] : composeActions(q, [], null))}
+        onAction={() => {}}
+      />,
+    );
+  });
+  // Three letters of "message": the action, after the real matches.
+  await type('mes');
+  await waitFor(() => headings().includes('Threads') && headings().includes('Actions'));
+  expect(headings()).toEqual(['Threads', 'Messages12', 'Actions']);
+  expect(options()[0]!.textContent).toContain('Relay: rate limit');
+  // Two letters call nothing.
+  await type('me');
+  await waitFor(() => searches().at(-1)?.url.searchParams.get('q') === 'me' && !headings().includes('Actions'));
+  // The whole word: the action first.
+  await type('new');
+  await waitFor(() => headings()[0] === 'Actions');
+  // While the index builds: the action, above the skeletons.
+  await type('idle');
+  await waitFor(() => host!.querySelector('[data-search-indexing]') !== null);
+  expect(host!.querySelector('[data-compose-action="new"]')).not.toBeNull();
+});

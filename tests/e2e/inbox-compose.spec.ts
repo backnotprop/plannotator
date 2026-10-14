@@ -406,6 +406,8 @@ test('the session stops before it takes a message: Not delivered, and Send to an
   await shot(page, '08-not-delivered');
   await pane.locator('[data-readdress-open]').click();
   await pane.locator('[data-readdress-session="ses-claude"]').click();
+  await shot(page, '08b-send-to-another-session');
+  await pane.locator('[data-readdress-send]').click();
   const moved = await waitFor('the moved message', () => stays.commands.find((c) => c.id === command.id));
   expect(moved).toMatchObject({ type: 'message', new_thread: true });
   await stays.deliver(command.id);

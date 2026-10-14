@@ -21,7 +21,7 @@ import { middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow } from
 import { saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
-import { actionLabel, busyWord, sessionTitle, type ComposeAction } from '../compose/model';
+import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
 import {
   FROM_OPTIONS,
   NO_FILTERS,
@@ -348,11 +348,16 @@ export default function SearchPalette(props: SearchPaletteProps) {
 
   // ── options ──
   const groups: SearchGroupView[] = useMemo(() => {
-    if (!answered || answered.model.indexing) return [];
-    const found = searchGroups(answered.model, expanded);
+    if (!answered) return [];
+    // While the index builds there are no results yet, but the actions still show.
+    const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
     const actionList = actions ? actions(answered.q) : [];
-    // The Actions group sits above everything, Recent searches included.
-    return actionList.length > 0 ? [{ id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) }, ...found] : found;
+    if (actionList.length === 0) return found;
+    const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
+    // Above everything (Recent searches included) with no words, when nothing
+    // matched, or when the words name an action; below real results otherwise.
+    const first = !answered.q.trim() || found.length === 0 || namesActionWord(answered.q);
+    return first ? [group, ...found] : [...found, group];
   }, [answered, expanded, actions]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
@@ -642,6 +647,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
       if (!answered && !pending) return null;
       return (
         <>
+          {indexing && renderGroups()}
           <div className="ib-sp-group">
             <div className="ib-sp-gh">Threads</div>
             <div className="ib-sp-skel"><i style={{ width: '62%' }} /><i /></div>
@@ -689,6 +695,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </div>
       );
     }
+    return renderGroups();
+    function renderGroups() {
     return groups.map((group) => {
       const headingId = `ib-sp-g-${uid}-${group.id}`;
       return (
@@ -735,7 +743,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{actionLabel(action)}</span>
                     <span className="ib-sp-s">
-                      {action.kind === 'new' ? 'Start a thread with a live agent' : `${sessionTitle(action.target).split(' · ')[1]} · ${busyWord(action.target).toLowerCase()}`}
+                      {action.kind === 'new' ? 'Start a thread with a live agent' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
                     </span>
                   </span>
                 </div>
@@ -761,6 +769,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </div>
       );
     });
+    }
   })();
 
   const anyFilter = filtered;
