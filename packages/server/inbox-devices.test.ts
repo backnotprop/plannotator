@@ -17,7 +17,7 @@
  *    route there, and the mapping goes with the switch and a clean stop.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -249,6 +249,7 @@ describe("the device door, on the binary", () => {
       ["GET", `threads/${threadId}/attachments`],
       ["GET", "attachments/att_x/view"],
       ["GET", "html-assets/0000000000000001/sun.png"],
+      ["GET", `messages/${threadId}/image?path=sun.png`],
       ["POST", "annotations"],
       ["POST", "annotations/ann-1/remove"],
       ["GET", `messages/${threadId}/guide`],
@@ -439,6 +440,88 @@ describe("the device door, on the binary", () => {
     expect(record).toMatchObject({ id: "ann-1", attachment_id: md.id, version: "current", removed_at: null, sent_reply_id: null, annotation });
     const removed = await door("annotations/ann-1/remove", { body: { idempotency_key: keys() } });
     expect(((await removed.json()) as Json).annotation.removed_at).toBeTruthy();
+  });
+
+  test("7.38: a message's images, one in a question's context too, through the window's own route: same bytes, same headers, the same refusals, ETag and 304", async () => {
+    mkdirSync(join(w.project, "shots"), { recursive: true });
+    writeFileSync(join(w.project, "shots", "after.png"), ONE_PIXEL_PNG);
+    writeFileSync(join(w.project, "shots", "mock.png"), ONE_PIXEL_PNG);
+    writeFileSync(join(w.project, "shots", "not-shown.png"), ONE_PIXEL_PNG);
+    // Outside the project, referenced by `../`.
+    writeFileSync(join(w.project, "..", "outside.png"), ONE_PIXEL_PNG);
+    const body = [
+      "The page after the fix:",
+      "",
+      "![after](shots/after.png)",
+      "",
+      "![up](../outside.png)",
+      "",
+      ":::question",
+      "Keep the new header?",
+      "It moves the search into the header:",
+      "![mock](shots/mock.png)",
+      "- Keep it",
+      "- Go back",
+      ":::",
+    ].join("\n");
+    const sent = await agent.send({ project_path: w.project, body, thread: "images" });
+    const id = sent.message_id as string;
+    // The question's context holds the image: it is the same body the route checks.
+    const thread = (await (await door(`threads/${sent.thread_id}`)).json()) as Json;
+    const question = thread.thread.messages.find((m: Json) => m.id === id).questions[0];
+    expect(question.context).toContain("![mock](shots/mock.png)");
+
+    const img = (path: string, init: Parameters<typeof door>[1] = {}) => door(`messages/${id}/image?path=${encodeURIComponent(path)}`, init);
+    const windowImg = (path: string, headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/inbox/messages/${id}/image?path=${encodeURIComponent(path)}`, { headers });
+    const SAME = ["content-type", "content-length", "content-security-policy", "x-content-type-options", "cross-origin-resource-policy", "cache-control", "etag", "x-image-width", "x-image-height"];
+    const picked = (r: Response) => SAME.map((h) => [h, r.headers.get(h)]);
+
+    for (const path of ["shots/after.png", "shots/mock.png"]) {
+      const phone = await img(path);
+      const page = await windowImg(path);
+      expect([path, phone.status]).toEqual([path, 200]);
+      expect(picked(phone)).toEqual(picked(page));
+      expect(phone.headers.get("content-type")).toBe("image/png");
+      expect(phone.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'; style-src 'unsafe-inline'");
+      expect(phone.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(phone.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+      expect(phone.headers.get("cache-control")).toBe("private, no-cache");
+      expect(phone.headers.get("etag")).toBe(`"${createHash("sha256").update(ONE_PIXEL_PNG).digest("hex")}"`);
+      expect(Buffer.from(await phone.arrayBuffer()).equals(ONE_PIXEL_PNG)).toBe(true);
+      // The phone's If-None-Match reaches the window: a cached copy revalidates to 304.
+      const cached = await img(path, { headers: { "If-None-Match": phone.headers.get("etag")! } });
+      expect(cached.status).toBe(304);
+      expect(picked(cached).filter(([h]) => h !== "content-length")).toEqual(picked(phone).filter(([h]) => h !== "content-length"));
+      expect((await cached.arrayBuffer()).byteLength).toBe(0);
+    }
+
+    // Not referenced by that message's body: 403, the window's own answer.
+    const unshown = await img("shots/not-shown.png");
+    expect(unshown.status).toBe(403);
+    expect(((await unshown.json()) as Json).code).toBe("image_not_referenced");
+    expect(unshown.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'; style-src 'unsafe-inline'");
+    // Referenced, but outside the project.
+    const escaped = await img("../outside.png");
+    expect(escaped.status).toBe(403);
+    expect(((await escaped.json()) as Json).code).toBe("outside_project");
+    // Another message's id does not lend its body.
+    const other = await door(`messages/${threadId}/image?path=${encodeURIComponent("shots/after.png")}`);
+    expect(other.status).toBe(403);
+
+    // No token, a wrong token, a browser: refused before the window is asked.
+    expect((await img("shots/after.png", { token: null })).status).toBe(401);
+    expect((await img("shots/after.png", { token: "tok_exampleaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })).status).toBe(401);
+    expect((await img("shots/after.png", { headers: { Origin: base } })).status).toBe(403);
+
+    // A removed phone is refused.
+    const made = await offer();
+    const spare = (await (await door("pair", { token: null, body: { code: made.offer.code, name: "Spare iPhone", platform: "ios" } })).json()) as Json;
+    expect((await img("shots/after.png", { token: spare.token })).status).toBe(200);
+    expect((await win(`/api/inbox/devices/${spare.device.id}/revoke`, { serverSession })).status).toBe(200);
+    const gone = await img("shots/after.png", { token: spare.token });
+    expect(gone.status).toBe(401);
+    expect(((await gone.json()) as Json).code).toBe("device_revoked");
   });
 
   test("7.19 to 7.24: the guide and a tick, the decision switch, decisions, live sessions, New message", async () => {
@@ -752,5 +835,36 @@ describe("the device door, in process", () => {
     expect(applied).toBe(1);
     expect([a.status, b.status]).toEqual([200, 200]);
     expect([a.headers.get("idempotent-replayed"), b.headers.get("idempotent-replayed")]).toEqual([null, "true"]);
+  });
+
+  test("through the relay (asDevice), a message image's path rides to the window's route with its query; a removed phone is refused", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-relay-image-"));
+    roots.push(dataDir);
+    const asked: string[] = [];
+    const phones = createInboxDevices({
+      dataDir,
+      serverSession: "0".repeat(32),
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async (req) => {
+        const url = new URL(req.url);
+        asked.push(`${req.method} ${url.pathname}${url.search}`);
+        return new Response(ONE_PIXEL_PNG, { headers: { "Content-Type": "image/png" } });
+      },
+    });
+    const made = (await (await phones.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
+    const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+    const paired = (await (await phones.door(new Request(pairUrl, { method: "POST", body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) }), pairUrl)).json()) as Json;
+    const path = `/api/inbox/device/messages/msg_x/image?path=${encodeURIComponent("shots/my shot.png")}`;
+    const answer = await phones.asDevice(paired.device.id, { method: "GET", path });
+    expect(answer.status).toBe(200);
+    expect(Buffer.from(await answer.arrayBuffer()).equals(ONE_PIXEL_PNG)).toBe(true);
+    expect(asked).toEqual([`GET /api/inbox/messages/msg_x/image?path=${encodeURIComponent("shots/my shot.png")}`]);
+    const revokeUrl = new URL("http://127.0.0.1/api/inbox/device/revoke");
+    await phones.door(new Request(revokeUrl, { method: "POST", headers: { Authorization: `Bearer ${paired.token}` }, body: "{}" }), revokeUrl);
+    const after = await phones.asDevice(paired.device.id, { method: "GET", path });
+    expect(after.status).toBe(401);
+    expect(asked.length).toBe(1);
   });
 });

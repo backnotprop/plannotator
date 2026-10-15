@@ -91,7 +91,9 @@ function refuse(status: number, code: string, error: string, details: Record<str
  * markup, project deletion, decision retire and replace, pairing and the
  * device list are never on it. An attachment's bytes reach the phone only
  * through the window's own `image` and `download` routes, so the dotenv
- * refusal, the size checks and the headers are the window's.
+ * refusal, the size checks and the headers are the window's. The images a
+ * message's body shows come the same way, through the window's
+ * `messages/<id>/image`.
  */
 const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: RegExpExecArray) => string }[] = [
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
@@ -112,6 +114,11 @@ const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: R
   // phone gets the same dotenv refusal, sniffed type and headers.
   { method: "GET", route: /^attachments\/([^/]+)\/(image|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
   { method: "GET", route: /^markups\/([^/]+)$/, window: (m) => `/api/inbox/markups/${m[1]}` },
+  // An image a message's body shows (`?path=<src as written>`, a question
+  // block's context included): the window's own route, so the phone gets the
+  // same rules (referenced by that body, inside its project, sniffed, capped)
+  // and the same headers. The query rides through as the door received it.
+  { method: "GET", route: /^messages\/([^/]+)\/image$/, window: (m) => `/api/inbox/messages/${m[1]}/image` },
   { method: "GET", route: /^html-assets\/([^/]+)\/(.+)$/, window: (m) => `/api/html-assets/${m[1]}/${m[2]}` },
   { method: "POST", route: /^annotations$/, window: () => "/api/inbox/annotations" },
   { method: "POST", route: /^annotations\/([^/]+)\/remove$/, window: (m) => `/api/inbox/annotations/${m[1]}/remove` },
@@ -398,6 +405,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (body !== null) headers.set("Content-Type", "application/json");
     const lastEventId = req.headers.get("last-event-id");
     if (lastEventId) headers.set("Last-Event-ID", lastEventId);
+    // The image routes' validator (attachments/<id>/image, messages/<id>/image):
+    // a phone that cached the bytes revalidates and gets the window's 304.
+    const ifNoneMatch = req.headers.get("if-none-match");
+    if (ifNoneMatch) headers.set("If-None-Match", ifNoneMatch);
     return context.dispatch(new Request(`http://127.0.0.1:${context.port()}${windowPath}${search}`, { method: req.method, headers, body, signal }));
   };
 

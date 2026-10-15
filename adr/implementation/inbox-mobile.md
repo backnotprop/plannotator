@@ -114,7 +114,7 @@ Every phone request goes to `/api/inbox/device/*`. The door's checks, in order:
 3. `Authorization: Bearer tok_...`. None: `401 device_token_missing`. No device with that hash: `401 device_token_invalid`. A revoked device: `401 device_revoked`.
 4. The path is in the allowlist below, else `404 device_route_not_found`.
 5. A POST in the allowlist carries `idempotency_key` in its body (section 6), else `422 validation_error`. The two exceptions are `pair` and `revoke`, which change nothing when repeated.
-6. The request is handed to the window's own handler under the window's path. The door adds nothing and strips nothing; the phone sends no `serverSession`, which the window's guard accepts (`checkServerSession`: absent passes).
+6. The request is handed to the window's own handler under the window's path. The door adds nothing to the route, the query or the body; the phone sends no `serverSession`, which the window's guard accepts (`checkServerSession`: absent passes). Of the phone's headers it passes on only `Last-Event-ID` (the event stream) and `If-None-Match` (the image routes' cache validator, added 2026-10-14 with `messages/:id/image`), so a phone that cached an image gets the window's `304`.
 
 Where the door answers. On the loopback listener, the door sits beside the window. The tailnet reaches a second loopback listener, open only while "Reach from my tailnet" is on, that serves the door and nothing else: any path outside `/api/inbox/device/` answers `404 device_route_not_found` there, whatever its Host. `tailscale serve` points at that listener, never at the window's port. On the LAN listener only the door exists (section 3).
 
@@ -139,6 +139,7 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | `GET threads/:id/attachments` | same | | `{ serverSession, attachments: [state], annotations }` | 7.14 |
 | `GET attachments/:id/view[?version=sent]` | same | | `{ serverSession, attachment, version, text, html }`; also Share (the "..." menu of section 4 of the record), which writes `text` to a file named `attachment.name` | 7.15 |
 | `GET html-assets/<token>/<path>` | `GET /api/html-assets/<token>/<path>` | | the asset's bytes, as annotate serves them | 7.16 |
+| `GET messages/:id/image?path=<src as written>` | `GET /api/inbox/messages/:id/image` | `If-None-Match` (optional) | an image the message's body shows, its bytes with the window's headers exactly: `Content-Type` sniffed from the bytes (never the name), `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'`, `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: private, no-cache`, `ETag` (the SHA-256 of the bytes served), `X-Image-Width`/`-Height` when the header parses; `304` with the same headers when `If-None-Match` names the current ETag. The body is the whole message, so an image in a `:::question` block's context counts. Refused as the window refuses: `403 image_not_referenced` (not in that message's body), `403 outside_project` (`../` or a symlink out of the project), `404 message_not_found` / `image_missing`, `409 image_changed`, `413 image_too_large` (10 MB or 50 megapixels), `415 not_an_image`. Remote `http(s)` sources are not served. Cache by message id plus `path`, and revalidate with `If-None-Match` (the file lives on disk and can change). Added 2026-10-14 | 7.38 |
 | `POST annotations` | same | `{ idempotency_key, attachment_id, version, annotation }` | `{ annotation }` | 7.17 |
 | `POST annotations/:id/remove` | same | `{ idempotency_key }` | `{ annotation }` | 7.18 |
 | `GET messages/:id/guide` | same | | `{ message_id, guide, snapshot }` | 7.19 |
@@ -265,7 +266,7 @@ Down item plaintexts:
 - `{ "v": 1, "type": "record", "after", "seq", "kind", "id", "<kind>": record }`: one store line, exactly the `record` event of the event stream (`eventPayload` in `packages/server/inbox.ts`) with `v`, `type` and `after` added. After a device's `cursor`, every line goes down, in seq order. `after` is the seq the device's previous item on this socket reached (the cursor the relay held, for the first after a `hello` or a `carriage` frame): a phone whose last seen seq is lower than an item's `after` knows an item was delayed or dropped and reads the list again (written in by R2 after the review). A line whose `item` frame would pass Cloudflare's 32 MiB WebSocket message limit goes down as the placeholder `{ "v": 1, "type": "record", "after", "seq", "kind", "id", "too_large": true }`, and the cursor moves past it; the phone reads that record over the Wi-Fi or the tailnet, or shows that it is too large to show here (M6 draws the words). Written in by R2 after the review: the store caps nothing, and one line over the limit closed the socket at every resend, held every later line and every command behind the reconnect loop. A phone reading over the Wi-Fi or the tailnet acknowledges by store cursor (`ack { cursor }`), so its queue holds only what it missed.
 - `{ "v": 1, "type": "result", "id", "status", "content_type", "body_b64" }`: the door's answer to an up command, its status, its `Content-Type` and its body bytes exactly, as base64 (standard alphabet, padded). It goes only to a device with carriage on. `id` is the id sealed inside the command, never the relay's plaintext frame `id`, and the Inbox refuses a command whose sealed `id` is not its frame's (written in by R2 after its review: otherwise the relay could file one command's authentic result under another command's id, a GET's 200 under a Send it dropped). A result whose `item` frame would pass Cloudflare's WebSocket message limit (32 MiB, the platform's own) is replaced by `status: 413`, `content_type: application/json; charset=utf-8` and the body `{ "error", "code": "result_too_large", "limit_bytes": 33554432 }`, and the command is reported applied (written in by R2 after its review: one frame over the limit closed the socket, the command was handed over again at every `hello`, and every command behind it waited forever). The phone opens such a file over the Wi-Fi or the tailnet.
 
-Files have no item of their own (written in by R2): a file is the result of a GET. An attachment is `GET attachments/:id/view` (the current version) or `GET attachments/:id/view?version=sent` (the version the agent sent), whose result carries 7.15's JSON with `text` and `html`; an HTML asset is `GET html-assets/<token>/<path>`, whose result carries the asset's bytes and type as 7.16 answers them. A result is one envelope whatever its size (kept in parts at the relay, above).
+Files have no item of their own (written in by R2): a file is the result of a GET. An attachment is `GET attachments/:id/view` (the current version) or `GET attachments/:id/view?version=sent` (the version the agent sent), whose result carries 7.15's JSON with `text` and `html`; an HTML asset is `GET html-assets/<token>/<path>`, whose result carries the asset's bytes and type as 7.16 answers them; a message's image is `GET messages/:id/image?path=...` (7.38), its bytes and sniffed type. A result frame carries the body base64 twice (`body_b64`, then the sealed envelope as base64url), about 16/9 of the body, so the route's 10 MB image cap (`MAX_REVIEW_IMAGE_PREVIEW_BYTES`) is a frame of about 17.8 MiB, inside the 32 MiB limit: every image the route serves fits one result (`inbox-relay-bounds.test.ts`, and the relay proof fetches one at the cap). A command carries no headers, so there is no `If-None-Match` through the relay: the result is always the bytes. A result is one envelope whatever its size (kept in parts at the relay, above).
 
 Up command plaintext: `{ "v": 1, "id", "method", "path", "body" }`, sealed under the up key `U`, where `path` is a door path (`/api/inbox/device/...`, with its query string when the route takes one, `?version=sent` or `?project=prj_...`) and `body` is the JSON body the phone would have sent directly (a POST only). The Inbox applies it in-process through the door as that device (never as a loopback HTTP call), so the allowlist, the revocation check and the idempotency rule are the same on every path: every POST goes through the door's idempotency log per device and key, so a command the relay hands over again, or replays later, answers the stored result and writes nothing. A GET through the relay (the list after a long absence, an attachment's view, an HTML asset) is a command whose `id` is a fresh random id; a POST's `id` is its `idempotency_key` (section 6). Two door routes are not carried, and answer a result of `404 device_route_not_found`: `pair` (pairing through the relay is not in v1) and `events` (the down items are the relay's event stream; an endless answer cannot be one result).
 
@@ -983,9 +984,29 @@ curl -sS -X POST http://127.0.0.1:52817/api/inbox/devices/dev_01K700000000000000
 
 `{ "device": { "id": "dev_01K70000000000000000000001", "name": "iPhone", "platform": "ios", "created_at": "2026-10-08T10:03:12.000Z", "last_seen_at": "2026-10-08T10:55:01.000Z", "revoked_at": "2026-10-08T11:00:00.000Z", "carriage": true } }`. The Inbox then sends 7.28 to the relay. The phone's next request answers `401 device_revoked`.
 
+### 7.38 An image a message shows
+
+The message body (an agent's question, its context written as markdown):
+
+```markdown
+:::question
+Keep the new header?
+It moves search into the header:
+![mock](shots/header-mock.png)
+- Keep it
+- Go back
+:::
+```
+
+```sh
+curl -sS "$INBOX/api/inbox/device/messages/msg_01K70000000000000000000031/image?path=shots%2Fheader-mock.png" -H "Authorization: Bearer $TOKEN" -D - -o header-mock.png
+```
+
+`200` with the bytes, `Content-Type: image/png` (sniffed), `ETag: "<sha256 of the bytes>"`, `Cache-Control: private, no-cache` and the guard headers of the door table. `path` is the source exactly as the body writes it (percent-encoded in the query). Again with `-H 'If-None-Match: "<that sha256>"'`: `304`, no body, the same headers, while the file is unchanged; a changed file answers `200` with a new ETag. A path the body does not reference: `403 { "code": "image_not_referenced" }`.
+
 ## 8. What this contract leaves out
 
-The Workspaces app's side (it has its own contract), the iPad, pairing through the relay, deleting a mailbox, a retention sweep at the relay, rates beyond the reused creation brake, raw attachment bytes on the door, device attestation, request signing, re-authentication, and any Settings, restart or storage route on the phone.
+The Workspaces app's side (it has its own contract, and decides how to draw a message's images), the iPad, pairing through the relay, deleting a mailbox, a retention sweep at the relay, rates beyond the reused creation brake, raw attachment bytes on the door, device attestation, request signing, re-authentication, and any Settings, restart or storage route on the phone.
 
 ## 9. Rulings written in (2026-10-08)
 
