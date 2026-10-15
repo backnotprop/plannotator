@@ -394,3 +394,49 @@ test("the phone's door forwards Range and If-Range and returns the window's 206 
   expect(relayed.headers.get("content-range")).toBeNull();
   expect(Buffer.from(await relayed.arrayBuffer()).equals(FILM)).toBe(true);
 });
+
+test("a long range is answered 8 MiB at a time: a player reads the whole film, and seeks, across capped 206s; a plain download is the whole file", async () => {
+  const { project, dataDir } = world();
+  const film = mp4({ duration: 120, mdatBytes: 30 * 1024 * 1024 + 123 });
+  writeFileSync(join(project, "film", "long-cut.mp4"), film);
+  const server = await start(dataDir);
+  const sent = await send(server, { project_path: project, body: "Long.", attachments: ["film/long-cut.mp4"] });
+  const id = (sent.attachments as Json[])[0]!.id as string;
+  const MiB = 1024 * 1024;
+  const url = (route: string) => `http://127.0.0.1:${server.port}/api/inbox/attachments/${id}/${route}`;
+
+  // Open-ended from the start, as Chromium asks: each answer is at most 8 MiB and says where it ended.
+  const parts: Buffer[] = [];
+  let from = 0;
+  let answers = 0;
+  while (from < film.length) {
+    const answer = await fetch(url("video"), { headers: { Range: `bytes=${from}-` } });
+    expect(answer.status).toBe(206);
+    const end = Math.min(from + 8 * MiB, film.length) - 1;
+    expect(answer.headers.get("content-range")).toBe(`bytes ${from}-${end}/${film.length}`);
+    const body = Buffer.from(await answer.arrayBuffer());
+    expect(body.length).toBe(end - from + 1);
+    parts.push(body);
+    from = end + 1;
+    answers += 1;
+  }
+  expect(answers).toBe(4);
+  expect(Buffer.concat(parts).equals(film)).toBe(true);
+
+  // A seek deep into the film: 8 MiB from there, and the next ask continues it.
+  const seek = await fetch(url("video"), { headers: { Range: "bytes=20000000-" } });
+  expect(seek.headers.get("content-range")).toBe(`bytes 20000000-${20000000 + 8 * MiB - 1}/${film.length}`);
+  expect(Buffer.from(await seek.arrayBuffer()).equals(film.subarray(20000000, 20000000 + 8 * MiB))).toBe(true);
+  const rest = await fetch(url("video"), { headers: { Range: `bytes=${20000000 + 8 * MiB}-` } });
+  expect(rest.headers.get("content-range")).toBe(`bytes ${20000000 + 8 * MiB}-${film.length - 1}/${film.length}`);
+  expect(Buffer.from(await rest.arrayBuffer()).equals(film.subarray(20000000 + 8 * MiB))).toBe(true);
+
+  // /download takes the same cap on a Range; with no Range it is still the whole file.
+  const part = await fetch(url("download"), { headers: { Range: "bytes=0-" } });
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-range")).toBe(`bytes 0-${8 * MiB - 1}/${film.length}`);
+  expect((await part.arrayBuffer()).byteLength).toBe(8 * MiB);
+  const whole = await fetch(url("download"));
+  expect(whole.status).toBe(200);
+  expect(Buffer.from(await whole.arrayBuffer()).equals(film)).toBe(true);
+}, 60_000);

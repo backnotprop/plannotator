@@ -1102,6 +1102,7 @@ Before this, a film was an attachment of kind `file`, and the app opened it with
 
 - Every answer carries `Accept-Ranges: bytes` and an `ETag`.
 - One range (`Range: bytes=a-b`, `bytes=a-` or `bytes=-n`): `206 Partial Content` with `Content-Range: bytes a-b/size`. An end past the file is its last byte.
+- **A `206` may cover less than the range asked for.** No answer carries more than 8 MiB: an open-ended range (`bytes=a-`) or one longer than 8 MiB is answered from its start for 8 MiB, and `Content-Range` says where it ended (RFC 9110 allows this). The client asks again from there. That is what players do (AVPlayer's resource loader and ExoPlayer read `Content-Range` and request the rest); an app that fills a loading request itself must loop until it has the bytes it needs. A full `200` (a `download` with no `Range`) is not capped.
 - No range, a `Range` the Inbox does not read, or several ranges: the full `200`.
 - An unsatisfiable range (a start at or past the end, `bytes=-0`, any range of an empty file): `416` with `Content-Range: bytes */size` and no body.
 - `ETag`: the sent version's `"<sent_sha256>"`; the current file's `"<dev>-<ino>-<size>-<mtime µs>"` (strong, as nginx's stat tag is; `If-Range` compares strongly), from the stat of the descriptor the Inbox opened (never a hash per request: every seek is one). `If-Range` that is not exactly this version's ETag (or is a date) gets the full `200`: the file changed (the agent re-rendered it). Re-read `threads/:id/attachments` and start again.
@@ -1134,7 +1135,7 @@ Cross-Origin-Resource-Policy: same-origin
 Cache-Control: private, no-cache
 ```
 
-A seek: `Range: bytes=104857600-` with `If-Range` set to that ETag gets `206` and the rest of the film; a stale `If-Range` gets the full `200`; `Range: bytes=483393536-` gets `416` with `Content-Range: bytes */483393536`. Another kind: `415 { "code": "attachment_not_video" }`.
+A seek: `Range: bytes=104857600-` with `If-Range` set to that ETag gets `206` with the next 8 MiB (`Content-Range: bytes 104857600-113246207/483393536`), and the player asks again from `113246208`; a stale `If-Range` gets the full `200`; `Range: bytes=483393536-` gets `416` with `Content-Range: bytes */483393536`. Another kind: `415 { "code": "attachment_not_video" }`.
 
 ### 11.4 A download by Range
 

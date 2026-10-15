@@ -9,7 +9,9 @@
  * The rules (RFC 9110 section 14, as the contract in
  * adr/implementation/inbox-mobile.md states them):
  * - one range, `bytes=a-b`, `bytes=a-` or `bytes=-n`: `206` with
- *   `Content-Range: bytes a-b/size` (an end past the file is the last byte);
+ *   `Content-Range: bytes a-b/size` (an end past the file is the last byte),
+ *   at most `BYTE_RANGE_MAX_ANSWER` (8 MiB) of it: an open-ended or longer
+ *   range gets its first 8 MiB, and the client asks again from there;
  * - none, or a header that is not a byte range we read: the full `200`;
  * - several ranges: the full `200` (no multipart);
  * - a range that starts past the end (or `-0`, or any range of an empty
@@ -28,7 +30,31 @@ export type ByteRangeDecision =
   | { kind: "unsatisfiable" };
 
 /** What one `Range` header asks of a file of `size` bytes, with `If-Range` judged against `etag`. */
-export function decideByteRange(range: string | null, size: number, options: { ifRange?: string | null; etag?: string } = {}): ByteRangeDecision {
+/**
+ * The most one `206` carries. Bun 1.3.14 pulls a streamed body as fast as
+ * the file reads, whatever the client's socket takes (every stream form it
+ * offers does: measured, a client at 400 KB/s on `bytes=0-` of a 200 MB film
+ * had all 200 MB read into memory in 0.1 s). So an open-ended range, or one
+ * longer than this, is answered with its first 8 MiB and the matching
+ * `Content-Range`; RFC 9110 lets a server send less than was asked for, and a
+ * player asks again from where the answer ended (Chromium, AVPlayer and
+ * ExoPlayer do). A full `200` (a download with no Range) is not capped.
+ */
+export const BYTE_RANGE_MAX_ANSWER = 8 * 1024 * 1024;
+
+export function decideByteRange(
+  range: string | null,
+  size: number,
+  options: { ifRange?: string | null; etag?: string; maxLength?: number } = {},
+): ByteRangeDecision {
+  const decided = decideRequestedRange(range, size, options);
+  const max = options.maxLength ?? BYTE_RANGE_MAX_ANSWER;
+  if (decided.kind === "partial" && decided.end - decided.start + 1 > max) return { kind: "partial", start: decided.start, end: decided.start + max - 1 };
+  return decided;
+}
+
+/** The range as asked for, before the answer cap. */
+function decideRequestedRange(range: string | null, size: number, options: { ifRange?: string | null; etag?: string }): ByteRangeDecision {
   if (range === null) return { kind: "full" };
   if (options.ifRange != null && options.ifRange.trim() !== options.etag) return { kind: "full" };
   const match = /^\s*bytes\s*=\s*(.*)$/i.exec(range);

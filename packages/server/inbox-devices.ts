@@ -112,7 +112,8 @@ const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: R
   { method: "GET", route: /^attachments\/([^/]+)\/view$/, window: (m) => `/api/inbox/attachments/${m[1]}/view` },
   // An image's bytes, a video's (by Range) and any kind's download (by Range
   // too): the window's own routes, so the phone gets the same dotenv refusal,
-  // sniffed type and headers. The door forwards Range and If-Range only.
+  // sniffed type and headers. Of the phone's request headers the door forwards
+  // Range, If-Range and If-None-Match (and Last-Event-ID to the event stream).
   { method: "GET", route: /^attachments\/([^/]+)\/(image|video|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
   { method: "GET", route: /^markups\/([^/]+)$/, window: (m) => `/api/inbox/markups/${m[1]}` },
   // An image a message's body shows (`?path=<src as written>`, a question

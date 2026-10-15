@@ -5,7 +5,7 @@
  * the full 200.
  */
 import { describe, expect, test } from "bun:test";
-import { decideByteRange, handleRangeStream } from "./inbox-byte-range";
+import { BYTE_RANGE_MAX_ANSWER, byteRangeResponse, decideByteRange, handleRangeStream } from "./inbox-byte-range";
 
 const ETAG = '"1-2-3-4"';
 
@@ -124,5 +124,42 @@ describe("handleRangeStream", () => {
     }
     expect(total).toBe(3 * 1024 * 1024 + 10);
     expect(state.closes).toBe(1);
+  });
+});
+
+describe("the 8 MiB answer cap", () => {
+  const MiB = 1024 * 1024;
+  const FILM = 200 * MiB;
+
+  test("an open-ended or longer range is answered with its first 8 MiB; a shorter one is untouched", () => {
+    expect(BYTE_RANGE_MAX_ANSWER).toBe(8 * MiB);
+    expect(decideByteRange("bytes=0-", FILM)).toEqual({ kind: "partial", start: 0, end: 8 * MiB - 1 });
+    expect(decideByteRange("bytes=100000000-", FILM)).toEqual({ kind: "partial", start: 100000000, end: 100000000 + 8 * MiB - 1 });
+    expect(decideByteRange("bytes=0-99999999", FILM)).toEqual({ kind: "partial", start: 0, end: 8 * MiB - 1 });
+    // The last 100 MB: from where that starts, 8 MiB of it.
+    expect(decideByteRange("bytes=-100000000", FILM)).toEqual({ kind: "partial", start: FILM - 100000000, end: FILM - 100000000 + 8 * MiB - 1 });
+    // At or under the cap, and near the end of the file, the range is as asked.
+    expect(decideByteRange(`bytes=0-${8 * MiB - 1}`, FILM)).toEqual({ kind: "partial", start: 0, end: 8 * MiB - 1 });
+    expect(decideByteRange(`bytes=${FILM - 10}-`, FILM)).toEqual({ kind: "partial", start: FILM - 10, end: FILM - 1 });
+    expect(decideByteRange("bytes=0-1", FILM)).toEqual({ kind: "partial", start: 0, end: 1 });
+    // No range is the full file, never capped (a plain download).
+    expect(decideByteRange(null, FILM)).toEqual({ kind: "full" });
+  });
+
+  test("one capped answer reads at most 8 MiB from the file, however much was asked for", async () => {
+    let read = 0;
+    const handle = {
+      async read(buffer: Buffer, offset: number, length: number, position: number) {
+        const n = Math.max(0, Math.min(length, FILM - position));
+        read += n;
+        return { bytesRead: n, buffer };
+      },
+      async close() {},
+    } as unknown as import("node:fs/promises").FileHandle;
+    const answer = await byteRangeResponse(handle, FILM, decideByteRange("bytes=0-", FILM), {});
+    expect(answer.status).toBe(206);
+    expect(answer.headers.get("content-range")).toBe(`bytes 0-${8 * MiB - 1}/${FILM}`);
+    expect((await answer.arrayBuffer()).byteLength).toBe(8 * MiB);
+    expect(read).toBe(8 * MiB);
   });
 });
