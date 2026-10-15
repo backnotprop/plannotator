@@ -4,6 +4,7 @@ import { attachmentDownloadUrl, attachmentImageUrl, imageFitsWithin, readableVer
 import { formatBytes, plural, shortTime, whenTime } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from './FileName';
+import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
 
 /** The icon a tile (and the stepper's list) shows for a file of this kind. */
 export function iconOf(attachment: InboxAttachmentState): IconName {
@@ -148,6 +149,7 @@ export function AttachmentTiles({
   onOpen,
   openId = null,
   placement = 'foot',
+  openIn,
 }: {
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
@@ -156,6 +158,8 @@ export function AttachmentTiles({
   openId?: string | null;
   /** Where the tiles sit: at the foot of the message (with their heading and the image gallery), or in the header's band. */
   placement?: 'foot' | 'header';
+  /** "Open in" on this computer (`apps`): each tile gets a ⋯ menu beside its button. Otherwise none. */
+  openIn?: OpenInSurface;
 }) {
   if (attachments.length === 0) return null;
   const header = placement === 'header';
@@ -209,9 +213,19 @@ export function AttachmentTiles({
               )}
             </span>
           );
+          // The ⋯ is the tile button's sibling (a button inside a button is invalid), in a wrapper the grid lays out.
+          const withMenu = (tile: React.ReactElement) =>
+            openIn === 'apps' ? (
+              <div className="ib-att-w" key={attachment.id} data-open-in-tile={attachment.id}>
+                {tile}
+                <OpenInTileMenu attachment={attachment} version={readableVersion(attachment)} />
+              </div>
+            ) : (
+              tile
+            );
           if (!opensInWindow(attachment)) {
             // A download: the whole tile is the link, never a viewer on this origin.
-            return (
+            return withMenu(
               <a
                 className="ib-att-t ib-dl"
                 key={attachment.id}
@@ -228,14 +242,14 @@ export function AttachmentTiles({
                 <span className="ib-open" aria-hidden="true">
                   Download
                 </span>
-              </a>
+              </a>,
             );
           }
           // The whole tile is the one control (record 2.1): a click on the
           // icon, the name or the type line opens the file exactly as Open
           // does. "Open" stays as the visual cue inside it.
           const isOpen = attachment.id === openId;
-          return (
+          return withMenu(
             <button
               type="button"
               className={`ib-att-t${isOpen ? ' ib-open-beside' : ''}`}
@@ -253,7 +267,7 @@ export function AttachmentTiles({
               <span className="ib-open" aria-hidden="true">
                 {isOpen ? 'Open beside' : 'Open'}
               </span>
-            </button>
+            </button>,
           );
         })}
       </div>

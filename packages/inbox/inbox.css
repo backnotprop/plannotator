@@ -2223,3 +2223,31 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-draft-meta { grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; }
   .pn-inbox .ib-draft-del { width: 44px; height: 44px; }
 }
+
+/* "Open in" for attachments (design record inbox-open-in, mock-v2; components/OpenIn.tsx).
+   The pane header's split button: ghost until hover or open, like Download beside it. */
+.ib-openin { position: relative; display: inline-flex; align-items: center; flex: none; }
+.ib-split { display: inline-flex; align-items: stretch; height: 28px; border-radius: 7px; flex: none; }
+.ib-split:hover, .ib-split.ib-on { box-shadow: inset 0 0 0 1px var(--border); }
+.pn-inbox .ib-split .ib-sa { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 7px; font-size: 12.5px; font-weight: 500; color: var(--foreground); border-radius: 7px 0 0 7px; text-decoration: none; }
+.pn-inbox .ib-split .ib-sa:disabled { opacity: 0.5; cursor: default; }
+.pn-inbox .ib-split .ib-st { width: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); border-radius: 0 7px 7px 0; }
+.ib-split.ib-on .ib-st { background: var(--muted); color: var(--foreground); }
+.ib-split .ib-sa:hover:not(:disabled), .ib-split .ib-st:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
+.ib-appi { width: 16px; height: 16px; flex: none; display: block; }
+/* The menu portals to the body, outside .pn-inbox: its glyphs carry their own stroke. */
+[data-open-in-menu] svg.ib-ic { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+[data-open-in-menu] svg.ib-glyph { color: var(--muted-foreground); }
+[data-open-in-menu] svg.ib-openin-check { width: 14px; height: 14px; color: var(--foreground); }
+[data-open-in-menu] a[data-open-in-item] { color: inherit; text-decoration: none; }
+.ib-openin-status.ib-err { position: absolute; top: calc(100% + 6px); right: 0; z-index: 6; max-width: 18rem; padding: 4px 8px; border-radius: 6px; background: var(--popover); border: 1px solid var(--border); color: var(--destructive); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: var(--ib-shadow-tooltip); }
+
+/* A tile's ⋯: the tile button's sibling, at its right edge; on hover, keyboard focus or open, always on a touch screen. */
+.ib-att-w { position: relative; display: flex; min-width: 0; }
+.ib-att-w > .ib-att-t { flex: 1 1 auto; }
+.ib-att-w > .ib-att-t .ib-open { margin-right: 28px; }
+.pn-inbox .ib-att-more { position: absolute; right: 8px; top: 50%; translate: 0 -50%; width: 26px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); opacity: 0; transition: opacity 120ms ease; }
+.ib-att-w:hover .ib-att-more, .ib-att-w:focus-within .ib-att-more, .pn-inbox .ib-att-more[data-popup-open] { opacity: 1; }
+.pn-inbox .ib-att-more:hover, .pn-inbox .ib-att-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
+@media (hover: none) { .pn-inbox .ib-att-more { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-att-more { transition: none; } }

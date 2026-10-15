@@ -307,7 +307,7 @@ test('an agent connects: the draft reopens with To prefilled; Send starts a thre
   const listRow = page.locator(`.ib-listcol [data-thread-id="${command.thread_id}"]`).first();
   await expect(listRow).toContainText('To Claude Code');
   await claude.deliver(command.id);
-  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Claude Code, \d{1,2}:\d{2} [AP]M$/);
+  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   await shot(page, '07-thread-delivered');
 
   await claude.answer(command.id, 'I will add the chip after the export fix lands.');

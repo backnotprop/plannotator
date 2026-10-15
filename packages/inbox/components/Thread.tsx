@@ -11,6 +11,7 @@ import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
 import { annotationOf, attachmentFeedback } from '../attachments';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
+import type { OpenInSurface } from './OpenIn';
 import { attachmentSequence } from '../stepping';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, fullTime, plural, whenTime } from '../format';
@@ -460,6 +461,13 @@ export interface ThreadPaneProps {
   /** A window too narrow for a file beside the thread (stack.ts): an open file takes the whole window. */
   fileStacked?: boolean;
   /**
+   * This page came through the tailnet ("Over your tailnet"): "Open in" is a
+   * new tab only, never an app on the computer. Null until the settings say
+   * where the page is: no "Open in" yet, so a tailnet page never asks for the
+   * local app list.
+   */
+  remote?: boolean | null;
+  /**
    * A file open beside the thread on a desktop hides the list and the
    * sidebar: the header then leads with `‹ Inbox` (`backLabel`), which closes
    * the file (through the pane's unsaved-comment question, as the file's ×
@@ -507,7 +515,9 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   return { model, load, patch };
 }
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, onBackToList, landing = null, onLanded }: ThreadPaneProps) {
+export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, decisions, onOpenDecisionPage, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, row, onMarkRead, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, landing = null, onLanded }: ThreadPaneProps) {
+  // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
+  const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
   // A thread the person started (compose) is about the agent it is addressed to, never the person.
   const startedTo = root.started_by_person && root.to ? root.to : null;
@@ -1939,6 +1949,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                           onOpen={openFromMessage}
                           openId={file && !full && !phone && !fileStacked ? file.id : null}
                           placement="header"
+                          openIn={openIn}
                         />
                         <p className="ib-hatts-note">Also at the end of the message.</p>
                       </>
@@ -1988,6 +1999,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     annotationCounts={countsByPath}
                     onOpen={openFromMessage}
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
+                    openIn={openIn}
                   />
                 )}
                 {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
@@ -2229,6 +2241,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         full={full || phone || fileStacked}
         fullLocked={phone || fileStacked}
         phone={phone}
+        openIn={openIn}
         steps={steps}
         // A step keeps the frame the person is in, and replaces the route.
         onStep={(attachmentId, version) => onOpenFile({ id: attachmentId, version, focus: null }, { replace: true })}

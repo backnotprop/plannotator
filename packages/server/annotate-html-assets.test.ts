@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHtmlAssetRegistry, framedDocumentNotFound, inlineHtmlLocalAssets } from "./html-assets";
+import { HTML_ASSET_SUBRESOURCE_CSP } from "@plannotator/shared/html-assets";
 import { startAnnotateServer } from "./annotate";
 import { startAnnotateServer as startPiAnnotateServer } from "../../apps/pi-extension/server/serverAnnotate";
 
@@ -41,10 +42,40 @@ describe("annotate raw HTML assets", () => {
     expect(await imageResponse?.text()).toBe("png-bytes");
   });
 
+  test("every non-HTML asset carries the sandbox CSP and nosniff: an SVG or XML opened as a document runs no script on the session origin", async () => {
+    // A page in a top-level tab has only its response CSP as a sandbox, so it can
+    // navigate its own tab to a sibling .svg; without a policy there, that SVG ran
+    // script on this origin. As a subresource (<img>, CSS) the policy does not apply.
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-html-assets-svg-"));
+    const htmlPath = join(dir, "page.html");
+    const html = '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><img src="chart.svg"></body></html>';
+    writeFileSync(htmlPath, html, "utf-8");
+    writeFileSync(join(dir, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/api/plan")</script></svg>', "utf-8");
+    writeFileSync(join(dir, "data.xml"), '<html xmlns="http://www.w3.org/1999/xhtml"><script>1</script></html>', "utf-8");
+    writeFileSync(join(dir, "style.css"), "body { color: red; }", "utf-8");
+    writeFileSync(join(dir, "app.js"), "1", "utf-8");
+    const assets = createHtmlAssetRegistry();
+    const base = assets.rewriteHtml(html, htmlPath).match(/<base href="([^"]+)"/)![1]!;
+    for (const name of ["chart.svg", "data.xml", "style.css", "app.js"]) {
+      const url = new URL(`${base}${name}`, "http://localhost");
+      const response = await assets.handle(new Request(String(url)), url);
+      expect([name, response?.status, response?.headers.get("content-security-policy")]).toEqual([
+        name,
+        200,
+        "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:",
+      ]);
+      expect(response?.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+    // The page itself keeps its document policy (scripts run, at an opaque origin).
+    const page = new URL(`${base}page.html`, "http://localhost");
+    expect((await assets.handle(new Request(String(page)), page))?.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   // An SVG (or XML) opened directly in a tab is a scriptable document on the
   // session's origin; the sandbox CSP gives it an opaque origin and no script.
   // As an <img> it never ran script, so it loads exactly as before.
-  test("serves SVG and XML assets with a sandbox CSP and nosniff; other assets get no CSP", async () => {
+  test("serves SVG, XML and every other asset with the sandbox CSP and nosniff; an <img> still loads", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-html-assets-svg-"));
     try {
       const htmlPath = join(dir, "page.html");
@@ -66,7 +97,7 @@ describe("annotate raw HTML assets", () => {
       const svg = await get("chart.svg");
       expect(svg?.status).toBe(200);
       expect(svg?.headers.get("content-type")).toBe("image/svg+xml");
-      expect(svg?.headers.get("content-security-policy")).toBe("sandbox");
+      expect(svg?.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
       expect(svg?.headers.get("x-content-type-options")).toBe("nosniff");
 
       // An XML file in the same folder, reached the way a page's <base href>
@@ -75,11 +106,12 @@ describe("annotate raw HTML assets", () => {
       const xmlUrl = new URL(svgPath.replace(/chart\.svg$/, "data.xml"), "http://localhost");
       const xml = await assets.handle(new Request(String(xmlUrl)), xmlUrl);
       expect(xml?.status).toBe(200);
-      expect(xml?.headers.get("content-security-policy")).toBe("sandbox");
+      expect(xml?.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
 
       const png = await get("logo.png");
       expect(png?.status).toBe(200);
-      expect(png?.headers.get("content-security-policy")).toBeNull();
+      // Every non-HTML asset, not only the scriptable types (a response CSP never applies to an <img> load).
+      expect(png?.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
       expect(png?.headers.get("x-content-type-options")).toBe("nosniff");
     } finally {
       rmSync(dir, { recursive: true, force: true });

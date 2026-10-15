@@ -28,9 +28,11 @@
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import type { FileHandle } from "node:fs/promises";
-import { HTML_ASSET_DOCUMENT_CSP, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
+import { basename } from "node:path";
+import { HTML_ASSET_DOCUMENT_CSP, htmlAssetDocumentHeaders, MAX_HTML_ASSET_DOCUMENT_BYTES, refusesHiddenHtmlAssetPath } from "@plannotator/shared/html-assets";
 import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, type InboxAttachment } from "@plannotator/core/inbox-types";
 import {
+  checkCurrent,
   inboxAttachmentState,
   isPdfHead,
   openInboxAttachmentVersion,
@@ -195,6 +197,36 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         text,
         // The page as annotate serves it: a <base href> at its own folder's asset route.
         html: attachment.kind === "html" ? htmlAssets.rewriteHtml(text, attachment.path) : null,
+      });
+    }
+
+    // An attached HTML page in a tab of its own ("Open in" → Browser): read only,
+    // under the sandbox attached pages already get, from its own folder.
+    const page = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/page$/.exec(path);
+    if (page) {
+      if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
+      const { attachment } = attachmentOf(page[1]!);
+      if (readInboxAttachmentKind(attachment.kind) !== "html") {
+        throw new InboxError("attachment_not_html", `${attachment.name} is not an HTML page.`);
+      }
+      const version = versionOf(url);
+      if (version === "current") {
+        const check = checkCurrent(attachment);
+        if (!check.ok) throw new InboxError(check.unavailable.code, check.unavailable.message);
+        // The file at its own folder's asset URL: relative assets, #anchors and frames
+        // resolve natively, with the document CSP. A name the asset route refuses
+        // (a hidden page, `.draft.html`) or a page over its size is served below instead.
+        const target = htmlAssets.documentUrl(attachment.path);
+        const name = basename(attachment.path);
+        if (target && /\.html?$/i.test(name) && !inboxRefusesAssetPath(name) && check.stat.size <= MAX_HTML_ASSET_DOCUMENT_BYTES) {
+          return new Response(null, { status: 303, headers: { Location: target, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+        }
+      }
+      // The sent bytes (or a page the asset route will not serve), with a <base href> at its folder.
+      const html = htmlAssets.rewriteHtml((await readVersion(store, attachment, version)).toString("utf8"), attachment.path);
+      return new Response(req.method === "HEAD" ? null : html, {
+        headers: { ...htmlAssetDocumentHeaders(INBOX_HTML_DOCUMENT_CSP), ...BYTE_GUARD_HEADERS, "Referrer-Policy": "no-referrer" },
       });
     }
 

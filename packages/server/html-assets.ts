@@ -127,6 +127,19 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
     }
   }
 
+  /**
+   * The asset-route URL of an HTML file itself (`/api/html-assets/<token>/<name>`),
+   * so a top-level tab of it resolves its relative assets, anchors and frames
+   * from its own folder, with the document CSP. Null for a URL.
+   */
+  function documentUrl(htmlFilePath: string): string | null {
+    if (/^https?:\/\//i.test(htmlFilePath)) return null;
+    const { root, basePath, docDir } = htmlAssetContext(htmlFilePath, folderPath);
+    const token = register(root, docDir);
+    const name = htmlFilePath.split(/[\\/]/).pop() ?? "";
+    return `${htmlAssetBaseHref(token)}${encodeHtmlAssetPath(basePath ? `${basePath}/${name}` : name)}`;
+  }
+
   function inlineHtml(html: string, htmlFilePath: string): string {
     return inlineHtmlLocalAssets(html, htmlFilePath, folderPath);
   }
@@ -180,6 +193,7 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
       }
       return new Response(file, {
         headers: {
+          // Sandboxed: an SVG or XML asset opened as a document never runs script on this origin.
           ...htmlAssetHeaders(contentType),
           "Access-Control-Allow-Origin": "*",
         },
@@ -189,6 +203,6 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
     }
   }
 
-  return { rewriteHtml, inlineHtml, handle };
+  return { rewriteHtml, inlineHtml, documentUrl, handle };
 }
 

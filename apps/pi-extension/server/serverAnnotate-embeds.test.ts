@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HTML_ASSET_SUBRESOURCE_CSP } from "../generated/html-assets.ts";
 import { startAnnotateServer } from "./serverAnnotate.ts";
 
 const MINIMAL_HTML = "<html><body>PLANNOTATOR_APP_SHELL</body></html>";
@@ -90,18 +91,50 @@ describe("pi annotate server: embedded local documents", () => {
 		});
 	});
 
-	// An SVG opened directly is a scriptable document on the session's origin.
-	test("serves an SVG asset with a sandbox CSP and nosniff; a PNG gets no CSP", async () => {
+	// An SVG opened directly is a scriptable document on the session's origin;
+	// every non-HTML asset gets the sandbox, the PNG too (an <img> load ignores it).
+	test("serves an SVG asset and a PNG with the sandbox CSP and nosniff", async () => {
 		await withSession("svg", async ({ url, base }) => {
 			const svg = await fetch(`${url}${base}chart.svg`);
 			expect(svg.status).toBe(200);
 			expect(svg.headers.get("content-type")).toBe("image/svg+xml");
-			expect(svg.headers.get("content-security-policy")).toBe("sandbox");
+			expect(svg.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
 			expect(svg.headers.get("x-content-type-options")).toBe("nosniff");
 			const png = await fetch(`${url}${base}logo.png`);
 			expect(png.status).toBe(200);
-			expect(png.headers.get("content-security-policy")).toBeNull();
+			expect(png.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
+			expect(png.headers.get("x-content-type-options")).toBe("nosniff");
 		});
+	});
+
+	test("every non-HTML asset carries the sandbox CSP and nosniff: an SVG or XML opened as a document runs no script here", async () => {
+		const dir = siteDir("svg");
+		const pagePath = join(dir, "page.html");
+		const html = '<!doctype html><html><body><img src="chart.svg"></body></html>';
+		writeFileSync(pagePath, html, "utf-8");
+		writeFileSync(join(dir, "chart.svg"), '<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/api/plan")</script></svg>', "utf-8");
+		writeFileSync(join(dir, "data.xml"), '<html xmlns="http://www.w3.org/1999/xhtml"><script>1</script></html>', "utf-8");
+		writeFileSync(join(dir, "logo.png"), Buffer.from("89504e470d0a1a0a", "hex"));
+		const server = await startAnnotateServer({ markdown: "", filePath: pagePath, htmlContent: MINIMAL_HTML, rawHtml: html, renderHtml: true });
+		try {
+			const plan = (await (await fetch(`${server.url}/api/plan`)).json()) as { rawHtml?: string };
+			const base = plan.rawHtml!.match(/<base href="([^"]+)"/)![1];
+			for (const [name, type] of [
+				["chart.svg", "image/svg+xml"],
+				["data.xml", "application/xml; charset=utf-8"],
+				["logo.png", "image/png"],
+			] as const) {
+				const response = await fetch(`${server.url}${base}${name}`);
+				expect([name, response.status, response.headers.get("content-type")]).toEqual([name, 200, type]);
+				expect([name, response.headers.get("content-security-policy")]).toEqual([
+					name,
+					"sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:",
+				]);
+				expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+			}
+		} finally {
+			server.stop();
+		}
 	});
 
 	// The bug: the catch-all answering a nested-document request with the

@@ -133,6 +133,11 @@ export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id
   return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/download${version === 'sent' ? '?version=sent' : ''}`;
 }
 
+/** An attached HTML page in a tab of its own, sandboxed, from its own folder ("Open in" → Browser). */
+export function attachmentPageUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
+  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/page${version === 'sent' ? '?version=sent' : ''}`;
+}
+
 /** Wider than this width-to-height ratio, an image is a panorama: the gallery crops it from the left, the viewer scrolls it sideways. */
 export const WIDE_IMAGE_RATIO = 4;
 

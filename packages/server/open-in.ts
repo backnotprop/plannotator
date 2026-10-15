@@ -37,7 +37,8 @@ import { isRemoteSession } from "./remote";
 
 export type OpenInLaunchResult = { ok: true } | { ok: false; error: string };
 
-function currentPlatform(): OpenInPlatform {
+/** The catalog's name for this host's platform. */
+export function currentPlatform(): OpenInPlatform {
   switch (process.platform) {
     case "darwin":
       return "mac";
@@ -185,7 +186,7 @@ function spawnDetached(
 /**
  * Reveal a file in the OS file manager.
  */
-function revealFile(absPath: string): Promise<OpenInLaunchResult> {
+export function revealFile(absPath: string): Promise<OpenInLaunchResult> {
   const platform = currentPlatform();
   if (platform === "mac") {
     return runArgv("open", ["-R", absPath], "Finder");
@@ -202,7 +203,7 @@ function revealFile(absPath: string): Promise<OpenInLaunchResult> {
  *   - editor   -> open the file itself
  *   - terminal -> open the file's parent directory
  */
-function openWithApp(
+export function openWithApp(
   app: OpenInApp,
   absPath: string,
 ): Promise<OpenInLaunchResult> {
@@ -245,6 +246,26 @@ function openWithApp(
     });
   }
   return runArgv(bin, [target], app.label);
+}
+
+/**
+ * Hand a file to the OS default handler: `open <file>` on macOS,
+ * `explorer <file>` on Windows (no cmd parser between the path and the
+ * launch), `xdg-open <file>` on Linux.
+ *
+ * DANGEROUS by design: the default handler of `.command`, `.app`, `.sh`,
+ * `.exe` and friends runs them. Nothing reaches this implicitly (#1915 took
+ * the fallback out of openFileInApp). Its one caller is the Inbox's launch
+ * route, which allows it only for the kinds its per-kind policy names
+ * (`inboxOpenInPolicy`: images and PDFs whose bytes and extension agree, and
+ * a few text formats on macOS and Windows).
+ */
+export function openWithSystemDefault(absPath: string): Promise<OpenInLaunchResult> {
+  const platform = currentPlatform();
+  if (platform === "mac") return runArgv("open", [absPath], "the default app");
+  // explorer.exe exits non-zero even on success; launch fire-and-forget.
+  if (platform === "win") return spawnDetached("explorer", [absPath], "the default app");
+  return runArgv("xdg-open", [absPath], "the default app");
 }
 
 /**

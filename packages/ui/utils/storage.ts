@@ -127,6 +127,11 @@ export function getLastOpenInApp(): string {
   return getItem(OPEN_IN_APP_KEY) ?? 'reveal';
 }
 
+/** The stored "Open in app" id, or null when nothing was ever picked (no 'reveal' default). */
+export function getStoredOpenInApp(): string | null {
+  return getItem(OPEN_IN_APP_KEY);
+}
+
 export function setLastOpenInApp(id: string): void {
   setItem(OPEN_IN_APP_KEY, id);
 }
