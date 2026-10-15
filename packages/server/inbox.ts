@@ -84,6 +84,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
+import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_MAX_MS,
@@ -333,6 +334,8 @@ const ERROR_STATUS: Record<string, number> = {
   question_set_aside: 409,
   thread_resolved: 409,
   idempotency_key_reused: 409,
+  // The project menu: a batch_id already answered another project or action.
+  batch_id_reused: 409,
   config_not_saved: 500,
   ...INBOX_DECISION_ERROR_STATUS,
   // Attachments and annotations (step 2).
@@ -561,12 +564,47 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   const health = (): InboxHealth => ({ ok: true, app: INBOX_APP_ID, version, serverSession, pid: process.pid, update: updates.current() });
 
-  /** The sidebar's folders: every project, with its thread and unread counts. */
+  /**
+   * The sidebar's folders: every project, with its thread and unread counts,
+   * and (additive) `listed`, the threads the window's list holds, and
+   * `archived`, the rest. The window leaves out a project with nothing listed
+   * (the project menu's automatic hiding); an older window ignores both.
+   */
   const projectFolders = (rows: readonly InboxListRow[] = store.listRows()) => {
     return store.listProjects().map((project) => {
       const mine = rows.filter((row) => row.project.id === project.id);
-      return { ...project, threads: mine.length, unread: mine.filter((row) => row.unread).length };
+      const archived = mine.filter((row) => inboxRowArchived(row)).length;
+      return { ...project, threads: mine.length, unread: mine.filter((row) => row.unread).length, listed: mine.length - archived, archived };
     });
+  };
+
+  /**
+   * The project menu's batches remember their answer by `batch_id` (the
+   * last 50, in memory), so a retried request answers what the first one did
+   * and its Undo still names the threads it touched.
+   */
+  const batches = new Map<string, { route: string; answer: unknown }>();
+  const BATCH_MEMORY = 50;
+  const batchIdOf = (body: Record<string, unknown>): string | null => {
+    const id = body.batch_id;
+    if (id === undefined || id === null) return null;
+    if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) {
+      throw new InboxError("validation_error", "batch_id: 1 to 128 letters, digits, _ or -.", { field: "batch_id" });
+    }
+    return id;
+  };
+  const rememberBatch = (id: string | null, route: string, answer: unknown) => {
+    if (id === null) return;
+    batches.set(id, { route, answer });
+    while (batches.size > BATCH_MEMORY) batches.delete(batches.keys().next().value!);
+  };
+  /** Thread ids a body names: a list of msg_ ids (an Undo). */
+  const threadIdList = (value: unknown, field: string): string[] => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > 10_000 || !value.every((id) => isInboxId("msg", id))) {
+      throw new InboxError("validation_error", `${field}: a list of thread ids (msg_).`, { field });
+    }
+    return value as string[];
   };
 
   /**
@@ -1575,6 +1613,69 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const row = store.markRead(readMatch[1]!, read);
         if (read) scheduleSetAside(readMatch[1]!);
         return json({ thread: row });
+      }
+
+      // The project menu (design record "inbox-project-menu"): Mark all as
+      // read and Archive all on one project, and their Undo. Loops over the
+      // single actions (packages/shared/inbox/project-batch.ts); the same
+      // guards as every window write. Not on the phone's door.
+      const projectBatchMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/(read|unread|resolve)$/.exec(path);
+      if (projectBatchMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const projectId = projectBatchMatch[1]!;
+        if (!isInboxId("prj", projectId)) throw new InboxError("validation_error", "A project id (prj_).", { field: "project" });
+        if (!store.project(projectId)) throw new InboxError("project_not_found", `No project ${projectId}.`);
+        const action = projectBatchMatch[2]!;
+        const batchId = batchIdOf(body);
+        const route = `${action}:${projectId}:${action === "resolve" ? String(body.resolved !== false) : ""}`;
+        if (batchId !== null) {
+          const seen = batches.get(batchId);
+          if (seen && seen.route !== route) throw new InboxError("batch_id_reused", "This batch_id answered another request.");
+          if (seen) return json({ ...(seen.answer as object), replayed: true });
+        }
+        const rows = (ids: readonly string[]) => ids.map((id) => store.listRow(id)).filter((row): row is InboxListRow => row !== null);
+        const folder = () => projectFolders().find((p) => p.id === projectId) ?? null;
+        let answer: Record<string, unknown>;
+        // A batch that stopped partway (a write failed): the threads it changed get their notes, and the
+        // answer names them with `error`, so the window offers Undo for what did apply and says the rest
+        // did not change. The cause goes to stderr, never the page.
+        const incomplete = (error: string | undefined) => {
+          if (error === undefined) return {};
+          process.stderr.write(`Inbox: the project menu's batch on ${projectId} stopped partway: ${error}\n`);
+          return { error: { code: "batch_incomplete", message: "Stopped partway; the other threads did not change." } };
+        };
+        if (action === "read") {
+          const { error, ...batch } = markProjectRead(store, projectId);
+          for (const id of batch.read) scheduleSetAside(id);
+          answer = { project: folder(), batch, threads: rows(batch.read), ...incomplete(error) };
+        } else if (action === "unread") {
+          const ids = threadIdList(body.threads, "threads");
+          const result = unmarkProjectRead(store, projectId, ids);
+          answer = { project: folder(), threads: rows(result.done), skipped: result.skipped };
+        } else {
+          if (body.resolved !== undefined && typeof body.resolved !== "boolean") throw new InboxError("validation_error", "resolved: must be a boolean.", { field: "resolved" });
+          if (body.resolved !== false) {
+            const { error, ...batch } = archiveProject(store, projectId);
+            // A came-back thread sent back by Mark read: its set-aside note, as for the single action.
+            for (const id of batch.read) scheduleSetAside(id);
+            answer = { project: folder(), batch, threads: rows([...batch.resolved, ...batch.read]), ...incomplete(error) };
+          } else {
+            const named = body.threads;
+            if (!named || typeof named !== "object" || Array.isArray(named)) {
+              throw new InboxError("validation_error", "threads: { resolved: [ids], read: [ids] } from the batch to undo.", { field: "threads" });
+            }
+            const { resolved, read } = named as Record<string, unknown>;
+            const undo = { resolved: threadIdList(resolved, "threads.resolved"), read: threadIdList(read, "threads.read") };
+            const result = unarchiveProject(store, projectId, undo);
+            // Unarchived: a Mark read's set-aside note an archive held back is due again (as for the single Unarchive).
+            for (const id of undo.resolved) if (result.done.includes(id)) scheduleSetAside(id);
+            answer = { project: folder(), threads: rows(result.done), skipped: result.skipped };
+          }
+        }
+        rememberBatch(batchId, route, answer);
+        return json({ ...answer, replayed: false });
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).

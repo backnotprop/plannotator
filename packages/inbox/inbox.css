@@ -103,6 +103,42 @@
 .ib-proj.ib-proj-quiet { color: var(--muted-foreground); }
 .ib-proj.ib-on { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 550; }
 .ib-side-empty { font-size: 13px; color: var(--muted-foreground); padding: 2px 9px; line-height: 1.5; }
+/* The project menu (design record "inbox-project-menu", approved 2026-10-14): the row and its ⋯ are two buttons
+   side by side (the Settings row's pattern). ⋯ shows on hover, on keyboard focus and while its menu is open, in
+   place of the count; the row whose menu is open keeps a muted background. */
+.ib-projrow { position: relative; }
+.pn-inbox .ib-pmore { position: absolute; right: 3px; top: 3px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--muted-foreground); opacity: 0; }
+.ib-pmore .ib-ic { width: 16px; height: 16px; stroke-width: 2.2; }
+.pn-inbox .ib-pmore:hover { background: color-mix(in oklch, var(--muted) 90%, transparent); color: var(--foreground); }
+.pn-inbox .ib-pmore:focus-visible { outline-offset: 0; }
+.ib-projrow:hover .ib-pmore, .ib-projrow:has(:focus-visible) .ib-pmore, .ib-projrow[data-menu] .ib-pmore { opacity: 1; }
+.ib-projrow:hover .ib-proj, .ib-projrow:has(:focus-visible) .ib-proj, .ib-projrow[data-menu] .ib-proj { padding-right: 32px; }
+/* The count steps aside for ⋯ for the eye only: it stays in the row button's accessible name ("pando 1"), which a
+   screen reader announces exactly when keyboard focus lands on the row. */
+.ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ib-projrow:hover .ib-proj:not(.ib-on) { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.ib-projrow[data-menu] .ib-proj:not(.ib-on) { background: color-mix(in oklch, var(--muted) 70%, transparent); color: var(--foreground); }
+.ib-projrow[data-menu] .ib-pmore { color: var(--foreground); }
+/* Shown only because the list shows it (nothing of it is listed): it leaves when the person goes elsewhere. */
+.ib-projrow[data-held] .ib-proj { color: var(--muted-foreground); }
+.ib-projrow[data-held] .ib-name { opacity: 0.7; }
+/* The menu: the Inbox's dropdown (the search chips' .ib-sp-menu), on Base UI Menu / ContextMenu. */
+.ib-pm-pos { z-index: 80; outline: none; }
+.ib-pm { min-width: 184px; padding: 4px; border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5); transform-origin: var(--transform-origin, top left); animation: ib-pm-in 120ms cubic-bezier(0.23, 1, 0.32, 1); outline: none; font-size: 13px; }
+@keyframes ib-pm-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .ib-pm { animation: none; } }
+.ib-pmi { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px; white-space: nowrap; text-align: left; cursor: default; outline: none; user-select: none; }
+.ib-pmi .ib-ic { width: 15px; height: 15px; color: var(--muted-foreground); flex: none; }
+.ib-pmi[data-highlighted] { background: color-mix(in oklch, var(--muted) 80%, transparent); }
+.ib-pmi:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-pmi[data-disabled] { opacity: 0.5; }
+.ib-pm-title { display: none; }
+.ib-pm-scrim { display: none; }
+/* One project's list when every thread in it is archived. */
+.ib-empty-list { padding: 40px 22px; color: var(--muted-foreground); font-size: 14px; line-height: 1.6; }
+.ib-empty-list b { color: var(--foreground); font-weight: 600; display: block; font-size: 15px; margin-bottom: 2px; overflow-wrap: anywhere; }
+.ib-empty-list a { color: var(--primary); text-decoration: none; }
+.ib-empty-list a:hover { text-decoration: underline; }
 .ib-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
 /* The update control (.product/approved/plannotator-updates): one full-width filled primary button above
    Settings, 32 px, no motion, never a percentage, never the error colour. */
@@ -1599,6 +1635,20 @@ pre code.pn-code[data-keep-layout] {
   .ib-sb-sheet-in .ib-brand, .ib-sb-sheet-in .ib-side-foot { flex: none; }
   .ib-sb-sheet-in .ib-projs { flex: 0 1 auto; min-height: 88px; }
   .ib-proj { height: 44px; font-size: 15px; flex: none; }
+  /* The project menu on a phone: ⋯ always shown (a 44 px target after the count), the menu a sheet from the
+     bottom edge titled by the project, with 48 px items. No right-click and no long-press. */
+  .ib-projrow > .ib-proj, .ib-projrow:has(:focus-visible) > .ib-proj, .ib-projrow[data-menu] > .ib-proj { padding-right: 46px; }
+  .ib-projrow .ib-proj .ib-n, .ib-projrow:hover .ib-proj .ib-n, .ib-projrow:has(:focus-visible) .ib-proj .ib-n, .ib-projrow[data-menu] .ib-proj .ib-n { position: static; width: auto; height: auto; margin: 0 0 0 auto; overflow: visible; clip-path: none; }
+  .pn-inbox .ib-pmore { opacity: 1; top: 0; right: 0; width: 44px; height: 44px; border-radius: 8px; }
+  .ib-pmore .ib-ic { width: 20px; height: 20px; }
+  .ib-pm-scrim { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 0.3); }
+  .ib-pm-pos[data-phone] { position: fixed !important; left: 8px !important; right: 8px !important; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)) !important; transform: none !important; width: auto !important; }
+  .ib-pm-pos[data-phone] .ib-pm { min-width: 0; padding: 6px; border-radius: 12px; animation: ib-pm-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+  @keyframes ib-pm-up { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .ib-pm-pos[data-phone] .ib-pm { animation: none; } }
+  .ib-pm-pos[data-phone] .ib-pm-title { display: block; font-size: 13px; color: var(--muted-foreground); padding: 6px 10px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib-pm-pos[data-phone] .ib-pmi { height: 48px; font-size: 16px; padding: 0 12px; gap: 12px; border-radius: 8px; }
+  .ib-pm-pos[data-phone] .ib-pmi .ib-ic { width: 18px; height: 18px; }
   .pn-inbox .ib-upd-btn { height: 44px; }
   .pn-inbox .ib-dlg, dialog.ib-dlg { max-height: calc(100dvh - 32px); width: calc(100vw - 24px); }
   .pn-inbox .ib-btn.ib-icon, .pn-inbox .ib-btn.ib-sm.ib-icon { width: 44px; height: 44px; }
