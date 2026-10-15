@@ -22,10 +22,17 @@ describe("inboxOpenInPolicy", () => {
   });
 
   test("a kind this build does not know is a plain file: the file manager only", () => {
-    const policy = inboxOpenInPolicy({ kind: "video", path: "/p/clip.mov" }, "mac");
+    const policy = inboxOpenInPolicy({ kind: "hologram", path: "/p/clip.holo" }, "mac");
     expect(policy).toEqual({ browser: false, editors: false, systemDefault: false });
     expect(inboxOpenInAllows(policy, { id: "reveal", kind: "file-manager" })).toBe(true);
     expect(inboxOpenInAllows(policy, { id: INBOX_OPEN_IN_DEFAULT_APP })).toBe(false);
+  });
+
+  test("a video opens in the OS default player only when its own extension says video", () => {
+    expect(inboxOpenInPolicy({ kind: "video", path: "/p/clip.mov" }, "mac")).toEqual({ browser: false, editors: false, systemDefault: true });
+    expect(inboxOpenInPolicy({ kind: "video", path: "/p/cut.webm" }, "linux").systemDefault).toBe(true);
+    // The bytes said video; a name that does not would have the OS pick another app by it.
+    expect(inboxOpenInPolicy({ kind: "video", path: "/p/clip.bin" }, "mac").systemDefault).toBe(false);
   });
 
   test("a terminal is never allowed, whatever the kind", () => {

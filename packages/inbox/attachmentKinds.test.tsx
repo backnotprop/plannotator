@@ -65,7 +65,7 @@ const shot = file('att_01K7AAAAAAAAAAAAAAAAAAAAAA', 'checkout.png', 'image', { m
 const spec = file('att_01K7BBBBBBBBBBBBBBBBBBBBBB', 'payments-api.pdf', 'pdf', { media_type: 'application/pdf' });
 const zip = file('att_01K7CCCCCCCCCCCCCCCCCCCCCC', 'fixtures.zip', 'file');
 // A kind a newer Inbox might write: this window treats it as a file to download.
-const future = file('att_01K7DDDDDDDDDDDDDDDDDDDDDD', 'clip.mov', 'video');
+const future = file('att_01K7DDDDDDDDDDDDDDDDDDDDDD', 'clip.holo', 'hologram');
 
 test.skipIf(!hasDom)('an image shows inline in the message and as a tile with its thumbnail, both from its image route', async () => {
   const opened: string[] = [];

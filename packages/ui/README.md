@@ -350,6 +350,17 @@ Neither prop reaches `CodeAnnotation` cards (the review-editor shape), which
 take no `renderCardFooter` either. See HANDOFF.md § "Annotation card header
 slot and mentions on the edit box (0.45.0)".
 
+- **`compareAnnotations?: (a, b) => number`** (unreleased) — the order of the
+  comment timeline and of each All-files group, for comments with an order of
+  their own (the Inbox sorts a video's comments by the moment they are at).
+  Ties keep creation order; replies still thread under their parent. Omit it
+  and the panel sorts by creation exactly as before.
+- **Export: `exportLocation`** (unreleased) — a string a host sets on the
+  COPY of an annotation it hands the exporters (`exportAnnotations`,
+  `exportLinkedDocAnnotations`): one line printed under the entry's heading
+  (the Inbox's `At 1:42 (102.4 s of 7:41)`). Never stored; an annotation
+  without it exports byte-identically.
+
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
 The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.modelContext`) call in-page tools on a document surface. Feature-detected once; a browser without the API sees no registration, no DOM, no network, no timers. Seam: `configurePlannotatorUI({ webmcp: { enabled, namePrefix } })`, default enabled with the `plannotator.` prefix; pass `enabled: false` to keep a host page tool-free, or your own prefix to namespace the tools beside your own. There is deliberately no confirmation seam: the catalog is read-and-comment only (no approve / submit / close tools), and the agent may only edit or remove comments stamped `source: "browser-agent"`.

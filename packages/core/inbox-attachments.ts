@@ -19,9 +19,11 @@
  * their viewers by extension (markdown, text, HTML, Mermaid, Graphviz);
  * everything else is decided from the bytes at send time
  * (packages/shared/inbox/attachments.ts): an image by its magic bytes
- * (`image`), a PDF by `%PDF-` (`pdf`), UTF-8 text with no NUL (`code`, shown
- * with line comments), anything else `file` (offered as a download). A
- * document whose bytes are not text is a `file` too.
+ * (`image`), a PDF by `%PDF-` (`pdf`), a film by its container (`video`:
+ * MP4/MOV `ftyp` with a video brand, WebM by its EBML DocType), UTF-8 text
+ * with no NUL (`code`, shown with line comments), anything else `file`
+ * (offered as a download). A document whose bytes are not text is a `file`
+ * too.
  *
  * The person's annotations on an attachment are stored per attachment and
  * version (`inbox/projects/<key>/annotations.jsonl`): `version` is "current"
@@ -38,15 +40,16 @@ import { ulid } from "./inbox-types";
  * How the window draws a file: Plannotator's viewer for its type. `code` (a
  * source file, a script, or any other UTF-8 text) is drawn as a code view
  * with line comments; `image` inline in the message and in an image viewer;
- * `pdf` and `file` are offered as downloads.
+ * `video` in a player, with comments at moments; `pdf` and `file` are
+ * offered as downloads.
  *
  * Strictly additive: a reader that meets a kind it does not know (an older
  * window reading a newer store, a newer kind on a phone) treats it as `file`,
  * a download (`readInboxAttachmentKind`).
  */
-export type InboxAttachmentKind = "markdown" | "text" | "html" | "mermaid" | "graphviz" | "code" | "image" | "pdf" | "file";
+export type InboxAttachmentKind = "markdown" | "text" | "html" | "mermaid" | "graphviz" | "code" | "image" | "video" | "pdf" | "file";
 
-const KNOWN_KINDS: ReadonlySet<string> = new Set(["markdown", "text", "html", "mermaid", "graphviz", "code", "image", "pdf", "file"]);
+const KNOWN_KINDS: ReadonlySet<string> = new Set(["markdown", "text", "html", "mermaid", "graphviz", "code", "image", "video", "pdf", "file"]);
 
 /** A kind as a reader should treat it: a value it does not know is `file` (a download). */
 export function readInboxAttachmentKind(kind: unknown): InboxAttachmentKind {
@@ -56,10 +59,10 @@ export function readInboxAttachmentKind(kind: unknown): InboxAttachmentKind {
 /** Kinds whose bytes are text, read through the `view` route. */
 export function isInboxTextKind(kind: unknown): boolean {
   const k = readInboxAttachmentKind(kind);
-  return k !== "image" && k !== "pdf" && k !== "file";
+  return k !== "image" && k !== "video" && k !== "pdf" && k !== "file";
 }
 
-/** Kinds the person can comment on (every viewer kind; a PDF and a plain file are downloads). */
+/** Kinds the person can comment on (every viewer kind, a video at moments; a PDF and a plain file are downloads). */
 export function isInboxAnnotatableKind(kind: unknown): boolean {
   const k = readInboxAttachmentKind(kind);
   return k !== "pdf" && k !== "file";
@@ -83,11 +86,13 @@ export interface InboxAttachment {
   sent_at: string;
   /** The file's mtime when it was sent. */
   sent_mtime: string;
-  /** The sniffed content type of the sent bytes (images: `image/png`, ...; PDF: `application/pdf`). Added with the image and pdf kinds. */
+  /** The sniffed content type of the sent bytes (images: `image/png`, ...; PDF: `application/pdf`; video: `video/mp4`, `video/quicktime`, `video/webm`). Added with the image and pdf kinds. */
   media_type?: string;
-  /** An image's size in pixels, from its header, when it parses. */
+  /** An image's size in pixels, from its header, when it parses; a video's first video track (MP4/MOV only). */
   width?: number;
   height?: number;
+  /** A video's length in milliseconds, from `moov/mvhd` (MP4/MOV only, when it parses). Additive. */
+  duration_ms?: number;
 }
 
 /** Why the current file cannot be opened (the sent version always can). */
@@ -247,6 +252,9 @@ const MEDIA_LABELS: Record<string, string> = {
   "image/bmp": "BMP",
   "image/x-icon": "ICO",
   "image/svg+xml": "SVG",
+  "video/mp4": "MP4",
+  "video/quicktime": "MOV",
+  "video/webm": "WebM",
 };
 
 /** The kind as a tile names it: "Markdown", "HTML", "PNG image", "PDF", "ZIP file". An unknown kind reads as a file. */
@@ -269,9 +277,51 @@ export function inboxAttachmentKindLabel(kind: InboxAttachmentKind | string, nam
       const label = (mediaType && MEDIA_LABELS[mediaType]) ?? ext?.toUpperCase();
       return label ? `${label} image` : "Image";
     }
+    case "video": {
+      const label = (mediaType && MEDIA_LABELS[mediaType]) ?? ext?.toUpperCase();
+      return label ? `${label} video` : "Video";
+    }
     case "pdf":
       return "PDF";
     default:
       return ext ? `${ext.toUpperCase()} file` : "File";
   }
+}
+
+/**
+ * A moment in a video as people read it: `m:ss`, and `h:mm:ss` from one
+ * hour (the window, the phone and the feedback text alike). Seconds are
+ * floored, so a label never names a moment after the frame.
+ */
+export function formatInboxVideoTime(seconds: number): string {
+  const total = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const ss = String(total % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * A comment on a video (contract: `adr/implementation/inbox-mobile.md`):
+ * Plannotator's `Annotation` with this `blockId` and `inboxVideo: { time }`,
+ * the moment in seconds from the start (millisecond precision). The frame the
+ * window grabbed, when there is one, rides `images[0]`.
+ */
+export const INBOX_VIDEO_BLOCK_ID = "video";
+
+/** The moment a stored annotation is on, in seconds, or null when it is not a video comment. */
+export function readInboxVideoTime(annotation: unknown): number | null {
+  if (!annotation || typeof annotation !== "object") return null;
+  const video = (annotation as { inboxVideo?: unknown }).inboxVideo;
+  if (!video || typeof video !== "object") return null;
+  const time = (video as { time?: unknown }).time;
+  return typeof time === "number" && Number.isFinite(time) && time >= 0 ? time : null;
+}
+
+/** A video's length and frame size as its header gave them: "7:41 · 1920 × 1080" (empty when nothing parsed). */
+export function inboxVideoMeta(attachment: Pick<InboxAttachment, "duration_ms" | "width" | "height">): string {
+  const parts: string[] = [];
+  if (typeof attachment.duration_ms === "number" && attachment.duration_ms > 0) parts.push(formatInboxVideoTime(attachment.duration_ms / 1000));
+  if (attachment.width && attachment.height) parts.push(`${attachment.width} × ${attachment.height}`);
+  return parts.join(" · ");
 }

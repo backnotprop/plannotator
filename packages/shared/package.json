@@ -121,6 +121,7 @@
     "./inbox/registry": "./inbox/registry.ts",
     "./inbox/devices": "./inbox/devices.ts",
     "./inbox/attachments": "./inbox/attachments.ts",
+    "./inbox/video": "./inbox/video.ts",
     "./inbox/message-images": "./inbox/message-images.ts",
     "./inbox/markups": "./inbox/markups.ts",
     "./inbox/connection": "./inbox/connection.ts",

@@ -139,6 +139,8 @@ The allowlist. Each row is the window's handler as it is today, with the request
 | `GET threads/:id/attachments` | same | | `{ serverSession, attachments: [state], annotations }` | 7.14 |
 | `GET attachments/:id/view[?version=sent]` | same | | `{ serverSession, attachment, version, text, html }`; also Share (the "..." menu of section 4 of the record), which writes `text` to a file named `attachment.name` | 7.15 |
 | `GET html-assets/<token>/<path>` | `GET /api/html-assets/<token>/<path>` | | the asset's bytes, as annotate serves them | 7.16 |
+| `GET attachments/:id/video[?version=sent]` | same | `Range`, `If-Range` (headers, the only ones the door forwards) | a video's bytes by HTTP Range: `206` with `Content-Range`, `200`, or `416`; kind `video` only, else `415 attachment_not_video`. Added 2026-10-15 (section 11) | 11.3 |
+| `GET attachments/:id/download[?version=sent]` | same | `Range`, `If-Range` | any kind's bytes; honors Range the same way since 2026-10-15 (section 11) | 11.4 |
 | `POST annotations` | same | `{ idempotency_key, attachment_id, version, annotation }` | `{ annotation }` | 7.17 |
 | `POST annotations/:id/remove` | same | `{ idempotency_key }` | `{ annotation }` | 7.18 |
 | `GET messages/:id/guide` | same | | `{ message_id, guide, snapshot }` | 7.19 |
@@ -1051,3 +1053,89 @@ curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K7
 ```
 
 `204`. Exchange 7.30 to this device then answers `202 { "sent": true }`; after FCM answers `UNREGISTERED`, `200 { "sent": false, "reason": "fcm_gone" }`.
+
+## 11. Video (2026-10-15)
+
+Design record "inbox-video" (approved by the owner 2026-10-15, not in this repo): an agent attaches a film; the person watches it in the Inbox on the Mac and on the phone, and comments at moments. Everything here is additive.
+
+Before this, a film was an attachment of kind `file`, and the app opened it with the door's `GET attachments/:id/download`, which sent the whole file with no Range, so the app downloaded all of it before it played (AVPlayer from a local file). That fallback stays valid. What follows is the upgrade to streaming playback.
+
+### 11.1 The kind `video`
+
+- `InboxAttachmentState.kind` gets the value `"video"`. The Inbox decides it from the bytes: MP4/MOV with a video `ftyp` brand (an image or audio major brand such as `avif`, `heic`, `M4A ` keeps it out), or WebM by its EBML DocType `webm` (Matroska stays `file`).
+- New optional fields on the state:
+  - `media_type`: `"video/mp4" | "video/quicktime" | "video/webm"`
+  - `duration_ms`: integer, MP4/MOV only (from `moov/mvhd`)
+  - `width`, `height`: pixels of the first video track, MP4/MOV only (from its `tkhd`)
+- An older app reads an unknown kind as `file` (`readInboxAttachmentKind`) and shows Download; `/download` works unchanged for it.
+- An older Inbox sends `file` for the same film. The app plays it through `/download` with Range when the answer carries `Accept-Ranges: bytes` (an Inbox from 2026-10-15 on); otherwise it downloads the whole file first.
+- Display rule for a time: `m:ss`, and `h:mm:ss` from one hour.
+
+### 11.2 Range, the same on `video` and `download`
+
+- Every answer carries `Accept-Ranges: bytes` and an `ETag`.
+- One range (`Range: bytes=a-b`, `bytes=a-` or `bytes=-n`): `206 Partial Content` with `Content-Range: bytes a-b/size`. An end past the file is its last byte.
+- No range, a `Range` the Inbox does not read, or several ranges: the full `200`.
+- An unsatisfiable range (a start at or past the end, `bytes=-0`, any range of an empty file): `416` with `Content-Range: bytes */size` and no body.
+- `ETag`: the sent version's `"<sent_sha256>"`; the current file's weak `W/"<dev>-<ino>-<size>-<mtime>"`, from the stat of the descriptor the Inbox opened (never a hash per request: every seek is one). `If-Range` that is not exactly this version's ETag (or is a date) gets the full `200`: the file changed (the agent re-rendered it). Re-read `threads/:id/attachments` and start again.
+- `Content-Length`: on every answer of 1 MiB or less (a player's `bytes=0-1` probe, and a range of up to 1 MiB). A longer answer is streamed and arrives chunked, without `Content-Length` (the Inbox's HTTP server drops it on a streamed body); its size is the length `Content-Range` names (`206`), or the attachment's `size` (`200`).
+- Headers on every answer: `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` and a sandbox CSP. `video`: `Content-Type` the sniffed `video/*` type, `Content-Disposition: inline`, `Cache-Control: private, no-cache`. `download`: `application/octet-stream` (`application/pdf` for a PDF), `Content-Disposition: attachment`, `Cache-Control: no-store`.
+- The door forwards `Range` and `If-Range` to the window, and no other header of the phone's. It returns the window's status and headers unchanged: `206`, `Content-Range`, `Accept-Ranges`, `Content-Length`, `ETag`.
+- The door is GET only, so there is no HEAD. AVPlayer's first probe (`bytes=0-1`) returns the size in `Content-Range`.
+
+Suggested app shape: `AVURLAsset` on a custom scheme (`plannotator-video://<att id>?version=…`), with an `AVAssetResourceLoaderDelegate` that answers each `AVAssetResourceLoadingRequest` from the door with the app's pinned `URLSession` and bearer token. Set `contentInformationRequest.contentType` from `media_type` (or the `Content-Type` of `/video`), `contentLength` from the total in `Content-Range`, and `isByteRangeAccessSupported = true`. If an answer is a `200` (an older Inbox on `/download`), slice that body for the request, or fall back to the full download. ExoPlayer: a `DataSource` over the same requests.
+
+### 11.3 A video by Range
+
+```sh
+curl -sS "$INBOX/api/inbox/device/attachments/att_01K70000000000000000000030/video" \
+  -H "Authorization: Bearer $TOKEN" -H 'Range: bytes=0-1' -D - -o /dev/null
+```
+
+```
+HTTP/1.1 206 Partial Content
+Content-Type: video/mp4
+Content-Range: bytes 0-1/483393536
+Content-Length: 2
+Accept-Ranges: bytes
+ETag: W/"1000004-2b1f0a-1cd0b000-6b0d1a2f4c5e0"
+Content-Disposition: inline; filename="launch-cut-v3.mp4"; filename*=UTF-8''launch-cut-v3.mp4
+Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'
+X-Content-Type-Options: nosniff
+Cross-Origin-Resource-Policy: same-origin
+Cache-Control: private, no-cache
+```
+
+A seek: `Range: bytes=104857600-` with `If-Range` set to that ETag gets `206` and the rest of the film; a stale `If-Range` gets the full `200`; `Range: bytes=483393536-` gets `416` with `Content-Range: bytes */483393536`. Another kind: `415 { "code": "attachment_not_video" }`.
+
+### 11.4 A download by Range
+
+The same request to `attachments/:id/download` answers the same way, with the download's own type, disposition and `Cache-Control`. A native player can stream any file from it.
+
+### 11.5 The relay
+
+No relay changes in v1 (the owner's answer 3). A sealed command carries no headers, so no Range reaches the window through the relay: `video` and `download` answer the whole file, which the relay carries when it fits one frame and answers `413 result_too_large` otherwise, without reading it. Over the relay the app shows "Plays when your phone reaches this computer over Wi-Fi or Tailscale" with Download. Planned for v1.1: an optional `headers: { range, if_range }` in the sealed command and `headers: { content_range, accept_ranges, etag }` in the result; the app then fetches pieces of 8 MiB or less.
+
+### 11.6 The comment record
+
+The app saves comments with the existing `POST annotations` (7.17): `{ idempotency_key, attachment_id, version, annotation }`, `version` `"current"` or the sent sha256 as for other files. The annotation:
+
+```json
+{
+  "id": "ann-vid-<uuid>",
+  "blockId": "video",
+  "startOffset": 0,
+  "endOffset": 0,
+  "type": "COMMENT",
+  "text": "Logo is clipped on the right edge at this size.",
+  "originalText": "launch-cut-v3.mp4 at 1:42",
+  "createdA": 1760440000000,
+  "inboxVideo": { "time": 102.4 },
+  "images": [{ "path": "<data dir>/inbox/markups/<sha256>.jpg", "name": "launch-cut-v3 at 1:42" }]
+}
+```
+
+- `inboxVideo.time` is seconds from the start, with millisecond precision. It is the only new field. On a video the Inbox requires `blockId: "video"` and a `time` of 0 or more (`422 validation_error` otherwise).
+- `images` is optional. The Mac attaches the paused frame there (a JPEG kept through its markups route). The phone sends no `images` in v1, because the door has no upload route. When it shows a comment with an image, the phone loads it with `GET markups/<name>` (already on the allowlist).
+- An older Inbox refuses a comment on a video (`422 annotation_not_allowed`), because there the kind reads `file`.
+- Send: the surface's `export_feedback` builds the feedback text with Plannotator's exporter, as for every other kind; the app passes the video records as usual, and `texts` carries no entry for a video. The text lists a film's comments by time, each with a line `At 1:42 (102.4 s of 7:41)` under its heading and the frame's path. The surface needs no new message type, but the app must bundle a `surface.html` built after this shipped: an older surface reads `video` as `file` and leaves these comments out of the text.

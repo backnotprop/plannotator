@@ -1,5 +1,14 @@
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { inboxAttachmentKindLabel, isInboxTextKind, type InboxAnnotationRecord, type InboxAttachmentState, type InboxProjectRepo } from '@plannotator/core/inbox-types';
+import {
+  formatInboxVideoTime,
+  inboxAttachmentKindLabel,
+  inboxVideoMeta,
+  isInboxTextKind,
+  readInboxVideoTime,
+  type InboxAnnotationRecord,
+  type InboxAttachmentState,
+  type InboxProjectRepo,
+} from '@plannotator/core/inbox-types';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
@@ -24,12 +33,14 @@ import {
   codeCommentBlocks,
   codeRangeMatches,
   codeRangeOf,
+  compareVideoTimes,
   inboxViewKind,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
 import { titleIfClipped } from '../clipTitle';
 import { useRefRepo } from '../links';
 import { ImageAttachmentView } from './ImageAttachmentView';
+import { VideoAttachmentView, type VideoAttachmentViewHandle } from './VideoAttachmentView';
 import { OpenInControl, type OpenInSurface } from './OpenIn';
 import { AttachmentStepper, type StepSource } from './AttachmentStepper';
 import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepKeyIntent, type AttachmentStep } from '../stepping';
@@ -447,6 +458,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const isText = kind === 'markdown' || kind === 'text';
   const isCode = kind === 'code';
   const isImage = kind === 'image';
+  const isVideo = kind === 'video';
+  const videoRef = useRef<VideoAttachmentViewHandle>(null);
   // A PDF, any other file, and a kind this window does not know: offered as a download.
   const isDownload = kind === 'pdf' || kind === 'file' || tooLarge;
   const fileRecords = useMemo(
@@ -624,9 +637,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             <FileName name={attachment.name} />
           </span>
         )}
-        <span className="ib-from">
-          from {props.agent} in {props.projectName}
-        </span>
+        <span className="ib-from">{isVideo && inboxVideoMeta(attachment) ? inboxVideoMeta(attachment) : `from ${props.agent} in ${props.projectName}`}</span>
         <span className="ib-sp" />
         {isHtml && <HtmlSurfaceControls armed={armed} onToggleArmed={props.readOnly ? undefined : () => setArmed((v) => !v)} />}
         {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
@@ -749,6 +760,22 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onSwipe={multi ? (dir) => step(dir, 'key') : undefined}
             />
           )}
+          {isVideo && (
+            <VideoAttachmentView
+              // Its own comment row per file: a typed comment never carries over to the next film.
+              key={attachment.id}
+              ref={videoRef}
+              attachment={attachment}
+              version={effectiveVersion}
+              annotations={annotations}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              readOnly={props.readOnly}
+              onSave={save}
+              onError={setError}
+              phone={phone}
+            />
+          )}
           {isDownload && (
             <div className="ib-docscroll" data-download-card="">
               <div className="ib-att-t ib-dlcard">
@@ -856,12 +883,37 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           <AnnotationPanel
             // A folded panel draws its timeline inside the sheet, under the sheet's own title and close (and a phone's window-wide overlay below 768 px would have no close here).
             presentation={folded ? 'embedded' : undefined}
-            emptyHint={isImage ? 'Comment below the image' : isCode ? 'Click a line to comment' : undefined}
+            emptyHint={isImage ? 'Comment below the image' : isVideo ? 'Pause at a moment and comment below the film' : isCode ? 'Click a line to comment' : undefined}
             isOpen
             annotations={annotations}
             blocks={blocks}
+            // A film's comments read by the moment they are at, each with its time (a click seeks there).
+            compareAnnotations={isVideo ? compareVideoTimes : undefined}
+            renderCardHeader={
+              isVideo
+                ? (annotation) => {
+                    const time = readInboxVideoTime(annotation);
+                    if (time === null) return null;
+                    return (
+                      <button
+                        type="button"
+                        className="ib-vtime"
+                        onClick={() => {
+                          setSelectedId(annotation.id);
+                          videoRef.current?.seekTo(annotation.id);
+                        }}
+                        title={`Go to ${formatInboxVideoTime(time)}`}
+                        data-video-card-time={annotation.id}
+                      >
+                        {formatInboxVideoTime(time)}
+                      </button>
+                    );
+                  }
+                : undefined
+            }
             onSelect={(id) => {
               setSelectedId(id);
+              if (isVideo) videoRef.current?.seekTo(id);
               // A folded panel steps aside to show the comment in the file.
               if (folded) setSheet(false);
             }}

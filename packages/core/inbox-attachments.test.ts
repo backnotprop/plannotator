@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  formatInboxVideoTime,
+  inboxVideoMeta,
+  readInboxVideoTime,
   inboxAttachmentKind,
   inboxAttachmentKindLabel,
   inboxAttachmentNameRefusal,
@@ -40,18 +43,39 @@ describe('Inbox attachment names and kinds', () => {
 
   test('a kind a reader does not know is a file (a download)', () => {
     expect(readInboxAttachmentKind('image')).toBe('image');
-    expect(readInboxAttachmentKind('video')).toBe('file');
+    expect(readInboxAttachmentKind('video')).toBe('video');
+    expect(readInboxAttachmentKind('hologram')).toBe('file');
     expect(readInboxAttachmentKind(undefined)).toBe('file');
     expect(isInboxTextKind('code')).toBe(true);
     expect(isInboxTextKind('image')).toBe(false);
     expect(isInboxTextKind('video')).toBe(false);
     expect(isInboxAnnotatableKind('image')).toBe(true);
     expect(isInboxAnnotatableKind('code')).toBe(true);
+    expect(isInboxAnnotatableKind('video')).toBe(true);
     expect(isInboxAnnotatableKind('pdf')).toBe(false);
-    expect(isInboxAnnotatableKind('video')).toBe(false);
-    expect(inboxAttachmentKindLabel('video', 'clip.mov')).toBe('MOV file');
+    expect(isInboxAnnotatableKind('hologram')).toBe(false);
+    expect(inboxAttachmentKindLabel('hologram', 'clip.holo')).toBe('HOLO file');
+    expect(inboxAttachmentKindLabel('video', 'cut.mp4', 'video/mp4')).toBe('MP4 video');
+    expect(inboxAttachmentKindLabel('video', 'cut.mov', 'video/quicktime')).toBe('MOV video');
+    expect(inboxAttachmentKindLabel('video', 'teaser.webm', 'video/webm')).toBe('WebM video');
     expect(inboxAttachmentKindLabel('image', 'shot.png', 'image/png')).toBe('PNG image');
     expect(inboxAttachmentKindLabel('pdf', 'spec.pdf')).toBe('PDF');
+  });
+
+  test('a moment in a video reads m:ss, h:mm:ss from one hour; a comment carries it as inboxVideo.time', () => {
+    expect(formatInboxVideoTime(0)).toBe('0:00');
+    expect(formatInboxVideoTime(14.9)).toBe('0:14');
+    expect(formatInboxVideoTime(102.4)).toBe('1:42');
+    expect(formatInboxVideoTime(461)).toBe('7:41');
+    expect(formatInboxVideoTime(3600)).toBe('1:00:00');
+    expect(formatInboxVideoTime(3 * 3600 + 7 * 60 + 5)).toBe('3:07:05');
+    expect(formatInboxVideoTime(Number.NaN)).toBe('0:00');
+    expect(readInboxVideoTime({ inboxVideo: { time: 102.4 } })).toBe(102.4);
+    expect(readInboxVideoTime({ inboxVideo: { time: -1 } })).toBeNull();
+    expect(readInboxVideoTime({ inboxVideo: { time: '1' } })).toBeNull();
+    expect(readInboxVideoTime({ blockId: 'image' })).toBeNull();
+    expect(inboxVideoMeta({ duration_ms: 461_300, width: 1920, height: 1080 })).toBe('7:41 · 1920 × 1080');
+    expect(inboxVideoMeta({})).toBe('');
   });
 
   test('the tile names a code file by its extension, or its name when it has none', () => {

@@ -41,6 +41,8 @@ import {
 import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-images";
 import { readInboxMarkup, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
+import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
+import { byteRangeResponse, decideByteRange } from "./inbox-byte-range";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createHtmlAssetRegistry } from "./html-assets";
@@ -250,6 +252,35 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       });
     }
 
+    // A film for `<video src>` and a native player: Range from the descriptor
+    // the one check opened (inbox-byte-range.ts), never the whole file at once.
+    const videoRoute = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/video$/.exec(path);
+    if (videoRoute) {
+      if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
+      const { attachment } = attachmentOf(videoRoute[1]!);
+      if (readInboxAttachmentKind(attachment.kind) !== "video") {
+        throw new InboxError("attachment_not_video", `${attachment.name} is not a video; download it instead.`);
+      }
+      const opened = await openInboxAttachmentVersion(store.dir, attachment, versionOf(url), { hash: "none" });
+      if (!opened.ok) throw new InboxError(opened.code, opened.message);
+      // The type of the bytes served, sniffed now (the sent blob too): never the record's, never the name's.
+      const sniffed = sniffInboxVideo(opened.head);
+      if (!sniffed) {
+        await opened.handle.close().catch(() => {});
+        throw new InboxError("attachment_not_video", `${attachment.name} is no longer a video.`);
+      }
+      const decision = decideByteRange(req.headers.get("range"), opened.size, { ifRange: req.headers.get("if-range"), etag: opened.etag });
+      return byteRangeResponse(opened.handle, opened.size, decision, {
+        ...BYTE_GUARD_HEADERS,
+        "Content-Type": sniffed,
+        "Content-Security-Policy": INBOX_MESSAGE_IMAGE_CSP,
+        "Content-Disposition": contentDisposition("inline", attachment.name),
+        "Cache-Control": "private, no-cache",
+        ETag: opened.etag,
+      });
+    }
+
     const bytesRoute = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/(image|download)$/.exec(path);
     if (bytesRoute) {
       if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
@@ -279,7 +310,8 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       } else {
         contentType = kind === "pdf" && isPdfHead(opened.head) ? "application/pdf" : "application/octet-stream";
       }
-      const etag = opened.sha256 ? `"${opened.sha256}"` : null;
+      // The image's ETag is its hash; a download's is the version's validator (no read: a seek is a request).
+      const etag = route === "image" ? (opened.sha256 ? `"${opened.sha256}"` : null) : opened.etag;
       const headers: Record<string, string> = {
         ...BYTE_GUARD_HEADERS,
         ...extra,
@@ -289,6 +321,11 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         "Cache-Control": route === "image" ? "private, no-cache" : "no-store",
         ...(etag ? { ETag: etag } : {}),
       };
+      if (route === "download") {
+        // Any file streams to a native player (or resumes) by Range, from the same descriptor.
+        const decision = decideByteRange(req.headers.get("range"), opened.size, { ifRange: req.headers.get("if-range"), etag: opened.etag });
+        return byteRangeResponse(opened.handle, opened.size, decision, headers, { head: req.method === "HEAD" });
+      }
       if (req.method === "HEAD") {
         await opened.handle.close().catch(() => {});
         return new Response(null, { headers: { ...headers, "Content-Length": String(opened.size) } });

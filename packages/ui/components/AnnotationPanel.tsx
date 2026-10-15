@@ -191,6 +191,13 @@ interface PanelProps {
   questionRows?: readonly QuestionPanelRow[];
   /** A Questions row was clicked (the host scrolls to the card). */
   onSelectQuestion?: (row: QuestionPanelRow) => void;
+  /**
+   * The order of the comment timeline (and of each document group), for a
+   * host whose comments have an order of their own (the Inbox's video
+   * comments, by the moment they are at). Ties keep creation order. Absent:
+   * creation order, exactly as before.
+   */
+  compareAnnotations?: (a: Annotation, b: Annotation) => number;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -229,6 +236,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onEditInDocument,
   questionRows,
   onSelectQuestion,
+  compareAnnotations,
 }) => {
   const isMobile = useIsMobile();
   const embedded = presentation === 'embedded';
@@ -240,7 +248,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   const timelineAnnotations = questionRows !== undefined
     ? annotations.filter((a) => a.questionAnswer == null)
     : annotations;
-  const sortedAnnotations = [...timelineAnnotations].sort((a, b) => a.createdA - b.createdA);
+  const byCreation = (a: Annotation, b: Annotation) => a.createdA - b.createdA;
+  const byHost = compareAnnotations ? (a: Annotation, b: Annotation) => compareAnnotations(a, b) || byCreation(a, b) : byCreation;
+  const sortedAnnotations = [...timelineAnnotations].sort(byHost);
   const sortedCodeAnnotations = [...codeAnnotations].sort((a, b) => a.createdAt - b.createdAt);
   // Replies (`inReplyTo`) thread under their parent: each reply is lifted to
   // sit right after its parent (and the parent's earlier replies) at the
@@ -251,13 +261,15 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   // comparator with a linear parent lookup was O(n^2 log n) and froze the
   // tab on a few thousand threaded comments.
   const threadRootTs = resolveThreadRootTimestamps(sortedAnnotations);
-  const timelineEntries = [
-    ...threadedAnnotations.map(({ annotation, isReply }) => ({ kind: 'plan' as const, ts: annotation.createdA, threadTs: threadRootTs.get(annotation.id) ?? annotation.createdA, annotation, isReply })),
-    ...sortedCodeAnnotations.map(annotation => ({ kind: 'code' as const, ts: annotation.createdAt, threadTs: annotation.createdAt, annotation, isReply: false })),
-  ].sort((a, b) => {
-    if (a.threadTs !== b.threadTs) return a.threadTs - b.threadTs;
-    return a.ts - b.ts;
-  });
+  const planEntries = threadedAnnotations.map(({ annotation, isReply }) => ({ kind: 'plan' as const, ts: annotation.createdA, threadTs: threadRootTs.get(annotation.id) ?? annotation.createdA, annotation, isReply }));
+  const codeEntries = sortedCodeAnnotations.map(annotation => ({ kind: 'code' as const, ts: annotation.createdAt, threadTs: annotation.createdAt, annotation, isReply: false }));
+  // A host order keeps the plan comments as the host sorted them (code comments after).
+  const timelineEntries = compareAnnotations
+    ? [...planEntries, ...codeEntries]
+    : [...planEntries, ...codeEntries].sort((a, b) => {
+        if (a.threadTs !== b.threadTs) return a.threadTs - b.threadTs;
+        return a.ts - b.ts;
+      });
   const totalCount = annotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
   const timelineCount = timelineAnnotations.length + codeAnnotations.length + (editorAnnotations?.length ?? 0);
 
@@ -427,7 +439,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
               const groupAnnotations = group.isCurrent && questionRows !== undefined
                 ? group.annotations.filter((a) => a.questionAnswer == null)
                 : group.annotations;
-              const sorted = [...groupAnnotations].sort((a, b) => a.createdA - b.createdA);
+              const sorted = [...groupAnnotations].sort(byHost);
               const threaded = threadReplies(sorted);
               return (
                 <section key={group.path} data-annotation-group={group.path}>

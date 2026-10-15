@@ -9,7 +9,7 @@
  *   the window; the server never hands an HTML file to the OS default
  *   handler, which would load it from `file://` unsandboxed.
  * - Markdown, text, code and config open in an editor from the catalog.
- * - Images and PDFs open in the OS default viewer, but only when the name's
+ * - Images, PDFs and videos open in the OS default viewer, but only when the name's
  *   extension says so too (the OS picks the app by extension; the Inbox
  *   picks the kind by bytes, and the server checks the bytes again at
  *   launch). SVG is not offered: its default app is often a browser, which
@@ -28,6 +28,9 @@ export const INBOX_OPEN_IN_DEFAULT_APP = "default";
 
 /** Image extensions the OS default viewer gets (SVG deliberately not). */
 const DEFAULT_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(["png", "apng", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico"]);
+
+/** Video extensions the OS default player gets (the bytes are checked again at launch). */
+const DEFAULT_VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(["mp4", "m4v", "mov", "webm"]);
 
 /** Text extensions the OS default app gets on macOS and Windows. */
 const DEFAULT_TEXT_EXTENSIONS: ReadonlySet<string> = new Set(["md", "markdown", "txt", "json", "yaml", "yml", "toml", "log"]);
@@ -64,6 +67,8 @@ export function inboxOpenInPolicy(attachment: { kind: unknown; path: string }, p
       return { browser: false, editors: true, systemDefault: false };
     case "image":
       return { browser: false, editors: false, systemDefault: DEFAULT_IMAGE_EXTENSIONS.has(ext) };
+    case "video":
+      return { browser: false, editors: false, systemDefault: DEFAULT_VIDEO_EXTENSIONS.has(ext) };
     case "pdf":
       return { browser: false, editors: false, systemDefault: ext === "pdf" };
     default:

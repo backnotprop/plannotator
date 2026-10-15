@@ -1028,7 +1028,17 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
  *  a malformed anchor (an older or foreign writer) is skipped, never thrown. */
 const diagramLocationExportLine = (ann: any): string => {
   const anchor = ann?.diagramAnchor === undefined ? null : parseDiagramAnchor(ann.diagramAnchor);
-  return anchor === null ? '' : `${safeInline(diagramAnchorLocationLine(anchor), 600)}\n`;
+  if (anchor !== null) return `${safeInline(diagramAnchorLocationLine(anchor), 600)}\n`;
+  return hostLocationExportLine(ann);
+};
+
+/** A host's own location line for an entry (the Inbox's "At 1:42 (102.4 s of
+ *  7:41)" on a video comment): `exportLocation`, a string the HOST sets on the
+ *  copy it hands the exporter, never stored and never set by Plannotator, so
+ *  every other annotation's output is byte-identical. One line, capped. */
+const hostLocationExportLine = (ann: any): string => {
+  const line = ann?.exportLocation;
+  return typeof line === 'string' && line.trim() !== '' ? `${safeInline(line, 300)}\n` : '';
 };
 
 const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {

@@ -344,6 +344,7 @@ const ERROR_STATUS: Record<string, number> = {
   attachment_changed_type: 409,
   attachment_not_text: 415,
   attachment_not_image: 415,
+  attachment_not_video: 415,
   attachment_not_html: 415,
   // "Open in" (packages/server/inbox-open-in.ts): an app the per-kind policy refuses, or one not installed.
   open_not_allowed: 422,

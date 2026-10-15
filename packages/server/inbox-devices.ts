@@ -108,9 +108,10 @@ const ALLOWLIST: readonly { method: "GET" | "POST"; route: RegExp; window: (m: R
   { method: "POST", route: /^threads\/([^/]+)\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/delete` },
   { method: "GET", route: /^threads\/([^/]+)\/attachments$/, window: (m) => `/api/inbox/threads/${m[1]}/attachments` },
   { method: "GET", route: /^attachments\/([^/]+)\/view$/, window: (m) => `/api/inbox/attachments/${m[1]}/view` },
-  // An image's bytes and any kind's download: the window's own routes, so the
-  // phone gets the same dotenv refusal, sniffed type and headers.
-  { method: "GET", route: /^attachments\/([^/]+)\/(image|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
+  // An image's bytes, a video's (by Range) and any kind's download (by Range
+  // too): the window's own routes, so the phone gets the same dotenv refusal,
+  // sniffed type and headers. The door forwards Range and If-Range only.
+  { method: "GET", route: /^attachments\/([^/]+)\/(image|video|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
   { method: "GET", route: /^markups\/([^/]+)$/, window: (m) => `/api/inbox/markups/${m[1]}` },
   { method: "GET", route: /^html-assets\/([^/]+)\/(.+)$/, window: (m) => `/api/html-assets/${m[1]}/${m[2]}` },
   { method: "POST", route: /^annotations$/, window: () => "/api/inbox/annotations" },
@@ -398,6 +399,15 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (body !== null) headers.set("Content-Type", "application/json");
     const lastEventId = req.headers.get("last-event-id");
     if (lastEventId) headers.set("Last-Event-ID", lastEventId);
+    // A player's byte range (the `video` and `download` routes answer it): only
+    // these two headers, and the window's answer (206, Content-Range,
+    // Accept-Ranges, ETag) comes back unchanged.
+    if (req.method === "GET") {
+      const range = req.headers.get("range");
+      if (range) headers.set("Range", range);
+      const ifRange = req.headers.get("if-range");
+      if (ifRange) headers.set("If-Range", ifRange);
+    }
     return context.dispatch(new Request(`http://127.0.0.1:${context.port()}${windowPath}${search}`, { method: req.method, headers, body, signal }));
   };
 
@@ -502,6 +512,11 @@ export function createInboxDevices(context: InboxDevicesContext) {
    * relay replays writes nothing again. Two door routes are not carried:
    * `pair` (pairing through the relay is not in v1) and `events` (the down
    * items are the relay's stream; an endless answer cannot be one result).
+   * A sealed command carries no headers in v1, so no Range reaches the
+   * window from here: `attachments/:id/video` and `download` answer the whole
+   * file (`200`), which the relay carries when it fits one frame and answers
+   * `413 result_too_large` otherwise, without reading it (inbox-relay.ts).
+   * A phone plays a video over the Wi-Fi or the tailnet; relay ranges are v1.1.
    */
   const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown }): Promise<Response> => {
     try {

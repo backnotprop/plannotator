@@ -7,14 +7,22 @@
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
 import { cutText } from '@plannotator/core/inbox-questions';
-import { readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import {
+  formatInboxVideoTime,
+  INBOX_VIDEO_BLOCK_ID,
+  readInboxAttachmentKind,
+  readInboxVideoTime,
+  type InboxAnnotationRecord,
+  type InboxAttachmentKind,
+  type InboxAttachmentState,
+} from '@plannotator/core/inbox-types';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
 import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
 export function attachmentBlocks(kindValue: InboxAttachmentKind | string, text: string, name: string): Block[] {
   const kind = readInboxAttachmentKind(kindValue);
-  if (kind === 'html' || kind === 'image' || kind === 'pdf' || kind === 'file') return [];
+  if (kind === 'html' || kind === 'image' || kind === 'video' || kind === 'pdf' || kind === 'file') return [];
   if (kind === 'mermaid' || kind === 'graphviz') return diagramDocumentBlocks(text, kind);
   if (kind === 'code') return codeDocumentBlocks(text, name);
   return parseMarkdownToBlocks(text, shouldStripFrontmatter(name) ? undefined : { frontmatter: false });
@@ -127,6 +135,11 @@ export function attachmentLabel(attachment: Pick<InboxAttachmentState, 'path' | 
 /** Where an attachment's bytes are served: an image for `<img src>`, and any kind as a download. By id only. */
 export function attachmentImageUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
   return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`;
+}
+
+/** A video's bytes for `<video src>` (HTTP Range, by id only). */
+export function attachmentVideoUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
+  return `/api/inbox/attachments/${encodeURIComponent(attachment.id)}/video${version === 'sent' ? '?version=sent' : ''}`;
 }
 
 export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
@@ -277,6 +290,55 @@ export function imageCommentAnnotation(input: { id: string; name: string; text: 
   };
 }
 
+/** A comment's moment kept to the millisecond (contract 4: seconds, millisecond precision). */
+export function videoTimeOf(seconds: number): number {
+  return Math.max(0, Math.round(seconds * 1000) / 1000);
+}
+
+/** The frame's name as a comment carries it: "launch-cut-v3 at 1:42". */
+export function videoFrameName(name: string, time: number): string {
+  return `${name.replace(/\.[^.]+$/, '') || name} at ${formatInboxVideoTime(time)}`;
+}
+
+/**
+ * A comment at a moment of a video (contract 4): `blockId: "video"`,
+ * `inboxVideo: { time }` in seconds, and the frame the window grabbed (or the
+ * person's marked-up copy of it) as `images[0]`.
+ */
+export function videoCommentAnnotation(input: { id: string; name: string; time: number; text: string; frame?: ImageAttachment | null; author?: string; createdA?: number }): Annotation {
+  const time = videoTimeOf(input.time);
+  return {
+    id: input.id,
+    blockId: INBOX_VIDEO_BLOCK_ID,
+    startOffset: 0,
+    endOffset: 0,
+    type: AnnotationType.COMMENT,
+    text: input.text,
+    originalText: `${input.name} at ${formatInboxVideoTime(time)}`,
+    createdA: input.createdA ?? Date.now(),
+    ...(input.author ? { author: input.author } : {}),
+    ...(input.frame ? { images: [input.frame] } : {}),
+    inboxVideo: { time },
+  } as Annotation;
+}
+
+/** Video comments by the moment they are at (the panel, the rail, the export); a comment with no time sorts last. */
+export function compareVideoTimes(a: unknown, b: unknown): number {
+  return (readInboxVideoTime(a) ?? Number.POSITIVE_INFINITY) - (readInboxVideoTime(b) ?? Number.POSITIVE_INFINITY) || 0;
+}
+
+/** "102.4 s", or "14 s" (one decimal, none when whole). */
+function secondsLabel(seconds: number): string {
+  const tenths = Math.round(seconds * 10) / 10;
+  return `${Number.isInteger(tenths) ? tenths : tenths.toFixed(1)} s`;
+}
+
+/** The location line the export prints under a video comment: "At 1:42 (102.4 s of 7:41)" (without "of …" when the length is unknown). */
+export function videoLocationLine(time: number, durationMs?: number): string {
+  const of = typeof durationMs === 'number' && durationMs > 0 ? ` of ${formatInboxVideoTime(durationMs / 1000)}` : '';
+  return `At ${formatInboxVideoTime(time)} (${secondsLabel(time)}${of})`;
+}
+
 /** A comment on a guided review's diff, as the review app made it, or null for an attachment's annotation. */
 export function guideCommentOf(record: InboxAnnotationRecord): CodeAnnotation | null {
   return record.guide ? (record.annotation as unknown as CodeAnnotation) : null;
@@ -387,7 +449,7 @@ export function attachmentFeedback(
   projectRoot: string,
 ): string {
   if (records.length === 0) return '';
-  const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[] }>();
+  const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[]; video?: { durationMs?: number } }>();
   for (const record of records) {
     // Comments on a guided review's diff go in their own section, after the files'.
     if (record.guide) continue;
@@ -400,7 +462,11 @@ export function attachmentFeedback(
       const text = texts.get(`${attachment.id}\0${record.version}`) ?? '';
       // Code comments name their own lines; an image has no lines.
       const kind = readInboxAttachmentKind(attachment.kind);
-      group = { annotations: [], blocks: kind === 'code' ? [] : attachmentBlocks(kind, text, attachment.name) };
+      group = {
+        annotations: [],
+        blocks: kind === 'code' ? [] : attachmentBlocks(kind, text, attachment.name),
+        ...(kind === 'video' ? { video: { durationMs: attachment.duration_ms } } : {}),
+      };
       groups.set(label, group);
     }
     group.annotations.push(annotationOf(record));
@@ -408,6 +474,15 @@ export function attachmentFeedback(
   for (const group of groups.values()) {
     const code = codeCommentBlocks(group.annotations);
     if (code.length > 0) group.blocks = [...group.blocks, ...code];
+    // A video's comments go by the moment they are at, each with its "At 1:42 (102.4 s of 7:41)" line.
+    // Export copies only: the exporter orders same-block entries by offset, and prints `exportLocation`.
+    if (group.video) {
+      const durationMs = group.video.durationMs;
+      group.annotations = [...group.annotations].sort(compareVideoTimes).map((annotation, index) => {
+        const time = readInboxVideoTime(annotation);
+        return { ...annotation, startOffset: index, endOffset: index, ...(time !== null ? { exportLocation: videoLocationLine(time, durationMs) } : {}) } as Annotation;
+      });
+    }
   }
   const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
   const files = records.some((record) => !record.guide) ? exportLinkedDocAnnotations(entries, ATTACHMENT_FEEDBACK_HEADING).trim() : '';

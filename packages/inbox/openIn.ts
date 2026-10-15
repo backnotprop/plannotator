@@ -53,8 +53,8 @@ export function openInMenu(
   const launchable = items.filter((item) => item.kind !== 'browser');
   const primary =
     items.find((item) => item.kind === 'browser') ??
-    // Images and PDFs open in their viewer; everything else in the remembered app, else the first editor.
-    (readInboxAttachmentKind(attachment.kind) === 'image' || readInboxAttachmentKind(attachment.kind) === 'pdf' ? items.find((item) => item.kind === 'default') : undefined) ??
+    // Images, PDFs and videos open in their viewer; everything else in the remembered app, else the first editor.
+    (['image', 'pdf', 'video'].includes(readInboxAttachmentKind(attachment.kind)) ? items.find((item) => item.kind === 'default') : undefined) ??
     (remembered ? launchable.find((item) => item.id === remembered) : undefined) ??
     launchable.find((item) => item.kind === 'app' && item.id !== reveal?.id) ??
     launchable[0] ??
