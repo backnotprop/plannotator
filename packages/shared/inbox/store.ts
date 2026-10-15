@@ -83,6 +83,8 @@ import {
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
+import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
+import { inboxDraftsBytes } from "./drafts";
 import {
   ANNOTATIONS_FILE,
   DECISIONS_FILE,
@@ -768,6 +770,7 @@ export class InboxStore {
       sent,
       guide: messages.some((m) => m.guide != null),
       last_agent_at: lastAgentAt,
+      ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
     };
     const section = inboxSectionOf(facts);
     return { ...facts, section, unread: inboxRowUnread(section) };
@@ -1117,7 +1120,8 @@ export class InboxStore {
     const projects: InboxProjectUsage[] = [];
     const blobSizes = inboxBlobSizes(this.dir);
     // Every blob once in the total; a project and a thread count each blob they use once.
-    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0);
+    // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
+    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir);
     for (const project of this.listProjects()) {
       const folder = this.projectFolder(project);
       const perThread = new Map<string, number>();
@@ -1705,6 +1709,11 @@ export class InboxStore {
     // If any of these writes fails, the questions written so far are put back
     // as they were (on disk, repairUnsentAnswers does the same at the next
     // start), so a failed Send never leaves answers "sent" with no reply.
+    // Another live session takes it (the asking one ended), or, for more words
+    // on a message of the person's own (a thread they started, before the agent
+    // answered), the session that message is addressed to now. Stamped on the
+    // line, so only that session is handed it and only its delivery settles it.
+    const to = input.to ?? (message.author.kind === "person" && message.to ? message.to : undefined);
     const reply: InboxMessage = {
       id: replyId,
       project_id: message.project_id,
@@ -1716,8 +1725,7 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
-      // Another live session takes it: handed only to that session, like a New message.
-      ...(input.to ? { to: { host: input.to.host, session: input.to.session } } : {}),
+      ...(to ? { to: { host: to.host, session: to.session } } : {}),
     };
     try {
       for (const record of updated) this.appendQuestion(record, at);
@@ -2175,12 +2183,18 @@ export class InboxStore {
     this.annotations.clear();
     this.tornFiles.clear();
     this.load();
-    const used = new Set<string>();
+    const used = pendingInboxUploadBlobs(this.dir);
+    const attachmentIds = new Set<string>();
     for (const message of this.messages.values()) {
-      for (const attachment of message.attachments ?? []) used.add(attachment.sent_sha256);
+      for (const attachment of message.attachments ?? []) {
+        used.add(attachment.sent_sha256);
+        attachmentIds.add(attachment.id);
+      }
       if (message.guide) used.add(message.guide.sha256);
     }
     removeUnusedInboxBlobs(this.dir, used);
+    // A person's sent uploads are files under inbox/uploads/<att_id>/: they go with their message.
+    removeUnusedInboxUploadFiles(this.dir, attachmentIds);
     const stillNamed = this.markupsOf(() => true);
     removeInboxMarkups(this.dir, [...deletedMarkups].filter((name) => !stillNamed.has(name)));
   }
@@ -2259,6 +2273,16 @@ export class InboxStore {
     return asked?.author.kind === "agent" && asked.author.session === session;
   }
 
+  /** The blobs the store's messages use (attachments and guided reviews): the upload sweep keeps them. */
+  usedBlobs(): Set<string> {
+    const used = new Set<string>();
+    for (const message of this.messages.values()) {
+      for (const attachment of message.attachments ?? []) used.add(attachment.sent_sha256);
+      if (message.guide) used.add(message.guide.sha256);
+    }
+    return used;
+  }
+
   // ──────────── New message (step 8) ────────────
 
   /**
@@ -2299,5 +2323,109 @@ export class InboxStore {
     };
     this.appendMessage(message, at);
     return { message, replayed: false };
+  }
+  // ──────────── Compose: a thread the person starts with a live agent ────────────
+
+  /**
+   * The person starts a thread, addressed to one live agent session (`to`):
+   * a root person message (`started_by_person`, `reply_to` null) whose
+   * subject is derived from the body. It is no session's default thread
+   * (routing indexes agent roots only), and the agent's answer lands in it by
+   * `reply_to`. The session is handed it on its next poll (`pendingReplies`,
+   * `isFor` by `to`) and only its delivery settles it. Replaying the same
+   * idempotency key answers the thread it wrote and writes nothing; the same
+   * key with another body is `idempotency_key_reused`. Whether the session is
+   * live is the server's check: `to` null means it is not, and only a replay
+   * answers. Question blocks in the body are the person's text: no question
+   * records are written.
+   */
+  startPersonThread(input: {
+    project_id: string;
+    body: unknown;
+    to: InboxAddressee | null;
+    idempotency_key: unknown;
+    attachments?: InboxAttachment[];
+  }): { message: InboxMessage; replayed: boolean } {
+    const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
+    if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
+    const body = typeof input.body === "string" ? input.body.trim() : "";
+    for (const message of this.messages.values()) {
+      if (!message.started_by_person || message.idempotency_key !== key) continue;
+      if (message.body !== body) {
+        throw new InboxError("idempotency_key_reused", "This idempotency_key was already used for a different message.", { message_id: message.id });
+      }
+      return { message, replayed: true };
+    }
+    if (!input.to) {
+      throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
+    }
+    if (!body) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
+    if (!this.projectsById.has(input.project_id)) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
+    const at = this.stamp();
+    const id = inboxId("msg");
+    const message: InboxMessage = {
+      id,
+      project_id: input.project_id,
+      thread_id: id,
+      reply_to: null,
+      author: { kind: "person" },
+      subject: deriveInboxSubject(body, []),
+      subject_question: null,
+      body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: key,
+      to: { host: input.to.host, session: input.to.session },
+      started_by_person: true,
+      ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
+    };
+    this.appendMessage(message, at);
+    return { message, replayed: false };
+  }
+
+  /** The thread the person started with this idempotency key, for a replayed Send. */
+  personThreadByKey(key: string): InboxMessage | null {
+    for (const message of this.messages.values()) if (message.started_by_person && message.idempotency_key === key) return message;
+    return null;
+  }
+
+  /**
+   * "Send to another session": the person re-addresses a message of theirs
+   * that no session has taken yet (a thread they started, a New message, or
+   * a reply sent to another session) because the session it was for ended.
+   * The same message, a new snapshot with the new `to` (the last line wins).
+   * Refused once delivered (`already_delivered`); `to` null means the chosen
+   * session is not live (`session_not_live`). The same session writes nothing.
+   */
+  readdressMessage(messageId: string, to: InboxAddressee | null): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (message.author.kind !== "person" || !message.to || isInboxNote(message)) {
+      throw new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
+    }
+    if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
+    if (this.isResolved(message.thread_id)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+    if (!to) throw new InboxError("session_not_live", "That session is not live any more: nothing was changed. Pick another live session.");
+    if (message.to.session === to.session && message.to.host === to.host) return message;
+    const at = this.stamp();
+    const next: InboxMessage = { ...message, to: { host: to.host, session: to.session } };
+    this.appendMessage(next, at);
+    return next;
+  }
+
+  /** The thread each agent session last wrote in (any project): compose's "Last: <subject>". */
+  lastThreadsBySession(): Map<string, { id: string; subject: string | null; at: string; project_id: string }> {
+    const latest = new Map<string, { message: InboxMessage; seq: number }>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind !== "agent" || !message.author.session) continue;
+      const seq = this.messageSeq.get(message.id) ?? 0;
+      const known = latest.get(message.author.session);
+      if (!known || known.seq < seq) latest.set(message.author.session, { message, seq });
+    }
+    const out = new Map<string, { id: string; subject: string | null; at: string; project_id: string }>();
+    for (const [session, { message }] of latest) {
+      out.set(session, { id: message.thread_id, subject: this.threadSubject(message.thread_id), at: message.created_at, project_id: message.project_id });
+    }
+    return out;
   }
 }

@@ -211,6 +211,16 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 				// The session is gone: the reply stays readable in the Inbox.
 			}
 		},
+		// The session's working folder, so the Inbox lists it under its project from its first poll.
+		projectPath: () => {
+			const current = ctx;
+			if (!current || !isCtxAlive(current)) return null;
+			try {
+				return current.cwd;
+			} catch {
+				return null;
+			}
+		},
 	};
 
 	pi.on("session_start", (_event, startCtx: ExtensionContext) => {

@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -287,4 +288,40 @@ test("a base_path gone by serve time, or outside the project, falls back to the 
   // inbox-worktree-projects.test.ts).
   const result = readInboxMessageImage({ body: "![a](.walkthrough/shots/after.png)", root: project, base: join(project, ".."), path: ".walkthrough/shots/after.png" });
   expect(result.ok).toBe(true);
+});
+
+test("a cache validator: the ETag is the SHA-256 of the bytes served, If-None-Match answers 304 with the guard headers, a changed file gets a new ETag", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const sent = await send(await agent(server), { project_path: project, body: "![a](.walkthrough/shots/after.png)" });
+  const id = sent.message_id as string;
+  const path = ".walkthrough/shots/after.png";
+
+  const first = await image(server, id, path);
+  expect(first.status).toBe(200);
+  const etag = first.headers.get("etag");
+  expect(etag).toBe(`"${createHash("sha256").update(png()).digest("hex")}"`);
+  expect(first.headers.get("cache-control")).toBe("private, no-cache");
+
+  for (const header of [etag!, `W/${etag}`, `"other", ${etag}`, "*"]) {
+    const again = await image(server, id, path, { "If-None-Match": header });
+    expect([header, again.status]).toEqual([header, 304]);
+    expect(again.headers.get("etag")).toBe(etag);
+    expect(again.headers.get("cache-control")).toBe("private, no-cache");
+    expect(again.headers.get("content-type")).toBe("image/png");
+    expectGuardHeaders(again);
+    expect((await again.arrayBuffer()).byteLength).toBe(0);
+  }
+  const stale = await image(server, id, path, { "If-None-Match": '"not-it"' });
+  expect(stale.status).toBe(200);
+  expect(new Uint8Array(await stale.arrayBuffer())).toEqual(png());
+
+  // The agent rewrites the screenshot (same name, new bytes: a GIF now).
+  writeFileSync(join(project, ".walkthrough", "shots", "after.png"), gif());
+  const changed = await image(server, id, path, { "If-None-Match": etag! });
+  expect(changed.status).toBe(200);
+  expect(changed.headers.get("content-type")).toBe("image/gif");
+  expect(changed.headers.get("etag")).toBe(`"${createHash("sha256").update(gif()).digest("hex")}"`);
+  expect(changed.headers.get("etag")).not.toBe(etag);
+  expect(new Uint8Array(await changed.arrayBuffer())).toEqual(gif());
 });

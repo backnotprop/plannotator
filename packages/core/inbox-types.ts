@@ -15,7 +15,7 @@
  */
 
 import type { QuestionAnswer, QuestionKind } from "./question-block";
-import type { InboxAnnotationRecord, InboxAttachment } from "./inbox-attachments";
+import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind } from "./inbox-attachments";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
@@ -49,7 +49,8 @@ export function ulid(now: number = Date.now()): string {
   return timePart + randomPart;
 }
 
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev";
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose). */
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -62,6 +63,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   dec: /^dec_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A paired phone (adr/implementation/inbox-mobile.md, section 2). */
   dev: /^dev_[0-9A-HJKMNP-TV-Z]{26}$/,
+  upl: /^upl_[0-9A-HJKMNP-TV-Z]{26}$/,
+  drf: /^drf_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -73,12 +76,12 @@ export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is strin
 /** The longest `thread` name send_message takes, in characters. */
 export const INBOX_THREAD_NAME_MAX = 120;
 
-const THREAD_NAME_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+export const THREAD_NAME_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 /**
  * Bidi controls (LRE..RLO, LRI..PDI, LRM, RLM, ALM) reorder the text around
  * them, so a name holding one can draw as another name in the list.
  */
-const THREAD_NAME_BIDI = /\p{Bidi_Control}/u;
+export const THREAD_NAME_BIDI = /\p{Bidi_Control}/u;
 /** Code points that draw as nothing (zero-width space and joiners, BOM, variation selectors...). */
 const THREAD_NAME_INVISIBLE = /\p{Default_Ignorable_Code_Point}/gu;
 
@@ -308,6 +311,13 @@ export interface InboxMessage {
    * equal to the root's first question's prompt counts as derived from it.
    */
   subject_question?: string | null;
+  /**
+   * On a thread's root the person wrote (compose: "send a new message to a
+   * connected agent"): the thread was started by the person, addressed to
+   * one live agent session (`to`), and is no session's default thread. The
+   * agent's answer lands in it by `reply_to`. Absent on every other message.
+   */
+  started_by_person?: true;
 }
 
 /**
@@ -600,6 +610,13 @@ export interface InboxListRow extends InboxThreadSummary {
   last_agent_at?: string | null;
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
+  /**
+   * On a thread the person started (`started_by_person`): the agent session
+   * it is addressed to now (the root's `to`, which "Send to another session"
+   * may change), so the row draws that agent's mark and "To <agent>". Absent
+   * on every other thread and from an older Inbox.
+   */
+  addressee?: InboxAddressee | null;
   /**
    * When the person marked the thread read (Mark read), while it still holds:
    * no message but a set-aside note since. The row is Quiet. Null otherwise.
@@ -968,4 +985,70 @@ export interface InboxAgentsModel {
 /** "Codex, Gemini CLI and Pi" for note agents. */
 export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
   return inboxAgentList(ids);
+}
+
+// ─────────────── Compose: a new thread the person starts with a live agent ───────────────
+
+/**
+ * A file the person uploaded from the window for a thread they start, not
+ * sent yet (`POST /api/inbox/uploads`). At send it becomes an
+ * `InboxAttachment`; a draft names it by `upload_id`.
+ */
+export interface InboxUpload {
+  upload_id: string;
+  name: string;
+  size: number;
+  kind: InboxAttachmentKind;
+  sha256: string;
+  created_at: string;
+  media_type?: string;
+  width?: number;
+  height?: number;
+}
+
+/** The session a draft was written for, with enough to name it after it has ended. */
+export interface InboxDraftTo {
+  host: string;
+  session: string;
+  project_root: string | null;
+  project_name: string | null;
+  started_at: string | null;
+}
+
+/**
+ * A message the person started and did not send (`inbox/drafts/<id>.json`):
+ * never in the event log, so never seen by agents, phones or search. A draft
+ * never sends itself and is never re-addressed on its own.
+ */
+export interface InboxDraft {
+  v: 1;
+  id: string;
+  created_at: string;
+  updated_at: string;
+  body: string;
+  to: InboxDraftTo | null;
+  /** The project it was written in (the chosen session's, or the one open in the list). */
+  project: { id: string | null; root: string; name: string } | null;
+  files: InboxUpload[];
+}
+
+/** A draft's chip: its chosen session is live, has ended, or none was chosen. */
+export type InboxDraftStatus = "live" | "ended" | "none";
+
+/** One live session as compose lists it (`GET /api/inbox/sessions`). */
+export interface InboxComposeSession {
+  session: string;
+  host: string;
+  started_at: string;
+  last_seen_at: string;
+  busy: boolean | null;
+  idle_since: string | null;
+  /** The thread it last wrote in, or null when it has not written in the Inbox. */
+  last_thread: { id: string; subject: string | null; at: string } | null;
+}
+
+/** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */
+export interface InboxComposeProject {
+  project: { id: string | null; name: string; root: string };
+  sessions: InboxComposeSession[];
 }

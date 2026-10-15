@@ -13,9 +13,12 @@
  * transport: a cross-site request is refused before anything is read, and
  * every answer carries nosniff, a sandbox CSP and a same-origin CORP, so
  * another site can neither embed nor read an image, and an SVG opened
- * directly never runs.
+ * directly never runs. A 200 carries an ETag (the SHA-256 of the bytes
+ * served) and `Cache-Control: private, no-cache`; If-None-Match with that tag
+ * answers 304 with the same headers. The phone door forwards here as is.
  */
 
+import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImage } from "@plannotator/shared/inbox/message-images";
@@ -77,16 +80,30 @@ export async function inboxMessageImageRoute(req: Request, url: URL, store: Inbo
     path: url.searchParams.get("path"),
   });
   if (!result.ok) return refuse(result.status, result.code, result.error);
+  // The validator is the SHA-256 of the bytes served (read once, at most the
+  // cap), so it changes whenever the file does. `no-cache`: the file lives on
+  // disk and can change, so a client (the window, a phone caching by message
+  // id + path) revalidates with If-None-Match and gets a 304 when unchanged.
+  const etag = `"${createHash("sha256").update(result.bytes).digest("hex")}"`;
+  const headers: Record<string, string> = {
+    ...GUARD_HEADERS,
+    "Content-Type": result.contentType,
+    "Cache-Control": "private, no-cache",
+    ETag: etag,
+    // As code review's image route: the header's size, when it parses.
+    ...(result.width !== undefined && result.height !== undefined
+      ? { "X-Image-Width": String(result.width), "X-Image-Height": String(result.height) }
+      : {}),
+  };
+  if (ifNoneMatchHits(req.headers.get("if-none-match"), etag)) return new Response(null, { status: 304, headers });
   return new Response(req.method === "HEAD" ? null : new Uint8Array(result.bytes), {
-    headers: {
-      ...GUARD_HEADERS,
-      "Content-Type": result.contentType,
-      "Content-Length": String(result.bytes.byteLength),
-      "Cache-Control": "private, no-cache",
-      // As code review's image route: the header's size, when it parses.
-      ...(result.width !== undefined && result.height !== undefined
-        ? { "X-Image-Width": String(result.width), "X-Image-Height": String(result.height) }
-        : {}),
-    },
+    headers: { ...headers, "Content-Length": String(result.bytes.byteLength) },
   });
+}
+
+/** RFC 9110 If-None-Match: `*`, or any listed tag equal to `etag` by weak comparison. */
+function ifNoneMatchHits(header: string | null, etag: string): boolean {
+  if (!header) return false;
+  const strip = (tag: string) => tag.trim().replace(/^W\//, "");
+  return header.split(",").some((tag) => tag.trim() === "*" || strip(tag) === etag);
 }

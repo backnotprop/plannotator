@@ -243,6 +243,38 @@ export function createInboxLiveSessions(options: {
     return { project, sessions: out.map(({ order: _order, started: _started, ...session }) => session) };
   };
 
+  /**
+   * Every live session in any project (compose), with the root its
+   * `project_path` resolved to (null when its connection sends none).
+   */
+  const allLive = (): { session: string; host: string; root: string | null; startedAt: number; lastSeen: number; busy: boolean | null; idleSince: number | null }[] => {
+    const out = [];
+    for (const [session, entry] of sessions) {
+      if (!isLive(entry)) continue;
+      out.push({ session, host: entry.host, root: entry.root, startedAt: entry.startedAt, lastSeen: entry.lastSeen, busy: entry.busy, idleSince: entry.busy === false ? entry.idleSince : null });
+    }
+    return out;
+  };
+
+  /** Whether a session is live now (no grace: compose sends only to a session that polls). */
+  const isSessionLive = (session: string): boolean => {
+    const entry = sessions.get(session);
+    return !!entry && isLive(entry);
+  };
+
+  /** `{ host?, session }` naming a live session in any project, or null when it is not live (compose's Send). */
+  const composeTarget = (to: unknown): { host: string; session: string; root: string | null } | null => {
+    if (!to || typeof to !== "object" || Array.isArray(to)) {
+      throw new InboxError("validation_error", "to: { host, session } of a live session.", { field: "to" });
+    }
+    const { host, session } = to as Record<string, unknown>;
+    if (typeof session !== "string" || !session) throw new InboxError("validation_error", "to.session: the live session to send to.", { field: "to.session" });
+    if (host !== undefined && typeof host !== "string") throw new InboxError("validation_error", "to.host: a string.", { field: "to.host" });
+    const entry = sessions.get(session);
+    if (!entry || !isLive(entry) || (host !== undefined && entry.host !== host)) return null;
+    return { host: entry.host, session, root: entry.root };
+  };
+
   const answer = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
       status,
@@ -288,5 +320,5 @@ export function createInboxLiveSessions(options: {
     return answer({ message: result.message, replayed: result.replayed });
   };
 
-  return { pollStarted, stateChanged, liveFor, askerLive, replyTarget, seenOverMcp, holdOverMcp, route };
+  return { pollStarted, stateChanged, liveFor, askerLive, replyTarget, seenOverMcp, holdOverMcp, route, allLive, isSessionLive, composeTarget };
 }

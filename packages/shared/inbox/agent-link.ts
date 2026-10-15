@@ -67,6 +67,8 @@ const START_TIMEOUT_MS = 30_000;
 export const INBOX_LEASE_EVERY_MS = 5_000;
 /** A lease not renewed for this long belongs to a process that exited, slept or hung (the mod's 20 s). */
 export const INBOX_LEASE_STALE_MS = 20_000;
+/** While nothing waits for delivery, a wake asks its host whether a turn runs every this many ticks (5 s at the default tick). */
+export const INBOX_STATE_EVERY_TICKS = 5;
 
 /** The first time a call finds no `plannotator` to start the Inbox with. */
 export const INBOX_INSTALL_TEXT =
@@ -350,6 +352,14 @@ export interface InboxWakeTarget {
   deliver(text: string, command: InboxReplyCommand): Promise<void>;
   /** A line for the person, outside the model's context (a toast, a notice). */
   notify(message: string): void;
+  /**
+   * The folder the session works in (Pi: `ctx.cwd`; OpenCode: the session's
+   * `location.directory`). Each poll carries it as `project_path`, so the
+   * Inbox lists the session under its real project, even before it wrote
+   * there (compose, New message). Optional: a host without it is listed only
+   * where it wrote.
+   */
+  projectPath?(): string | null | undefined | Promise<string | null | undefined>;
 }
 
 /**
@@ -379,6 +389,12 @@ export class InboxWake {
   private leaseCheckedAt = Number.NEGATIVE_INFINITY;
   /** When the person last acted in this process; the most recent touch wins the lease. */
   private touchedAt = 0;
+  /** When this wake started: the poll's `started_at`, as the Claude Code mod sends it. */
+  private readonly startedAt = Date.now();
+  /** Whether a turn runs, as last asked (null until asked), and since when the session is idle. */
+  private busy: boolean | null = null;
+  private idleSince: number | null = null;
+  private stateCheckedAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     private readonly connection: InboxAgentConnection,
@@ -452,8 +468,17 @@ export class InboxWake {
 
   private async tick(): Promise<void> {
     if (this.disposed) return;
-    // The session is only asked while a reply waits: idle for two ticks in a row, then it goes in.
-    this.idleTicks = this.pending.size === 0 || (await this.target.isBusy()) ? 0 : this.idleTicks + 1;
+    // While a reply waits the session is asked every tick (idle for two ticks
+    // in a row, then it goes in); otherwise every few seconds, for the
+    // Inbox's live sessions ("idle" or "working").
+    let busy: boolean | null = null;
+    const asked = Date.now();
+    if (this.pending.size > 0 || asked - this.stateCheckedAt >= this.tickMs * INBOX_STATE_EVERY_TICKS) {
+      this.stateCheckedAt = asked;
+      busy = await this.target.isBusy();
+      this.noteBusy(busy, asked);
+    }
+    this.idleTicks = this.pending.size === 0 || busy !== false ? 0 : this.idleTicks + 1;
     for (const id of [...this.unacked]) await this.acknowledge(id);
     const now = Date.now();
     if (now - this.leaseCheckedAt >= INBOX_LEASE_EVERY_MS) this.holdLease(now);
@@ -469,9 +494,42 @@ export class InboxWake {
     }
   }
 
+  /** A turn started or ended: the Inbox's live sessions say so (a `state` event, as the Claude Code mod posts). */
+  private noteBusy(busy: boolean, now: number): void {
+    if (busy === this.busy) return;
+    const known = this.busy !== null;
+    this.busy = busy;
+    if (!busy) this.idleSince = now;
+    if (known && this.leader && !this.disposed) {
+      void this.connection.bridge(INBOX_BRIDGE_EVENT_PATH, this.sessionId, { type: "state", busy, idle_since: this.idleSince }).catch(() => null);
+    }
+  }
+
+  /**
+   * The replies and messages waiting for this session (waitMs 0: now). The
+   * poll says where the session works and whether a turn runs
+   * (`project_path`, `started_at`, `busy`, `idle_since`), as the Claude Code
+   * mod's does, for the Inbox's live sessions.
+   */
   private async pendingNow(waitMs: number): Promise<InboxReplyCommand[] | null> {
     const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(waitMs + 10_000)]);
-    const response = await this.connection.bridge(INBOX_BRIDGE_POLL_PATH, this.sessionId, { waitMs }, signal);
+    let projectPath: string | null | undefined = null;
+    try {
+      projectPath = await this.target.projectPath?.();
+    } catch {
+      projectPath = null;
+    }
+    const response = await this.connection.bridge(
+      INBOX_BRIDGE_POLL_PATH,
+      this.sessionId,
+      {
+        waitMs,
+        ...(typeof projectPath === "string" && projectPath ? { project_path: projectPath } : {}),
+        started_at: this.startedAt,
+        ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
+      },
+      signal,
+    );
     return response && response.status === 200 ? parseInboxBridgeCommands(response.text) : null;
   }
 

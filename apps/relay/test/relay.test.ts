@@ -891,6 +891,28 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     say(`attachments/${plan.id}/view?version=sent: the plan's text as sent; html-assets/<token>/images/sun.png: ${sun.bytes.length} bytes, equal to the file, image/png`);
   }, 60_000);
 
+  test("a message's image, from a question's context, arrives by request; one at the 10 MB cap still fits one result frame", async () => {
+    mkdirSync(join(w.project, "shots"), { recursive: true });
+    writeFileSync(join(w.project, "shots", "mock.png"), PNG);
+    // Exactly the route's byte cap (MAX_REVIEW_IMAGE_PREVIEW_BYTES): base64 twice and sealed, still under 32 MiB.
+    const big = Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(10 * 1024 * 1024 - 8, 9)]);
+    writeFileSync(join(w.project, "shots", "big.png"), big);
+    const body = ["Two layouts.", "", ":::question", "Keep the new header?", "![mock](shots/mock.png)", "![big](shots/big.png)", "- Keep it", "- Go back", ":::"].join("\n");
+    const sent = await agent.send({ project_path: w.project, body, thread: "relay-images" });
+    const id = sent.message_id as string;
+    const mock = await ask(a, "GET", `messages/${id}/image?path=${encodeURIComponent("shots/mock.png")}`);
+    expect(mock.status).toBe(200);
+    expect(mock.contentType).toBe("image/png");
+    expect(mock.bytes.equals(PNG)).toBe(true);
+    const large = await ask(a, "GET", `messages/${id}/image?path=${encodeURIComponent("shots/big.png")}`);
+    expect(large.status).toBe(200);
+    expect(large.bytes.equals(big)).toBe(true);
+    const unshown = await ask(a, "GET", `messages/${id}/image?path=${encodeURIComponent("pages/images/sun.png")}`);
+    expect(unshown.status).toBe(403);
+    expect(unshown.json()).toMatchObject({ code: "image_not_referenced" });
+    say(`messages/${id}/image?path=shots/mock.png (in a question's context): 200 image/png; shots/big.png (10 MiB, the cap): 200, equal to the file; an unreferenced path: 403 image_not_referenced`);
+  }, 60_000);
+
   test("the Inbox stopped: the answer waits at the relay; started, it is applied once and the agent receives it once", async () => {
     const second = await agent.send({ project_path: w.project, thread: "deploy", body: [":::question", "Deploy to staging now?", "- Yes", "- No", ":::"].join("\n") });
     const secondId = second.message_id ?? second.thread_id;

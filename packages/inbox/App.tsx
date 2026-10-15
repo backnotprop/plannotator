@@ -74,6 +74,11 @@ import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, useStack } from './stack';
 import { backTo, pushScreen } from './history';
 import { adoptSavedTheme, inboxThemeSync } from './theme';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
+import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { DraftsPage } from './compose/DraftsPage';
+import { useComposeSessions } from './compose/useComposeSessions';
+import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
+import type { DraftView } from './api';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, except the theme, which goes to config.json `theme`
@@ -105,6 +110,10 @@ configurePlannotatorUI({
 });
 
 const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
+/** The session the person last sent a new message to (compose preselects it while it is live). */
+const COMPOSE_LAST_COOKIE = 'plannotator-inbox-compose-last';
+/** How often the Drafts page reads its drafts again, so each chip follows its session. */
+const DRAFTS_REFRESH_MS = 10_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
 const SEEN_RETRIES = 5;
 const SEEN_RETRY_MS = 1000;
@@ -113,7 +122,7 @@ const WHATS_NEW_RETRIES = 15;
 const WHATS_NEW_RETRY_MS = 1000;
 
 interface Route {
-  page: 'inbox' | 'settings' | 'decisions' | 'whats-new';
+  page: 'inbox' | 'settings' | 'decisions' | 'whats-new' | 'drafts';
   /** The release whose notes the What's new page shows (`#whats-new=0.28.12`). */
   version?: string | null;
   project: string | null;
@@ -146,6 +155,7 @@ function routeOf(fullHash: string): Route {
   if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair };
   const params = new URLSearchParams(hash);
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
+  if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
   if (params.has('decisions')) {
     return { page: 'decisions', project: params.get('decisions') || null, thread: null, decision: params.get('decision') };
   }
@@ -166,6 +176,7 @@ function hashOf(route: Route): string {
   let hash = '';
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
+  else if (route.page === 'drafts') hash = 'drafts';
   else if (route.page === 'decisions') {
     const params = new URLSearchParams();
     params.set('decisions', route.project ?? '');
@@ -399,6 +410,18 @@ function Inbox() {
   const searchOpener = useRef<HTMLElement | null>(null);
   /** The landing a search result asked for: the query's words to highlight in that message, a question's card to focus. */
   const searchLanding = useRef<SearchLanding | null>(null);
+  /**
+   * Compose (a new message to a connected agent): open with what it starts
+   * from (a draft, a session), and the drafts not sent (the sidebar's Drafts
+   * row, the Drafts page).
+   */
+  const [compose, setCompose] = useState<ComposeRequest | null>(null);
+  const composeOpener = useRef<HTMLElement | null>(null);
+  /** Where focus goes once compose closes or a draft row goes: the opener, else `focusFallback(next)`. */
+  const pendingFocus = useRef<{ opener: HTMLElement | null; next: string | null } | null>(null);
+  const [drafts, setDrafts] = useState<DraftView[] | null>(null);
+  const [draftsError, setDraftsError] = useState<string | null>(null);
+  const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
   /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
   const [toast, setToast] = useState<InboxToastModel | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -624,6 +647,26 @@ function Inbox() {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
+
+  const refreshDrafts = useCallback(async () => {
+    try {
+      const next = await inboxApi.drafts();
+      setDrafts(next.drafts);
+      setDraftsError(null);
+    } catch (cause) {
+      setDraftsError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+  useEffect(() => {
+    void refreshDrafts();
+  }, [refreshDrafts]);
+  // The Drafts page follows each draft's session (live, ended) while it is open.
+  useEffect(() => {
+    if (route.page !== 'drafts') return;
+    void refreshDrafts();
+    const timer = setInterval(() => void refreshDrafts(), DRAFTS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [route.page, refreshDrafts]);
 
   /** Read the agents; while `plannotator inbox` is still connecting them, read again until it is done. */
   const refreshAgents = useCallback(async () => {
@@ -936,6 +979,132 @@ function Inbox() {
     // Otherwise a new history entry: Back returns to where the search started (on a phone, the list).
     writeRoute(next, sameThread ? { replace: true } : {});
   };
+  // ── Compose: a new message to a connected agent (compose/ComposeDialog.tsx) ──
+  const openCompose = (request: ComposeRequest, opener?: HTMLElement | null) => {
+    composeOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setCompose(request);
+  };
+  /**
+   * The draft after this one in the Drafts list (else the one before), for
+   * focus once it leaves the list: sent, deleted or discarded.
+   */
+  const draftNeighbour = (draftId: string): string | null => {
+    const list = drafts ?? [];
+    const index = list.findIndex((d) => d.id === draftId);
+    if (index < 0) return null;
+    return (list[index + 1] ?? list[index - 1])?.id ?? null;
+  };
+  /**
+   * Focus somewhere real once what had it is gone: the draft row named, else
+   * the Drafts heading, else a New message button. Never left on the page.
+   */
+  const focusFallback = (draftId: string | null) => {
+    // The Drafts page is the page on screen when it has these; the New message
+    // buttons are several (sidebar, a phone's list header), so the shown one.
+    const row = draftId ? document.querySelector<HTMLElement>(`[data-draft-id="${CSS.escape(draftId)}"] .ib-draft-open`) : null;
+    if (row) return row.focus();
+    const heading = document.querySelector<HTMLElement>('[data-drafts-page] h1');
+    if (heading) return heading.focus();
+    for (const button of document.querySelectorAll<HTMLElement>('[data-open-compose]')) {
+      button.focus();
+      if (document.activeElement === button) return;
+    }
+  };
+  // Runs after the render that closed compose or dropped a draft row, so the DOM is the new one.
+  useEffect(() => {
+    const pending = pendingFocus.current;
+    if (!pending || compose) return;
+    pendingFocus.current = null;
+    const { opener, next } = pending;
+    // A hidden opener (a closed phone sheet) does not take focus; then the fallback.
+    if (opener?.isConnected) opener.focus();
+    if (opener && document.activeElement === opener) return;
+    focusFallback(next);
+  });
+  /** Close compose; focus goes back to what opened it, or, when that is gone (a draft row), `focusFallback(next)`. */
+  const closeCompose = (next: string | null = null) => {
+    setCompose(null);
+    // After the render that closes it (and drops a sent draft's row): see the effect below.
+    pendingFocus.current = { opener: composeOpener.current, next };
+    composeOpener.current = null;
+  };
+  const composeSent = (sent: ComposeSent) => {
+    // A draft sent leaves the list now; focus goes to the next one.
+    const next = sent.draftId ? draftNeighbour(sent.draftId) : null;
+    if (sent.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== sent.draftId));
+    closeCompose(next);
+    // While a thread is open its list holds still; with none, the new row shows at once.
+    void refreshList(!routeRef.current.thread, true);
+    if (sent.draftId) void refreshDrafts();
+    showToast(
+      {
+        icon: 'check',
+        lead: `Sent to ${hostLabel(sent.host)}`,
+        detail: `in ${sent.projectName}. It takes it as its next turn.`,
+        action: { label: 'Open', onPress: () => {
+          dismissToast();
+          go({ page: 'inbox', project: routeRef.current.page === 'inbox' ? routeRef.current.project : null, thread: sent.threadId });
+        } },
+      },
+      7000,
+    );
+  };
+  const lastSentRef = useRef(lastSent);
+  const rememberSent = (session: string) => {
+    lastSentRef.current = session;
+    setLastSent(session);
+    storage.setItem(COMPOSE_LAST_COOKIE, session);
+  };
+  const composeSaved = (draft: DraftView) => {
+    closeCompose();
+    setDrafts((current) => [draft, ...(current ?? []).filter((d) => d.id !== draft.id)]);
+    void refreshDrafts();
+    showToast({
+      icon: 'check',
+      lead: 'Draft saved',
+      detail: 'It waits under Drafts and never sends itself.',
+      action: { label: 'Drafts', onPress: () => {
+        dismissToast();
+        go({ page: 'drafts', project: null, thread: null });
+      } },
+    });
+  };
+  /** Delete a draft, with Undo: the window re-creates it from what it still holds (no soft delete on the server). */
+  const deleteDraft = async (draft: DraftView, alreadyDeleted = false) => {
+    const next = draftNeighbour(draft.id);
+    const hadFocus = document.activeElement instanceof HTMLElement && !!document.activeElement.closest(`[data-draft-id="${CSS.escape(draft.id)}"]`);
+    if (!alreadyDeleted) {
+      try {
+        await inboxApi.deleteDraft(draft.id);
+      } catch (cause) {
+        showToast({ icon: 'warn', lead: cause instanceof Error ? cause.message : 'The draft was not deleted.', wrap: true });
+        return;
+      }
+    }
+    setDrafts((current) => (current ?? []).filter((d) => d.id !== draft.id));
+    // The row held focus (its delete button): the next row takes it.
+    if (hadFocus) pendingFocus.current = { opener: null, next };
+    void refreshDrafts();
+    showToast({
+      icon: 'check',
+      lead: 'Draft deleted',
+      onUndo: () => {
+        dismissToast();
+        void inboxApi
+          .saveDraft(draft.id, { body: draft.body, to: draft.to, project: draft.project, files: draft.files.map((f) => f.upload_id), base: null })
+          .then(() => refreshDrafts())
+          .then(() => say('Draft restored.'))
+          .catch(() => showToast({ icon: 'warn', lead: 'The draft could not be restored.', wrap: true }));
+      },
+    });
+  };
+  // The palette's Actions group reads the live sessions while it is open.
+  const { model: paletteSessions } = useComposeSessions(searchOpen);
+  const paletteActions = useCallback(
+    (q: string): ComposeAction[] => composeActions(q, composeTargets(paletteSessions?.projects ?? []), lastSentRef.current),
+    [paletteSessions],
+  );
+
   /** The thread landed on the message `msg=` named: drop it from the hash, so a reload does not jump again. */
   const landed = () => {
     searchLanding.current = null;
@@ -1619,6 +1788,13 @@ function Inbox() {
     }
   }, [stack.thread, stack.decision, view, route.thread, route.decision, phone]);
 
+  // The project compose treats as current: the list's filter, else the open thread's.
+  const composeCurrent = (() => {
+    const id = route.page === 'inbox' ? (route.project ?? thread?.project.id ?? null) : null;
+    const folder = id ? projects.find((p) => p.id === id) : null;
+    return folder ? { id: folder.id, root: folder.root, name: folder.name } : thread && route.thread ? { id: thread.project.id, root: thread.project.root, name: thread.project.name } : null;
+  })();
+
   let main: ReactNode;
   const decisionsFolder = decisionsProject ? projects.find((p) => p.id === decisionsProject) ?? null : null;
   if (route.page === 'settings') {
@@ -1708,6 +1884,17 @@ function Inbox() {
     );
   } else if (route.page === 'decisions') {
     main = <div className="ib-listcol" />;
+  } else if (route.page === 'drafts') {
+    main = (
+      <DraftsPage
+        drafts={drafts}
+        error={draftsError}
+        phone={phone}
+        onOpen={(draft, opener) => openCompose({ draft }, opener)}
+        onDelete={(draft) => void deleteDraft(draft)}
+        onCompose={(opener) => openCompose({}, opener)}
+      />
+    );
   } else if (!latest || !shown) {
     main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
   } else if (firstRun) {
@@ -1747,6 +1934,7 @@ function Inbox() {
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
           onSearch={(opener) => openSearch(opener)}
+          onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
           empty={
             projectAllArchived(filterProject) ? (
@@ -1789,7 +1977,7 @@ function Inbox() {
             lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
             seenThrough={look?.threadId === thread.thread_id ? look.through : null}
             onSeen={(through) => seenOnSight(thread.thread_id, through)}
-            covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen}
+            covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || compose !== null}
             backLabel={filterProject?.name ?? 'Inbox'}
             phone={phone}
             stacked={stack.thread}
@@ -1847,6 +2035,9 @@ function Inbox() {
             restarting={restarting}
             updated={updated}
             onSearch={(opener) => openSearch(opener)}
+            onCompose={(opener) => openCompose({}, opener)}
+            draftsCount={drafts?.length ?? 0}
+            onDrafts={() => go({ page: 'drafts', project: null, thread: null })}
             onInbox={() => go({ page: 'inbox', project: null, thread: null })}
             onProject={(projectId) => go({ page: 'inbox', project: projectId, thread: null })}
             onSettings={() => go({ page: 'settings', project: null, thread: null })}
@@ -1925,7 +2116,28 @@ function Inbox() {
         projects={projects}
         onClose={closeSearch}
         onOpenResult={openSearchResult}
+        actions={paletteActions}
+        onAction={(action) => openCompose(action.kind === 'message' ? { session: action.target.session } : {}, searchOpener.current)}
       />
+      {compose && (
+        <ComposeDialog
+          request={compose}
+          phone={phone}
+          current={composeCurrent}
+          lastSent={lastSent}
+          home={settings?.home ?? null}
+          onSent={(sent) => {
+            rememberSent(sent.session);
+            composeSent(sent);
+          }}
+          onSaved={composeSaved}
+          onDeleted={(draft) => {
+            closeCompose(draftNeighbour(draft.id));
+            void deleteDraft(draft, true);
+          }}
+          onClose={() => closeCompose()}
+        />
+      )}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

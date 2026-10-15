@@ -18,6 +18,10 @@ import type {
   InboxQuestion,
   InboxSoundSettings,
   InboxThread,
+  InboxComposeProject,
+  InboxDraft,
+  InboxDraftStatus,
+  InboxUpload,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
@@ -383,6 +387,67 @@ export interface SearchRequest {
   current?: string | null;
 }
 
+/** GET /api/inbox/sessions: every live session, grouped by project (compose). */
+export interface ComposeSessionsModel {
+  serverSession: string;
+  home: string;
+  projects: InboxComposeProject[];
+  /** Asked for with `?session=`: whether that session is still there (with the asker grace). */
+  session?: { session: string; live: boolean };
+}
+
+/** A draft as the Drafts page lists it, with its chip. */
+export type DraftView = InboxDraft & { status: InboxDraftStatus };
+
+/** What compose sends: a new thread to one live session. */
+export interface StartThreadInput {
+  to: { host: string; session: string };
+  body: string;
+  idempotency_key: string;
+  uploads?: string[];
+  draft_id?: string;
+}
+
+/**
+ * Upload one file (compose): the raw bytes, streamed by the browser, with
+ * progress. XHR because fetch reports no upload progress. `serverSession`
+ * rides the query (the body is the file).
+ */
+export function uploadFile(
+  file: File,
+  options: { onProgress?: (loaded: number, total: number) => void; signal?: AbortSignal } = {},
+): Promise<InboxUpload> {
+  return new Promise((resolve, reject) => {
+    const query = new URLSearchParams({ name: file.name });
+    if (pageSession) query.set('serverSession', pageSession);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/inbox/uploads?${query}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = (event) => options.onProgress?.(event.loaded, event.lengthComputable ? event.total : file.size);
+    xhr.onload = () => {
+      let body: Record<string, unknown> = {};
+      try {
+        body = JSON.parse(xhr.responseText) as Record<string, unknown>;
+      } catch {
+        // Not JSON: the status says it.
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body.upload) resolve(body.upload as InboxUpload);
+      else
+        reject(
+          new InboxApiError(
+            xhr.status,
+            typeof body.code === 'string' ? body.code : 'error',
+            typeof body.error === 'string' ? body.error : xhr.status === 413 ? 'Not attached: the file is too large.' : 'Not attached: the upload failed.',
+          ),
+        );
+    };
+    xhr.onerror = () => reject(new InboxApiError(0, 'network', 'Not attached: the upload failed.'));
+    xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
+    options.signal?.addEventListener('abort', () => xhr.abort(), { once: true });
+    xhr.send(file);
+  });
+}
+
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
   const query = new URLSearchParams({ q: request.q });
@@ -523,6 +588,17 @@ export const inboxApi = {
     ),
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/delete`, {}),
   // Step 8: New message to a live session of the thread's project.
+  // Compose: every live session, a new thread, Send to another session, and drafts.
+  composeSessions: (session?: string | null) =>
+    get<ComposeSessionsModel>(`/api/inbox/sessions${session ? `?session=${encodeURIComponent(session)}` : ''}`),
+  startThread: (input: StartThreadInput) =>
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean }>('/api/inbox/messages', { ...input }),
+  readdress: (messageId: string, to: { host: string; session: string }) =>
+    post<{ message: InboxMessage; row: InboxListRow | null }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/to`, { to }),
+  drafts: () => get<{ serverSession: string; drafts: DraftView[] }>('/api/inbox/drafts'),
+  saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: string[]; base: string | null }) =>
+    post<{ draft: DraftView }>(`/api/inbox/drafts/${encodeURIComponent(id)}`, { ...input }),
+  deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(`/api/inbox/drafts/${encodeURIComponent(id)}/delete`, {}),
   sessions: (threadId: string, asker?: string | null) =>
     get<LiveSessionsModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}/sessions${asker ? `?asker=${encodeURIComponent(asker)}` : ''}`),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>

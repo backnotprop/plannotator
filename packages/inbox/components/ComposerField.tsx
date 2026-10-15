@@ -1,6 +1,6 @@
 /**
  * The Inbox's one composer field (approval "inbox-skill-references"): the
- * reply box, New message, and the message-an-agent dialog once it exists all
+ * reply box, New message, and compose (a message the person starts) all
  * render this. It is Plannotator's comment composer field, unchanged in
  * behavior: the `/` and `$` skill picker at the start of a word
  * (`useSkillReferenceAutocomplete`, `SkillReferenceMenu`), the highlight

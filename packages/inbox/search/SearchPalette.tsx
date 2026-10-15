@@ -20,7 +20,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow } from '@plannotator/core/inbox-search';
 import { saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
-import { Icon } from '../icons';
+import { HostMark, Icon } from '../icons';
+import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
 import {
   FROM_OPTIONS,
   NO_FILTERS,
@@ -64,6 +65,13 @@ export interface SearchPaletteProps {
   onClose: (reason: 'dismissed' | 'opened') => void;
   /** Open a result in this tab: the window writes the hash (a new history entry) and lands on the message. */
   onOpenResult: (hash: string, land: SearchLanding | null) => void;
+  /**
+   * Compose's actions for the words typed (the Actions group, above the
+   * results): "New message…", "Message <host> in <project>". Absent: none.
+   */
+  actions?: (q: string) => ComposeAction[];
+  /** An action chosen: the palette closes and the window opens compose. */
+  onAction?: (action: ComposeAction) => void;
 }
 
 type FilterKind = keyof SearchFilters;
@@ -198,7 +206,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 }
 
 export default function SearchPalette(props: SearchPaletteProps) {
-  const { open, phone, currentProject, projects, onClose, onOpenResult } = props;
+  const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
@@ -339,7 +347,18 @@ export default function SearchPalette(props: SearchPaletteProps) {
   };
 
   // ── options ──
-  const groups: SearchGroupView[] = useMemo(() => (answered && !answered.model.indexing ? searchGroups(answered.model, expanded) : []), [answered, expanded]);
+  const groups: SearchGroupView[] = useMemo(() => {
+    if (!answered) return [];
+    // While the index builds there are no results yet, but the actions still show.
+    const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
+    const actionList = actions ? actions(answered.q) : [];
+    if (actionList.length === 0) return found;
+    const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
+    // Above everything (Recent searches included) with no words, when nothing
+    // matched, or when the words name an action; below real results otherwise.
+    const first = !answered.q.trim() || found.length === 0 || namesActionWord(answered.q);
+    return first ? [group, ...found] : [...found, group];
+  }, [answered, expanded, actions]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
@@ -405,6 +424,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (!option || !answered) return;
     if (option.kind === 'more') {
       void expand(option, index);
+      return;
+    }
+    if (option.kind === 'action') {
+      close('opened');
+      onAction?.(option.action);
       return;
     }
     if (option.kind === 'recent-q') {
@@ -623,6 +647,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
       if (!answered && !pending) return null;
       return (
         <>
+          {indexing && renderGroups()}
           <div className="ib-sp-group">
             <div className="ib-sp-gh">Threads</div>
             <div className="ib-sp-skel"><i style={{ width: '62%' }} /><i /></div>
@@ -670,6 +695,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </div>
       );
     }
+    return renderGroups();
+    function renderGroups() {
     return groups.map((group) => {
       const headingId = `ib-sp-g-${uid}-${group.id}`;
       return (
@@ -708,6 +735,20 @@ export default function SearchPalette(props: SearchPaletteProps) {
                 </div>
               );
             }
+            if (option.kind === 'action') {
+              const action = option.action;
+              return (
+                <div key={action.kind === 'new' ? 'action-new' : `action-${action.target.session}`} className="ib-sp-row" {...common} data-compose-action={action.kind}>
+                  {action.kind === 'new' ? <Icon name="compose" className="ib-sp-mk" /> : <HostMark host={action.target.host} />}
+                  <span className="ib-sp-rs">
+                    <span className="ib-sp-p">{actionLabel(action)}</span>
+                    <span className="ib-sp-s">
+                      {action.kind === 'new' ? 'Start a thread with a live agent' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
+                    </span>
+                  </span>
+                </div>
+              );
+            }
             if (option.kind === 'more') {
               return (
                 <div key={`more-${option.group}`} className="ib-sp-row ib-sp-more" {...common} data-show-more={option.group}>
@@ -728,6 +769,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </div>
       );
     });
+    }
   })();
 
   const anyFilter = filtered;

@@ -12,7 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxRedirectedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
+import { inboxAgentTool, INBOX_MESSAGE_INSTRUCTION, INBOX_NEW_THREAD_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, inboxRedirectedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { ClaudeSession } from './testing/claude-session'
 import { removeStubbedHtml, stubBuiltHtml } from '../../../../tests/helpers/inbox-world'
 import { inboxEntryOf, isAlive, mustSignalInbox, stopProvenInboxes } from '../../../../tests/helpers/inbox-process'
@@ -587,5 +587,48 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const delivered = await waitFor('the delivery record', async () => (await thread(w, asked.thread_id)).messages.find((m) => m.id === reply.id)?.delivery)
     expect(delivered).toMatchObject({ state: 'delivered', host: 'claude-code', session: 'session-taker' })
     w.proof(`thread shows: Delivered to Claude Code (another session), ${delivered.at}`)
+  }, 120_000)
+
+  test('compose: the person starts a thread with a session that never wrote in the Inbox; it arrives once as a new-thread turn, the answer lands in that thread, and the session\'s next message starts its own', async () => {
+    const w = world('11-compose-new-thread')
+    startInbox(w)
+    const session = await open(w, 'session-compose')
+    const { port } = registry(w)
+    // The mod's poll says where it works: listed under the project before it ever wrote.
+    const listed = await waitFor('the session in the live list', async () => {
+      const model = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/sessions`)).json()) as {
+        projects: { project: { id: string | null; root: string }; sessions: { session: string; host: string; busy: boolean | null }[] }[]
+      }
+      return model.projects.find((group) => group.project.root === w.project && group.sessions.some((s) => s.session === 'session-compose')) ?? null
+    })
+    expect(listed.project.id).toBeNull()
+    w.proof(`live sessions in every project (GET /api/inbox/sessions):\n${JSON.stringify(listed, null, 2)}\n`)
+
+    const health = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as { serverSession: string }
+    const words = 'Idea: show which session wrote each thread.\n\nA small chip on each row would do.'
+    const response = await fetch(`http://127.0.0.1:${port}/api/inbox/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${port}` },
+      body: JSON.stringify({ serverSession: health.serverSession, to: { host: 'claude-code', session: 'session-compose' }, body: words, idempotency_key: 'compose-1' }),
+    })
+    expect(response.status).toBe(200)
+    const message = ((await response.json()) as { message: { id: string; thread_id: string } }).message
+    w.proof(`> the person sends from compose to session-compose: ${message.id}`)
+
+    const turn = await waitFor('the new-thread turn', () => session.turns.find((t) => t.text.includes(message.id)))
+    await Bun.sleep(3_000)
+    expect(session.host.submits).toEqual([inboxWakeText({ type: 'message', new_thread: true, id: message.id, subject: 'Idea: show which session wrote each thread.', body: words })])
+    expect(session.host.submits[0]!.split('\n')[1]).toBe(INBOX_NEW_THREAD_INSTRUCTION)
+    w.proof(`turn.start ${turn.id} in session-compose:\n${turn.text}\n`)
+    const delivered = await waitFor('the delivery record', async () => (await thread(w, message.thread_id)).messages[0]?.delivery)
+    expect(delivered).toMatchObject({ host: 'claude-code', session: 'session-compose' })
+
+    const answer = await session.callInbox({ action: 'send_message', body: "I'll add the chip after this fix.", reply_to: message.id }, w.project)
+    if ('deny' in answer) throw new Error(answer.deny)
+    expect((await thread(w, message.thread_id)).messages.map((m) => m.author.kind)).toEqual(['person', 'agent'])
+    // A thread the person started is no session's default thread.
+    const own = await send(session, w, 'Unrelated: the export is done.')
+    expect(own.thread_id).not.toBe(message.thread_id)
+    w.proof('the answer with reply_to landed in the person\'s thread; the session\'s next message without reply_to started its own thread')
   }, 120_000)
 })

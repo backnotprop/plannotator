@@ -147,6 +147,11 @@ async function threadMessages(): Promise<{ id: string; author: { kind: string };
 }
 
 const clock = (ms: number) => new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(ms));
+/**
+ * "Started 11:42 PM", or "Started Oct 14, 11:42 PM" once the day has passed
+ * (the window's whenTime names the day; a run can cross midnight).
+ */
+const startedLabel = (ms: number) => new RegExp(`^Started (?:[A-Z][a-z]{2} \\d{1,2}, )?${clock(ms).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 
 test.describe.configure({ mode: 'serial' });
 
@@ -253,7 +258,7 @@ test('one live session: the box opens addressed to it (5.1); Send delivers once 
   await expect(pane.locator('[data-delivery="queued"]')).toHaveText('Pi takes it as its next turn.');
 
   await writer.deliver(command.id);
-  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, \d{1,2}:\d{2} [AP]M$/);
+  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   // Handed out once: a delivered message is never handed out again.
   await page.waitForTimeout(2_500);
   expect(writer.commands).toHaveLength(1);
@@ -275,10 +280,10 @@ test('two live sessions: New message opens the list, the writer first (5.2); the
   const items = picker.getByRole('menuitem');
   await expect(items).toHaveCount(2);
   await expect(items.nth(0)).toHaveAttribute('data-session', world.writer);
-  await expect(items.nth(0).locator('.ib-t')).toHaveText(`Started ${clock(writer.startedAt)}`);
-  await expect(items.nth(0).locator('.ib-d')).toHaveText(/^Wrote this thread\. Idle since \d{1,2}:\d{2} [AP]M\.$/);
+  await expect(items.nth(0).locator('.ib-t')).toHaveText(startedLabel(writer.startedAt));
+  await expect(items.nth(0).locator('.ib-d')).toHaveText(/^Wrote this thread\. Idle since (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M\.$/);
   await expect(items.nth(1)).toHaveAttribute('data-session', 'pi-session-two');
-  await expect(items.nth(1).locator('.ib-t')).toHaveText(`Started ${clock(laterStart)}`);
+  await expect(items.nth(1).locator('.ib-t')).toHaveText(startedLabel(laterStart));
   await expect(items.nth(1).locator('.ib-d')).toHaveText('Working now; takes it when the turn ends.');
   await expect(button).toHaveClass(/ib-on/);
   await shot('5.2-pick-a-session');
@@ -298,7 +303,7 @@ test('two live sessions: New message opens the list, the writer first (5.2); the
   // Its turn ends, then the turn goes in.
   await second.setBusy(false);
   await second.deliver(command.id);
-  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, \d{1,2}:\d{2} [AP]M$/);
+  await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   await shot('5.2-delivered-to-the-picked-session');
 });
 

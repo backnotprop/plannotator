@@ -19,6 +19,8 @@ export interface InboxToastModel {
   onUndo?: () => void;
   /** Desktop only (a phone's thread foot has Reply). */
   onReply?: () => void;
+  /** One more action (compose: Open the thread just sent, or Drafts). */
+  action?: { label: string; onPress: () => void };
 }
 
 const ICONS: Record<InboxToastIcon, IconName> = { check: 'checkCircle', warn: 'warn', archive: 'archive', mute: 'mute' };
@@ -49,7 +51,7 @@ export function InboxToast({ toast, phone = false, threadRouted = false }: { toa
 }
 
 function toastClass(toast: InboxToastModel, phone: boolean): string {
-  const actions = !!toast.onUndo || (!phone && !!toast.onReply);
+  const actions = !!toast.onUndo || !!toast.action || (!phone && !!toast.onReply);
   return [
     'ib-toast',
     phone ? 'ib-toast-phone' : '',
@@ -70,8 +72,13 @@ function ToastBody({ toast, phone }: { toast: InboxToastModel; phone: boolean })
         <span className="ib-tlead">{phone ? (toast.phoneLead ?? toast.lead) : toast.lead}</span>
         {toast.detail && <span className="ib-tdetail">{toast.detail}</span>}
       </span>
-      {(reply || toast.onUndo) && (
+      {(reply || toast.onUndo || toast.action) && (
         <span className="ib-tacts">
+          {toast.action && (
+            <button type="button" className="ib-tghost" onClick={toast.action.onPress} data-toast-action="">
+              {toast.action.label}
+            </button>
+          )}
           {reply && (
             <button type="button" className="ib-tghost" onClick={toast.onReply} data-toast-reply="">
               Reply

@@ -37,6 +37,8 @@ Labels: `m1`, `m2`, ... are messages in the order they were written; `t1`, `t2`,
 | `archive`, `unarchive` | `thread` | Resolve `true` and `false` |
 | `agent_read` | `thread` | An agent read the thread (`read_thread`, or `wait_for_reply` handed it the reply) |
 | `set_aside_note` | `thread` | The Undo window passed: the Inbox writes its set-aside notes to the asking agent (it does this by itself 10 s after a Mark read) |
+| `person_thread` | `project`, `session` (`ses_a` or `ses_b`), `body` | The person starts a thread from the Inbox, addressed to that live session (compose, `POST /api/inbox/messages`). Its root is the person's message; it is in Sent until the session takes it. It is no session's default thread: an agent message without `reply_to` never joins it. Each uses its own idempotency key. Only `hand-19-person-started-thread` uses it |
+| `delivered` | `thread` | The addressed session's connection delivered what the person sent it in that thread (bridge `delivered`): it counts as the agent having read the thread up to that message, so a Sent row moves to Quiet |
 
 ## expect
 

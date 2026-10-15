@@ -21,6 +21,7 @@ import {
   destroyInboxWorld,
   personSends,
   QUESTION,
+  registry,
   removeStubbedHtml,
   startInbox,
   stubBuiltHtml,
@@ -147,6 +148,48 @@ describe.skipIf(process.platform === "win32")("OpenCode 2's Inbox wake on a host
     // Stopping the wakes ends the event subscription.
     stop.abort();
     await waitFor("the event subscription to end", () => (events.aborted === 1 ? true : undefined), 5_000);
+  }, 60_000);
+
+  test("the wake's poll carries the session's folder and turn state: a session that never wrote is listed under its project, idle or working (compose)", async () => {
+    const w = createInboxWorld("plannotator-inbox-oc2-poll-", "07-opencode2-poll-fields", "opencode2");
+    worlds.push(w);
+    startInbox(w);
+    mkdirSync(w.dataDir, { recursive: true });
+    writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true } }));
+    process.env.PLANNOTATOR_DATA_DIR = w.dataDir;
+    process.env.PLANNOTATOR_BIN = path.join(w.bin, "plannotator");
+    const connection = await findInboxConnection();
+    const events = eventStream();
+    const v2 = {
+      location: { directory: "/somewhere/else" },
+      event: { subscribe: events.subscribe },
+      session: {
+        // The session's own folder wins over the plugin's.
+        get: async () => ({ location: { directory: w.project } }),
+        wait: async () => undefined,
+        prompt: async () => undefined,
+      },
+    };
+    const stop = new AbortController();
+    stops.push(stop);
+    await registerInboxOpenCode2({ transform: () => {} }, v2 as never, connection!, async (sessionID) => ({ root: sessionID }), { signal: stop.signal });
+    // A run starts in a session that has never written in the Inbox: its wake starts and polls.
+    const sessionID = "ses_quiet";
+    events.emit({ type: "session.execution.started", data: { sessionID } });
+    const listed = async () => {
+      const model = (await (await fetch(`http://127.0.0.1:${registry(w).port}/api/inbox/sessions`)).json()) as {
+        projects: { project: { root: string }; sessions: { session: string; host: string; busy: boolean | null }[] }[];
+      };
+      return model.projects.find((group) => group.project.root === w.project)?.sessions.find((s) => s.session === sessionID) ?? null;
+    };
+    const working = await waitFor("the session listed as working", async () => {
+      const entry = await listed();
+      return entry?.busy === true ? entry : null;
+    });
+    expect(working.host).toBe("opencode");
+    events.emit({ type: "session.execution.succeeded", data: { sessionID } });
+    await waitFor("the session listed as idle", async () => ((await listed())?.busy === false ? true : null), 20_000);
+    w.proof(`listed under ${w.project}, working then idle, before it wrote anything`);
   }, 60_000);
 
   test("a draft without `add` (an older host): no tool, and the wakes stop at once (the event subscription ends)", async () => {

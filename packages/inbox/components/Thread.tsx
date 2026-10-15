@@ -4,7 +4,7 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxDecision, InboxDecisionDraft, InboxListRow, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer, QuestionStatus } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
-import { isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, useRefRepo } from '../links';
 import { InboxApiError, inboxApi, type AttachmentsModel } from '../api';
@@ -26,6 +26,7 @@ import { inboxMessageImageBase, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
+import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import {
   AskerEndedNote,
   CLOSED_ROUTE,
@@ -518,7 +519,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
-  const asker = agentName(root.author);
+  // A thread the person started (compose) is about the agent it is addressed to, never the person.
+  const startedTo = root.started_by_person && root.to ? root.to : null;
+  const asker = startedTo ? hostName(startedTo.host) : agentName(root.author);
   // Archived (resolved). What an agent wrote after the archive line behaves as
   // an open thread's: its questions are live, Reply goes to it, its files take
   // comments; the thread stays archived. `resolved` is the thread with nothing
@@ -1461,13 +1464,21 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   // ("Claude Code (another session)" when it is the asker's own host).
   const toName = (message: InboxMessageWire, to: { host: string; session: string }) =>
     isRedirected(message) ? redirectedName(to, askedBy(message)) : hostName(to.host);
+  // Where the person's last message is addressed: its own `to`, or, for a reply in a thread the
+  // person started, the thread's (the server hands it to that session).
+  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to ? startedTo : null)) : null;
+  // Not delivered (compose): the session it is addressed to stopped before it took it (after the asker grace).
+  const { model: pendingLive, load: loadPendingLive } = useLiveSessions(thread.thread_id, lastTo?.session ?? null, !!lastTo && !last.delivery);
+  const undelivered = !!lastTo && !last.delivery && pendingLive?.asker?.session === lastTo.session && pendingLive.asker.live === false;
   const delivered =
     last.author.kind !== 'person'
       ? null
-      : last.to
+      : lastTo
         ? last.delivery
           ? { state: 'delivered', text: `Delivered to ${toName(last, last.delivery)}, ${whenTime(last.delivery.at)}` }
-          : { state: 'queued', text: `${toName(last, last.to)} takes it as its next turn.` }
+          : undelivered
+            ? { state: 'undelivered', text: `Not delivered. That ${hostName(lastTo.host)} session stopped before it took this. If it is resumed, it still gets it.` }
+            : { state: 'queued', text: `${last.to ? toName(last, last.to) : hostName(lastTo.host)} takes it as its next turn.` }
         : sent?.checked_at
           ? { state: 'delivered', text: `Delivered to ${asker}, ${whenTime(sent.checked_at)}` }
           : askerEnded && asking
@@ -1675,6 +1686,15 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef}>
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
+        {startedTo && (
+          <div className="ib-tmeta" data-started-by="">
+            <span>You started this thread</span>
+            <span className="ib-tdot" aria-hidden="true" />
+            <span>
+              to {hostName(startedTo.host)} in <bdi>{thread.project.name}</bdi>
+            </span>
+          </div>
+        )}
         {readAt !== null && !resolved && (
           <div className="ib-readline" data-read-line="">
             <Icon name="checkCircle" size={16} />
@@ -1972,7 +1992,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                     </p>
                   );
                 })}
-                {isAgent && (message.attachments?.length ?? 0) > 0 && (
+                {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
+                {(message.attachments?.length ?? 0) > 0 && (
                   <AttachmentTiles
                     attachments={attachments.filter((a) => a.message_id === message.id)}
                     annotationCounts={countsByPath}
@@ -2000,10 +2021,21 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
                   </ul>
                 )}
                 {message === last && delivered && (
-                  <div className="ib-delivered" data-delivery={delivered.state}>
-                    <Icon name={'ended' in delivered && delivered.ended ? 'clock' : 'check'} size={14} />
+                  // tabIndex -1: Send to another session puts focus here once it moved the message.
+                  <div className="ib-delivered" data-delivery={delivered.state} tabIndex={-1}>
+                    <Icon name={delivered.state === 'undelivered' ? 'warn' : 'ended' in delivered && delivered.ended ? 'clock' : 'check'} size={14} />
                     {delivered.text}
                   </div>
+                )}
+                {message === last && delivered?.state === 'undelivered' && lastTo && (
+                  <SendToAnotherSession
+                    messageId={last.id}
+                    ended={lastTo}
+                    project={thread.project.name}
+                    live={pendingLive}
+                    onReload={loadPendingLive}
+                    onMoved={onChanged}
+                  />
                 )}
               </div>
             </article>,
@@ -2216,7 +2248,11 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         onToggleFull={() => setFull((v) => !v)}
         focusId={file!.focus}
         focusRequest={paneFocus}
-        readOnly={!liveMessage(thread.messages.find((m) => m.id === openAttachment.message_id) ?? root)}
+        readOnly={(() => {
+          const owner = thread.messages.find((m) => m.id === openAttachment.message_id) ?? root;
+          // The person does not comment on their own upload.
+          return !liveMessage(owner) || owner.author.kind === 'person';
+        })()}
         onSaved={saveRecord}
         onRemoved={dropRecord}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus }, { replace: true })}
