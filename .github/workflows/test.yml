@@ -149,6 +149,7 @@ jobs:
           packages/inbox/compose.test.tsx
           packages/inbox/composeThread.test.tsx
           packages/inbox/markRead.test.tsx
+          packages/inbox/projectMenu.test.tsx
           packages/inbox/fileBack.test.tsx
           packages/inbox/archived.test.tsx
           packages/inbox/decisionsPicker.test.tsx

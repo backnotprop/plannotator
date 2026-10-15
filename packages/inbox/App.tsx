@@ -66,6 +66,7 @@ import { AboutBlock, FailedDialog, RestartDialog, UpdateDialog, WhatsNewPage } f
 import { unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
+import { newBatchId, projectAllArchived, projectBatchToast, projectsWithReadable, type ProjectAction } from './projectMenu';
 import { lookBoundary } from './folding';
 import { latestAgentSeq } from './seenOnSight';
 import { isPhone, trackKeyboard, usePhone } from './phone';
@@ -1263,6 +1264,73 @@ function Inbox() {
   };
 
   /**
+   * The project menu (design record "inbox-project-menu", approved
+   * 2026-10-14): Mark all as read and Archive all on one project, each one
+   * batch on the server, with one Undo for the batch (the toast, `Z`). The
+   * same held-order rules as the single actions: with a thread open the
+   * rows show their new state in place and the list settles when it closes;
+   * with none open the rows slide to their places. A project left with
+   * nothing listed leaves the sidebar (the one the list shows stays until
+   * the person leaves it).
+   */
+  const projectAction = async (projectId: string, action: ProjectAction) => {
+    const name = latestRef.current?.projects.find((p) => p.id === projectId)?.name ?? 'the project';
+    const before = (latestRef.current?.sections ?? []).flatMap((section) => section.threads).filter((row) => row.project.id === projectId);
+    const openThread = routeRef.current.thread;
+    let taken: string[];
+    let undo: () => Promise<unknown>;
+    /** The batch stopped partway: Undo still covers what it changed, and the toast says the rest did not change. */
+    let incomplete: string | null = null;
+    try {
+      if (action === 'read') {
+        const answer = await inboxApi.markProjectRead(projectId, newBatchId());
+        taken = answer.batch.read;
+        incomplete = answer.error?.message ?? null;
+        undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read);
+      } else {
+        const answer = await inboxApi.archiveProject(projectId, newBatchId());
+        taken = [...answer.batch.resolved, ...answer.batch.read];
+        incomplete = answer.error?.message ?? null;
+        undo = () => inboxApi.unarchiveProject(projectId, answer.batch);
+        // The list leaves archived threads out; while a thread is open each taken row stays where it is,
+        // shown archived, and goes when the person leaves the thread (as the single Archive does).
+        if (openThread) {
+          const at = new Date().toISOString();
+          setShown((current) => (current ? taken.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
+        }
+      }
+    } catch (cause) {
+      showToast({ icon: 'warn', lead: cause instanceof Error ? cause.message : 'The project did not change.', wrap: true });
+      return;
+    }
+    await afterWrite();
+    if (taken.length === 0) {
+      if (incomplete) showToast({ icon: 'warn', lead: `${name} did not change`, detail: incomplete, wrap: true });
+      else say(action === 'read' ? `Nothing in ${name} waits on you.` : `Nothing in ${name} to archive.`);
+      return;
+    }
+    const copy = projectBatchToast(action, name, taken.length, before.filter((row) => taken.includes(row.thread_id)));
+    showToast({
+      ...copy,
+      // Stopped partway: the warning, and why, whole (it may wrap); Undo still covers what did apply.
+      ...(incomplete ? { icon: 'warn' as const, detail: `${incomplete} · ${name}`, wrap: true } : {}),
+      onUndo: () => {
+        void (async () => {
+          try {
+            await undo();
+          } catch (cause) {
+            showToast({ icon: 'warn', lead: cause instanceof Error ? cause.message : 'The project did not change.', wrap: true });
+            return;
+          }
+          await afterWrite();
+          dismissToast();
+          say('Moved back.');
+        })();
+      },
+    });
+  };
+
+  /**
    * Settings' Unarchive: the thread goes back to the list, in whatever
    * section its state puts it, and opens there (owner ruling 2026-10-12).
    */
@@ -1535,6 +1603,8 @@ function Inbox() {
     ? (latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id) ??
       (threadRow?.thread_id === thread.thread_id ? threadRow : null))
     : null;
+  /** The projects where Mark all as read has something to do. */
+  const projectsReadable = useMemo(() => projectsWithReadable(latestSections), [latestSections]);
   const projectCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const project of projects) counts.set(project.id, waitingCount(latestSections, project.id));
@@ -1866,6 +1936,15 @@ function Inbox() {
           onSearch={(opener) => openSearch(opener)}
           onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
+          empty={
+            projectAllArchived(filterProject) ? (
+              <div className="ib-empty-list" data-project-archived="">
+                <b dir="auto">Everything in {filterProject!.name} is archived.</b>
+                It leaves the sidebar when you go elsewhere, and comes back when an agent writes there.{' '}
+                <a href="#settings/archived">See archived threads</a>
+              </div>
+            ) : null
+          }
         />
         )}
         {route.thread && thread && thread.thread_id === route.thread && (
@@ -1949,6 +2028,8 @@ function Inbox() {
             decisionsCount={latest?.decisions_waiting ?? 0}
             projects={projects}
             projectCounts={projectCounts}
+            projectsReadable={projectsReadable}
+            onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             update={update}
             restarting={restarting}
             updated={updated}

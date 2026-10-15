@@ -37,6 +37,8 @@ export interface InboxListProps {
   onSearch?: (opener: HTMLElement) => void;
   /** Opens compose: on a phone, the list header's compose icon beside search (inbox.css shows it there only). */
   onCompose?: (opener: HTMLElement) => void;
+  /** What an empty list says (one project whose threads are all archived). Drawn only while no row shows. */
+  empty?: ReactNode;
 }
 
 /**
@@ -305,6 +307,7 @@ export function InboxList(props: InboxListProps) {
             <b>Show</b>
           </button>
         )}
+        {visible.length === 0 && props.empty}
         {visible.map((section) => {
           const quiet = section.id === 'quiet';
           const open = !quiet || quietOpen;

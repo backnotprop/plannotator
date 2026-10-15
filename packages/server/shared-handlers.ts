@@ -21,6 +21,7 @@ import { listReferenceSkills, readReferenceSkillContent } from "./review-skill-l
 import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
 import { isSameOriginRequest } from "./request-origin-guard";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
+import { localImageContentType, localImageResponseHeaders } from "@plannotator/shared/local-image";
 
 function normalizeDraftGeneration(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
@@ -42,19 +43,27 @@ export function readDraftGenerationFromBody(body: unknown): number | undefined {
 
 /** Serve images from local paths or temp uploads. Used by all 3 servers. */
 export async function handleImage(req: Request): Promise<Response> {
+  // Every answer carries the sandbox CSP, nosniff and CORP (see
+  // @plannotator/shared/local-image): an SVG opened directly must not run
+  // script on the session origin.
+  const text = (body: string, status: number) =>
+    new Response(body, { status, headers: localImageResponseHeaders("text/plain; charset=utf-8") });
+  const image = (file: ReturnType<typeof Bun.file>, path: string) =>
+    new Response(file, { headers: localImageResponseHeaders(localImageContentType(path)) });
+
   const url = new URL(req.url);
   const imagePath = url.searchParams.get("path");
   if (!imagePath) {
-    return new Response("Missing path parameter", { status: 400 });
+    return text("Missing path parameter", 400);
   }
   const validation = validateImagePath(imagePath);
   if (!validation.valid) {
-    return new Response(validation.error!, { status: 403 });
+    return text(validation.error!, 403);
   }
   try {
     const file = Bun.file(validation.resolved);
     if (await file.exists()) {
-      return new Response(file);
+      return image(file, validation.resolved);
     }
     // If not found and a base directory is provided, try resolving relative to it
     const base = url.searchParams.get("base");
@@ -65,13 +74,13 @@ export async function handleImage(req: Request): Promise<Response> {
       if (baseValidation.valid) {
         const baseFile = Bun.file(baseValidation.resolved);
         if (await baseFile.exists()) {
-          return new Response(baseFile);
+          return image(baseFile, baseValidation.resolved);
         }
       }
     }
-    return new Response("File not found", { status: 404 });
+    return text("File not found", 404);
   } catch {
-    return new Response("Failed to read file", { status: 500 });
+    return text("Failed to read file", 500);
   }
 }
 

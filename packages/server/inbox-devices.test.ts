@@ -279,7 +279,7 @@ describe("the device door, on the binary", () => {
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
 
-  test("what the door never answers: settings, restart, /mcp, the bridge, control, raw bytes, project delete, decision retire, pairing, the device list, search, skills", async () => {
+  test("what the door never answers: settings, restart, /mcp, the bridge, control, raw bytes, project delete, the project menu, compose, decision retire, pairing, the device list, search, skills", async () => {
     for (const [method, path] of [
       ["GET", "settings"],
       // Search is the window's only (the approved brief's D6): the iPhone app needs its own search design first.
@@ -294,6 +294,18 @@ describe("the device door, on the binary", () => {
       ["POST", "control/stop"],
       ["GET", "attachments/att_x"],
       ["POST", "projects/prj_x/delete"],
+      // The project menu's batches: the window's only until the iPhone app has a project menu design.
+      ["POST", "projects/prj_x/read"],
+      ["POST", "projects/prj_x/unread"],
+      ["POST", "projects/prj_x/resolve"],
+      // Compose (a message the person starts), its drafts and uploads: the window's only until the iPhone app has a compose design.
+      ["GET", "sessions"],
+      ["POST", "messages"],
+      ["POST", "messages/msg_x/to"],
+      ["GET", "drafts"],
+      ["POST", "drafts/drf_x"],
+      ["POST", "drafts/drf_x/delete"],
+      ["POST", "uploads?name=a.txt"],
       ["POST", "decisions/dec_x/retire"],
       ["POST", "decisions/dec_x/replace"],
       ["POST", "pairing"],
@@ -323,7 +335,7 @@ describe("the device door, on the binary", () => {
 
     const projects = (await (await door("projects")).json()) as Json;
     expect(Object.keys(projects).sort()).toEqual(["cursor", "projects", "serverSession"]);
-    expect(Object.keys(projects.projects[0]).sort()).toEqual(["created_at", "id", "key", "name", "root", "threads", "unread"]);
+    expect(Object.keys(projects.projects[0]).sort()).toEqual(["archived", "created_at", "id", "key", "listed", "name", "root", "threads", "unread"]);
 
     const thread = (await (await door(`threads/${threadId}`)).json()) as Json;
     expect(Object.keys(thread).sort()).toEqual(["cursor", "decisions", "row", "serverSession", "thread"]);

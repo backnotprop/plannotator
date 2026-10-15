@@ -9,16 +9,14 @@
  * once not to wait on them. It comes back when an agent writes again.
  */
 
-import type { InboxListRow } from '@plannotator/core/inbox-types';
+import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow } from '@plannotator/core/inbox-types';
 import { agentName, plural } from './format';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
 export const MARK_READ_UNDO_MS = 7_000;
 
 /** Something here waits on the person: a question, or news they have not looked at. */
-export function waitsOnPerson(row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent'>): boolean {
-  return row.section === 'stopped' || row.section === 'holding' || row.section === 'waiting' || (row.section === 'new' && (row.unseen > 0 || row.answered_not_sent));
-}
+export const waitsOnPerson = inboxRowWaitsOnPerson;
 
 /**
  * The thread can be marked read now, or is marked read (the pressed button
@@ -32,9 +30,7 @@ export function canToggleRead(row: Pick<InboxListRow, 'section' | 'unseen' | 'an
 }
 
 /** The list row's quiet hover action: on rows that wait on the person, never on Sent or Quiet. */
-export function offersRowMarkRead(row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'back_from_archive'>): boolean {
-  return (row.resolved_at === null || row.back_from_archive === true) && waitsOnPerson(row);
-}
+export const offersRowMarkRead = inboxRowOffersMarkRead;
 
 export interface MarkReadToast {
   /** The bold first words. */

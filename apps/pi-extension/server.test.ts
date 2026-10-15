@@ -1279,6 +1279,8 @@ describe("pi review server", () => {
         `${server.url}/api/image?path=${encodeURIComponent(uploadPayload.path)}`,
       );
       expect(imageResponse.status).toBe(200);
+      expect(imageResponse.headers.get("content-security-policy")).toStartWith("sandbox;");
+      expect(imageResponse.headers.get("x-content-type-options")).toBe("nosniff");
       expect(await imageResponse.text()).toBe("png-bytes");
 
       const draftDelete = await fetch(`${server.url}/api/draft`, { method: "DELETE" });
