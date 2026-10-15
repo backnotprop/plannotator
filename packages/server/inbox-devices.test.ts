@@ -724,6 +724,60 @@ describe("the device door, in process", () => {
       resetServedHostnamesForTests();
     }
   });
+  test("a phone's Send with words and no pick: without skip_unanswered (or with false) it skips nothing; only skip_unanswered: true skips, which is what an iPhone app older than the words-only rule (#1903) sent", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-words-"));
+    roots.push(dataDir);
+    const inbox = await startInboxServer({ dataDir, binaryPath: null, phones: true, setAsideDelayMs: 60_000 });
+    try {
+      const base = `http://127.0.0.1:${inbox.port}`;
+      const made = (await (await fetch(`${base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
+      const pair = await fetch(`${base}/api/inbox/device/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }),
+      });
+      const token = ((await pair.json()) as Json).token as string;
+      const reply = (message: string, body: Json) =>
+        fetch(`${base}/api/inbox/device/messages/${message}/reply`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ idempotency_key: crypto.randomUUID(), ...body }),
+        });
+      // One session asks twice in one thread, one open question each: the owner's thread on 0.28.20.
+      const ask = (n: number) => {
+        const project = inbox.store.ensureProject({ name: `films-${n}`, root: join(dataDir, `films-${n}`) });
+        const author = { kind: "agent" as const, host: "claude-code", session: `ses_films${n}`, name: "Claude Code" };
+        const question = (prompt: string) => [":::question", prompt, "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
+        const first = inbox.store.sendMessage({ project_id: project.id, author, body: question("Is this the film you submit?") }).message;
+        const second = inbox.store.sendMessage({ project_id: project.id, author, reply_to: first.id, body: question("Is this the film you upload?") }).message;
+        return { first: first.id, second: second.id };
+      };
+      const thread = (id: string) => inbox.store.thread(id)!;
+      const states = (id: string) => thread(id).messages.flatMap((m) => m.questions ?? []).map((q) => q.state);
+      const people = (id: string) => thread(id).messages.filter((m) => m.author.kind === "person");
+      const words = "Is there a way to attach video?";
+
+      // The words-only Send the window makes, as a phone that follows #1903 sends it: one reply, to the latest message.
+      for (const [n, extra] of [[0, {}], [1, { skip_unanswered: false }]] as const) {
+        const t = ask(n);
+        expect((await reply(t.second, { words, questions: [], ...extra })).status).toBe(200);
+        expect(states(t.first)).toEqual(["open", "open"]);
+        expect(people(t.first).map((m) => [m.reply_to, m.body])).toEqual([
+          [t.second, `${words}\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox.`],
+        ]);
+      }
+
+      // What the iPhone app sent on 0.28.20 (its Keep open defaulted off): a reply to each message, both with skip_unanswered: true.
+      const t = ask(2);
+      expect((await reply(t.first, { words: "", questions: [], skip_unanswered: true })).status).toBe(200);
+      expect((await reply(t.second, { words, questions: [], skip_unanswered: true })).status).toBe(200);
+      expect(states(t.first)).toEqual(["sent", "sent"]);
+      expect(people(t.first).map((m) => m.body.split("\n")[0])).toEqual(["Skipped 1 question.", "Skipped 1 question."]);
+    } finally {
+      inbox.stop();
+    }
+  });
+
   test("one command sent twice at once is applied once: the second waits for the first and replays its answer", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-race-"));
     roots.push(dataDir);

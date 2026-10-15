@@ -147,6 +147,7 @@ jobs:
           packages/inbox/listColumn.test.tsx
           packages/inbox/endedSession.test.tsx
           packages/inbox/markRead.test.tsx
+          packages/inbox/wordsOnlyTwoAsks.test.tsx
           packages/inbox/projectMenu.test.tsx
           packages/inbox/fileBack.test.tsx
           packages/inbox/archived.test.tsx
