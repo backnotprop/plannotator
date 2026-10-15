@@ -253,6 +253,7 @@ function createHtmlAssetRegistry(folderPath?: string) {
 							"Access-Control-Allow-Origin": "*",
 						}
 					: {
+							// Sandboxed: an SVG or XML asset opened as a document never runs script on this origin (mirrors the Bun route).
 							...htmlAssetHeaders(contentType),
 							"Access-Control-Allow-Origin": "*",
 						},

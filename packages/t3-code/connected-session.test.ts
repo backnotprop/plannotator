@@ -131,6 +131,8 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
     // The command has exited. A stopped worker leaves the review alive; the next CLI adopts it.
     await daemonStatus(options, "thread-a", true);
     await eventually(async () => !(await daemonStatus(options, "thread-a") as { running: boolean }).running);
+    // A worker unregisters before it stops answering: once it reads as not running, its registry is gone.
+    expect(existsSync(join(daemonDirectory(options, "thread-a"), "daemon.json"))).toBe(false);
     expect(await cli({ t3_thread_id: "thread-a", action: "list" })).toContain(id);
     expect((await fetch(`${url}/api/approve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ feedback: "", annotations: [] }) })).status).toBe(200);
     await eventually(() => (messages.get("thread-a") ?? []).some((item) => item.text?.includes(`(${id}) — Approved.`)));

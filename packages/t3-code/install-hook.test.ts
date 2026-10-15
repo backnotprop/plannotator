@@ -85,6 +85,8 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   expect(parseT3HookCommand(`PLANNOTATOR_DATA_DIR='/data' '${executable}' t3-hook`)).toEqual({ executable });
 });
 
+// Five starts of the compiled binary, about 1.3 s each on a loaded CI runner:
+// past bun's 5 s default (it timed out at 6.4 s in CI), so the limit is explicit.
 test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper registers an executable hook and removes only its registration", () => {
   const { file, executable, dataDir } = fixture();
   mkdirSync(join(executable, ".."), { recursive: true });
@@ -112,4 +114,4 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
   const removed = Bun.spawnSync([executable, "t3-hook", "remove", "--settings", file], { env, stdout: "pipe", stderr: "pipe" });
   expect(removed.exitCode).toBe(0);
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({});
-});
+}, 30_000);

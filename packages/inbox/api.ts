@@ -509,6 +509,9 @@ export const inboxApi = {
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
     post<{ annotation: InboxAnnotationRecord }>('/api/inbox/annotations', { attachment_id: attachmentId, version, annotation }),
   removeAnnotation: (id: string) => post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/annotations/${encodeURIComponent(id)}/remove`, {}),
+  /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
+  openIn: (attachmentId: string, appId: string) =>
+    post<{ ok: boolean; error?: string }>('/api/inbox/open-in', { attachment_id: attachmentId, app_id: appId }),
   /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */
   uploadMarkup: async (image: Blob) =>
     readJson<{ path: string; name: string; url: string }>(

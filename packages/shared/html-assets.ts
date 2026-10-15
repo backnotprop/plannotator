@@ -314,28 +314,30 @@ export function htmlAssetDocumentHeaders(csp: string): Record<string, string> {
 }
 
 /**
- * Asset types a browser renders as a scriptable DOCUMENT when one is opened
- * directly (a top-level tab, a frame): SVG and XML (an XHTML-namespaced `.xml`
- * runs its scripts). Served from the session's own origin, such a file could
- * otherwise run script with this session's cookies and API.
+ * The policy EVERY non-HTML asset from the route gets. The route is on the
+ * session's own origin, and a browser renders several asset types as a
+ * scriptable document when one is opened directly (a top-level tab, a
+ * frame): SVG, and XML (an XHTML-namespaced `.xml` runs its scripts). A page
+ * in a top-level tab (the Inbox's new-tab page, or an asset URL pasted into a
+ * tab) has only its response CSP as a sandbox, so it can navigate its own tab
+ * to a sibling `.svg`; without a policy there, that SVG ran script on the
+ * session origin with its API. `sandbox` gives any such document an opaque
+ * origin and no script, and `default-src 'none'` lets it fetch nothing but
+ * its inline styles and same-origin or data: images. A response CSP does not
+ * apply to a subresource load, so `<img src>`, CSS, fonts, `<script src>`
+ * and media load exactly as before. Every type gets it, not a list of
+ * "scriptable" ones, so a type a browser renders as a document tomorrow is
+ * covered too.
  */
-const SCRIPTABLE_ASSET_TYPES = /^(image\/svg\+xml|application\/xml)\b/i;
+export const HTML_ASSET_SUBRESOURCE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:";
 
-/** The policy those assets get: an opaque origin with no scripts. */
-export const HTML_ASSET_SCRIPTABLE_CSP = "sandbox";
-
-/**
- * Headers for a support asset (not an embedded HTML document). SVG and XML get
- * `Content-Security-Policy: sandbox`, so one opened directly cannot run script
- * on the session origin; as an `<img>` (or CSS background) an SVG never runs
- * script and still loads exactly as before. Every asset gets `nosniff`.
- */
+/** Headers for a support asset (anything but an embedded HTML document): its type, the sandbox policy above, nosniff. */
 export function htmlAssetHeaders(contentType: string): Record<string, string> {
   return {
     "Content-Type": contentType,
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
-    ...(SCRIPTABLE_ASSET_TYPES.test(contentType) ? { "Content-Security-Policy": HTML_ASSET_SCRIPTABLE_CSP } : {}),
+    "Content-Security-Policy": HTML_ASSET_SUBRESOURCE_CSP,
   };
 }
 
