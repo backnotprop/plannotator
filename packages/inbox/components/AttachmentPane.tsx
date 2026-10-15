@@ -10,6 +10,7 @@ import {
   type InboxProjectRepo,
 } from '@plannotator/core/inbox-types';
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
+import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
@@ -875,6 +876,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               <b>Comments</b>
               <span className="ib-mut">{annotations.length}</span>
               <span className="ib-sp" />
+              {isVideo && <span className="ib-mut ib-sheet-note">By time</span>}
               <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
@@ -894,23 +896,40 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 ? (annotation) => {
                     const time = readInboxVideoTime(annotation);
                     if (time === null) return null;
+                    const frame = annotation.images?.[0];
                     return (
-                      <button
-                        type="button"
-                        className="ib-vtime"
-                        onClick={() => {
-                          setSelectedId(annotation.id);
-                          videoRef.current?.seekTo(annotation.id);
-                        }}
-                        title={`Go to ${formatInboxVideoTime(time)}`}
-                        data-video-card-time={annotation.id}
-                      >
-                        {formatInboxVideoTime(time)}
-                      </button>
+                      <span className="ib-vcardtop">
+                        <button
+                          type="button"
+                          className="ib-vtime"
+                          onClick={() => {
+                            setSelectedId(annotation.id);
+                            videoRef.current?.seekTo(annotation.id);
+                          }}
+                          title={`Go to ${formatInboxVideoTime(time)}`}
+                          data-video-card-time={annotation.id}
+                        >
+                          {formatInboxVideoTime(time)}
+                        </button>
+                        {frame && (
+                          <span className="ib-vframe ib-vframe-sm" title={frame.name} data-video-card-frame={annotation.id}>
+                            <img src={getImageSrc(frame.path)} alt="" />
+                            {/marked up$/.test(frame.name) && (
+                              <span className="ib-vpen" aria-hidden="true">
+                                <Icon name="pen" size={8} />
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </span>
                     );
                   }
                 : undefined
             }
+            // The moment and the frame are in the card's header; the quote ("cut.mp4 at 1:42") and the image row would repeat them.
+            cardParts={isVideo ? (annotation) => (readInboxVideoTime(annotation) === null ? {} : { quote: false, images: false }) : undefined}
+            title={isVideo ? 'Comments' : undefined}
+            titleNote={isVideo ? 'By time' : undefined}
             onSelect={(id) => {
               setSelectedId(id);
               if (isVideo) videoRef.current?.seekTo(id);

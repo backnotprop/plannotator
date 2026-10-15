@@ -206,6 +206,13 @@ export interface InboxDiskUsage {
   projects: InboxProjectUsage[];
 }
 
+/** An annotation as stored: without the exporter's `exportLocation`, which only the window sets, on its export copies. */
+function withoutExportLocation(annotation: Record<string, unknown>): Record<string, unknown> {
+  if (!("exportLocation" in annotation)) return annotation;
+  const { exportLocation: _dropped, ...rest } = annotation;
+  return rest;
+}
+
 function refusalError(refusal: InboxAnswerRefusal): InboxError {
   switch (refusal.code) {
     case "validation_error":
@@ -1940,7 +1947,9 @@ export class InboxStore {
       attachment_id: existing?.attachment_id ?? hit.attachment.id,
       path: hit.attachment.path,
       version: input.version,
-      annotation: annotation as Record<string, unknown>,
+      // `exportLocation` is the exporter's line the window computes at Send
+      // (a video comment's "At 1:42 …"): never taken from a client.
+      annotation: withoutExportLocation(annotation as Record<string, unknown>),
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,

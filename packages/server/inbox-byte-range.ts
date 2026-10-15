@@ -14,7 +14,8 @@
  * - several ranges: the full `200` (no multipart);
  * - a range that starts past the end (or `-0`, or any range of an empty
  *   file): `416` whose `Content-Range` names only the size (`bytes *` then `/size`);
- * - `If-Range` that is not exactly this version's ETag (or is a date): the
+ * - `If-Range` that is not exactly this version's (strong) ETag, by strong
+ *   comparison, so a weak tag never matches (or a date): the
  *   full `200`, so a player that resumes a file the agent re-rendered starts
  *   over instead of splicing two films.
  */
@@ -52,38 +53,105 @@ export function decideByteRange(range: string | null, size: number, options: { i
   return { kind: "partial", start, end: last === null ? size - 1 : Math.min(last, size - 1) };
 }
 
-/** Bytes `start..end` (inclusive) of a file handle, read in 1 MiB chunks and closed at its end or when the reader goes away. */
-export function handleRangeStream(handle: FileHandle, start: number, end: number): ReadableStream<Uint8Array> {
+/**
+ * A streamed body not pulled for this long has lost its reader: its file
+ * handle is closed and the stream ends with an error (a player that only
+ * paused asks again with a Range).
+ */
+export const STREAM_IDLE_CLOSE_MS = 30_000;
+
+/**
+ * Bytes `start..end` (inclusive; to the end of the file when `end` is
+ * omitted) of a file handle, read in 1 MiB chunks. The handle is closed at
+ * the end, on an error, when the reader cancels, and by an idle watchdog.
+ *
+ * Two Bun facts shape this (measured on Bun 1.3.14 against the Inbox, with
+ * `lsof`):
+ * - A client that aborts mid-answer does get `cancel` called, but Bun pulls
+ *   ahead, so a read is in flight then, and `FileHandle.close()` called while
+ *   a read is in flight never closes the descriptor: it stays open for good.
+ *   So a close asked for during a read is done when that read returns.
+ * - A client that is gone before the answer starts (it closed the socket
+ *   while the handler was still opening the file) gets a stream Bun neither
+ *   reads to the end nor cancels. Only a watchdog can close that handle: a
+ *   body not pulled for `STREAM_IDLE_CLOSE_MS` closes itself. The same covers
+ *   any runtime that never calls `cancel`.
+ * No Bun mechanism does this for us: `server.timeout(req, s)` and
+ * `idleTimeout` end a socket, never the stream's own resources, and the
+ * Inbox's handler is async (opening and checking the file), so the answer
+ * cannot be made synchronously.
+ */
+export function handleRangeStream(handle: FileHandle, start: number, end = Number.POSITIVE_INFINITY, options: { idleMs?: number } = {}): ReadableStream<Uint8Array> {
+  const idleMs = options.idleMs ?? STREAM_IDLE_CLOSE_MS;
   let position = start;
+  let reading = false;
+  let closing = false;
   let closed = false;
-  const close = () => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const stopTimer = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+  };
+  /** Close the descriptor now (never while a read is in flight: that close would be lost). */
+  const finish = () => {
     if (closed) return;
     closed = true;
+    stopTimer();
     void handle.close().catch(() => {});
   };
+  /** Ask to close: now, or when the read in flight returns. */
+  const close = () => {
+    closing = true;
+    stopTimer();
+    if (!reading) finish();
+  };
+  const arm = () => {
+    stopTimer();
+    timer = setTimeout(close, idleMs);
+    (timer as { unref?: () => void }).unref?.();
+  };
+  arm();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
+      if (closing) {
+        finish();
+        controller.error(new Error("The file was closed: this answer went unread too long."));
+        return;
+      }
+      stopTimer();
+      const left = end + 1 - position;
+      if (left <= 0) {
+        close();
+        controller.close();
+        return;
+      }
+      const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, left));
+      let bytesRead: number;
+      reading = true;
       try {
-        const left = end + 1 - position;
-        if (left <= 0) {
-          close();
-          controller.close();
-          return;
-        }
-        const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, left));
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
-        if (bytesRead === 0) {
-          // The file shrank under the stream: end it short rather than hang.
-          close();
-          controller.close();
-          return;
-        }
-        position += bytesRead;
-        controller.enqueue(buffer.subarray(0, bytesRead));
+        ({ bytesRead } = await handle.read(buffer, 0, buffer.length, position));
       } catch (error) {
+        reading = false;
         close();
         controller.error(error);
+        return;
+      } finally {
+        reading = false;
       }
+      if (closing) {
+        // Cancelled (or idle) while this read ran: close now that it returned.
+        finish();
+        return;
+      }
+      if (bytesRead === 0) {
+        // The file shrank under the stream: end it short rather than hang.
+        close();
+        controller.close();
+        return;
+      }
+      position += bytesRead;
+      controller.enqueue(buffer.subarray(0, bytesRead));
+      arm();
     },
     cancel() {
       close();
@@ -125,7 +193,7 @@ export async function byteRangeResponse(
   size: number,
   decision: ByteRangeDecision,
   headers: Record<string, string>,
-  options: { head?: boolean } = {},
+  options: { head?: boolean; idleMs?: number } = {},
 ): Promise<Response> {
   const base = { ...headers, "Accept-Ranges": "bytes" };
   if (decision.kind === "unsatisfiable") {
@@ -151,5 +219,5 @@ export async function byteRangeResponse(
       await handle.close().catch(() => {});
     }
   }
-  return new Response(handleRangeStream(handle, start, end), { status, headers: out });
+  return new Response(handleRangeStream(handle, start, end, { idleMs: options.idleMs }), { status, headers: out });
 }

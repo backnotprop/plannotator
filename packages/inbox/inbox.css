@@ -1109,6 +1109,11 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-vframe { position: relative; flex: none; width: 57px; height: 32px; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); background: #000; }
 .ib-imgcompose .ib-vframe { width: 71px; height: 40px; }
 .ib-vframe img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* a comment card in the panel: the moment and its frame, side by side (the quote and the image row are not drawn) */
+.ib-vcardtop { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-vframe.ib-vframe-sm { width: 48px; height: 27px; border-radius: 4px; }
+.ib-vframe-sm .ib-vpen { width: 12px; height: 12px; right: 1px; bottom: 1px; border-radius: 3px; }
+.ib-sheet-note { font-size: 12px; margin-right: 6px; }
 .ib-vpen { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; border-radius: 4px; display: flex; align-items: center; justify-content: center; background: var(--primary); color: var(--primary-foreground); }
 /* a phone: the film on top, its length and the comment count, the rail, the comments, and "Comment at 1:42" at the foot */
 .ib-vidphone .ib-vidstage { container-type: normal; justify-content: flex-start; align-items: stretch; padding: 0; overflow: auto; background: var(--card); }

@@ -376,6 +376,11 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
                     {image && (
                       <span className="ib-vframe">
                         <img src={getImageSrc(image.path)} alt="" />
+                        {/marked up$/.test(image.name) && (
+                          <span className="ib-vpen" aria-hidden="true">
+                            <Icon name="pen" size={9} />
+                          </span>
+                        )}
                       </span>
                     )}
                   </span>

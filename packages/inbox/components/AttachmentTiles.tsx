@@ -187,13 +187,14 @@ export function AttachmentTiles({
           // text and what a screen reader hears.
           const changed = changedLine(attachment, true);
           const changedLong = changedLine(attachment);
-          const counted = count > 0 ? `, ${plural(count, 'annotation')}` : '';
+          const isImage = readInboxAttachmentKind(attachment.kind) === 'image';
+          const isVideo = readInboxAttachmentKind(attachment.kind) === 'video';
+          // A video's caption keeps one separator throughout: "WebM video · 81.8 KB · 2 comments".
+          const counted = count > 0 ? (isVideo ? ` · ${plural(count, 'comment')}` : `, ${plural(count, 'annotation')}`) : '';
           const detail = `${changed ?? sizeLine(attachment)}${counted}`;
           const detailLong = `${changedLong ?? sizeLine(attachment)}${counted}`;
           // The header's band shows the same tiles while the foot's are on the page: ids stay unique.
           const detailId = `ib-${header ? 'hatt' : 'att'}-detail-${attachment.id}`;
-          const isImage = readInboxAttachmentKind(attachment.kind) === 'image';
-          const isVideo = readInboxAttachmentKind(attachment.kind) === 'video';
           const icon = isImage ? (
             <span className="ib-fi ib-thumb">
               <img src={attachmentImageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />

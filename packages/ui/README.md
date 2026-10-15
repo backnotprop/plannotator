@@ -355,6 +355,11 @@ slot and mentions on the edit box (0.45.0)".
   their own (the Inbox sorts a video's comments by the moment they are at).
   Ties keep creation order; replies still thread under their parent. Omit it
   and the panel sorts by creation exactly as before.
+- **`title?`, `titleNote?`, `cardParts?: (annotation) => { quote?, images? }`**
+  (unreleased) — the header's title (default "Annotations") and a quiet note
+  at its right, and per card whether the built-in quote and image row are
+  drawn (the Inbox's video comments draw the moment and the frame in
+  `renderCardHeader` instead). Omit them and the panel is as before.
 - **Export: `exportLocation`** (unreleased) — a string a host sets on the
   COPY of an annotation it hands the exporters (`exportAnnotations`,
   `exportLinkedDocAnnotations`): one line printed under the entry's heading

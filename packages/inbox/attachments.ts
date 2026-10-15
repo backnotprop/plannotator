@@ -469,7 +469,9 @@ export function attachmentFeedback(
       };
       groups.set(label, group);
     }
-    group.annotations.push(annotationOf(record));
+    // Never a client's `exportLocation` (a record from before the store dropped it): only the line computed below prints.
+    const { exportLocation: _stored, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
+    group.annotations.push(annotation as Annotation);
   }
   for (const group of groups.values()) {
     const code = codeCommentBlocks(group.annotations);

@@ -599,17 +599,22 @@ export type InboxAttachmentOpen =
       /**
        * A validator for this version, taken without reading the file (a seek
        * in a film is one request each): the sent version's `"<sha256>"`, and
-       * for the current file a weak tag of the opened descriptor's stat
-       * (`W/"<dev>-<ino>-<size>-<mtime>"`), which changes when the agent
+       * for the current file a tag of the opened descriptor's stat
+       * (`"<dev>-<ino>-<size>-<mtime µs>"`, strong as nginx's is), which changes when the agent
        * rewrites the file. The Range routes answer `If-Range` with it.
        */
       etag: string;
     }
   | { ok: false; code: InboxAttachmentUnavailable["code"]; message: string };
 
-/** The weak validator of a file as a descriptor saw it: no read, and it moves with any rewrite. */
+/**
+ * The validator of a file as a descriptor saw it: no read, and it moves with
+ * any rewrite (a new inode, size or mtime to the microsecond). Strong, as
+ * nginx's stat ETag is, because `If-Range` takes only a strong comparison
+ * (RFC 9110 13.1.5): a range is only ever served from those exact bytes.
+ */
 export function inboxStatEtag(stat: Pick<Stats, "dev" | "ino" | "size" | "mtimeMs">): string {
-  return `W/"${stat.dev.toString(16)}-${stat.ino.toString(16)}-${stat.size.toString(16)}-${Math.round(stat.mtimeMs * 1000).toString(16)}"`;
+  return `"${stat.dev.toString(16)}-${stat.ino.toString(16)}-${stat.size.toString(16)}-${Math.round(stat.mtimeMs * 1000).toString(16)}"`;
 }
 
 /**

@@ -1104,10 +1104,11 @@ Before this, a film was an attachment of kind `file`, and the app opened it with
 - One range (`Range: bytes=a-b`, `bytes=a-` or `bytes=-n`): `206 Partial Content` with `Content-Range: bytes a-b/size`. An end past the file is its last byte.
 - No range, a `Range` the Inbox does not read, or several ranges: the full `200`.
 - An unsatisfiable range (a start at or past the end, `bytes=-0`, any range of an empty file): `416` with `Content-Range: bytes */size` and no body.
-- `ETag`: the sent version's `"<sent_sha256>"`; the current file's weak `W/"<dev>-<ino>-<size>-<mtime>"`, from the stat of the descriptor the Inbox opened (never a hash per request: every seek is one). `If-Range` that is not exactly this version's ETag (or is a date) gets the full `200`: the file changed (the agent re-rendered it). Re-read `threads/:id/attachments` and start again.
+- `ETag`: the sent version's `"<sent_sha256>"`; the current file's `"<dev>-<ino>-<size>-<mtime µs>"` (strong, as nginx's stat tag is; `If-Range` compares strongly), from the stat of the descriptor the Inbox opened (never a hash per request: every seek is one). `If-Range` that is not exactly this version's ETag (or is a date) gets the full `200`: the file changed (the agent re-rendered it). Re-read `threads/:id/attachments` and start again.
 - `Content-Length`: on every answer of 1 MiB or less (a player's `bytes=0-1` probe, and a range of up to 1 MiB). A longer answer is streamed and arrives chunked, without `Content-Length` (the Inbox's HTTP server drops it on a streamed body); its size is the length `Content-Range` names (`206`), or the attachment's `size` (`200`).
 - Headers on every answer: `X-Content-Type-Options: nosniff`, `Cross-Origin-Resource-Policy: same-origin` and a sandbox CSP. `video`: `Content-Type` the sniffed `video/*` type, `Content-Disposition: inline`, `Cache-Control: private, no-cache`. `download`: `application/octet-stream` (`application/pdf` for a PDF), `Content-Disposition: attachment`, `Cache-Control: no-store`.
 - The door forwards three request headers of the phone's to the window: `Range` and `If-Range` (on a GET) and `If-None-Match` (the image routes' validator, 7.38), besides the event stream's `Last-Event-ID`; nothing else. It returns the window's status and headers unchanged: `206`, `Content-Range`, `Accept-Ranges`, `Content-Length`, `ETag`.
+- A streamed answer the app stops reading for 30 s is ended by the Inbox (its file handle closes) and the connection errors: a player that paused that long asks again from where it is, with a `Range`.
 - The door is GET only, so there is no HEAD. AVPlayer's first probe (`bytes=0-1`) returns the size in `Content-Range`.
 
 Suggested app shape: `AVURLAsset` on a custom scheme (`plannotator-video://<att id>?version=…`), with an `AVAssetResourceLoaderDelegate` that answers each `AVAssetResourceLoadingRequest` from the door with the app's pinned `URLSession` and bearer token. Set `contentInformationRequest.contentType` from `media_type` (or the `Content-Type` of `/video`), `contentLength` from the total in `Content-Range`, and `isByteRangeAccessSupported = true`. If an answer is a `200` (an older Inbox on `/download`), slice that body for the request, or fall back to the full download. ExoPlayer: a `DataSource` over the same requests.
@@ -1125,7 +1126,7 @@ Content-Type: video/mp4
 Content-Range: bytes 0-1/483393536
 Content-Length: 2
 Accept-Ranges: bytes
-ETag: W/"1000004-2b1f0a-1cd0b000-6b0d1a2f4c5e0"
+ETag: "1000004-2b1f0a-1cd0b000-6b0d1a2f4c5e0"
 Content-Disposition: inline; filename="launch-cut-v3.mp4"; filename*=UTF-8''launch-cut-v3.mp4
 Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'
 X-Content-Type-Options: nosniff

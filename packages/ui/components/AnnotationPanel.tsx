@@ -198,6 +198,21 @@ interface PanelProps {
    * creation order, exactly as before.
    */
   compareAnnotations?: (a: Annotation, b: Annotation) => number;
+  /**
+   * The panel's title (default "Annotations") and a quiet note at the right
+   * of its header (the Inbox's "By time" for a video's comments). Absent:
+   * the header is exactly as before.
+   */
+  title?: string;
+  titleNote?: string;
+  /**
+   * Which built-in parts a plan-annotation card draws: its quoted text
+   * (`quote`) and its attached images under the comment (`images`). A host
+   * that draws them itself (the Inbox's video comments show the moment and
+   * the frame in `renderCardHeader`) turns them off per card. Absent: both
+   * drawn, exactly as before.
+   */
+  cardParts?: (annotation: Annotation) => { quote?: boolean; images?: boolean };
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -237,6 +252,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   questionRows,
   onSelectQuestion,
   compareAnnotations,
+  title = 'Annotations',
+  titleNote,
+  cardParts,
 }) => {
   const isMobile = useIsMobile();
   const embedded = presentation === 'embedded';
@@ -347,7 +365,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
           <div className="flex h-10 items-center justify-between px-3">
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-medium text-foreground">
-                Annotations
+                {title}
               </h2>
               {headerCount > 0 && (
                 <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary/10 px-1 font-mono text-[10px] font-medium tabular-nums text-primary">
@@ -355,6 +373,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                 </span>
               )}
             </div>
+            {titleNote && <span data-annotation-panel-note="" className="ml-auto mr-1 text-[11px] text-muted-foreground">{titleNote}</span>}
             {mobilePanel && onClose && (
               <button
                 onClick={onClose}
@@ -494,6 +513,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                             readOnly={readOnly}
                             footer={group.isCurrent ? renderCardFooter?.(annotation) : undefined}
                             header={group.isCurrent ? renderCardHeader?.(annotation) : undefined}
+                            parts={group.isCurrent ? cardParts?.(annotation) : undefined}
                             mentionSource={mentionSource}
                             unanchored={group.isCurrent ? (unanchoredIds?.has(annotation.id) ?? false) : false}
                           />
@@ -607,6 +627,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                       readOnly={readOnly}
                       footer={renderCardFooter?.(entry.annotation)}
                       header={renderCardHeader?.(entry.annotation)}
+                  parts={cardParts?.(entry.annotation)}
                       mentionSource={mentionSource}
                       unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                     />
@@ -623,6 +644,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   readOnly={readOnly}
                   footer={renderCardFooter?.(entry.annotation)}
                   header={renderCardHeader?.(entry.annotation)}
+                  parts={cardParts?.(entry.annotation)}
                   mentionSource={mentionSource}
                   unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                 />
@@ -940,7 +962,9 @@ const AnnotationCard: React.FC<{
   mentionSource?: MentionSource;
   /** The annotation has no live location in the document (host-reported). */
   unanchored?: boolean;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false }) => {
+  /** Built-in parts to draw (see `cardParts`). */
+  parts?: { quote?: boolean; images?: boolean };
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false, parts }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
 
@@ -1083,9 +1107,11 @@ const AnnotationCard: React.FC<{
       ) : (
         <>
           {/* Quote — the annotated text */}
-          <p className="mb-1.5 line-clamp-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground/80">
-            "{annotation.originalText}"
-          </p>
+          {parts?.quote !== false && (
+            <p className="mb-1.5 line-clamp-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground/80">
+              "{annotation.originalText}"
+            </p>
+          )}
 
           {/* Comment/Replacement Text */}
           {annotation.type !== AnnotationType.DELETION && (
@@ -1103,7 +1129,7 @@ const AnnotationCard: React.FC<{
       )}
 
       {/* Attached Images */}
-      {annotation.images && annotation.images.length > 0 && (
+      {parts?.images !== false && annotation.images && annotation.images.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {annotation.images.map((img, idx) => (
             <div key={idx} className="text-center">

@@ -42,7 +42,7 @@ import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-image
 import { readInboxMarkup, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
-import { byteRangeResponse, decideByteRange } from "./inbox-byte-range";
+import { byteRangeResponse, decideByteRange, handleRangeStream } from "./inbox-byte-range";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createHtmlAssetRegistry } from "./html-assets";
@@ -70,36 +70,14 @@ export function contentDisposition(type: "inline" | "attachment", name: string):
   return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
-/** A file handle as a response body, read in 1 MiB chunks and closed at its end or when the reader goes away. */
-function handleStream(handle: FileHandle): ReadableStream<Uint8Array> {
-  let position = 0;
-  let closed = false;
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    void handle.close().catch(() => {});
-  };
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const buffer = Buffer.allocUnsafe(1024 * 1024);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
-        if (bytesRead === 0) {
-          close();
-          controller.close();
-          return;
-        }
-        position += bytesRead;
-        controller.enqueue(buffer.subarray(0, bytesRead));
-      } catch (error) {
-        close();
-        controller.error(error);
-      }
-    },
-    cancel() {
-      close();
-    },
-  });
+/**
+ * A file handle as a response body, read in 1 MiB chunks: the Range routes'
+ * stream (inbox-byte-range.ts), so the handle is closed at the end, on a
+ * cancel (after any read in flight), and by the idle watchdog when a reader
+ * vanishes.
+ */
+function handleStream(handle: FileHandle, idleMs?: number): ReadableStream<Uint8Array> {
+  return handleRangeStream(handle, 0, undefined, { idleMs });
 }
 
 /**
@@ -129,6 +107,8 @@ export interface InboxAttachmentRoutesContext {
   store: InboxStore;
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
+  /** How long a streamed answer may go unread before its file handle closes. Default `STREAM_IDLE_CLOSE_MS`; tests shorten it. */
+  streamIdleMs?: number;
 }
 
 type Version = "current" | "sent";
@@ -278,7 +258,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         "Content-Disposition": contentDisposition("inline", attachment.name),
         "Cache-Control": "private, no-cache",
         ETag: opened.etag,
-      });
+      }, { idleMs: context.streamIdleMs });
     }
 
     const bytesRoute = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/(image|download)$/.exec(path);
@@ -324,7 +304,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (route === "download") {
         // Any file streams to a native player (or resumes) by Range, from the same descriptor.
         const decision = decideByteRange(req.headers.get("range"), opened.size, { ifRange: req.headers.get("if-range"), etag: opened.etag });
-        return byteRangeResponse(opened.handle, opened.size, decision, headers, { head: req.method === "HEAD" });
+        return byteRangeResponse(opened.handle, opened.size, decision, headers, { head: req.method === "HEAD", idleMs: context.streamIdleMs });
       }
       if (req.method === "HEAD") {
         await opened.handle.close().catch(() => {});
@@ -334,7 +314,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         await opened.handle.close().catch(() => {});
         return new Response(null, { status: 304, headers });
       }
-      return new Response(handleStream(opened.handle), { headers: { ...headers, "Content-Length": String(opened.size) } });
+      return new Response(handleStream(opened.handle, context.streamIdleMs), { headers: { ...headers, "Content-Length": String(opened.size) } });
     }
 
     // The person's marked-up images (a comment drawn on an image attachment).
