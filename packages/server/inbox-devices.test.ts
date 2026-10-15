@@ -762,6 +762,7 @@ describe("the device door, in process", () => {
         const t = ask(n);
         expect((await reply(t.second, { words, questions: [], ...extra })).status).toBe(200);
         expect(states(t.first)).toEqual(["open", "open"]);
+        // Pinned word for word on purpose: the still-open line is the approved agent wording (approval "inbox-words-only-reply").
         expect(people(t.first).map((m) => [m.reply_to, m.body])).toEqual([
           [t.second, `${words}\n\nNo questions answered yet; all 2 are still open. Don't re-ask them; the person will answer in the Inbox.`],
         ]);
