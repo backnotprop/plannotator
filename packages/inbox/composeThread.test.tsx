@@ -154,7 +154,7 @@ test.skipIf(!hasDom)('the session stopped before it took it: Not delivered, and 
 test.skipIf(!hasDom)('delivered: the line says so, and nothing offers to move it', async () => {
   askerLive = false;
   const el = await render(started({ delivery: { state: 'delivered', host: 'claude-code', session: 'ses_gone', at: '2026-10-14T15:05:00.000Z' } }));
-  expect(el.querySelector('[data-delivery]')?.textContent).toMatch(/^Delivered to Claude Code, \d{1,2}:\d{2} [AP]M$/);
+  expect(el.querySelector('[data-delivery]')?.textContent).toMatch(/^Delivered to Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   expect(el.querySelector('[data-readdress]')).toBeNull();
   // Nothing waits, so the window does not ask about the session.
   expect(posted).toEqual([]);
