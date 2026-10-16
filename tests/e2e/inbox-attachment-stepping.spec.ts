@@ -9,13 +9,15 @@
  *
  * Proves: the bar under the file says "1 of 5 · SCOPE.md" and the header
  * drops the name; `]` and the › button step in thread order across the two
- * messages, keeping full screen and replacing the route; › greys at the end,
+ * messages, keeping the frame (full screen stays full screen, with its
+ * toolbar) and replacing the route; › greys at the end,
  * keeps focus, and says "Last file in this thread"; the list opens
  * upward, grouped by message, and jumps; inside the HTML page a plain `]`
  * steps while armed (Annotate) and does nothing in Interact or in the page's
  * text field; a typed image comment raises the question row, Keep writing
  * returns to it and "Save it and go on" saves it and steps; one Back returns
- * to the thread.
+ * to the thread; on a phone (always full screen) the toolbar's ⋯ opens every
+ * file of the thread as a sheet.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-attachment-stepping.spec.ts`.
@@ -106,7 +108,8 @@ async function shot(name: string): Promise<void> {
 }
 
 const pane = () => world.page.locator('[data-attachment-pane]');
-const label = () => world.page.locator('[data-step-label]');
+/** The position: the stepper's label beside the thread, the toolbar's N/M in full screen (both name it the same way). */
+const label = () => world.page.locator('[data-step-label], [data-full-view-position]');
 const nextButton = () => world.page.locator('[data-step-next]');
 const htmlFrame = () => world.page.frameLocator('[data-attachment-pane] iframe').first();
 
@@ -153,10 +156,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
-  // This spec proves full screen WITH the tools (header, panel, bar). An HTML file opens straight into full view
-  // while the shared hidden-tools choice says so (approval "inbox-full-view"); this person chose to keep the tools.
-  // Full view itself: inbox-full-view.spec.ts.
-  await context.addCookies([{ name: 'plannotator-html-chrome', value: encodeURIComponent(JSON.stringify({ sidebarOpen: false, panelOpen: false, toolsHidden: false, savedAt: Date.now() })), url }]);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('response', (response) => {
@@ -230,19 +229,23 @@ test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the
   await shot('01-side-markdown');
 });
 
-test('] and › step in thread order, keep full screen, and replace the route; inside the HTML page ] steps only while armed', async () => {
+test('] and › step in thread order, keep the frame, and replace the route; inside the HTML page ] steps only while armed', async () => {
   const page = world.page;
+  // Full screen: a step keeps it (and its toolbar), the route is replaced.
   await pane().getByRole('button', { name: 'Full screen' }).click();
   await expect(pane()).toHaveClass(/ib-full/);
-  await pane().focus();
   const historyBefore = await page.evaluate(() => history.length);
   await page.keyboard.press(']');
   await expectAt(2, 'checkout-flow.html');
   await expect(pane()).toHaveClass(/ib-full/);
+  await expect(page.locator('[data-full-view-bar]')).toBeVisible();
   expect(page.url()).toContain(`file=${world.ids['checkout-flow.html']}`);
   expect(await page.evaluate(() => history.length)).toBe(historyBefore);
   await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
   await shot('02-full-html');
+  // Beside the thread for the rest: a step keeps that frame too.
+  await page.getByRole('button', { name: 'Exit full screen' }).click();
+  await expect(pane()).not.toHaveClass(/ib-full/);
 
   // The page's text field keeps [ and ], armed or not.
   // (A click would pin the field while armed: focus it the way Tab would.)
@@ -380,63 +383,25 @@ test('one Back returns to the thread, however many files were stepped through', 
   expect(page.url()).toContain(`thread=${world.threadId}`);
 });
 
-test('a phone: Previous / "1 of 5" / Next, the list across the width', async () => {
+test('a phone: the file is full screen under its toolbar; ⋯ opens every file of the thread as a sheet', async () => {
   const page = world.page;
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await page.getByRole('button', { name: 'Open checkout-flow.html' }).click();
   await expect(pane()).toHaveClass(/ib-full/);
-  await expect(page.getByRole('button', { name: 'Next file: retry-states.mmd' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Previous file: SCOPE.md' })).toBeVisible();
-  await shot('06-phone-html');
-  await label().click();
-  await shot('07-phone-list');
-  await page.keyboard.press('Escape');
-  await expect(label()).toBeFocused();
-  await page.setViewportSize({ width: 1440, height: 900 });
-});
-
-test('a phone at an end: the note shows in the bar in place of the count, and nothing of ours covers the HTML page', async () => {
-  const page = world.page;
-  // A second thread whose first file is the page, so the page is on screen at an end.
-  const sent = await world.claude.send({
-    project_path: world.project,
-    thread: 'Phone check',
-    subject: 'The checkout page on a phone',
-    body: 'The page first, then the scope.',
-    attachments: ['proto/checkout-flow.html', 'docs/SCOPE.md'],
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${world.url}#thread=${sent.thread_id}`);
-  await page.getByRole('button', { name: 'Open checkout-flow.html' }).click();
-  await expect(pane()).toHaveClass(/ib-full/);
-  await expect(label()).toHaveAttribute('aria-label', '1 of 2, checkout-flow.html. Show every file in this thread');
+  await expect(page.locator('[data-full-view-bar]')).toBeVisible();
+  await expect(page.locator('[data-attachment-stepper]')).toHaveCount(0);
   await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
-  // Previous is greyed (aria-disabled) and keeps focus: pressing it says where you are.
-  await page.locator('[data-step-prev]').press('Enter');
-  const note = page.locator('[data-step-end-note]');
-  await expect(note).toHaveText('First file in this thread');
-  await expect(label()).not.toContainText('1 of 2');
-  const layout = await page.evaluate(() => {
-    const iframe = document.querySelector('[data-attachment-pane] iframe')!;
-    const frame = iframe.getBoundingClientRect();
-    const bar = document.querySelector('[data-view-foot]')!.getBoundingClientRect();
-    const noteBox = document.querySelector('[data-step-end-note]')!.getBoundingClientRect();
-    // What sits on top at a grid of points over the page: only the frame itself.
-    const covered: string[] = [];
-    for (let x = frame.left + 2; x < frame.right - 1; x += (frame.width - 4) / 6) {
-      for (let y = frame.top + 2; y < frame.bottom - 1; y += (frame.height - 4) / 8) {
-        const top = document.elementFromPoint(x, y);
-        if (top !== iframe) covered.push(`${Math.round(x)},${Math.round(y)} ${top?.tagName}.${top?.className}`);
-      }
-    }
-    return { covered, frameBottom: frame.bottom, barTop: bar.top, noteTop: noteBox.top, noteBottom: noteBox.bottom, barBottom: bar.bottom };
-  });
-  expect(layout.covered).toEqual([]);
-  expect(layout.noteTop).toBeGreaterThanOrEqual(layout.barTop);
-  expect(layout.noteBottom).toBeLessThanOrEqual(layout.barBottom);
-  expect(layout.barTop).toBeGreaterThanOrEqual(layout.frameBottom - 0.5);
-  await shot('08-phone-end-note');
+  await shot('06-phone-html');
+  const more = page.locator('[data-full-view-more]');
+  await more.click();
+  await page.locator('[data-full-view-menu-position]').click();
+  const peek = page.getByRole('grid', { name: 'Files in this thread' });
+  await expect(peek).toBeVisible();
+  await shot('07-phone-list');
+  await peek.getByRole('gridcell', { name: /retry-states\.mmd/ }).click();
+  await expect(pane()).toHaveAttribute('data-attachment-pane', world.ids['retry-states.mmd']!);
+  await expect(pane()).toHaveClass(/ib-full/);
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 

@@ -176,7 +176,7 @@ function placeOver(host: HTMLElement, threadRouted: boolean): Placement {
   const fileFoot = (view: Element, viewBox: DOMRect) => {
     const foot = view.querySelector('[data-view-foot]');
     const footBox = shown(foot);
-    const row = view.querySelector('[data-image-composer]');
+    const row = view.querySelector('[data-image-composer], [data-file-foot]');
     const rowBox = shown(row);
     const watch = [view, ...(footBox ? [foot!] : []), ...(rowBox ? [row!] : [])];
     const gap = footBox ? TOAST_FOOT_GAP : TOAST_LIST_GAP;

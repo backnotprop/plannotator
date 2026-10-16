@@ -133,7 +133,7 @@ function pane(records: InboxAnnotationRecord[], extra: Record<string, unknown> =
       onRemoved={noop}
       onOpenAt={noop}
       onClose={noop}
-      strip={{ picks: 0, annotations: records.length, onBack: noop, onWriteReply: noop }}
+      strip={{ picks: 0, annotations: records.length, onWriteReply: noop }}
       {...extra}
     />
   );

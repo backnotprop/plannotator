@@ -52,6 +52,9 @@ import { InboxList } from './components/InboxList';
 import { ThreadPane } from './components/Thread';
 import { SearchHost, type SearchLanding } from './components/SearchHost';
 import { onOpenSearchKey } from './search/searchShortcut';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
+import { isComposingKey, isEditableTarget, isRepeatKey } from './shortcuts/guards';
 import { EmptyState } from './components/EmptyState';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { cardReport, noteQuestionRows } from './agents';
@@ -1426,44 +1429,47 @@ function Inbox() {
   // dialog is up.
   const keysRef = useRef({ markRead, toast, thread, soundDialog, agentNoteOpen: false });
   keysRef.current = { markRead, toast, thread, soundDialog, agentNoteOpen: typeof agentNote === 'object' };
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || event.repeat) return;
-      const key = event.key.toLowerCase();
-      if (key !== 'e' && key !== 'z') return;
-      if (keysRef.current.soundDialog === 'open' || keysRef.current.agentNoteOpen || routeRef.current.guide) return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target) {
-        if (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
-        if (target.tagName === 'INPUT' && !['radio', 'checkbox'].includes((target as HTMLInputElement).type)) return;
-        if (target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], iframe, .ib-view, [data-step-guard]')) return;
-      }
-      // With a file open beside the thread, only a key aimed at the thread or the list counts.
-      if (routeRef.current.file && !target?.closest('section.ib-pane, .ib-listcol')) return;
-      const { markRead: toggle, toast: current, thread: open } = keysRef.current;
-      if (key === 'z') {
-        if (!current?.onUndo) return;
-        event.preventDefault();
-        current.onUndo();
-        return;
-      }
-      if (routeRef.current.page !== 'inbox') return;
-      // A row the keyboard is on wins over the thread open beside the list; a
-      // row that merely holds focus (clicked, or put there after a mouse close) does not.
-      const rowEl = target?.closest('.ib-listcol [data-row]') ?? null;
-      const rowId = rowEl && target && keyboardFocused(target) ? rowEl.getAttribute('data-row') : null;
-      const threadId = rowId ?? (open && open.thread_id === routeRef.current.thread ? open.thread_id : null);
-      if (!threadId) return;
-      const row = rowOf(threadId);
-      if (!row || !canToggleRead(row)) return;
-      event.preventDefault();
-      void toggle(threadId, !(row.read_at ?? null));
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // rowOf reads a ref.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  /**
+   * What E or Z does now, or null when it stands down (the rules: guards.ts
+   * for typing, composition and repeat; the rest is the thread's own).
+   */
+  const threadKeyAction = (event: KeyboardEvent, key: 'e' | 'z'): (() => void) | null => {
+    if (event.defaultPrevented || isRepeatKey(event) || isComposingKey(event)) return null;
+    if (keysRef.current.soundDialog === 'open' || keysRef.current.agentNoteOpen || routeRef.current.guide) return null;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target) {
+      if (isEditableTarget(target)) return null;
+      if (target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], iframe, .ib-view, [data-step-guard]')) return null;
+    }
+    // With a file open beside the thread, only a key aimed at the thread or the list counts.
+    if (routeRef.current.file && !target?.closest('section.ib-pane, .ib-listcol')) return null;
+    const { markRead: toggle, toast: current, thread: open } = keysRef.current;
+    if (key === 'z') return current?.onUndo ?? null;
+    if (routeRef.current.page !== 'inbox') return null;
+    // A row the keyboard is on wins over the thread open beside the list; a
+    // row that merely holds focus (clicked, or put there after a mouse close) does not.
+    const rowEl = target?.closest('.ib-listcol [data-row]') ?? null;
+    const rowId = rowEl && target && keyboardFocused(target) ? rowEl.getAttribute('data-row') : null;
+    const threadId = rowId ?? (open && open.thread_id === routeRef.current.thread ? open.thread_id : null);
+    if (!threadId) return null;
+    const row = rowOf(threadId);
+    if (!row || !canToggleRead(row)) return null;
+    return () => void toggle(threadId, !(row.read_at ?? null));
+  };
+  const threadKey = useRef<(() => void) | null>(null);
+  useShortcutScope({
+    scope: inboxThreadShortcuts,
+    handlers: {
+      markRead: {
+        when: (event) => (threadKey.current = threadKeyAction(event, 'e')) !== null,
+        handle: () => threadKey.current?.(),
+      },
+      undo: {
+        when: (event) => (threadKey.current = threadKeyAction(event, 'z')) !== null,
+        handle: () => threadKey.current?.(),
+      },
+    },
+  });
 
   const restart = async () => {
     setRestarting(true);

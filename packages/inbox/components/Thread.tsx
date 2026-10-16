@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { getHtmlChromeState, saveHtmlChromeState } from '@plannotator/ui/utils/htmlChrome';
 import type { InboxDecision, InboxDecisionDraft, InboxListRow, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxThread, InboxUpload } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer, QuestionStatus } from '@plannotator/core/question-block';
 import { inboxDecisionWords } from '@plannotator/core/inbox-questions';
@@ -1035,15 +1034,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const fileRecords = useMemo(() => records.filter((r) => !r.guide), [records]);
   /** Something here takes annotations: an attached file, or a guided review's diffs. */
   const takesAnnotations = allFiles.length > 0 || records.length > 0 || thread.messages.some((m) => m.guide);
-  const [full, setFull] = useState(false);
   /**
-   * Full view (approval "inbox-full-view"): Plannotator's "hide tools" over a
-   * full-screen file. An HTML file opens straight into it while the choice
-   * plan review shares (htmlChrome.ts `toolsHidden`, hidden by default) says
-   * so; the eye and ⌘⇧X on an HTML file write that choice back. A step keeps it.
+   * The open file is full screen (approval "inbox-one-fullscreen"): it fills
+   * the window under one floating toolbar, which always starts showing (the
+   * Inbox does not follow plan review's shared hide-tools choice). A step
+   * keeps it.
    */
-  const [fullView, setFullView] = useState(false);
-  /** A narrow window (a phone): the open file is always full screen. */
+  const [full, setFull] = useState(false);
   /** Bumped when the person opens a file, so focus moves into its pane. */
   const [paneFocus, setPaneFocus] = useState(0);
   const paneRef = useRef<AttachmentPaneHandle>(null);
@@ -1052,7 +1049,6 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
   const openFile = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'>, version: 'current' | 'sent' = 'current', focus: string | null = null) => {
     // HTML opens full screen; so does an image from a message's text (approval "inbox-image-viewer"). Documents open beside the thread.
     setFull(attachment.kind === 'html' || attachment.ref !== undefined);
-    setFullView(attachment.kind === 'html' && getHtmlChromeState().toolsHidden);
     onOpenFile({ id: attachment.id, version, focus });
   };
   /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file asks first). */
@@ -1627,7 +1623,6 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
       replyFiles.forget(sentFiles);
       setBox({ open: later, text: '' });
       setFull(false);
-      setFullView(false);
       await onChanged();
       await reloadFiles();
       // The reply and where it is now sit at the foot of the thread.
@@ -1773,7 +1768,6 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
     const name = openAttachment?.name ?? null;
     const go = () => {
       setFull(false);
-      setFullView(false);
       onBackToList!(name);
     };
     if (paneRef.current) paneRef.current.leave(null, go);
@@ -2478,19 +2472,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         steps={steps}
         // A step keeps the frame the person is in, and replaces the route.
         onStep={(attachmentId, version) => onOpenFile({ id: attachmentId, version, focus: null }, { replace: true })}
-        onToggleFull={() => {
-          const next = !full;
-          setFull(next);
-          // Full screen on an HTML file follows the shared hidden-tools choice, as plan review does.
-          setFullView(next && openAttachment.kind === 'html' && getHtmlChromeState().toolsHidden);
-        }}
-        fullView={fullView}
-        onFullView={(on) => {
-          // Beside the thread the eye takes the file full screen too: the pane beside the thread never hides its own chrome.
-          if (on && !full && !phone && !fileStacked) setFull(true);
-          setFullView(on);
-          if (openAttachment.kind === 'html') saveHtmlChromeState({ ...getHtmlChromeState(), toolsHidden: on });
-        }}
+        onToggleFull={() => setFull(!full)}
         focusId={file!.focus}
         focusRequest={paneFocus}
         fromPerson={thread.messages.find((m) => m.id === openAttachment.message_id)?.author.kind === 'person'}
@@ -2504,20 +2486,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, onClose, deci
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus }, { replace: true })}
         onClose={() => {
           setFull(false);
-          setFullView(false);
           onOpenFile(null);
         }}
         strip={{
           picks: picksCount,
           annotations: records.length,
-          onBack: () => {
-            setFull(false);
-            setFullView(false);
-            onOpenFile(null);
-          },
           onWriteReply: () => {
             setFull(false);
-            setFullView(false);
             openBox(picksCount > 0);
           },
         }}

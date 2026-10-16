@@ -1487,6 +1487,7 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     onAnnotateModeExit?: () => void;
     onAnnotateModeToggle?: () => void;
     onStep?: (dir: 1 | -1) => void;
+    onPageEscape?: () => void;
   } = {}) {
     if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
     const HtmlViewer = htmlViewerModule.HtmlViewer;
@@ -1508,6 +1509,7 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
           onAnnotateModeExit={options.onAnnotateModeExit}
           onAnnotateModeToggle={options.onAnnotateModeToggle}
           onStep={options.onStep}
+          onPageEscape={options.onPageEscape}
         />,
       );
     });
@@ -1622,6 +1624,31 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     await act(async () => { frames[frames.length - 1]!.focus(); });
     await second.post({ type: 'plannotator-bridge-step', dir: 1 });
     expect(interact).toEqual([]);
+  });
+
+  test('a bridge page-escape (an Escape the page did not use, in Interact) reaches the host only in Interact, with the frame focused, at most once per 150 ms', async () => {
+    // The Inbox leaves full screen on it. The page can post it itself, so it
+    // is honored only for a key the person pressed in the frame, never in
+    // Annotate (whose Escape is annotate-exit), and a loop is throttled.
+    const seen: string[] = [];
+    const { post } = await mountModeViewer({ annotateModeActive: false, onPageEscape: () => seen.push('escape') });
+    const iframe = document.querySelector<HTMLIFrameElement>('iframe')!;
+    await post({ type: 'plannotator-bridge-page-escape' });
+    expect(seen).toEqual([]);
+    await act(async () => { iframe.focus(); });
+    await post({ type: 'plannotator-bridge-page-escape' });
+    await post({ type: 'plannotator-bridge-page-escape' });
+    expect(seen).toEqual(['escape']);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, htmlViewerModule!.STEP_MESSAGE_MIN_INTERVAL_MS + 20)); });
+    await post({ type: 'plannotator-bridge-page-escape' });
+    expect(seen).toEqual(['escape', 'escape']);
+
+    const armed: string[] = [];
+    const second = await mountModeViewer({ annotateModeActive: true, onPageEscape: () => armed.push('escape') });
+    const frames = document.querySelectorAll<HTMLIFrameElement>('iframe');
+    await act(async () => { frames[frames.length - 1]!.focus(); });
+    await second.post({ type: 'plannotator-bridge-page-escape' });
+    expect(armed).toEqual([]);
   });
 });
 

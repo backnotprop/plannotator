@@ -217,10 +217,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(docs, 'install-flow.mmd'), FLOW);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
-  // This spec proves full screen WITH the tools (header, panel, bar). An HTML file opens straight into full view
-  // while the shared hidden-tools choice says so (approval "inbox-full-view"); this person chose to keep the tools.
-  // Full view itself: inbox-full-view.spec.ts.
-  await context.addCookies([{ name: 'plannotator-html-chrome', value: encodeURIComponent(JSON.stringify({ sidebarOpen: false, panelOpen: false, toolsHidden: false, savedAt: Date.now() })), url }]);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -414,7 +410,7 @@ test('a selection comment on the plan is saved and listed in the reply box chip'
 
   await pane.getByRole('button', { name: 'Full screen' }).click();
   await expect(pane).toHaveClass(/ib-full/);
-  await expect(pane.locator('[data-strip-chip]')).toHaveText('2 annotations');
+  await expect(pane.locator('[data-strip-chip]')).toContainText('2 annotations ride your next Send');
   await shot('2.3-full-screen-annotation-mode');
   await pane.getByRole('button', { name: 'Exit full screen' }).click();
   await expect(pane).not.toHaveClass(/ib-full/);
@@ -466,13 +462,15 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   };
   const pin = model.annotations.find((a) => a.attachment_id === world.attachments.html)!;
   expect(pin.annotation.htmlAnchor?.tagName.toLowerCase()).toBe('button');
-  await expect(pane.locator('[data-strip-chip]')).toHaveText('3 annotations');
+  await expect(pane.locator('[data-strip-chip]')).toContainText('3 annotations ride your next Send');
   await shot('2.4-html-full-screen-marker-pinned');
 
   // "Open in" → Browser (the split button's left half on an HTML file): the page in
   // a tab of its own, from its own folder, under the same sandbox. Only the new tab
   // is driven here; no app is ever launched by this spec.
-  const [tab] = await Promise.all([world.context.waitForEvent('page'), pane.locator('[data-open-in-primary="browser"]').click()]);
+  // Full screen has no header: Open in is in the toolbar's ⋯.
+  await pane.locator('[data-full-view-more]').click();
+  const [tab] = await Promise.all([world.context.waitForEvent('page'), page.locator(`[data-full-view-menu="${world.attachments.html}"] [data-open-in-item="browser"]`).click()]);
   await tab.waitForLoadState();
   expect(new URL(tab.url()).pathname).toMatch(/^\/api\/html-assets\/[0-9a-f]{16}\/admin-view\.html$/);
   await expect(tab.locator('#retry-all')).toHaveText('Retry all (40)');
@@ -916,6 +914,8 @@ test('Send carries the picks and then the annotations as feedback; wait_for_repl
   await pop.locator('[data-annotation-row]').nth(2).getByRole('button', { name: /admin-view\.html/ }).click();
   await expect(page.locator(`[data-attachment-pane="${world.attachments.html}"]`)).toBeVisible();
   expect(page.url()).toContain('at=');
+  // Full screen: Write the reply is in the comments drawer's foot (the drawer never opens by itself).
+  await page.locator(`[data-attachment-pane="${world.attachments.html}"] [data-full-view-comments]`).click();
   await page.locator(`[data-attachment-pane="${world.attachments.html}"]`).getByRole('button', { name: 'Write the reply' }).click();
   await expect(page.locator(`[data-attachment-pane="${world.attachments.html}"]`)).not.toHaveClass(/ib-full/);
 

@@ -822,7 +822,6 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-vfoot .ib-l { font-size: 13px; color: var(--muted-foreground); white-space: nowrap; }
 .ib-vfoot .ib-rchip { border: 1px solid var(--border); background: var(--card); }
 .ib-vfoot .ib-sp { flex: 1; }
-.ib-vreply { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .ib-stepper { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .ib-stepbox { display: inline-flex; align-items: center; gap: 1px; min-width: 0; padding: 2px; border-radius: 8px; border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); background: color-mix(in oklch, var(--muted) 35%, var(--card)); }
 .pn-inbox .ib-stepbtn { width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); flex: none; }
@@ -850,18 +849,6 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-stepguard .ib-gt b { font-weight: 600; }
 /* The open file's tile beside the thread. */
 .ib-att-t.ib-open-beside { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
-/* A narrow window (a phone): Previous / "3 of 5" / Next as 44 px buttons, the reply row under them. */
-.ib-vfoot.ib-vfoot-phone { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 10px 14px; }
-.ib-vfoot-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ib-vfoot-row .ib-sp { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-.ib-stepper.ib-stepphone { display: flex; gap: 8px; }
-.pn-inbox .ib-stepbig { height: 44px; min-width: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 14px; font-weight: 550; background: var(--card); }
-.pn-inbox .ib-stepbig[aria-disabled="true"] { opacity: 0.35; cursor: default; }
-.pn-inbox .ib-steppos.ib-stepmid { flex: 1; justify-content: center; height: 44px; max-width: none; }
-.ib-stepphone .ib-stepnote { white-space: normal; text-align: center; font-size: 12px; line-height: 1.25; min-width: 0; color: var(--foreground); }
-.ib-view.ib-phone .ib-vhead { padding: 0 6px 0 12px; gap: 6px; }
-.ib-view.ib-phone .ib-vhead .ib-fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ib-view.ib-phone .ib-vhead .ib-from, .ib-view.ib-phone .ib-vhead .ib-sp { display: none; }
 .ib-view.ib-phone .ib-vbody { grid-template-columns: minmax(0, 1fr); }
 .ib-view.ib-phone .ib-changed { flex-wrap: wrap; padding: 7px 12px; font-size: 12.5px; }
 .ib-imgstage.ib-swipes { touch-action: pan-y pinch-zoom; }
@@ -884,39 +871,72 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* the viewer's Global comment and Copy float right by the window's width; in a narrow pane they sit on their own line, as on a phone */
 .ib-fold [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
 
-/* Full view (approval "inbox-full-view", A · Pill): Plannotator's "hide tools" for a full-screen file. The header,
-   the changed line, the docked comments and the bottom bar are gone; the file fills the window. No motion: the chrome
-   goes at once, as in plan review. What floats over the file: the bar, the step chip, the question row, the sheets. */
+/* Full screen (approval "inbox-one-fullscreen", Drawer): one mode. The file fills the window; what floats over it is
+   one toolbar (it tucks into a corner handle), the changed chip (a fact about the file: it does not tuck), the step
+   chip and the question row. The comments are a drawer beside the page: the page narrows, it is not covered (no width
+   animation: the page reflows once). On a phone the drawer is the bottom sheet (its rules are in the phone query). */
 .ib-view.ib-full.ib-fullview { grid-template-rows: minmax(0, 1fr); }
-.ib-fvbar { position: absolute; top: 12px; right: 12px; z-index: 8; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 11px; background: color-mix(in oklch, var(--popover) 94%, transparent); color: var(--popover-foreground); border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.ib-view.ib-fullview .ib-vbody { grid-template-columns: minmax(0, 1fr); position: relative; }
+.ib-view.ib-fullview .ib-apanel { display: none; }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-vbody { grid-template-columns: minmax(0, 1fr) 320px; }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { display: flex; border-left-color: color-mix(in oklch, var(--border) 60%, transparent); }
+/* the file's own layers (the viewer draws at z-50) stay under the toolbar and the sheets */
+.ib-view.ib-fullview .ib-docarea { isolation: isolate; z-index: 0; }
+.ib-fullview .ib-sheet-h { flex: none; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 6px 0 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: 13.5px; }
+.ib-fullview .ib-sheet-h b { font-weight: 600; }
+.ib-fullview .ib-sheet-h .ib-sp { flex: 1; }
+.ib-fullview [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
+
+/* The dock: the toolbar, its tucked handle, and the corner where a pointer brings it back. A 0 × 0 box at the page's
+   top right (left of an open drawer); everything in it is placed from that corner. */
+.ib-fvdock { position: absolute; top: 0; right: 0; z-index: 8; width: 0; height: 0; }
+.ib-fvdock.ib-shift { right: 320px; }
+.ib-fvzone { position: absolute; top: 0; right: 0; width: 96px; height: 64px; pointer-events: none; }
+.ib-fvdock[data-bar="tucked"] .ib-fvzone, .ib-fvdock[data-bar="revealed"] .ib-fvzone { pointer-events: auto; }
+/* A touch screen has no pointer to rest in the corner: the box would only swallow taps on the page (the handle is tapped instead). */
+@media (hover: none) { .ib-fvdock .ib-fvzone, .ib-fvdock[data-bar] .ib-fvzone { pointer-events: none; } }
+.ib-fvbar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 11px; white-space: nowrap; background: color-mix(in oklch, var(--popover) 94%, transparent); color: var(--popover-foreground); border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease; }
 :root.light .ib-fvbar { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08); }
-/* the Comments sheet open over the file's right edge: the bar steps left of it */
-.ib-fvbar.ib-shift { right: calc(min(300px, 100%) + 12px); }
+/* Tucked: the toolbar slides off to the right (it is inert, so nothing in it takes focus). */
+.ib-fvdock[data-bar="tucked"] .ib-fvbar { transform: translateX(calc(100% + 24px)); opacity: 0; pointer-events: none; }
 .pn-inbox .ib-fvb { position: relative; height: 30px; min-width: 30px; padding: 0 7px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--muted-foreground); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; border: 1px solid transparent; }
 .pn-inbox .ib-fvb:hover { background: var(--muted); color: var(--foreground); }
 .pn-inbox .ib-fvb.ib-on { border-color: color-mix(in oklch, var(--primary) 60%, transparent); background: color-mix(in oklch, var(--primary) 15%, transparent); color: var(--primary); }
 .pn-inbox .ib-fvb.ib-fvcount { color: var(--foreground); }
 .pn-inbox .ib-fvb.ib-fvcount.ib-zero { color: var(--muted-foreground); font-weight: 500; }
-.pn-inbox .ib-fvb.ib-fvcount.ib-open { background: var(--muted); }
+.pn-inbox .ib-fvb.ib-fvcount.ib-open, .pn-inbox .ib-fvb.ib-fvmore.ib-open, .pn-inbox .ib-fvb.ib-fvposb[aria-expanded="true"] { background: var(--muted); }
 .pn-inbox .ib-fvb.ib-fvposb { color: var(--foreground); font-weight: 500; gap: 1px; }
 .ib-fvposb small { color: var(--muted-foreground); font-weight: 500; font-size: 12px; margin-right: 4px; }
-.pn-inbox .ib-fvb.ib-fveye { color: var(--foreground); }
+.pn-inbox .ib-fvb.ib-fvexit { color: var(--foreground); }
 .ib-fvdv { width: 1px; height: 18px; background: color-mix(in oklch, var(--border) 90%, transparent); margin: 0 3px; flex: none; }
 .ib-fvpos { display: inline-flex; }
-/* the peek opens under the bar, right-aligned with it */
-.ib-fvpeek { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; }
-/* the step chip: names the new file for a moment (FULL_VIEW_CHIP_MS); it only fades */
+/* The peek from the toolbar's N/M: under it, at its right edge. */
+.ib-fvpeek { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; white-space: normal; }
+/* The handle: what is left of the toolbar when it is tucked, flush with the corner. */
+.pn-inbox .ib-fvhandle { position: absolute; top: 12px; right: env(safe-area-inset-right); height: 34px; min-width: 34px; padding: 0 8px 0 9px; display: inline-flex; align-items: center; gap: 5px; border-radius: 10px 0 0 10px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); border-right: 0; background: color-mix(in oklch, var(--popover) 94%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: 12.5px; font-weight: 600; transition: opacity 160ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1); }
+:root.light .ib-fvhandle { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); }
+.pn-inbox .ib-fvhandle:hover { background: var(--popover); }
+.ib-fvdock:not([data-bar="tucked"]) .ib-fvhandle { opacity: 0; transform: translateX(100%); pointer-events: none; }
+.ib-fvhandle-n { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: var(--primary-foreground); font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.ib-fvhandle-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); flex: none; }
+/* A comment saved while the drawer is closed: the count bumps once. */
+.ib-bump { display: inline-block; animation: ib-bump 380ms cubic-bezier(0.23, 1, 0.32, 1); }
+@keyframes ib-bump { 0% { transform: scale(1); } 35% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .ib-fvbar, .ib-fvhandle { transition: none; } .ib-bump { animation: none; } }
+
 .ib-fvchip { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 10px; height: 38px; max-width: calc(100% - 32px); padding: 0 8px 0 14px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34); font-size: 13.5px; white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 150ms ease, visibility 0s linear 150ms; }
 .ib-fvchip.ib-on { opacity: 1; visibility: visible; transition: opacity 150ms ease; }
+/* With the drawer open the chip is centred on the page, not under the drawer. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fvchip { left: calc((100% - 320px) / 2); max-width: calc(100% - 352px); }
 .ib-fvchip .ib-stepn { color: var(--muted-foreground); font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .ib-fvchip-nm { font-weight: 600; min-width: 0; overflow: hidden; }
 .ib-fvchip-note { font-size: 12px; color: var(--muted-foreground); background: var(--muted); border-radius: 6px; padding: 3px 8px; }
 .ib-fvchip-keys { display: inline-flex; gap: 4px; }
 .ib-fvchip kbd { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; border-radius: 5px; border: 1px solid color-mix(in oklch, var(--border) 70%, transparent); background: var(--muted); font: 600 11px/1 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 @media (prefers-reduced-motion: reduce) { .ib-fvchip, .ib-fvchip.ib-on { transition: none; } }
-/* the question row comes back over the file, at its foot */
+/* The question row comes back as an overlay at the foot (there is no bar to sit on). */
 .ib-view.ib-fullview > .ib-stepguard { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; width: min(760px, calc(100% - 24px)); box-sizing: border-box; border: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); border-radius: 10px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); }
-/* the Comments sheet's foot: where the comments go, and the way to the reply */
+/* The drawer's foot: what rides the next Send, and the way to the reply. */
 .ib-fvfoot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); background: var(--card); }
 .ib-fvsend { margin: 0; font-size: 13px; line-height: 1.4; color: var(--muted-foreground); }
 .ib-fvsend b { color: var(--foreground); font-weight: 600; }
@@ -925,33 +945,36 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-fvfoot-pos { justify-content: flex-start; gap: 8px; min-width: 0; }
 .ib-fvfoot-pos .ib-stepn { color: var(--muted-foreground); font-variant-numeric: tabular-nums; font-size: 12.5px; white-space: nowrap; }
 .ib-fvfoot-nm { font-weight: 600; min-width: 0; overflow: hidden; white-space: nowrap; flex: 1; text-align: left; }
-/* a phone: the bar sits bottom right, above the home indicator, with 44 px targets (pen, count, eye); the position is in the sheet */
-.ib-fvbar.ib-fvbar-phone { top: auto; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); padding: 4px; border-radius: 14px; }
-.pn-inbox .ib-fvbar-phone .ib-fvb { height: 44px; min-width: 44px; border-radius: 10px; font-size: 14px; }
-.ib-view.ib-fullview.ib-phone.ib-panel-open .ib-fvbar { visibility: hidden; }
+/* A phone: the toolbar bottom right with 44 px targets, the handle a 44 × 52 px tab at the right edge. */
+/* ⋯'s menu on a phone: 44 px rows (the menu is portaled out of the pane, so it is matched by its own attribute). */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  [data-full-view-menu] [role="menuitem"] { min-height: 44px; font-size: 14px; }
+}
+.ib-fvdock.ib-fvdock-phone { top: auto; bottom: 0; right: 0; }
+.ib-fvdock-phone .ib-fvbar { top: auto; right: calc(12px + env(safe-area-inset-right)); bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); padding: 4px; border-radius: 14px; }
+.pn-inbox .ib-fvdock-phone .ib-fvb { height: 44px; min-width: 44px; border-radius: 10px; font-size: 14px; padding: 0 8px; }
+.pn-inbox .ib-fvdock-phone .ib-fvhandle { top: auto; bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); height: 52px; min-width: 44px; padding: 0 10px 0 12px; border-radius: 14px 0 0 14px; }
+.ib-view.ib-fullview.ib-phone.ib-panel-open .ib-fvdock { visibility: hidden; }
 .ib-view.ib-fullview.ib-phone .ib-fvchip { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); }
-/* an image's own size and Fit / Actual size bar moves to the top left, out from under the full-view bar */
+/* the image's size bar moves out from under the toolbar */
 .ib-view.ib-fullview:not(.ib-phone) .ib-imgbar { right: auto; left: 14px; }
-/* the changed line, compact: a persistent chip at the file's top left (styled like the step chip), with the same action */
-.ib-fvver { position: absolute; top: 12px; left: 12px; z-index: 8; display: flex; align-items: center; gap: 8px; min-height: 34px; max-width: calc(100% - 330px); box-sizing: border-box; padding: 6px 12px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid color-mix(in oklab, var(--warning) 40%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28); font-size: 13px; line-height: 1.3; }
+/* The changed chip: the changed line, compact, at the top left. It is a fact about the file, so it does not tuck. */
+.ib-fvver { position: absolute; top: 12px; left: 12px; z-index: 8; display: flex; align-items: center; gap: 8px; min-height: 34px; max-width: calc(100% - 360px); box-sizing: border-box; padding: 6px 12px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid color-mix(in oklab, var(--warning) 40%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28); font-size: 13px; line-height: 1.3; }
 :root.light .ib-fvver { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fvver { max-width: calc(100% - 680px); }
 .ib-fvver > .ib-ic { color: var(--warning); flex: none; }
 .ib-fvver-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-fvver .ib-vlink { flex: none; white-space: nowrap; }
 .ib-fvver .ib-vlink::before { content: "·"; margin-right: 8px; color: var(--muted-foreground); }
-/* what sits at the top left of a file moves down under it */
+/* the markdown toolstrip and the image's size bar sit under the chip */
 .ib-view.ib-fullview:has([data-full-view-changed]) .ib-toolstrip,
 .ib-view.ib-fullview:not(.ib-phone):has([data-full-view-changed]) .ib-imgbar { top: 56px; }
 .ib-view.ib-fullview:has([data-full-view-changed]) .ib-docscroll { padding-top: 100px; }
 .ib-view.ib-fullview.ib-phone .ib-fvver { top: calc(10px + env(safe-area-inset-top)); left: 10px; max-width: calc(100% - 20px); flex-wrap: wrap; row-gap: 2px; }
 .ib-view.ib-fullview.ib-phone .ib-fvver-t { white-space: normal; }
 .pn-inbox .ib-view.ib-fullview.ib-phone .ib-fvver .ib-vlink { min-height: 32px; }
-/* a phone: the file keeps clear of the status bar */
+/* a phone keeps clear of the status bar */
 .ib-view.ib-full.ib-fullview.ib-phone { padding-top: env(safe-area-inset-top); }
-/* the eye's label on its first appearance in a session (FullViewBar): fades after a few seconds; reduced motion just removes it */
-.ib-fveye-label { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; max-width: 90px; opacity: 1; transition: opacity 400ms ease, max-width 400ms ease; }
-.ib-fveye-label.ib-gone { opacity: 0; max-width: 0; }
-@media (prefers-reduced-motion: reduce) { .ib-fveye-label { transition: none; } }
 .ib-view.ib-fullview.ib-phone .ib-fvfoot { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-view.ib-fullview.ib-phone .ib-fvfoot .ib-btn { min-height: 44px; }
 
@@ -1557,10 +1580,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 30px; padding: 0 9px 0 4px; border-radius: 7px; color: var(--primary); font-size: 13.5px; font-weight: 550; white-space: nowrap; }
 .pn-inbox .ib-pback:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-pback-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* The full-screen file's foot names the reply in a sentence that a narrow window or pane wraps (at any width: a
-   1024 px window that does not stack still clipped "Write the reply"). One row fits at 1280 px and wider. */
-.pn-inbox .ib-vfoot:not(.ib-vfoot-phone) { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
-.pn-inbox .ib-vreply { flex-wrap: wrap; row-gap: 6px; }
+/* The stepping bar beside the thread wraps rather than cutting its parts in a narrow pane. */
+.pn-inbox .ib-vfoot { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
 
 /* ───────────── The Inbox on a phone ─────────────
    One screen at a time, like a mail app: the list, then a thread (Back to
@@ -1692,8 +1713,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-arow .ib-aa { min-height: 36px; }
   .ib-deccard { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; max-height: 85%; overflow-y: auto; border-radius: 16px 16px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
 
-  /* a file: the whole window, Back to the thread, the comments as a sheet */
-  .ib-view.ib-full { z-index: 40; grid-template-rows: calc(48px + env(safe-area-inset-top)) auto minmax(0, 1fr) auto auto; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  /* a file: always full screen (its toolbar leads with Back to the thread), the comments as a sheet */
+  .ib-view.ib-full { z-index: 40; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
   .ib-vhead { gap: 4px; padding: env(safe-area-inset-top) 6px 0 0; }
   .ib-vhead .ib-fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 15px; }
   .ib-vhead .ib-from, .ib-vhead .ib-sp { display: none; }
@@ -1710,8 +1731,6 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-changed { flex-wrap: wrap; padding: 8px 14px; }
   .ib-docscroll { padding: 56px 10px 24px; }
   .ib-toolstrip { top: 10px; left: 10px; }
-  /* the stepping bar (Previous / N of M / Next, then the reply) clears the home indicator */
-  .ib-vfoot.ib-vfoot-phone { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
   /* the viewer's Global comment and Copy float right on a desktop; on a phone they sit on their own line, so the file keeps the width */
   .ib-phone [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
   .ib-imgstage { padding: 12px; }
@@ -1857,8 +1876,6 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-toast.ib-toast-phone.ib-toast-wrap { height: auto; min-height: 44px; }
   .pn-inbox .ib-toast-phone .ib-tundo { position: relative; height: 36px; padding: 0 12px; font-size: 14px; }
   .pn-inbox .ib-toast-phone .ib-tundo::after { content: ""; position: absolute; inset: -4px; }
-  /* The file's reply strip: "ride your next Send" wraps under itself rather than being cut. */
-  .ib-vfoot-row .ib-sp { white-space: normal; text-overflow: clip; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   /* 44 px hit areas for small controls that keep their look: the reply's
      Keep open / Skip them, the question card's "Records a decision" (ui), and
      the file's toolstrip, Global comment and Copy file (ui). */
@@ -1879,19 +1896,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
      above and below, so the hit area is 28 + 16 = 44 px tall. Drawn the same. */
   .ib-phone .ib-toolstrip button { overflow: visible; clip-path: inset(-8px -4px round 8px); }
 }
-/* An iPhone SE's width has no room for the strip's sentence beside its chip and button. */
-@media (max-width: 359px) {
-  .ib-vfoot-row .ib-sp { visibility: hidden; }
-}
-/* A phone on its side: the stepping bar and the reply strip share one row, and the comments sheet takes the file's height. */
+/* A phone on its side: the comments sheet takes the file's height. */
 @media (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .ib-vfoot.ib-vfoot-phone { flex-direction: row; align-items: center; gap: 10px; min-height: 0; padding-top: 6px; padding-bottom: calc(6px + env(safe-area-inset-bottom)); }
-  .ib-vfoot-phone .ib-stepper.ib-stepphone { flex: none; gap: 6px; }
-  .pn-inbox .ib-vfoot-phone .ib-stepbig { width: 44px; padding: 0; }
-  .ib-vfoot-phone .ib-stepbig-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .pn-inbox .ib-vfoot-phone .ib-steppos.ib-stepmid { flex: none; padding: 0 12px; }
-  .ib-vfoot-phone .ib-vfoot-row { flex: 1; }
-  .ib-vfoot-phone .ib-vfoot-row .ib-sp { -webkit-line-clamp: 1; }
   .ib-phone.ib-panel-open .ib-apanel { height: calc(100% - 8px); }
 }
 
@@ -2431,6 +2437,8 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-split.ib-on .ib-st { background: var(--muted); color: var(--foreground); }
 .ib-split .ib-sa:hover:not(:disabled), .ib-split .ib-st:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
 .ib-appi { width: 16px; height: 16px; flex: none; display: block; }
+/* A menu portals out of .pn-inbox (Open in, full screen's ⋯): its line glyphs keep their stroke there too, never a filled shape. */
+svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--muted-foreground); }
 /* The menu portals to the body, outside .pn-inbox: its glyphs carry their own stroke. */
 [data-open-in-menu] svg.ib-ic { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 [data-open-in-menu] svg.ib-glyph { color: var(--muted-foreground); }

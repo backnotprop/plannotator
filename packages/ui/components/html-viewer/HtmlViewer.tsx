@@ -239,6 +239,13 @@ export interface HtmlViewerProps {
    *  key. Honored only while the frame holds focus, and at most once per
    *  STEP_MESSAGE_MIN_INTERVAL_MS. Absent: the message is ignored, as before. */
   onStep?: (dir: 1 | -1) => void;
+  /** Escape pressed inside the page in Interact that the page did not use
+   *  itself (no handler of the page cancelled it or stopped it, and focus was
+   *  not in one of its text fields): the host may close something of its own
+   *  (the Inbox leaves full screen). Never sent in Annotate, whose Escape is
+   *  `onAnnotateModeExit`. Honored only while the frame holds focus, and at
+   *  most once per STEP_MESSAGE_MIN_INTERVAL_MS. Absent: ignored, as before. */
+  onPageEscape?: () => void;
   /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
   vimModeEnabled?: boolean;
   /** Replace the iframe-local compact badge with the shared live key HUD. */
@@ -384,6 +391,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onAnnotateModeToggle,
       onToolsToggle,
       onStep,
+      onPageEscape,
       vimModeEnabled = false,
       vimHudEnabled = false,
       vimHudKeyPanelEnabled = true,
@@ -452,6 +460,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const annotateModeActiveRef = useRef(annotateModeActive);
     annotateModeActiveRef.current = annotateModeActive;
     const lastStepAtRef = useRef(0);
+    const onPageEscapeRef = useRef(onPageEscape);
+    onPageEscapeRef.current = onPageEscape;
+    const lastPageEscapeAtRef = useRef(0);
 
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
@@ -807,6 +818,17 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           if (now - lastStepAtRef.current < STEP_MESSAGE_MIN_INTERVAL_MS) return;
           lastStepAtRef.current = now;
           onStepRef.current?.(dir);
+          return;
+        }
+        if (isRecord(e.data) && e.data.type === `${PREFIX}page-escape`) {
+          // Like a step, the page could post this itself: honored only for a
+          // key pressed in the frame, in Interact, at most once per interval.
+          if (annotateModeActiveRef.current) return;
+          if (document.activeElement !== iframeRef.current) return;
+          const now = Date.now();
+          if (now - lastPageEscapeAtRef.current < STEP_MESSAGE_MIN_INTERVAL_MS) return;
+          lastPageEscapeAtRef.current = now;
+          onPageEscapeRef.current?.();
           return;
         }
         const vimCopy = parseVimBridgeCopy(e.data);

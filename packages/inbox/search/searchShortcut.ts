@@ -4,7 +4,8 @@
  * amendment 2026-10-14) to the rule that the Inbox has no shortcuts until the
  * centralized shortcut system exists; ⌘K is that system's first binding, so it
  * is defined here as a registry scope, matched and spelled by the registry's
- * own functions. Nothing else in the Inbox binds a key.
+ * own functions. It is composed into the Inbox's surface with the others
+ * (`packages/inbox/shortcuts/`).
  */
 import { defineShortcutScope, formatShortcutBindingTokens, getShortcutPlatform, matchesShortcutBinding } from '@plannotator/ui/shortcuts';
 import { isMac, isModKeyHeld } from '@plannotator/ui/utils/platform';

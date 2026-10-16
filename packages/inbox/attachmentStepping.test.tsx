@@ -89,7 +89,7 @@ interface Harness {
 }
 
 /** The pane as the thread drives it: a step opens the next file in place. */
-function Pane({ start, full = true, harness, steps = STEPS, phone = false }: { start: InboxAttachmentState; full?: boolean; harness: Harness; steps?: AttachmentStep[]; phone?: boolean }) {
+function Pane({ start, full = false, harness, steps = STEPS, phone = false }: { start: InboxAttachmentState; full?: boolean; harness: Harness; steps?: AttachmentStep[]; phone?: boolean }) {
   const [open, setOpen] = useState(start);
   const noop = () => {};
   const all = steps.map((s) => s.attachment);
@@ -103,7 +103,8 @@ function Pane({ start, full = true, harness, steps = STEPS, phone = false }: { s
       projectRoot="/work/shop"
       version="current"
       onVersion={noop}
-      full={full}
+      full={full || phone}
+      fullLocked={phone}
       onToggleFull={noop}
       focusId={null}
       readOnly={false}
@@ -111,7 +112,7 @@ function Pane({ start, full = true, harness, steps = STEPS, phone = false }: { s
       onRemoved={noop}
       onOpenAt={noop}
       onClose={() => harness.closed++}
-      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+      strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
       steps={steps}
       phone={phone}
       onStep={(id, version) => {
@@ -356,17 +357,22 @@ test.skipIf(!hasDom)('the peek opens a picture list, one row per message; it own
   expect(openId()).toBe(shotB.id);
 });
 
-test.skipIf(!hasDom)('on a phone the count opens the peek as a bottom sheet, three across; the backdrop closes it and focus returns to the count', async () => {
+test.skipIf(!hasDom)('on a phone (always full screen) the position in the comments sheet opens the peek as a bottom sheet, three across; the backdrop closes it and focus returns to the position', async () => {
   await render(<Pane start={shotA} harness={harnessOf()} phone />);
-  await act(async () => host!.querySelector<HTMLButtonElement>('[data-step-label]')!.click());
+  // No stepper under the file on a phone: the toolbar and its comments sheet carry the position.
+  expect(host!.querySelector('[data-attachment-stepper]')).toBeNull();
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-full-view-comments]')!.click());
+  const pos = host!.querySelector<HTMLButtonElement>('[data-full-view-foot] [data-full-view-position]')!;
+  await act(async () => pos.click());
   const sheet = document.querySelector<HTMLElement>('[data-image-peek-sheet]')!;
   expect(sheet).not.toBeNull();
   expect(sheet.querySelector('[data-image-peek="sheet"]')).not.toBeNull();
   expect(sheet.querySelector('[role="row"] [class*="grid-cols-3"]')).not.toBeNull();
   await act(async () => sheet.querySelector<HTMLElement>('[data-peek-backdrop]')!.click());
+  await settle();
   expect(document.querySelector('[data-image-peek-sheet]')).toBeNull();
-  // The backdrop covered everything: focus goes back to the count that opened it.
-  expect(document.activeElement).toBe(host!.querySelector('[data-step-label]'));
+  // The backdrop covered everything: focus goes back to the position that opened it.
+  expect(document.activeElement).toBe(pos);
 });
 
 test('images in a message come before its attached files, in text order; each says where it was', () => {
@@ -508,15 +514,3 @@ test.skipIf(!hasDom)('the arrows stand down inside a block that scrolls sideways
   expect(harness.steps.map((s) => s.id)).toEqual([shotB.id]);
 });
 
-test.skipIf(!hasDom)('on a phone the end note takes the place of the count in the bar, never floating over the file', async () => {
-  const harness = harnessOf();
-  await render(<Pane start={zip} harness={harness} phone />);
-  const label = host!.querySelector<HTMLButtonElement>('[data-step-label]')!;
-  expect(label.textContent).toContain('4 of 4');
-  await act(async () => host!.querySelector<HTMLButtonElement>('[data-step-next]')!.click());
-  const note = host!.querySelector('[data-step-end-note]')!;
-  expect(note.textContent).toBe('Last file in this thread');
-  expect(label.contains(note)).toBe(true);
-  expect(label.textContent).not.toContain('4 of 4');
-  expect(host!.querySelectorAll('[data-step-end-note]')).toHaveLength(1);
-});

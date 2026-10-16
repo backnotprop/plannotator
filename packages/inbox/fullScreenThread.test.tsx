@@ -1,12 +1,12 @@
 /**
- * Full view's remembered choice (approval "inbox-full-view", decision 2): the
- * whole window (InboxApp) over a REAL Inbox server in a temp data dir (its own
- * process, tests/helpers/inbox-dom-server.ts in its `open-in` mode, whose
- * thread carries page.html, plan.md, build.zip, shot.png). An HTML file opens
- * full screen straight into full view while the choice plan review shares
- * (the `plannotator-html-chrome` cookie, `toolsHidden`, hidden by default)
- * says so; the eye writes that same cookie both ways; Full screen on an HTML
- * file follows it; a markdown file opens beside the thread and never writes it.
+ * Full screen through the whole window (approval "inbox-one-fullscreen"):
+ * InboxApp over a REAL Inbox server in a temp data dir (its own process,
+ * tests/helpers/inbox-dom-server.ts in its `open-in` mode, whose thread
+ * carries page.html, plan.md, build.zip, shot.png). An HTML file opens full
+ * screen with the toolbar showing, whatever plan review's shared hide-tools
+ * choice says, and nothing here writes that choice; every opening starts
+ * showing; Exit puts the file beside the thread; the comments drawer left
+ * open comes back with the next file; a step keeps full screen.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
  */
@@ -25,6 +25,7 @@ const { getHtmlChromeState, saveHtmlChromeState } = (hasDom ? await import('@pla
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 const CHROME_COOKIE = 'plannotator-html-chrome';
+const DRAWER_COOKIE = 'plannotator-inbox-file-comments';
 
 type World = { project: string; openIn: { thread: string; ids: Record<string, string> } };
 
@@ -51,13 +52,13 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 3;
+const TESTS = 2;
 
 beforeAll(async () => {
   if (!hasDom) return;
   // A page on localhost, as the Inbox is served: about:blank keeps no readable cookies.
   (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
-  dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-fullview-dom-')));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-fullscreen-dom-')));
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
@@ -102,6 +103,7 @@ beforeEach(() => {
   if (!hasDom) return;
   world = worlds.shift()!;
   document.cookie = `${CHROME_COOKIE}=; path=/; max-age=0`;
+  document.cookie = `${DRAWER_COOKIE}=; path=/; max-age=0`;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
@@ -124,6 +126,7 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
   document.cookie = `${CHROME_COOKIE}=; path=/; max-age=0`;
+  document.cookie = `${DRAWER_COOKIE}=; path=/; max-age=0`;
 });
 
 async function until(check: () => boolean, what: string) {
@@ -149,73 +152,82 @@ async function renderThread() {
 }
 
 const view = () => host!.querySelector<HTMLElement>('.ib-view');
-const inFullView = () => view()?.hasAttribute('data-full-view') === true;
+const inFullScreen = () => view()?.hasAttribute('data-full-view') === true;
 async function openTile(name: string) {
   const tile = host!.querySelector<HTMLElement>(`.ib-attachments [data-attachment-id="${world.openIn.ids[name]}"], [data-attachment-id="${world.openIn.ids[name]}"]`)!;
   await act(async () => tile.click());
   await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids[name], `${name} open`);
 }
+/** Close the file beside the thread. */
 async function close() {
-  const button = host!.querySelector<HTMLButtonElement>('.ib-vhead [aria-label^="Close "]') ?? null;
-  if (button) await act(async () => button.click());
-  else await act(async () => host!.querySelector<HTMLButtonElement>('[data-full-view-eye]')!.click());
+  await act(async () => host!.querySelector<HTMLButtonElement>('.ib-vhead [aria-label^="Close "]')!.click());
 }
 
-test.skipIf(!hasDom)('an HTML file opens straight into full view by default; the eye shows the tools and writes the cookie plan review reads', async () => {
-  // Plan review's own halves of the record (its sidebar and its annotations drawer) are left as they were.
+const toolbarState = () => host!.querySelector('[data-full-view-dock]')?.getAttribute('data-bar') ?? null;
+
+test.skipIf(!hasDom)('an HTML file opens full screen with the toolbar showing, even where plan review keeps its tools hidden; Hide, Exit and Full screen never write that shared choice', async () => {
+  // Plan review's shared choice says hidden: the Inbox no longer follows it (owner's choice, approval "inbox-one-fullscreen").
   saveHtmlChromeState({ sidebarOpen: true, panelOpen: true, toolsHidden: true });
+  const chromeCookie = () => document.cookie.split('; ').find((c) => c.startsWith(`${CHROME_COOKIE}=`));
+  const before = chromeCookie();
   const el = await renderThread();
   await openTile('page.html');
-  await until(inFullView, 'full view');
-  expect(view()!.classList.contains('ib-full')).toBe(true);
+  await until(inFullScreen, 'full screen');
   expect(el.querySelector('.ib-vhead')).toBeNull();
+  expect(toolbarState()).toBe('pinned');
   expect(el.querySelector('[data-full-view-pen]')).not.toBeNull();
 
-  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-eye]')!.click());
-  await until(() => !inFullView(), 'the tools back');
-  expect(view()!.classList.contains('ib-full')).toBe(true);
-  expect(getHtmlChromeState()).toEqual({ sidebarOpen: true, panelOpen: true, toolsHidden: false });
+  // Hide tucks it; Exit puts the file beside the thread, focus on Full screen.
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-hide]')!.click());
+  expect(toolbarState()).toBe('tucked');
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-handle]')!.click());
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-exit="exit"]')!.click());
+  await until(() => !inFullScreen(), 'beside the thread');
+  expect(document.activeElement).toBe(el.querySelector('.ib-vhead [data-full-screen-toggle]'));
 
-  // Remembered: the next HTML file opens full screen with the tools.
+  // Full screen again: the toolbar starts showing.
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await until(inFullScreen, 'full screen again');
+  expect(toolbarState()).toBe('pinned');
+
+  // Closed and opened again: full screen, showing.
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-exit="exit"]')!.click());
   await close();
   await until(() => view() === null, 'the file closed');
   await openTile('page.html');
-  expect(inFullView()).toBe(false);
-  expect(view()!.classList.contains('ib-full')).toBe(true);
-
-  // And the other way: the header eye hides them again, written back.
-  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-html-tools-toggle]')!.click());
-  await until(inFullView, 'full view again');
-  expect(getHtmlChromeState().toolsHidden).toBe(true);
+  await until(inFullScreen, 'full screen once more');
+  expect(toolbarState()).toBe('pinned');
+  expect(getHtmlChromeState()).toEqual({ sidebarOpen: true, panelOpen: true, toolsHidden: true });
+  // Not even rewritten (its save time is the one plan review wrote).
+  expect(chromeCookie()).toBe(before);
 });
 
-test.skipIf(!hasDom)('a choice saved by plan review (tools shown) is followed; Exit / Full screen on the HTML file follows it again', async () => {
-  saveHtmlChromeState({ ...getHtmlChromeState(), toolsHidden: false });
-  const el = await renderThread();
-  await openTile('page.html');
-  expect(inFullView()).toBe(false);
-  const fullButton = () => [...el.querySelectorAll<HTMLButtonElement>('.ib-vhead button')].find((b) => /full screen/i.test(b.textContent ?? ''))!;
-  await act(async () => fullButton().click());
-  expect(view()!.classList.contains('ib-full')).toBe(false);
-  // Now hidden is the shared choice: Full screen opens straight into full view.
-  saveHtmlChromeState({ ...getHtmlChromeState(), toolsHidden: true });
-  await act(async () => fullButton().click());
-  await until(inFullView, 'full view from Full screen');
-});
-
-test.skipIf(!hasDom)('a markdown file opens beside the thread; its eye goes full view without touching the shared choice', async () => {
+test.skipIf(!hasDom)('a markdown file opens beside the thread; Full screen takes it to the one mode; the drawer left open comes back with the next file; a step keeps full screen', async () => {
   const el = await renderThread();
   await openTile('plan.md');
-  expect(view()!.classList.contains('ib-full')).toBe(false);
-  expect(inFullView()).toBe(false);
-  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-html-tools-toggle]')!.click());
-  await until(inFullView, 'full view');
-  expect(view()!.classList.contains('ib-full')).toBe(true);
-  expect(document.cookie.includes(CHROME_COOKIE)).toBe(false);
-  // A step to the HTML file keeps full view (the thread's order: page.html is before plan.md).
+  expect(inFullScreen()).toBe(false);
+  expect(el.querySelector('[data-html-tools-toggle]')).toBeNull();
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await until(inFullScreen, 'full screen');
+  expect(toolbarState()).toBe('pinned');
+  expect(document.activeElement).toBe(el.querySelector('[data-full-view-bar] button'));
+
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-comments]')!.click());
+  expect(view()!.classList.contains('ib-drawer')).toBe(true);
+  // A step to the HTML file keeps full screen and the drawer (the thread's order: page.html is before plan.md).
   await act(async () => {
     view()!.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true, cancelable: true }));
   });
   await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids['page.html'], 'the step');
-  expect(inFullView()).toBe(true);
+  expect(inFullScreen()).toBe(true);
+  expect(view()!.classList.contains('ib-drawer')).toBe(true);
+
+  // Closed, then another file taken full screen: the drawer is open as it was left.
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-exit="exit"]')!.click());
+  await close();
+  await until(() => view() === null, 'the file closed');
+  await openTile('plan.md');
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await until(inFullScreen, 'full screen');
+  expect(view()!.classList.contains('ib-drawer')).toBe(true);
 });

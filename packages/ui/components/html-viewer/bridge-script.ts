@@ -4032,12 +4032,36 @@ export const BRIDGE_SCRIPT = `(function() {
     window.getSelection().removeAllRanges();
     renderAnnotationOverlay();
   }
+  // An Escape in Interact that the page did not use (no handler cancelled it
+  // or stopped it on its way up, focus not in one of its text fields) is
+  // offered to the host as page-escape, after every handler had its turn: the
+  // Inbox leaves full screen with it. The page still got the key first.
+  var escapeReachedWindow = null;
+  window.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') escapeReachedWindow = e;
+  });
+  function offerUnusedEscape(e) {
+    if (e.repeat || e.isComposing || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    var t = e.target;
+    if (t && t.nodeType === 1) {
+      var tag = t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) return;
+      if (t.closest && t.closest('[contenteditable]:not([contenteditable="false"])')) return;
+    }
+    // The page's own dialog closes on this Escape (the browser's default, not a handler).
+    if (document.querySelector('dialog[open]')) return;
+    setTimeout(function() {
+      if (escapeReachedWindow !== e || e.defaultPrevented) return;
+      postToParent({ type: PREFIX + 'page-escape' });
+    }, 0);
+  }
   document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape' || vimEnabled) return;
     if (!annotateModeActive) {
       // Interact mode: Esc belongs to the page — except an open drag-comment
       // draft (drag-selection stays live in Interact) still closes first.
       if (pendingSelection) closePendingDraft();
+      else offerUnusedEscape(e);
       return;
     }
     if (pendingSelection) {

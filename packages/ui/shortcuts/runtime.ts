@@ -27,6 +27,12 @@ export interface UseShortcutScopeOptions<TScope extends ShortcutScopeDefinition<
   handlers: ShortcutHandlers<TScope>;
   target?: ShortcutEventTarget;
   stopOnMatch?: boolean;
+  /**
+   * Listen in the capture phase: the scope sees a key before the focused
+   * element does (a guard that must run before a component's own handler).
+   * Default false (bubble), so a component that used the key first can say so.
+   */
+  capture?: boolean;
 }
 
 interface ShortcutSequenceCandidate {
@@ -123,6 +129,7 @@ export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
   handlers,
   target = 'window',
   stopOnMatch = true,
+  capture = false,
 }: UseShortcutScopeOptions<TScope>) {
   const handlersRef = useRef(handlers);
   const sequenceRef = useRef<ShortcutSequenceState | null>(null);
@@ -206,11 +213,11 @@ export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
       if (started.length > 0) keyboardEvent.preventDefault();
     };
 
-    eventTarget.addEventListener('keydown', handleKeyDown);
+    eventTarget.addEventListener('keydown', handleKeyDown, capture);
     return () => {
-      eventTarget.removeEventListener('keydown', handleKeyDown);
+      eventTarget.removeEventListener('keydown', handleKeyDown, capture);
     };
-  }, [scope, stopOnMatch, target]);
+  }, [scope, stopOnMatch, target, capture]);
 }
 
 export function createShortcutScopeHook<TScope extends ShortcutScopeDefinition<any>>(scope: TScope) {

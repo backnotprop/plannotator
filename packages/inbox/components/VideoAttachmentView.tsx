@@ -393,7 +393,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       </div>
       {composer}
       {phone && !readOnly && !composing && (
-        <div className="ib-vbar">
+        <div className="ib-vbar" data-file-foot="">
           <button
             type="button"
             className="ib-btn ib-pri ib-vbig"

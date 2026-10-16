@@ -1,24 +1,44 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { formatShortcutBindingText, formatShortcutBindingTokens } from '@plannotator/ui/shortcuts';
 import { Icon } from '../icons';
 
 /**
- * The one floating bar of full view (approval "inbox-full-view", A · Pill):
- * the pane's header, docked comments and bottom bar are gone, and this is
- * what is left over the file. Top right on a desktop, bottom right with
- * 44 px targets on a phone. In order: the pen (HTML, Annotate / Interact),
- * the comment count (opens the pane's Comments sheet over the file), the
- * position `N/M ⌄` (opens the file peek; on a phone it lives in the sheet),
- * and the eye (the tools back). A toolbar, first in the pane's tab order.
+ * The toolbar of full screen (approval "inbox-one-fullscreen", Drawer): the
+ * file fills the window and this is all that is left over it. Top right on a
+ * desktop, bottom right with 44 px targets on a phone. In order: Back to the
+ * thread (where the file cannot sit beside the thread: a phone, a stacked
+ * window), the pen (HTML that takes comments), the comment count (opens the
+ * comments drawer), the position `N/M ⌄` (opens the file peek; not on a
+ * phone), ⋯ (Open in, Download, the other version), Exit full screen, and
+ * » Hide tools.
+ *
+ * Hide tucks the toolbar into a handle flush with the corner (‹, the comment
+ * count, an amber dot when the file changed since it was sent). A pointer in
+ * the corner (a 96 × 64 px box that holds the handle) reveals it after
+ * 120 ms; leaving tucks it again after 450 ms; while it is out that way the
+ * last button is a pin that keeps it out. Tucked, the toolbar is `inert` and
+ * the handle is a real button, so nothing invisible takes focus and focus is
+ * never lost. Every opening of full screen starts with the toolbar showing.
  */
+export type ToolbarState = 'pinned' | 'tucked' | 'revealed';
+
+/** The pointer rests in the corner this long before the toolbar comes out. */
+export const REVEAL_DELAY_MS = 120;
+/** And leaves it this long before the toolbar tucks again. */
+export const TUCK_DELAY_MS = 450;
+
 export interface FullViewBarProps {
   phone: boolean;
+  state: ToolbarState;
+  onState: (next: ToolbarState) => void;
+  /** Say something in the pane's live region. */
+  announce: (text: string) => void;
   /** Annotate is armed (HTML). */
   armed: boolean;
   /** The pen, on an HTML file that takes comments. */
   onToggleArmed?: () => void;
-  /** The comment count and its sheet; absent when the file takes no comments and no other file has any. */
+  /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and no other file has any. */
   comments: {
     count: number;
     open: boolean;
@@ -26,6 +46,10 @@ export interface FullViewBarProps {
     onToggle: () => void;
     buttonRef: RefObject<HTMLButtonElement | null>;
   } | null;
+  /** The handle's count: the open file's comments (also when the file takes none and the count button is gone). */
+  handleCount: number;
+  /** The file changed since it was sent (or is gone): an amber dot on the handle. */
+  changed: boolean;
   /** The position and its peek (a thread with two or more files, not on a phone). */
   position: {
     index: number;
@@ -37,21 +61,24 @@ export interface FullViewBarProps {
     /** The peek, drawn under the bar while open; it closes through `close` with its reason. */
     renderPeek: (close: (reason: 'key' | 'outside') => void) => ReactNode;
   } | null;
-  /** The eye's chord (`Mod+Shift+X`, HTML only), shown in its tooltip. */
+  /** ⋯: the trigger and its menu (OpenIn.tsx `FullScreenMore`), with whether its menu is open. */
+  more: ReactNode;
+  moreOpen: boolean;
+  /**
+   * The way out: Exit full screen (the file goes back beside the thread), or
+   * Back to the thread where the file can only be full screen (a phone, a
+   * stacked window), which leads the bar instead.
+   */
+  leave: { kind: 'exit' | 'back'; onLeave: () => void };
+  /** The Hide / Show tools chord (`Mod+Shift+X`, HTML only), shown in the tooltips. */
   chord: string | null;
-  onEye: () => void;
-  eyeRef: RefObject<HTMLButtonElement | null>;
-  /** The Comments sheet is open over the file's right edge (desktop): the bar steps left of it. */
+  /** The comments drawer is open beside the page (desktop): the dock sits left of it. */
   shifted: boolean;
 }
 
-/** How long the eye's "Show tools" label stays on its first appearance (then it fades). */
-export const EYE_LABEL_MS = 4000;
-/** The label shows once per page session, on the first full view. */
-let eyeLabelSeen = false;
-/** Tests: show the eye's label again. */
-export function resetFullViewEyeLabelForTests() {
-  eyeLabelSeen = false;
+export interface FullViewBarHandle {
+  /** ⌘⇧X: tuck a showing toolbar, show a tucked one. */
+  toggle: () => void;
 }
 
 function Keys({ binding }: { binding: string }) {
@@ -69,7 +96,9 @@ function Keys({ binding }: { binding: string }) {
   );
 }
 
-function Tip({ text, binding, phone, children }: { text: string; binding?: string | null; phone: boolean; children: React.ReactElement }) {
+function Tip({ text, note, binding, phone, children }: { text: string; note?: string; binding?: string | null; phone: boolean; children: React.ReactElement }) {
+  // A phone has no hover: a tooltip there only opens on focus, unseen, and takes the next Escape for itself. The buttons carry their names.
+  if (phone) return children;
   return (
     <Tooltip
       side={phone ? 'top' : 'bottom'}
@@ -77,6 +106,7 @@ function Tip({ text, binding, phone, children }: { text: string; binding?: strin
       content={
         <span className="flex flex-col gap-1">
           <span>{text}</span>
+          {note && <span className="text-muted-foreground">{note}</span>}
           {binding && <Keys binding={binding} />}
         </span>
       }
@@ -86,9 +116,96 @@ function Tip({ text, binding, phone, children }: { text: string; binding?: strin
   );
 }
 
-export function FullViewBar(props: FullViewBarProps) {
-  const { phone, comments, position } = props;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(function FullViewBar(props, ref) {
+  const { phone, comments, position, state } = props;
+  const barId = `ib-fvbar-${useId().replace(/:/g, '')}`;
+  const dockRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const handleRef = useRef<HTMLButtonElement>(null);
   const posRef = useRef<HTMLButtonElement>(null);
+  /** Where focus goes once the next state is drawn (the toolbar's inert flips first). */
+  const pendingFocus = useRef<'handle' | 'bar' | null>(null);
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tuckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const popoverOpen = (position?.open ?? false) || props.moreOpen;
+  const popoverRef = useRef(popoverOpen);
+  popoverRef.current = popoverOpen;
+  const where = phone ? 'bottom right' : 'top right';
+
+  const clearTimers = () => {
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+    if (tuckTimer.current) clearTimeout(tuckTimer.current);
+    revealTimer.current = null;
+    tuckTimer.current = null;
+  };
+  useEffect(() => clearTimers, []);
+
+  const set = (next: ToolbarState, focus: 'handle' | 'bar' | null = null, saying?: string) => {
+    clearTimers();
+    pendingFocus.current = focus;
+    props.onState(next);
+    if (saying) props.announce(saying);
+    // The same state again (a pin pressed twice): the focus still lands.
+    if (next === stateRef.current) applyFocus();
+  };
+  const setRef = useRef(set);
+  setRef.current = set;
+
+  const applyFocus = () => {
+    const focus = pendingFocus.current;
+    pendingFocus.current = null;
+    if (focus === 'handle') handleRef.current?.focus({ preventScroll: true });
+    else if (focus === 'bar') barRef.current?.querySelector<HTMLElement>('button:not([disabled]), a[href]')?.focus({ preventScroll: true });
+  };
+  // Inert flips with the state, before paint: focus lands once it has. Focus is never lost: what held it and goes inert hands it on.
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (!pendingFocus.current && active && active !== document.body) {
+      if (state === 'tucked' && barRef.current?.contains(active)) pendingFocus.current = 'handle';
+      else if (state !== 'tucked' && active === handleRef.current) pendingFocus.current = 'bar';
+    }
+    if (barRef.current) barRef.current.inert = state === 'tucked';
+    if (handleRef.current) handleRef.current.inert = state !== 'tucked';
+    applyFocus();
+    if (state !== 'revealed') clearTimers();
+  }, [state]);
+
+  const hide = (focusHandle: boolean) => set('tucked', focusHandle ? 'handle' : null, `Tools hidden. They are in the ${where} corner.`);
+  useImperativeHandle(
+    ref,
+    () => ({
+      toggle: () => {
+        if (stateRef.current === 'pinned') setRef.current('tucked', dockRef.current?.contains(document.activeElement) ? 'handle' : null, `Tools hidden. They are in the ${where} corner.`);
+        else setRef.current('pinned', null, 'Tools shown.');
+      },
+    }),
+    [where],
+  );
+
+  /** A revealed toolbar tucks again when the pointer has left, unless a popover is open or the keyboard is in it. */
+  const maybeTuck = () => {
+    if (stateRef.current !== 'revealed' || popoverRef.current) return;
+    const active = document.activeElement;
+    if (active && dockRef.current?.contains(active) && active.matches(':focus-visible')) return;
+    setRef.current('tucked');
+  };
+
+  // A press outside the revealed toolbar (and its popovers) tucks it again; a pinned toolbar never moves.
+  useEffect(() => {
+    if (state !== 'revealed') return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list]')) return;
+      setRef.current('tucked');
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [state]);
+
   /** The peek closed from the keyboard or by a choice: focus back on the position (not after a press elsewhere). */
   const refocus = useRef(false);
   const peekOpen = position?.open ?? false;
@@ -99,124 +216,203 @@ export function FullViewBar(props: FullViewBarProps) {
       posRef.current?.focus({ preventScroll: true });
     }
   }, [peekOpen]);
-
-  const eyeText = 'Show tools';
-  // A first-time reader finds the way back: the eye says "Show tools" the first time the bar appears in this page session.
-  const [eyeLabel, setEyeLabel] = useState<'on' | 'fading' | null>(() => (eyeLabelSeen ? null : 'on'));
-  useEffect(() => {
-    if (eyeLabel === null) return;
-    eyeLabelSeen = true;
-    const fade = setTimeout(() => setEyeLabel('fading'), EYE_LABEL_MS);
-    const gone = setTimeout(() => setEyeLabel(null), EYE_LABEL_MS + 450);
-    return () => {
-      clearTimeout(fade);
-      clearTimeout(gone);
-    };
-    // Once per mount: the timers run from the first appearance.
-  }, []);
   const closePeek = (reason: 'key' | 'outside') => {
     // A press elsewhere on a desktop leaves focus where it went; Esc, Tab or a choice put it back on N/M.
     if (reason === 'outside' && !phone) refocus.current = false;
     position?.onOpenChange(false);
   };
+
+  const count = props.handleCount;
+  // A comment saved while the drawer is closed bumps the count (never on the first draw; with the drawer open the new card shows there instead).
+  const lastCount = useRef(count);
+  const [bump, setBump] = useState(0);
+  const drawerOpen = comments?.open ?? false;
+  useEffect(() => {
+    if (count > lastCount.current && !drawerOpen) setBump((n) => n + 1);
+    lastCount.current = count;
+  }, [count, drawerOpen]);
+  const handleLabel = `Show tools${count ? `, ${plural(count, 'comment')}` : ''}${props.changed ? ', file changed since sent' : ''}`;
+  const pinned = state === 'pinned';
+  const hideText = pinned ? 'Hide tools' : 'Keep tools out';
+  const iconSize = phone ? 18 : 15;
+
+  const leaveButton = (
+    <Tip text={props.leave.kind === 'exit' ? 'Exit full screen' : 'Back to the thread'} note={props.leave.kind === 'exit' ? 'The file goes back beside the thread' : undefined} phone={phone}>
+      <button
+        type="button"
+        className="ib-fvb ib-fvexit"
+        onClick={props.leave.onLeave}
+        aria-label={props.leave.kind === 'exit' ? 'Exit full screen' : 'Back to the thread'}
+        data-full-view-exit={props.leave.kind}
+      >
+        <Icon name={props.leave.kind === 'exit' ? 'collapse' : 'chevL'} size={props.leave.kind === 'exit' ? iconSize : phone ? 20 : 16} />
+      </button>
+    </Tip>
+  );
+
   return (
     <div
-      className={`ib-fvbar${phone ? ' ib-fvbar-phone' : ''}${props.shifted ? ' ib-shift' : ''}`}
-      role="toolbar"
-      aria-label="Full view"
-      data-full-view-bar=""
+      ref={dockRef}
+      className={`ib-fvdock${phone ? ' ib-fvdock-phone' : ''}${props.shifted ? ' ib-shift' : ''}`}
+      data-full-view-dock=""
+      data-bar={state}
+      onPointerEnter={(event) => {
+        if (event.pointerType === 'touch' || phone) return;
+        if (tuckTimer.current) clearTimeout(tuckTimer.current);
+        tuckTimer.current = null;
+        if (stateRef.current === 'tucked' && !revealTimer.current) revealTimer.current = setTimeout(() => {
+          revealTimer.current = null;
+          if (stateRef.current === 'tucked') setRef.current('revealed');
+        }, REVEAL_DELAY_MS);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === 'touch' || phone) return;
+        if (revealTimer.current) clearTimeout(revealTimer.current);
+        revealTimer.current = null;
+        if (stateRef.current === 'revealed') tuckTimer.current = setTimeout(() => {
+          tuckTimer.current = null;
+          maybeTuck();
+        }, TUCK_DELAY_MS);
+      }}
+      onBlur={(event) => {
+        // Focus that leaves the revealed toolbar tucks it, without moving focus.
+        if (stateRef.current !== 'revealed') return;
+        const to = event.relatedTarget as Element | null;
+        if (!to || dockRef.current?.contains(to) || to.closest('[data-full-view-menu], [data-step-list]')) return;
+        setRef.current('tucked');
+      }}
+      // Capture: a tooltip open on the focused button would take Escape first, and the count's Escape closes its open drawer.
+      onKeyDownCapture={(event) => {
+        const onOpenCount = comments?.open && comments.buttonRef.current === event.target;
+        if (event.key === 'Escape' && stateRef.current === 'revealed' && !popoverRef.current && !onOpenCount) {
+          event.preventDefault();
+          setRef.current('tucked', 'handle');
+        }
+      }}
     >
-      {props.onToggleArmed && (
-        <Tip text={props.armed ? 'Annotate: click an element or select text to comment. Esc to interact' : 'Interact: clicks reach the page. Click to annotate'} phone={phone}>
+      {!phone && <div className="ib-fvzone" aria-hidden="true" />}
+      <button
+        type="button"
+        ref={handleRef}
+        className="ib-fvhandle"
+        onClick={(event) => set('revealed', event.detail === 0 ? 'bar' : null)}
+        aria-controls={barId}
+        aria-expanded={state !== 'tucked'}
+        aria-label={handleLabel}
+        title="Show tools"
+        data-full-view-handle=""
+      >
+        <Icon name="chevL" size={phone ? 18 : 14} />
+        {count > 0 && (
+          <span key={bump} className={`ib-fvhandle-n${bump ? ' ib-bump' : ''}`}>
+            {count}
+          </span>
+        )}
+        {props.changed && <span className="ib-fvhandle-dot" aria-hidden="true" />}
+      </button>
+      <div
+        ref={barRef}
+        id={barId}
+        className={`ib-fvbar${phone ? ' ib-fvbar-phone' : ''}`}
+        role="toolbar"
+        aria-label="Full screen"
+        data-full-view-bar=""
+      >
+        {props.leave.kind === 'back' && leaveButton}
+        {props.onToggleArmed && (
+          <Tip text={props.armed ? 'Annotate: click an element or select text to comment. Esc to interact' : 'Interact: clicks reach the page. Click to annotate'} phone={phone}>
+            <button
+              type="button"
+              className={`ib-fvb${props.armed ? ' ib-on' : ''}`}
+              onClick={props.onToggleArmed}
+              aria-pressed={props.armed}
+              aria-label={props.armed ? 'Annotate mode' : 'Interact mode'}
+              data-full-view-pen=""
+            >
+              <Icon name="pen" size={phone ? 18 : 16} />
+            </button>
+          </Tip>
+        )}
+        {comments && (
+          <Tip text={comments.open ? 'Close the comments' : 'Comments'} phone={phone}>
+            <button
+              type="button"
+              ref={comments.buttonRef}
+              className={`ib-fvb ib-fvcount${comments.count === 0 ? ' ib-zero' : ''}${comments.open ? ' ib-open' : ''}`}
+              onClick={comments.onToggle}
+              onKeyDown={(event) => {
+                // Escape on the count closes its open drawer (focus stays here); full screen stays.
+                if (event.key === 'Escape' && comments.open && !event.defaultPrevented) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  comments.onToggle();
+                }
+              }}
+              aria-expanded={comments.open}
+              aria-controls={comments.controls}
+              aria-label={`Comments, ${comments.count}`}
+              data-full-view-comments=""
+            >
+              <Icon name="comment" size={iconSize} />
+              <span key={bump} className={bump ? 'ib-bump' : undefined}>
+                {comments.count}
+              </span>
+            </button>
+          </Tip>
+        )}
+        {position && (
+          <span className="ib-fvpos">
+            <button
+              type="button"
+              ref={posRef}
+              className="ib-fvb ib-fvposb"
+              aria-haspopup="grid"
+              aria-expanded={position.open}
+              aria-controls={position.open ? position.peekId : undefined}
+              aria-label={`${position.index + 1} of ${position.total}, ${position.name}. Show every file in this thread`}
+              onClick={() => position.onOpenChange(!position.open)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' && !position.open) {
+                  event.preventDefault();
+                  position.onOpenChange(true);
+                }
+              }}
+              data-full-view-position=""
+              data-peek-opener=""
+            >
+              <span>{position.index + 1}</span>
+              <small>/{position.total}</small>
+              <span className={`ib-stepchev${position.open ? ' ib-on' : ''}`} aria-hidden="true">
+                <Icon name="chevD" size={12} />
+              </span>
+            </button>
+            {position.open && (
+              <div className="ib-fvpeek" data-step-list="">
+                {position.renderPeek(closePeek)}
+              </div>
+            )}
+          </span>
+        )}
+        <span className="ib-fvdv" aria-hidden="true" />
+        {props.more}
+        {props.leave.kind === 'exit' && leaveButton}
+        <Tip text={hideText} binding={props.chord} phone={phone}>
           <button
             type="button"
-            className={`ib-fvb${props.armed ? ' ib-on' : ''}`}
-            onClick={props.onToggleArmed}
-            aria-pressed={props.armed}
-            aria-label={props.armed ? 'Annotate mode' : 'Interact mode'}
-            data-full-view-pen=""
+            className="ib-fvb ib-fvhide"
+            onClick={() => {
+              if (pinned) hide(true);
+              // The pin becomes » in place: focus stays on it.
+              else set('pinned', null, 'Tools pinned. They stay out.');
+            }}
+            aria-label={hideText}
+            aria-description={props.chord ? `Shortcut: ${formatShortcutBindingText(props.chord)}` : undefined}
+            data-full-view-hide={pinned ? 'hide' : 'pin'}
           >
-            <Icon name="pen" size={phone ? 18 : 16} />
+            <Icon name={pinned ? 'chevsR' : 'pin'} size={iconSize} />
           </button>
         </Tip>
-      )}
-      {comments && (
-        <Tip text={comments.open ? 'Close the comments' : 'Comments'} phone={phone}>
-          <button
-            type="button"
-            ref={comments.buttonRef}
-            className={`ib-fvb ib-fvcount${comments.count === 0 ? ' ib-zero' : ''}${comments.open ? ' ib-open' : ''}`}
-            onClick={comments.onToggle}
-            onKeyDown={(event) => {
-              // Escape on the count closes its open sheet (focus stays here); full view stays.
-              if (event.key === 'Escape' && comments.open && !event.defaultPrevented) {
-                event.preventDefault();
-                comments.onToggle();
-              }
-            }}
-            aria-expanded={comments.open}
-            aria-controls={comments.controls}
-            aria-label={`Comments, ${comments.count}`}
-            data-full-view-comments=""
-          >
-            <Icon name="comment" size={phone ? 18 : 15} />
-            <span>{comments.count}</span>
-          </button>
-        </Tip>
-      )}
-      {position && (
-        <span className="ib-fvpos">
-          <button
-            type="button"
-            ref={posRef}
-            className="ib-fvb ib-fvposb"
-            aria-haspopup="grid"
-            aria-expanded={position.open}
-            aria-controls={position.open ? position.peekId : undefined}
-            aria-label={`${position.index + 1} of ${position.total}, ${position.name}. Show every file in this thread`}
-            onClick={() => position.onOpenChange(!position.open)}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown' && !position.open) {
-                event.preventDefault();
-                position.onOpenChange(true);
-              }
-            }}
-            data-full-view-position=""
-            data-peek-opener=""
-          >
-            <span>{position.index + 1}</span>
-            <small>/{position.total}</small>
-            <span className={`ib-stepchev${position.open ? ' ib-on' : ''}`} aria-hidden="true">
-              <Icon name="chevD" size={12} />
-            </span>
-          </button>
-          {position.open && (
-            <div className="ib-fvpeek" data-step-list="">
-              {position.renderPeek(closePeek)}
-            </div>
-          )}
-        </span>
-      )}
-      <span className="ib-fvdv" aria-hidden="true" />
-      <Tip text={eyeText} binding={props.chord} phone={phone}>
-        <button
-          type="button"
-          ref={props.eyeRef}
-          className="ib-fvb ib-fveye"
-          onClick={props.onEye}
-          aria-pressed="true"
-          aria-label={eyeText}
-          aria-description={props.chord ? `Shortcut: ${formatShortcutBindingText(props.chord)}` : undefined}
-          data-full-view-eye=""
-        >
-          <Icon name="eyeOff" size={phone ? 19 : 16} />
-          {eyeLabel && (
-            <span className={`ib-fveye-label${eyeLabel === 'fading' ? ' ib-gone' : ''}`} aria-hidden="true" data-full-view-eye-label="">
-              {eyeText}
-            </span>
-          )}
-        </button>
-      </Tip>
+      </div>
     </div>
   );
-}
+});

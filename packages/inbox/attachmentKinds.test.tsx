@@ -126,7 +126,7 @@ test.skipIf(!hasDom)('the image pane draws the image from its route and offers a
       onRemoved={noop}
       onOpenAt={noop}
       onClose={noop}
-      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+      strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
     />,
   );
   expect(host!.querySelector('.ib-imgstage')!.getAttribute('data-src')).toBe(`/api/inbox/attachments/${shot.id}/image`);
@@ -163,7 +163,7 @@ test.skipIf(!hasDom)('a text file too large to show (413 attachment_too_large) o
       onRemoved={noop}
       onOpenAt={noop}
       onClose={noop}
-      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+      strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
     />,
   );
   await act(async () => {
@@ -198,12 +198,12 @@ function renderPane(attachment: InboxAttachmentState, options: { phone?: boolean
       onRemoved={noop}
       onOpenAt={noop}
       onClose={noop}
-      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+      strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
     />,
   );
 }
 
-// Rows 47 and 61: a PDF takes no comments, so it has no panel beside it and no Comments button on a phone.
+// Rows 47 and 61: a PDF takes no comments, so it has no panel beside it and no Comments count in a phone's full-screen toolbar.
 test.skipIf(!hasDom)('a PDF has no comments panel or Comments button, unless other files have comments to list', async () => {
   await renderPane(spec);
   expect(host!.querySelector('[data-attachment-pane]')!.classList.contains('ib-nopanel')).toBe(true);
@@ -212,15 +212,15 @@ test.skipIf(!hasDom)('a PDF has no comments panel or Comments button, unless oth
 
   await renderPane(spec, { phone: true });
   expect(host!.querySelector('[data-download-card]')).not.toBeNull();
-  expect(host!.querySelector('[data-annotations-sheet]')).toBeNull();
+  expect(host!.querySelector('[data-full-view-comments]')).toBeNull();
   act(() => root!.unmount());
   host!.remove();
 
-  // Another file's comment: the panel lists it, so a phone keeps the button to open it.
+  // Another file's comment: the panel lists it, so a phone's toolbar keeps the count that opens it.
   const note = record(shot, imageCommentAnnotation({ id: 'ann-shot', name: 'checkout.png', text: 'Cut off.' }), 'ann-shot');
   await renderPane(spec, { phone: true, others: [shot], records: [note] });
   expect(host!.querySelector('[data-attachment-pane]')!.classList.contains('ib-nopanel')).toBe(false);
-  const button = host!.querySelector<HTMLButtonElement>('[data-annotations-sheet]')!;
+  const button = host!.querySelector<HTMLButtonElement>('[data-full-view-comments]')!;
   expect(button).not.toBeNull();
   expect(button.getAttribute('aria-label')).toMatch(/^Comments, \d+$/);
   const panel = host!.querySelector('.ib-apanel')!;

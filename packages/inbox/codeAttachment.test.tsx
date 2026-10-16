@@ -81,7 +81,7 @@ async function openPane(text: string, file: InboxAttachmentState = attachment, r
       onRemoved={noop}
       onOpenAt={noop}
       onClose={noop}
-      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+      strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
     />,
   );
   await act(async () => {

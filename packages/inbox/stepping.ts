@@ -7,6 +7,7 @@
 
 import { inboxAttachmentKindLabel, type InboxAttachmentState, type InboxMessageWire } from '@plannotator/core/inbox-types';
 import { agentName, whenTime } from './format';
+import { hasCommandModifier, inOverlay, isComposingKey, isEditableTarget, isRepeatKey } from './shortcuts/guards';
 
 /** One file in the thread's sequence, with the message it came in. */
 export interface AttachmentStep {
@@ -76,17 +77,8 @@ export function stepAnnouncement(steps: readonly AttachmentStep[], index: number
   return `${index + 1} of ${steps.length}, ${attachment.name}, ${kind}${changed}${from}`;
 }
 
-/** Where focus is a place to type: `[` `]` and the arrows are text there. */
-export function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  const el = target as HTMLElement;
-  if (el.isContentEditable) return true;
-  if (el.closest('[contenteditable]:not([contenteditable="false"])')) return true;
-  const tag = el.tagName;
-  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
-  if (tag === 'INPUT') return !['button', 'checkbox', 'radio', 'submit', 'reset', 'range', 'color', 'file', 'image'].includes((el as HTMLInputElement).type);
-  return false;
-}
+/** Where focus is a place to type: the shared rule (shortcuts/guards.ts), kept here for the files that import it from stepping. */
+export { isEditableTarget };
 
 /** Elements that use the arrow keys themselves (the diagram canvas pans, a zoomed image scrolls, menus move). */
 const ARROW_OWNERS =
@@ -128,13 +120,13 @@ export function stepKeyIntent(event: KeyboardEvent, context: StepKeyContext): 1 
   const bracket = key === ']' || key === '[';
   const arrow = key === 'ArrowRight' || key === 'ArrowLeft';
   if (!bracket && !arrow) return null;
-  if (event.isComposing || event.repeat) return null;
-  if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  if (isComposingKey(event) || isRepeatKey(event)) return null;
+  if (hasCommandModifier(event)) return null;
   if (context.blocked) return null;
   const target = event.target instanceof Element ? event.target : null;
   if (isEditableTarget(target)) return null;
   // A dialog or popover over the window (the image annotator, a composer) keeps its keys.
-  if (target?.closest('[role="dialog"], [role="alertdialog"], [data-popover-layer], [data-pn-image-annotator-stage]')) return null;
+  if (inOverlay(target)) return null;
   if (typeof document !== 'undefined' && document.querySelector('[data-pn-image-annotator-stage]')) return null;
   if (!context.full) {
     const pane = context.pane;

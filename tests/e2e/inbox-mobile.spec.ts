@@ -452,21 +452,25 @@ for (const phone of [
       expect(viewBox.x).toBeLessThan(1);
       expect(viewBox.width).toBeGreaterThan(viewport.width - 2);
       await expect(pane).toBeHidden();
-      // The desktop's Full screen and close give way to Back; the annotations panel waits behind Comments.
+      // Full screen, the one mode (approval "inbox-one-fullscreen"): no header, one toolbar led by Back to the thread;
+      // the comments wait behind its count.
+      await expect(view.locator('.ib-vhead')).toHaveCount(0);
       await expect(view.getByRole('button', { name: 'Full screen' })).toHaveCount(0);
+      await expect(view.locator('[data-full-view-bar]')).toBeVisible();
       await expect(view.locator('.ib-apanel')).toBeHidden();
       await shot(page, '7-file');
       expect(await sideways(page)).toEqual([]);
-      expect(await overlaps(page, '.ib-vhead', '.ib-pback, .ib-fn, .ib-btn')).toEqual([]);
-      expect(await smallTargets(page, '.ib-vhead [data-phone-back], .ib-vhead .ib-btn, .ib-vfoot .ib-btn')).toEqual([]);
-      await view.locator('[data-annotations-sheet]').click();
+      expect(await overlaps(page, '[data-full-view-bar]', '.ib-fvb')).toEqual([]);
+      expect(await smallTargets(page, '[data-full-view-bar] .ib-fvb')).toEqual([]);
+      await view.locator('[data-full-view-comments]').click();
       const sheet = view.getByRole('region', { name: 'Comments' });
       await expect(sheet).toBeVisible();
-      // A sheet up from the bar under the file, over the file, under the header.
+      // A sheet up from the bottom edge, over the file.
       const sheetBox = (await sheet.boundingBox())!;
       const fileBox = (await view.locator(".ib-vbody").boundingBox())!;
       expect(Math.abs(sheetBox.y + sheetBox.height - (fileBox.y + fileBox.height))).toBeLessThan(2);
-      expect(sheetBox.y).toBeGreaterThan((await view.locator('.ib-vhead').boundingBox())!.height);
+      expect(sheetBox.y).toBeGreaterThan(fileBox.y);
+      expect(await smallTargets(page, '[data-full-view-foot] .ib-btn')).toEqual([]);
       await shot(page, '8-file-comments');
       expect(await sideways(page)).toEqual([]);
       await sheet.getByRole('button', { name: 'Close the comments' }).click();
@@ -491,7 +495,10 @@ for (const phone of [
       await pane.locator('.ib-att-t', { hasText: 'retry-policy.md' }).click();
       const view = page.locator('section.ib-view');
       await expect(view.getByText('Failed refunds are retried with exponential backoff')).toBeVisible();
-      await view.getByRole('button', { name: /^Next file/ }).click();
+      // No stepper on a phone: ⋯ opens every file of the thread, and a pick steps there (a replace, like a step).
+      await view.locator('[data-full-view-more]').click();
+      await page.locator('[data-full-view-menu-position]').click();
+      await page.getByRole('grid', { name: 'Files in this thread' }).getByRole('gridcell').nth(1).click();
       await expect(view.getByText('The on-call is paged once per refund')).toBeVisible();
       expect(await page.evaluate(() => (window.history.state as { ibFrom?: string } | null)?.ibFrom)).toBe(`#thread=${world.threads.attach}`);
       await view.getByRole('button', { name: 'Back to the thread' }).click();
@@ -701,7 +708,7 @@ for (const side of [
 ]) {
   test.describe(side.name, () => {
     const { defaultBrowserType: _browser, ...device } = side.device;
-    test("an open file's stepping bar and reply strip share one row, so the comments sheet has the room", async () => {
+    test("an open file on its side: the toolbar's 44 px controls keep apart, and the comments sheet has the room", async () => {
       // (WebKit launches without the config's Chromium flags, which Linux WebKit exits on.)
       const browser = side.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
       try {
@@ -711,18 +718,12 @@ for (const side of [
         await page.locator('section.ib-pane .ib-att-t', { hasText: 'retry-policy.md' }).click();
         const view = page.locator('section.ib-view');
         await expect(view.getByText('Failed refunds are retried with exponential backoff')).toBeVisible();
-        const foot = view.locator('[data-view-foot]');
-        const [footBox, stepBox, stripBox] = await Promise.all([foot.boundingBox(), foot.locator('[data-attachment-stepper]').boundingBox(), foot.locator('[data-view-strip]').boundingBox()]);
-        // One row: the stepper and the strip side by side, the foot a thumb's height and its padding (it was two rows, about 95 px).
-        expect(Math.abs(stepBox!.y - stripBox!.y)).toBeLessThan(4);
-        expect(stripBox!.x).toBeGreaterThanOrEqual(stepBox!.x + stepBox!.width);
-        expect(footBox!.height).toBeLessThanOrEqual(60);
+        // Full screen: no bar under the file, the file takes the window's height.
+        await expect(view.locator('[data-view-foot]')).toHaveCount(0);
         expect(await sideways(page)).toEqual([]);
-        expect(await overlaps(page, '[data-view-foot]', '.ib-stepbig, .ib-stepmid, .ib-rchip, .ib-vfoot-row .ib-sp, .ib-vfoot-row .ib-btn')).toEqual([]);
-        expect(await smallTargets(page, '[data-view-foot] .ib-stepbig, [data-view-foot] .ib-stepmid, [data-view-foot] .ib-btn')).toEqual([]);
-        // Previous and Next keep their names for a screen reader.
-        await expect(foot.getByRole('button', { name: /^Next file/ })).toBeVisible();
-        await view.locator('[data-annotations-sheet]').click();
+        expect(await overlaps(page, '[data-full-view-bar]', '.ib-fvb')).toEqual([]);
+        expect(await smallTargets(page, '[data-full-view-bar] .ib-fvb')).toEqual([]);
+        await view.locator('[data-full-view-comments]').click();
         const sheet = view.getByRole('region', { name: 'Comments' });
         await expect(sheet).toBeVisible();
         await page.screenshot({ path: join(proofDir, `${side.browserName}-15-landscape-comments.png`) });
@@ -815,7 +816,7 @@ for (const narrow of [
         await expect(page.locator('.ib-dpage')).toBeVisible();
         await expect(dpane).toHaveCount(0);
 
-        // A file covers the thread, full screen, with its desktop close and Back to the thread.
+        // A file covers the thread, full screen, its toolbar led by Back to the thread.
         await page.evaluate((hash) => (window.location.hash = hash), `#thread=${world.threads.attach}`);
         await pane.locator('.ib-att-t', { hasText: 'retry-policy.md' }).click();
         const view = page.locator('section.ib-view');
@@ -824,13 +825,19 @@ for (const narrow of [
         const viewBox = (await view.boundingBox())!;
         expect(viewBox.x).toBeLessThan(1);
         expect(viewBox.width).toBeGreaterThan(page.viewportSize()!.width - 2);
-        // Full screen is all the window can do here, so there is no toggle.
+        // Full screen is all the window can do here, so there is no Exit full screen: Back to the thread leads instead.
         await expect(view.getByRole('button', { name: /full screen/i })).toHaveCount(0);
+        await expect(view.locator('[data-full-view-bar]')).toBeVisible();
+        // The comments drawer docks beside the page (not a phone): the page narrows.
+        await view.locator('[data-full-view-comments]').click();
         await expect(view.locator('.ib-apanel')).toBeVisible();
+        const [drawerBox, docBox] = await Promise.all([view.locator('.ib-apanel').boundingBox(), view.locator('.ib-docarea').boundingBox()]);
+        expect(docBox!.x + docBox!.width).toBeLessThanOrEqual(drawerBox!.x + 1);
         await page.screenshot({ path: join(proofDir, `${tag}-3-file.png`) });
         expect(await sideways(page)).toEqual([]);
-        expect(await overlaps(page, '.ib-vhead', '.ib-fn, .ib-from, .ib-btn, .ib-iconbtn')).toEqual([]);
-        expect(await overlaps(page, '[data-view-strip]', '.ib-l, .ib-rchip, .ib-btn')).toEqual([]);
+        expect(await overlaps(page, '[data-full-view-bar]', '.ib-fvb')).toEqual([]);
+        await view.locator('[data-full-view-comments]').click();
+        await expect(view.locator('.ib-apanel')).toBeHidden();
         // Closing the file reopens the docked sidebar on a spring: the thread covers the list from the first
         // frame, never drawn squeezed beside it while the sidebar opens (motion on, so the spring runs).
         await page.emulateMedia({ reducedMotion: 'no-preference' });

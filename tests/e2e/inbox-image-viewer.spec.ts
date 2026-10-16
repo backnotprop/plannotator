@@ -6,12 +6,13 @@
  * image in a message opens it full screen in the file viewer; `]` `[` step
  * through everything in reading order (each message's images in text order,
  * then its attached files), keeping the frame and replacing the route (one
- * Back to the thread); the peek opens a picture list above the bar (one row
- * per message, the open file ringed) and owns the keys while open; an inline
+ * Back to the thread); the peek opens a picture list under full screen's
+ * toolbar (above the bar beside the thread; one row per message, the open
+ * file ringed) and owns the keys while open; an inline
  * image takes a comment and a markup and rides the Send under its path and
  * message; an image the agent overwrites says "Changed since Claude sent it"
  * and opens the version it sent; a typed comment asks before a step; on an
- * iPhone (WebKit) the count opens the peek as a bottom sheet; and plan
+ * iPhone (WebKit) the toolbar's ⋯ opens the peek as a bottom sheet; and plan
  * review's annotate surface gets the light version (full screen, ← →, the
  * peek, no pen).
  *
@@ -94,11 +95,12 @@ async function png(browser: Browser, html: string, width: number, height: number
 }
 
 const pane = () => world.page.locator('[data-attachment-pane]');
-const label = () => world.page.locator('[data-step-label]');
+/** The position: the stepper's label beside the thread, the toolbar's N/M in full screen (both name it the same way). */
+const label = () => world.page.locator('[data-step-label], [data-full-view-position]');
 
-/** "2 of 7, checkout-b.png": the open file as the stepper names it. */
+/** "2 of 7, checkout-b.png": the open file as the stepper (or full screen's N/M) names it. */
 async function expectAt(page: Page, position: number, name: string): Promise<void> {
-  await expect(page.locator('[data-step-label]')).toHaveAttribute('aria-label', `${position} of 7, ${name}. Show every file in this thread`);
+  await expect(page.locator('[data-step-label], [data-full-view-position]')).toHaveAttribute('aria-label', `${position} of 7, ${name}. Show every file in this thread`);
   await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-attachment-pane', world.ids[name]!);
 }
 
@@ -203,7 +205,9 @@ test('a click on an image in a message opens it full screen in the file viewer; 
   await inlineB.click();
   await expect(pane()).toHaveClass(/ib-full/);
   await expectAt(page, 2, 'checkout-b-steps.png');
-  await expect(pane().locator('[data-header-from]')).toContainText('Claude ·');
+  // Full screen: no header, one toolbar.
+  await expect(pane().locator('[data-header-from]')).toHaveCount(0);
+  await expect(page.locator('[data-full-view-bar]')).toBeVisible();
   await expect(pane().locator('.ib-imgstage img')).toBeVisible();
   await shot(page, '01-inline-image-full-screen');
   for (const [position, name] of [
@@ -219,7 +223,7 @@ test('a click on an image in a message opens it full screen in the file viewer; 
     await expect(pane()).toHaveClass(/ib-full/);
   }
   await page.keyboard.press(']');
-  await expect(page.locator('[data-step-end-note]').first()).toHaveText('Last file in this thread');
+  await expect(page.locator('[data-full-view-chip]')).toContainText('Last file in this thread');
   await page.keyboard.press('[');
   await expectAt(page, 6, 'checkout-mobile.png');
   // Stepping replaced the route: one Back returns to the thread.
@@ -245,13 +249,13 @@ test('the peek: a picture list above the pill, one row per message, the open fil
   await expect(peek.locator(`[data-peek-item="${world.ids['checkout-b-steps.png']}"] img`)).toBeVisible();
   await expect(peek.locator(`[data-peek-item="${world.ids['empty-states.md']}"]`)).toContainText('MD');
   await expect(peek.locator('[data-peek-attached]')).toHaveCount(3);
-  // It floats above the bar and moves nothing under it.
+  // It floats under full screen's toolbar and moves nothing under it.
   const placement = await page.evaluate(() => {
     const grid = document.querySelector('[data-step-list]')!.getBoundingClientRect();
-    const bar = document.querySelector('[data-view-foot]')!.getBoundingClientRect();
-    return { gridBottom: grid.bottom, barTop: bar.top };
+    const bar = document.querySelector('[data-full-view-bar]')!.getBoundingClientRect();
+    return { gridTop: grid.top, barBottom: bar.bottom };
   });
-  expect(placement.gridBottom).toBeLessThanOrEqual(placement.barTop);
+  expect(placement.gridTop).toBeGreaterThanOrEqual(placement.barBottom);
   await page.keyboard.press('ArrowRight');
   await expect(peek.locator(`[data-peek-item="${world.ids['checkout-b-steps.png']}"]`)).toBeFocused();
   // ] is not a step while the peek is open.
@@ -309,8 +313,10 @@ test('an image the agent overwrites says it changed since it was sent, and opens
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await page.keyboard.press(']');
   await expectAt(page, 3, 'checkout-c-drawer.png');
-  const line = pane().locator('[data-changed-line]');
-  await expect(line).toContainText('Changed since Claude sent it');
+  // Full screen: the changed line is the chip at the top left (its title the whole sentence).
+  const line = pane().locator('[data-full-view-changed]');
+  await expect(line).toContainText('Changed since sent');
+  await expect(line).toHaveAttribute('title', /^Changed since Claude sent it/);
   await shot(page, '05-inline-image-changed');
   await line.getByRole('button', { name: 'Open the version it sent' }).click();
   await expect(pane()).toHaveAttribute('data-version', 'sent');
@@ -360,7 +366,7 @@ test('Send carries the comment on the image in the message, named by its path an
   expect(world.errors.filter((e) => !/HTTP 404 \/favicon/.test(e))).toEqual([]);
 });
 
-test('on an iPhone (WebKit) an image in a message opens full screen and the count opens the peek as a bottom sheet', async () => {
+test('on an iPhone (WebKit) an image in a message opens full screen and the toolbar\'s ⋯ opens the peek as a bottom sheet', async () => {
   const { defaultBrowserType: _ignored, ...device } = devices['iPhone 15'];
   const browser = await webkit.launch({ args: [] });
   try {
@@ -378,7 +384,8 @@ test('on an iPhone (WebKit) an image in a message opens full screen and the coun
     await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-attachment-pane', world.ids['checkout-b-steps.png']!);
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(shotsDir, '08-phone-inline-image-light.png') });
-    await page.locator('[data-step-label]').click();
+    await page.locator('[data-full-view-more]').click();
+    await page.locator('[data-full-view-menu-position]').click();
     const sheet = page.locator('[data-image-peek-sheet]');
     await expect(sheet).toBeVisible();
     // Three across.

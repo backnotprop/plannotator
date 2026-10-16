@@ -172,8 +172,14 @@ async function checkSurface(page: Page, label: string, scroller: string, strip: 
 /** A dialog still covers the strip: the table popout, which the Viewer portals into its own article. */
 async function checkTablePopoutCovers(page: Page, label: string, scroller: string, strip: string): Promise<void> {
   await probe(page, scroller, strip, 'table');
+  // The table's own toolbar floats above it: in full screen (no header) the probe leaves the table at the window's
+  // top edge, so give the toolbar room inside the window, and hover its first row (hovering a table taller than the
+  // window would scroll it back to the top).
+  await page.locator(scroller).first().evaluate((el) => {
+    el.scrollTop -= 80;
+  });
   const table = page.locator(`${scroller} table`).first();
-  await table.hover();
+  await table.locator('tr').first().hover();
   await page.getByTitle('Expand table').first().click();
   const popout = page.locator('[data-popout]');
   await expect(popout).toBeVisible();
@@ -190,7 +196,8 @@ async function checkTablePopoutCovers(page: Page, label: string, scroller: strin
 
 /** The stepping bar's list of files opens up over the document and stays above it. */
 async function checkStepListAbove(page: Page, label: string): Promise<void> {
-  await page.locator('[data-attachment-stepper] [aria-haspopup="grid"]').click();
+  // Beside the thread the stepper's label opens it; in full screen, the toolbar's N/M.
+  await page.locator('[data-attachment-stepper] [aria-haspopup="grid"], [data-full-view-position]').first().click();
   const list = page.locator('[data-step-list]');
   await expect(list).toBeVisible();
   const covered = await page.evaluate(() => {
@@ -248,6 +255,9 @@ test('Inbox: the attached document never paints over the toolstrip, beside the t
           if (layout.full) {
             await page.getByRole('button', { name: 'Full screen' }).click();
             await expect(page.locator('.ib-view.ib-full')).toBeVisible();
+            // The comments drawer open beside the page, so the centred document reaches under the toolstrip.
+            await page.locator('[data-full-view-comments]').click();
+            await expect(page.locator('.ib-view.ib-drawer')).toBeVisible();
           }
           await checkSurface(page, `${layout.label}-${look}`, '[data-attachment-pane] .ib-docscroll', '[data-attachment-pane] .ib-toolstrip');
           await checkTablePopoutCovers(page, `${layout.label}-${look}`, '[data-attachment-pane] .ib-docscroll', '[data-attachment-pane] .ib-toolstrip');

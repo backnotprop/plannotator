@@ -166,7 +166,8 @@ function Pane({ start, steps, records = [] }: { start: InboxAttachmentState; ste
       projectRoot="/work/shop"
       version="current"
       onVersion={noop}
-      full
+      // Beside the thread, where the stepper under the file steps (full screen steps from its toolbar and keys).
+      full={false}
       onToggleFull={noop}
       focusId={null}
       readOnly={false}
@@ -174,7 +175,7 @@ function Pane({ start, steps, records = [] }: { start: InboxAttachmentState; ste
       onRemoved={noop}
       onOpenAt={noop}
       onClose={noop}
-      strip={{ picks: 0, annotations: 0, onBack: noop, onWriteReply: noop }}
+      strip={{ picks: 0, annotations: 0, onWriteReply: noop }}
       steps={STEPS}
       onStep={(id) => {
         steps.push({ id });

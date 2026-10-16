@@ -447,13 +447,15 @@ for (const width of [920, 1024, 1180, 1280]) {
       expect((await page.locator('section.ib-view [data-download-card] .ib-att-text').boundingBox())!.width).toBeGreaterThan(200);
       await shot(page, `fold-${width}-pdf`);
 
-      // Full screen: the foot wraps rather than cutting "Write the reply" (row 50).
+      // Full screen: the PDF fills the window under its toolbar, which stays whole inside it (row 50); a file
+      // that takes no comments has no count in it.
       await page.locator('section.ib-view').getByRole('button', { name: 'Full screen' }).click();
       await page.waitForTimeout(300);
       expect(await shapes(page)).toEqual([]);
-      const reply = (await page.locator('section.ib-view .ib-vfoot').getByRole('button', { name: 'Write the reply' }).boundingBox())!;
-      const foot = (await page.locator('section.ib-view .ib-vfoot').boundingBox())!;
-      expect(reply.x + reply.width).toBeLessThanOrEqual(foot.x + foot.width + 1);
+      await expect(page.locator('section.ib-view [data-full-view-comments]')).toHaveCount(0);
+      const toolbar = (await page.locator('section.ib-view [data-full-view-bar]').boundingBox())!;
+      expect(toolbar.x).toBeGreaterThanOrEqual(0);
+      expect(toolbar.x + toolbar.width).toBeLessThanOrEqual(width + 1);
       await shot(page, `fold-${width}-full`);
     } finally {
       await context.close();
@@ -542,7 +544,9 @@ test('a phone opens a PDF with no Comments button (row 61)', async ({ browser })
   try {
     await openFile(page, world.seed.threads.kinds, world.seed.kinds.pdf);
     await page.waitForSelector('section.ib-view [data-download-card]');
-    await expect(page.locator('section.ib-view [data-annotations-sheet]')).toHaveCount(0);
+    // A phone's file is full screen: its toolbar has no comment count for a PDF.
+    await expect(page.locator('section.ib-view [data-full-view-bar]')).toBeVisible();
+    await expect(page.locator('section.ib-view [data-full-view-comments]')).toHaveCount(0);
     await shot(page, 'phone-pdf');
   } finally {
     await context.close();
