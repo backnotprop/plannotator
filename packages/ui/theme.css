@@ -767,11 +767,29 @@
   }
 }
 
+/* Inter's stylistic sets: ss01 (open digits), ss02 (disambiguation: I, l, 0)
+ * and cv01 (alternate one). They are named per family here and applied with
+ * font-variant-alternates, never font-feature-settings: feature tags mean
+ * different things in each font and font-feature-settings is inherited by
+ * every font on the page. In Ubuntu Mono, the Linux monospace fallback that
+ * code review diffs and gutters reach, ss02 turns digits into superscripts
+ * (#1961). A named value applies only to text a listed family renders, so
+ * monospace text, Pierre's diffs (inside their shadow roots), system-ui
+ * themes and any fallback font get none of them. */
+@font-feature-values "Inter Variable", "Inter", "InterVariable" {
+  @styleset {
+    pn-inter: 1 2;
+  }
+  @character-variant {
+    pn-inter-one: 1;
+  }
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--background);
   color: var(--foreground);
-  font-feature-settings: "ss01", "ss02", "cv01";
+  font-variant-alternates: styleset(pn-inter) character-variant(pn-inter-one);
 }
 
 /* Safari extends the page canvas beneath its floating browser controls. The

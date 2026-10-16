@@ -16,7 +16,8 @@
   --ib-hair: color-mix(in oklch, var(--border) 55%, transparent);
   height: 100%;
   font-family: var(--font-sans);
-  font-feature-settings: "ss01", "ss02", "cv01";
+  /* Inter's stylistic sets, named per family in packages/ui/theme.css (#1961). */
+  font-variant-alternates: styleset(pn-inter) character-variant(pn-inter-one);
   color: var(--foreground);
   background: var(--background);
   font-size: 14px;
