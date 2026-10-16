@@ -29,6 +29,25 @@ import type { InboxAgentId, InboxAgentsModel, InboxAnnotationRecord, InboxAttach
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
 
+/** PROTOTYPE: GET /api/inbox/name (packages/server/inbox-name.ts, InboxNameState). */
+export interface InboxNameState {
+  status: 'unavailable' | 'off' | 'working' | 'on' | 'failed';
+  url: string;
+  host: string;
+  reason: string | null;
+  /** preparing: fetching portless; password: the OS prompt is up; installing: the password went in; starting: the proxy and the name; verifying: checking it. */
+  step: 'preparing' | 'password' | 'installing' | 'starting' | 'verifying' | null;
+  listener_port: number | null;
+  dialog_due: boolean;
+  /** The prototype is switched on in the Inbox's environment; off, the window shows nothing. */
+  prototype: boolean;
+  verified_at: string | null;
+  probe: string | null;
+  /** The commands run for it, newest last. */
+  log?: string[];
+  portless: { node: string | null; cli: string | null; state_dir: string; home: string };
+}
+
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
   enabled: boolean;
@@ -575,6 +594,10 @@ export const inboxApi = {
   saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>('/api/inbox/settings', { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>('/api/inbox/sound/dialog', {}),
+  // PROTOTYPE (proto/inbox-fixed-address): the fixed address http://inbox.plannotator.localhost.
+  nameState: () => get<{ name: InboxNameState }>('/api/inbox/name'),
+  setName: (on: boolean) => post<{ name: InboxNameState }>('/api/inbox/name', { on }),
+  claimNameDialog: () => post<{ show: boolean; name: InboxNameState }>('/api/inbox/name/dialog', {}),
   /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */
   saveTheme: (theme: InboxThemeConfig) => post<{ theme: InboxThemeConfig | null }>('/api/inbox/settings', { theme }),
   saveTailscale: (on: boolean, replaceExposed = false) =>

@@ -9,6 +9,7 @@ import { ConnectPicker } from './ConnectPicker';
 import { AgentsSettings } from './AgentsSettings';
 import type { InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
+import { FixedAddressSection } from './FixedAddress';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxTheme } from '../theme';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
@@ -537,6 +538,13 @@ export function SettingsPage(props: SettingsPageProps) {
             pairing={pairing && phonesOn}
             onPairing={(open) => onPairing?.(open)}
           />
+        );
+        // PROTOTYPE (proto/inbox-fixed-address): the fixed address row.
+        body = (
+          <>
+            {body}
+            <FixedAddressSection via={via} localUrl={settings.url} />
+          </>
         );
         break;
       case 'archived':

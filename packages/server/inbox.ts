@@ -128,6 +128,7 @@ import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, PHONES_TAILNET_HTTPS_PORT, type InboxTailscale } from "./inbox-tailscale";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
+import { createInboxName, type InboxName, type InboxNameOptions } from "./inbox-name";
 import {
   agentSpec,
   connectInboxAgents,
@@ -260,6 +261,12 @@ export interface InboxServerOptions {
    * Default: this host's launcher. Tests pass a recording one, so no real app starts.
    */
   openInLauncher?: InboxOpenInLauncher;
+  /**
+   * PROTOTYPE (proto/inbox-fixed-address): the fixed address's seams
+   * (packages/server/inbox-name.ts). Tests pass a scripted runner and probe,
+   * so no real portless, npm, osascript or sudo ever runs.
+   */
+  name?: Partial<Pick<InboxNameOptions, "runner" | "probe" | "findNode" | "proxyState" | "existingService" | "user" | "platform" | "env" | "pollMs" | "pollTries" | "proxyWaitMs">>;
   /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
@@ -300,6 +307,8 @@ export interface InboxServer {
   registry: InboxRegistryEntry;
   /** "Over your tailnet": its state, the window's switch and the run's flag. */
   tailscale: InboxTailscale;
+  /** PROTOTYPE: the fixed address (http://inbox.plannotator.localhost through portless). */
+  name: InboxName;
   /**
    * Connect the agents on this computer (inbox-agents.ts): what
    * `plannotator inbox` runs, here or over `/api/inbox/control/connect`. One
@@ -1373,6 +1382,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let relay: ReturnType<typeof createInboxRelay> | null = null;
   // Over your tailnet (packages/server/inbox-tailscale.ts), made once the port is known.
   let tailscale: InboxTailscale;
+  // PROTOTYPE: the fixed address (packages/server/inbox-name.ts), made once the server listens.
+  let name: InboxName;
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -1473,6 +1484,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/control/connect") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         return json({ connect: await connectAgents() });
+      }
+      // PROTOTYPE: the hidden `plannotator inbox --name on|off|status` while this Inbox runs.
+      if (path === "/api/inbox/control/name") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        let action: unknown;
+        try {
+          action = ((await req.json()) as { action?: unknown }).action;
+        } catch {
+          action = undefined;
+        }
+        if (action === "on") return json({ name: name.enable() });
+        if (action === "off") return json({ name: await name.disable() });
+        if (action === "status") return json({ name: await name.refresh() });
+        return json({ error: "action: on, off or status.", code: "validation_error" }, 422);
       }
       if (path === INBOX_BRIDGE_POLL_PATH || path === INBOX_BRIDGE_EVENT_PATH) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -1628,6 +1653,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme });
+      }
+      // PROTOTYPE: the fixed address (packages/server/inbox-name.ts). Turning it on runs
+      // an OS password prompt and installs a proxy on this computer: never through the
+      // tailnet. Writes passed the same-origin guard above; the serverSession here.
+      if (path === "/api/inbox/name" || path === "/api/inbox/name/dialog") {
+        if (via === "tailnet") return localOnly();
+        if (path === "/api/inbox/name" && req.method === "GET") return json({ name: await name.refresh() });
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (path === "/api/inbox/name/dialog") {
+          await name.refresh();
+          return json({ show: name.claimDialog(), name: name.state() });
+        }
+        if (typeof body.on !== "boolean" || Object.keys(body).some((key) => key !== "on" && key !== "serverSession")) {
+          throw new InboxError("validation_error", "body: { on: boolean }.", { field: "on" });
+        }
+        return json({ name: body.on ? name.enable() : await name.disable() });
       }
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
       if (path === "/api/inbox/sound/dialog") {
@@ -1954,6 +1997,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   tailscale.start();
+  // PROTOTYPE: the fixed address. Its listener hands only requests it checked
+  // (the name as Host, loopback X-Forwarded-For, no agent paths) to the window.
+  name = createInboxName({ dataDir, serverSession, dispatch: (req) => handle(req, "local"), ...options.name });
+  void name.start();
   if (phonesOn) {
     const devices = createInboxDevices({
       dataDir,
@@ -2040,9 +2087,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     relay?.stop();
     // Over your tailnet: the mapping and the tailnet-only listener, before a restart starts the new run.
     tailnetStopFailedPort = tailscale.stop().failedPort;
+    // The fixed address: the listener closes; the alias stays (the sticky port comes back next run).
+    name.stop();
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, name, connectAgents, search: search.index, imageCapture, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

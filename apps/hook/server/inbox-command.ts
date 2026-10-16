@@ -278,6 +278,15 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   process.once("SIGINT", () => shutdown(130));
   process.once("SIGTERM", () => shutdown(143));
   await handleInboxServerReady(inbox, { open });
+  // PROTOTYPE: say the fixed address once it answers (it was turned on at an earlier run).
+  void (async () => {
+    for (let i = 0; i < 40; i++) {
+      const state = inbox.name.state();
+      if (state.status === "on") return void process.stderr.write(`Fixed address: ${state.url}\n`);
+      if (state.status !== "working") return;
+      await Bun.sleep(500);
+    }
+  })();
   // Off the request path: the window is already open, and its note dialog shows
   // what this did once it is done (GET /api/inbox/agents).
   if (connect) void inbox.connectAgents().then(reportConnect, () => {});
@@ -344,6 +353,55 @@ async function writeNotes(dataDir: string, list: string): Promise<number> {
   return ok ? 0 : 1;
 }
 
+/**
+ * PROTOTYPE: `plannotator inbox --name on|off|status`, through the running
+ * Inbox's token-guarded control route (started in the background when
+ * stopped). `on` waits while the OS password prompt is up.
+ */
+async function nameCommand(dataDir: string, action: "on" | "off" | "status"): Promise<number> {
+  type NameState = { status: string; url: string; reason: string | null; step: string | null; probe: string | null; listener_port: number | null; portless: { node: string | null; cli: string | null; state_dir: string } };
+  let entry: InboxRegistryEntry;
+  try {
+    entry = await ensureInboxRunning(dataDir);
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+  const ask = async (verb: "on" | "off" | "status"): Promise<NameState | null> => {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/name`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: verb }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (response.status === 404) {
+      process.stderr.write("The running Inbox has no fixed address (it is not this prototype build); quit it and start this build.\n");
+      return null;
+    }
+    return ((await response.json()) as { name: NameState }).name;
+  };
+  let state = await ask(action);
+  if (!state) return 1;
+  if (action === "on") {
+    let lastStep: string | null = null;
+    const until = Date.now() + 7 * 60_000;
+    while (state.status === "working" && Date.now() < until) {
+      if (state.step !== lastStep && state.step) {
+        lastStep = state.step;
+        process.stderr.write(
+          `${({ preparing: "Getting portless ready…", password: "Waiting for your password (the OS asks)…", installing: "Password accepted; setting it up…", starting: "Starting the address…", verifying: "Checking the address…" } as Record<string, string>)[state.step] ?? state.step}\n`,
+        );
+      }
+      await Bun.sleep(250);
+      state = (await ask("status")) ?? state;
+    }
+  }
+  process.stdout.write(`${JSON.stringify(state, null, 2)}\n`);
+  if (state.status === "on") process.stderr.write(`The Inbox is at ${state.url}${state.reason ? `\n${state.reason}` : ""}\n`);
+  else if (state.reason) process.stderr.write(`${state.reason}\n`);
+  return state.status === "failed" || state.status === "unavailable" || (action === "on" && state.status !== "on") ? 1 : 0;
+}
+
 function usageError(message: string): never {
   process.stderr.write(`${message}\nRun 'plannotator inbox --help' for usage.\n`);
   process.exit(1);
@@ -375,6 +433,13 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       hostSession: inboxHostSessionFromEnv(process.env),
     });
     process.exit(0);
+  }
+
+  // PROTOTYPE (proto/inbox-fixed-address), hidden: the fixed address http://inbox.plannotator.localhost.
+  if (args[0] === "--name") {
+    const action = args[1] ?? "status";
+    if (args.length > 2 || (action !== "on" && action !== "off" && action !== "status")) usageError("--name takes on, off or status, and no other option.");
+    process.exit(await nameCommand(dataDir, action));
   }
 
   if (args[0] === "--notes") {

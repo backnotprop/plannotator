@@ -54,6 +54,8 @@ import { SearchHost, type SearchLanding } from './components/SearchHost';
 import { onOpenSearchKey } from './search/searchShortcut';
 import { EmptyState } from './components/EmptyState';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
+import { FixedAddressDialog } from './components/FixedAddress';
+import type { InboxNameState } from './api';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
@@ -376,6 +378,11 @@ function Inbox() {
    */
   const [agentNote, setAgentNote] = useState<'none' | 'shown' | { rows: InboxAgentRow[]; report: InboxConnectReport | null }>('none');
   const agentNoteDecided = useRef(false);
+  /** The agent-note dialog was decided on this load (shown or not): the fixed-address offer may follow. */
+  const [agentNoteSettled, setAgentNoteSettled] = useState(false);
+  /** PROTOTYPE (proto/inbox-fixed-address): the one-time fixed-address offer, third in the chain. */
+  const [nameDialog, setNameDialog] = useState<'none' | 'shown' | InboxNameState>('none');
+  const nameDialogAsked = useRef(false);
   /** The sound dialog's claim has answered on this load (or it was never due). */
   const [soundClaimed, setSoundClaimed] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -953,6 +960,7 @@ function Inbox() {
     const decide = () => {
       if (cancelled || agentNoteDecided.current || replyInProgress()) return false;
       agentNoteDecided.current = true;
+      setAgentNoteSettled(true);
       const model = agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];
       if (rows.length > 0 && model) setAgentNote({ rows, report: cardReport(model) });
@@ -968,6 +976,39 @@ function Inbox() {
     };
   }, [agentNoteReady]);
   const agentNoteOpen = typeof agentNote === 'object';
+
+  // PROTOTYPE: the one-time fixed-address offer (packages/server/inbox-name.ts). After
+  // the sound and agent-note dialogs, never on a load that showed either, never
+  // through the tailnet, never while typing, in an update or in Settings. The
+  // server says yes once (a compare-and-set), and only when Node 24+ is here.
+  const nameReady =
+    agentNoteSettled &&
+    agentNote === 'none' &&
+    soundDialog === 'none' &&
+    latest !== null &&
+    updateDialog === null &&
+    !restarting &&
+    route.page !== 'settings' &&
+    (settings?.via ?? 'local') === 'local';
+  useEffect(() => {
+    if (!nameReady || nameDialogAsked.current) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      if (cancelled || nameDialogAsked.current || replyInProgress()) return;
+      nameDialogAsked.current = true;
+      clearInterval(timer);
+      inboxApi
+        .claimNameDialog()
+        .then((answer) => {
+          if (answer.show && !cancelled) setNameDialog(answer.name);
+        })
+        .catch(() => {});
+    }, 700);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [nameReady]);
 
 
   // The list on screen catches up as the route changes (the layout effect above), not here.
@@ -2195,6 +2236,7 @@ function Inbox() {
           onClosed={() => setAgentNote('shown')}
         />
       )}
+      {typeof nameDialog === 'object' && <FixedAddressDialog initial={nameDialog} onClose={() => setNameDialog('shown')} />}
       {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} threadRouted={route.page === 'inbox' && !!route.thread} />}
       <SearchHost
         mounted={searchMounted}
