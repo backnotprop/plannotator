@@ -580,6 +580,13 @@ export type PRFileBytesResult =
   | { kind: "missing" }
   | { kind: "too-large"; size: number };
 
+/** Every file path of one commit from a platform tree API (All files without a checkout). */
+export interface PRTreeResult {
+  paths: string[];
+  /** The platform stopped listing before the end (GitHub's ~100k-entry cap). */
+  truncated: boolean;
+}
+
 /** Decode a platform API base64 payload (GitHub wraps it at 60 columns). */
 export function decodeBase64Bytes(value: string): Uint8Array {
   const clean = value.replace(/\s+/g, "");
