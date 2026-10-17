@@ -22,6 +22,8 @@ interface CodeFilePopoutProps {
   onClose: () => void;
   filepath: string;
   contents: string;
+  line?: number;
+  lineEnd?: number;
   prerenderedHTML?: string;
   error?: string;
   requestedPath?: string;
@@ -286,6 +288,8 @@ const CodeInlineAnnotation: React.FC<{
 export interface CodeFileViewProps {
   filepath: string;
   contents: string;
+  line?: number;
+  lineEnd?: number;
   prerenderedHTML?: string;
   annotations?: CodeAnnotation[];
   selectedAnnotationId?: string | null;
@@ -312,6 +316,8 @@ export interface CodeFileViewProps {
 export const CodeFileView: React.FC<CodeFileViewProps> = ({
   filepath,
   contents,
+  line,
+  lineEnd,
   prerenderedHTML,
   annotations = [],
   selectedAnnotationId,
@@ -374,8 +380,11 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     if (selectedCodeAnnotation) {
       return { start: selectedCodeAnnotation.lineStart, end: selectedCodeAnnotation.lineEnd };
     }
+    if (line != null) {
+      return { start: line, end: lineEnd ?? line };
+    }
     return null;
-  }, [pendingComment, selectedCodeAnnotation]);
+  }, [pendingComment, selectedCodeAnnotation, line, lineEnd]);
   const effectivePrerenderedHTML = lineAnnotations.length === 0 ? prerenderedHTML : undefined;
 
   useEffect(() => {
@@ -387,6 +396,17 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     }, 100);
     return () => clearTimeout(timer);
   }, [selectedAnnotationId, filepath]);
+
+  useEffect(() => {
+    if (line == null || selectedAnnotationId || !fileAreaRef.current) return;
+    const timer = setTimeout(() => {
+      const lineEl =
+        fileAreaRef.current?.querySelector(`[data-line="${line}"]`) ||
+        fileAreaRef.current?.querySelector('diffs-container')?.shadowRoot?.querySelector(`[data-line="${line}"]`);
+      lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [line, filepath, selectedAnnotationId]);
 
   const openCommentForRange = useCallback((
     range: { start: number; end: number },
@@ -551,6 +571,8 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
   onClose,
   filepath,
   contents,
+  line,
+  lineEnd,
   prerenderedHTML,
   error,
   requestedPath,
@@ -653,6 +675,8 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
       <CodeFileView
         filepath={filepath}
         contents={contents}
+        line={line}
+        lineEnd={lineEnd}
         prerenderedHTML={prerenderedHTML}
         annotations={annotations}
         selectedAnnotationId={selectedAnnotationId}
