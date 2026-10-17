@@ -138,6 +138,10 @@ jobs:
         if: steps.browser-cache.outputs.cache-hit == 'true'
         run: bunx playwright install-deps chromium webkit
 
+      # Code review's Go to Definition (review-explorer.spec.ts) searches with ripgrep.
+      - name: Install ripgrep
+        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
+
       - name: Build the apps and compile the binary
         run: >-
           bun run build:review && bun run build:hook &&

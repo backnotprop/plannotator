@@ -248,6 +248,7 @@ jobs:
           packages/review-editor/components/FileTree.allFiles.test.tsx
           packages/review-editor/hooks/useRepoFiles.test.tsx
           packages/review-editor/components/RepoFileView.test.tsx
+          packages/review-editor/components/GoToFile.test.tsx
           packages/review-editor/components/FileHeader.fileKind.test.tsx
           packages/review-editor/components/FileTreeNode.controls.test.tsx
           packages/ui/components/Settings.analysis.test.tsx

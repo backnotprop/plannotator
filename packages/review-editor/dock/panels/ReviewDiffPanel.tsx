@@ -8,6 +8,7 @@ import { fileKind } from '@plannotator/core/file-kind';
 import { isLineRangeInPatch } from '@plannotator/core/diff-files';
 import { FileViewSwitch } from '../../components/FileViewSwitch';
 import { WholeFileView } from '../../components/WholeFileView';
+import { JumpCrumb } from '../../components/JumpCrumb';
 
 /**
  * Thin adapter between dockview's panel API and the existing DiffViewer.
@@ -87,6 +88,7 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
   // new side, for a file that has one (not a deletion), and not for Markdown,
   // whose Read view already shows the whole document.
   const fileView = state.fileViewOf ? state.fileViewOf(file.path) : 'changes';
+  const crumb = state.jumpCrumb?.targetPath === file.path ? state.jumpCrumb : null;
   const markdownFile = !!state.markdownPreview?.isPreviewable(file);
   const wholeUnavailableReason = file.status === 'deleted'
     ? 'The diff deletes this file'
@@ -106,7 +108,9 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
   // patch, and Pierre briefly reconciles old-patch + new-content → "trailing
   // context mismatch" warnings in the console.
   return (
-    <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full relative">
+    <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full flex flex-col">
+      {crumb && <JumpCrumb crumb={crumb} onBack={state.navigation?.back} />}
+      <div className="flex-1 min-h-0 relative">
       <DiffViewer
         headerAccessory={switchControl}
         bodyOverride={wholeView ? (
@@ -125,6 +129,8 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
             onEditAnnotation={(id, text) => state.onEditAnnotation(id, text)}
             onDeleteAnnotation={state.onDeleteAnnotation}
             onSelectAnnotation={state.onSelectAnnotation}
+            revealTarget={state.revealTarget}
+            tokens={state.fileTokens?.(file.path)}
           />
         ) : undefined}
         patch={file.patch}
@@ -192,6 +198,7 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
         onCodeNavRequest={state.onCodeNavRequest}
         onTokenHoverEnter={state.onTokenHoverEnter}
         onTokenHoverLeave={state.onTokenHoverLeave}
+        onTokenTarget={state.onTokenTarget}
         reviewFilePaths={reviewFilePaths}
         onOpenReviewFile={state.openDiffFile}
         markdownPreviewSupported={!!state.markdownPreview}
@@ -201,6 +208,7 @@ export const ReviewDiffBody: React.FC<{ filePath: string | null; onKeep?: () => 
           ? (view, how) => (how === 'chosen' ? state.markdownPreview!.choose : state.markdownPreview!.show)(file.path, view)
           : undefined}
       />
+      </div>
     </div>
   );
 };

@@ -54,6 +54,10 @@ export const ReviewFilePanel: React.FC<IDockviewPanelProps<ReviewFilePanelParams
       onEditAnnotation={(id, text) => state.onEditAnnotation(id, text)}
       onDeleteAnnotation={state.onDeleteAnnotation}
       onSelectAnnotation={state.onSelectAnnotation}
+      revealTarget={state.revealTarget}
+      crumb={state.jumpCrumb}
+      onNavigateBack={state.navigation?.back}
+      tokens={state.fileTokens?.(filePath)}
     />
   );
 };

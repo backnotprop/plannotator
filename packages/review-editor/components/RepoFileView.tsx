@@ -1,9 +1,46 @@
 import React, { useMemo } from 'react';
-import { CodeFileView, type CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
+import { CodeFileView, type CodeFileAnnotationInput, type CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { RepoRevisionInfo } from '@plannotator/shared/repo-files';
 import { useRepoFileText, repoFileEmptyMessage } from '../hooks/useRepoFileText';
 import { useScrollMemory } from '../hooks/useScrollMemory';
+import { findSymbolLine, type JumpCrumb as JumpCrumbData, type RevealTarget } from '../utils/explorerNavigation';
+import { JumpCrumb } from './JumpCrumb';
+
+/** Code navigation's tokens in a whole-file view (where F12 looks, Cmd+click). */
+export interface FileTokenHandlers {
+  onTokenTarget?: (kind: 'enter' | 'leave' | 'click', target: CodeFileTokenTarget) => void;
+  onTokenNavigate?: (target: CodeFileTokenTarget) => void;
+}
+
+/**
+ * The line a jump lands on in the text shown: code navigation's line, moved
+ * to where the symbol is in this revision (`findSymbolLine`), else the top
+ * with `missed` set.
+ */
+export function useRevealedLine(
+  filePath: string,
+  content: string | null,
+  target: RevealTarget | null | undefined,
+): { revealLine?: { line: number; token: number }; missed?: { symbol: string; line: number } } {
+  return useMemo(() => {
+    if (!target || target.path !== filePath || content == null) return {};
+    const line = findSymbolLine(content, target.symbol, target.line);
+    if (line == null) {
+      return {
+        revealLine: { line: 1, token: target.token },
+        missed: target.symbol ? { symbol: target.symbol, line: target.line } : undefined,
+      };
+    }
+    return { revealLine: { line, token: target.token } };
+  }, [content, filePath, target]);
+}
+
+export const RevealMissedNote: React.FC<{ missed: { symbol: string; line: number } }> = ({ missed }) => (
+  <div className="flex-none px-3 py-1 text-xs text-muted-foreground border-b border-border/40" data-reveal-missed>
+    <code className="font-mono">{missed.symbol}</code> is not near line {missed.line} in this revision; showing the top.
+  </div>
+);
 
 /** "at working tree", "at index", "at a1b2c3d". */
 export function revisionPhrase(revision: RepoRevisionInfo | undefined): string | null {
@@ -35,6 +72,12 @@ export interface RepoFileViewProps {
   onEditAnnotation: (id: string, text: string | undefined) => void;
   onDeleteAnnotation: (id: string) => void;
   onSelectAnnotation: (id: string | null) => void;
+  /** A jump to a line of this file. */
+  revealTarget?: RevealTarget | null;
+  /** The jump that opened this file, shown with the way back. */
+  crumb?: JumpCrumbData | null;
+  onNavigateBack?: () => void;
+  tokens?: FileTokenHandlers;
 }
 
 /**
@@ -53,14 +96,20 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   onEditAnnotation,
   onDeleteAnnotation,
   onSelectAnnotation,
+  revealTarget,
+  crumb,
+  onNavigateBack,
+  tokens,
 }) => {
   const text = useRepoFileText(filePath, snapshotId);
+  const { revealLine, missed } = useRevealedLine(filePath, text.status === 'ready' ? text.content : null, revealTarget);
   const fileAnnotations = useMemo(() => wholeFileAnnotations(annotations, filePath), [annotations, filePath]);
   const slash = filePath.lastIndexOf('/');
   const dir = slash === -1 ? '' : filePath.slice(0, slash + 1);
   const name = slash === -1 ? filePath : filePath.slice(slash + 1);
   const revision = text.status === 'ready' || text.status === 'empty' ? text.revision : undefined;
-  const scroll = useScrollMemory(`${snapshotId ?? ''}:${filePath}`, text.status === 'ready');
+  // A jump's line wins over where the tab was left.
+  const scroll = useScrollMemory(`${snapshotId ?? ''}:${filePath}`, text.status === 'ready' && !revealLine);
 
   return (
     <div className="h-full flex flex-col" data-repo-file-view={filePath}>
@@ -83,9 +132,17 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
         )}
         <span className="ml-auto flex-none text-[11px] text-muted-foreground/80">
           {onAddAnnotation ? 'Select lines to comment' : null}
-          {preview && <span className="ml-3" data-preview-hint>Double-click the tab to keep it</span>}
+          {preview && !crumb && <span className="ml-3" data-preview-hint>Double-click the tab to keep it</span>}
         </span>
       </div>
+      {crumb && crumb.targetPath === filePath && (
+        <JumpCrumb
+          crumb={crumb}
+          onBack={onNavigateBack}
+          right={preview ? <span data-preview-hint>Double-click the tab to keep it</span> : undefined}
+        />
+      )}
+      {missed && <RevealMissedNote missed={missed} />}
       <div className="flex-1 min-h-0 overflow-auto" ref={scroll.ref} onScroll={scroll.onScroll}>
         {text.status === 'loading' ? (
           <FileTextState>Reading the file…</FileTextState>
@@ -105,6 +162,9 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
             onSelectAnnotation={onSelectAnnotation}
             className="min-h-full"
             lang={text.content.length > 500_000 ? 'text' : undefined}
+            revealLine={revealLine}
+            onTokenTarget={tokens?.onTokenTarget}
+            onTokenNavigate={tokens?.onTokenNavigate}
           />
         )}
       </div>

@@ -13,6 +13,7 @@ import {
   reviewSuggestionModalShortcuts,
   reviewTourDialogShortcuts,
   reviewMarkdownPreviewShortcuts,
+  reviewExplorerShortcuts,
   type ShortcutSurface,
 } from '@plannotator/ui/shortcuts';
 
@@ -116,6 +117,7 @@ export const reviewSettingsShortcutRegistry = createShortcutRegistry([
   decisionControlShortcuts,
   historyShortcuts,
   reviewFileTreeShortcuts,
+  reviewExplorerShortcuts,
   reviewAllFilesDiffShortcuts,
   reviewMarkdownPreviewShortcuts,
   reviewAnnotationToolbarShortcuts,

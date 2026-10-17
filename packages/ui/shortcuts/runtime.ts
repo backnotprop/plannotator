@@ -5,6 +5,7 @@ import {
   matchesShortcutBinding,
   matchesShortcutBindingGroup,
   parseDoubleTapBinding,
+  resolveShortcutBindings,
 } from './core';
 
 type ShortcutActionId<TScope extends ShortcutScopeDefinition<any>> = keyof TScope['shortcuts'] & string;
@@ -80,7 +81,7 @@ export function dispatchShortcutEvent<TScope extends ShortcutScopeDefinition<any
   for (const [actionId, shortcut] of getShortcutEntries(scope)) {
     const handler = handlers[actionId];
     if (!handler) continue;
-    if (!shortcut.bindings.some(binding => matchesShortcutBinding(event, binding))) continue;
+    if (!resolveShortcutBindings(shortcut).some(binding => matchesShortcutBinding(event, binding))) continue;
 
     const { when, handle } = normalizeShortcutHandler(handler);
     if (when && !when(event)) continue;
@@ -182,7 +183,7 @@ export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
         const { when } = normalizeShortcutHandler(handler);
         if (when && !when(keyboardEvent)) continue;
 
-        for (const binding of shortcut.bindings) {
+        for (const binding of resolveShortcutBindings(shortcut)) {
           const groups = binding.trim().split(/\s+/).filter(Boolean);
           const doubleTapKey = parseDoubleTapBinding(binding);
           if (
@@ -268,7 +269,7 @@ export function useDoubleTapShortcuts<TScope extends ShortcutScopeDefinition<any
     // Pre-parse which actions have double-tap bindings
     const doubleTapActions: Array<{ actionId: ShortcutActionId<TScope>; keyName: string; preventDefault: boolean }> = [];
     for (const [actionId, shortcut] of getShortcutEntries(scope)) {
-      for (const binding of shortcut.bindings) {
+      for (const binding of resolveShortcutBindings(shortcut)) {
         const keyName = parseDoubleTapBinding(binding);
         if (keyName) {
           doubleTapActions.push({ actionId, keyName, preventDefault: shortcut.preventDefault === true });
