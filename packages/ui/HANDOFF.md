@@ -2325,3 +2325,9 @@ These are enforced socially and, where possible, by CI. They exist because a pri
 4. **Never delete working Plannotator code until a human confirms parity in the browser.**
 
 See `packages/ui/README.md` and `packages/ui/AGENTS.md` (CLAUDE.md symlink) for the short version that lives next to the code.
+
+## `CodeFileView` `extraCss` and `CodeAnnotation.outsideDiff` (ui, next publish; additive, no core change)
+
+**`CodeFileView`** (`components/CodeFilePopout`) gains **`extraCss?: string`**, appended to the theme CSS inside the file's shadow root (Pierre's `unsafeCSS`). Plannotator's code review draws the Whole file view's change bars with it (rules on `[data-gutter] [data-column-number="N"]`). Absent: today's view, byte for byte.
+
+**`CodeAnnotation.outsideDiff?: boolean`** marks a code-review comment on lines outside the diff (a file the review does not change, or a changed file's lines outside its hunks). `CodeFileView`'s inline comment card shows a "not in the diff" chip for it. Annotations without it render exactly as before.

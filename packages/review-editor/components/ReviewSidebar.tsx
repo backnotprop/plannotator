@@ -440,6 +440,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                     Outdated
                   </span>
                 )}
+                {annotation.outsideDiff && (
+                  <span
+                    data-annotation-outside-diff="true"
+                    className="ml-1.5 font-sans text-[9px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-warning/15 text-warning"
+                    title="To the agent: sent with the file, lines and code. On a PR: goes in the review's main comment with the code quoted and a link, since the platform cannot post a comment outside the diff."
+                  >
+                    not in the diff
+                  </span>
+                )}
               </span>
             )
           }

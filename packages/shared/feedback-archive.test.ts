@@ -111,6 +111,23 @@ describe("feedback archive: record shape", () => {
     expect(record.annotations?.find((a) => a.id === "l1")?.scope).toBeUndefined();
   });
 
+  test("a comment outside the diff records the flag; others stay without it", () => {
+    const dataDir = useTempDataDir();
+    appendFeedbackRecord({
+      project: PROJECT,
+      surface: "review",
+      decision: "feedback",
+      feedback: "one outside the diff",
+      annotations: [
+        { id: "o1", type: "comment", filePath: "src/other.ts", lineStart: 40, lineEnd: 41, text: "move this?", outsideDiff: true },
+        { id: "l1", type: "comment", filePath: "src/parse.ts", lineStart: 3, lineEnd: 3, text: "null case" },
+      ],
+    });
+    const record = readIndex(dataDir)[0];
+    expect(record.annotations?.find((a) => a.id === "o1")?.outsideDiff).toBe(true);
+    expect(record.annotations?.find((a) => a.id === "l1")?.outsideDiff).toBeUndefined();
+  });
+
   test("a comment made in a Markdown preview records the text it quotes", () => {
     const dataDir = useTempDataDir();
     appendFeedbackRecord({

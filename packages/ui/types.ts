@@ -387,6 +387,17 @@ export interface CodeAnnotation {
    */
   outdated?: boolean;
   /**
+   * Code review only: a comment on lines outside the diff — a file the review
+   * does not change (opened from All files), or lines of a changed file
+   * outside its hunks (its Whole file view). Line-scoped on the new side,
+   * with the commented code in `anchorText`. The agent gets it with the file,
+   * lines and code; a PR review posts it in the review body with the quoted
+   * code and a permalink, never inline (no platform accepts an inline comment
+   * outside the PR's diff). Never marked outdated by a diff re-check.
+   * Additive: annotations without it behave exactly as before.
+   */
+  outsideDiff?: boolean;
+  /**
    * Code review only: a comment made by selecting text in a Markdown file's
    * rendered preview. Always file-scoped (`scope: 'file'`); `lineStart` /
    * `lineEnd` are the file-comment sentinels, not source lines. Exported with

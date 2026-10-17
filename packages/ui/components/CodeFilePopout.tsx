@@ -181,6 +181,16 @@ const CodeInlineAnnotation: React.FC<{
           {lineLabel(annotation.lineStart, annotation.lineEnd)}
         </span>
         {annotation.author && <span className="truncate normal-case">by {annotation.author}</span>}
+        {annotation.outsideDiff && (
+          <span
+            className="rounded px-1.5 py-0.5 normal-case font-medium"
+            style={{ background: 'color-mix(in oklab, var(--warning) 18%, transparent)', color: 'var(--warning)' }}
+            data-code-annotation-outside-diff=""
+            title="A comment on lines outside the diff"
+          >
+            not in the diff
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
           {onEdit && !isEditing && (
             <button
@@ -301,6 +311,9 @@ export interface CodeFileViewProps {
   lang?: string;
   /** Long lines: `'scroll'` sideways (the default) or `'wrap'` onto the next row, for a minified file. */
   overflow?: 'scroll' | 'wrap';
+  /** CSS added inside the file's shadow root after the theme (a host's line
+   *  marks, e.g. code review's change bars on `[data-column-number="12"]`). */
+  extraCss?: string;
 }
 
 /**
@@ -323,6 +336,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   className = 'flex-1 min-h-0',
   lang,
   overflow = 'scroll',
+  extraCss,
 }) => {
   const { resolvedMode } = useTheme();
   const mode = resolvedMode ?? 'dark';
@@ -509,7 +523,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           } as React.CSSProperties}
           options={{
             themeType: pierreTheme.type,
-            unsafeCSS: pierreTheme.css,
+            unsafeCSS: extraCss ? `${pierreTheme.css}\n${extraCss}` : pierreTheme.css,
             overflow,
             disableFileHeader: true,
             enableLineSelection: true,
