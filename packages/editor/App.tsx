@@ -594,6 +594,7 @@ const App: React.FC = () => {
   //   short → "Comment" / "Copy"              — fits when planArea >= 680
   //   icon  → labels hidden                    — fallback below that
   const planAreaRef = useRef<HTMLDivElement>(null);
+  const stickyHeaderSentinelRef = useRef<HTMLDivElement>(null);
   const [actionsLabelMode, setActionsLabelMode] = useState<ActionsLabelMode>('full');
   const [isApiMode, setIsApiMode] = useState(false);
   // Warm the skill-reference catalog once per API session so export enrichment
@@ -3705,6 +3706,15 @@ const App: React.FC = () => {
       markdown,
     ],
   );
+
+  const isStickyHeaderActive =
+    !usesDocumentScroll &&
+    !goalSetupMode &&
+    !isPlanDiffActive &&
+    !isHtmlSurface &&
+    !archive.archiveMode &&
+    !isEditingMarkdown &&
+    uiPrefs.stickyActionsEnabled;
 
   const canHandleAnnotationModeShortcut = useCallback(
     (event: KeyboardEvent) => toolstripVisible && canHandleDocumentChromeShortcut(event),
@@ -7164,7 +7174,7 @@ const App: React.FC = () => {
                   sticky actions are disabled. remountToken re-anchors the
                   ResizeObserver when Viewer swaps content (linked docs or
                   message switches). */}
-              {!usesDocumentScroll && !goalSetupMode && !isPlanDiffActive && !isHtmlSurface && !archive.archiveMode && !isEditingMarkdown && uiPrefs.stickyActionsEnabled && (
+              {isStickyHeaderActive && (
                 <StickyHeaderLane
                   inputMethod={inputMethod}
                   onInputMethodChange={handleInputMethodChange}
@@ -7180,6 +7190,8 @@ const App: React.FC = () => {
                   planDiffBaselineTooltip={annotateMode ? 'Changes since you last reviewed this file' : undefined}
                   archiveInfo={archive.currentInfo}
                   maxWidth={annotateReaderMaxWidth}
+                  gridEnabled={gridEnabled}
+                  sentinelRef={stickyHeaderSentinelRef}
                   remountToken={viewerContentKey}
                 />
               )}
@@ -7211,6 +7223,9 @@ const App: React.FC = () => {
                     />
                   )}
                 </div>
+              )}
+              {isStickyHeaderActive && (
+                <div ref={stickyHeaderSentinelRef} aria-hidden="true" className="h-0 w-0" />
               )}
 
               {/* Plan Diff View — rendered when diff data exists, hidden when inactive */}
