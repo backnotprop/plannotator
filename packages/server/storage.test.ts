@@ -5,10 +5,21 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, readdirSync, utimesSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateSlug, getPlanDir, savePlan, saveToHistory, getPlanVersion, getVersionCount, listVersions } from "./storage";
+import {
+  generateSlug,
+  resolvePlanHistorySlug,
+  getPlanDir,
+  savePlan,
+  saveFinalSnapshot,
+  saveToHistory,
+  getPlanVersion,
+  getVersionCount,
+  listVersions,
+  listArchivedPlans,
+} from "./storage";
 
 const tempDirs: string[] = [];
 
@@ -37,16 +48,125 @@ describe("generateSlug", () => {
     expect(slug).toMatch(/^plan-\d{4}-\d{2}-\d{2}$/);
   });
 
-  test("same heading on same day produces same slug", () => {
-    const a = generateSlug("# Deploy Strategy\nVersion A");
-    const b = generateSlug("# Deploy Strategy\nVersion B");
-    expect(a).toBe(b);
+  test("archive slug is dated by the UTC day of the clock, independent of content", () => {
+    const evening = new Date("2026-10-02T23:50:00Z");
+    expect(generateSlug("# Deploy Strategy\nVersion A", evening)).toBe("deploy-strategy-2026-10-02");
+    expect(generateSlug("# Deploy Strategy\nVersion B", evening)).toBe("deploy-strategy-2026-10-02");
+    // Past UTC midnight the ARCHIVE name moves to the new date by design;
+    // history continuity is resolvePlanHistorySlug's job (#1679).
+    expect(generateSlug("# Deploy Strategy", new Date("2026-10-03T00:10:00Z"))).toBe("deploy-strategy-2026-10-03");
   });
 
   test("different headings produce different slugs", () => {
     const a = generateSlug("# Plan A");
     const b = generateSlug("# Plan B");
     expect(a).not.toBe(b);
+  });
+});
+
+// #1679: the version-history chain must not reset at UTC midnight.
+describe("resolvePlanHistorySlug", () => {
+  const project = "midnight-project";
+  const HOUR = 60 * 60 * 1000;
+
+  /** Run with a temp data dir, set inside the test and restored after. */
+  function withDataDir(fn: () => void): void {
+    const saved = process.env.PLANNOTATOR_DATA_DIR;
+    try {
+      process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
+      fn();
+    } finally {
+      if (saved === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = saved;
+    }
+  }
+
+  /** Save a version the way a plan server does at `now`, stamping its file time. */
+  function saveAt(plan: string, now: Date) {
+    const slug = resolvePlanHistorySlug(project, plan, { now });
+    const result = saveToHistory(project, slug, plan);
+    utimesSync(result.path, now, now);
+    const previousPlan = result.version > 1 ? getPlanVersion(project, slug, result.version - 1) : null;
+    return { slug, ...result, previousPlan };
+  }
+
+  test("a plan saved at 23:50 and revised at 00:10 keeps one chain with a diff base", () => {
+    withDataDir(() => {
+      const v1 = saveAt("# Deploy Strategy\n\nv1", new Date("2026-10-02T23:50:00Z"));
+      const v2 = saveAt("# Deploy Strategy\n\nv2", new Date("2026-10-03T00:10:00Z"));
+      expect(v1.slug).toBe("deploy-strategy-2026-10-02");
+      expect(v2.slug).toBe(v1.slug);
+      expect(v2.version).toBe(2);
+      expect(v2.previousPlan).toBe("# Deploy Strategy\n\nv1");
+      expect(getVersionCount(project, v1.slug)).toBe(2);
+    });
+  });
+
+  test("the reported case: a review resumed ~39h later continues the chain", () => {
+    withDataDir(() => {
+      const v1 = saveAt("# Deploy Strategy\n\nv1", new Date("2026-10-02T20:02:00Z"));
+      const v2 = saveAt("# Deploy Strategy\n\nv2", new Date("2026-10-04T10:57:00Z"));
+      expect(v2.slug).toBe(v1.slug);
+      expect(v2.previousPlan).toBe("# Deploy Strategy\n\nv1");
+    });
+  });
+
+  test("a same-heading plan days later starts a fresh chain", () => {
+    withDataDir(() => {
+      const old = saveAt("# Implementation Plan\n\nauth work", new Date("2026-10-01T10:00:00Z"));
+      const later = saveAt("# Implementation Plan\n\nbilling work", new Date("2026-10-05T10:00:00Z"));
+      expect(later.slug).toBe("implementation-plan-2026-10-05");
+      expect(later.slug).not.toBe(old.slug);
+      expect(later.version).toBe(1);
+      expect(later.previousPlan).toBeNull();
+    });
+  });
+
+  test("today's chain wins when it already holds versions", () => {
+    withDataDir(() => {
+      saveAt("# Deploy Strategy\n\nyesterday", new Date("2026-10-02T23:00:00Z"));
+      // A pre-fix binary already split the chain into today's directory.
+      const today = "deploy-strategy-2026-10-03";
+      const split = saveToHistory(project, today, "# Deploy Strategy\n\nsplit");
+      const splitAt = new Date("2026-10-03T00:30:00Z");
+      utimesSync(split.path, splitAt, splitAt);
+      expect(saveAt("# Deploy Strategy\n\nnext", new Date("2026-10-03T01:00:00Z")).slug).toBe(today);
+    });
+  });
+
+  test("a different heading's chain is never continued", () => {
+    withDataDir(() => {
+      saveAt("# Deploy\n\nv1", new Date("2026-10-02T23:50:00Z"));
+      saveAt("# Deploy Strategy\n\nv1", new Date("2026-10-02T23:51:00Z"));
+      const now = new Date("2026-10-03T00:10:00Z");
+      expect(resolvePlanHistorySlug(project, "# Deploy\n\nv2", { now })).toBe("deploy-2026-10-02");
+      expect(resolvePlanHistorySlug(project, "# Deploy Plan", { now })).toBe("deploy-plan-2026-10-03");
+    });
+  });
+
+  test("an open session keeps its own chain while the heading is unchanged", () => {
+    withDataDir(() => {
+      const v1 = saveAt("# Deploy Strategy\n\nv1", new Date("2026-10-02T10:00:00Z"));
+      // Far past the continuation window, the session's slug still holds.
+      const late = new Date(Date.parse("2026-10-02T10:00:00Z") + 100 * HOUR);
+      expect(resolvePlanHistorySlug(project, "# Deploy Strategy\n\nv2", { now: late, current: v1.slug })).toBe(v1.slug);
+      // A renamed heading leaves it.
+      expect(resolvePlanHistorySlug(project, "# Rollout\n\nv2", { now: late, current: v1.slug }))
+        .toBe(generateSlug("# Rollout", late));
+    });
+  });
+
+  test("archive snapshots stay dated by decision day while history continues", () => {
+    withDataDir(() => {
+      const v1 = saveAt("# Deploy Strategy\n\nv1", new Date("2026-10-02T23:50:00Z"));
+      const now = new Date("2026-10-03T00:10:00Z");
+      const v2 = saveAt("# Deploy Strategy\n\nv2", now);
+      expect(v2.slug).toBe(v1.slug);
+      saveFinalSnapshot(generateSlug("# Deploy Strategy", now), "approved", "# Deploy Strategy\n\nv2", "");
+      const archived = listArchivedPlans();
+      expect(archived.map((p) => p.filename)).toEqual(["deploy-strategy-2026-10-03-approved.md"]);
+      expect(archived[0].date).toBe("2026-10-03");
+    });
   });
 });
 
