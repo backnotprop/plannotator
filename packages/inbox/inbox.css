@@ -256,7 +256,8 @@
 
   height: 100%;
   font-family: var(--font-sans);
-  font-feature-settings: "ss01", "ss02", "cv01";
+  /* Inter's stylistic sets, named per family in packages/ui/theme.css (#1961). */
+  font-variant-alternates: styleset(pn-inter) character-variant(pn-inter-one);
   color: var(--foreground);
   background: var(--ib-ground);
   font-size: var(--ib-fs-14, 14px);

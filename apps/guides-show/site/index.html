@@ -28,7 +28,9 @@
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
-  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 var(--sans);font-feature-settings:"cv11","ss01"}
+  /* Inter's cv11 and ss01, named for Inter only: as font-feature-settings they reached the monospace text too (#1961). */
+  @font-feature-values "Inter"{@styleset{inter-digits:1}@character-variant{inter-a:11}}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.65 var(--sans);font-variant-alternates:styleset(inter-digits) character-variant(inter-a)}
   main{max-width:64ch;margin:0 auto;padding:6vh 1.25rem 12vh}
   a{color:var(--heading);text-decoration:underline;text-decoration-color:var(--border-strong);text-underline-offset:3px}
   a:hover{text-decoration-color:var(--add)}
