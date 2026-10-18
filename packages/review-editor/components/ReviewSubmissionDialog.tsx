@@ -41,6 +41,8 @@ export interface SubmissionTarget {
   fileScopedBody: string;
   fileCount: number;
   annotationCount: number;
+  /** Comments on lines outside the diff, posted in the review body (with code and a link). */
+  outsideDiffCount?: number;
   status: 'pending' | 'success' | 'partial' | 'failed' | 'blocked';
   error?: string;
   partial?: PRReviewSubmissionPartial;
@@ -102,7 +104,54 @@ interface ReviewSubmissionDialogProps {
 
 // A line comment posted in the review body instead of inline: outdated (#1590),
 // or stamped on a snapshot the session knows its PR has moved past.
-const inBody = (a: CodeAnnotation, withheld: ReadonlySet<string>) => a.outdated || withheld.has(a.id);
+const inBody = (a: CodeAnnotation, withheld: ReadonlySet<string>) => a.outdated || a.outsideDiff === true || withheld.has(a.id);
+
+/** A link to a file's lines at the PR's head commit (`prBlobPermalink`). */
+/** A link to lines at the PR head the comment was made on (its own PR in a stack). */
+export type ReviewPermalink = (path: string, lineStart: number, lineEnd: number, annotation?: CodeAnnotation) => string | undefined;
+
+/** Most lines of code quoted for one comment outside the diff; the permalink shows the rest. */
+export const OUTSIDE_DIFF_QUOTE_MAX_LINES = 40;
+
+function capQuotedCode(code: string): string {
+  const lines = code.split('\n');
+  if (lines.length <= OUTSIDE_DIFF_QUOTE_MAX_LINES) return code;
+  return `${lines.slice(0, OUTSIDE_DIFF_QUOTE_MAX_LINES).join('\n')}\n…`;
+}
+
+/** The heading of the review body's section for comments on lines outside the diff. */
+export const OUTSIDE_DIFF_BODY_HEADING = 'Comments outside the diff';
+
+function codeFence(code: string): string {
+  const longest = Math.max(2, ...(code.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longest + 1);
+  return `${fence}\n${code}\n${fence}`;
+}
+
+/**
+ * Comments on lines outside the PR's diff: no platform takes them inline, and
+ * a file outside the PR cannot take a file-level comment either, so each goes
+ * in the review body with the code it was written on and a link to those
+ * lines at the head commit.
+ */
+function buildOutsideDiffSection(annotations: CodeAnnotation[], permalink?: ReviewPermalink): string {
+  const entries = annotations
+    .filter((a) => a.outsideDiff && (a.scope ?? 'line') === 'line' && (a.text || a.suggestedCode))
+    .map((a) => {
+      const lines = a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`;
+      const link = permalink?.(a.filePath, a.lineStart, a.lineEnd, a);
+      const where = link ? `[${a.filePath} (${lines})](${link})` : `${a.filePath} (${lines})`;
+      const code = a.anchorText ?? a.originalCode;
+      // Capped (GitHub refuses a review body over 65,536 characters); the
+      // permalink covers the rest.
+      const quoted = code ? `\n\n${codeFence(capQuotedCode(code))}` : '';
+      const suggestion = a.suggestedCode ? `\n\nSuggested code:\n${codeFence(a.suggestedCode)}` : '';
+      const prefix = formatConventionalPrefix(a.conventionalLabel, a.decorations);
+      return `**${where}:** ${prefix}${a.text ?? ''}${quoted}${suggestion}`.trim();
+    });
+  if (entries.length === 0) return '';
+  return `**${OUTSIDE_DIFF_BODY_HEADING}**\n\n${entries.join('\n\n')}`;
+}
 
 function buildAnnotationFileComments(
   annotations: CodeAnnotation[],
@@ -148,10 +197,11 @@ function buildFileLevelComments(annotations: CodeAnnotation[]): PRReviewFileLeve
 // general (review-wide) comments, which belong to no file. Both ride here so
 // neither is dropped from a PR submission. With `fileLevel` (GitHub), file-scoped
 // comments post as file-level threads instead and are left out of the body.
-function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySet<string>, fileLevel: boolean): string {
+function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySet<string>, fileLevel: boolean, permalink?: ReviewPermalink): string {
   const parts: string[] = [];
   for (const a of annotations) {
     const scope = a.scope ?? 'line';
+    if (a.outsideDiff && scope === 'line') continue; // its own section below
     const callFlowContext = formatCallFlowAnnotationTargets(a);
     if (scope === 'file' && a.markdownPreview && a.text) {
       // Never inline and never a file-level thread: the quote is rendered
@@ -174,6 +224,8 @@ function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySe
       );
     }
   }
+  const outside = buildOutsideDiffSection(annotations, permalink);
+  if (outside) parts.push(outside);
   return parts.join('\n\n');
 }
 
@@ -272,6 +324,8 @@ export function buildReviewSubmission(
    *  (GitHub) post file-scoped comments as file-level
    *  threads (#1599); anything else folds them into the review body. */
   platform?: ReviewPlatform,
+  /** Links a comment outside the diff to its lines at the head commit. */
+  permalink?: ReviewPermalink,
 ): ReviewSubmission {
   const fileLevel = platform !== undefined && getPRPlatformCapabilities({ platform }).fileLevelComments;
   const targets: SubmissionTarget[] = [];
@@ -337,7 +391,8 @@ export function buildReviewSubmission(
     const sample = annotations[0];
     const fileComments = buildAnnotationFileComments(annotations, withheld);
     const fileLevelComments = fileLevel ? buildFileLevelComments(annotations) : [];
-    const fileScopedBody = buildFileScopedBody(annotations, withheld, fileLevel);
+    const fileScopedBody = buildFileScopedBody(annotations, withheld, fileLevel, permalink);
+    const outsideDiffCount = annotations.filter((a) => a.outsideDiff && (a.scope ?? 'line') === 'line').length;
     // Exclude the "" sentinel path of general (review-level) comments so they
     // don't inflate the file count.
     const uniqueFiles = new Set(annotations.map(a => a.filePath).filter(p => p.length > 0));
@@ -358,6 +413,7 @@ export function buildReviewSubmission(
       fileScopedBody,
       fileCount: uniqueFiles.size,
       annotationCount: annotations.length,
+      ...(outsideDiffCount > 0 ? { outsideDiffCount } : {}),
       status: 'pending',
     });
   }
@@ -579,6 +635,13 @@ export function ReviewSubmissionDialog({
                     <div className="text-xs text-muted-foreground">
                       {target.annotationCount} comment{target.annotationCount !== 1 ? 's' : ''} across {target.fileCount} file{target.fileCount !== 1 ? 's' : ''}
                     </div>
+                    {target.outsideDiffCount ? (
+                      <div className="text-xs text-muted-foreground mt-0.5" data-outside-diff-note>
+                        {target.outsideDiffCount === 1
+                          ? '1 comment is on lines outside the diff, so it goes in the review\'s main comment with the code quoted and a link.'
+                          : `${target.outsideDiffCount} comments are on lines outside the diff, so they go in the review's main comment with the code quoted and a link.`}
+                      </div>
+                    ) : null}
                     {(target.status === 'failed' || target.status === 'partial') && target.error && (
                       <div className="text-xs text-destructive mt-0.5">{target.error}</div>
                     )}

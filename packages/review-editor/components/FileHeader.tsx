@@ -60,6 +60,8 @@ interface FileHeaderProps {
    * `iconOnly` on a tight header; `touch` in the compact touch shell.
    */
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
+  /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
+  accessory?: React.ReactNode;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -146,6 +148,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isGenerated = false,
   isTest = false,
   renderMarkdownView,
+  accessory,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -254,6 +257,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 ${isCompact ? 'gap-1' : 'gap-2'}`}>
+        {accessory}
         {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
         {showViewedControl && onToggleViewed && (
           <button

@@ -198,7 +198,8 @@ export function reanchorCodeAnnotations(
   const { currentSnapshot, belongsToCurrentDiff = () => true, patchChanged = false } = options;
   let changed = false;
   const next = annotations.map((annotation) => {
-    if (!isLineScoped(annotation) || annotation.outdated || !belongsToCurrentDiff(annotation)) return annotation;
+    // A comment outside the diff anchors to its file, not to the patch.
+    if (!isLineScoped(annotation) || annotation.outdated || annotation.outsideDiff || !belongsToCurrentDiff(annotation)) return annotation;
     if (annotation.anchorSnapshot !== undefined && annotation.anchorSnapshot === currentSnapshot) return annotation;
     if (annotation.anchorSnapshot === undefined && !patchChanged) return annotation;
     changed = true;
@@ -253,7 +254,7 @@ export function canPostInline(
   knownSnapshots: ReadonlyMap<string, string> | undefined,
   currentPrUrl: string | undefined,
 ): boolean {
-  if (annotation.outdated) return false;
+  if (annotation.outdated || annotation.outsideDiff) return false;
   if (!knownSnapshots || annotation.anchorSnapshot === undefined) return true;
   const prUrl = annotation.prUrl ?? currentPrUrl;
   const known = prUrl === undefined ? undefined : knownSnapshots.get(prUrl);

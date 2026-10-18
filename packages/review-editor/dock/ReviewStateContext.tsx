@@ -15,6 +15,8 @@ import type { EditSelectionComment } from '../edit/useEditSession';
 import type { CallFlowAnalysisState } from '../hooks/useCallFlowAnalysis';
 import type { CallFlowInstallController } from '../hooks/useCallFlowInstall';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
+import type { CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
+import type { ChangedFileView } from '../components/FileViewSwitch';
 
 /** One-shot request to open the native code-annotation composer on a source range. */
 export interface LineAnnotationComposeRequest {
@@ -120,6 +122,14 @@ export interface ReviewState {
   onAddEditorCommentForFile: (filePath: string, comment: EditSelectionComment) => void;
   onAddFileComment: (text: string) => void;
   onAddFileCommentForFile: (filePath: string, text: string) => void;
+  /** Explorer (step 2): a changed file's view, Changes or Whole file. Absent: no switch. */
+  fileViewOf?: (filePath: string) => ChangedFileView;
+  onFileViewChange?: (filePath: string, view: ChangedFileView) => void;
+  /** A comment made in a whole-file view (a changed file's Whole file, or a
+   *  file the review does not change). `inDiff`: the lines sit in one hunk. */
+  onAddWholeFileAnnotation?: (input: CodeFileAnnotationInput, options: { inDiff: boolean }) => void;
+  /** Keep a preview tab (a comment in it, a double click on its tab). */
+  onKeepFileTab?: (panelId: string) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   /** Highlight a comment without moving the viewport (in-diff click). */
   onSelectAnnotation: (id: string | null) => void;

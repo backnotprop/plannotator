@@ -33,6 +33,11 @@ function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; 
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
+  // Comments outside the diff live in whole-file views, not on the diff.
+  const diffOnlyAnnotations = useMemo(
+    () => (state.allAnnotations.some((a) => a.outsideDiff) ? state.allAnnotations.filter((a) => !a.outsideDiff) : state.allAnnotations),
+    [state.allAnnotations],
+  );
 
   // A commit diff heads the surface with the full commit message and opens
   // its files folded — the description gives the "what/why", the collapsed
@@ -124,7 +129,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       expandUnchanged={state.expandUnchanged}
       fontFamily={state.fontFamily}
       fontSize={state.fontSize}
-      annotations={state.allAnnotations}
+      annotations={diffOnlyAnnotations}
       selectedAnnotationId={state.selectedAnnotationId}
       scrollTargetAnnotation={state.scrollTargetAnnotation}
       pendingSelection={state.pendingSelection}
