@@ -145,6 +145,8 @@ import { PRSelector } from './components/PRSelector';
 import { PRSwitchOverlay } from './components/PRSwitchOverlay';
 import { usePRStack } from './hooks/usePRStack';
 import { useDiffFreshness } from './hooks/useDiffFreshness';
+import { useTreeScope } from './hooks/useTreeScope';
+import { useRepoFiles } from './hooks/useRepoFiles';
 import { useAutoViewed } from './hooks/useAutoViewed';
 import { useGroupByKind } from './hooks/useGroupByKind';
 import type { AllFilesOrder } from './components/AllFilesCodeView';
@@ -700,6 +702,9 @@ const ReviewApp: React.FC = () => {
   // file in full (and serve a Markdown file's own images). Absent (old
   // server, demo) reads as false: no preview UI at all.
   const [markdownPreviewSupported, setMarkdownPreviewSupported] = useState(false);
+  // All files in the tree (approved design record "review-explorer"): offered
+  // where the server can list the repository at the diff's new side.
+  const [repoFilesSupported, setRepoFilesSupported] = useState(false);
   // Session-constant capability advert from `/api/diff`: 'patch' means the
   // diff is caller-supplied bytes (`plannotator review --patch-file`) with no
   // repository behind it. ABSENT reads as 'vcs', so an old server keeps every
@@ -2305,6 +2310,7 @@ const ReviewApp: React.FC = () => {
         serverSession?: string;
         imagePreviewSupported?: boolean;
         markdownPreviewSupported?: boolean;
+        repoFilesSupported?: boolean;
         sourceKind?: ReviewSourceKind;
         repoInfo?: { display: string; branch?: string };
         prMetadata?: PRMetadata;
@@ -2385,6 +2391,7 @@ const ReviewApp: React.FC = () => {
         adoptServerSession(data.serverSession);
         setImagePreviewSupported(data.imagePreviewSupported === true);
         setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
+        setRepoFilesSupported(data.repoFilesSupported === true);
         // Session-constant: a static patch session has no diff-type switch to
         // re-advertise it on, so `/api/diff` is the only place it can arrive.
         setSourceKind(data.sourceKind === 'patch' ? 'patch' : 'vcs');
@@ -2939,6 +2946,16 @@ const ReviewApp: React.FC = () => {
   // order when the sections view is active, the tree's kind blocks when it is
   // grouped by kind, tree order otherwise (the commits view never regroups).
   const [groupByKind, toggleGroupByKind] = useGroupByKind();
+  // Changes | All files in the Tree view: opens on Changes; All files is
+  // remembered per browser once chosen, and the repository is only listed
+  // while All files is chosen.
+  const [treeScope, setTreeScope] = useTreeScope();
+  // Listed (and watched) only while All files is on screen: the Tree view of
+  // an open file tree, not merely remembered in the cookie.
+  const repoFiles = useRepoFiles({
+    enabled: repoFilesSupported && treeScope === 'all' && effectivePanelView === 'tree' && isNavigatorOpen,
+    snapshotId,
+  });
   const allFilesOrder: AllFilesOrder =
     effectivePanelView === 'sections' ? 'list' : effectivePanelView === 'tree' && groupByKind ? 'kind' : 'tree';
 
@@ -3055,6 +3072,7 @@ const ReviewApp: React.FC = () => {
     approvalNotesSupported?: boolean;
     imagePreviewSupported?: boolean;
     markdownPreviewSupported?: boolean;
+    repoFilesSupported?: boolean;
     draftState?: CodeDraftTargetState;
   }) {
     const isPRSwitch = !!data.prMetadata;
@@ -3069,6 +3087,7 @@ const ReviewApp: React.FC = () => {
     }
     if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
     if (data.markdownPreviewSupported !== undefined) setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
+    if (data.repoFilesSupported !== undefined) setRepoFilesSupported(data.repoFilesSupported === true);
     const nextFiles = parseDiffToFiles(data.rawPatch);
     dockApi?.getPanel(REVIEW_DIFF_PANEL_ID)?.api.close();
     needsInitialDiffPanel.current = true;
@@ -3179,6 +3198,7 @@ const ReviewApp: React.FC = () => {
         approvalNotesSupported?: boolean;
         imagePreviewSupported?: boolean;
         markdownPreviewSupported?: boolean;
+        repoFilesSupported?: boolean;
         superseded?: boolean;
       };
 
@@ -3202,6 +3222,7 @@ const ReviewApp: React.FC = () => {
       }
       if (data.imagePreviewSupported !== undefined) setImagePreviewSupported(data.imagePreviewSupported === true);
       if (data.markdownPreviewSupported !== undefined) setMarkdownPreviewSupported(data.markdownPreviewSupported === true);
+      if (data.repoFilesSupported !== undefined) setRepoFilesSupported(data.repoFilesSupported === true);
 
       const nextFiles = orderFilesBySections(parseDiffToFiles(data.rawPatch), data.sections);
       // Durable progress reconciles every new snapshot independently of the
@@ -5619,6 +5640,9 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <FileTree
+                treeScope={treeScope}
+                onTreeScopeChange={repoFilesSupported ? setTreeScope : undefined}
+                repoFiles={repoFiles}
                 groupByKind={groupByKind}
                 onToggleGroupByKind={toggleGroupByKind}
                 generatedFiles={generatedFiles}

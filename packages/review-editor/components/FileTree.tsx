@@ -25,12 +25,28 @@ import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
+import { RepoFileTree } from './RepoFileTree';
+import { TreeScopeSwitch } from './TreeScopeSwitch';
+import type { TreeScope } from '../hooks/useTreeScope';
+import type { RepoFiles } from '../hooks/useRepoFiles';
+import { initialRepoExpansion, repoAncestors } from '../utils/repoTree';
+import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/OverlayScrollArea';
 
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 import { PanelSectionHeader, DiffCounts } from './FileRowBits';
 
 interface FileTreeProps {
+  /** Changes | All files (approved design record "review-explorer"). Without
+   *  `onTreeScopeChange` the switch is not drawn and the tree shows Changes. */
+  treeScope?: TreeScope;
+  onTreeScopeChange?: (scope: TreeScope) => void;
+  /** The repository listing behind All files (`useRepoFiles`). */
+  repoFiles?: RepoFiles;
+  /** Opens a file of the listing that is not in the review (single click: preview; double: pin). */
+  onOpenRepoFile?: (path: string, options: { pin: boolean }) => void;
+  /** A file of the listing open outside the diff, highlighted in All files. */
+  activeRepoPath?: string | null;
   /** Split the tree into Code / Tests / Generated blocks when the change holds
    *  two or more kinds ("Group by kind" in Tree controls). */
   groupByKind?: boolean;
@@ -140,6 +156,11 @@ interface FileTreeProps {
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  treeScope = 'changes',
+  onTreeScopeChange,
+  repoFiles,
+  onOpenRepoFile,
+  activeRepoPath,
   groupByKind = false,
   onToggleGroupByKind,
   generatedFiles,
@@ -354,14 +375,52 @@ export const FileTree: React.FC<FileTreeProps> = ({
     toggleAllFolders: handleToggleAllFolders,
   } = useDiffFileTreeExpansion(tree, activeExpansionPath);
 
+  // --- All files -----------------------------------------------------------
+  const showAllFiles = !!onTreeScopeChange && treeScope === 'all' && !!repoFiles;
+  const repoState = repoFiles?.state;
+  const repoReady = repoState?.status === 'ready' ? repoState : null;
+  const [repoExpanded, setRepoExpanded] = useState<ReadonlySet<string> | null>(null);
+  // Opens on the paths that lead to the changes (and the active file).
+  useEffect(() => {
+    if (!repoReady || repoExpanded) return;
+    setRepoExpanded(initialRepoExpansion(files.map((file) => file.path), activePath));
+  }, [repoReady, repoExpanded, files, activePath]);
+  // The active file's folders open when it changes, as in Changes.
+  const activeRepoTarget = activeRepoPath ?? activePath ?? null;
+  useEffect(() => {
+    if (!activeRepoTarget) return;
+    setRepoExpanded((current) => {
+      if (!current) return current;
+      const missing = repoAncestors(activeRepoTarget).filter((dir) => !current.has(dir));
+      if (missing.length === 0) return current;
+      const next = new Set(current);
+      for (const dir of missing) next.add(dir);
+      return next;
+    });
+  }, [activeRepoTarget]);
+  const toggleRepoFolder = useCallback((path: string) => {
+    setRepoExpanded((current) => {
+      const next = new Set(current ?? []);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+  const repoAllCollapsed = !repoExpanded || repoExpanded.size === 0;
+  const toggleAllRepoFolders = useCallback(() => {
+    setRepoExpanded(repoAllCollapsed ? initialRepoExpansion(files.map((file) => file.path), activePath) : new Set());
+  }, [repoAllCollapsed, files, activePath]);
+  const scrollAreaRef = useRef<OverlayScrollAreaHandle>(null);
+  const getScrollElement = useCallback(() => scrollAreaRef.current?.getViewport() ?? null, []);
+
   const panelControls = (
     <PanelControlsRow
       stagedCount={stagedFiles.size}
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
-      onToggleAllFolders={handleToggleAllFolders}
-      areAllFoldersExpanded={areAllFoldersExpanded}
-      collapseDisabled={allFolderPaths.length === 0}
+      onToggleAllFolders={showAllFiles ? toggleAllRepoFolders : handleToggleAllFolders}
+      areAllFoldersExpanded={showAllFiles ? !repoAllCollapsed : areAllFoldersExpanded}
+      collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
       onToggleHideViewed={onToggleHideViewed}
       hideViewedFiles={hideViewedFiles}
       viewedCount={viewedFiles.size}
@@ -547,8 +606,23 @@ export const FileTree: React.FC<FileTreeProps> = ({
           </div>
         )}
 
+      {/* Changes | All files */}
+      {onTreeScopeChange && !searchQuery.trim() && (
+        <div className="px-2 py-1.5 border-b border-border/30" data-tree-scope-row>
+          <TreeScopeSwitch
+            scope={treeScope}
+            onSelect={onTreeScopeChange}
+            changedCount={files.length}
+            allCount={repoReady ? repoReady.total : undefined}
+          />
+          {showAllFiles && repoReady && (repoReady.live || repoReady.truncated) && (
+            <RepoListingStatus repo={repoReady} />
+          )}
+        </div>
+      )}
+
       {/* File tree or search results */}
-      <OverlayScrollArea className="flex-1 min-h-0">
+      <OverlayScrollArea ref={scrollAreaRef} className="flex-1 min-h-0">
         <div className="px-1 py-1">
           {prOverviewNumber && prOverviewTitle && onSelectPROverview && (
             <SidebarActionRow
@@ -613,6 +687,36 @@ export const FileTree: React.FC<FileTreeProps> = ({
             ) : (
               <div className="py-6 text-center text-xs text-muted-foreground/50">No matches found</div>
             )
+          ) : showAllFiles ? (
+            repoReady ? (
+              <RepoFileTree
+                repo={repoReady}
+                loadDir={repoFiles!.loadDir}
+                files={files}
+                activeFileIndex={rowActiveIndex}
+                activeRepoPath={activeRepoPath}
+                expanded={repoExpanded ?? EMPTY_SET}
+                onToggleFolder={toggleRepoFolder}
+                onSelectFile={onSelectFile}
+                onDoubleClickFile={onDoubleClickFile}
+                onOpenRepoFile={onOpenRepoFile}
+                viewedFiles={viewedFiles}
+                onToggleViewed={onToggleViewed}
+                showViewedControls={showViewedControls}
+                annotations={annotations}
+                stagedFiles={stagedFiles}
+                repoRoot={repoRoot}
+                getSectionEntry={getSectionEntry}
+                onStageFile={onStageFile}
+                stagingFile={stagingFile}
+                showStageControls={showStageControls}
+                markdownPreviewedPaths={markdownPreviewedPaths}
+                scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
+                getScrollElement={getScrollElement}
+              />
+            ) : (
+              <RepoListingPlaceholder state={repoState} onRetry={repoFiles?.reload} />
+            )
           ) : (
             <>
               {kindBlocks
@@ -643,6 +747,73 @@ export const FileTree: React.FC<FileTreeProps> = ({
         </div>
       </OverlayScrollArea>
     </aside>
+  );
+};
+
+const EMPTY_SET: ReadonlySet<string> = new Set();
+
+/** The All files list while it loads, or why there is none. */
+const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; onRetry?: () => void }> = ({ state, onRetry }) => {
+  if (!state || state.status === 'idle' || state.status === 'loading') {
+    return <div className="py-6 text-center text-xs text-muted-foreground/60" data-repo-files-loading>Listing the repository…</div>;
+  }
+  if (state.status === 'unavailable') {
+    return <div className="px-3 py-6 text-center text-xs text-muted-foreground/70" data-repo-files-unavailable={state.reason}>{state.message}</div>;
+  }
+  if (state.status === 'error') {
+    return (
+      <div className="px-3 py-6 text-center text-xs text-muted-foreground/70" data-repo-files-error>
+        <div>The repository could not be listed.</div>
+        {onRetry && (
+          <button type="button" className="mt-2 text-primary hover:underline" onClick={onRetry}>
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
+
+function relativeAge(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
+/** "Live · updated just now · 1 added, 1 edited" under the switch, or the truncation note. */
+const RepoListingStatus: React.FC<{ repo: Extract<RepoFiles['state'], { status: 'ready' }> }> = ({ repo }) => {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!repo.live) return;
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, [repo.live]);
+  const counts = { A: 0, M: 0, D: 0 };
+  for (const change of Object.values(repo.onDisk)) counts[change] += 1;
+  const parts = [
+    counts.A > 0 ? `${counts.A} added` : null,
+    counts.M > 0 ? `${counts.M} edited` : null,
+    counts.D > 0 ? `${counts.D} deleted` : null,
+  ].filter(Boolean);
+  return (
+    <div className="mt-1.5 px-1 flex items-center gap-1.5 text-[11px] text-muted-foreground" data-repo-listing-status>
+      {repo.live ? (
+        <>
+          <span className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0" aria-hidden="true" />
+          <span className="text-foreground/80">Live</span>
+          <span className="truncate">
+            · updated {relativeAge(Math.max(0, now - repo.updatedAt))}
+            {parts.length > 0 ? ` · ${parts.join(', ')}` : ''}
+          </span>
+        </>
+      ) : (
+        <span>Part of the repository is listed (the platform stopped early).</span>
+      )}
+    </div>
   );
 };
 
