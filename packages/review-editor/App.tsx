@@ -113,6 +113,26 @@ import { useExternalAnnotations } from '@plannotator/ui/hooks/useExternalAnnotat
 import { AGENT_CLOSED_TITLE, agentClosedSubtitle } from '@plannotator/ui/utils/agentClosed';
 import { useUndoHistory } from '@plannotator/ui/hooks/useUndoHistory';
 import { useHistoryShortcuts } from '@plannotator/ui/shortcuts';
+import { useReviewEditorDoubleTap } from './shortcuts';
+import { useReviewExplorerShortcuts } from '@plannotator/ui/shortcuts';
+import { isVSCodePanel } from '@plannotator/ui/utils/vscodePanel';
+import { createTokenTargetTracker, type TokenTargetHandler } from './utils/tokenTarget';
+import {
+  EMPTY_NAV_HISTORY,
+  navigateBack,
+  navigateForward,
+  pushNavJump,
+  pushRecentPath,
+  type JumpCrumb as JumpCrumbData,
+  type JumpVia,
+  type NavHistory,
+  type NavLocation,
+  type RevealTarget,
+} from './utils/explorerNavigation';
+import { changeRuns, stepChange, type ChangeStep } from './utils/changeNavigation';
+import { GoToFile } from './components/GoToFile';
+import type { FileTokenHandlers } from './components/RepoFileView';
+import type { CodeNavLocation, CodeNavResponse } from '@plannotator/shared/code-nav';
 import {
   applyCollectionMutations,
   hasActiveHistoryOverlay,
@@ -126,7 +146,7 @@ import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { buildReviewAgentInstructions } from '@plannotator/ui/utils/reviewAgentInstructions';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { FolderTree } from 'lucide-react';
-import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from 'dockview-react';
+import { DockviewReact, type DockviewReadyEvent, type DockviewApi, type IDockviewPanel } from 'dockview-react';
 import {
   ReviewHeaderMenu,
   type CompactReviewAction,
@@ -191,10 +211,11 @@ import {
   REVIEW_FILE_PREVIEW_PANEL_ID,
   makeReviewFilePanelId,
   isReviewFilePanelId,
+  type ReviewDiffPanelParams,
   type ReviewFilePanelParams,
 } from './dock/reviewPanelTypes';
 import type { ChangedFileView } from './components/FileViewSwitch';
-import type { CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
+import type { CodeFileAnnotationInput, CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
 import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from './utils/codeAnnotationAnchor';
@@ -227,7 +248,7 @@ import { needsDestinationSpotlight, markDestinationSpotlightSeen } from './utils
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import type { PRMetadata, PRReviewAction } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
-import { altKey } from '@plannotator/ui/utils/platform';
+import { altKey, isMac } from '@plannotator/ui/utils/platform';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { TourDialog } from './components/tour/TourDialog';
 import { DEMO_TOUR_ID } from './demoTour';
@@ -947,6 +968,10 @@ const ReviewApp: React.FC = () => {
 
   // Sync activeFileIndex from dockview's active panel (wired in handleDockReady)
 
+  // The last tab of the code (not the references panel) that was active:
+  // where Back starts and where a reference opens beside.
+  const lastMainPanelIdRef = useRef<string | null>(null);
+
   const openDiffFile = useCallback((filePath: string) => {
     const file = files.find(candidate => candidate.path === filePath || candidate.oldPath === filePath);
     if (!file) return;
@@ -1016,7 +1041,7 @@ const ReviewApp: React.FC = () => {
   }, [dockApi]);
   const previewPanelSeq = useRef(0);
 
-  const openRepoFile = useCallback((filePath: string, options: { pin: boolean }) => {
+  const openRepoFile = useCallback((filePath: string, options: { pin: boolean; side?: boolean }) => {
     if (!dockApi) return;
     const changed = files.some((file) => file.path === filePath);
     const kept = findFilePanel((params) => !params.preview && params.filePath === filePath);
@@ -1024,7 +1049,14 @@ const ReviewApp: React.FC = () => {
       kept.api.setActive();
       return;
     }
+    // A file opened from the references panel goes beside the code, never
+    // into the references panel's own group.
+    const mainPanelId = lastMainPanelIdRef.current;
+    const besideCode = dockApi.activePanel?.id === REVIEW_CODE_NAV_PANEL_ID && mainPanelId && dockApi.getPanel(mainPanelId)
+      ? { position: { referencePanel: mainPanelId } }
+      : {};
     if (changed && !options.pin) {
+      if (besideCode.position) dockApi.getPanel(besideCode.position.referencePanel)?.api.setActive();
       openDiffFile(filePath);
       return;
     }
@@ -1041,11 +1073,15 @@ const ReviewApp: React.FC = () => {
           return;
         }
       }
+      const sideOf = options.side ? dockApi.activePanel : undefined;
       dockApi.addPanel({
         id: makeReviewFilePanelId(filePath),
         component: REVIEW_PANEL_TYPES.FILE,
         title,
         params: { filePath } satisfies ReviewFilePanelParams,
+        ...(sideOf && sideOf.id !== REVIEW_CODE_NAV_PANEL_ID
+          ? { position: { referencePanel: sideOf.id, direction: 'right' as const } }
+          : besideCode),
       });
       return;
     }
@@ -1062,6 +1098,7 @@ const ReviewApp: React.FC = () => {
       component: REVIEW_PANEL_TYPES.FILE,
       title,
       params: { filePath, preview: true } satisfies ReviewFilePanelParams,
+      ...besideCode,
     });
     setActiveRepoPath(filePath);
   }, [dockApi, files, findFilePanel, openDiffFile]);
@@ -1500,13 +1537,19 @@ const ReviewApp: React.FC = () => {
       existing.api.setTitle(`References: ${request.symbol}`);
       existing.api.setActive();
     } else {
-      const refPanel = isCallFlowActive
+      // Beside the tab the reader is in (a file tab too); the panel ids below
+      // are the fallback when that tab is gone.
+      const activeId = dockApi.activePanel?.id;
+      const fallbackPanel = isCallFlowActive
         ? REVIEW_CALL_FLOW_PANEL_ID
         : isSemanticDiffActive
         ? REVIEW_SEMANTIC_DIFF_PANEL_ID
         : isAllFilesActive
         ? REVIEW_ALL_FILES_PANEL_ID
         : REVIEW_DIFF_PANEL_ID;
+      const refPanel = [activeId, lastMainPanelIdRef.current, fallbackPanel]
+        .find((id): id is string => !!id && id !== REVIEW_CODE_NAV_PANEL_ID && !!dockApi.getPanel(id))
+        ?? dockApi.panels.find((panel) => panel.id !== REVIEW_CODE_NAV_PANEL_ID)?.id;
       dockApi.addPanel({
         id: REVIEW_CODE_NAV_PANEL_ID,
         component: REVIEW_PANEL_TYPES.CODE_NAV,
@@ -1514,7 +1557,7 @@ const ReviewApp: React.FC = () => {
         // Open beside the code, not under it: a below-split steals vertical
         // room from the diff being read, and the references list is a narrow
         // column that reads naturally at the right edge.
-        position: { direction: 'right', referencePanel: refPanel },
+        ...(refPanel ? { position: { direction: 'right' as const, referencePanel: refPanel } } : {}),
         initialWidth: 420,
       });
     }
@@ -1708,6 +1751,7 @@ const ReviewApp: React.FC = () => {
         setIsDiffPanelActive(false);
         return;
       }
+      if (panel.id !== REVIEW_CODE_NAV_PANEL_ID) lastMainPanelIdRef.current = panel.id;
       setIsAllFilesActive(panel.id === REVIEW_ALL_FILES_PANEL_ID);
       setIsSemanticDiffActive(panel.id === REVIEW_SEMANTIC_DIFF_PANEL_ID);
       setIsCallFlowActive(panel.id === REVIEW_CALL_FLOW_PANEL_ID);
@@ -1995,6 +2039,250 @@ const ReviewApp: React.FC = () => {
     },
     [handleCodeNavRequest, hoveredTokenSymbol, closeTokenHover],
   );
+
+  // --- Explorer navigation (approved design record "review-explorer", step 3) ---
+  // Go to File, Go to Definition / References into tabs, and Back / Forward
+  // across those jumps. The keys are the `review-explorer` registry scope.
+  const tokenTargets = useMemo(() => createTokenTargetTracker(), []);
+  const handleTokenTarget = useCallback<TokenTargetHandler>(
+    (kind, props, filePath) => tokenTargets.report(kind, props, filePath),
+    [tokenTargets],
+  );
+  const [navHistory, setNavHistory] = useState<NavHistory>(EMPTY_NAV_HISTORY);
+  const [revealTarget, setRevealTarget] = useState<RevealTarget | null>(null);
+  const revealCounterRef = useRef(0);
+  const [jumpCrumb, setJumpCrumb] = useState<JumpCrumbData | null>(null);
+  const [recentPaths, setRecentPaths] = useState<string[]>([]);
+  const [goToFileOpen, setGoToFileOpen] = useState(false);
+  // Where a references panel was opened from, for its results' Back.
+  const codeNavOriginRef = useRef<NavLocation | null>(null);
+
+  const navLocationOfPanel = useCallback((panel: IDockviewPanel | undefined | null): NavLocation | null => {
+    if (!panel) return null;
+    if (panel.id === REVIEW_ALL_FILES_PANEL_ID) return { path: null };
+    if (isReviewDiffPanelId(panel.id)) {
+      const path = getReviewDiffPanelFilePath(panel.api.getParameters<ReviewDiffPanelParams>()) ?? getReviewDiffPanelFilePath(panel.params as ReviewDiffPanelParams | undefined);
+      return path ? { path } : null;
+    }
+    if (isReviewFilePanelId(panel.id)) {
+      const path = panel.api.getParameters<ReviewFilePanelParams>()?.filePath ?? (panel.params as ReviewFilePanelParams | undefined)?.filePath;
+      return path ? { path } : null;
+    }
+    return null;
+  }, []);
+
+  /** Where the reader is now: the code's tab (never the references panel). */
+  const currentNavLocation = useCallback((): NavLocation | null => {
+    if (!dockApi) return null;
+    const active = dockApi.activePanel;
+    const panel = active && active.id !== REVIEW_CODE_NAV_PANEL_ID
+      ? active
+      : lastMainPanelIdRef.current ? dockApi.getPanel(lastMainPanelIdRef.current) : undefined;
+    return navLocationOfPanel(panel);
+  }, [dockApi, navLocationOfPanel]);
+
+  /**
+   * Show a place without recording it (Back, Forward, and the end of a jump).
+   * Answers the view change it made to show a line (a changed file flipped to
+   * Whole file), so Back can undo it.
+   */
+  const goToNavLocation = useCallback((target: NavLocation & { symbol?: string }): NavLocation['restoreView'] => {
+    if (!dockApi) return undefined;
+    if (target.restoreView) handleFileViewChange(target.restoreView.path, target.restoreView.view);
+    if (target.path == null) {
+      dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID)?.api.setActive();
+      return;
+    }
+    const path = target.path;
+    setRecentPaths((recent) => pushRecentPath(recent, path));
+    const file = files.find((candidate) => candidate.path === path);
+    if (file && target.line && fileViewOf(path) === 'changes' && isLineRangeInPatch(file.patch, target.line, target.line, 'new')) {
+      // A line the diff shows: the diff, with the line selected.
+      handleScrollToAILines(path, target.line, target.line, 'new');
+      return;
+    }
+    // Any other line of a changed file is in its Whole file view.
+    let flipped: NavLocation['restoreView'];
+    if (file && target.line && fileViewOf(path) !== 'whole') {
+      handleFileViewChange(path, 'whole');
+      flipped = { path, view: 'changes' };
+    }
+    openRepoFile(path, { pin: false });
+    if (target.line) {
+      revealCounterRef.current += 1;
+      setRevealTarget({ path, line: target.line, symbol: target.symbol, token: revealCounterRef.current });
+    }
+    return flipped;
+  }, [dockApi, files, fileViewOf, handleFileViewChange, handleScrollToAILines, openRepoFile]);
+
+  const jumpTo = useCallback((target: NavLocation & { symbol?: string }, via: JumpVia, from?: NavLocation | null) => {
+    const origin = from === undefined ? currentNavLocation() : from;
+    setJumpCrumb(origin && target.path ? { targetPath: target.path, from: origin, via } : null);
+    const flipped = goToNavLocation(target);
+    // Back undoes a view the jump changed (a changed file flipped to Whole file).
+    setNavHistory((history) => pushNavJump(history, origin && flipped ? { ...origin, restoreView: flipped } : origin));
+  }, [currentNavLocation, goToNavLocation]);
+
+  const navigateHistory = useCallback((direction: 'back' | 'forward') => {
+    const current = currentNavLocation();
+    const step = direction === 'back' ? navigateBack(navHistory, current) : navigateForward(navHistory, current);
+    if (!step) return;
+    setNavHistory(step.history);
+    setJumpCrumb(null);
+    goToNavLocation(step.target);
+  }, [currentNavLocation, goToNavLocation, navHistory]);
+
+  const needsCheckoutToast = useCallback(() => {
+    toast('Code navigation requires a local checkout', {
+      description: 'Re-run with --local for PR reviews',
+      duration: 4000,
+    });
+  }, []);
+
+  /** ⇧F12, and Cmd+click in a whole-file view: the references panel. */
+  const openReferences = useCallback((request: CodeNavRequest) => {
+    codeNavOriginRef.current = { path: request.filePath, line: request.line };
+    handleCodeNavRequest(request);
+  }, [handleCodeNavRequest]);
+
+  /** F12: one clear definition opens its file at the line; else the references panel. */
+  const goToDefinition = useCallback(async () => {
+    const request = tokenTargets.current();
+    if (!request) return;
+    if (!gitContext && !agentCwd) {
+      needsCheckoutToast();
+      return;
+    }
+    closeTokenHover();
+    const from: NavLocation = { path: request.filePath, line: request.line };
+    let definitions: CodeNavLocation[] = [];
+    try {
+      const response = await fetch('/api/code-nav/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (response.ok) definitions = ((await response.json()) as CodeNavResponse).definitions ?? [];
+    } catch {
+      definitions = [];
+    }
+    const distinct = [...new Map(definitions.map((d) => [`${d.filePath}:${d.line}`, d])).values()];
+    if (distinct.length === 1) {
+      jumpTo({ path: distinct[0].filePath, line: distinct[0].line, symbol: request.symbol }, 'definition', from);
+      return;
+    }
+    openReferences(request);
+  }, [agentCwd, closeTokenHover, gitContext, jumpTo, needsCheckoutToast, openReferences, tokenTargets]);
+
+  const goToReferences = useCallback(() => {
+    const request = tokenTargets.current();
+    if (!request) return;
+    openReferences(request);
+  }, [openReferences, tokenTargets]);
+
+  const handleOpenCodeNavLocation = useCallback((location: CodeNavLocation) => {
+    jumpTo(
+      { path: location.filePath, line: location.line, symbol: codeNav.activeSymbol ?? undefined },
+      'references',
+      codeNavOriginRef.current ?? currentNavLocation(),
+    );
+  }, [codeNav.activeSymbol, currentNavLocation, jumpTo]);
+
+  const fileTokenHandlersCache = useRef(new Map<string, FileTokenHandlers>());
+  const fileTokens = useCallback((filePath: string): FileTokenHandlers => {
+    let handlers = fileTokenHandlersCache.current.get(filePath);
+    if (!handlers) {
+      const asToken = (target: CodeFileTokenTarget) => ({
+        type: 'token',
+        side: 'additions',
+        lineCharEnd: target.lineCharStart + target.tokenText.length,
+        ...target,
+      }) as unknown as DiffTokenEventBaseProps;
+      handlers = {
+        onTokenTarget: (kind, target) => tokenTargets.report(kind, asToken(target), filePath),
+        onTokenNavigate: (target) => {
+          tokenTargets.report('click', asToken(target), filePath);
+          const request = tokenTargets.current();
+          if (request) openReferences(request);
+        },
+      };
+      fileTokenHandlersCache.current.set(filePath, handlers);
+    }
+    return handlers;
+  }, [openReferences, tokenTargets]);
+  // The cached handlers close over openReferences; drop them when it changes.
+  useEffect(() => {
+    fileTokenHandlersCache.current.clear();
+  }, [openReferences]);
+
+  /** ⌥F5 / ⇧⌥F5: the next run of changed lines; past the last, the next changed file. */
+  const codeGroupElement = useCallback((): HTMLElement | null => {
+    if (!dockApi) return null;
+    const active = dockApi.activePanel;
+    const panel = active && active.id !== REVIEW_CODE_NAV_PANEL_ID
+      ? active
+      : lastMainPanelIdRef.current ? dockApi.getPanel(lastMainPanelIdRef.current) : undefined;
+    return (panel?.group?.element as HTMLElement | undefined) ?? null;
+  }, [dockApi]);
+  const stepToChange = useCallback(async (direction: ChangeStep) => {
+    const container = codeGroupElement();
+    if (!container) return;
+    if ((await stepChange(container, direction)) === 'moved') return;
+    const location = currentNavLocation();
+    const index = location?.path != null ? files.findIndex((file) => file.path === location.path) : -1;
+    const next = index === -1 ? undefined : files[index + direction];
+    if (!next) {
+      toast(direction === 1 ? 'No more changes' : 'No earlier changes', { duration: 1800 });
+      return;
+    }
+    openRepoFile(next.path, { pin: false });
+    // Wait for the next file's rows to settle (the diff draws, then redraws
+    // with the full file), then land on its first (or last) run.
+    let previous = '';
+    let stable = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const nextContainer = codeGroupElement();
+      if (!nextContainer) return;
+      const runs = changeRuns(nextContainer);
+      const shape = runs.length > 0 ? `${runs.length}:${Math.round(runs[0].top)}` : '';
+      stable = shape && shape === previous ? stable + 1 : 0;
+      previous = shape;
+      if (stable >= 3) {
+        await stepChange(nextContainer, direction, { edge: direction === 1 ? 'first' : 'last' });
+        return;
+      }
+    }
+  }, [codeGroupElement, currentNavLocation, files, openRepoFile]);
+
+  useEffect(() => {
+    if (!dockApi) return;
+    const subscription = dockApi.onDidActivePanelChange((panel) => {
+      const location = navLocationOfPanel(panel);
+      if (location?.path) setRecentPaths((recent) => pushRecentPath(recent, location.path!));
+      // A jump's line applies to the tab it opened, once: coming back to that
+      // tab later finds it where it was left.
+      if (location) setRevealTarget((target) => (target && target.path !== location.path ? null : target));
+    });
+    return () => subscription.dispose();
+  }, [dockApi, navLocationOfPanel]);
+
+  const reviewNavigation = useMemo(() => ({
+    canBack: navHistory.back.length > 0,
+    canForward: navHistory.forward.length > 0,
+    back: () => navigateHistory('back'),
+    forward: () => navigateHistory('forward'),
+  }), [navHistory, navigateHistory]);
+
+  const openFromGoToFile = useCallback((path: string, options: { side: boolean }) => {
+    setGoToFileOpen(false);
+    if (options.side) {
+      setRecentPaths((recent) => pushRecentPath(recent, path));
+      openRepoFile(path, { pin: true, side: true });
+      return;
+    }
+    jumpTo({ path }, 'file');
+  }, [jumpTo, openRepoFile]);
   const { withPRContext } = useAnnotationFactory(
     prMetadata,
     prStackInfo ? prDiffScope : undefined,
@@ -3097,10 +3385,11 @@ const ReviewApp: React.FC = () => {
   // remembered per browser once chosen, and the repository is only listed
   // while All files is chosen.
   const [treeScope, setTreeScope] = useTreeScope();
-  // Listed (and watched) only while All files is on screen: the Tree view of
-  // an open file tree, not merely remembered in the cookie.
+  // Listed (and watched) only while All files is on screen (the Tree view of
+  // an open file tree, not merely remembered in the cookie), and while Go to
+  // File is open.
   const repoFiles = useRepoFiles({
-    enabled: repoFilesSupported && treeScope === 'all' && effectivePanelView === 'tree' && isNavigatorOpen,
+    enabled: repoFilesSupported && ((treeScope === 'all' && effectivePanelView === 'tree' && isNavigatorOpen) || goToFileOpen),
     snapshotId,
   });
   const allFilesOrder: AllFilesOrder =
@@ -4148,6 +4437,12 @@ const ReviewApp: React.FC = () => {
     onFileViewChange: repoFilesSupported ? handleFileViewChange : undefined,
     onAddWholeFileAnnotation: handleAddWholeFileAnnotation,
     onKeepFileTab: handleKeepFileTab,
+    revealTarget,
+    jumpCrumb,
+    navigation: reviewNavigation,
+    onTokenTarget: canUseLiveWorkspaceActions ? handleTokenTarget : undefined,
+    fileTokens: canUseLiveWorkspaceActions ? fileTokens : undefined,
+    onOpenCodeNavLocation: handleOpenCodeNavLocation,
     onEditAnnotation: handleEditAnnotation,
     onSelectAnnotation: handleSelectAnnotation,
     onNavigateToAnnotation: handleNavigateToAnnotation,
@@ -4252,6 +4547,7 @@ const ReviewApp: React.FC = () => {
     handleRequestLineAnnotation, handleAddCallFlowAnnotation,
     handleAddAnnotation, handleAddFileComment, handleAddFileCommentForFile, handleEditAnnotation,
     repoFilesSupported, fileViewOf, handleFileViewChange, handleAddWholeFileAnnotation, handleKeepFileTab,
+    revealTarget, jumpCrumb, reviewNavigation, handleTokenTarget, fileTokens, handleOpenCodeNavLocation,
     handleSelectAnnotation, handleNavigateToAnnotation, handleDeleteAnnotation, viewedFiles,
     generatedFiles, expandedGeneratedFiles, handleGeneratedFileCollapsedChange,
     handleToggleViewed, reviewShowViewedControls, reviewShowStageControls, stagedFiles, stagingFile, stageFile,
@@ -4839,22 +5135,14 @@ const ReviewApp: React.FC = () => {
     'discard-and-finish': () => {}, // the platform arm never emits it
   }), [runPlatformDecisionAction]);
 
-  // Double-tap Option/Alt to toggle review destination (PR mode only)
-  useEffect(() => {
-    if (!prMetadata) return;
-    let lastAltUp = 0;
-    const DOUBLE_TAP_WINDOW = 300;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Alt' || e.repeat) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key !== 'Alt') return;
-      const now = Date.now();
-      if (now - lastAltUp < DOUBLE_TAP_WINDOW) {
+  // Double-tap Option/Alt to toggle review destination (PR mode only). On the
+  // registry's double-tap hook, which counts a tap only when Alt went down and
+  // came up alone: ⌥F5 twice (Next change) or Alt+← twice (Back on Windows)
+  // must never switch where the review goes. The hand-written listener this
+  // replaces counted any two Alt releases.
+  useReviewEditorDoubleTap({
+    handlers: {
+      toggleDestination: prMetadata ? () => {
         setReviewDestination(prev => {
           const next = prev === 'platform' ? 'agent' : 'platform';
           storage.setItem('plannotator-review-dest', next);
@@ -4866,19 +5154,9 @@ const ReviewApp: React.FC = () => {
         // keydown handler deliberately ignores modifier keys, so this keyup
         // path is the only place that can see the gesture complete.
         if (showDestSpotlight) dismissDestSpotlight();
-        lastAltUp = 0;
-      } else {
-        lastAltUp = now;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [prMetadata, showDestSpotlight, dismissDestSpotlight]);
+      } : undefined,
+    },
+  });
 
   const canHandleReviewHistoryShortcut = useCallback((event: KeyboardEvent): boolean => {
     if (event.defaultPrevented || isNativeHistoryOwner(event)) return false;
@@ -4920,6 +5198,66 @@ const ReviewApp: React.FC = () => {
       redo: {
         when: (event) => canHandleReviewHistoryShortcut(event) && reviewHistory.canRedo,
         handle: () => { reviewHistory.redo(); },
+      },
+    },
+  });
+
+  // Explorer keys (the `review-explorer` scope): never over a dialog, the
+  // guide, or while the review is settling; only Go to File works from a text
+  // field (as in VS Code), every other key leaves typing alone.
+  const canHandleExplorerKey = useCallback((event: KeyboardEvent, options: { inText?: boolean } = {}): boolean => {
+    if (event.defaultPrevented || !dockApi || isLoading) return false;
+    if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return false;
+    if (guideOpen || goToFileOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showWorktreeDialog || showNoAnnotationsDialog || showExitWarning) return false;
+    if (showLookAndFeel || showGuideIntro || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || askSessionIntroVisible || agentToolIntroVisible || tourDialogJobId) return false;
+    if (hasActiveHistoryOverlay(document)) return false;
+    const origin = event.composedPath?.()[0] ?? event.target;
+    const typing = origin instanceof HTMLElement && (origin.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(origin.tagName));
+    if (typing && !options.inText) return false;
+    // In a text field on macOS only ⌘ counts: ⌃P there is the field's own
+    // "previous line" (Mod matches ⌃ too, for the keys that predate this).
+    if (typing && isMac && !event.metaKey) return false;
+    return true;
+  }, [
+    agentToolIntroVisible, askSessionIntroVisible, dockApi, editModeIntroVisible, goToFileOpen, guideOpen, isApproving,
+    isExiting, isLoading, isPlatformActioning, isSendingFeedback, openSettingsMenu, platformCommentDialog,
+    showDestinationMenu, showExitWarning, showExportModal, showGuideIntro, showLookAndFeel, showNoAnnotationsDialog,
+    showWorktreeDialog, submitted, terminalToolsIntroVisible, tokenHoverIntroVisible, tourDialogJobId,
+  ]);
+
+  useReviewExplorerShortcuts({
+    handlers: {
+      goToFile: {
+        // Inside the VS Code panel ⌘P stays VS Code's Quick Open (the panel
+        // forwards it); Go to File is the tree's "Go to File…" row there.
+        when: (event) => !isVSCodePanel() && canHandleExplorerKey(event, { inText: true }),
+        handle: () => setGoToFileOpen(true),
+      },
+      // With no symbol under the pointer (or clicked) the key is left alone,
+      // so the browser's F12 (developer tools) still works.
+      goToDefinition: {
+        when: (event) => canHandleExplorerKey(event) && tokenTargets.current() !== null,
+        handle: () => { void goToDefinition(); },
+      },
+      goToReferences: {
+        when: (event) => canHandleExplorerKey(event) && tokenTargets.current() !== null,
+        handle: goToReferences,
+      },
+      navigateBack: {
+        when: (event) => canHandleExplorerKey(event),
+        handle: () => navigateHistory('back'),
+      },
+      navigateForward: {
+        when: (event) => canHandleExplorerKey(event),
+        handle: () => navigateHistory('forward'),
+      },
+      nextChange: {
+        when: (event) => canHandleExplorerKey(event),
+        handle: () => { void stepToChange(1); },
+      },
+      previousChange: {
+        when: (event) => canHandleExplorerKey(event),
+        handle: () => { void stepToChange(-1); },
       },
     },
   });
@@ -5826,6 +6164,7 @@ const ReviewApp: React.FC = () => {
                 repoFiles={repoFiles}
                 onOpenRepoFile={(path, options) => completeNavigatorSelection(() => openRepoFile(path, options))}
                 activeRepoPath={activeRepoPath}
+                onGoToFile={dockApi ? () => setGoToFileOpen(true) : undefined}
                 groupByKind={groupByKind}
                 onToggleGroupByKind={toggleGroupByKind}
                 generatedFiles={generatedFiles}
@@ -6463,6 +6802,18 @@ const ReviewApp: React.FC = () => {
     )}
 
     <ServerSessionReplacedBanner />
+
+    {goToFileOpen && (
+      <GoToFile
+        onClose={() => setGoToFileOpen(false)}
+        onOpen={(path, options) => completeNavigatorSelection(() => openFromGoToFile(path, options))}
+        files={files}
+        repo={repoFiles.state}
+        repoSupported={repoFilesSupported}
+        recentPaths={recentPaths}
+        snapshotId={snapshotId}
+      />
+    )}
 
     <Toaster
       position="bottom-center"

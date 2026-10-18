@@ -170,6 +170,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       onCodeNavRequest={state.onCodeNavRequest}
       onTokenHoverEnter={state.onTokenHoverEnter}
       onTokenHoverLeave={state.onTokenHoverLeave}
+      onTokenTarget={state.onTokenTarget}
       onVisibleFileChange={state.onAllFilesVisibleFileChange}
       onFileScrolledPast={state.onAllFilesFileScrolledPast}
       fileOrder={state.allFilesOrder}

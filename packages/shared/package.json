@@ -17,6 +17,7 @@
     "./review-core": "./review-core.ts",
     "./review-image": "./review-image.ts",
     "./repo-files": "./repo-files.ts",
+    "./fuzzy-path": "./fuzzy-path.ts",
     "./review-markdown-image": "./review-markdown-image.ts",
     "./review-progress": "./review-progress.ts",
     "./commit-history": "./commit-history.ts",

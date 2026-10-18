@@ -310,3 +310,198 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
     await stopReview(child, root);
   }
 });
+
+test('Go to File, Go to Definition and References into tabs, Back / Forward, next change', async ({ browser }) => {
+  test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
+  test.skip(spawnSync('rg', ['--version']).status !== 0, 'Go to Definition searches with ripgrep');
+  mkdirSync(proofDir, { recursive: true });
+  const root = mkdtempSync(join(tmpdir(), 'plannotator-review-explorer-'));
+  const repo = buildRepo(root);
+  // A symbol the changed lines use, defined in a file the review does not change.
+  write(repo, 'packages/shared/kinds.ts', '// Labels for file kinds.\n\nexport function kindLabel(kind: string): string {\n  return kind.toUpperCase();\n}\n');
+  // A long file with many changes, taller than the screen, for Next change.
+  const longLines = Array.from({ length: 600 }, (_, i) => `export const line${i + 1} = ${i + 1};`);
+  write(repo, 'packages/shared/long.ts', `${longLines.join('\n')}\n`);
+  git(repo, ['add', 'packages/shared/kinds.ts', 'packages/shared/long.ts']);
+  git(repo, ['commit', '-q', '-m', 'kinds', '--', 'packages/shared/kinds.ts', 'packages/shared/long.ts']);
+  write(repo, 'packages/shared/long.ts', `${longLines.map((line, i) => (i % 20 === 10 ? `${line} // changed` : line)).join('\n')}\n`);
+  write(repo, 'packages/review-editor/utils/fileKindTree.ts', "import { kindLabel } from '../../shared/kinds';\nimport { line2 } from '../../shared/long';\n\nexport function kindFolderPath(kind: string, path: string) {\n  if (path === '') return kindLabel(kind);\n  return `${kind}:${path}:${line2}`;\n}\n");
+  const readyFile = join(root, 'ready.jsonl');
+  const env = {
+    PATH: process.env.PATH ?? '',
+    HOME: root,
+    PLANNOTATOR_DATA_DIR: join(root, 'data'),
+    PLANNOTATOR_READY_FILE: readyFile,
+    PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
+    NO_BROWSER,
+    PLANNOTATOR_REMOTE: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+  };
+  // VS Code's Back / Forward differ per system; headless Chromium reports the host's.
+  const back = process.platform === 'darwin' ? 'Control+Minus' : process.platform === 'win32' ? 'Alt+ArrowLeft' : 'Control+Alt+Minus';
+  const forward = process.platform === 'darwin' ? 'Control+Shift+Minus' : process.platform === 'win32' ? 'Alt+ArrowRight' : 'Control+Shift+Minus';
+  let child: ChildProcess | undefined;
+  try {
+    child = spawn(binary, ['review', '--diff-type', 'uncommitted'], { env, cwd: repo, stdio: 'ignore' });
+    await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
+    const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
+    const page = await openReview(browser, url);
+    const activeTab = page.locator('.dv-active-tab .dv-review-tab-label').first();
+
+    // With no symbol under the pointer F12 is left to the browser (developer tools).
+    expect(await page.evaluate(() => {
+      const event = new KeyboardEvent('keydown', { key: 'F12', code: 'F12', bubbles: true, cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    })).toBe(false);
+    await expect(page.locator('[data-code-nav-location]')).toHaveCount(0);
+
+    // The changed file on its diff.
+    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await expect(page.locator('[data-file-view-switch]')).toBeVisible();
+
+    // Go to File (Mod+P): fuzzy over the whole repository; the changed file is marked.
+    await page.keyboard.press('ControlOrMeta+p');
+    await expect(page.locator('[data-go-to-file]')).toBeVisible();
+    await page.keyboard.type('bft');
+    await expect(page.locator('[data-goto-path]').first()).toHaveAttribute('data-goto-path', 'packages/review-editor/utils/buildFileTree.ts');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('fkt');
+    await expect(page.locator('[data-goto-path="packages/review-editor/utils/fileKindTree.ts"] [data-goto-status]')).toHaveText('M');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('readme');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-go-to-file]')).toHaveCount(0);
+    await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
+    await expect(page.locator('[data-repo-file-view="README.md"] [data-jump-crumb]')).toContainText('From fileKindTree.ts · Go to File');
+
+    // Back returns to the diff; Forward to the file.
+    await page.keyboard.press(back);
+    await expect(activeTab).toHaveText('fileKindTree.ts');
+    await page.keyboard.press(forward);
+    await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
+    await page.keyboard.press(back);
+    await expect(activeTab).toHaveText('fileKindTree.ts');
+
+    // F12 on a symbol of the diff: its one definition opens in a tab at its line.
+    const token = page.locator('[data-char]', { hasText: /^kindLabel$/ }).last();
+    await token.hover();
+    await page.keyboard.press('F12');
+    const kinds = page.locator('[data-repo-file-view="packages/shared/kinds.ts"]');
+    await expect(kinds).toBeVisible({ timeout: 20_000 });
+    await expect(kinds.locator('[data-jump-crumb]')).toContainText('From fileKindTree.ts:5 · Go to Definition (F12)');
+    await expect(kinds.locator('[data-line="3"][data-selected-line]').first()).toBeAttached();
+    await page.screenshot({ path: join(proofDir, '07-definition.png') });
+
+    // A definition on a changed file's line outside its hunks opens its Whole
+    // file view; Back puts the file back on Changes.
+    await page.keyboard.press(back);
+    await expect(activeTab).toHaveText('fileKindTree.ts');
+    await page.locator('[data-char]', { hasText: /^line2$/ }).last().hover();
+    await page.keyboard.press('F12');
+    const longWhole = page.locator('[data-whole-file-view="packages/shared/long.ts"]');
+    await expect(longWhole).toBeVisible({ timeout: 20_000 });
+    await expect(longWhole.locator('[data-line="2"][data-selected-line]').first()).toBeAttached();
+    await page.keyboard.press(back);
+    await expect(activeTab).toHaveText('fileKindTree.ts');
+    await page.locator('.file-tree-item', { hasText: 'long.ts' }).first().click();
+    await expect(page.locator('[data-file-view="changes"]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await expect(activeTab).toHaveText('fileKindTree.ts');
+    await page.locator('[data-char]', { hasText: /^kindLabel$/ }).last().hover();
+    await page.keyboard.press('F12');
+    await expect(kinds).toBeVisible({ timeout: 20_000 });
+
+    // Shift+F12 on the definition: the references panel; a result opens in a tab.
+    await kinds.locator('[data-line="3"] [data-char]', { hasText: /^kindLabel$/ }).first().hover();
+    await page.keyboard.press('Shift+F12');
+    const reference = page.locator('[data-code-nav-location^="packages/review-editor/utils/fileKindTree.ts:"]').first();
+    await expect(reference).toBeVisible({ timeout: 20_000 });
+    await reference.click();
+    await expect(page.locator('[data-jump-crumb]', { hasText: 'References' }).first()).toBeVisible();
+    await expect(page.locator('[data-nav-history="back"]').first()).toBeEnabled();
+    await page.screenshot({ path: join(proofDir, '07-refs.png') });
+
+    // Next change: this diff fits the screen, so on to the next changed file.
+    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await expect(activeTab).toHaveText('fileKindTree.ts');
+    await page.keyboard.press('Alt+F5');
+    await expect(activeTab).toHaveText('long.ts');
+    // In a diff taller than the screen it walks the runs of changes, down and back up.
+    const scrollTop = () => page.evaluate(() => {
+      const host = document.querySelector('.dv-active-group diffs-container');
+      let node: Element | null = host;
+      while (node) {
+        if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node.scrollTop;
+        node = node.parentElement;
+      }
+      return -1;
+    });
+    await expect.poll(scrollTop).toBeGreaterThan(-1);
+    const first = await scrollTop();
+    await page.keyboard.press('Alt+F5');
+    await expect.poll(scrollTop).toBeGreaterThan(first);
+    const second = await scrollTop();
+    await page.keyboard.press('Alt+F5');
+    await expect.poll(scrollTop).toBeGreaterThan(second);
+    await page.keyboard.press('Shift+Alt+F5');
+    await expect.poll(scrollTop).toBe(second);
+    await expect(activeTab).toHaveText('long.ts');
+    await page.context().close();
+  } finally {
+    await stopReview(child, root);
+  }
+});
+
+test('Go to File from a text field on macOS needs ⌘ (⌃P stays the field\'s)', async ({ browser }) => {
+  test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
+  const root = mkdtempSync(join(tmpdir(), 'plannotator-review-explorer-'));
+  const repo = buildRepo(root);
+  const readyFile = join(root, 'ready.jsonl');
+  const env = {
+    PATH: process.env.PATH ?? '',
+    HOME: root,
+    PLANNOTATOR_DATA_DIR: join(root, 'data'),
+    PLANNOTATOR_READY_FILE: readyFile,
+    PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
+    NO_BROWSER,
+    PLANNOTATOR_REMOTE: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+  };
+  let child: ChildProcess | undefined;
+  try {
+    child = spawn(binary, ['review', '--diff-type', 'uncommitted'], { env, cwd: repo, stdio: 'ignore' });
+    await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
+    const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    // The page reads the system from navigator.platform when it loads.
+    await context.addInitScript(() => Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' }));
+    await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url })));
+    const page = await context.newPage();
+    await page.goto(url);
+    await expect(page.locator('[data-tree-scope-row]')).toBeVisible();
+    await page.evaluate(() => {
+      const field = document.createElement('textarea');
+      field.setAttribute('data-test-field', '');
+      document.body.appendChild(field);
+      field.focus();
+    });
+    await page.keyboard.press('Control+p');
+    await page.waitForTimeout(300);
+    await expect(page.locator('[data-go-to-file]')).toHaveCount(0);
+    await page.locator('[data-test-field]').focus();
+    await page.keyboard.press('Meta+p');
+    await expect(page.locator('[data-go-to-file]')).toBeVisible();
+    // Escape puts focus back in the field it came from.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-go-to-file]')).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement?.hasAttribute('data-test-field'))).toBe(true);
+    await context.close();
+  } finally {
+    await stopReview(child, root);
+  }
+});

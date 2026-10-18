@@ -23,12 +23,17 @@ import {
   type ReviewGitRuntime,
 } from "./review-core";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { fuzzySearchPaths, type FuzzyPathMatch } from "./fuzzy-path";
 
 export type { RepoFileListing, RepoRevisionInfo } from "./review-core";
 
 export const REPO_FILES_ENDPOINT = "/api/repo-files";
 export const REPO_FILE_ENDPOINT = "/api/repo-file";
 export const REPO_FILES_STREAM_ENDPOINT = "/api/repo-files/stream";
+/** Go to File's search, for a listing too large to send whole (and for any client that wants it). */
+export const REPO_FILES_SEARCH_ENDPOINT = "/api/repo-files/search";
+/** Most matches one search answers. */
+export const MAX_REPO_FILES_SEARCH_RESULTS = 100;
 
 /** Above this many paths the list stays on the server and folders load one at a time. */
 export const REPO_FILES_LAZY_THRESHOLD = 200_000;
@@ -395,6 +400,58 @@ export async function handleRepoFileRequest(input: RepoFileRequestInput): Promis
     default:
       return answer({ content: null, reason: "unavailable" });
   }
+}
+
+export interface RepoFilesSearchResponse {
+  query: string;
+  total: number;
+  matches: FuzzyPathMatch[];
+}
+
+export interface RepoFilesSearchRequestInput {
+  params: URLSearchParams;
+  unavailable: RepoFilesUnavailable | null;
+  isCurrentSnapshot: (snapshot: string) => boolean;
+  loadListing: () => Promise<RepoFileListing | null>;
+  /** The diff's changed paths, which win ties. */
+  preferred?: ReadonlySet<string>;
+}
+
+// One lowercased copy per listing, so a search per keystroke does not
+// lowercase hundreds of thousands of paths each time.
+const lowerPathsByListing = new WeakMap<readonly string[], string[]>();
+function lowerPathsOf(paths: readonly string[]): string[] {
+  let lower = lowerPathsByListing.get(paths);
+  if (!lower) {
+    lower = paths.map((path) => path.toLowerCase());
+    lowerPathsByListing.set(paths, lower);
+  }
+  return lower;
+}
+
+/**
+ * `GET /api/repo-files/search?snapshot=<id>&q=<query>[&limit=<n>]`: Go to
+ * File over the listed paths, best first (the fuzzy matcher the browser runs
+ * on a listing it holds). Answers only listed paths, so it reveals nothing
+ * `/api/repo-files` would not.
+ */
+export async function handleRepoFilesSearchRequest(input: RepoFilesSearchRequestInput): Promise<HandlerResult> {
+  const snapshot = input.params.get("snapshot");
+  if (!snapshot) return { status: 400, body: { error: "Missing snapshot", reason: "bad-request" } };
+  const query = (input.params.get("q") ?? "").slice(0, 256);
+  const limitParam = Number(input.params.get("limit") ?? 50);
+  const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(MAX_REPO_FILES_SEARCH_RESULTS, Math.floor(limitParam))) : 50;
+  if (input.unavailable) return { status: 400, body: { error: input.unavailable.message, reason: input.unavailable.reason } };
+  if (!input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+  const listing = await input.loadListing();
+  if (!listing) return { status: 400, body: { error: "The repository's files could not be listed.", reason: "failed" } };
+  if (!input.isCurrentSnapshot(snapshot)) return { status: 409, body: STALE_BODY };
+  const matches = fuzzySearchPaths(listing.paths, query, {
+    limit,
+    preferred: input.preferred,
+    lowerPaths: lowerPathsOf(listing.paths),
+  });
+  return { status: 200, body: { query, total: listing.paths.length, matches } satisfies RepoFilesSearchResponse };
 }
 
 // --- Live watching ----------------------------------------------------------

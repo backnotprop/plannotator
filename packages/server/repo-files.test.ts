@@ -251,6 +251,32 @@ for (const [runtime, startServer] of [
       }
     }, 30_000);
 
+    test("Go to File searches the listing on the server: listed paths only, best first", async () => {
+      const repo = buildRepo();
+      const { server, payload } = await start(repo, "uncommitted", { repoFilesLazyThreshold: 3 });
+      try {
+        const snap = encodeURIComponent(payload.snapshotId);
+        const search = async (q: string, extra = "") => {
+          const response = await fetch(`${server.url}/api/repo-files/search?snapshot=${snap}&q=${encodeURIComponent(q)}${extra}`);
+          return { status: response.status, body: (await response.json()) as { total: number; matches: Array<{ path: string; positions: number[] }> } };
+        };
+        const util = await search("utl");
+        expect(util.status).toBe(200);
+        expect(util.body.total).toBe(6);
+        expect(util.body.matches[0]?.path).toBe("src/util.ts");
+        expect(util.body.matches[0]?.positions).toEqual([4, 5, 7]);
+        // Ignored (.env, dist/) and deleted (docs/old.md) files are not in the listing, so never found.
+        expect((await search("env")).body.matches).toEqual([]);
+        expect((await search("out")).body.matches).toEqual([]);
+        expect((await search("md")).body.matches.map((m) => m.path).sort()).toEqual(["README.md", "notes/new.md"]);
+        expect((await search("s", "&limit=1")).body.matches).toHaveLength(1);
+        expect((await fetch(`${server.url}/api/repo-files/search?q=a`)).status).toBe(400);
+        expect((await fetch(`${server.url}/api/repo-files/search?snapshot=old&q=a`)).status).toBe(409);
+      } finally {
+        server.stop();
+      }
+    }, 30_000);
+
     test("refuses a stale or missing snapshot", async () => {
       const repo = buildRepo();
       const { server } = await start(repo, "uncommitted");

@@ -27,6 +27,27 @@ import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 import { RepoFileTree } from './RepoFileTree';
 import { TreeScopeSwitch } from './TreeScopeSwitch';
+import { formatShortcutBindingTokens, resolveShortcutBindings, reviewExplorerShortcuts } from '@plannotator/ui/shortcuts';
+
+/** "Go to File…" with its key, under Changes | All files (step 3). */
+const GoToFileRow: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+  const keys = formatShortcutBindingTokens(resolveShortcutBindings(reviewExplorerShortcuts.shortcuts.goToFile)[0] ?? '');
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-1.5 w-full flex items-center gap-2 h-7 px-2 rounded border border-border/60 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors"
+      data-go-to-file-button
+      aria-keyshortcuts={keys.join('+')}
+    >
+      <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+        <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" strokeLinecap="round" />
+      </svg>
+      <span className="flex-1 text-left truncate">Go to File…</span>
+      <kbd className="font-mono text-[10px] px-1 rounded bg-muted/70 border border-border/50">{keys.join('')}</kbd>
+    </button>
+  );
+};
 import type { TreeScope } from '../hooks/useTreeScope';
 import type { RepoFiles } from '../hooks/useRepoFiles';
 import { initialRepoExpansion, repoAncestors } from '../utils/repoTree';
@@ -47,6 +68,8 @@ interface FileTreeProps {
   onOpenRepoFile?: (path: string, options: { pin: boolean }) => void;
   /** A file of the listing open outside the diff, highlighted in All files. */
   activeRepoPath?: string | null;
+  /** Opens Go to File (step 3); draws the "Go to File…" row under the switch. */
+  onGoToFile?: () => void;
   /** Split the tree into Code / Tests / Generated blocks when the change holds
    *  two or more kinds ("Group by kind" in Tree controls). */
   groupByKind?: boolean;
@@ -161,6 +184,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   repoFiles,
   onOpenRepoFile,
   activeRepoPath,
+  onGoToFile,
   groupByKind = false,
   onToggleGroupByKind,
   generatedFiles,
@@ -615,6 +639,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             changedCount={files.length}
             allCount={repoReady ? repoReady.total : undefined}
           />
+          {onGoToFile && <GoToFileRow onClick={onGoToFile} />}
           {showAllFiles && repoReady && (repoReady.live || repoReady.truncated) && (
             <RepoListingStatus repo={repoReady} />
           )}

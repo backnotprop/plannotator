@@ -114,6 +114,7 @@ describe('shortcuts', () => {
       'File Actions',
       'History',
       'File Navigation',
+      'Go to',
       'All-Files View',
       'Markdown Files',
       'Annotations',

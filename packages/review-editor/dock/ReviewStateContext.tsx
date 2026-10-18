@@ -130,6 +130,17 @@ export interface ReviewState {
   onAddWholeFileAnnotation?: (input: CodeFileAnnotationInput, options: { inDiff: boolean }) => void;
   /** Keep a preview tab (a comment in it, a double click on its tab). */
   onKeepFileTab?: (panelId: string) => void;
+  /** Explorer (step 3): a jump's landing line, and where it came from. */
+  revealTarget?: import('../utils/explorerNavigation').RevealTarget | null;
+  jumpCrumb?: import('../utils/explorerNavigation').JumpCrumb | null;
+  /** Back / forward across jumps (absent: no history in this host). */
+  navigation?: { canBack: boolean; canForward: boolean; back: () => void; forward: () => void };
+  /** Where F12 looks: the token under the pointer in a diff, and the last one clicked. */
+  onTokenTarget?: import('../utils/tokenTarget').TokenTargetHandler;
+  /** The same for a whole-file view, and its Cmd+click (references). */
+  fileTokens?: (filePath: string) => import('../components/RepoFileView').FileTokenHandlers;
+  /** A result of the references panel opened in a tab at its line. */
+  onOpenCodeNavLocation?: (location: import('@plannotator/shared/code-nav').CodeNavLocation) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
   /** Highlight a comment without moving the viewport (in-diff click). */
   onSelectAnnotation: (id: string | null) => void;
