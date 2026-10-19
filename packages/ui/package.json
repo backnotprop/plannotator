@@ -24,6 +24,7 @@
     "./shortcuts": "./shortcuts/index.ts",
     "./webmcp": "./webmcp/index.ts",
     "./config": "./config/index.ts",
+    "./i18n": "./i18n/index.ts",
     "./configure": "./configure.ts",
     "./theme-modes": "./components/themeModes.tsx",
     "./types": "./types.ts",

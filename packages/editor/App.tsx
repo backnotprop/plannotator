@@ -45,6 +45,7 @@ import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
+import { I18nProvider } from '@plannotator/ui/i18n';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
@@ -6887,14 +6888,17 @@ const App: React.FC = () => {
   if (isLoading && !isSharedSession) {
     return (
       <ThemeProvider defaultTheme="dark" manageFavicon>
-        <div className="pn-app-viewport bg-background" />
+        <I18nProvider>
+          <div className="pn-app-viewport bg-background" />
+        </I18nProvider>
       </ThemeProvider>
     );
   }
 
   return (
     <ThemeProvider defaultTheme="dark" manageFavicon>
-      <TooltipProvider delayDuration={900} skipDelayDuration={200} disableHoverableContent>
+      <I18nProvider>
+        <TooltipProvider delayDuration={900} skipDelayDuration={200} disableHoverableContent>
       <div
         data-print-region="root"
         data-pn-browser-canvas={browserCanvas}
@@ -7938,6 +7942,7 @@ const App: React.FC = () => {
         />
       </div>
       </TooltipProvider>
+      </I18nProvider>
     </ThemeProvider>
   );
 };

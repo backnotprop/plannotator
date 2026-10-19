@@ -9,6 +9,7 @@ import '@plannotator/ui/utils/identity-tater';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { I18nProvider } from '@plannotator/ui/i18n';
 import { TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Settings } from '@plannotator/ui/components/Settings';
@@ -4934,16 +4935,19 @@ const ReviewApp: React.FC = () => {
   if (isLoading) {
     return (
       <ThemeProvider defaultTheme="dark" manageFavicon>
-        <div className="pn-app-viewport flex items-center justify-center bg-background">
-          <div className="text-muted-foreground text-sm">Loading diff...</div>
-        </div>
+        <I18nProvider>
+          <div className="pn-app-viewport flex items-center justify-center bg-background">
+            <div className="text-muted-foreground text-sm">Loading diff...</div>
+          </div>
+        </I18nProvider>
       </ThemeProvider>
     );
   }
 
   return (
     <ThemeProvider defaultTheme="dark" manageFavicon>
-      <TooltipProvider delayDuration={200} skipDelayDuration={100}>
+      <I18nProvider>
+        <TooltipProvider delayDuration={200} skipDelayDuration={100}>
       <ReviewStateProvider value={reviewStateValue}>
       <JobLogsProvider value={jobLogsValue}>
       {isSwitchingPRScope && <PRSwitchOverlay />}
@@ -6273,6 +6277,7 @@ const ReviewApp: React.FC = () => {
     </JobLogsProvider>
     </ReviewStateProvider>
     </TooltipProvider>
+    </I18nProvider>
     </ThemeProvider>
   );
 };
