@@ -152,7 +152,7 @@ test('All files: the repository at the diff, remembered, and following the disk 
     await page.reload();
     await expect(page.locator('[data-tree-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('[data-repo-file-tree]')).toBeVisible();
-    await expect(page.locator('[data-repo-listing-status]')).toContainText('Live');
+    await expect(page.locator('[data-repo-listing-status]')).toContainText('is live');
 
     // An agent writes files: the tree follows, the diff does not.
     await page.waitForTimeout(1500); // the server's watcher starts off the request path

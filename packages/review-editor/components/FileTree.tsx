@@ -1,11 +1,7 @@
 import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
-  AvailableBranches,
-  CompareTargetConfig,
-  DiffOption,
   JjEvoLogEntry,
-  RecentCommit,
   SinceBaseSections,
   WorktreeInfo,
 } from '@plannotator/shared/types';
@@ -15,61 +11,38 @@ import { fileKind, type FileKind } from '@plannotator/core/file-kind';
 import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKindIcon';
 import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
 import { FileTreeNodeItem } from './FileTreeNode';
-import { BaseBranchPicker } from './BaseBranchPicker';
 import { EvoLogPicker } from './EvoLogPicker';
-import { DiffTypePicker } from './DiffTypePicker';
 import { WorktreePicker } from './WorktreePicker';
-import { PanelViewToggle, type ReviewPanelView } from './PanelViewToggle';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 import { RepoFileTree } from './RepoFileTree';
-import { TreeScopeSwitch } from './TreeScopeSwitch';
-import { formatShortcutBindingTokens, resolveShortcutBindings, reviewExplorerShortcuts } from '@plannotator/ui/shortcuts';
+import { ReviewPanelHeader, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 
-/** "Go to File…" with its key, under Changes | All files (step 3). */
-const GoToFileRow: React.FC<{ onClick: () => void }> = ({ onClick }) => {
-  const keys = formatShortcutBindingTokens(resolveShortcutBindings(reviewExplorerShortcuts.shortcuts.goToFile)[0] ?? '');
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mt-1.5 w-full flex items-center gap-2 h-7 px-2 rounded border border-border/60 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors"
-      data-go-to-file-button
-      aria-keyshortcuts={keys.join('+')}
-    >
-      <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-        <circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" strokeLinecap="round" />
-      </svg>
-      <span className="flex-1 text-left truncate">Go to File…</span>
-      <kbd className="font-mono text-[10px] px-1 rounded bg-muted/70 border border-border/50">{keys.join('')}</kbd>
-    </button>
-  );
-};
 import type { TreeScope } from '../hooks/useTreeScope';
 import type { RepoFiles } from '../hooks/useRepoFiles';
 import { initialRepoExpansion, repoAncestors } from '../utils/repoTree';
 import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/OverlayScrollArea';
 
-import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
+import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 import { PanelSectionHeader, DiffCounts } from './FileRowBits';
 
 interface FileTreeProps {
-  /** Changes | All files (approved design record "review-explorer"). Without
-   *  `onTreeScopeChange` the switch is not drawn and the tree shows Changes. */
+  /** The top of the panel (views, the comparison sentence, Changes | All
+   *  files, Go to File), shared with the other views. Absent: no header. */
+  header?: ReviewPanelHeaderModel;
+  /** Changes | All files (approved design record "review-explorer"): which
+   *  list the tree draws. All files needs `repoFiles`. */
   treeScope?: TreeScope;
-  onTreeScopeChange?: (scope: TreeScope) => void;
   /** The repository listing behind All files (`useRepoFiles`). */
   repoFiles?: RepoFiles;
   /** Opens a file of the listing that is not in the review (single click: preview; double: pin). */
   onOpenRepoFile?: (path: string, options: { pin: boolean }) => void;
   /** A file of the listing open outside the diff, highlighted in All files. */
   activeRepoPath?: string | null;
-  /** Opens Go to File (step 3); draws the "Go to File…" row under the switch. */
-  onGoToFile?: () => void;
   /** Split the tree into Code / Tests / Generated blocks when the change holds
    *  two or more kinds ("Group by kind" in Tree controls). */
   groupByKind?: boolean;
@@ -90,23 +63,17 @@ interface FileTreeProps {
   showViewedControls?: boolean;
   onToggleShowViewedControls?: () => void;
   enableKeyboardNav?: boolean;
-  diffOptions?: DiffOption[];
+  /** The active diff type: the jj evolution picker shows under the header for `jj-evolog`. */
   activeDiffType?: string;
-  onSelectDiff?: (diffType: string) => void;
   isLoadingDiff?: boolean;
   width?: number;
   worktrees?: WorktreeInfo[];
   activeWorktreePath?: string | null;
   onSelectWorktree?: (path: string | null) => void;
   currentBranch?: string;
-  /** Compare target picker — base branch for Git, bookmark/revision for jj. */
-  availableBranches?: AvailableBranches;
+  /** The evolution entry compared against (jj-evolog), and its picker. */
   selectedBase?: string;
-  detectedBase?: string;
   onSelectBase?: (branch: string) => void;
-  compareTarget?: CompareTargetConfig;
-  /** HEAD ancestry for the commit-baseline picker (git only, #709). */
-  recentCommits?: RecentCommit[];
   /** Evolution log entries for the current jj change (jj-evolog mode only). */
   jjEvologs?: JjEvoLogEntry[];
   /** Default evolog commit ID to compare against (second evolog entry). */
@@ -161,16 +128,6 @@ interface FileTreeProps {
   scrollHighlightIndex?: number;
   /** Absolute repo root for the "Copy full path" context menu item. Null/undefined hides the option (e.g. PR review mode). */
   repoRoot?: string | null;
-  /** Current panel-view selection. The tree also renders as the FALLBACK for a
-   * latent 'sections'/'commits' selection the session can't offer, so the
-   * toggle must reflect the real selection, not assume 'tree'. */
-  panelView?: ReviewPanelView;
-  /** When the since-base sections view is available, renders a nav row back to it. */
-  onSwitchToSections?: () => void;
-  /** When the commit-history view is available, offers its toggle segment. */
-  onSwitchToCommits?: () => void;
-  /** Selects the tree view through the app's shared panel-view funnel. */
-  onSwitchToTree?: () => void;
   /** Sections sidecar while the since-base diff is displayed as a tree —
    * powers per-row U/staged markers and the stage button. */
   sinceBaseSections?: SinceBaseSections | null;
@@ -179,12 +136,11 @@ interface FileTreeProps {
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  header,
   treeScope = 'changes',
-  onTreeScopeChange,
   repoFiles,
   onOpenRepoFile,
   activeRepoPath,
-  onGoToFile,
   groupByKind = false,
   onToggleGroupByKind,
   generatedFiles,
@@ -201,21 +157,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
   showViewedControls = true,
   onToggleShowViewedControls,
   enableKeyboardNav = true,
-  diffOptions,
   activeDiffType,
-  onSelectDiff,
   isLoadingDiff,
   width,
   worktrees,
   activeWorktreePath,
   onSelectWorktree,
   currentBranch,
-  availableBranches,
   selectedBase,
-  detectedBase,
   onSelectBase,
-  compareTarget,
-  recentCommits,
   jjEvologs,
   detectedEvoBase,
   stagedFiles,
@@ -260,10 +210,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
   isAllFilesActive = false,
   scrollHighlightIndex,
   repoRoot,
-  panelView = 'tree',
-  onSwitchToSections,
-  onSwitchToCommits,
-  onSwitchToTree,
   sinceBaseSections,
   onStageFile,
   stagingFile,
@@ -400,7 +346,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   } = useDiffFileTreeExpansion(tree, activeExpansionPath);
 
   // --- All files -----------------------------------------------------------
-  const showAllFiles = !!onTreeScopeChange && treeScope === 'all' && !!repoFiles;
+  const showAllFiles = treeScope === 'all' && !!repoFiles;
   const repoState = repoFiles?.state;
   const repoReady = repoState?.status === 'ready' ? repoState : null;
   const [repoExpanded, setRepoExpanded] = useState<ReadonlySet<string> | null>(null);
@@ -529,55 +475,18 @@ export const FileTree: React.FC<FileTreeProps> = ({
       className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: width ?? 256 }}
     >
-      {/* Header — the view toggle owns the entire top row (full width). The
-          controls that used to share it render as PanelControlsRow above the
-          tree, below the All files entry. */}
-      <div className="px-3 flex items-center border-b border-border/50" style={{ height: 'var(--panel-header-h)' }}>
-        {searchQuery.trim() ? (
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Results</span>
-        ) : onSwitchToSections || onSwitchToCommits ? (
-          <PanelViewToggle
-            view={panelView}
-            showSections={!!onSwitchToSections}
-            showCommits={!!onSwitchToCommits}
-            onSelect={(view) => {
-              if (view === 'sections') onSwitchToSections?.();
-              else if (view === 'commits') onSwitchToCommits?.();
-              else onSwitchToTree?.();
-            }}
-          />
-        ) : (
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
-        )}
-      </div>
+      {header && <ReviewPanelHeader model={header} width={width ?? 256} />}
 
-      {/* Worktree + diff selectors — combined row when both present */}
-      {((worktrees && worktrees.length > 0 && onSelectWorktree) ||
-        (diffOptions && diffOptions.length > 0 && onSelectDiff)) && (
-        <div className="px-2 py-1.5 border-b border-border/30 flex gap-2">
-          {worktrees && worktrees.length > 0 && onSelectWorktree && (
-            <div className="flex-1 min-w-0">
-              <WorktreePicker
-                worktrees={worktrees}
-                activeWorktreePath={activeWorktreePath ?? null}
-                currentBranch={currentBranch}
-                onSelect={onSelectWorktree}
-                disabled={isLoadingDiff}
-              />
-            </div>
-          )}
-          {diffOptions && diffOptions.length > 0 && onSelectDiff && (
-            <div className="flex-1 min-w-0">
-              <DiffTypePicker
-                options={diffOptions}
-                activeDiffType={activeDiffType || 'uncommitted'}
-                onSelect={onSelectDiff}
-                isLoading={isLoadingDiff}
-                hasBasePicker={!!onSelectBase && !!availableBranches}
-                activeBase={selectedBase}
-              />
-            </div>
-          )}
+      {/* Worktree picker */}
+      {worktrees && worktrees.length > 0 && onSelectWorktree && (
+        <div className="px-2 py-1.5 border-b border-border/30">
+          <WorktreePicker
+            worktrees={worktrees}
+            activeWorktreePath={activeWorktreePath ?? null}
+            currentBranch={currentBranch}
+            onSelect={onSelectWorktree}
+            disabled={isLoadingDiff}
+          />
         </div>
       )}
 
@@ -603,48 +512,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
             </div>
           </div>
         )}
-
-      {/* Compare target picker — only relevant for base-dependent diff types (not evolog) */}
-      {activeDiffType !== 'jj-evolog' &&
-        onSelectBase &&
-        selectedBase &&
-        detectedBase &&
-        availableBranches &&
-        activeDiffType &&
-        compareTarget?.diffTypes.includes(activeDiffType) && (
-          <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
-              {compareTarget.picker.rowLabel}
-            </span>
-            <div className="flex-1 min-w-0">
-              <BaseBranchPicker
-                availableBranches={availableBranches}
-                selectedBase={selectedBase}
-                detectedBase={detectedBase}
-                onSelectBase={onSelectBase}
-                disabled={isLoadingDiff}
-                copy={compareTarget.picker}
-                recentCommits={recentCommits}
-              />
-            </div>
-          </div>
-        )}
-
-      {/* Changes | All files */}
-      {onTreeScopeChange && !searchQuery.trim() && (
-        <div className="px-2 py-1.5 border-b border-border/30" data-tree-scope-row>
-          <TreeScopeSwitch
-            scope={treeScope}
-            onSelect={onTreeScopeChange}
-            changedCount={files.length}
-            allCount={repoReady ? repoReady.total : undefined}
-          />
-          {onGoToFile && <GoToFileRow onClick={onGoToFile} />}
-          {showAllFiles && repoReady && (repoReady.live || repoReady.truncated) && (
-            <RepoListingStatus repo={repoReady} />
-          )}
-        </div>
-      )}
 
       {/* File tree or search results */}
       <OverlayScrollArea ref={scrollAreaRef} className="flex-1 min-h-0">
@@ -686,7 +553,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
           )}
           {onSelectAllFiles && (
-            <AllFilesRow
+            <AllChangesRow
               active={isAllFilesActive}
               onClick={onSelectAllFiles}
               additions={files.reduce((sum, file) => sum + file.additions, 0)}
@@ -798,48 +665,6 @@ const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; 
     );
   }
   return null;
-};
-
-function relativeAge(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 10) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  return `${Math.round(minutes / 60)}h ago`;
-}
-
-/** "Live · updated just now · 1 added, 1 edited" under the switch, or the truncation note. */
-const RepoListingStatus: React.FC<{ repo: Extract<RepoFiles['state'], { status: 'ready' }> }> = ({ repo }) => {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!repo.live) return;
-    const timer = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(timer);
-  }, [repo.live]);
-  const counts = { A: 0, M: 0, D: 0 };
-  for (const change of Object.values(repo.onDisk)) counts[change] += 1;
-  const parts = [
-    counts.A > 0 ? `${counts.A} added` : null,
-    counts.M > 0 ? `${counts.M} edited` : null,
-    counts.D > 0 ? `${counts.D} deleted` : null,
-  ].filter(Boolean);
-  return (
-    <div className="mt-1.5 px-1 flex items-center gap-1.5 text-[11px] text-muted-foreground" data-repo-listing-status>
-      {repo.live ? (
-        <>
-          <span className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0" aria-hidden="true" />
-          <span className="text-foreground/80">Live</span>
-          <span className="truncate">
-            · updated {relativeAge(Math.max(0, now - repo.updatedAt))}
-            {parts.length > 0 ? ` · ${parts.join(', ')}` : ''}
-          </span>
-        </>
-      ) : (
-        <span>Part of the repository is listed (the platform stopped early).</span>
-      )}
-    </div>
-  );
 };
 
 /** A kind block header's tail: file count, then viewed/total and +/-. */

@@ -1,6 +1,7 @@
 /**
- * DOM coverage for the tree's Changes | All files switch and the All files
- * list (approved design record "review-explorer", step 1).
+ * DOM coverage for the tree's All files list (approved design record
+ * "review-explorer", step 1) and the header the tree draws above it (the
+ * header itself is covered by ReviewPanelHeader.test.tsx).
  *
  * Regressions guarded:
  *  - All files losing the changed files' own rows (viewed circle, letter,
@@ -79,7 +80,6 @@ function Tree(props: TreeProps) {
       viewedFiles={new Set()}
       stagedFiles={new Set()}
       treeScope="all"
-      onTreeScopeChange={() => {}}
       repoFiles={repo(ready())}
       {...props}
     />
@@ -110,24 +110,28 @@ afterEach(async () => {
 });
 
 describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
-  test('the switch shows both counts and reports a choice', async () => {
-    const onTreeScopeChange = mock(() => {});
-    const el = await mount(<Tree treeScope="changes" onTreeScopeChange={onTreeScopeChange} repoFiles={repo(ready())} />);
-    const changes = el.querySelector<HTMLButtonElement>('[data-tree-scope="changes"]')!;
-    const all = el.querySelector<HTMLButtonElement>('[data-tree-scope="all"]')!;
-    expect(changes.getAttribute('aria-pressed')).toBe('true');
-    expect(changes.textContent).toBe('Changes3');
+  test('the tree draws the shared header; Changes is the changed tree', async () => {
+    const onScope = mock((_scope: string) => {});
+    const header = {
+      view: 'tree' as const,
+      showSections: true,
+      showCommits: false,
+      onSelectView: () => {},
+      scope: { value: 'changes' as const, onSelect: onScope, changed: changed.length, all: LISTING.length },
+    };
+    const el = await mount(<Tree header={header} treeScope="changes" repoFiles={repo(ready())} />);
+    const all = el.querySelector<HTMLButtonElement>('[data-review-panel-header] [data-tree-scope="all"]')!;
     expect(all.textContent).toBe('All files8');
     // Changes is today's tree: no repository list.
     expect(el.querySelector('[data-repo-file-tree]')).toBeNull();
     await act(async () => all.click());
-    expect(onTreeScopeChange).toHaveBeenCalledWith('all');
+    expect(onScope).toHaveBeenCalledWith('all');
   });
 
-  test('no switch without the handler (a host or session without All files)', async () => {
-    const el = await mount(<Tree onTreeScopeChange={undefined} />);
-    expect(el.querySelector('[data-tree-scope-row]')).toBeNull();
-    expect(el.querySelector('[data-repo-file-tree]')).toBeNull();
+  test('no header without a model (a host that draws its own)', async () => {
+    const el = await mount(<Tree />);
+    expect(el.querySelector('[data-review-panel-header]')).toBeNull();
+    expect(el.querySelector('[data-repo-file-tree]')).not.toBeNull();
   });
 
   test('All files opens on the paths that lead to changes; changed rows keep their controls', async () => {
@@ -178,14 +182,12 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(onOpenRepoFile).toHaveBeenLastCalledWith('README.md', { pin: true });
   });
 
-  test('files changed on disk since the diff was taken carry a mark; the status line counts them', async () => {
+  test('files changed on disk since the diff was taken carry a mark', async () => {
     const el = await mount(
       <Tree repoFiles={repo(ready({ onDisk: { 'packages/review-editor/utils/fileKindTree.ts': 'M', 'packages/shared/review-core.ts': 'A' } }))} />,
     );
     expect(el.querySelector('[data-repo-file="packages/review-editor/utils/fileKindTree.ts"] [data-repo-on-disk="M"]')).not.toBeNull();
     expect(el.querySelector('[data-repo-file="packages/shared/review-core.ts"] [data-repo-on-disk="A"]')).not.toBeNull();
-    expect(el.querySelector('[data-repo-listing-status]')?.textContent).toContain('Live');
-    expect(el.querySelector('[data-repo-listing-status]')?.textContent).toContain('1 added, 1 edited');
   });
 
   test('a big repository renders only a window of rows', async () => {

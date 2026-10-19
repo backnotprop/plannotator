@@ -117,9 +117,9 @@ export interface JumpCrumb {
   via: JumpVia;
 }
 
-/** "buildFileTree.ts:11", "All files". */
+/** "buildFileTree.ts:11", "All changes". */
 export function navLocationLabel(location: NavLocation): string {
-  if (location.path == null) return 'All files';
+  if (location.path == null) return 'All changes';
   const name = location.path.slice(location.path.lastIndexOf('/') + 1);
   return location.line ? `${name}:${location.line}` : name;
 }

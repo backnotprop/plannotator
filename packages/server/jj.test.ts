@@ -28,7 +28,7 @@ describe("jj diff args", () => {
 
     expect(getJjDiffArgs("jj-all", "trunk()")).toEqual({
       args: ["diff", "--git", "--from", "root()", "--to", "@"],
-      label: "All files",
+      label: "Every file",
     });
   });
 

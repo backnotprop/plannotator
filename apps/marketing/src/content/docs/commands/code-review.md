@@ -213,7 +213,7 @@ The standalone GitButler CLI installer supports macOS and Linux. On Windows, ins
 
 The review UI shows your changes in a familiar diff format:
 
-- **Left panel views** — a `Tree | Git status | Commits` toggle in the header (see below)
+- **Left panel views** — Tree, Git status and Commits as tabs at the top of the left panel (see below)
 - **Viewed tracking** to mark files as reviewed and track your progress
 - **Unified diff** showing additions and deletions in context
 - **Annotation tools** with the same annotation types as plan review (delete, comment, quick label, "looks good")
@@ -276,7 +276,9 @@ Call Flow is syntactic and does not resolve types, imports, runtime dispatch, or
 
 ### Panel views
 
-The left panel has three views. **Tree** is the default. The header toggle is session-scoped — glancing at another view never changes your saved default (change that in Settings → Git).
+The left panel has three views. **Tree** is the default. The tabs at the top are session-scoped — glancing at another view never changes your saved default (change that in Settings → Git).
+
+Under the tabs, the comparison reads as one sentence, for example **All changes ⌄ since main ⌄**: click the first words to pick which changes are shown, and the branch to pick what they are compared with. A long branch name keeps its start and end; hover it for the full name. Below that, **Changes** and **All files** switch the tree between the files this review changes and every file of the repository, and the search button opens Go to File (⌘P / Ctrl+P). The **All changes** row in the list opens every change of the review in one scrolling view.
 
 - **Git status** — your changes grouped the way `git status` groups them: **Committed / Changes / Untracked**. Each row shows viewed state, a stage/unstage button, the change-type letter, and +/- counts. Only available with the "All changes" diff.
 - **Tree** (default) — the classic file tree over whichever diff type you've selected.

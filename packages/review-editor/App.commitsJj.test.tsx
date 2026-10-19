@@ -65,7 +65,7 @@ const JJ_CONTEXT = {
     { id: "jj-current", label: "Current change" },
     { id: "jj-last", label: "Last change" },
     { id: "jj-line", label: "Line of work" },
-    { id: "jj-all", label: "All files" },
+    { id: "jj-all", label: "Every file" },
   ],
   worktrees: [],
 };

@@ -119,7 +119,7 @@ export async function getJjContext(
       { id: "jj-last", label: "Last change" },
       { id: "jj-line", label: "Line of work" },
       ...(evologs.length >= 2 ? [{ id: "jj-evolog", label: "Evolution diff" }] : []),
-      { id: "jj-all", label: "All files" },
+      { id: "jj-all", label: "Every file" },
     ],
     worktrees: [],
     availableBranches: targets,
@@ -646,7 +646,7 @@ export function getJjDiffArgs(
         label: `Evolution diff from ${compareTarget.slice(0, 8)}`,
       };
     case "jj-all":
-      return { args: ["diff", "--git", ...whitespaceArgs, "--from", "root()", "--to", "@"], label: "All files" };
+      return { args: ["diff", "--git", ...whitespaceArgs, "--from", "root()", "--to", "@"], label: "Every file" };
     default:
       return null;
   }

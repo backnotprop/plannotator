@@ -97,11 +97,11 @@ function describeDiff(ctx: FeedbackDiffContext): string {
     case "jj-current":   label = "Current change"; break;
     case "jj-last":      label = "Last change"; break;
     case "jj-line":      label = base ? `Line of work vs \`${base}\`` : "Line of work"; break;
-    case "jj-all":       label = "All files"; break;
+    case "jj-all":       label = "Every file"; break;
     case "since-base":   label = base ? `All changes since \`${base}\` (committed + uncommitted + untracked)` : "All changes since base (committed + uncommitted + untracked)"; break;
     case "branch":       label = base ? `Branch diff vs \`${base}\`` : "Branch diff"; break;
     case "merge-base":   label = base ? `Committed changes vs \`${base}\`` : "Committed changes"; break;
-    case "all":          label = "All files"; break;
+    case "all":          label = "Every file"; break;
     default:             label = mode; // p4-* or anything else — show raw
   }
   return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;

@@ -221,6 +221,7 @@ import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/anno
 import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from './utils/codeAnnotationAnchor';
 import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
+import type { ReviewPanelHeaderModel } from './components/ReviewPanelHeader';
 import { CommitsPanel } from './components/CommitsPanel';
 import { useCommitsView } from './hooks/useCommitsView';
 import { shouldRepairPanelPair } from './utils/panelPairRepair';
@@ -2415,7 +2416,7 @@ const ReviewApp: React.FC = () => {
     dockApi.addPanel({
       id: REVIEW_ALL_FILES_PANEL_ID,
       component: REVIEW_PANEL_TYPES.ALL_FILES,
-      title: 'All files',
+      title: 'All changes',
     });
   }, [dockApi]);
 
@@ -5471,6 +5472,60 @@ const ReviewApp: React.FC = () => {
             })),
           ];
 
+  // The top of the left panel (approved design record "review-sidebar-header",
+  // "sentence"): one model for the three views, so nothing moves between them.
+  const panelDiffOptions = reviewMode === 'workspace' ? (workspaceDiffOptions ?? undefined) : gitContext?.diffOptions;
+  const panelDetectedBase = gitContext?.defaultBranch || gitContext?.compareTarget?.fallback;
+  const panelCompareTarget = gitContext?.compareTarget;
+  // The base is a word of the sentence when the active diff reads one: always
+  // in Git status (it IS the since-base comparison), and in the tree for the
+  // compare target's diff types (never the jj evolution diff, which has its
+  // own picker under the header).
+  const panelBaseApplies =
+    !prMetadata && !!selectedBase && !!panelDetectedBase && !!gitContext?.availableBranches && !!panelCompareTarget && (
+      effectivePanelView === 'sections' ||
+      (effectivePanelView === 'tree' && !!activeDiffBase && activeDiffBase !== 'jj-evolog' && panelCompareTarget.diffTypes.includes(activeDiffBase))
+    );
+  const panelHeader: ReviewPanelHeaderModel = {
+    view: showCommitsPanel ? 'commits' : effectivePanelView,
+    showSections: sectionsCapable,
+    showCommits: commitsCapable,
+    onSelectView: handlePanelViewSelect,
+    scope: repoFilesSupported
+      ? {
+          value: treeScope,
+          onSelect: setTreeScope,
+          changed: files.length,
+          all: repoFiles.state.status === 'ready' ? repoFiles.state.total : undefined,
+        }
+      : undefined,
+    repo: repoFiles.state.status === 'ready' && treeScope === 'all' ? repoFiles.state : null,
+    diff:
+      effectivePanelView === 'tree' && !showCommitsPanel && panelDiffOptions && panelDiffOptions.length > 0
+        ? {
+            options: panelDiffOptions,
+            active: activeDiffBase || 'uncommitted',
+            onSelect: (next) => completeNavigatorSelection(() => handleDiffSwitch(next)),
+            loading: isLoadingDiff,
+            activeBase: selectedBase,
+            hasBasePicker: !prMetadata && !!gitContext?.availableBranches,
+          }
+        : undefined,
+    base: panelBaseApplies
+      ? {
+          availableBranches: gitContext!.availableBranches!,
+          selectedBase: selectedBase!,
+          detectedBase: panelDetectedBase!,
+          onSelectBase: (base) => completeNavigatorSelection(() => handleBaseSelect(base)),
+          disabled: isLoadingDiff,
+          copy: panelCompareTarget!.picker,
+          recentCommits: gitContext?.recentCommits,
+        }
+      : undefined,
+    onGoToFile: dockApi ? () => setGoToFileOpen(true) : undefined,
+    searching: hasSearchableFiles && !!searchQuery.trim(),
+  };
+
   if (isLoading) {
     return (
       <ThemeProvider defaultTheme="dark" manageFavicon>
@@ -6064,6 +6119,7 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <SectionsPanel
+                header={panelHeader}
                 generatedFiles={generatedFiles}
                 files={files}
                 sections={sections!}
@@ -6088,15 +6144,6 @@ const ReviewApp: React.FC = () => {
                 onToggleShowStageControls={handleToggleReviewStageControls}
                 autoViewed={autoViewedEnabled}
                 onToggleAutoViewed={handleToggleAutoViewed}
-                isLoadingDiff={isLoadingDiff}
-                availableBranches={gitContext?.availableBranches}
-                selectedBase={selectedBase ?? undefined}
-                detectedBase={gitContext?.defaultBranch || gitContext?.compareTarget?.fallback}
-                onSelectBase={(base) => completeNavigatorSelection(() => handleBaseSelect(base))}
-                compareTarget={gitContext?.compareTarget}
-                recentCommits={gitContext?.recentCommits}
-                onSelectPanelView={handlePanelViewSelect}
-                showCommitsOption={commitsCapable}
                 onSelectAllFiles={() => completeNavigatorSelection(openAllFilesPanel)}
                 isAllFilesActive={isAllFilesActive}
                 onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
@@ -6134,6 +6181,7 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <CommitsPanel
+                header={panelHeader}
                 width={fileTreeResize.width}
                 commits={commitsView.commits}
                 base={commitsView.base}
@@ -6145,8 +6193,6 @@ const ReviewApp: React.FC = () => {
                 onSelectCommit={(sha) => completeNavigatorSelection(() => handleSelectCommit(sha))}
                 onShowMore={commitsView.showMore}
                 onRetry={commitsView.refresh}
-                onSelectPanelView={handlePanelViewSelect}
-                showSectionsOption={sectionsCapable}
                 headLabel={commitsVcs === 'jj' ? '@' : 'HEAD'}
               />
             </ReviewNavigatorContainer>
@@ -6159,12 +6205,11 @@ const ReviewApp: React.FC = () => {
               resizeHandle={fileTreeResizeHandle}
             >
               <FileTree
-                treeScope={treeScope}
-                onTreeScopeChange={repoFilesSupported ? setTreeScope : undefined}
+                header={panelHeader}
+                treeScope={repoFilesSupported ? treeScope : 'changes'}
                 repoFiles={repoFiles}
                 onOpenRepoFile={(path, options) => completeNavigatorSelection(() => openRepoFile(path, options))}
                 activeRepoPath={activeRepoPath}
-                onGoToFile={dockApi ? () => setGoToFileOpen(true) : undefined}
                 groupByKind={groupByKind}
                 onToggleGroupByKind={toggleGroupByKind}
                 generatedFiles={generatedFiles}
@@ -6201,21 +6246,15 @@ const ReviewApp: React.FC = () => {
                 showViewedControls={reviewShowViewedControls}
                 onToggleShowViewedControls={handleToggleReviewViewedControls}
                 enableKeyboardNav={!showExportModal && hasSearchableFiles}
-                diffOptions={reviewMode === 'workspace' ? (workspaceDiffOptions ?? undefined) : gitContext?.diffOptions}
                 activeDiffType={activeDiffBase}
-                onSelectDiff={(diffType) => completeNavigatorSelection(() => handleDiffSwitch(diffType))}
                 isLoadingDiff={isLoadingDiff}
                 width={fileTreeResize.width}
                 worktrees={gitContext?.worktrees}
                 activeWorktreePath={activeWorktreePath}
                 onSelectWorktree={(path) => completeNavigatorSelection(() => handleWorktreeSwitch(path))}
                 currentBranch={gitContext?.currentBranch}
-                availableBranches={prMetadata ? undefined : gitContext?.availableBranches}
                 selectedBase={prMetadata ? undefined : selectedBase ?? undefined}
-                detectedBase={prMetadata ? undefined : gitContext?.defaultBranch || gitContext?.compareTarget?.fallback}
                 onSelectBase={prMetadata ? undefined : (base) => completeNavigatorSelection(() => handleBaseSelect(base))}
-                compareTarget={gitContext?.compareTarget}
-                recentCommits={prMetadata ? undefined : gitContext?.recentCommits}
                 jjEvologs={prMetadata ? undefined : gitContext?.jjEvologs}
                 detectedEvoBase={prMetadata ? undefined : gitContext?.jjEvologs?.[1]?.commitId}
                 stagedFiles={stagedFiles}
@@ -6240,10 +6279,6 @@ const ReviewApp: React.FC = () => {
                 onSelectSearchMatch={hasSearchableFiles ? (match) => completeNavigatorSelection(() => handleSelectSearchMatch(match)) : undefined}
                 onStepSearchMatch={hasSearchableFiles ? stepSearchMatch : undefined}
                 repoRoot={prMetadata ? null : (activeWorktreePath ?? agentCwd ?? gitContext?.cwd ?? null)}
-                panelView={effectivePanelView}
-                onSwitchToSections={sectionsCapable ? handleSwitchToSections : undefined}
-                onSwitchToCommits={commitsCapable ? () => handlePanelViewSelect('commits') : undefined}
-                onSwitchToTree={() => handlePanelViewSelect('tree')}
                 sinceBaseSections={activeDiffBase === 'since-base' ? sections : null}
                 onStageFile={canStageFiles ? stageFile : undefined}
                 stagingFile={stagingFile}

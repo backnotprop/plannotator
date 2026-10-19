@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import type { DiffOption } from '@plannotator/shared/types';
+import type { PickerTrigger } from './BaseBranchPicker';
 
 interface DiffTypePickerProps {
   options: DiffOption[];
@@ -11,13 +12,18 @@ interface DiffTypePickerProps {
   hasBasePicker: boolean;
   /** The live active base (picker selection / server echo / --base flag). */
   activeBase?: string | null;
+  /**
+   * Draw the trigger as the caller's own button (the sidebar header's
+   * sentence) instead of the field. The menu and its keyboard are the same.
+   */
+  trigger?: PickerTrigger;
 }
 
 /**
  * Long/full hex SHAs display as their 7-char prefix; branch names, tags, and
  * HEAD~N pass through unchanged (mirrors review-core's displayRef).
  */
-const displayRef = (ref: string): string =>
+export const displayRef = (ref: string): string =>
   /^[0-9a-f]{7,}$/i.test(ref) ? ref.slice(0, 7) : ref;
 
 /**
@@ -52,6 +58,7 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
   isLoading,
   hasBasePicker,
   activeBase,
+  trigger,
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -73,27 +80,37 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
 
   return (
     <Menu.Root open={open} onOpenChange={setOpen}>
-      <Menu.Trigger
-        render={
-          <button
-            type="button"
-            disabled={isLoading}
-            className="w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-muted rounded text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-wait"
-          />
-        }
-      >
-          <span className="truncate flex-1 text-left">{activeLabel}</span>
-          {isLoading ? (
-            <svg className="w-3.5 h-3.5 text-muted-foreground animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-          ) : (
-            <svg className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          )}
-      </Menu.Trigger>
+      {trigger ? (
+        <Menu.Trigger
+          render={
+            <button type="button" disabled={isLoading} aria-label={trigger.ariaLabel} className={trigger.className} />
+          }
+        >
+          {trigger.content}
+        </Menu.Trigger>
+      ) : (
+        <Menu.Trigger
+          render={
+            <button
+              type="button"
+              disabled={isLoading}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 bg-muted rounded text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-wait"
+            />
+          }
+        >
+            <span className="truncate flex-1 text-left">{activeLabel}</span>
+            {isLoading ? (
+              <svg className="w-3.5 h-3.5 text-muted-foreground animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            )}
+        </Menu.Trigger>
+      )}
       <Menu.Portal>
         <Menu.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
           <Menu.Popup className="min-w-[var(--anchor-width)] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">

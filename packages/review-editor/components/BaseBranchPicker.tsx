@@ -11,6 +11,20 @@ interface BaseBranchPickerProps {
   copy: CompareTargetPickerCopy;
   /** HEAD ancestry from GitContext.recentCommits — enables picking a commit as the baseline (#709). */
   recentCommits?: RecentCommit[];
+  /**
+   * Draw the trigger as the caller's own button (the sidebar header's
+   * sentence) instead of the field. The popup and its keyboard are the same.
+   */
+  trigger?: PickerTrigger;
+  /** Popup alignment against the trigger. */
+  align?: 'start' | 'center' | 'end';
+}
+
+/** A caller-drawn trigger: the button's class, its contents and its accessible name. */
+export interface PickerTrigger {
+  className: string;
+  content: React.ReactNode;
+  ariaLabel?: string;
 }
 
 type Tab = 'branches' | 'commits';
@@ -42,6 +56,8 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
   disabled,
   copy,
   recentCommits,
+  trigger,
+  align = 'start',
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -152,38 +168,54 @@ export const BaseBranchPicker: React.FC<BaseBranchPickerProps> = ({
         }
       }}
     >
-      <Popover.Trigger
-        render={
-          <button
-            type="button"
-            disabled={disabled}
-            title={`${copy.triggerTitlePrefix}: ${selectedBase}`}
-            className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
-              isCustom
-                ? 'bg-primary/10 border border-primary/30 text-foreground'
-                : 'bg-muted border border-transparent text-foreground'
-            }`}
-          />
-        }
-      >
-          <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
-            {copy.triggerLabel}
-          </span>
-          <span className="truncate flex-1 text-left">{chipLabel(selectedBase)}</span>
-          <svg
-            className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-      </Popover.Trigger>
+      {trigger ? (
+        <Popover.Trigger
+          render={
+            <button
+              type="button"
+              disabled={disabled}
+              title={`${copy.triggerTitlePrefix}: ${selectedBase}`}
+              aria-label={trigger.ariaLabel}
+              className={trigger.className}
+            />
+          }
+        >
+          {trigger.content}
+        </Popover.Trigger>
+      ) : (
+        <Popover.Trigger
+          render={
+            <button
+              type="button"
+              disabled={disabled}
+              title={`${copy.triggerTitlePrefix}: ${selectedBase}`}
+              className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed ${
+                isCustom
+                  ? 'bg-primary/10 border border-primary/30 text-foreground'
+                  : 'bg-muted border border-transparent text-foreground'
+              }`}
+            />
+          }
+        >
+            <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
+              {copy.triggerLabel}
+            </span>
+            <span className="truncate flex-1 text-left">{chipLabel(selectedBase)}</span>
+            <svg
+              className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+        </Popover.Trigger>
+      )}
       <Popover.Portal>
-        <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
+        <Popover.Positioner side="bottom" align={align} sideOffset={4} className="z-50">
           <Popover.Popup
-            className="w-80 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
+            className="w-80 max-w-[calc(100vw-16px)] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
             initialFocus={() => searchRef.current}
           >
           <div className="p-2 border-b border-border/50">

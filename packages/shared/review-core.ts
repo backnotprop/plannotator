@@ -817,7 +817,7 @@ export async function getGitContext(
     diffOptions.push({ id: "merge-base", label: "Committed changes (PR view)" });
   }
 
-  diffOptions.push({ id: "all", label: "All files (HEAD)" });
+  diffOptions.push({ id: "all", label: "Every file (HEAD)" });
 
   const [worktrees, currentTreePathResult] = await Promise.all([
     getWorktrees(runtime, cwd),
@@ -1949,7 +1949,7 @@ export async function runGitDiff(
           `${emptyTree}..HEAD`,
         ];
         patch = await runBoundedTrackedDiff(runtime, allDiffArgs, cwd, fileIdentities);
-        label = "All files";
+        label = "Every file";
         break;
       }
 
