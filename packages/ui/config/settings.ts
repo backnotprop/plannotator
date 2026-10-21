@@ -121,6 +121,12 @@ function isDiffLineBgIntensity(v: unknown): v is DiffLineBgIntensity {
   return typeof v === 'string' && (DIFF_LINE_BG_INTENSITY_VALUES as readonly string[]).includes(v);
 }
 
+export const UI_LANGUAGE_VALUES = ['auto', 'en', 'zh-CN'] as const;
+export type UILanguage = (typeof UI_LANGUAGE_VALUES)[number];
+export function isUILanguage(v: unknown): v is UILanguage {
+  return typeof v === 'string' && (UI_LANGUAGE_VALUES as readonly string[]).includes(v);
+}
+
 export interface SettingDef<T> {
   defaultValue: T | (() => T);
   fromCookie: () => T | undefined;
@@ -141,6 +147,19 @@ export const SETTINGS = {
     fromServer: (sc: Record<string, unknown>) =>
       typeof sc.displayName === 'string' && sc.displayName ? sc.displayName : undefined,
     toServer: (v: string) => ({ displayName: v }),
+  },
+
+  uiLanguage: {
+    defaultValue: 'auto' as UILanguage,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-ui-language');
+      return isUILanguage(v) ? v : undefined;
+    },
+    toCookie: (v: UILanguage) => storage.setItem('plannotator-ui-language', v),
+    serverKey: 'uiLanguage',
+    fromServer: (sc: Record<string, unknown>) =>
+      isUILanguage(sc.uiLanguage) ? sc.uiLanguage : undefined,
+    toServer: (v: UILanguage) => ({ uiLanguage: v }),
   },
 
   /**

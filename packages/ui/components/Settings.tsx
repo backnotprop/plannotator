@@ -6,6 +6,7 @@ import type { Origin } from '@plannotator/core/agents';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import type { TokenHoverDelay } from '@plannotator/core/token-hover';
 import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType, setReviewAutoViewed } from '../config';
+import { useTranslation, type UILanguage } from '../i18n';
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
 import { DIAGRAM_SHADOW_OPTIONS } from '../utils/diagramShadow';
 import {
@@ -1077,39 +1078,42 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const [fileBrowserSettings, setFileBrowserSettings] = useState<FileBrowserSettings>({ enabled: false, directories: [] });
   const [newDirPath, setNewDirPath] = useState('');
 
+  const { t } = useTranslation();
+  const [uiLanguage, setUILanguage] = useConfigValue('uiLanguage');
+
   // Fetch available agents for OpenCode
   const { agents: availableAgents, validateAgent, getAgentWarning } = useAgents(origin ?? null, agentSurface);
 
   const mainTabs = useMemo(() => {
-    const t: { id: SettingsTab; label: string }[] = [{ id: 'general', label: 'General' }];
-    t.push({ id: 'theme', label: 'Theme' });
+    const tabsList: { id: SettingsTab; label: string }[] = [{ id: 'general', label: t('settings.tabs.general') }];
+    tabsList.push({ id: 'theme', label: t('settings.tabs.theme') });
     // Annotate renders the same document viewer as plan review, so the
     // document-level tabs apply there too. Only rows that describe a plan
     // decision (plan snapshots, plan-arrival auto-save, plan-time hooks,
     // post-approval permission mode / agent switch) stay plan-only.
     if (mode === 'plan' || annotateDocumentTabs) {
-      t.push({ id: 'display', label: 'Display' });
-      t.push({ id: 'saving', label: 'Saving' });
-      t.push({ id: 'labels', label: 'Labels' });
+      tabsList.push({ id: 'display', label: t('settings.tabs.display') });
+      tabsList.push({ id: 'saving', label: t('settings.tabs.saving') });
+      tabsList.push({ id: 'labels', label: t('settings.tabs.labels') });
     }
     if (mode === 'review') {
-      t.push({ id: 'git', label: 'Git' });
-      t.push({ id: 'display', label: 'Editor' });
-      t.push({ id: 'analysis', label: 'Analysis' });
-      t.push({ id: 'comments', label: 'Comments' });
+      tabsList.push({ id: 'git', label: t('settings.tabs.git') });
+      tabsList.push({ id: 'display', label: 'Editor' });
+      tabsList.push({ id: 'analysis', label: t('settings.tabs.analysis') });
+      tabsList.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
-        t.push({ id: 'ai', label: 'AI' });
+        tabsList.push({ id: 'ai', label: t('settings.tabs.ai') });
       }
     }
     if (mode !== 'review') {
-      t.push({ id: 'vim', label: 'Vim' });
+      tabsList.push({ id: 'vim', label: t('settings.tabs.vim') });
     }
-    t.push({ id: 'shortcuts', label: 'Shortcuts' });
+    tabsList.push({ id: 'shortcuts', label: t('settings.tabs.shortcuts') });
     if (mode === 'plan') {
-      t.push({ id: 'hooks', label: 'Hooks' });
+      tabsList.push({ id: 'hooks', label: t('settings.tabs.hooks') });
     }
-    return t;
-  }, [mode, annotateDocumentTabs, aiProviders.length]);
+    return tabsList;
+  }, [mode, annotateDocumentTabs, aiProviders.length, t]);
 
   const integrationTabs: { id: SettingsTab; label: string }[] = [
     { id: 'files', label: 'Files' },
@@ -1320,7 +1324,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
           >
             {taterMode && <TaterSpritePullup />}
             <div className="flex items-center justify-between p-4 border-b border-border">
-              <h3 id="plannotator-settings-title" className="font-semibold text-sm">Settings</h3>
+              <h3 id="plannotator-settings-title" className="font-semibold text-sm">{t('settings.title')}</h3>
               <button
                 type="button"
                 aria-label="Close settings"
@@ -1450,6 +1454,26 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                           </button>
                         )}
                       </div>
+                    </div>
+
+                    {/* Interface Language */}
+                    <div className="border-t border-border" />
+                    <div className="space-y-2">
+                      <div>
+                        <div className="text-sm font-medium">{t('settings.language.title')}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {t('settings.language.description')}
+                        </div>
+                      </div>
+                      <select
+                        value={uiLanguage}
+                        onChange={(e) => setUILanguage(e.target.value as UILanguage)}
+                        className="w-full px-3 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 cursor-pointer"
+                      >
+                        <option value="auto">{t('settings.language.auto')}</option>
+                        <option value="en">{t('settings.language.en')}</option>
+                        <option value="zh-CN">{t('settings.language.zhCN')}</option>
+                      </select>
                     </div>
 
                     {/* Update notices: on by default. Writes updateCheck to
