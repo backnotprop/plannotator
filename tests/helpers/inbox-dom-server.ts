@@ -70,6 +70,14 @@
  * stdin line `{ "poll": { session, body } }` is that session's connection
  * polling the bridge with `body`'s fields (`plugin`, `busy`, `send_now`...);
  * the server answers `{ "polled": true }`.
+ *
+ * With `board` (the Board, approval "inbox-board"), the store is seeded
+ * before the Inbox starts with the sample cards of
+ * tests/helpers/inbox-board-world.ts (every column, real ages, the Icebox,
+ * Dropped and two drops by an agent not seen yet); the first line adds
+ * `board: { ids, projects, projectIds }`. A stdin line
+ * `{ "card": { id, by: "agent" | "person", column?, reason?, say?, restore? } }` is a
+ * write to a card (an agent's drop, say); the server answers `{ "carded": <column> }`.
  */
 import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -81,6 +89,7 @@ import { writeUpdateState } from "../../packages/shared/update-check";
 import { createAgentEnvironmentFor } from "../../packages/server/inbox-agents";
 import { isScratchDataDir, refuseRealDataDir } from "./real-data-dir";
 import { seedTagWorld, TAG_SESSIONS } from "./inbox-tag-world";
+import { seedBoardWorld } from "./inbox-board-world";
 
 const [dataDir, projectsDir, countArg, extra] = process.argv.slice(2);
 const withNews = extra === "news";
@@ -228,6 +237,7 @@ const openInLauncher: InboxOpenInLauncher = {
   openWithApp: (app, path) => recordLaunch(app.id, path),
   openWithSystemDefault: (path) => recordLaunch("default", path),
 };
+const boardWorld = extra === "board" ? seedBoardWorld(dataDir, join(projectsDir, "board")) : undefined;
 const server = await startInboxServer({
   dataDir,
   setAsideDelayMs: Number(process.env.INBOX_DOM_SET_ASIDE_MS) > 0 ? Number(process.env.INBOX_DOM_SET_ASIDE_MS) : 60_000,
@@ -415,7 +425,7 @@ for (let i = 0; i < count; i++) {
 const tailnet = openInMode ? { listener: server.tailscale.listenerPort(), host: `macbook.tail0000.ts.net:${server.port}`, login: "ramos@example.com" } : undefined;
 const tagWorld = extra === "tags" ? await seedTagWorld(`http://127.0.0.1:${server.port}`, server.token, join(projectsDir, "tags")) : null;
 const tags = tagWorld ? { ids: tagWorld.ids, sessions: TAG_SESSIONS } : undefined;
-process.stdout.write(`${JSON.stringify({ port: server.port, worlds, ...(tailnet ? { tailnet } : {}), ...(tags ? { tags } : {}) })}\n`);
+process.stdout.write(`${JSON.stringify({ port: server.port, worlds, ...(tailnet ? { tailnet } : {}), ...(tags ? { tags } : {}), ...(boardWorld ? { board: boardWorld } : {}) })}\n`);
 /** The host a delivery is recorded under: the tag world's own sessions are not all Claude Code. */
 function tagHost(session: string): string {
   if (session === TAG_SESSIONS.pi || session === TAG_SESSIONS.oldPi) return "pi";
@@ -430,7 +440,15 @@ void (async () => {
       deliver?: { session: string };
       wait?: { thread: string; session: string };
       poll?: { session: string; body: Record<string, unknown> };
+      card?: { id: string; by: "agent" | "person"; column?: string; reason?: string; say?: string; restore?: boolean };
     };
+    if (command.card) {
+      const card = store.card(command.card.id)!;
+      const by = command.card.by === "person" ? ({ kind: "person" } as const) : card.agent ?? { kind: "agent" as const, host: "claude-code", session: "ses_board", name: "Claude Code" };
+      const next = store.updateCard(command.card.id, { by, column: command.card.column, reason: command.card.reason, say: command.card.say, restore: command.card.restore });
+      process.stdout.write(`${JSON.stringify({ carded: next.column })}\n`);
+      continue;
+    }
     if (command.poll) {
       // That session's connection polling now: it is live, with what it loaded.
       await fetch(`http://127.0.0.1:${server.port}/api/inbox/bridge/poll`, {

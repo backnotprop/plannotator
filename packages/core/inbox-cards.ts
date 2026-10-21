@@ -31,10 +31,10 @@ import type { InboxAuthor } from "./inbox-types";
  * tool cost (INBOX_TOOL_COST) goes back to the size without it. After
  * flipping it, run `bun run scripts/sync-mod-inbox-tools.ts` (the Claude Code
  * mod's bundled tool list is generated from a real Inbox). The store, the
- * window's card routes and the event stream are unaffected. Off since the
- * owner's answer (2026-10-20): it is switched on with the Board page (step 2).
+ * window's card routes and the event stream are unaffected. Held back on the
+ * owner's answer (2026-10-20) until the Board page (step 2), which switches it on.
  */
-export const INBOX_CARD_ACTION_ON: boolean = false;
+export const INBOX_CARD_ACTION_ON: boolean = true;
 
 /** Every column a card can be in, in the Board's order. */
 export const INBOX_CARD_COLUMNS = ["asked", "designing", "your_look", "building", "your_review", "shipped", "icebox", "dropped"] as const;

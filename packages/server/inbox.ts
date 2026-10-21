@@ -771,7 +771,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const cards = store.listCards({ projectIds: project ? new Set([project]) : null, columns }).map((card) => store.cardWire(card));
     // An agent's drops the person has not seen, in the project (or everywhere): the Board's "N dropped by an agent".
     const droppedUnseen = store.listCards({ projectIds: project ? new Set([project]) : null, columns: new Set(["dropped"]) }).filter(isInboxCardDropUnseen).length;
-    return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen };
+    // The Board page (step 2): each linked thread's list row (subject, section, last time) and each card's
+    // project, so the open card names them without reading every thread. Additive.
+    const threads: Record<string, InboxListRow> = {};
+    const projects: Record<string, { id: string; name: string; root: string }> = {};
+    for (const card of cards) {
+      for (const id of card.threads) {
+        if (threads[id]) continue;
+        const row = store.listRow(id);
+        if (row) threads[id] = row;
+      }
+      if (!projects[card.project_id]) {
+        const known = store.project(card.project_id);
+        if (known) projects[known.id] = { id: known.id, name: known.name, root: known.root };
+      }
+    }
+    return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen, threads, projects };
   };
 
   /**
@@ -1974,7 +1989,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(cardsModel(url));
       }
-      // The person looked at Dropped: an agent's drops there are seen (in `project`, or everywhere).
+      // The person looked at Dropped: the agent's drops named in `cards` (required: those the window showed) are seen, within `project` when given.
       if (path === "/api/inbox/cards/dropped/seen") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
@@ -1985,7 +2000,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (!store.project(body.project)) throw new InboxError("project_not_found", `No project ${body.project}.`);
           projectIds = new Set([body.project]);
         }
-        return json({ cards: store.markCardDropsSeen(projectIds).map((card) => store.cardWire(card)) });
+        // `cards`: the drops the window showed the person (the notice's, or the Dropped list drawn while the page was
+        // in front). Only those are marked: a drop that arrived after, or one never drawn, stays unseen.
+        // Required: a caller that names no cards would mark drops the person never saw.
+        if (!Array.isArray(body.cards) || body.cards.length > 1000 || !body.cards.every((id) => isInboxId("crd", id))) {
+          throw new InboxError("validation_error", "cards: the list of crd_ ids the person was shown (required).", { field: "cards" });
+        }
+        const cardIds = new Set(body.cards as string[]);
+        return json({ cards: store.markCardDropsSeen(projectIds, cardIds).map((card) => store.cardWire(card)) });
       }
       const cardMatch = /^\/api\/inbox\/cards\/([A-Za-z0-9_]+)$/.exec(path);
       if (cardMatch) {

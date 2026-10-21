@@ -127,6 +127,19 @@ Holds up: staging deploy; release notes
 
 Agents are told to write `Stopped:` only when they truly cannot continue. A negative value (`no`, `none`, `n/a`, a dash) means no stop, so `Stopped: no` is read as if the line were not there, and a `Holds up:` entry `none` holds nothing up. `plannotator inbox --help` and the `send_message` tool's `body` field teach agents both lines.
 
+## The Board
+
+**Board** in the sidebar shows the work your agents have in flight: one card per piece of work that outlasts an agent's reply (a lane started, a PR opened, something it promised to send). An agent makes the card when it takes such an ask and keeps it current with one short call (`card`, below). The count beside **Board** is the cards waiting on you.
+
+- **Five columns:** Asked · Designing · Your look · Building · Your review. Designing and Building are the agent working (anything that is not code, then code or an open PR). **Your look** and **Your review** wait on you: a sheet, options or questions to look at, then code, a green PR or a release go.
+- **A card** is two lines: its title, then "You: …" (what you owe) in your columns and the agent's last word in the others, with how long ago anyone last wrote to it ("2d ago"). Nothing marks a card as stalled: the age is the fact.
+- **Shipped** and **Icebox** are links at the top. Only you pause a card (it goes to the Icebox) or take one out. Dropped cards are listed on the Icebox page under **Dropped**, with who dropped them, when and why, and **Restore** puts one back where it was.
+- **When an agent drops a card**, the Board says "N dropped by an agent" above the columns, with each reason and **Restore**, until you have looked: **Got it**, or opening Dropped.
+- **Open a card** to see its threads and PRs. From there you can move it to another column, **Pause** it, **Drop** it (with a reason if you like), or **Ask where this is**, which starts a message to the card's agent (or another agent running in its project). The work itself happens in the card's threads: opening one takes you there.
+- A merged PR never moves a card by itself: the agent (or you) moves it to Shipped.
+
+On a phone the columns are one list in the same order, each one folds, and Shipped and Icebox come at the end. The Board has no keyboard shortcuts of its own.
+
 ## Connecting your agent
 
 Before any agent has written, the Inbox window shows one next step for this computer: Plannotator's own connections first (Claude Code, Pi and OpenCode, whose replies come back into the session by themselves), then agents that reach it through MCP. A tool that is off turns on with one click. A plugin that is missing shows its install command to copy; the window never installs anything, and it moves on by itself once you have. Below the step, a short list says which agents are already connected and what is left.
@@ -139,7 +152,7 @@ The mod is off in `claude -p`, in SDK runs and on Windows. There the tool is not
 
 ### Pi
 
-Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 7 KB to every request, roughly 2,000 tokens depending on the model. To turn it on yourself:
+Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 9 KB to every request, roughly 2,400 tokens depending on the model. To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -149,7 +162,7 @@ Start a new Pi session (or `/reload`). A reply arrives as a follow-up message on
 
 ### OpenCode
 
-Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 7 KB per request, roughly 2,000 tokens). To turn it on yourself:
+Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 9 KB per request, roughly 2,400 tokens). To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -232,6 +245,7 @@ The stdio command fills in the project (its working folder) and a session id for
 | `resolve_message` | Resolve (archive) or reopen a thread |
 | `get_guide_brief` | Get the brief for writing a guided review, with an example that works as it is |
 | `submit_guide` | Send a guided review: a guide plus its patch, or a snapshot |
+| `card` | Keep a card on your [Board](#the-board) for work that outlasts the agent's reply: a lane started, a PR opened, something it promised to send. One short call creates it, moves it, says where it is, links a thread or a PR, ships it or drops it (with a reason), and lists the agent's cards. Only you put a card in the Icebox or bring one back, and only you restore a card you dropped |
 
 No tool answers, approves or sends anything for you.
 
@@ -272,6 +286,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `inbox.json` | The registry: port, URL, version, process id, and a token that changes at every start. Owner-only |
 | `inbox.log` | The output of an Inbox started with `--background` |
 | `projects/<name>-<hash>/` | One folder per project: `project.json`, plus `messages.jsonl`, `questions.jsonl` and `annotations.jsonl`, which grow by appending lines (a `decisions.jsonl` an older Inbox wrote, when it kept decisions, stays as it was; it is kept only so sequence numbers are never reused, and its decisions are never shown) |
+| `projects/<name>-<hash>/cards.jsonl` | The project's Board cards, appended like the rest. A card is its own record: it never moves a thread or changes your list |
 | `blobs/<sha256>` | The version of each attached file as it was sent, a copy of each image a message shows, and each guided review |
 | `markups/<sha256>.png` | The images you marked up when commenting on an image attachment, and the frames your video comments carry (`.jpg`) |
 | `seq.json` | The highest event number ever written, kept across deletions |

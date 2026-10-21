@@ -28,6 +28,7 @@ import type {
   InboxAgentId,
   InboxAgentsModel,
   InboxAnnotationRecord,
+  InboxCardColumn,
   InboxCardWire,
   InboxAttachmentState,
   InboxMessageWire,
@@ -402,6 +403,24 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   );
 }
 
+/**
+ * GET /api/inbox/cards: the Board (approval "inbox-board"). `dropped_unseen`
+ * counts an agent's drops the person has not looked at; `threads` and
+ * `projects` (step 2) name what the cards link. Both absent from an Inbox
+ * before step 2.
+ */
+export interface CardsModel {
+  serverSession: string;
+  cursor: number;
+  cards: InboxCardWire[];
+  dropped_unseen?: number;
+  threads?: Record<string, InboxListRow>;
+  projects?: Record<string, { id: string; name: string; root: string }>;
+}
+
+/** The person's moves on one card (`POST /api/inbox/cards/:id`). */
+export type CardMove = { op: 'move'; column: InboxCardColumn; reason?: string } | { op: 'icebox' } | { op: 'drop'; reason?: string } | { op: 'restore' };
+
 /** config.json `theme`: the mode and the palette for each half (ThemeConfig in @plannotator/core/config-types). */
 export interface InboxThemeConfig {
   mode?: 'light' | 'dark' | 'system';
@@ -524,6 +543,12 @@ export const inboxApi = {
     return get<ArchivedModel>(`/api/inbox/threads/archived${qs ? `?${qs}` : ''}`);
   },
   thread: (threadId: string) => get<ThreadModel>(`/api/inbox/threads/${encodeURIComponent(threadId)}`),
+  /** The Board's cards, every column (approval "inbox-board"). */
+  cards: () => get<CardsModel>('/api/inbox/cards'),
+  /** One of the person's moves on a card: move, icebox (pause), drop, restore. */
+  moveCard: (cardId: string, move: CardMove) => post<{ card: InboxCardWire }>(`/api/inbox/cards/${encodeURIComponent(cardId)}`, move),
+  /** The person looked at Dropped: an agent's drops there stop showing in "N dropped by an agent". */
+  cardDropsSeen: (cardIds: readonly string[]) => post<{ cards: InboxCardWire[] }>('/api/inbox/cards/dropped/seen', { cards: cardIds }),
   settings: () => get<SettingsModel>('/api/inbox/settings'),
   /**
    * The person looked at the thread. `throughSeq`: the seq of the newest

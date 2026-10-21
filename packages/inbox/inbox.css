@@ -3589,3 +3589,179 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
 .ib-reask-d summary { cursor: pointer; min-height: 24px; width: fit-content; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); border-radius: 4px; }
 .ib-reask-d summary:hover { color: var(--foreground); }
 .ib-reask-d pre { margin: 8px 0 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in oklch, var(--muted) 60%, transparent); font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground); }
+
+/* ───────────────────────── The Board (approval "inbox-board", step 2) ─────────────────────────
+   Five lanes, Asked · Designing · Your look · Building · Your review; Shipped and the Icebox are header
+   links. Cards are variant C, "Lean": the title, then "You: …" (the person's lanes) or the agent's last
+   word, and the last-heard age. No amber anywhere (the owner dropped it): "on you" and "You:" are drawn
+   in the text colour and the accent, never a warning colour. Every colour comes from the theme tokens. */
+.ib-main > .ib-board { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; background: var(--ib-pane-bg-s, transparent); }
+.ib-board { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ib-bhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; min-width: 0; }
+.ib-bhead h1 { font-size: var(--ib-fs-20, 20px); font-weight: 650; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
+.ib-bsum { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ib-bsum b { color: var(--foreground); font-weight: 600; }
+.ib-blinks { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; }
+.ib-blinks-dot { color: var(--muted-foreground); }
+.pn-inbox .ib-blink { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 9px; border-radius: var(--ib-r7-s, 6px); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); font-weight: 500; white-space: nowrap; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-blink:hover { background: var(--ib-hover); color: var(--foreground); }
+.ib-blink .ib-n { font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-blink:focus-visible, .pn-inbox .ib-bcard:focus-visible, .pn-inbox .ib-lane-fold:focus-visible, .pn-inbox .ib-cd-thread:focus-visible, .pn-inbox .ib-cd-pr:focus-visible,
+.pn-inbox .ib-cd-mv:focus-visible, .pn-inbox .ib-brow-t:focus-visible, .pn-inbox .ib-dropnote-t:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-board-err { margin: 0 22px 10px; }
+.ib-board-empty { margin: 8px 22px; padding: 18px 20px; border-radius: var(--ib-rl-lg-s, 10px); background: var(--ib-raise); color: var(--ib-raise-mfg); font-size: var(--ib-fs-14, 14px); line-height: 1.55; max-width: 640px; }
+.ib-board-empty b { color: var(--ib-raise-fg); }
+
+/* The lanes: five equal columns (a 1280 px window fits all five); under about 1000 px of room they keep 184 px each
+   and the Board scrolls sideways. */
+.ib-lanes { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(5, minmax(184px, 1fr)); gap: 10px; padding: 2px 12px 12px; overflow-x: auto; overflow-y: hidden; }
+.ib-lane { min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--ib-raise); border-radius: var(--ib-rl-lg-s, 10px); }
+.ib-lane-h { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px 0 12px; margin: 0; font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--ib-raise-fg); flex: none; min-width: 0; }
+.ib-lane-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-lane-h .ib-n { color: var(--ib-raise-mfg); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ib-onyou { margin-left: auto; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 999px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; white-space: nowrap; flex: none; background: color-mix(in oklch, var(--primary) 14%, transparent); color: color-mix(in oklab, var(--primary) 72%, var(--foreground)); }
+.ib-lane-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted-foreground); box-sizing: border-box; }
+.ib-lane-dot[data-column="asked"], .ib-lane-dot[data-column="icebox"] { background: transparent; border: 2px solid var(--muted-foreground); }
+.ib-lane-dot:is([data-column="designing"], [data-column="building"]) { background: var(--primary); }
+.ib-lane-dot:is([data-column="your_look"], [data-column="your_review"]) { background: var(--foreground); }
+.ib-lane-dot[data-column="shipped"] { background: var(--success, var(--primary)); }
+.ib-lane-dot[data-column="dropped"] { background: var(--muted-foreground); opacity: 0.6; }
+.ib-lane-cards { list-style: none; margin: 0; padding: 0 8px 10px; overflow-y: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; overscroll-behavior: contain; }
+.ib-lane-empty { color: var(--ib-raise-mfg); font-size: var(--ib-fs-13, 13px); padding: 6px 6px 2px; }
+
+/* A card: its title and its "You: …" or the agent's last word, each wrapping to at most two lines (the whole text in
+   a tooltip only while one is clamped), then its age on a line of its own, right-aligned, so it never takes room from
+   the words. The whole card opens it. */
+.ib-bcard-li { min-width: 0; }
+.pn-inbox .ib-bcard { display: grid; grid-template-columns: 18px minmax(0, 1fr); column-gap: 9px; row-gap: 4px; align-items: start; width: 100%; min-width: 0; text-align: left; padding: 11px 12px 11px 11px; border: 0; border-radius: var(--ib-rl-md-s, 9px); background: var(--card); color: var(--foreground); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent), 0 1px 2px color-mix(in oklch, var(--ib-shadow-ink) 12%, transparent); cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-bcard:hover { box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 85%, transparent), 0 3px 10px -4px color-mix(in oklch, var(--ib-shadow-ink) 35%, transparent); }
+.ib-bcard-mk { display: flex; align-items: center; justify-content: center; width: 18px; height: 20px; grid-row: 1; grid-column: 1; }
+.ib-bcard-you > svg.ib-ic { color: var(--muted-foreground); }
+.ib-bcard-t { grid-row: 1; grid-column: 2; min-width: 0; font-size: var(--ib-fs-14, 14px); font-weight: 600; line-height: 20px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.ib-bcard-l { grid-row: 2; grid-column: 2; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); line-height: 18px; color: var(--muted-foreground); overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.ib-bcard-l b { color: var(--foreground); font-weight: 600; }
+.ib-bcard-none { font-style: italic; }
+.ib-bcard-age { grid-row: 3; grid-column: 2; justify-self: end; margin-top: -1px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 16px; color: var(--muted-foreground); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* "N dropped by an agent": above the lanes until the person has looked (Got it, or opening Dropped). */
+.ib-dropnote { flex: none; margin: 0 12px 10px; padding: 10px 14px 8px 16px; border-radius: var(--ib-rl-lg-s, 10px); background: var(--ib-raise); box-shadow: inset 3px 0 0 var(--primary); }
+.ib-dropnote-h { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.ib-dropnote-h > svg.ib-ic { color: var(--primary); flex: none; }
+.ib-dropnote-h h2 { margin: 0; font-size: var(--ib-fs-14, 14px); font-weight: 650; color: var(--ib-raise-fg); }
+.ib-dropnote-sub { color: var(--ib-raise-mfg); font-size: var(--ib-fs-13, 13px); }
+.ib-dropnote-acts { margin-left: auto; display: flex; gap: 6px; }
+.ib-dropnote-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; }
+.ib-dropnote-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--ib-line); }
+.ib-dropnote-row > .ib-bcard-age, .ib-brow > .ib-bcard-age, .ib-cd-thread > .ib-bcard-age { grid-row: auto; grid-column: auto; justify-self: auto; margin-top: 0; flex: none; }
+.ib-dropnote-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pn-inbox .ib-dropnote-t, .pn-inbox .ib-brow-t { min-width: 0; max-width: 100%; text-align: left; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0; border: 0; background: none; cursor: pointer; }
+.pn-inbox .ib-dropnote-t:hover, .pn-inbox .ib-brow-t:hover { text-decoration: underline; }
+.ib-dropnote-why { min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--ib-raise-mfg); overflow-wrap: anywhere; }
+
+/* Shipped and the Icebox (with Dropped): the header links' pages, a list of cards. */
+.ib-bpage { overflow-y: auto; }
+.ib-bpage .ib-bhead { gap: 8px; }
+.ib-bpage-sub { margin: 0 22px 14px; max-width: 680px; }
+.ib-bgroup { margin: 0 22px 22px; max-width: 900px; }
+.ib-bgroup-h { margin: 0 0 8px; font-size: var(--ib-fs-14, 14px); font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.ib-bgroup-h .ib-n { color: var(--muted-foreground); font-weight: 500; }
+.ib-bgroup-empty { margin: 0; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-brows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ib-brow { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--ib-rl-md-s, 9px); background: var(--ib-raise); }
+.ib-brow-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ib-brow-l, .ib-brow-fact { min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--ib-raise-mfg); }
+.ib-brow-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-brow-l b { color: var(--ib-raise-fg); font-weight: 600; }
+.ib-brow-fact { overflow-wrap: anywhere; }
+.ib-brow-why { color: var(--ib-raise-fg); }
+
+/* The open card. */
+.pn-inbox dialog.ib-cardlg, dialog.ib-cardlg { width: min(660px, calc(100vw - 32px)); }
+.ib-cd-head h2:focus { outline: none; }
+.ib-cd-head { display: flex; align-items: flex-start; gap: 12px; }
+.ib-cd-titles { flex: 1; min-width: 0; }
+.ib-cd .ib-cd-head h2 { font-size: var(--ib-fs-17, 17px); line-height: 1.35; overflow-wrap: anywhere; }
+.ib-cd-meta { margin: 4px 0 0; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); overflow-wrap: anywhere; }
+.ib-cd-col { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); font-weight: 550; }
+.ib-cd-x { flex: none; margin: -4px -6px 0 0; }
+.ib-cd-line { margin: 14px 0 0; padding: 10px 12px; border-radius: var(--ib-rl-md-s, 9px); background: var(--ib-raise); color: var(--ib-raise-fg); font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
+.ib-cd-said { color: var(--ib-raise-mfg); }
+.ib-cd-done { display: flex; align-items: center; gap: 7px; margin: 12px 0 0; font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--foreground); }
+.ib-cd-done > svg.ib-ic { color: var(--success, var(--primary)); flex: none; }
+.ib-cd-done[data-empty] { margin: 0; }
+.ib-cd-done[data-error] > svg.ib-ic { color: var(--destructive); }
+.ib-cd-state { display: flex; align-items: center; gap: 12px; margin: 12px 0 0; padding: 10px 12px; border-radius: var(--ib-rl-md-s, 9px); background: color-mix(in oklch, var(--muted) 55%, transparent); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
+.ib-cd-state > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ib-cd-empty { margin: 0; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-cd-threads, .ib-cd-prs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pn-inbox .ib-cd-thread, .pn-inbox .ib-cd-pr { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px; padding: 6px 8px; border-radius: var(--ib-r8-s, 7px); border: 0; background: none; color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); text-align: left; text-decoration: none; cursor: pointer; }
+.pn-inbox .ib-cd-thread:hover, .pn-inbox .ib-cd-pr:hover { background: var(--ib-hover); }
+.ib-cd-thread > svg.ib-ic, .ib-cd-pr > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-cd-thread-s { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+.ib-cd-thread-sec { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; }
+.ib-cd-pr > span { font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cd-move { display: flex; flex-wrap: wrap; gap: 6px; }
+.pn-inbox .ib-cd-mv { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--ib-badge-border-s, var(--border)); background: var(--ib-fill); color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 500; white-space: nowrap; }
+.pn-inbox .ib-cd-mv:hover:not(:disabled) { background: var(--ib-hover); }
+.pn-inbox .ib-cd-mv.ib-on { background: color-mix(in oklch, var(--primary) 14%, transparent); color: color-mix(in oklab, var(--primary) 72%, var(--foreground)); font-weight: 600; cursor: default; }
+.pn-inbox .ib-cd-mv:disabled:not(.ib-on) { opacity: 0.55; }
+.ib-cd-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.ib-cd-gap { flex: 1; }
+.pn-inbox .ib-btn.ib-danger { background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground, white); }
+.ib-cd-drop { margin-top: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ib-cd-drop label { font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.ib-cd-drop input { height: 34px; padding: 0 10px; border-radius: var(--ib-r8-s, 7px); border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-cd-drop input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-cd-drop .ib-cd-acts { margin-top: 6px; justify-content: flex-end; }
+.ib-cd-note { margin: 8px 0 0; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cd-foot { margin: 16px 0 0; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+@media (forced-colors: active) {
+  .ib-bcard, .ib-lane, .ib-dropnote, .ib-brow { border: 1px solid CanvasText; }
+  .ib-lane-dot { forced-color-adjust: none; }
+}
+
+/* The Board on a phone: the same order as one stacked list, each lane a band that folds; Shipped and the
+   Icebox at its end. 44 px targets. */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-board { overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .ib-bhead { height: auto; min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 16px 0 4px; gap: 6px; flex-wrap: wrap; }
+  .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
+  .ib-bsum { margin-left: auto; }
+  .ib-lanes { display: block; overflow: visible; padding: 0; flex: none; }
+  .ib-lane { background: none; border-radius: 0; }
+  .ib-lane-h { height: auto; padding: 0; background: var(--ib-band); }
+  .pn-inbox .ib-lane-fold { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 16px; color: inherit; font: inherit; }
+  .ib-lane-fold > svg.ib-ic { margin-left: auto; color: var(--muted-foreground); flex: none; }
+  .ib-lane-fold .ib-onyou { margin-left: auto; }
+  .ib-lane-fold .ib-onyou + svg.ib-ic { margin-left: 4px; }
+  .ib-lane-cards { padding: 0; gap: 0; overflow: visible; }
+  .ib-lane-empty { padding: 12px 16px; }
+  .pn-inbox .ib-bcard { border-radius: 0; box-shadow: none; padding: 12px 16px; row-gap: 6px; background: transparent; }
+  .pn-inbox .ib-bcard:hover { box-shadow: none; }
+  .ib-bcard-t { font-size: var(--ib-fs-15, 15px); line-height: 21px; }
+  .ib-bcard-l { line-height: 19px; }
+  .ib-bcard-l { font-size: var(--ib-fs-14, 14px); }
+  .ib-dropnote { margin: 4px 12px 12px; }
+  .ib-dropnote-acts { margin-left: 0; width: 100%; }
+  .ib-dropnote-acts .ib-btn { flex: 1; justify-content: center; }
+  .ib-dropnote-row { grid-template-columns: 18px minmax(0, 1fr) auto; }
+  .ib-dropnote-row > .ib-bcard-age { display: none; }
+  .ib-blinks-foot { flex-direction: column; align-items: stretch; gap: 0; margin: 16px 0 0; border-top: 1px solid var(--ib-line); }
+  .pn-inbox .ib-blinks-foot .ib-blink { justify-content: flex-start; height: 52px; padding: 0 16px; border-radius: 0; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-15, 15px); color: var(--foreground); }
+  .ib-blinks-foot .ib-blink > svg.ib-ic { margin-left: auto; color: var(--muted-foreground); }
+  .ib-bpage-sub { margin: 0 16px 14px; }
+  .ib-bgroup { margin: 0 12px 22px; }
+  .ib-brow { grid-template-columns: 18px minmax(0, 1fr) auto; }
+  .ib-brow > .ib-bcard-age { display: none; }
+  .ib-brow .ib-btn { min-height: 44px; }
+  .pn-inbox .ib-blink, .pn-inbox .ib-pback { min-height: 44px; }
+  .pn-inbox .ib-cd-mv { height: 44px; padding: 0 14px; }
+  .pn-inbox .ib-cd-thread, .pn-inbox .ib-cd-pr { min-height: 44px; }
+  .pn-inbox .ib-cd-thread { flex-wrap: wrap; row-gap: 2px; }
+  .ib-cd-thread-s { flex-basis: calc(100% - 30px); }
+  .ib-cd-thread-sec { margin-left: 24px; }
+  .ib-cd-thread > .ib-bcard-age { margin-left: auto; }
+  .ib-cd-drop input { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-cd-acts .ib-btn { flex: 1 1 auto; justify-content: center; }
+  .ib-cd-gap { display: none; }
+}

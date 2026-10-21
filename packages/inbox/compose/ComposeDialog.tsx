@@ -53,6 +53,8 @@ export interface ComposeRequest {
   draft?: DraftView | null;
   /** A session to put in To (the palette's "Message <host> in <project>"). */
   session?: string | null;
+  /** Words to start with (the Board's "Ask where this is"); a draft's own words win. */
+  body?: string;
 }
 
 export interface ComposeSent {
@@ -89,7 +91,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const statusId = `ib-cp-status-${uid}`;
 
   const [draft, setDraft] = useState<DraftView | null>(request.draft ?? null);
-  const [body, setBody] = useState(request.draft?.body ?? '');
+  const [body, setBody] = useState(request.draft?.body ?? request.body ?? '');
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
   const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft));
   const [chosen, setChosen] = useState<string | null>(request.draft ? (request.draft.to?.session ?? null) : (request.session ?? null));

@@ -341,5 +341,105 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
       "properties": {},
       "additionalProperties": false
     }
+  },
+  {
+    "name": "card",
+    "description": "Keep a card on the person's Board for work that outlasts this reply (a lane started, a PR opened, \"I'll send you X\"), and keep it current with one short call as the work moves. op: create (a title, or thread_id to take its subject), move (column), say (your last word, or what the person owes in `you`), link (thread_id, pr), ship, drop (with a reason), list (your cards). A merged PR never moves a card by itself: ship it when it is merged or live.",
+    "inputSchema": {
+      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "create",
+            "move",
+            "say",
+            "link",
+            "ship",
+            "drop",
+            "list"
+          ]
+        },
+        "card_id": {
+          "description": "The card (crd_…); not for create or list.",
+          "type": "string"
+        },
+        "title": {
+          "description": "One line.",
+          "type": "string"
+        },
+        "column": {
+          "description": "asked · designing (not code) · your_look (a non-code thing waits on the person; give `you`) · building (code, an open PR) · your_review (code or a release waits on the person; give `you`) · shipped (merged or live) · dropped (give `reason`). Waiting on the person wins. icebox: the person's only.",
+          "type": "string",
+          "enum": [
+            "asked",
+            "designing",
+            "your_look",
+            "building",
+            "your_review",
+            "shipped",
+            "icebox",
+            "dropped"
+          ]
+        },
+        "say": {
+          "description": "Your last word: where the work is, one line.",
+          "type": "string"
+        },
+        "you": {
+          "description": "What the person owes, one line.",
+          "type": "string"
+        },
+        "pr": {
+          "description": "owner/repo#123 or a PR URL.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why it is dropped.",
+          "type": "string"
+        },
+        "thread_id": {
+          "description": "A thread or message id to link; create takes its subject.",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "description": "Create: the same key answers the first card.",
+          "type": "string"
+        },
+        "asked_by": {
+          "description": "List: \"me\" (default) or \"anyone\".",
+          "type": "string",
+          "enum": [
+            "me",
+            "anyone"
+          ]
+        },
+        "include_resolved": {
+          "description": "List: shipped and dropped too.",
+          "type": "boolean"
+        },
+        "project_path": {
+          "description": "Absolute path of the repository or folder you work in; the thread lands in that project's row. The `plannotator inbox mcp` shim fills it from its working folder.",
+          "type": "string"
+        },
+        "agent_session": {
+          "description": "Your session id; the `plannotator inbox mcp` shim fills it. The cards you make are yours: list shows them.",
+          "type": "string"
+        },
+        "agent_name": {
+          "description": "How the person sees you, e.g. \"Claude Code\".",
+          "type": "string"
+        },
+        "agent_host": {
+          "description": "Your agent host, e.g. claude-code, codex, cursor.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    }
   }
 ]

@@ -173,6 +173,7 @@ jobs:
           packages/inbox/rowMenu.test.tsx
           packages/inbox/fileBack.test.tsx
           packages/inbox/archived.test.tsx
+          packages/inbox/board.test.tsx
           packages/inbox/openStaysPut.test.tsx
           packages/inbox/clickToRefresh.test.tsx
           packages/inbox/tabCountWindow.test.tsx

@@ -3646,13 +3646,16 @@ export class InboxStore {
 
   /**
    * The person looked at Dropped: every agent's drop they had not seen (in
-   * `projectIds`, or everywhere) is marked seen, one line per card. Not a
+   * `projectIds`, or everywhere; only those in `cardIds` when given, the drops
+   * the window showed them) is marked seen, one line per card. Not a
    * write to the card itself: `heard_at` stays. Answers the cards it marked.
    */
-  markCardDropsSeen(projectIds: ReadonlySet<string> | null = null): InboxCard[] {
+  markCardDropsSeen(projectIds: ReadonlySet<string> | null = null, cardIds: ReadonlySet<string> | null = null): InboxCard[] {
     const marked: InboxCard[] = [];
     for (const card of this.listCards({ projectIds, columns: new Set(["dropped"]) })) {
       if (!isInboxCardDropUnseen(card)) continue;
+      // Only the drops the person was shown (the window names them), when it names them.
+      if (cardIds && !cardIds.has(card.id)) continue;
       const at = this.stamp();
       const next: InboxCard = { ...card, dropped: { ...card.dropped!, seen_at: at } };
       this.appendCard(next, at);

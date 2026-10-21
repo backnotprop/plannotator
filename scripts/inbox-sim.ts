@@ -107,6 +107,11 @@ export class SimAgent {
     return this.call('wait_for_reply', { thread_id: threadId, timeout_seconds: timeoutSeconds, ...(cursor === undefined ? {} : { cursor }) });
   }
 
+  /** The Board's `card` call (approval "inbox-board"): create, move, say, link, ship, drop, list; a refusal throws. */
+  card(input: { op: string; project_path: string; [field: string]: unknown }): Promise<Structured> {
+    return this.call('card', { ...input, agent_name: this.name, agent_host: this.host });
+  }
+
   close(): Promise<void> {
     return this.client.close();
   }

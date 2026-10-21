@@ -216,12 +216,15 @@ describe("the window's card routes and the event stream", () => {
     const unseen = (await (await fetch(`${base}/api/inbox/cards`)).json()) as { dropped_unseen: number };
     expect(unseen.dropped_unseen).toBe(2);
     expect(((await (await fetch(`${base}/api/inbox/cards?project=${here.id}`)).json()) as { dropped_unseen: number }).dropped_unseen).toBe(1);
-    const looked = (await (await post("/api/inbox/cards/dropped/seen", { project: here.id })).json()) as { cards: { id: string; dropped: { seen_at: string | null } }[] };
+    const looked = (await (await post("/api/inbox/cards/dropped/seen", { project: here.id, cards: [b.id, c.id] })).json()) as { cards: { id: string; dropped: { seen_at: string | null } }[] };
     expect(looked.cards.map((card) => card.id)).toEqual([b.id]);
     expect(looked.cards[0]!.dropped.seen_at).not.toBeNull();
     expect(((await (await fetch(`${base}/api/inbox/cards`)).json()) as { dropped_unseen: number }).dropped_unseen).toBe(1);
-    expect(((await (await post("/api/inbox/cards/dropped/seen", {})).json()) as { cards: { id: string }[] }).cards.map((card) => card.id)).toEqual([c.id]);
-    expect((await post("/api/inbox/cards/dropped/seen", { project: "nope" })).status).toBe(422);
+    // `cards` is required: a call that names no cards marks nothing.
+    expect((await post("/api/inbox/cards/dropped/seen", {})).status).toBe(422);
+    expect(((await (await fetch(`${base}/api/inbox/cards`)).json()) as { dropped_unseen: number }).dropped_unseen).toBe(1);
+    expect(((await (await post("/api/inbox/cards/dropped/seen", { cards: [c.id] })).json()) as { cards: { id: string }[] }).cards.map((card) => card.id)).toEqual([c.id]);
+    expect((await post("/api/inbox/cards/dropped/seen", { project: "nope", cards: [] })).status).toBe(422);
     expect((await fetch(`${base}/api/inbox/cards/dropped/seen`)).status).toBe(405);
 
     // Guards: a bad op, an unknown card, another site, a stale tab.
@@ -230,7 +233,7 @@ describe("the window's card routes and the event stream", () => {
     expect((await post("/api/inbox/cards/nope", { op: "icebox" })).status).toBe(422);
     expect((await post(`/api/inbox/cards/${a.id}`, { op: "icebox" }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
     expect((await post(`/api/inbox/cards/${a.id}`, { op: "icebox", serverSession: "another-session" })).status).toBe(409);
-    expect((await post("/api/inbox/cards/dropped/seen", { serverSession: "another-session" })).status).toBe(409);
+    expect((await post("/api/inbox/cards/dropped/seen", { serverSession: "another-session", cards: [] })).status).toBe(409);
     expect((await fetch(`${base}/api/inbox/cards`, { method: "POST" })).status).toBe(405);
 
     // The event stream carries the card lines after the cursor, on the one counter.
