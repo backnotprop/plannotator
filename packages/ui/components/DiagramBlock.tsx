@@ -5,6 +5,7 @@ import { AnnotationType, type Annotation, type Block } from '../types';
 import { useConfigValue } from '../config';
 import type { DiagramTheme } from '../utils/diagram-render';
 import { diagramShadowAmount } from '../utils/diagramShadow';
+import { useDiagramEngine } from '../hooks/useDiagramEngine';
 import { getIdentity } from '../utils/identity';
 import { createRuntimeRetryEpoch } from '../utils/runtimeRetry';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
@@ -120,13 +121,15 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
   // part of the theme key, so changing it re-initializes Mermaid and re-renders
   // every mounted diagram.
   const diagramShadow = useConfigValue('diagramShadow');
+  const mermaidEngine = useDiagramEngine();
   const theme = useMemo<DiagramTheme>(
     () => ({
       colorTheme,
       mode: resolvedMode === 'light' ? 'light' : 'dark',
       shadowAmount: diagramShadowAmount(diagramShadow),
+      mermaidEngine,
     }),
-    [colorTheme, resolvedMode, diagramShadow],
+    [colorTheme, resolvedMode, diagramShadow, mermaidEngine],
   );
 
   // A sibling's Retry re-attempts this block too, but only while its own

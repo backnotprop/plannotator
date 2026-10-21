@@ -35,12 +35,21 @@
 import DOMPurify from 'dompurify';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import { MERMAID_FINDER, type DiagramFinder } from './diagram-anchor';
+import { PELE_COMPAT_FINDER, PELE_FINDER } from './diagram-anchor-pele';
 import { GRAPHVIZ_FINDER } from './diagram-anchor-graphviz';
 import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } from './graphviz';
 import { loadMathRenderer } from './math';
 import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
 import { hasMermaidMath } from './mermaid-math-slot';
 import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
+import {
+  loadPeleRuntime,
+  PELE_OUTPUT_LIMIT,
+  PELE_SOURCE_LIMIT,
+  peleSvgId,
+  renderPeleSource,
+  peleThemeStyle,
+} from './pele';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
 
@@ -63,6 +72,8 @@ export interface DiagramTheme {
    * `DiagramTheme` renders exactly what Plannotator renders.
    */
   readonly shadowAmount?: number;
+  /** Optional alternative Mermaid-syntax renderer. Unset keeps Mermaid. */
+  readonly mermaidEngine?: 'mermaid' | 'pele';
 }
 
 export type DiagramRenderError = {
@@ -176,7 +187,7 @@ function scrubAttributes(el: Element): void {
   for (const attribute of Array.from(el.attributes)) {
     const name = attribute.name.toLowerCase();
     const value = attribute.value.trim().toLowerCase();
-    if (name.startsWith('on')) {
+    if (name.startsWith('on') || (name === 'style' && cssFetches(attribute.value))) {
       el.removeAttribute(attribute.name);
       continue;
     }
@@ -218,6 +229,7 @@ const EDGE_SELECTOR = [
   'path.messageLine0',
   'path.messageLine1',
   'g.edge > path',
+  'g.pele-edge > path:not(.pele-marker)',
 ].join(', ');
 
 /** The geometry a hit path keeps from its edge; everything else (id, class,
@@ -441,7 +453,12 @@ export function __setDiagramSvgParserForTests(next: ((svg: string) => SVGSVGElem
  * in line N near '...'". */
 function errorLine(error: unknown): number | null {
   if (typeof error === 'object' && error !== null) {
-    const hash = (error as { hash?: { line?: unknown; loc?: { first_line?: unknown } } }).hash;
+    const sourceError = error as { line?: unknown; hash?: { line?: unknown; loc?: { first_line?: unknown } } };
+    // Pele reports one-based lines; Mermaid's parser hash is zero-based.
+    if (typeof sourceError.line === 'number' && sourceError.line > 0 && Number.isFinite(sourceError.line)) {
+      return sourceError.line;
+    }
+    const hash = sourceError.hash;
     const line = hash?.line ?? hash?.loc?.first_line;
     if (typeof line === 'number' && Number.isFinite(line)) return line + 1;
   }
@@ -494,8 +511,10 @@ async function renderMermaid(runtime: Mermaid, renderId: string, source: string)
 }
 
 const mermaidRenderer: DiagramRenderer = {
-  finder: MERMAID_FINDER,
+  finder: PELE_COMPAT_FINDER,
   async render(renderId, source, theme) {
+    if (theme.mermaidEngine === 'pele') return renderPele(renderId, source);
+
     let runtime: Mermaid;
     try {
       runtime = await loadWithRetry(loadMermaidRuntime, getMermaidRetryDelayMs());
@@ -648,6 +667,44 @@ const graphvizRenderer: DiagramRenderer = {
     }
   },
 };
+
+async function renderPele(renderId: string, source: string): Promise<DiagramRenderResult> {
+  let runtime: Awaited<ReturnType<typeof loadPeleRuntime>>;
+  try {
+    runtime = await loadWithRetry(loadPeleRuntime, 250);
+  } catch (error) {
+    return {
+      ok: false,
+      message: errorMessage(error, 'The Pele engine could not be loaded.'),
+      line: null,
+      runtimeUnavailable: true,
+    };
+  }
+  if (source.length > PELE_SOURCE_LIMIT) {
+    return { ok: false, message: `Diagram source exceeds the ${PELE_SOURCE_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
+  }
+  try {
+    const result = renderPeleSource(runtime, source, renderId);
+    if (result.svg.length > PELE_OUTPUT_LIMIT) {
+      return { ok: false, message: `Rendered diagram exceeds the ${PELE_OUTPUT_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
+    }
+    const svgNode = sanitizeDiagramSvg(result.svg);
+    if (svgNode === null) {
+      return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
+    }
+    svgNode.id = peleSvgId(renderId);
+    svgNode.setAttribute('style', `${svgNode.getAttribute('style') ?? ''};${peleThemeStyle()}`);
+    widenEdgeHitAreas(svgNode);
+    return { ok: true, svgNode, findTarget: PELE_FINDER.findTarget };
+  } catch (error) {
+    return {
+      ok: false,
+      message: errorMessage(error, 'Failed to render diagram'),
+      line: errorLine(error),
+      runtimeUnavailable: false,
+    };
+  }
+}
 
 const RENDERERS: Record<DiagramKind, DiagramRenderer> = {
   mermaid: mermaidRenderer,
