@@ -9,6 +9,8 @@ import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffTy
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
 import { DIAGRAM_SHADOW_OPTIONS } from '../utils/diagramShadow';
 import { DEFAULT_DOCUMENT_TEXT_SIZE, DOCUMENT_TEXT_SIZE_OPTIONS } from '../utils/documentTextSize';
+import { useDiagramEngine } from '../hooks/useDiagramEngine';
+import { setDiagramEngine } from '../utils/diagramEngine';
 import {
   agentToolAppliesWhen,
   agentToolCostNote,
@@ -1169,6 +1171,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const gridEnabled = useConfigValue('gridEnabled');
   const diagramShadow = useConfigValue('diagramShadow');
   const documentTextSize = useConfigValue('documentTextSize');
+  const diagramEngine = useDiagramEngine();
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const enterSavesComment = useConfigValue('enterSavesComment');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
@@ -1969,18 +1972,54 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                     <div className="border-t border-border" />
 
-                    {/* Diagram Shadow */}
+                    {/* Experimental renderer selection; stays cookie-only rather than
+                        entering the registry shipped with the portable guide viewer. */}
+                    <div className="space-y-3" data-diagram-engine-setting>
+                      <div>
+                        <div className="text-sm font-medium">Diagram renderer</div>
+                        <div className="text-xs text-muted-foreground">
+                          Pele is experimental. Existing Mermaid fences work with either renderer; appearance may differ and HTML labels are unsupported. Graphviz is unaffected.
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5" role="group" aria-label="Diagram renderer">
+                        {([
+                          { value: 'mermaid', label: 'Mermaid' },
+                          { value: 'pele', label: 'Pele (experimental)' },
+                        ] as const).map(({ value, label }) => (
+                          <button
+                            key={value}
+                            type="button"
+                            aria-pressed={diagramEngine === value}
+                            onClick={() => setDiagramEngine(value)}
+                            className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+                              diagramEngine === value
+                                ? 'bg-background text-foreground shadow-sm font-medium'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-border" />
+
+                    {/* Mermaid's renderer-specific shadow setting. */}
                     <div className="space-y-3" data-diagram-shadow-setting>
                       <div>
                         <div className="text-sm font-medium">Diagram Shadow</div>
                         <div className="text-xs text-muted-foreground">
-                          Drop shadow under diagram nodes (100 = Mermaid's own)
+                          {diagramEngine === 'pele'
+                            ? 'Applies to Mermaid only; it does not affect Pele.'
+                            : "Drop shadow under Mermaid nodes (100 = Mermaid's own)"}
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
+                      <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5" aria-disabled={diagramEngine === 'pele'}>
                         {DIAGRAM_SHADOW_OPTIONS.map((value) => (
                           <button
                             key={value}
+                            disabled={diagramEngine === 'pele'}
                             onClick={() => configStore.set('diagramShadow', value)}
                             aria-pressed={diagramShadow === value}
                             className={`flex-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
