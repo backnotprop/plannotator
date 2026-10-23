@@ -59,7 +59,7 @@
     "bun": ">=1.0.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.2.0",
+    "@modelcontextprotocol/client": "2.3.0",
     "glimpseui": "^0.8.0"
   }
 }
