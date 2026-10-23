@@ -429,11 +429,11 @@
     "clean": "rm -rf ./dist"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.8.0",
+    "@agentclientprotocol/sdk": "1.9.0",
     "@vscode/codicons": "0.0.45",
     "dompurify": "3.4.17",
     "marked": "17.0.6",
-    "zod": "4.5.4"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/bun": "latest",
