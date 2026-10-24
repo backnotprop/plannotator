@@ -318,6 +318,8 @@ chmodSync(join(bin, "gh"), 0o755);
 // --- what the FAKE agent does ------------------------------------------------
 const place = (file: string, chapter: string, summary: string, focus?: unknown[]) => ({ mcp: { name: "guide_place_file", args: { file, chapter, summary, ...(focus && { focus }) } } });
 const agentScript = {
+  // Like claude-agent-acp: a question about the guide loads the session that wrote it.
+  loadSession: true,
   pace: Number(process.env.FAKE_AGENT_PACE ?? 700),
   steps: [
     { say: "I'll read the PR and the change first, then build the guide chapter by chapter." },
@@ -370,6 +372,66 @@ const agentScript = {
     { say: "The guide is saved: 5 chapters and an overview." },
   ],
 };
+// --- what the FAKE agent answers when asked (the ask session offers show_answer) ---
+const box = (x: number, y: number, w: number, title: string, sub: string, color: string, link: string) =>
+  `<g class="box" data-link="${link}" tabindex="0"><rect x="${x}" y="${y}" width="${w}" height="44" rx="6" fill="var(--card)" stroke="${color}" stroke-width="1.5"/>` +
+  `<text x="${x + 12}" y="${y + 19}" font-family="var(--mono)" font-size="13" fill="var(--foreground)">${title}</text>` +
+  `<text x="${x + 12}" y="${y + 35}" font-size="11.5" fill="var(--muted)">${sub}</text></g>`;
+const arrow = (x1: number, y1: number, x2: number, y2: number) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--muted)" stroke-width="1.3" marker-end="url(#a)"/>`;
+const answerHtml = `<style>
+  .lead { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  .fig { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px 6px; margin: 0 0 14px; }
+  .fig h4 { margin: 4px 0 6px; font-size: 11px; letter-spacing: .08em; color: var(--muted); }
+  .box { cursor: pointer; } .box:hover rect { stroke-width: 2.5; }
+  .note { font-size: 12px; color: var(--muted); margin: 2px 0 8px; }
+  p { margin: 0 0 10px; } p.hl { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 4px; }
+</style>
+<div class="fig">
+  <h4>BEFORE</h4>
+  <svg viewBox="0 0 640 96" width="640">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+    ${box(4, 6, 130, "post()", "any status", "var(--border)", "code:src/webhooks/deliver.ts#L18")}${arrow(136, 28, 160, 28)}
+    ${box(162, 6, 140, "throw Error", "on non-2xx", "var(--del)", "code:src/webhooks/deliver.ts#L25")}${arrow(304, 28, 328, 28)}
+    ${box(330, 6, 140, "processJob", "catch {…}", "var(--border)", "symbol:processJob")}${arrow(472, 28, 496, 28)}
+    ${box(498, 6, 136, "queue.push(job)", "right away", "var(--del)", "code:src/queue/worker.ts#L1")}
+    <path d="M566,52 L566,74 L70,74 L70,56" fill="none" stroke="var(--del)" stroke-dasharray="4 3" marker-end="url(#a)"/>
+    <text x="318" y="90" text-anchor="middle" font-size="11.5" fill="var(--del)">back to the start: no delay, no limit, a 404 too</text>
+  </svg>
+  <h4>AFTER</h4>
+  <svg viewBox="0 0 640 170" width="640">
+    ${box(4, 62, 150, "deliverWebhook", "one attempt", "var(--chart-1)", "symbol:deliverWebhook")}${arrow(156, 84, 196, 84)}
+    <g class="box" data-link="code:src/webhooks/deliver.ts#L26"><polygon points="244,62 290,84 244,106 198,84" fill="var(--card)" stroke="var(--chart-1)" stroke-width="1.5"/><text x="244" y="88" text-anchor="middle" font-size="12" fill="var(--foreground)">status?</text></g>
+    ${arrow(290, 78, 360, 26)}${arrow(292, 84, 360, 84)}${arrow(290, 90, 360, 142)}
+    <text x="300" y="40" font-size="11" fill="var(--muted)">2xx</text><text x="300" y="78" font-size="11" fill="var(--muted)">5xx · 429</text><text x="200" y="128" font-size="11" fill="var(--muted)">else, or 8th try</text>
+    ${box(362, 4, 270, "delivered", "done; the worker does nothing", "var(--chart-3)", "code:src/webhooks/deliver.ts#L23")}
+    ${box(362, 62, 270, "retry · computeBackoff(attempt)", "waits 0.5 s … 5 min, then queue.push", "var(--chart-2)", "symbol:computeBackoff")}
+    ${box(362, 120, 270, "dead-lettered · deadLetters.put()", "kept once in webhook_dead_letters", "var(--chart-4)", "symbol:deadLetters")}
+  </svg>
+  <div class="note">Click a box to open its code.</div>
+</div>
+<p data-for="before">Before, <a href="symbol:deliverWebhook">deliverWebhook</a> threw on any bad status and <a href="symbol:processJob">processJob</a> caught it and pushed the job back at once: no delay, no limit. A receiver that was down for an hour got a retry every few milliseconds, and a <code>404</code> was retried forever.</p>
+<p data-for="after">Lines <a href="code:src/webhooks/deliver.ts#L25-L31">25–31</a> replace the throw with a decision. A <code>5xx</code> or <code>429</code> with attempts left returns <code>retry</code> with a delay from <a href="symbol:computeBackoff">computeBackoff</a> (exponential, full jitter, capped at 5 minutes). Anything else, or the 8th failure, goes to <a href="symbol:deadLetters">deadLetters.put</a> and stops.</p>
+<p>It returns a value instead of throwing because the worker now needs the delay: the outcome carries <code>delayMs</code>, and the worker hands it to <code>queue.push</code>. That half is <a href="chapter:4">Chapter 4 · Worker schedules the retry</a>.</p>
+<script>
+  // Hovering a picture highlights the paragraph that explains it.
+  const figs = document.querySelectorAll(".fig svg");
+  const para = (k) => document.querySelector('p[data-for="' + k + '"]');
+  [["before", figs[0]], ["after", figs[1]]].forEach(([k, svg]) => {
+    svg.addEventListener("mouseenter", () => para(k).classList.add("hl"));
+    svg.addEventListener("mouseleave", () => para(k).classList.remove("hl"));
+  });
+</script>`;
+(agentScript as Record<string, unknown>).askTurns = [[
+  { say: "Before this change the loop retried every failure at once, with no delay and no cap. The new code turns the thrown error into a value the worker can act on" },
+  { tool: { title: "Read src/queue/worker.ts", locations: [{ path: "src/queue/worker.ts" }] } },
+  { tool: { title: "Read src/webhooks/retryPolicy.ts", locations: [{ path: "src/webhooks/retryPolicy.ts" }] } },
+  { tool: { title: "Searched for processJob", kind: "search" } },
+  { usage: { cost: 0.01 } },
+  { sleep: Number(process.env.FAKE_AGENT_ASK_HOLD ?? 0) },
+  { mcp: { name: "show_answer", args: { title: "Failures used to loop straight back. Now each one gets a decision.", html: answerHtml } } },
+  { usage: { cost: 0.03 } },
+  { say: "The answer is shown." },
+]];
 writeFileSync(join(root, "agent-script.json"), JSON.stringify(agentScript, null, 2));
 
 console.log(JSON.stringify({ repo, bin, mainSha, prHead }));

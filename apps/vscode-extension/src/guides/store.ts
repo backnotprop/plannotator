@@ -26,6 +26,7 @@ import {
 } from "@plannotator/shared/guide-store";
 import { buildGuideSnapshot, type GuideSnapshot, type GuideSnapshotSource } from "@plannotator/core/guide-format";
 import { guideDraftProgress, parseGuideDraft, type GuideDraft, type GuideFocusRange } from "./core/adapter";
+import { deleteGuideAnswers } from "./ask/answers";
 
 /** What a guide is of, recorded with drafts and guides so a run can resume and a reader can find its files. */
 export interface ReviewSourceRecord {
@@ -84,6 +85,12 @@ export interface GuideSidecar {
   source?: ReviewSourceRecord;
   agent?: AgentChoiceRecord;
   acpSessionId?: string;
+  /**
+   * The ACP session that answers questions about this guide (the guide's own
+   * when it was loaded, else a new one), and the agent it belongs to, so a
+   * later window can load it.
+   */
+  askSession?: { id: string; agent: string };
   cost?: { amount: number; currency: string };
   /** The overview diagram's render check when the guide was saved: "unchecked" until the reader checks it. */
   diagramCheck?: "ok" | "unchecked" | "failed";
@@ -280,6 +287,7 @@ export function readSidecar(repoKey: string, id: string): GuideSidecar {
     ...(r.source && { source: r.source }),
     ...(r.agent && { agent: r.agent }),
     ...(typeof r.acpSessionId === "string" && { acpSessionId: r.acpSessionId }),
+    ...(r.askSession && typeof r.askSession.id === "string" && typeof r.askSession.agent === "string" && { askSession: { id: r.askSession.id, agent: r.askSession.agent } }),
     ...(r.cost && { cost: r.cost }),
     ...((r.diagramCheck === "ok" || r.diagramCheck === "unchecked" || r.diagramCheck === "failed") && { diagramCheck: r.diagramCheck }),
   };
@@ -315,6 +323,8 @@ export function setChapterReviewed(repoKey: string, id: string, reviewed: boolea
 export function deleteSavedGuide(repoKey: string, id: string): boolean {
   const removed = deleteGuide(repoKey, id);
   if (isValidGuideId(id)) rmSync(join(vscodeDir(repoKey), `${id}.json`), { force: true });
+  // Its answers go with it (they are kept only for this guide).
+  deleteGuideAnswers(repoKey, id);
   return removed;
 }
 

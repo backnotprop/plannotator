@@ -232,6 +232,58 @@ blockquote { margin: 8px 0; padding: 0 12px; border-left: 3px solid var(--pn-lin
 .pn-side-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
 .pn-side-foot { font-size: 12px; }
 
+/* Ask box and answers (chapter view and answer tab) */
+.pn-ask {
+  display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; padding: 0 10px; min-height: 32px;
+  border: 1px solid var(--vscode-input-border, var(--pn-line)); border-radius: var(--pn-radius);
+  background: var(--vscode-input-background, var(--pn-soft));
+}
+.pn-ask:focus-within { border-color: var(--vscode-focusBorder); }
+.pn-ask-icon { color: var(--vscode-descriptionForeground); background: transparent; border: 0; padding: 0; cursor: pointer; display: inline-flex; font: inherit; }
+.pn-ask-icon:hover { color: var(--vscode-textLink-foreground); }
+.pn-ask-input { flex: 1; min-width: 0; font: inherit; color: var(--vscode-input-foreground, inherit); background: transparent; border: 0; outline: none; padding: 6px 0; }
+.pn-ask-input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
+.pn-ask-hint { font-size: 12px; white-space: nowrap; }
+.pn-side-head { margin: 16px 0 6px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; color: var(--vscode-descriptionForeground); }
+.pn-answers { display: flex; flex-direction: column; }
+.pn-answer-row {
+  font: inherit; color: inherit; text-align: left; background: transparent; border: 0; border-radius: var(--pn-radius); cursor: pointer;
+  display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: start; padding: 6px 6px; margin: 0 -6px;
+}
+.pn-answer-row:hover { background: var(--vscode-list-hoverBackground); }
+.pn-answer-row:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.pn-answer-icon { margin-top: 2px; color: var(--vscode-textLink-foreground); }
+.pn-answer-q { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pn-answer-sub, .pn-answer-when { font-size: 12px; }
+.pn-answer-when { white-space: nowrap; }
+.pn-tag-new { border-color: var(--vscode-focusBorder); color: var(--vscode-textLink-foreground); line-height: 16px; }
+
+.pn-answer { max-width: 920px; display: flex; flex-direction: column; min-height: 100vh; padding-bottom: 0; }
+.pn-answer-head { padding-bottom: 6px; }
+.pn-answer-question { font-size: 21px; margin: 6px 0 10px; }
+.pn-answer-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pn-answer-tools { display: inline-flex; gap: 6px; }
+.pn-answer-prev { margin-top: 6px; font-size: 12px; }
+.pn-answer-body { flex: 1; }
+.pn-answer-rule { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.pn-answer-rule::before, .pn-answer-rule::after { content: ""; flex: 1; border-top: 1px solid var(--pn-line); }
+.pn-answer-title { font-size: 16px; margin: 6px 0 10px; }
+.pn-answer-frame { display: block; width: 100%; border: 0; background: transparent; }
+.pn-answer-text { font-size: 14px; }
+.pn-quote { border: 1px solid var(--pn-line); border-radius: var(--pn-radius); margin: 12px 0; overflow: hidden; }
+.pn-quote-head { padding: 6px 12px; border-bottom: 1px solid var(--pn-line); font-size: 12px; display: flex; align-items: center; gap: 4px; }
+.pn-quote-code { margin: 0; padding: 6px 0; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: 12px; background: var(--vscode-textCodeBlock-background, var(--pn-soft)); }
+.pn-quote-line { display: grid; grid-template-columns: 44px 1fr; white-space: pre; }
+.pn-quote-n { text-align: right; padding-right: 12px; color: var(--vscode-editorLineNumber-foreground, var(--vscode-descriptionForeground)); user-select: none; }
+.pn-answer-working { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; }
+.pn-answer-working .pn-spinner { margin-top: 0; }
+.pn-answer-stop { margin-left: auto; }
+.pn-answer-activity { border: 1px solid var(--pn-line); border-radius: var(--pn-radius); max-height: none; }
+.pn-answer-stream { margin: 12px 2px; color: var(--vscode-descriptionForeground); font-style: italic; white-space: pre-wrap; }
+.pn-answer-stream::after { content: ""; display: inline-block; width: 7px; height: 1.1em; margin-left: 2px; vertical-align: text-bottom; background: currentColor; opacity: 0.7; }
+.pn-answer-foot { position: sticky; bottom: 0; padding: 10px 0 16px; background: var(--vscode-editor-background); }
+.pn-answer-foot .pn-ask { margin: 0; }
+
 /* Popover */
 .pn-popover {
   position: absolute; z-index: 20; max-width: 520px;

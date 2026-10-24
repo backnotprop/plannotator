@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import * as vscode from "vscode";
-import { CLAUDE_CODE, OPENCODE, resolveAgentLaunch, type AgentOptionsCache, type AgentStatus } from "../acp/agents";
+import { CLAUDE_CODE, OPENCODE, PI, resolveAgentLaunch, type AgentOptionsCache, type AgentStatus } from "../acp/agents";
 import type { RepoInfo } from "../sources/git";
 import { agentRows, autoApproveChoice, pickAgentAndEffort, pullRequestChoice } from "./new-review";
 
@@ -145,5 +145,17 @@ describe("a typed or pasted pull request", () => {
   it("needs a folder for a bare number, and is nothing otherwise", () => {
     expect(pullRequestChoice("482", null)).toBeNull();
     expect(pullRequestChoice("not a pr", repo)).toBeNull();
+  });
+});
+
+describe("the picker for who answers questions about a guide", () => {
+  it("says the agent answers, and an agent that cannot reach the tools answers in text", () => {
+    const pi: AgentStatus = { agent: PI, launch: { ok: true, source: "path", command: "/usr/bin/pi-acp", args: [] } as AgentStatus["launch"] };
+    const [writes] = agentRows([pi]);
+    expect(writes.description).toContain("can't write guides yet");
+    const [answers] = agentRows([pi], undefined, false, "answer");
+    expect(answers.description).toContain("answers in text only");
+    expect(answers.description).not.toContain("guides");
+    expect(answers.detail).toStartWith("Answers in text only");
   });
 });

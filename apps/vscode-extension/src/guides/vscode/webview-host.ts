@@ -7,9 +7,10 @@
 
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
+import { webviewCsp, type GuidesWebviewMode } from "../webview-csp";
 import { WEBVIEW_COMMANDS, type LinkInfo, type ToExtension, type ToWebview, type ViewState } from "../webview-protocol";
 
-export type WebviewMode = "home" | "generating" | "guide" | "chapter";
+export type WebviewMode = GuidesWebviewMode;
 
 export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions {
   return { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, "dist")] };
@@ -18,13 +19,7 @@ export function webviewOptions(extensionUri: vscode.Uri): vscode.WebviewOptions 
 export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, mode: WebviewMode): string {
   const nonce = randomBytes(16).toString("base64");
   const asset = (...p: string[]) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "dist", ...p)).toString();
-  const csp = [
-    "default-src 'none'",
-    `img-src ${webview.cspSource} data:`,
-    `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `font-src ${webview.cspSource}`,
-    `script-src 'nonce-${nonce}'`,
-  ].join("; ");
+  const csp = webviewCsp(webview.cspSource, nonce, mode);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

@@ -25,6 +25,8 @@ export class ReaderUi implements vscode.Disposable {
   private readonly gutter: vscode.TextEditorDecorationType[];
   private readonly focus: vscode.TextEditorDecorationType;
   private inHover = false;
+  /** A question being answered: the status bar says so, and opens its answer. */
+  private answering: { text: string; answerId: string } | null = null;
 
   constructor(private readonly host: ReaderUiHost) {
     const selector: vscode.DocumentSelector = [{ scheme: "file" }, { scheme: GUIDE_SCHEME }];
@@ -91,6 +93,12 @@ export class ReaderUi implements vscode.Disposable {
         arguments: [path],
         tooltip: reviewed ? "Untick this file" : "Tick this file; the chapter ticks itself when all its files are ticked",
       }),
+      new vscode.CodeLens(range, {
+        title: "Ask…",
+        command: "plannotator.guides.askAboutFile",
+        arguments: [path],
+        tooltip: "Ask the agent about the selected lines, or the whole file; the answer opens beside the diff",
+      }),
       new vscode.CodeLens(range, next
         ? { title: "Next file ›", command: "plannotator.guides.nextFile", arguments: [path], tooltip: `${next.path} (chapter ${next.chapter + 1})` }
         : { title: "Last file", command: "" }),
@@ -115,8 +123,25 @@ export class ReaderUi implements vscode.Disposable {
     }
   }
 
+  /** Say in the status bar that a question is being answered (null: it was). */
+  setAnswering(text: string | null, answerId: string | null): void {
+    this.answering = text && answerId ? { text, answerId } : null;
+    this.updateStatus(this.lastFile);
+  }
+
+  private lastFile: string | null | undefined = null;
+
   updateStatus(currentFile?: string | null): void {
+    this.lastFile = currentFile;
     const cur = this.host.current();
+    if (this.answering) {
+      const q = this.answering.text.length > 48 ? `${this.answering.text.slice(0, 46)}…` : this.answering.text;
+      this.status.text = `$(loading~spin) Answering · ${q}`;
+      this.status.tooltip = `The agent is answering: ${this.answering.text}`;
+      this.status.command = { command: "plannotator.guides.openAnswer", title: "Show the answer", arguments: [this.answering.answerId] };
+      this.status.show();
+      return;
+    }
     if (!cur) {
       this.status.hide();
       return;

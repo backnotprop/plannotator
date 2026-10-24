@@ -56,6 +56,26 @@ export function headPathOf(sides: ReaderSides, uri: vscode.Uri): string | null {
   return null;
 }
 
+/**
+ * Which side of a guide diff a document is, and the file it shows (the
+ * file's path in the change; a renamed file's base side is its old path).
+ */
+export function guideSideOf(sides: ReaderSides, uri: vscode.Uri, files: ReadonlyMap<string, { path: string; oldPath?: string }>): { path: string; side: "head" | "base" } | null {
+  const head = headPathOf(sides, uri);
+  if (head) return { path: head, side: "head" };
+  if (uri.scheme !== GUIDE_SCHEME) return null;
+  try {
+    const q = JSON.parse(uri.query) as VirtualQuery;
+    if (q.root !== sides.gitRoot || q.rev !== sides.baseRev) return null;
+  } catch {
+    return null;
+  }
+  const shown = uri.path.replace(/^\//, "");
+  if (files.has(shown)) return { path: shown, side: "base" };
+  for (const f of files.values()) if (f.oldPath === shown) return { path: f.path, side: "base" };
+  return null;
+}
+
 export class GuideContentProvider implements vscode.TextDocumentContentProvider {
   constructor(private readonly runner: Runner) {}
 

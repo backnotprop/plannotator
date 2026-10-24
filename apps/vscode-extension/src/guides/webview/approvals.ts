@@ -13,7 +13,7 @@ export type Command = (name: string, ...args: unknown[]) => void;
  * Requests the agent is waiting on: never a silent stall. Each shows every
  * option the agent offers; the first time, automatic approval is offered too.
  */
-export function renderPermissions(s: GeneratingViewState, command: Command): HTMLElement[] {
+export function renderPermissions(s: Pick<GeneratingViewState, "id" | "pendingPermissions" | "offerAutoApprove">, command: Command): HTMLElement[] {
   const out = s.pendingPermissions.map((p) =>
     h("section", { class: "pn-approval", role: "alert", "data-permission": p.id },
       h("div", { class: "pn-approval-head" }, icon("shield"), h("b", {}, " Waiting for your approval: "), p.title, p.kind ? h("span", { class: "pn-tag" }, p.kind) : null),
@@ -29,7 +29,7 @@ export function renderPermissions(s: GeneratingViewState, command: Command): HTM
         h("span", { class: "pn-muted" }, "Approve this request and the rest automatically. What the agent may do is governed by its own settings; you can turn this off in Settings (plannotator.guides.autoApprove).")),
       h("div", { class: "pn-actions" },
         h("button", { class: "pn-btn pn-btn-primary", "data-action": "approveRun", onclick: () => command("approveRun", s.id) }, "Approve all for this run"),
-        h("button", { class: "pn-btn", "data-action": "approveAlways", onclick: () => command("approveAlways", s.id) }, "Always approve during guides"),
+        h("button", { class: "pn-btn", "data-action": "approveAlways", onclick: () => command("approveAlways", s.id, s.pendingPermissions[0]?.id) }, "Always approve during guides"),
       ),
     ));
   }

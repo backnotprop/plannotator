@@ -48,6 +48,14 @@ export class Uri {
     return new Uri("file", "", fsPath, "", "");
   }
 
+  static joinPath(base: Uri, ...segments: string[]): Uri {
+    return new Uri(base.scheme, base.authority, [base.path.replace(/\/+$/, ""), ...segments].join("/"), base.query, base.fragment);
+  }
+
+  get fsPath(): string {
+    return this.path;
+  }
+
   static parse(value: string): Uri {
     const parsed = new globalThis.URL(value);
     return new Uri(
@@ -89,16 +97,26 @@ export interface WebviewPanel {
 }
 
 export const ViewColumn = {
+  Active: -1,
+  Beside: -2,
   One: 1,
   Two: 2,
   Three: 3,
 };
 
 export const window = {
+  /** No editor groups unless a test sets them. */
+  tabGroups: { all: [] as unknown[], activeTabGroup: undefined as unknown },
   registerUriHandler(_handler: unknown) {
     return { dispose() {} };
   },
-  async showInformationMessage(_message: string) {
+  async showInformationMessage(_message: string, ..._items: string[]): Promise<string | undefined> {
+    return undefined;
+  },
+  async showWarningMessage(_message: string, ..._items: string[]): Promise<string | undefined> {
+    return undefined;
+  },
+  async showErrorMessage(_message: string, ..._items: string[]): Promise<string | undefined> {
     return undefined;
   },
   async showInputBox(_options?: unknown) {
@@ -165,25 +183,55 @@ export const env = {
   },
 };
 
+/** Every comment thread made, for tests that look at what a controller shows. */
+export const createdCommentThreads: Array<{ uri: Uri; range: unknown; comments: unknown[]; label?: string; contextValue: string; canReply: boolean; collapsibleState: number; disposed: boolean; controller: string }> = [];
+
 export const comments = {
-  createCommentController(_id: string, _label: string) {
+  createCommentController(id: string, _label: string) {
     return {
+      id,
       options: {},
       dispose() {},
       createCommentThread(_uri: Uri, _range: unknown, _comments: unknown[]) {
-        return {
+        const thread = {
           uri: _uri,
           range: _range,
           comments: _comments,
+          label: undefined as string | undefined,
+          state: undefined as number | undefined,
           collapsibleState: 0,
           canReply: true,
           contextValue: "",
-          dispose() {},
+          disposed: false,
+          controller: id,
+          dispose() {
+            thread.disposed = true;
+          },
         };
+        createdCommentThreads.push(thread);
+        return thread;
       },
     };
   },
 };
+
+export class MarkdownString {
+  value: string;
+  supportThemeIcons: boolean;
+  isTrusted?: boolean | { enabledCommands: readonly string[] };
+  constructor(value = "", supportThemeIcons = false) {
+    this.value = value;
+    this.supportThemeIcons = supportThemeIcons;
+  }
+  appendText(text: string) {
+    this.value += text.replace(/[\\`*_{}[\]()#+\-.!]/g, "\\$&");
+    return this;
+  }
+  appendMarkdown(text: string) {
+    this.value += text;
+    return this;
+  }
+}
 
 export const languages = {
   registerCodeActionsProvider(_selector: unknown, _provider: unknown, _metadata?: unknown) {
@@ -211,8 +259,17 @@ export class Range {
   }
 }
 
+export class TabInputWebview {
+  constructor(readonly viewType: string) {}
+}
+
+export class TabInputTextDiff {
+  constructor(readonly original: Uri, readonly modified: Uri) {}
+}
+
 export const CommentMode = { Preview: 1, Editing: 0 };
 export const CommentThreadCollapsibleState = { Collapsed: 0, Expanded: 1 };
+export const CommentThreadState = { Unresolved: 0, Resolved: 1 };
 
 export const CodeActionKind = {
   RefactorInline: { value: "refactor.inline" },

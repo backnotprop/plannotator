@@ -76,9 +76,12 @@ import type { ChapterViewState, GeneratingViewState, GuideViewState, HomeViewSta
 import { chapterColorCss, linkInfo, locateLink, resolveSymbolForBuilder } from "./intel";
 import { autoApproveChoice, pickAgentAndEffort, pickPullRequest, pickPullRequestByLink, pickSource, type RememberedChoice, type SourceChoice } from "./new-review";
 import { ReaderUi } from "./reader-ui";
+import { GuideAsks } from "./asks";
+import { approveAlwaysTarget, isKnownPullRequestUrl } from "../trust";
 import { getChildren, getParent, getTreeItem, nodeId, relativeTime, type TreeData, type TreeNode } from "./tree";
-import { GuideContentProvider, GUIDE_SCHEME, baseUri, headPathOf, headUri } from "./uris";
-import { WebviewHost, webviewHtml, webviewOptions, type WebviewMode } from "./webview-host";
+import { ANSWER_VIEW_TYPE, diffColumnBesideAnswers } from "./tab-columns";
+import { GuideContentProvider, GUIDE_SCHEME, baseUri, guideSideOf, headPathOf, headUri } from "./uris";
+import { WebviewHost, webviewHtml, webviewOptions, type WebviewHandlers, type WebviewMode } from "./webview-host";
 import { pullRequestWorktreeInUse, removeDraftWorktree, type WorktreeUsers } from "../worktrees";
 
 interface Log {
@@ -135,6 +138,7 @@ export class GuidesController implements vscode.Disposable {
   /** Guides made while guide history is off: kept in memory for this session only. */
   private readonly sessionGuides = new Map<string, LoadedGuide>();
   private readonly ui: ReaderUi;
+  private readonly asks: GuideAsks;
   private readonly version: string;
 
   constructor(
@@ -144,11 +148,42 @@ export class GuidesController implements vscode.Disposable {
   ) {
     this.version = String((context.extension?.packageJSON as { version?: string } | undefined)?.version ?? "dev");
     this.ui = new ReaderUi({ current: () => this.reader });
+    this.asks = new GuideAsks({
+      context,
+      version: this.version,
+      runner: this.runner,
+      log: (line) => this.log.info(line),
+      reader: () => this.reader,
+      openGuide: (id) => this.openGuide(id),
+      openLink: (href, column) => this.openLink(href, "open", column),
+      relayHost: () => this.relayHost(),
+      agentById: (id) => this.agentById(id),
+      defaultChoice: () => {
+        const d = this.context.globalState.get<RememberedChoice>(DEFAULTS_KEY);
+        const agent = this.agentById(d?.agent ?? CLAUDE_CODE.id) ?? CLAUDE_CODE;
+        return { id: agent.id, label: agent.label };
+      },
+      ensureLaunch: (agent) => this.ensureLaunch(agent),
+      pickModel: async (current) => {
+        const picked = await pickAgentAndEffort({ ...this.pickerInput({ agent: current.id, model: current.model?.id, effort: current.effort?.id }), standingInstructions: "", defaultsOnly: true, title: "Who answers questions about this guide", purpose: "answer" });
+        return picked?.agent ?? null;
+      },
+      notifyPermission: (pending, signal, label) => this.notifyPermission(pending, signal, label),
+      autoApprove: () => this.autoApproveSetting(),
+      approveAlways: () => void vscode.workspace.getConfiguration("plannotator.guides").update("autoApprove", "allow-all", vscode.ConfigurationTarget.Global),
+      signIn: (agentId, logins, label, cwd) => this.signIn(label, { agentId, logins, cwd }),
+      createPanel: (title, column, onLink, preserveFocus) => this.createPanel(ANSWER_VIEW_TYPE, title, "answer", column, preserveFocus ?? false, { onLink: (link) => onLink(link) }),
+      persists: (guide) => guideHistoryEnabled() && !this.sessionGuides.has(guide.id),
+      updateChapterView: () => this.updateChapterView(),
+      setAnswering: (text, answerId) => this.ui.setAnswering(text, answerId),
+    });
     this.disposables.push(
       this.ui,
+      this.asks,
       vscode.workspace.registerTextDocumentContentProvider(GUIDE_SCHEME, new GuideContentProvider(this.runner)),
       bridge.treeView.onDidChangeCheckboxState((e) => this.onCheckboxes(e)),
       vscode.window.onDidChangeActiveTextEditor((editor) => this.onActiveEditor(editor)),
+      vscode.window.onDidChangeActiveTextEditor((editor) => this.updateEditorContext(editor)),
       vscode.workspace.onDidChangeWorkspaceFolders(() => void this.refresh()),
     );
     void this.refresh();
@@ -281,7 +316,7 @@ export class GuidesController implements vscode.Disposable {
     entry.host.show(this.homeState());
   }
 
-  private createPanel(viewType: string, title: string, mode: WebviewMode, column = vscode.ViewColumn.Active, preserveFocus = false): PanelEntry {
+  private createPanel(viewType: string, title: string, mode: WebviewMode, column: vscode.ViewColumn = vscode.ViewColumn.Active, preserveFocus = false, handlers: Partial<WebviewHandlers> = {}): PanelEntry {
     const panel = vscode.window.createWebviewPanel(viewType, title, { viewColumn: column, preserveFocus }, { ...webviewOptions(this.context.extensionUri), retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "images", "guides.svg");
     panel.webview.html = webviewHtml(panel.webview, this.context.extensionUri, mode);
@@ -289,6 +324,7 @@ export class GuidesController implements vscode.Disposable {
       onCommand: (command, args) => void this.webviewCommand(command, args),
       onLink: (link, action) => void this.openLink(link, action),
       onLinkInfo: (link) => this.linkInfo(link),
+      ...handlers,
     });
     panel.onDidDispose(() => host.dispose());
     return { panel, host };
@@ -338,6 +374,12 @@ export class GuidesController implements vscode.Disposable {
       approveRun: "approveRun",
       approveAlways: "approveAlways",
       resumeWithApproval: "resumeWithApproval",
+      ask: "askChapter",
+      openAnswer: "openAnswer",
+      followUp: "followUp",
+      stopAnswer: "stopAnswer",
+      answerMenu: "answerMenu",
+      openAnswerExternal: "openAnswerExternal",
     };
     if (command === "guideCurrentPR" && this.dashboard?.currentBranchPR) args = [this.dashboard.currentBranchPR.number];
     const target = map[command];
@@ -410,31 +452,100 @@ export class GuidesController implements vscode.Disposable {
       case "signIn":
         return this.signIn(str(args[0]));
       case "answerPermission": {
-        // (run id, permission id, option id)
+        // (run id, permission id, option id): a guide run, or a question being answered
         const gen = this.run?.gen;
         const id = num(args[1]);
         const optionId = str(args[2]);
+        if (this.asks.answerPermission(str(args[0]), id, optionId)) return;
         if (gen && gen.state.id === str(args[0]) && id !== undefined && optionId) gen.answerPermission(id, { optionId });
         return;
       }
       case "approveRun":
+        if (this.asks.approveRun(str(args[0]))) return;
         if (this.run && this.run.gen.state.id === str(args[0])) this.run.gen.approveAutomatically();
         return;
-      case "approveAlways":
+      case "approveAlways": {
+        // (run id, permission id). The setting is written only for a request that is really
+        // waiting on the user: a forged command (no such run or request) changes nothing.
+        const runId = str(args[0]);
+        const permissionId = num(args[1]);
+        const gen = this.run?.gen;
+        const target = approveAlwaysTarget(runId, permissionId, {
+          generation: gen ? { id: gen.state.id, live: isLive(gen.state), pending: gen.state.pendingPermissions.map((p) => p.id) } : null,
+          askPending: (run, id) => this.asks.hasPendingPermission(run, id),
+        });
+        if (!target) {
+          this.log.warn(`[guides] approveAlways ignored: no request ${permissionId ?? "?"} is waiting in run ${runId ?? "?"}`);
+          return;
+        }
         await vscode.workspace.getConfiguration("plannotator.guides").update("autoApprove", "allow-all", vscode.ConfigurationTarget.Global);
-        if (this.run && this.run.gen.state.id === str(args[0])) this.run.gen.approveAutomatically();
+        if (target === "ask") this.asks.approveRun(runId);
+        else gen!.approveAutomatically();
         return;
+      }
+      case "askAboutSelection":
+        return this.asks.askAboutSelection();
+      case "askAboutFile":
+        return this.asks.askAboutFile(str(args[0]) ?? (args[0] && typeof args[0] === "object" && "path" in (args[0] as object) ? (args[0] as { path: string }).path : undefined));
+      case "askThreadSubmit":
+        return this.asks.threads.submit(args[0]);
+      case "askThreadCancel":
+      case "askThreadClose":
+        return this.asks.threads.close(args[0]);
+      case "askThreadSettings":
+        return this.asks.threads.settings(args[0]);
+      case "askThreadPick":
+        return this.asks.threads.pick(args[0], args[1]);
+      case "askThreadAgain":
+        return this.asks.threads.again(args[0]);
+      case "askThreadStop":
+        return this.asks.threads.stop(args[0]);
+      case "askChapter":
+        return this.asks.askChapter(num(args[0]), str(args[1]));
+      case "openAnswer":
+        return this.asks.openAnswer(str(args[0]));
+      case "followUp":
+        return this.asks.followUp(str(args[0]), str(args[1]));
+      case "stopAnswer":
+        return this.asks.stop(str(args[0]));
+      case "answerMenu":
+        return this.asks.menu(str(args[0]), str(args[1]));
+      case "openAnswerExternal":
+        return this.asks.openExternal(str(args[1]));
       case "resumeWithApproval":
         return this.resumeDraft(str(args[0]) ?? treeArg(args[0]), true);
       case "openPullRequestOnGitHub": {
-        const target = str(args[0]) ?? (args[0] && typeof args[0] === "object" ? ((args[0] as { pr?: { url: string }; row?: { url: string } }).pr?.url ?? (args[0] as { row?: { url: string } }).row?.url) : undefined);
-        if (target && /^https:\/\//.test(target)) await vscode.env.openExternal(vscode.Uri.parse(target));
+        // A tree row passes its node (the extension's own data); a webview passes a string,
+        // which opens without asking only when it is a pull request the extension knows.
+        const fromNode = args[0] && typeof args[0] === "object" ? ((args[0] as { pr?: { url: string }; row?: { url: string } }).pr?.url ?? (args[0] as { row?: { url: string } }).row?.url) : undefined;
+        const target = fromNode ?? str(args[0]);
+        if (!target || !/^https:\/\//.test(target)) return;
+        if (!fromNode && !isKnownPullRequestUrl(target, this.knownPullRequestUrls())) {
+          const choice = await vscode.window.showInformationMessage(`Open ${target} in your browser?`, "Open");
+          if (choice !== "Open") return;
+        }
+        await vscode.env.openExternal(vscode.Uri.parse(target));
         return;
       }
       default:
         this.log.warn(`[guides] unknown command ${name}`);
         return undefined;
     }
+  }
+
+  /** Pull requests the extension itself knows: the dashboard's, the open guide's and the run's. */
+  private knownPullRequestUrls(): string[] {
+    const d = this.dashboard;
+    const env = this.reader?.model.loaded.envelope;
+    return [
+      ...(d?.prs.map((p) => p.url) ?? []),
+      ...(d?.waiting.map((w) => w.url) ?? []),
+      d?.currentBranchPR?.url,
+      env?.prUrl,
+      env?.review?.source.pr?.url,
+      this.reader?.model.loaded.sidecar.source?.pr?.url,
+      this.run?.gen.state.source.pr?.url,
+    ].filter((u): u is string => !!u);
   }
 
   /**
@@ -1007,10 +1118,10 @@ export class GuidesController implements vscode.Disposable {
    * Sign in to the agent: a terminal running the agent's own login command
    * (the terminal sign-ins it listed in `initialize`), else `claude /login`.
    */
-  private async signIn(label?: string): Promise<void> {
+  private async signIn(label?: string, explicit?: { agentId: string; logins: LoginCommand[]; cwd: string }): Promise<void> {
     const state = this.run?.gen.state;
-    const logins: LoginCommand[] = state?.signIn?.logins ?? [];
-    const agent = (state && this.agentById(state.agent.id)) ?? CLAUDE_CODE;
+    const logins: LoginCommand[] = explicit?.logins ?? state?.signIn?.logins ?? [];
+    const agent = (explicit ? this.agentById(explicit.agentId) : state && this.agentById(state.agent.id)) ?? CLAUDE_CODE;
     const launch = this.launchFor(agent);
     let choice = label;
     if (!choice) {
@@ -1047,7 +1158,7 @@ export class GuidesController implements vscode.Disposable {
       name: `${agent.label} sign-in`,
       shellPath: plan.command,
       shellArgs: plan.args,
-      cwd: state?.source.repoRoot ?? this.cwd(),
+      cwd: explicit?.cwd ?? state?.source.repoRoot ?? this.cwd(),
       env: { ...plan.env, ...(launch.ok && login ? launch.env : undefined), ...login?.env },
     });
     terminal.show();
@@ -1242,6 +1353,7 @@ export class GuidesController implements vscode.Disposable {
       const firstOpen = model.reviewed.findIndex((r) => !r);
       model.currentChapter = firstOpen >= 0 ? firstOpen : 0;
       this.reader = { model, sides };
+      this.asks.onReaderChanged(model.id);
       this.currentFile = null;
       void vscode.commands.executeCommand("setContext", "plannotator.guides.readerOpen", true);
     }
@@ -1278,6 +1390,7 @@ export class GuidesController implements vscode.Disposable {
     if (!this.reader) return;
     this.guidePanels.get(this.reader.model.id)?.panel.dispose();
     this.reader = null;
+    this.asks.onReaderChanged(null);
     this.currentFile = null;
     void vscode.commands.executeCommand("setContext", "plannotator.guides.readerOpen", false);
     this.updateReaderViews();
@@ -1339,7 +1452,15 @@ export class GuidesController implements vscode.Disposable {
       reviewed: model.reviewed[i],
       hasNext: i + 1 < model.chapters.length,
       ...(footer && { footer }),
+      ...this.chapterAsks(i),
     };
+  }
+
+  /** The chapter view's ask box and the answers about this chapter. */
+  private chapterAsks(chapter: number): Pick<ChapterViewState, "ask" | "answers" | "answersFooter"> {
+    if (!this.reader) return {};
+    const a = this.asks.chapterAnswers(this.reader.model.loaded, chapter);
+    return { ask: { agent: a.agent, busy: a.busy }, ...(a.items.length && { answers: a.items }), ...(a.footer && a.items.length && { answersFooter: a.footer }) };
   }
 
   resolveChapterView(view: vscode.WebviewView): void {
@@ -1358,7 +1479,7 @@ export class GuidesController implements vscode.Disposable {
     this.updateChapterView();
   }
 
-  private updateChapterView(): void {
+  updateChapterView(): void {
     if (!this.chapterView) return;
     const state = this.chapterState();
     this.chapterView.view.title = state.empty ? "Chapter" : `Chapter ${state.n} · why this changed`;
@@ -1372,6 +1493,7 @@ export class GuidesController implements vscode.Disposable {
     if (state && this.reader) this.guidePanels.get(this.reader.model.id)?.host.show(state);
     this.ui.refresh();
     this.ui.updateStatus(this.currentFile);
+    this.updateEditorContext(vscode.window.activeTextEditor);
   }
 
   private persistTicks(): void {
@@ -1385,7 +1507,7 @@ export class GuidesController implements vscode.Disposable {
     model.loaded.envelope.reviewed = [...model.reviewed];
   }
 
-  private async openChapter(n: number | undefined, options?: { openFile?: boolean }): Promise<void> {
+  private async openChapter(n: number | undefined, options?: { openFile?: boolean; column?: vscode.ViewColumn }): Promise<void> {
     if (!this.reader || n === undefined) return;
     const { model } = this.reader;
     const index = n - 1;
@@ -1400,7 +1522,7 @@ export class GuidesController implements vscode.Disposable {
     }
     if (options?.openFile !== false) {
       const first = model.chapters[index].files.find((f) => !model.fileTicks.has(f.path)) ?? model.chapters[index].files[0];
-      if (first) await this.openFile(first.path);
+      if (first) await this.openFile(first.path, undefined, options?.column);
     }
   }
 
@@ -1453,7 +1575,7 @@ export class GuidesController implements vscode.Disposable {
   }
 
   /** Open a guide file in the native diff editor, in preview so stepping reuses one tab. */
-  async openFile(path: string | undefined, line?: number): Promise<void> {
+  async openFile(path: string | undefined, line?: number, column?: vscode.ViewColumn): Promise<void> {
     if (!this.reader || !path) return;
     const { model, sides } = this.reader;
     const file = model.files.get(path) ?? { path, status: "modified" };
@@ -1464,7 +1586,8 @@ export class GuidesController implements vscode.Disposable {
     const target = line ?? focus?.start ?? model.files.get(path)?.hunks[0]?.start;
     const selection = target ? new vscode.Range(target - 1, 0, target - 1, 0) : undefined;
     const title = `${basename(path)}${chapter >= 0 ? ` · Chapter ${chapter + 1}` : ""}`;
-    await vscode.commands.executeCommand("vscode.diff", baseUri(sides, file), headUri(sides, file), title, { preview: true, ...(selection && { selection }) });
+    const where = column ?? diffColumnBesideAnswers(baseUri(sides, file), headUri(sides, file));
+    await vscode.commands.executeCommand("vscode.diff", baseUri(sides, file), headUri(sides, file), title, { preview: true, ...(selection && { selection }), ...(where && { viewColumn: where }) });
     this.updateReaderViews();
     void this.offerDiffCodeLens();
   }
@@ -1484,6 +1607,15 @@ export class GuidesController implements vscode.Disposable {
       "Not now",
     );
     if (choice === "Turn on") await vscode.workspace.getConfiguration("diffEditor").update("codeLens", true, vscode.ConfigurationTarget.Global);
+  }
+
+  /** `plannotator.guides.editorInGuide`: the editor shows a file of the open guide (either side), for "Ask the Agent About This…". */
+  private updateEditorContext(editor: vscode.TextEditor | undefined): void {
+    const inGuide = !!editor && !!this.reader && (() => {
+      const side = guideSideOf(this.reader!.sides, editor.document.uri, this.reader!.model.files);
+      return !!side && this.reader!.model.chapterOf(side.path) >= 0;
+    })();
+    void vscode.commands.executeCommand("setContext", "plannotator.guides.editorInGuide", inGuide);
   }
 
   private onActiveEditor(editor: vscode.TextEditor | undefined): void {
@@ -1514,19 +1646,19 @@ export class GuidesController implements vscode.Disposable {
   }
 
   /** A click on an overview link: its diff when the file is in the change, the plain file otherwise. */
-  private async openLink(href: string, action: "open" | "definition" | "references"): Promise<void> {
+  private async openLink(href: string, action: "open" | "definition" | "references", column?: vscode.ViewColumn): Promise<void> {
     if (!this.reader) return;
     const parsed = parseGuideLink(href);
     if (!parsed?.ok) return;
     const link = parsed.link;
-    if (link.kind === "chapter") return this.openChapter(link.chapter);
+    if (link.kind === "chapter") return this.openChapter(link.chapter, column ? { column } : undefined);
     const target = await locateLink(link, this.reader.model, this.reader.sides);
     if ("error" in target) {
       void vscode.window.showWarningMessage(target.error);
       return;
     }
-    if (action === "open" && target.inChange) return this.openFile(target.path, target.range.start.line + 1);
-    const editor = await vscode.window.showTextDocument(target.uri, { preview: true, selection: target.range });
+    if (action === "open" && target.inChange) return this.openFile(target.path, target.range.start.line + 1, column);
+    const editor = await vscode.window.showTextDocument(target.uri, { preview: true, selection: target.range, ...(column && { viewColumn: column }) });
     if (action === "definition") await vscode.commands.executeCommand("editor.action.revealDefinition");
     if (action === "references") await vscode.commands.executeCommand("editor.action.goToReferences", editor.document.uri, target.range.start);
   }
@@ -1581,6 +1713,7 @@ export class GuidesController implements vscode.Disposable {
     if (this.reader?.model.id === id) this.closeGuide();
     if (memory) this.sessionGuides.delete(id);
     else deleteSavedGuide(where.repoKey, id);
+    this.asks.onGuideDeleted(where.repoKey, id);
     const storage = this.context.globalStorageUri.fsPath;
     const wt = guideWorktreePath(loaded, storage);
     const repoRoot = loaded.sidecar.source?.repoRoot ?? this.dashboard?.repo?.root;
@@ -1601,6 +1734,7 @@ export class GuidesController implements vscode.Disposable {
   dispose(): void {
     // VS Code is closing: no grace period for the agent or anything it started.
     this.run?.gen.kill();
+    this.asks.kill();
     for (const d of this.disposables) d.dispose();
   }
 }

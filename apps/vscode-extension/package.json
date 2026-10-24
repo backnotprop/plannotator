@@ -191,6 +191,59 @@
         "icon": "$(check)"
       },
       {
+        "command": "plannotator.guides.askAboutSelection",
+        "title": "Ask the Agent About This…",
+        "category": "Guided Reviews",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "plannotator.guides.askAboutFile",
+        "title": "Ask the Agent About This File…",
+        "category": "Guided Reviews",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "plannotator.guides.openAnswer",
+        "title": "Open Answer",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadSubmit",
+        "title": "Ask",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadCancel",
+        "title": "Cancel",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadClose",
+        "title": "Close",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadSettings",
+        "title": "Change the Agent, Model and Effort",
+        "category": "Guided Reviews",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "plannotator.guides.askThreadPick",
+        "title": "Ask a Suggested Question",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadAgain",
+        "title": "Ask Again",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadStop",
+        "title": "Stop Answering",
+        "category": "Guided Reviews"
+      },
+      {
         "command": "plannotator.guides.changeDefaults",
         "title": "Change Defaults (Agent, Model, Effort)",
         "category": "Guided Reviews"
@@ -221,6 +274,11 @@
           "command": "plannotator-webview.addEditorAnnotation",
           "when": "editorHasSelection",
           "group": "plannotator"
+        },
+        {
+          "command": "plannotator.guides.askAboutSelection",
+          "when": "plannotator.guides.editorInGuide && editorHasSelection",
+          "group": "plannotator@1"
         }
       ],
       "comments/commentThread/title": [
@@ -228,6 +286,11 @@
           "command": "plannotator-webview.deleteEditorAnnotation",
           "group": "inline",
           "when": "commentController == plannotator && commentThread == plannotator-thread"
+        },
+        {
+          "command": "plannotator.guides.askThreadSettings",
+          "group": "inline",
+          "when": "commentController =~ /^plannotator-guides-ask/"
         }
       ],
       "comments/commentThread/context": [
@@ -235,6 +298,21 @@
           "command": "plannotator-webview.submitComment",
           "group": "inline",
           "when": "commentController == plannotator"
+        },
+        {
+          "command": "plannotator.guides.askThreadSubmit",
+          "group": "inline@1",
+          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread != plannotator-ask-asking"
+        },
+        {
+          "command": "plannotator.guides.askThreadCancel",
+          "group": "inline@2",
+          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread == plannotator-ask-compose"
+        },
+        {
+          "command": "plannotator.guides.askThreadClose",
+          "group": "inline@2",
+          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread == plannotator-ask-done"
         }
       ],
       "view/title": [
@@ -383,6 +461,46 @@
         {
           "command": "plannotator.guides.closeGuide",
           "when": "plannotator.guides.readerOpen"
+        },
+        {
+          "command": "plannotator.guides.askAboutSelection",
+          "when": "plannotator.guides.editorInGuide"
+        },
+        {
+          "command": "plannotator.guides.askAboutFile",
+          "when": "plannotator.guides.editorInGuide"
+        },
+        {
+          "command": "plannotator.guides.openAnswer",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadSubmit",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadCancel",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadClose",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadSettings",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadPick",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadAgain",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadStop",
+          "when": "false"
         }
       ]
     },

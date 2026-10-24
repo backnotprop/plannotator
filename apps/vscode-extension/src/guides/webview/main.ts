@@ -8,6 +8,7 @@
 import "./style.css";
 import type {
   ActivityRow,
+  AnswerViewState,
   ChapterViewState,
   GeneratingViewState,
   GuideViewState,
@@ -21,6 +22,8 @@ import { renderInlineMarkdown, renderMarkdown } from "./markdown";
 import { checkMermaid, renderMermaid } from "./diagram";
 import { h, icon } from "./dom";
 import { renderBottlenecks, renderPermissions } from "./approvals";
+import { answerFrame } from "./answer-frame";
+import { fromWebviewHost } from "./host-messages";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void; getState(): unknown; setState(state: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -33,6 +36,7 @@ let state: ViewState | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
+  if (!fromWebviewHost(event)) return;
   const msg = event.data;
   if (!msg || typeof msg !== "object") return;
   if (msg.type === "state") {
@@ -60,6 +64,7 @@ function render(): void {
     state.mode === "home" ? renderHome(state)
       : state.mode === "generating" ? renderGenerating(state)
       : state.mode === "guide" ? renderGuide(state)
+      : state.mode === "answer" ? renderAnswer(state)
       : renderChapter(state),
   );
   const list = root.querySelector(".pn-activity-list");
@@ -335,8 +340,144 @@ function renderChapter(s: ChapterViewState): HTMLElement {
         : h("button", { class: "pn-btn pn-btn-primary", onclick: () => command("markChapterReviewed", s.n, true) }, icon("check"), " Mark chapter reviewed"),
       s.hasNext ? h("button", { class: "pn-btn", onclick: () => command("nextChapter") }, "Next chapter ›") : null,
     ),
-    s.footer ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.footer}`) : null,
+    s.ask ? askBox(s) : null,
+    s.answers?.length ? answersList(s) : null,
+    s.answersFooter ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.answersFooter}`) : s.footer ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.footer}`) : null,
   );
+}
+
+/** "Ask the agent about this chapter…": Enter asks what is typed; empty, it opens the question box with suggestions. */
+function askBox(s: ChapterViewState): HTMLElement {
+  const input = h("input", {
+    class: "pn-ask-input",
+    type: "text",
+    placeholder: s.ask!.busy ? `${s.ask!.agent} is answering a question…` : "Ask the agent about this chapter…",
+    "aria-label": `Ask ${s.ask!.agent} about this chapter`,
+    maxlength: 2000,
+  }) as HTMLInputElement;
+  input.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key !== "Enter") return;
+    e.preventDefault();
+    command("ask", s.n, input.value.trim());
+    input.value = "";
+  });
+  return h("div", { class: "pn-ask", "data-ask": "chapter" },
+    h("button", { class: "pn-ask-icon", title: "Suggestions and past questions", "aria-label": "Open the question box", onclick: () => command("ask", s.n, "") }, icon("sparkle")),
+    input,
+  );
+}
+
+function answersList(s: ChapterViewState): HTMLElement {
+  const items = s.answers ?? [];
+  return h("div", { class: "pn-answers", "data-answers": items.length },
+    h("div", { class: "pn-side-head" }, `Answers · ${items.length}`),
+    ...items.map((a) =>
+      h("button", { class: "pn-answer-row", "data-answer": a.id, onclick: () => command("openAnswer", a.id) },
+        icon(a.status === "answering" ? "loading" : a.status === "failed" ? "error" : "sparkle", `pn-answer-icon${a.status === "answering" ? " codicon-modifier-spin" : ""}`),
+        h("div", { class: "pn-answer-main" },
+          h("div", { class: "pn-answer-q" }, a.question, a.isNew ? h("span", { class: "pn-tag pn-tag-new" }, "new") : null),
+          h("div", { class: "pn-muted pn-answer-sub" }, a.sub),
+        ),
+        h("span", { class: "pn-muted pn-answer-when" }, a.when),
+      )),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Answer tab
+// ---------------------------------------------------------------------------
+
+/** The page's frame, kept across renders of the same answer so its scripts keep their state. */
+let answerFrameCache: { key: string; frame: HTMLIFrameElement } | null = null;
+
+function renderAnswer(s: AnswerViewState): HTMLElement {
+  const live = s.status === "answering";
+  const head = h("header", { class: "pn-answer-head" },
+    h("div", { class: "pn-kicker" }, s.kicker),
+    h("h1", { class: "pn-answer-question" }, s.question),
+    h("div", { class: "pn-answer-meta" },
+      h("span", { class: "pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.meta}`),
+      h("span", { class: "pn-answer-tools" },
+        s.jump ? h("button", { class: "pn-btn pn-btn-sm", "data-link": s.jump.link, title: "Back to the code" }, icon("code"), ` ${s.jump.label}`) : null,
+        h("button", { class: "pn-btn pn-btn-sm pn-btn-ghost", title: "More", "aria-label": "More actions", onclick: () => command("answerMenu", s.id) }, icon("ellipsis")),
+      ),
+    ),
+    s.followUpOf ? h("div", { class: "pn-muted pn-answer-prev" }, "Follow-up to ", h("a", { href: "#", class: "pn-loc", onclick: (e) => { e.preventDefault(); command("openAnswer", s.followUpOf!.id); } }, s.followUpOf.question)) : null,
+    s.stale ? h("div", { class: "pn-note pn-warn" }, icon("warning"), ` ${s.stale}`) : null,
+  );
+  const body = h("div", { class: "pn-answer-body" });
+  if (s.page && s.status === "answered") {
+    body.append(
+      h("div", { class: "pn-answer-rule" }, h("span", {}, `Drawn by ${s.agent} · the agent's own page, run in a sandbox: no network, no access to VS Code`)),
+      h("h2", { class: "pn-answer-title" }, s.page.title),
+      cachedFrame(s),
+    );
+  } else if (s.text && (s.status === "text" || s.status === "stopped")) {
+    body.append(
+      h("div", { class: "pn-answer-rule" }, h("span", {}, s.status === "text" ? `Answered in text by ${s.agent}` : "What it wrote before it stopped")),
+      h("div", { class: "pn-prose pn-answer-text" }, renderMarkdown(s.text)),
+    );
+  }
+  if (s.quote && (live || (!s.page && !s.text))) {
+    body.prepend(h("div", { class: "pn-quote" },
+      h("div", { class: "pn-quote-head pn-muted" }, icon("file-code"), ` ${s.quote.header}`),
+      h("pre", { class: "pn-quote-code" }, ...s.quote.lines.map((line, i) => h("div", { class: "pn-quote-line" }, h("span", { class: "pn-quote-n" }, String(s.quote!.start + i)), h("span", {}, line)))),
+    ));
+  }
+  if (live || s.status === "failed" || (s.status === "stopped" && !s.text)) body.append(answerWork(s, live));
+  else if (s.status === "stopped" || s.status === "text") body.append(h("div", { class: "pn-status" }, icon(s.status === "text" ? "info" : "debug-pause"), ` ${s.statusMessage ?? ""}`, h("button", { class: "pn-btn pn-btn-sm", onclick: () => command("answerMenu", s.id, "again") }, "Ask again")));
+  const foot = h("footer", { class: "pn-answer-foot" }, followUpBox(s));
+  return h("div", { class: "pn-page pn-answer" }, head, ...renderPermissions(s, command), body, foot);
+}
+
+function cachedFrame(s: AnswerViewState): HTMLIFrameElement {
+  const key = `${s.id}:${s.page!.html.length}:${s.page!.title}`;
+  if (answerFrameCache?.key === key) return answerFrameCache.frame;
+  const frame = answerFrame(s.page!.html, {
+    link: (link) => post({ type: "link", link, action: "open" }),
+    external: (url) => command("openAnswerExternal", s.id, url),
+  });
+  answerFrameCache = { key, frame };
+  return frame;
+}
+
+/** While the agent works: what it does, what it writes, Stop. Also the end of a run that failed. */
+function answerWork(s: AnswerViewState, live: boolean): HTMLElement {
+  const elapsed = h("span", {}, fmtElapsed((s.endedAt ?? Date.now()) - s.startedAt));
+  if (live) elapsedTimer = setInterval(() => (elapsed.textContent = fmtElapsed(Date.now() - s.startedAt)), 1000);
+  const line = live
+    ? h("div", { class: "pn-answer-working" },
+        h("div", { class: "pn-spinner" }),
+        h("b", {}, `${s.agent} is answering`), h("span", { class: "pn-muted" }, " · ", elapsed, s.cost ? ` · ${s.cost}` : ""),
+        h("button", { class: "pn-btn pn-btn-sm pn-answer-stop", onclick: () => command("stopAnswer", s.id) }, h("span", { class: "pn-stop" }), "Stop"),
+      )
+    : h("div", { class: `pn-status${s.status === "failed" ? " pn-status-error" : ""}` }, icon(s.status === "failed" ? "error" : "debug-pause"), ` ${s.statusMessage ?? ""}`,
+        ...(s.signIn ?? []).map((label) => h("button", { class: "pn-btn pn-btn-sm", onclick: () => command("signIn", label) }, s.signIn!.length === 1 ? "Sign in" : `Sign in: ${label}`)),
+        h("button", { class: "pn-btn pn-btn-sm", onclick: () => command("answerMenu", s.id, "again") }, "Ask again"));
+  const rows = s.activity.filter((a) => a.kind !== "message");
+  return h("div", { class: "pn-answer-work" },
+    line,
+    rows.length ? h("div", { class: "pn-activity-list pn-answer-activity", role: "log", "aria-live": "polite" }, ...rows.map(activityRow)) : null,
+    live && s.stream ? h("div", { class: "pn-answer-stream" }, s.stream) : null,
+  );
+}
+
+function followUpBox(s: AnswerViewState): HTMLElement {
+  const input = h("input", {
+    class: "pn-ask-input",
+    type: "text",
+    placeholder: s.canFollowUp ? "Ask a follow-up…" : `${s.agent} is answering…`,
+    "aria-label": "Ask a follow-up question",
+    disabled: !s.canFollowUp,
+    maxlength: 2000,
+  }) as HTMLInputElement;
+  input.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key !== "Enter" || !input.value.trim()) return;
+    e.preventDefault();
+    command("followUp", s.id, input.value.trim());
+    input.value = "";
+  });
+  return h("div", { class: "pn-ask pn-ask-follow" }, icon("sparkle", "pn-ask-icon"), input, h("span", { class: "pn-muted pn-ask-hint" }, "continues this conversation"));
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +499,9 @@ document.addEventListener("click", (e) => {
   const ext = e.target instanceof Element ? e.target.closest("[data-external]") : null;
   if (ext) {
     e.preventDefault();
-    command("openExternal", ext.getAttribute("data-external"));
+    // In an answer tab the link is the agent's: open it only after the confirm (openAnswerExternal).
+    if (state?.mode === "answer") command("openAnswerExternal", state.id, ext.getAttribute("data-external"));
+    else command("openExternal", ext.getAttribute("data-external"));
     return;
   }
   const action = e.target instanceof Element ? e.target.closest("[data-popover-action]") : null;

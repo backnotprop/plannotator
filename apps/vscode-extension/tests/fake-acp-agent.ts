@@ -76,6 +76,16 @@ interface Script {
   ignoreMcp?: boolean;
   /** The modes offered (default: Claude Code's four), e.g. another agent's read-only or plan mode. */
   modes?: Array<{ id: string; name: string }>;
+  /** Advertise `loadSession` in `initialize` (default false). */
+  loadSession?: boolean;
+  /** Fail `session/load` with this message. */
+  loadSessionError?: string;
+  /**
+   * What the agent does in an "ask" session (its MCP server offers
+   * show_answer): one list of steps per prompt, the last one repeated.
+   * Without it, `steps` is played.
+   */
+  askTurns?: Step[][];
 }
 
 const script: Script = JSON.parse(readFileSync(process.env.FAKE_ACP_SCRIPT ?? "", "utf8"));
@@ -156,7 +166,23 @@ function setMode(mode: string): void {
   if (!script.ignoreModeChange) currentMode = mode;
 }
 
-const sessions = new Map<string, { cwd: string; mcp: McpClient | null; cancelled: boolean }>();
+const sessions = new Map<string, { cwd: string; mcp: McpClient | null; cancelled: boolean; tools: string[]; turns: number }>();
+
+/** Start the stdio MCP server the client handed over (the relay), as a real agent does. */
+async function startMcp(servers: Array<unknown>): Promise<{ mcp: McpClient | null; tools: string[] }> {
+  const server = servers[0] as { command?: string; args?: string[]; env?: Array<{ name: string; value: string }> } | undefined;
+  if (!server?.command || script.ignoreMcp) return { mcp: null, tools: [] };
+  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  for (const e of server.env ?? []) env[e.name] = e.value;
+  const child = spawn(server.command, server.args ?? [], { env, stdio: ["pipe", "pipe", "inherit"] });
+  const mcp = new McpClient(child);
+  const init = await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake-agent", version: "1" } });
+  mcp.notify("notifications/initialized");
+  const list = await mcp.request("tools/list", {});
+  const tools = (list.result?.tools ?? []).map((t: { name: string }) => t.name);
+  log({ event: "mcpReady", protocolVersion: init.result?.protocolVersion, tools, instructions: init.result?.instructions ?? null });
+  return { mcp, tools };
+}
 
 const stream = ndJsonStream(
   Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
@@ -172,7 +198,7 @@ new AgentSideConnection((conn): Agent => ({
     const authMethods = params.clientCapabilities?.auth?.terminal
       ? [{ id: "claude-ai-login", name: "Claude Subscription", type: "terminal" as const, args: ["--cli", "auth", "login", "--claudeai"] }]
       : [];
-    return { protocolVersion: (script.protocolVersion ?? PROTOCOL_VERSION) as typeof PROTOCOL_VERSION, agentCapabilities: { loadSession: false }, authMethods };
+    return { protocolVersion: (script.protocolVersion ?? PROTOCOL_VERSION) as typeof PROTOCOL_VERSION, agentCapabilities: { loadSession: !!script.loadSession }, authMethods };
   },
   async authenticate() {
     return {};
@@ -180,22 +206,23 @@ new AgentSideConnection((conn): Agent => ({
   async newSession(params) {
     log({ event: "newSession", cwd: params.cwd, mcpServers: params.mcpServers.map((s) => ({ name: s.name })), meta: params._meta ?? null });
     if (script.newSessionError) throw new Error(script.newSessionError);
-    const sessionId = `fake-${Date.now()}`;
-    let mcp: McpClient | null = null;
-    const server = params.mcpServers[0] as { command?: string; args?: string[]; env?: Array<{ name: string; value: string }> } | undefined;
-    if (server?.command && !script.ignoreMcp) {
-      const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-      for (const e of server.env ?? []) env[e.name] = e.value;
-      const child = spawn(server.command, server.args ?? [], { env, stdio: ["pipe", "pipe", "inherit"] });
-      mcp = new McpClient(child);
-      const init = await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake-agent", version: "1" } });
-      mcp.notify("notifications/initialized");
-      const list = await mcp.request("tools/list", {});
-      log({ event: "mcpReady", protocolVersion: init.result?.protocolVersion, tools: (list.result?.tools ?? []).map((t: { name: string }) => t.name) });
-    }
-    sessions.set(sessionId, { cwd: params.cwd, mcp, cancelled: false });
+    const sessionId = `fake-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const { mcp, tools } = await startMcp(params.mcpServers);
+    sessions.set(sessionId, { cwd: params.cwd, mcp, cancelled: false, tools, turns: 0 });
     const modes = currentMode !== undefined && modeSurface !== "config" ? { currentModeId: currentMode, availableModes } : undefined;
     return { sessionId, configOptions: configOptions(), ...(modes && { modes }) };
+  },
+  async loadSession(params) {
+    log({ event: "loadSession", sessionId: params.sessionId, cwd: params.cwd, mcpServers: params.mcpServers.map((s) => ({ name: s.name })) });
+    if (script.loadSessionError) throw new Error(script.loadSessionError);
+    // Replay the conversation, as session/load does: none of it is a new turn.
+    await conn.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Write a guided review (replayed)" } } as never });
+    await conn.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "REPLAYED: the guide is saved." } } as never });
+    await conn.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "replayed-1", title: "Read src/replayed.ts", kind: "read", status: "completed" } as never });
+    await conn.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "usage_update", used: 1000, size: 200000, cost: { amount: 0.5, currency: "USD" } } as never });
+    const { mcp, tools } = await startMcp(params.mcpServers);
+    sessions.set(params.sessionId, { cwd: params.cwd, mcp, cancelled: false, tools, turns: 0 });
+    return { configOptions: configOptions() };
   },
   async setSessionMode(params) {
     log({ event: "setMode", modeId: params.modeId });
@@ -215,7 +242,11 @@ new AgentSideConnection((conn): Agent => ({
     log({ event: "prompt", text, model: currentModel, effort: currentEffort, mode: currentMode ?? null });
     const update = (u: Record<string, unknown>) => conn.sessionUpdate({ sessionId: params.sessionId, update: u as never });
     let toolNo = 0;
-    for (const step of script.steps) {
+    session.cancelled = false;
+    const asking = session.tools.includes("show_answer") && !!script.askTurns?.length;
+    const steps = asking ? script.askTurns![Math.min(session.turns, script.askTurns!.length - 1)] : script.steps;
+    session.turns++;
+    for (const step of steps) {
       if (session.cancelled) break;
       if (script.pace) await sleep(script.pace);
       if ("say" in step) {

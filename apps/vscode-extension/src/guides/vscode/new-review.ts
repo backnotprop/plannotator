@@ -151,7 +151,8 @@ export interface RememberedChoice {
  * active), then the ones to install. Ready means installed, or an agent whose
  * ACP adapter Guided Reviews installs on first use (`installAdapters`).
  */
-export function agentRows(agents: readonly AgentStatus[], remembered?: string, installAdapters = false): Array<{ status: AgentStatus; label: string; description: string; detail?: string; active: boolean; ready: boolean }> {
+export function agentRows(agents: readonly AgentStatus[], remembered?: string, installAdapters = false, purpose: AgentPurpose = "write"): Array<{ status: AgentStatus; label: string; description: string; detail?: string; active: boolean; ready: boolean }> {
+  const caveat = purpose === "answer" ? "answers in text only" : "can't write guides yet";
   const rows = agents.map((status) => {
     const { agent, launch } = status;
     const ready = canStart(launch, installAdapters);
@@ -162,12 +163,12 @@ export function agentRows(agents: readonly AgentStatus[], remembered?: string, i
       ready,
       label: `${launch.ok ? "$(check)" : willInstall ? "$(arrow-circle-down)" : "$(cloud-download)"} ${agent.label}`,
       description: launch.ok
-        ? [source, agent.note ? "can't write guides yet" : ""].filter(Boolean).join(" · ")
+        ? [source, agent.note ? caveat : ""].filter(Boolean).join(" · ")
         : willInstall
-          ? ["installs its ACP adapter on first use", agent.note ? "can't write guides yet" : ""].filter(Boolean).join(" · ")
+          ? ["installs its ACP adapter on first use", agent.note ? caveat : ""].filter(Boolean).join(" · ")
           : launch.reason === "requires" ? `needs ${agent.requires?.label ?? "a program"}` : agent.installCommand ? "not installed" : "not found",
       detail:
-        agent.note ??
+        (agent.note && (purpose === "answer" ? ANSWER_NOTE : agent.note)) ??
         (launch.ok
           ? "Runs with your own settings and permissions."
           : willInstall && agent.adapter
@@ -181,6 +182,12 @@ export function agentRows(agents: readonly AgentStatus[], remembered?: string, i
   if (target) target.active = true;
   return rows;
 }
+
+/** What the picked agent will do: write a guide, or answer questions about one. */
+export type AgentPurpose = "write" | "answer";
+
+/** An agent with a note (it cannot reach Plannotator's tools) can still answer, in text. */
+const ANSWER_NOTE = "Answers in text only: it cannot reach Plannotator's tools, so it cannot draw an answer page.";
 
 /**
  * Steps 2 to 4: the agent, its model, then effort and instructions.
@@ -201,8 +208,12 @@ export async function pickAgentAndEffort(input: {
   defaultsOnly?: boolean;
   /** Automatic approval preselected (the `plannotator.guides.autoApprove` setting). */
   autoApprove?: boolean;
+  /** The Quick Pick's title (default "Guide defaults" or "New Guided Review"). */
+  title?: string;
+  /** What the agent will do (default: write the guide); the words follow it. */
+  purpose?: AgentPurpose;
 }): Promise<AgentPickResult | undefined> {
-  const title = input.defaultsOnly ? "Guide defaults" : "New Guided Review";
+  const title = input.title ?? (input.defaultsOnly ? "Guide defaults" : "New Guided Review");
   const total = input.defaultsOnly ? 3 : 4;
   const offset = input.defaultsOnly ? 0 : 1;
   // Step: agent
@@ -211,9 +222,11 @@ export async function pickAgentAndEffort(input: {
     aq.title = title;
     aq.step = 1 + offset;
     aq.totalSteps = total;
-    aq.placeholder = "Which agent writes the guide? It runs with your own setup, settings and sign-in.";
+    aq.placeholder = input.purpose === "answer"
+      ? "Which agent answers questions about this guide? It runs with your own setup, settings and sign-in."
+      : "Which agent writes the guide? It runs with your own setup, settings and sign-in.";
     aq.matchOnDetail = true;
-    const rows = agentRows(input.agents, input.remembered?.agent, input.installAdapters);
+    const rows = agentRows(input.agents, input.remembered?.agent, input.installAdapters, input.purpose);
     const items: Array<Item<AgentStatus>> = [];
     const installed = rows.filter((r) => r.ready);
     const missing = rows.filter((r) => !r.ready);
@@ -250,6 +263,7 @@ async function pickModelAndEffort(input: {
   title: string;
   total: number;
   offset: number;
+  purpose?: AgentPurpose;
 }): Promise<AgentPickResult | undefined | typeof BACK> {
   const { agent } = input;
   let options = input.optionsFor(agent.id);
@@ -260,7 +274,7 @@ async function pickModelAndEffort(input: {
     qp.title = input.title;
     qp.step = 2 + input.offset;
     qp.totalSteps = input.total;
-    qp.placeholder = `Which ${agent.label} model writes the guide?`;
+    qp.placeholder = `Which ${agent.label} model ${input.purpose === "answer" ? "answers" : "writes the guide"}?`;
     if (!options && !triedLoading) {
       // First time: the agent lists its own models (nothing is prompted, no cost); cached afterwards.
       triedLoading = true;
@@ -278,7 +292,7 @@ async function pickModelAndEffort(input: {
       }
       qp.busy = false;
       qp.enabled = true;
-      qp.placeholder = `Which ${agent.label} model writes the guide?`;
+      qp.placeholder = `Which ${agent.label} model ${input.purpose === "answer" ? "answers" : "writes the guide"}?`;
     }
     const items: Array<Item<ConfigChoice | null | typeof LOAD_MODELS | typeof BACK>> = [{ label: agent.label, kind: vscode.QuickPickItemKind.Separator }];
     const models = options?.model;

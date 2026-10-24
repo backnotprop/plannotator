@@ -100,9 +100,61 @@ export interface ChapterViewState {
   reviewed?: boolean;
   hasNext?: boolean;
   footer?: string;
+  /** The ask box: which agent answers ("Ask Claude Code about this chapter…"). */
+  ask?: { agent: string; busy: boolean };
+  /** Answers about this chapter, newest first. */
+  answers?: AnswerListItem[];
+  /** "Claude Code · Sonnet · low · answers $0.05". */
+  answersFooter?: string;
 }
 
-export type ViewState = HomeViewState | GeneratingViewState | GuideViewState | ChapterViewState;
+export interface AnswerListItem {
+  id: string;
+  question: string;
+  /** "deliver.ts · lines 25–31", "Chapter 2". */
+  sub: string;
+  when: string;
+  isNew: boolean;
+  status: "answering" | "answered" | "text" | "stopped" | "failed";
+}
+
+/** An answer tab: the question, what it is about, the agent's work while it answers, then its page. */
+export interface AnswerViewState {
+  mode: "answer";
+  id: string;
+  question: string;
+  /** "Answer · Chapter 2 · deliver.ts 25–31". */
+  kicker: string;
+  agent: string;
+  /** "Claude Code · Sonnet · Low · 41s · $0.03 · 2 minutes ago". */
+  meta: string;
+  /** Back to the code the question was about. */
+  jump: { label: string; link: string } | null;
+  /** The selected code, shown while the agent works. */
+  quote: { header: string; start: number; lines: string[] } | null;
+  status: "answering" | "answered" | "text" | "stopped" | "failed";
+  statusMessage: string | null;
+  startedAt: number;
+  endedAt: number | null;
+  cost: string | null;
+  activity: ActivityRow[];
+  /** What the agent is writing now. */
+  stream: string;
+  /** The page from show_answer. */
+  page: { title: string; html: string } | null;
+  /** The agent's last message, when it answered in text (markdown). */
+  text: string | null;
+  /** "Written for 9b07e4d; the file has changed since." */
+  stale: string | null;
+  followUpOf: { id: string; question: string } | null;
+  canFollowUp: boolean;
+  pendingPermissions: GeneratingViewState["pendingPermissions"];
+  offerAutoApprove: boolean;
+  approvals: { auto: boolean; mode: string | null };
+  signIn: string[] | null;
+}
+
+export type ViewState = HomeViewState | GeneratingViewState | GuideViewState | ChapterViewState | AnswerViewState;
 
 /** What the code-intelligence popover shows for a link (SPEC 3.5, "Hover"). */
 export interface LinkInfo {
@@ -157,6 +209,12 @@ export const WEBVIEW_COMMANDS = [
   "approveRun",
   "approveAlways",
   "resumeWithApproval",
+  "ask",
+  "openAnswer",
+  "followUp",
+  "stopAnswer",
+  "answerMenu",
+  "openAnswerExternal",
 ] as const;
 
 export type WebviewCommand = (typeof WEBVIEW_COMMANDS)[number];

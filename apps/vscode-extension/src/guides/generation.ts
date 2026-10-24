@@ -830,12 +830,12 @@ export class GuideGeneration {
 }
 
 /** The agent's allow option: "allow once" first, else "allow always". */
-function allowOption(request: RequestPermissionRequest) {
+export function allowOption(request: RequestPermissionRequest) {
   return request.options.find((o) => o.kind === "allow_once") ?? request.options.find((o) => o.kind === "allow_always") ?? null;
 }
 
 /** What a permission request acts on: its locations, else the first string of its raw input. */
-function describeTarget(request: RequestPermissionRequest): string | undefined {
+export function describeTarget(request: RequestPermissionRequest): string | undefined {
   const locations = request.toolCall.locations?.map((l) => l.path).filter(Boolean) ?? [];
   if (locations.length) return locations.slice(0, 3).join(", ");
   const raw = request.toolCall.rawInput;
@@ -881,7 +881,7 @@ export function blockedCause(output: string): "settings" | null {
   return null;
 }
 
-const AUTH_TEXT = /auth(entication)?[_ ]required|not (logged|signed) in|please (log|sign) in|\/login/i;
+export const AUTH_TEXT = /auth(entication)?[_ ]required|not (logged|signed) in|please (log|sign) in|\/login/i;
 
 /** One-line description of a builder call for the activity stream. */
 export function builderDetail(name: string, args: unknown, draft: GuideDraft, ok: boolean, answer: string): string {

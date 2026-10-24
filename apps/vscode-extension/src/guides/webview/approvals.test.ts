@@ -53,7 +53,7 @@ describe("the run view's approvals", () => {
     const offer = panels.find((p) => p.getAttribute("data-offer") === "auto-approve")!;
     expect(offer.textContent).toContain("Let the agent work without asking?");
     for (const b of offer.querySelectorAll("button")) (b as HTMLButtonElement).click();
-    expect(sent).toEqual([["approveRun", "g1"], ["approveAlways", "g1"]]);
+    expect(sent).toEqual([["approveRun", "g1"], ["approveAlways", "g1", 7]]);
     // No offer without a pending request, or once it is on.
     expect(renderPermissions(state({ offerAutoApprove: true }), () => {})).toEqual([]);
   });

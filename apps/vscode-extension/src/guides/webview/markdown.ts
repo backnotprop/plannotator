@@ -56,6 +56,9 @@ function hookOnce(): void {
 
 const PURIFY_CONFIG = {
   ALLOWED_URI_REGEXP: /^(?:code:|symbol:|chapter:|https?:)/i,
+  // No data-* attributes from agent text: the webview acts on data-link, data-external and
+  // data-popover-*, which only the hook above (from a real link) or the extension may set.
+  ALLOW_DATA_ATTR: false,
   FORBID_TAGS: ["style", "form", "input", "button", "textarea", "select", "iframe", "object", "embed", "img", "video", "audio", "svg", "math"],
   FORBID_ATTR: ["style", "id", "class"],
 };

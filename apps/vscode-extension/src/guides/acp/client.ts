@@ -25,7 +25,9 @@ import {
   type Agent,
   type AuthMethod,
   type Client,
+  type AgentCapabilities,
   type InitializeResponse,
+  type LoadSessionResponse,
   type McpServer,
   type NewSessionResponse,
   type PromptResponse,
@@ -235,6 +237,11 @@ export class AcpClient {
     return this.exited;
   }
 
+  /** What the agent said it can do in `initialize` (`loadSession`, …). */
+  get agentCapabilities(): AgentCapabilities {
+    return this.initializeResult?.agentCapabilities ?? {};
+  }
+
   /** The sign-ins the agent offered in `initialize`. */
   get authMethods(): readonly AuthMethod[] {
     return this.initializeResult?.authMethods ?? [];
@@ -269,6 +276,15 @@ export class AcpClient {
 
   newSession(cwd: string, mcpServers: McpServer[], meta?: Record<string, unknown>): Promise<NewSessionResponse> {
     return this.raceExit(this.connection.newSession({ cwd, mcpServers, ...(meta && { _meta: meta }) }), "session/new");
+  }
+
+  /**
+   * `session/load`: reopen an earlier session (only when the agent advertises
+   * `loadSession`). The agent replays the conversation as `session/update`
+   * notifications before it answers.
+   */
+  loadSession(sessionId: string, cwd: string, mcpServers: McpServer[]): Promise<LoadSessionResponse> {
+    return this.raceExit(this.connection.loadSession({ sessionId, cwd, mcpServers }), "session/load");
   }
 
   async setConfigOption(sessionId: string, configId: string, value: string): Promise<SessionConfigOption[]> {

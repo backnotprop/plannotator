@@ -26,6 +26,11 @@ export async function renderMermaid(source: string): Promise<DiagramResult> {
   // An agent's diagram never needs pictures: a label's <img> or an svg <image> is dropped,
   // so nothing in a guide fetches from the network (the webview's CSP blocks it too).
   for (const el of Array.from(svg.querySelectorAll("img, image"))) el.remove();
+  // Labels are agent text: no element of the drawing may carry the attributes the webview acts
+  // on (data-link, data-external, data-popover-*) except the click links attached below.
+  for (const el of [svg, ...Array.from(svg.querySelectorAll("*"))]) {
+    for (const name of el.getAttributeNames()) if (/^data-(link|external|popover)/i.test(name)) el.removeAttribute(name);
+  }
   for (const [nodeId, link] of clicks) {
     const el = findNode(svg, nodeId);
     if (!el) continue;
