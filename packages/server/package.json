@@ -44,7 +44,7 @@
     "*.mjs"
   ],
   "dependencies": {
-    "@modelcontextprotocol/server": "2.2.0",
+    "@modelcontextprotocol/server": "2.3.0",
     "@pierre/diffs": "1.3.6",
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
