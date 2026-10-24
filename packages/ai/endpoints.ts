@@ -96,6 +96,8 @@ export interface QueryRequest {
 export interface AbortRequest {
   /** The session ID to abort. */
   sessionId: string;
+  /** A newer question replaced this answer. Session bridges keep a host turn running. */
+  reason?: "supersede";
 }
 
 // ---------------------------------------------------------------------------
@@ -505,7 +507,11 @@ export function createAIEndpoints(deps: AIEndpointDeps) {
         );
       }
 
-      entry.session.abort();
+      if (body.reason === "supersede" && entry.session instanceof SessionBridgeSession) {
+        entry.session.supersede();
+      } else {
+        entry.session.abort();
+      }
       return Response.json({ ok: true });
     },
 

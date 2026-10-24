@@ -346,6 +346,24 @@ describe("Ask this session over the shared /api/ai endpoints", () => {
     expect(text).toContain('"delta":"hi"');
     expect(text).toContain("[DONE]");
   });
+  test("supersede still cancels a transient answer that has no running agent turn", async () => {
+    const host = fakeBridge("blocked", { transient: true });
+    const endpoints = setup(host, false);
+    const { sessionId } = await (await endpoints["/api/ai/session"](new Request("http://x/api/ai/session", {
+      method: "POST",
+      body: JSON.stringify({ context: CONTEXT, providerId: SESSION_BRIDGE_PROVIDER_NAME }),
+    }))).json();
+    const answer = await endpoints["/api/ai/query"](new Request("http://x/api/ai/query", {
+      method: "POST", body: JSON.stringify({ sessionId, prompt: "q" }),
+    }));
+    expect(host.asks[0].req.mode).toBe("transient");
+    await endpoints["/api/ai/abort"](new Request("http://x/api/ai/abort", {
+      method: "POST", body: JSON.stringify({ sessionId, reason: "supersede" }),
+    }));
+    await answer.text();
+    expect(host.asks[0].signal.aborted).toBe(true);
+  });
+
   test("the bridge refuses requests the runtime's host guard rejects; other providers never ask it", async () => {
     const host = fakeBridge("ready");
     let allow = true;

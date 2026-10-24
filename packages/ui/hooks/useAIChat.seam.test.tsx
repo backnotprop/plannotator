@@ -205,6 +205,45 @@ describe('AITransport seam', () => {
     await session.unmount();
   });
 
+  test.skipIf(!hasDom)('supersede reaches the server before disconnecting the old answer', async () => {
+    const signals: AbortSignal[] = [];
+    const abortBodies: unknown[] = [];
+    let acknowledge = () => {};
+    const acknowledged = new Promise<void>(resolve => { acknowledge = resolve; });
+    setAITransport({
+      session: async () => Response.json({ sessionId: 's1' }),
+      query: async (_body, signal) => {
+        signals.push(signal);
+        return signals.length === 1 ? makeAbortableSseResponse(signal) : makeSseResponse('second answer');
+      },
+      abort: async body => { abortBodies.push(body); await acknowledged; },
+      permission: () => {},
+    });
+    const session = await mountHook(TEST_CONTEXT);
+    let first = Promise.resolve();
+    let second = Promise.resolve();
+    try {
+      await act(async () => { first = session.result.current!.ask({ prompt: 'first' }); });
+      expect(signals).toHaveLength(1);
+      await act(async () => { second = session.result.current!.ask({ prompt: 'second' }); });
+
+      // Disconnecting first would reach the server's SSE cancel handler and
+      // stop Pi before it can distinguish supersede from the Stop button.
+      expect(signals[0].aborted).toBe(false);
+      expect(signals).toHaveLength(1);
+      expect(abortBodies).toEqual([{ sessionId: 's1', reason: 'supersede' }]);
+
+      await act(async () => { acknowledge(); await Promise.all([first, second]); });
+      expect(signals[0].aborted).toBe(true);
+      expect(signals).toHaveLength(2);
+      expect(session.result.current!.messages[1].response.text).toBe('second answer');
+    } finally {
+      acknowledge();
+      await act(async () => { await Promise.all([first, second]); });
+      await session.unmount();
+    }
+  });
+
   test.skipIf(!hasDom)('resetSession aborts the active server turn', async () => {
     await expectResetAbortsActiveTurn('session');
   });

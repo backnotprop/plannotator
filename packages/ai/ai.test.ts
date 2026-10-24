@@ -1141,8 +1141,8 @@ describe("AI endpoints", () => {
     expect(entry?.label).toBe("Why did we choose this approach?");
   });
 
-  test("abort endpoint", async () => {
-    const { reg, endpoints } = setup();
+  test.each([undefined, "supersede"])("abort endpoint stops a separate provider, reason=%s", async (reason) => {
+    const { reg, sm, endpoints } = setup();
     reg.register(mockProvider("mock"));
 
     const createRes = await endpoints["/api/ai/session"](
@@ -1156,15 +1156,22 @@ describe("AI endpoints", () => {
     );
     const { sessionId } = (await createRes.json()) as { sessionId: string };
 
+    const session = sm.get(sessionId)!.session;
+    const query = session.query("Still working")[Symbol.asyncIterator]();
+    await query.next();
+    expect(session.isActive).toBe(true);
+
     const abortRes = await endpoints["/api/ai/abort"](
       new Request("http://localhost/api/ai/abort", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ sessionId, reason }),
       })
     );
     const abortData = (await abortRes.json()) as { ok: boolean };
     expect(abortData.ok).toBe(true);
+    expect(session.isActive).toBe(false);
+    await query.return?.();
   });
 
   test("sessions list endpoint", async () => {
