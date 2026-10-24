@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # A backstop, not a budget: green runs take 16-19 minutes. Some DOM tests
     # run on fake timers, where bun's per-test timeout cannot fire, so a stuck
     # await would otherwise idle until GitHub's 6-hour default.
@@ -448,7 +448,7 @@ jobs:
 
   opencode-v2:
     name: OpenCode 2 installed package
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # The smoke's own budgets (health 120s, plugin activation 300s) are the real assertion;
     # this is only a backstop so a genuinely wedged runner cannot idle for hours.
     timeout-minutes: 25
@@ -533,7 +533,7 @@ jobs:
 
   guides-show:
     name: guides.show viewer (budgets + pinned manifest)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -602,7 +602,7 @@ jobs:
       # rebuild your environment (rm -rf node_modules && bun install --frozen-lockfile).
       - name: Publish built viewer manifest for pin regeneration
         if: always() && steps.gate.outputs.run == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: guide-viewer-manifest
           path: apps/guides-show/dist/viewer/manifest.json
@@ -649,7 +649,7 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
 

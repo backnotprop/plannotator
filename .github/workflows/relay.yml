@@ -64,7 +64,7 @@ concurrency:
 jobs:
   relay:
     name: Inbox relay (wrangler dev with the compiled binary)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     steps:

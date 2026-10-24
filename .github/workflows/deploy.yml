@@ -33,7 +33,7 @@ jobs:
   # push; this job waits for Test instead of allowing deployment to race it.
   verify:
     name: Require successful Test run
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
       actions: read
@@ -99,7 +99,7 @@ jobs:
 
   detect-changes:
     needs: verify
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       marketing: ${{ steps.changes.outputs.marketing }}
       portal: ${{ steps.changes.outputs.portal }}
@@ -176,7 +176,7 @@ jobs:
   deploy-marketing:
     needs: detect-changes
     if: needs.detect-changes.outputs.marketing == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -233,7 +233,7 @@ jobs:
   deploy-portal:
     needs: detect-changes
     if: needs.detect-changes.outputs.portal == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -271,7 +271,7 @@ jobs:
   deploy-paste:
     needs: detect-changes
     if: needs.detect-changes.outputs.paste == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     environment: production
@@ -297,7 +297,7 @@ jobs:
   deploy-waitlist:
     needs: detect-changes
     if: needs.detect-changes.outputs.waitlist == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     environment: production
