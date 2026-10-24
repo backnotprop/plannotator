@@ -160,7 +160,7 @@ jobs:
           (github.event_name != 'pull_request' ||
           (github.event.pull_request.head.repo.full_name == github.repository &&
           github.actor != 'dependabot[bot]'))
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: security-results/gitleaks.sarif
           category: gitleaks
@@ -394,7 +394,7 @@ jobs:
 
       - name: Retain Semgrep reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: semgrep-reports
           path: |
@@ -411,7 +411,7 @@ jobs:
           (github.event_name != 'pull_request' ||
           (github.event.pull_request.head.repo.full_name == github.repository &&
           github.actor != 'dependabot[bot]'))
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: security-results/semgrep.sarif
           category: semgrep-ce
@@ -823,7 +823,7 @@ jobs:
 
       - name: Retain Trivy reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: trivy-reports
           path: |
@@ -840,7 +840,7 @@ jobs:
           (github.event_name != 'pull_request' ||
           (github.event.pull_request.head.repo.full_name == github.repository &&
           github.actor != 'dependabot[bot]'))
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: security-results/trivy.sarif
           category: trivy
@@ -942,7 +942,7 @@ jobs:
           (github.event_name != 'pull_request' ||
           (github.event.pull_request.head.repo.full_name == github.repository &&
           github.actor != 'dependabot[bot]'))
-        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           sarif_file: security-results/zizmor.sarif
           category: zizmor
