@@ -1,0 +1,69 @@
+/* The Messages prototype: Halftone on Plannotator's palettes, nothing of the
+   Inbox window's own stylesheet. */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
+@import "halftone-styles/index.css";
+@import "halftone-styles/palettes/all.css" layer(theme);
+
+@source "./src";
+
+:root {
+  --font-inter: "Inter Variable", "InterVariable", system-ui, sans-serif;
+  --font-geist-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+}
+
+/* Plannotator's own line icons (packages/inbox/icons.tsx), drawn as the window draws them. */
+svg.proto-ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Bubble geometry, kept in one place: the Messages tail drawn as a notch. */
+.msg-bubble {
+  position: relative;
+  max-width: min(36rem, 78%);
+  border-radius: 18px;
+  padding: 7px 12px 8px;
+  overflow-wrap: anywhere;
+}
+.msg-bubble[data-tail="true"][data-side="theirs"] {
+  border-bottom-left-radius: 6px;
+}
+.msg-bubble[data-tail="true"][data-side="mine"] {
+  border-bottom-right-radius: 6px;
+}
+
+/* Markdown inside a bubble: compact, no outer margins. */
+.msg-md > :first-child { margin-top: 0; }
+.msg-md > :last-child { margin-bottom: 0; }
+.msg-md p { margin: 0.35em 0; }
+.msg-md ul, .msg-md ol { margin: 0.35em 0; padding-inline-start: 1.25em; }
+.msg-md ul { list-style: disc; }
+.msg-md ol { list-style: decimal; }
+.msg-md li { margin: 0.1em 0; }
+.msg-md h1, .msg-md h2, .msg-md h3 { font-weight: 600; margin: 0.6em 0 0.25em; }
+.msg-md code { font-family: var(--font-mono); font-size: 0.88em; padding: 0.05em 0.3em; border-radius: 5px; background: var(--color-component); }
+.msg-md pre { margin: 0.5em 0; padding: 8px 10px; border-radius: 10px; background: var(--color-component); overflow-x: auto; }
+.msg-md pre code { background: none; padding: 0; }
+.msg-md a { text-decoration: underline; text-underline-offset: 2px; }
+.msg-md blockquote { border-inline-start: 3px solid var(--color-border-strong); padding-inline-start: 0.6em; color: var(--color-secondary-foreground); }
+
+/* The thread header floats over the bubbles and fades out at its foot. */
+.proto-header-veil {
+  mask-image: linear-gradient(to bottom, black 86%, transparent);
+}
+
+/* The phone push between list and thread. */
+@media (prefers-reduced-motion: no-preference) {
+  .push-enter { animation: push-in 260ms cubic-bezier(0.32, 0.72, 0, 1); }
+}
+@keyframes push-in {
+  from { transform: translateX(28%); opacity: 0.4; }
+  to { transform: none; opacity: 1; }
+}
