@@ -1,0 +1,199 @@
+/*
+ * Round 2 of the Messages study: Messages' finish on today's Inbox, with no
+ * change to its structure. Same DOM, same components, same layout: only
+ * materials, spacing, shapes and motion. Paint only (no box moves more than
+ * the spacing it gains on purpose), on Plannotator's theme tokens.
+ *
+ * The material values are Halftone's (halftone/packages/private/design-system/
+ * styles: tokens/shadows.css for --ht-shadow-*, theme.css for the radius
+ * scale, COLOR-MAP.md for the shell / recessed pane / fill formulas), copied
+ * here because a stylesheet of the real window cannot import Halftone's
+ * Tailwind theme without changing Plannotator's.
+ */
+
+/* ── Halftone's materials, on the palette ─────────────────────────────── */
+.pn-inbox {
+  --ht-ink: var(--foreground);
+  --ht-shadow-default:
+    0 0 0 0.5px color-mix(in oklch, var(--ht-ink) 6%, transparent),
+    0 1px 1px -1px color-mix(in oklch, var(--ht-ink) 10%, transparent),
+    0 1px 2px 0 color-mix(in oklch, var(--ht-ink) 5%, transparent);
+  --ht-shadow-xl:
+    0 0 0 0.5px color-mix(in oklch, var(--ht-ink) 6%, transparent),
+    0 8px 40px 0 color-mix(in oklch, var(--ht-ink) 5%, transparent),
+    0 12px 32px -16px color-mix(in oklch, var(--ht-ink) 15%, transparent);
+  --ht-fill: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --ht-fill-hover: color-mix(in oklch, var(--foreground) 9%, transparent);
+  --ht-r-pane: 16px; /* rounded-3xl */
+  --ht-r-row: 10px; /* rounded-xl */
+  --ht-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+
+  /* Today's panes, Halftone's material: a deeper radius, the default shadow, a 10 px gutter. */
+  --ib-lr-pane: var(--ht-r-pane);
+  --ib-pane-shadow-soft: var(--ht-shadow-default);
+  --ib-gutter-s: var(--ib-soft-panes) 10px;
+  /* Lines: one hairline weight, a step quieter. */
+  --ib-hair: color-mix(in oklch, var(--border) 38%, transparent);
+  --ib-line: color-mix(in oklch, var(--border) 50%, transparent);
+  /* Selection: the filled accent (Messages' selected conversation). */
+  --ib-sel-filled: var(--primary);
+  --ib-sel-filled-fg: var(--primary-foreground);
+}
+:root:not(.light) .pn-inbox {
+  /* Halftone's dark mode: no drop shadows, a 0.5 px inner highlight draws the edge. */
+  --ht-shadow-default: inset 0 0 0 0.5px color-mix(in oklch, var(--foreground) 9%, transparent);
+  --ht-shadow-xl: inset 0 0 0 0.5px color-mix(in oklch, var(--foreground) 9%, transparent), 0 16px 40px -12px color-mix(in oklch, black 60%, transparent);
+}
+
+/* ── The window ground: a quiet wash under the floating panes ───────────── */
+.pn-inbox .ib-shell {
+  background:
+    radial-gradient(1200px 700px at 12% -10%, color-mix(in oklch, var(--primary) 7%, transparent), transparent 70%),
+    radial-gradient(900px 600px at 110% 120%, color-mix(in oklch, var(--accent, var(--primary)) 5%, transparent), transparent 70%),
+    var(--ib-ground);
+}
+
+/* ── The sidebar: a floating, rounded, slightly translucent pane ─────────── */
+.pn-inbox .ib-sb-inner > .ib-side,
+.pn-inbox .ib-peek-in > .ib-side {
+  margin: 10px 0 10px 10px;
+  border-radius: var(--ht-r-pane);
+  background: color-mix(in oklch, var(--card) 62%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  backdrop-filter: blur(28px) saturate(1.5);
+  box-shadow: var(--ht-shadow-default);
+  border-right: 0;
+  padding: 14px 10px 12px;
+}
+.pn-inbox .ib-nav,
+.pn-inbox .ib-proj {
+  border-radius: 9px;
+  transition: background-color 160ms var(--ht-ease), color 160ms var(--ht-ease);
+}
+.pn-inbox .ib-nav.ib-on,
+.pn-inbox .ib-proj.ib-on {
+  background: var(--ib-sel-filled);
+  color: var(--ib-sel-filled-fg);
+  box-shadow: none;
+}
+.pn-inbox .ib-nav.ib-on .ib-ic,
+.pn-inbox .ib-nav.ib-on .ib-n,
+.pn-inbox .ib-proj.ib-on .ib-n { color: color-mix(in oklch, var(--ib-sel-filled-fg) 85%, transparent); }
+.pn-inbox .ib-side-label { padding-top: 20px; letter-spacing: 0; }
+
+/* The pill search field. */
+.pn-inbox .ib-sp-entry {
+  height: 34px;
+  border-radius: 999px;
+  border-color: transparent;
+  box-shadow: none;
+  background: var(--ht-fill);
+  padding: 0 12px;
+  transition: background-color 160ms var(--ht-ease);
+}
+.pn-inbox .ib-sp-entry:hover { background: var(--ht-fill-hover); border-color: transparent; }
+.pn-inbox .ib-sp-entry .ib-kbd { border-radius: 6px; }
+.pn-inbox .ib-compose-btn { border-radius: 999px; }
+.pn-inbox .ib-cpill { border-radius: 999px; }
+
+/* ── The list: calmer rhythm, the filled-accent selection ─────────────────── */
+.pn-inbox .ib-lhead { height: 64px; }
+.pn-inbox .ib-lbody { padding: 0 12px 12px; }
+.pn-inbox .ib-nrow { padding: 12px 14px; gap: 5px; }
+.pn-inbox :is(.ib-row, .ib-nrow)::before {
+  border-radius: var(--ht-r-row);
+  inset: 2px 0;
+  transition: background-color 160ms var(--ht-ease);
+}
+.pn-inbox :is(.ib-row, .ib-nrow):hover::before { background: var(--ht-fill) !important; }
+.pn-inbox :is(.ib-row, .ib-nrow).ib-sel::before,
+.pn-inbox :is(.ib-row, .ib-nrow).ib-sel:hover::before { background: var(--ib-sel-filled) !important; }
+.pn-inbox :is(.ib-row, .ib-nrow).ib-sel,
+.pn-inbox :is(.ib-row, .ib-nrow).ib-sel * {
+  color: var(--ib-sel-filled-fg) !important;
+}
+.pn-inbox :is(.ib-row, .ib-nrow).ib-sel :is(.ib-p, .ib-c, .ib-t) { opacity: 0.82; }
+.pn-inbox :is(.ib-row, .ib-nrow).ib-sel .ib-key,
+.pn-inbox :is(.ib-row, .ib-nrow).ib-sel .ib-badge {
+  background: color-mix(in oklch, var(--ib-sel-filled-fg) 18%, transparent) !important;
+  color: var(--ib-sel-filled-fg) !important;
+  border-color: transparent !important;
+}
+/* Unread: Messages' dot, in the gap left of the row (paint only). */
+.pn-inbox .ib-nrow.ib-u:not(.ib-sel)::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 19px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+.pn-inbox .ib-band {
+  background: transparent;
+  height: 30px;
+  padding: 0 14px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  font-size: var(--ib-fs-12-5, 12.5px);
+}
+.pn-inbox .ib-key { border-radius: 999px; }
+.pn-inbox .ib-badge { border-radius: 999px; }
+
+/* ── The thread: a centred, quiet header ──────────────────────────────── */
+.pn-inbox .ib-phead {
+  height: 52px;
+  border-bottom-color: transparent;
+  box-shadow: 0 1px 0 var(--ib-hair);
+}
+.pn-inbox .ib-phsubj { text-align: center; font-weight: 600; letter-spacing: -0.005em; }
+.pn-inbox .ib-pbody { padding: 26px 36px 22px; }
+.pn-inbox .ib-subject {
+  text-align: center;
+  font-size: var(--ib-fs-20, 20px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 2px auto 6px;
+  max-width: 40rem;
+  text-wrap: balance;
+}
+.pn-inbox .ib-tmeta { justify-content: center; margin: 0 0 22px; }
+.pn-inbox .ib-pbody.ib-folding .ib-message { border-top-color: var(--ib-hair); }
+.pn-inbox .ib-message { line-height: 1.6; }
+.pn-inbox .ib-iconbtn,
+.pn-inbox .ib-hbtn { border-radius: 999px; transition: background-color 160ms var(--ht-ease); }
+
+/* ── The foot: soft, and the reply box is a pill composer ─────────────────── */
+.pn-inbox .ib-pfoot {
+  border-top: 0;
+  box-shadow: 0 -1px 0 var(--ib-hair);
+  padding: 12px 24px 16px;
+}
+.pn-inbox .ib-btn { border-radius: 999px; transition: background-color 160ms var(--ht-ease), border-color 160ms var(--ht-ease); }
+.pn-inbox .ib-rbox {
+  border-radius: 22px;
+  border: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
+  box-shadow: var(--ht-shadow-default);
+  background: var(--card);
+  transition: border-color 160ms var(--ht-ease), box-shadow 160ms var(--ht-ease);
+}
+.pn-inbox .ib-rbox:focus-within {
+  border-color: color-mix(in oklch, var(--primary) 55%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+.pn-inbox .ib-rtext { padding: 11px 16px 6px; }
+
+/* ── Floating surfaces: menus, dialogs, the toast (Halftone's large shadow) ── */
+.pn-inbox { --ib-float-shadow: var(--ht-shadow-xl); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox :is(.ib-row, .ib-nrow)::before,
+  .pn-inbox :is(.ib-nav, .ib-proj, .ib-sp-entry, .ib-btn, .ib-rbox, .ib-iconbtn, .ib-hbtn) { transition: none; }
+}
+
+/* Phone: the same window, the finish only (no gutters change, 44 px targets kept). */
+@media (max-width: 767px) {
+  .pn-inbox .ib-nrow.ib-u:not(.ib-sel)::after { left: 2px; }
+  .pn-inbox .ib-pbody { padding: 18px 16px; }
+}

@@ -18,7 +18,7 @@ const inbox = new URL(flag('--inbox') ?? '');
 if (!/^(localhost|127\.0\.0\.1)$/.test(inbox.hostname)) throw new Error('--inbox must be a loopback Inbox');
 // Read on every load, so a rebuild shows on the next reload.
 const html = () =>
-  readFileSync(join(import.meta.dir, '../apps/inbox/proto-imessage/dist/index.html'), 'utf8').replace(
+  readFileSync(flag('--html') ?? join(import.meta.dir, '../apps/inbox/proto-imessage/dist/index.html'), 'utf8').replace(
     '<head>',
     `<head><script>window.__INBOX_WINDOW__=${JSON.stringify(inbox.origin + '/')}</script>`,
   );

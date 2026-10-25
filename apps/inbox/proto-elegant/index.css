@@ -1,0 +1,19 @@
+/* Round 2 of the Messages study: the real Inbox window, unchanged, plus one
+   stylesheet (elegant.css) that borrows Messages' finish through Halftone's
+   material values. This file is apps/inbox/index.css one folder deeper. */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+
+@plugin "tailwindcss-animate";
+
+@source "../../../packages/ui/components/**/*.tsx";
+@source "../../../packages/ui/hooks/**/*.ts";
+@source "../../../packages/inbox/**/*.tsx";
+@source "../../../packages/guide-viewer/**/*.tsx";
+@source "../../../packages/review-editor/components/**/*.tsx";
+
+@import "../../../packages/ui/theme.css";
+@import "../../../packages/review-editor/comments.css";
+@import "../../../packages/inbox/inbox.css";
+@import "./elegant.css";
