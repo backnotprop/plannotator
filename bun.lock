@@ -428,6 +428,7 @@
         "marked": "^17.0.6",
         "mermaid": "12.2.0",
         "motion": "^12.38.0",
+        "pele": "1.3.0",
         "perfect-freehand": "^1.2.2",
         "tailwind-merge": "^3.7.0",
         "unique-username-generator": "^1.5.1",
@@ -2432,6 +2433,8 @@
     "path-type": ["path-type@6.0.0", "", {}, "sha512-Vj7sf++t5pBD637NSfkxpHSMfWaeig5+DKWLhcqIYx6mWQz5hdJTGDVMQiJcw1ZYkhs7AazKDGpRVji1LJCZUQ=="],
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
+
+    "pele": ["pele@1.3.0", "", {}, "sha512-Jz3SW2OYo4yLkrrNuQwfg93el1SEGsFVTd7c/XVvZEry6UfR8ncvxoZqAefEpXOFpJRwhmXwWq17aGHg8W0vuA=="],
 
     "pend": ["pend@1.2.0", "", {}, "sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg=="],
 

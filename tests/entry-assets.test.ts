@@ -248,13 +248,13 @@ describe('review entry assets', () => {
   //   runtime is still inlined by inlineDynamicImports. KaTeX is inlined
   //   through utils/math-default-loader.ts's import('katex') whether or not it is registered,
   //   so `katex-display` cannot prove registration and is not asked to; the
-  //   Mermaid diagram id in the plan bundle likewise proves inlining only.
+  //   Pele runtime marker proves the plan bundle includes the Mermaid-syntax renderer.
   //
   // dist/ is gitignored, so this is skipped on an unbuilt checkout; the CI job
   // that builds the bundles runs it right after.
   const REGISTRATION_MARKERS = ['plannotator-math-eager', 'uniqueUsernameGenerator'];
   const markerExpectations: Array<[bundle: string, present: string[], absent: string[]]> = [
-    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'flowchart-v2', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager']],
+    ['apps/hook/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', 'plannotator-pele', 'viz_set_y_invert', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2']],
     ['apps/review/dist/index.html', [...REGISTRATION_MARKERS, 'katex-display', '__plannotatorLiveConfig'], ['plannotator-mermaid-eager', 'flowchart-v2', 'viz_set_y_invert']],
   ];
   for (const [path, present, absent] of markerExpectations) {

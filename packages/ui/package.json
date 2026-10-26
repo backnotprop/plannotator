@@ -92,6 +92,7 @@
     "marked": "^17.0.6",
     "mermaid": "12.2.0",
     "motion": "^12.38.0",
+    "pele": "1.3.0",
     "perfect-freehand": "^1.2.2",
     "tailwind-merge": "^3.7.0",
     "unique-username-generator": "^1.5.1"

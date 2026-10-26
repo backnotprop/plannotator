@@ -34,17 +34,20 @@
  */
 import DOMPurify from 'dompurify';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
-import { MERMAID_FINDER, type DiagramFinder } from './diagram-anchor';
+import type { DiagramFinder } from './diagram-anchor';
+import { PELE_FINDER } from './diagram-anchor-pele';
 import { GRAPHVIZ_FINDER } from './diagram-anchor-graphviz';
 import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } from './graphviz';
-import { loadMathRenderer } from './math';
-import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
-import { hasMermaidMath } from './mermaid-math-slot';
-import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
+import {
+  loadPeleRuntime,
+  PELE_OUTPUT_LIMIT,
+  PELE_SOURCE_LIMIT,
+  peleSvgId,
+  renderPeleSource,
+  peleThemeStyle,
+} from './pele';
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
-
-type Mermaid = Awaited<ReturnType<typeof loadMermaidRuntime>>;
 
 /**
  * The (palette, mode) a render is for: the same pair `useTheme()` resolves
@@ -56,13 +59,14 @@ type Mermaid = Awaited<ReturnType<typeof loadMermaidRuntime>>;
  */
 export interface DiagramTheme {
   readonly colorTheme: string;
-  readonly mode: MermaidThemeMode;
+  readonly mode: 'dark' | 'light';
   /**
    * Node drop shadow strength, 0..1 (see `mermaidTheme.buildMermaidShadow`).
    * Absent means the shipped default, so a host that builds its own
    * `DiagramTheme` renders exactly what Plannotator renders.
    */
   readonly shadowAmount?: number;
+
 }
 
 export type DiagramRenderError = {
@@ -176,7 +180,7 @@ function scrubAttributes(el: Element): void {
   for (const attribute of Array.from(el.attributes)) {
     const name = attribute.name.toLowerCase();
     const value = attribute.value.trim().toLowerCase();
-    if (name.startsWith('on')) {
+    if (name.startsWith('on') || (name === 'style' && cssFetches(attribute.value))) {
       el.removeAttribute(attribute.name);
       continue;
     }
@@ -218,6 +222,7 @@ const EDGE_SELECTOR = [
   'path.messageLine0',
   'path.messageLine1',
   'g.edge > path',
+  'g.pele-edge > path:not(.pele-marker)',
 ].join(', ');
 
 /** The geometry a hit path keeps from its edge; everything else (id, class,
@@ -441,7 +446,12 @@ export function __setDiagramSvgParserForTests(next: ((svg: string) => SVGSVGElem
  * in line N near '...'". */
 function errorLine(error: unknown): number | null {
   if (typeof error === 'object' && error !== null) {
-    const hash = (error as { hash?: { line?: unknown; loc?: { first_line?: unknown } } }).hash;
+    const sourceError = error as { line?: unknown; hash?: { line?: unknown; loc?: { first_line?: unknown } } };
+    // Pele reports one-based lines; Mermaid's parser hash is zero-based.
+    if (typeof sourceError.line === 'number' && sourceError.line > 0 && Number.isFinite(sourceError.line)) {
+      return sourceError.line;
+    }
+    const hash = sourceError.hash;
     const line = hash?.line ?? hash?.loc?.first_line;
     if (typeof line === 'number' && Number.isFinite(line)) return line + 1;
   }
@@ -474,60 +484,9 @@ async function loadWithRetry<T>(load: () => Promise<T>, delayMs: number): Promis
   }
 }
 
-async function renderMermaid(runtime: Mermaid, renderId: string, source: string): Promise<DiagramRenderResult> {
-  try {
-    const { svg } = await runtime.render(renderId, source);
-    const svgNode = sanitizeDiagramSvg(svg);
-    if (svgNode === null) {
-      return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
-    }
-    widenEdgeHitAreas(svgNode);
-    return { ok: true, svgNode, findTarget: MERMAID_FINDER.findTarget };
-  } catch (error) {
-    return {
-      ok: false,
-      message: errorMessage(error, 'Failed to render diagram'),
-      line: errorLine(error),
-      runtimeUnavailable: false,
-    };
-  }
-}
-
-const mermaidRenderer: DiagramRenderer = {
-  finder: MERMAID_FINDER,
-  async render(renderId, source, theme) {
-    let runtime: Mermaid;
-    try {
-      runtime = await loadWithRetry(loadMermaidRuntime, getMermaidRetryDelayMs());
-    } catch (error) {
-      return {
-        ok: false,
-        message: errorMessage(error, 'Failed to render diagram'),
-        line: null,
-        runtimeUnavailable: true,
-      };
-    }
-    // A `$$` label makes Mermaid render KaTeX. On a host that redirects
-    // Mermaid's `katex` import to `utils/mermaid-math-slot` the label is
-    // typeset through the math slot, which must be filled by then: warm it
-    // with the registered loader first. A filled slot resolves at once; a
-    // load failure is left to the render, whose error names it.
-    if (hasMermaidMath(source)) {
-      try {
-        await loadMathRenderer();
-      } catch {
-        // Reported by the render below.
-      }
-    }
-    // Derive every Mermaid theme variable from the page's tokens before each
-    // render, so the diagram follows the palette and mode. Keyed on the
-    // runtime plus (palette, mode, shadow amount), so the lazy runtime is
-    // themed on its first render and re-initialized only when one changes.
-    // With no tokens on the page it is a no-op and the static
-    // MERMAID_CONFIG (securityLevel strict) applies.
-    applyMermaidTheme(runtime, mermaidThemeKey(theme.colorTheme, theme.mode, theme.shadowAmount));
-    return renderMermaid(runtime, renderId, source);
-  },
+const peleRenderer: DiagramRenderer = {
+  finder: PELE_FINDER,
+  render: renderPele,
 };
 
 /** A Graphviz default color, as `viz` writes it: a named default or its
@@ -649,8 +608,46 @@ const graphvizRenderer: DiagramRenderer = {
   },
 };
 
+async function renderPele(renderId: string, source: string): Promise<DiagramRenderResult> {
+  let runtime: Awaited<ReturnType<typeof loadPeleRuntime>>;
+  try {
+    runtime = await loadWithRetry(loadPeleRuntime, 250);
+  } catch (error) {
+    return {
+      ok: false,
+      message: errorMessage(error, 'The Pele engine could not be loaded.'),
+      line: null,
+      runtimeUnavailable: true,
+    };
+  }
+  if (source.length > PELE_SOURCE_LIMIT) {
+    return { ok: false, message: `Diagram source exceeds the ${PELE_SOURCE_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
+  }
+  try {
+    const result = renderPeleSource(runtime, source, renderId);
+    if (result.svg.length > PELE_OUTPUT_LIMIT) {
+      return { ok: false, message: `Rendered diagram exceeds the ${PELE_OUTPUT_LIMIT.toLocaleString()} character limit.`, line: null, runtimeUnavailable: false };
+    }
+    const svgNode = sanitizeDiagramSvg(result.svg);
+    if (svgNode === null) {
+      return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
+    }
+    svgNode.id = peleSvgId(renderId);
+    svgNode.setAttribute('style', `${svgNode.getAttribute('style') ?? ''};${peleThemeStyle()}`);
+    widenEdgeHitAreas(svgNode);
+    return { ok: true, svgNode, findTarget: PELE_FINDER.findTarget };
+  } catch (error) {
+    return {
+      ok: false,
+      message: errorMessage(error, 'Failed to render diagram'),
+      line: errorLine(error),
+      runtimeUnavailable: false,
+    };
+  }
+}
+
 const RENDERERS: Record<DiagramKind, DiagramRenderer> = {
-  mermaid: mermaidRenderer,
+  mermaid: peleRenderer,
   graphviz: graphvizRenderer,
 };
 

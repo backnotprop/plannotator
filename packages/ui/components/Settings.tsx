@@ -1969,12 +1969,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
 
                     <div className="border-t border-border" />
 
-                    {/* Diagram Shadow */}
                     <div className="space-y-3" data-diagram-shadow-setting>
                       <div>
                         <div className="text-sm font-medium">Diagram Shadow</div>
                         <div className="text-xs text-muted-foreground">
-                          Drop shadow under diagram nodes (100 = Mermaid's own)
+                          Drop shadow under diagram nodes
                         </div>
                       </div>
                       <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
