@@ -9,8 +9,9 @@
  * like the sidebar FileBrowser's (13 px muted file names, 11 px folder rows
  * with a chevron and folder icon, `+N -N`, status letters, comment counts),
  * with indent guides drawn the way VS Code's default does (`onHover`: only
- * while the pointer is over the tree), the open file's folder guide a little
- * stronger.
+ * while the pointer is over the tree; also while the tree has keyboard focus,
+ * and always on a screen without hover, #2062), the open file's folder guide a
+ * little stronger.
  *
  * One tab stop: the tree element holds focus and points at the focused row
  * with `aria-activedescendant`. Keys are VS Code's (a standard tree widget):
@@ -210,7 +211,7 @@ const RowView = memo(function RowView(p: RowViewProps) {
         <span
           aria-hidden
           data-guides
-          className="pointer-events-none absolute inset-y-0 opacity-0 transition-opacity duration-100 motion-reduce:transition-none group-hover/ft:opacity-100"
+          className="pointer-events-none absolute inset-y-0 opacity-0 transition-opacity duration-100 motion-reduce:transition-none group-hover/ft:opacity-100 group-focus-visible/ft:opacity-100 [@media(hover:none)]:opacity-100"
           style={{
             left: guideLeft,
             width: p.depth * p.indent,
@@ -222,7 +223,7 @@ const RowView = memo(function RowView(p: RowViewProps) {
         <span
           aria-hidden
           data-guide-strong
-          className="pointer-events-none absolute inset-y-0 w-px opacity-0 transition-opacity duration-100 motion-reduce:transition-none group-hover/ft:opacity-100"
+          className="pointer-events-none absolute inset-y-0 w-px opacity-0 transition-opacity duration-100 motion-reduce:transition-none group-hover/ft:opacity-100 group-focus-visible/ft:opacity-100 [@media(hover:none)]:opacity-100"
           style={{ left: guideLeft + p.strongLevel * p.indent, background: 'var(--ft-guide-strong)' }}
         />
       )}
