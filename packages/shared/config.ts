@@ -27,6 +27,7 @@ import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig } f
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
+import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor } from './inbox/connection';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -76,6 +77,19 @@ export interface PromptConfig {
     approved?: string;
     approvedWithNotes?: string;
   };
+  /**
+   * The Plannotator Inbox's reminder at session start (approval
+   * "inbox-prompts-page", #2194): `reminder` for every host, and
+   * `runtimes.<claude-code|pi|opencode>.reminder` for one host, which wins.
+   * Set, it REPLACES the built-in line (INBOX_REMINDER_TEXT /
+   * INBOX_REMINDER_TEXT_NO_WAKE); empty, whitespace or longer than
+   * INBOX_REMINDER_MAX_CHARS counts as unset. Whether the reminder is sent at
+   * all stays `inboxReminder`. Read once per session start.
+   */
+  inbox?: {
+    reminder?: string;
+    runtimes?: Partial<Record<InboxToolHost, { reminder?: string }>>;
+  };
 }
 
 const PROMPT_SECTIONS = ["review", "plan", "annotate"] as const;
@@ -102,7 +116,48 @@ export function mergePromptConfig(
     }
   }
 
+  // The Inbox section merges key by key, each host's entry too, so writing one
+  // key keeps the others; a key the write sets to undefined is deleted, and an
+  // entry or section left empty goes with it. Only when the write names
+  // `inbox`: otherwise whatever config.json holds there is kept verbatim.
+  if (partial && Object.prototype.hasOwnProperty.call(partial, "inbox")) {
+    result.inbox = mergeInboxPromptConfig(current?.inbox, partial.inbox);
+    if (Object.values(result).every((value) => value === undefined)) return undefined;
+  }
+
   return result as PromptConfig;
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function withoutUndefined(value: Record<string, unknown>): Record<string, unknown> | undefined {
+  const kept = Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
+  return Object.keys(kept).length > 0 ? kept : undefined;
+}
+
+function mergeInboxPromptConfig(current: unknown, partial: unknown): PromptConfig["inbox"] {
+  const par = plainRecord(partial);
+  if (!par) return partial as PromptConfig["inbox"];
+  const cur = plainRecord(current) ?? {};
+  const merged: Record<string, unknown> = { ...cur, ...par };
+  if (Object.prototype.hasOwnProperty.call(par, "runtimes")) {
+    const parRuntimes = plainRecord(par.runtimes);
+    if (!parRuntimes) {
+      merged.runtimes = par.runtimes;
+    } else {
+      const runtimes: Record<string, unknown> = { ...plainRecord(cur.runtimes) };
+      for (const [host, entry] of Object.entries(parRuntimes)) {
+        const parEntry = plainRecord(entry);
+        runtimes[host] = parEntry ? withoutUndefined({ ...plainRecord(runtimes[host]), ...parEntry }) : entry;
+      }
+      merged.runtimes = withoutUndefined(runtimes);
+    }
+  } else if (cur.runtimes !== undefined) {
+    merged.runtimes = cur.runtimes;
+  }
+  return withoutUndefined(merged) as PromptConfig["inbox"];
 }
 
 export interface PlannotatorConfig {
@@ -1301,6 +1356,22 @@ export function resolveInboxReminder(
   host: InboxToolHost,
 ): boolean {
   return resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
+}
+
+/**
+ * The Inbox reminder a `host` session starts with, once resolveInboxReminder
+ * said it gets one: the person's own text from config.json
+ * (`prompts.inbox.runtimes.<host>.reminder`, then `prompts.inbox.reminder`;
+ * `plannotator_inbox` in it renamed to `toolName`), else exactly today's line
+ * (`inboxReminderText(toolName, { wakes })`). Hosts call it once per session
+ * start, with the switch: the line sits in the cached prompt prefix.
+ */
+export function resolveInboxReminderText(
+  config: PlannotatorConfig,
+  host: InboxToolHost,
+  options: { wakes?: boolean; toolName?: string } = {},
+): string {
+  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes });
 }
 
 /**

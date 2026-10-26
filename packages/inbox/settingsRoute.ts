@@ -6,12 +6,13 @@
  * an old or mistyped link still lands in Settings.
  */
 
-export const SETTINGS_SECTIONS = ['general', 'agents', 'devices', 'archived', 'storage', 'about'] as const;
+export const SETTINGS_SECTIONS = ['general', 'agents', 'prompts', 'devices', 'archived', 'storage', 'about'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
   general: 'General',
   agents: 'Agents',
+  prompts: 'Prompts',
   devices: 'Devices',
   archived: 'Archived',
   storage: 'Storage',

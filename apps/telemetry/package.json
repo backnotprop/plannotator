@@ -15,6 +15,6 @@
     "@cloudflare/workers-types": "^4.20241218.0",
     "@plannotator/core": "workspace:*",
     "typescript": "~5.8.2",
-    "wrangler": "^4.151.1"
+    "wrangler": "^4.151.2"
   }
 }

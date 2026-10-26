@@ -1,4 +1,4 @@
-import { memo, useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { threadChipName } from '../threadChip';
 import { agentName, formatCount, shortTime, waitCount } from '../format';
@@ -19,6 +19,7 @@ import { rowTimeIso, rowWait } from '../rowDelivery';
 import { UndeliveredBadge } from './Undelivered';
 import { TimeWithTick } from './DeliveryTick';
 import { decideLabel } from '../decisions/entry';
+import { attachPullToRefresh } from '../pullRefresh';
 
 export interface InboxListProps {
   title: string;
@@ -43,6 +44,11 @@ export interface InboxListProps {
    * ↻ beside it on hover with the tooltip, one turn on a click. Absent: a plain heading.
    */
   onRefresh?: () => void;
+  /**
+   * Pull down to refresh, on a phone only (pullRefresh.ts): the same refresh as the title, its promise
+   * settling when the read lands (the ↻ spins until then). Absent: no gesture.
+   */
+  onPullRefresh?: () => Promise<unknown>;
   /** A refresh of this list just ran: the title's icon turns once (the key restarts the turn). */
   refreshSpin?: number | null;
   onOpen: (row: InboxListRow) => void;
@@ -420,6 +426,19 @@ export function InboxList(props: InboxListProps) {
     shownScope.current = scope;
     if (props.phone && bodyRef.current) bodyRef.current.scrollTop = 0;
   }, [props.scope, props.phone]);
+  // Pull down to refresh: a phone's list, while it is the screen on top (no thread over it).
+  const pullRef = useRef<HTMLDivElement>(null);
+  const pulls = props.phone === true && props.onPullRefresh !== undefined;
+  const pullOn = pulls && props.selectedThreadId === null;
+  useEffect(() => {
+    const body = bodyRef.current;
+    const indicator = pullRef.current;
+    if (!pullOn || !body || !indicator) return;
+    return attachPullToRefresh(body, indicator, {
+      onRefresh: () => latest.current.onPullRefresh?.(),
+      reduced: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    });
+  }, [pullOn]);
   const [listRef, narrowList] = useNarrowerThan(WIDE_ROWS_MIN_LIST_WIDTH, props.narrow);
   // Two-line rows in a list too narrow for the wide row's columns: beside an
   // open thread for every list (the column is 380px unless its edge was
@@ -531,6 +550,15 @@ export function InboxList(props: InboxListProps) {
           </Tip>
         )}
       </div>
+      {pulls && (
+        // The ↻ a pull reveals under the header, behind the list (pullRefresh.ts moves it). Not for a screen reader:
+        // the title is the accessible way, and the live region says the refresh.
+        <div ref={pullRef} className="ib-pull" aria-hidden="true" data-pull-indicator="">
+          <span className="ib-pull-dot">
+            <Icon name="refresh" size={18} />
+          </span>
+        </div>
+      )}
         <ThreadRowMenu
           ref={bodyRef}
           className="ib-lbody"

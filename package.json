@@ -43,7 +43,7 @@
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.302",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.303",
     "@opencode-ai/sdk": "^1.19.3",
     "@pierre/diffs": "1.5.2",
     "diff": "^8.0.4",
@@ -55,7 +55,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "1.64.1",
-    "@types/node": "^25.5.2",
+    "@types/node": "^26.6.5",
     "@types/turndown": "^5.0.6",
     "bun-types": "^1.4.3"
   },

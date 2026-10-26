@@ -2223,6 +2223,29 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 /* The stepping bar beside the thread wraps rather than cutting its parts in a narrow pane. */
 .pn-inbox .ib-vfoot { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
 
+/* Pull down to refresh, on a phone's list (pullRefresh.ts): the list moves down from the very top and
+   uncovers a small ↻ under the header, behind it. The script writes the travel (--ib-pull), the ↻'s
+   turn (--ib-pull-turn), the opacity and data-state (pull, ready, refreshing, settling); the list is
+   painted over the ↻ while a pull is on, so the ↻ shows only in the gap it leaves. */
+@property --ib-pull { syntax: '<length>'; inherits: true; initial-value: 0px; }
+.ib-pull { position: relative; height: 0; z-index: 0; pointer-events: none; opacity: 0; --ib-pull-turn: 0deg; clip-path: inset(0 0 -200px 0); }
+.ib-pull-dot {
+  position: absolute; left: 50%; top: 0; width: 34px; height: 34px; margin-left: -17px; border-radius: 50%;
+  display: grid; place-items: center; color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--muted) 72%, var(--card));
+  translate: 0 calc(var(--ib-pull) / 2 - 17px); scale: 0.88;
+  transition: color 160ms ease-out, scale 160ms ease-out;
+}
+.ib-pull-dot svg { transform: rotate(var(--ib-pull-turn)); }
+.ib-pull:is([data-state="ready"], [data-state="refreshing"]) .ib-pull-dot { color: var(--foreground); scale: 1; }
+.ib-pull[data-state="refreshing"] .ib-pull-dot svg { animation: ib-pull-spin 800ms linear infinite; }
+@keyframes ib-pull-spin { from { transform: rotate(var(--ib-pull-turn)); } to { transform: rotate(calc(var(--ib-pull-turn) + 360deg)); } }
+.ib-lbody[data-pull] { z-index: 1; background: var(--card); }
+@media (prefers-reduced-motion: reduce) {
+  .ib-pull-dot, .ib-pull:is([data-state="ready"], [data-state="refreshing"]) .ib-pull-dot { transition: none; }
+  .ib-pull-dot svg, .ib-pull[data-state="refreshing"] .ib-pull-dot svg { transform: none; animation: none; }
+}
+
 /* ───────────── The Inbox on a phone ─────────────
    One screen at a time, like a mail app: the list, then a thread (Back to
    the list), then a file (Back to the thread). The query is PHONE_QUERY in
@@ -4590,3 +4613,57 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The tour thread's controls that do nothing in the tour (Mark read, Archive, Reply): drawn quiet, still focusable, their tooltip says why. */
 .pn-inbox [data-tour-thread] button[aria-disabled="true"] { opacity: 0.45; cursor: default; }
 .pn-inbox [data-tour-thread] button[aria-disabled="true"]:hover { background: none; }
+
+/* Settings → Prompts (design of record .product/approved/inbox-prompts-page/, #2194): the Inbox reminder, shared and per agent, then the plan, review and annotate prompts folded, read-only. */
+.pm-shared { padding: 14px 16px; }
+.pm-head { display: flex; align-items: center; gap: 8px; min-height: 28px; margin-bottom: 8px; }
+.pm-sp { flex: 1; }
+.pn-inbox .ib-chip.pm-custom { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.pm-text { margin: 0; font-family: var(--font-sans); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.6; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border-radius: var(--ib-rl-sm-s, 8px); background: color-mix(in oklch, var(--foreground) 5%, transparent); border: 1px solid transparent; }
+.pm-text.pm-faint { color: var(--muted-foreground); background: transparent; border: 1px dashed var(--border); }
+.pn-inbox .pm-area { display: block; width: 100%; box-sizing: border-box; min-height: 96px; resize: vertical; margin: 0; padding: 10px 12px; border-radius: var(--ib-rl-sm-s, 8px); border: 1px solid var(--border); background: var(--card); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.6; color: var(--foreground); }
+.pn-inbox .pm-area:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-color: transparent; }
+.pn-inbox .pm-area[aria-invalid="true"] { border-color: var(--destructive); }
+.pm-acts { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.pm-count { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.pm-count[data-over] { color: var(--destructive); }
+/* A config.json path outside the home folder can be long: it wraps, never runs off a phone's screen. */
+.pm-path { overflow-wrap: anywhere; }
+.pm-over { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); line-height: 1.45; }
+.pm-err { margin: 8px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); line-height: 1.45; }
+.pn-inbox .pm-disc { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 2px 0; background: none; border: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .pm-disc:hover { color: var(--foreground); }
+.pn-inbox .pm-disc svg.ib-ic { width: 13px; height: 13px; transition: transform 120ms ease-out; }
+.pm-disc[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
+.pm-disc + .pm-text { margin-top: 6px; }
+.pn-inbox .pm-ghost { color: var(--muted-foreground); }
+.pn-inbox .ib-btn.ib-ghost.pm-ghost:hover { background: var(--ib-fill, var(--muted)); color: var(--foreground); }
+.pm-ag { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); }
+.pm-ag .ib-prow { border-bottom: 0; min-height: 52px; padding-top: 9px; padding-bottom: 9px; }
+.pm-ag-body { padding: 0 16px 14px 60px; }
+.pn-inbox .pm-fold { display: flex; align-items: center; gap: 8px; width: 100%; padding: 13px 16px; background: none; border: 0; text-align: left; font-size: var(--ib-fs-14, 14px); color: var(--foreground); cursor: pointer; }
+.pn-inbox .pm-fold:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 45%, transparent)); }
+.pm-fold .ib-mut { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .pm-fold svg.ib-ic { width: 14px; height: 14px; color: var(--muted-foreground); transition: transform 120ms ease-out; }
+.pm-fold[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
+.pm-osec { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); padding: 12px 16px 4px; }
+.pm-osec h3 { margin: 0 0 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); }
+.pm-oitem { padding: 0 0 14px; }
+.pm-ohead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; font-size: var(--ib-fs-13-5, 13.5px); }
+.pm-ohead b { font-weight: 500; }
+.pm-ohead code { margin-left: auto; font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); }
+.pm-otext { margin: 0; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground); padding: 9px 12px; border-radius: var(--ib-rl-sm-s, 8px); background: color-mix(in oklch, var(--foreground) 5%, transparent); }
+.pm-onote { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); margin: 6px 0 0; }
+@media (prefers-reduced-motion: reduce) { .pm-disc svg.ib-ic, .pm-fold svg.ib-ic { transition: none; } }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pm-shared { padding: 12px; }
+  .pm-ag-body { padding: 0 12px 12px; }
+  .pm-ag .ib-prow { padding-left: 12px; padding-right: 12px; flex-wrap: nowrap; }
+  .pm-ag .ib-prow .ib-txt { flex-basis: auto; }
+  .pn-inbox .pm-area { min-height: 180px; font-size: var(--ib-fs-16-in, 16px); }
+  .pm-ohead code { margin-left: 0; flex-basis: 100%; }
+  .pm-osec { padding: 12px 12px 4px; }
+  .pm-acts .ib-btn.ib-pri { flex: 1; justify-content: center; }
+  .pn-inbox .pm-disc, .pn-inbox .pm-fold { min-height: 44px; }
+  .pm-ag .ib-desc a { display: inline-flex; align-items: center; min-height: 44px; margin: -12px 0; }
+}

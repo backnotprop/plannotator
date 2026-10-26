@@ -217,7 +217,32 @@ Where it goes:
 - **Pi:** once, as a hidden message with the session's first prompt.
 - **OpenCode:** a line in the system prompt of every request. On OpenCode 1, and on an OpenCode 2 that cannot bring a reply back by itself, the sentence about the reply says to call `wait_for_reply` instead.
 
-The text is fixed and never changes during a session, so it costs little and does not invalidate the prompt cache. It never appears without the tool. To turn it off, set `inboxReminder` in `~/.plannotator/config.json`: `false` for every host, or one per host, for example `{ "inboxReminder": { "claude-code": false } }`.
+The text never changes during a session, so it costs little and does not invalidate the prompt cache. It never appears without the tool. To turn it off, set `inboxReminder` in `~/.plannotator/config.json`: `false` for every host, or one per host, for example `{ "inboxReminder": { "claude-code": false } }`.
+
+#### Your own reminder
+
+You can replace the line with your own, in **Settings → Prompts** or in `~/.plannotator/config.json`:
+
+```json
+{
+  "prompts": {
+    "inbox": {
+      "reminder": "Plannotator Inbox is on. Send to it only when no upstream session can take the decision. Use plannotator_inbox send_message and keep going.",
+      "runtimes": {
+        "pi": { "reminder": "You are a worker session: report to your upstream session first. Use plannotator_inbox send_message only when it is gone." }
+      }
+    }
+  }
+}
+```
+
+- `prompts.inbox.reminder` is for every agent. `prompts.inbox.runtimes.<agent>.reminder` (`claude-code`, `pi` or `opencode`) is for one agent and wins over the shared text.
+- Your text replaces the whole line, on every host, OpenCode 1 included. Each `plannotator_inbox` in it becomes the tool's name in that agent (on Claude Code, its full `mcp__…` name).
+- Empty or blank text counts as unset. At most 4,128 characters; longer text is refused when you save it, and ignored if written by hand (Settings → Prompts says so, with Reset to default).
+- With no `prompts.inbox` set, every agent gets the line above, exactly as before.
+- Like the switch, it is read when a session starts: a change applies to each agent's next session.
+- After a compaction on Claude Code, the plugin adds your line again, exactly as you wrote it.
+- **Settings → Prompts** shows the line in effect, marked Default or Custom (on OpenCode 1, whose replies do not come back by themselves, its row shows the `wait_for_reply` wording it gets), with **Edit**, **Reset to default** and each agent's own text (**Use shared** deletes it). It also lists the plan, review and annotate prompts (see [custom feedback](/docs/guides/custom-feedback/)), read-only. Changes are made on this computer only; through your tailnet the page is read-only.
 
 ## Other agents
 
@@ -304,7 +329,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `recent-searches.json` | Your last six searches, written only when you open a result. **Clear** in the search box empties it |
 | `claims/`, `leases/` and `connection-tools.json` | Bookkeeping for the Pi and OpenCode connections |
 
-The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete thread** or **Delete project** in **Settings**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `inboxNotifications`, `inboxSound`, `inboxTailscale`, `inboxTailscaleAllow`).
+The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete thread** or **Delete project** in **Settings**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `prompts.inbox`, `inboxNotifications`, `inboxSound`, `inboxTailscale`, `inboxTailscaleAllow`).
 
 ## Uninstall
 

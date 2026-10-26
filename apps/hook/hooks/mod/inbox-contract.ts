@@ -226,6 +226,42 @@ export function inboxReminderText(toolName: string = INBOX_TOOL_NAME, options: {
 }
 
 /**
+ * The most characters (UTF-16 code units, a string's `length`) a custom Inbox
+ * reminder may hold. Longer text is refused when saved and ignored when read,
+ * so the host falls back to the next text in line (the shared one, then the
+ * default).
+ */
+export const INBOX_REMINDER_MAX_CHARS = 4128
+
+/**
+ * The person's own reminder for a host, from config.json
+ * (`prompts.inbox.runtimes.<host>.reminder`, which wins, then the shared
+ * `prompts.inbox.reminder`), or null when neither holds usable text: a
+ * string with something besides whitespace, at most INBOX_REMINDER_MAX_CHARS
+ * long. Takes the parsed config.json object (anything else reads as unset).
+ */
+export function inboxReminderCustomText(config: unknown, host: string): string | null {
+  const record = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  const usable = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim() !== '' && value.length <= INBOX_REMINDER_MAX_CHARS ? value : null
+  const inbox = record(record(record(config)?.prompts)?.inbox)
+  if (!inbox) return null
+  return usable(record(record(inbox.runtimes)?.[host])?.reminder) ?? usable(inbox.reminder)
+}
+
+/**
+ * The reminder a host sends: the person's own text when there is one (it
+ * REPLACES the line, for hosts with the wake and without it alike, every
+ * whole word `plannotator_inbox` in it renamed to the tool as the host
+ * registered it), else exactly `inboxReminderText(toolName, options)`.
+ */
+export function inboxReminderFor(custom: string | null | undefined, toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean } = {}): string {
+  if (typeof custom !== 'string' || custom.trim() === '') return inboxReminderText(toolName, options)
+  return custom.replace(/(^|[^A-Za-z0-9_])plannotator_inbox(?![A-Za-z0-9_])/g, (_match: string, before: string) => before + toolName)
+}
+
+/**
  * The agent tool: name, description and input schema, built from the Inbox's
  * own tools. Null when it offers none. `wakes: false` for a host that cannot
  * deliver a reply as a turn (OpenCode 1): the description then says nothing

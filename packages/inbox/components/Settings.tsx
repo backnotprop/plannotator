@@ -7,6 +7,8 @@ import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
+import { PromptsSection, promptsSummary } from './PromptsSettings';
+import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox-types';
 import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
@@ -27,6 +29,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   agents: 'chip',
+  prompts: 'prompt',
   devices: 'phone',
   archived: 'archive',
   storage: 'disk',
@@ -86,6 +89,8 @@ export interface SettingsPageProps {
   /** Settings → Agents (components/AgentsSettings.tsx): the agents on this computer; null while unread. */
   agents?: InboxAgentsModel | null;
   onAgents?: (next: InboxAgentsModel) => void;
+  /** Settings → Prompts saved a change: the server's model of it. */
+  onPrompts?: (next: InboxPromptsSettings) => void;
 }
 
 /** A row's switch, named by its visible title. */
@@ -556,6 +561,7 @@ function StoreTable({
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
   storage: '',
@@ -658,6 +664,8 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'prompts':
+        return settings.prompts ? promptsSummary(settings.prompts) : '';
       case 'devices':
         if (phonesOn && phones.devices && phones.devices.length > 0) return plural(phones.devices.length, 'phone');
         return settings.tailscale?.on ? 'Over your tailnet' : '';
@@ -689,6 +697,16 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
+        break;
+      case 'prompts':
+        body = settings.prompts ? (
+          <PromptsSection prompts={settings.prompts} onPrompts={props.onPrompts} configFile={`${settings.data_dir}/config.json`} home={settings.home} />
+        ) : (
+          <div className="ib-card ib-sempty">
+            <Icon name="prompt" />
+            This Inbox is older than Settings → Prompts. Restart it to update.
+          </div>
+        );
         break;
       case 'devices':
         body = (
@@ -754,7 +772,7 @@ export function SettingsPage(props: SettingsPageProps) {
           <SidebarTrigger />
           <h1>Settings</h1>
         </div>
-        {[SETTINGS_SECTIONS.slice(0, 3), SETTINGS_SECTIONS.slice(3)].map((group, i) => (
+        {[SETTINGS_SECTIONS.slice(0, 4), SETTINGS_SECTIONS.slice(4)].map((group, i) => (
           <ul className="ib-card" key={i} aria-label={i === 0 ? 'Settings' : 'Your data and Plannotator'}>
             {group.map((id) => (
               <li key={id}>

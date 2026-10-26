@@ -95,6 +95,7 @@ import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -1493,6 +1494,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return experimentalState();
   };
 
+  /**
+   * Settings → Prompts: the Inbox reminder (config.json `prompts.inbox`) and
+   * the plan, review and annotate prompts. `on` per agent is what Settings →
+   * Agents shows: the reminder switch, with the Inbox tool (and, for Claude
+   * Code, its mod). Changing it is for this computer only: the text goes to
+   * every agent session here.
+   */
+  const promptsState = (via: RequestVia) => {
+    const config = loadConfig();
+    const env = agentEnvironment.env as NodeJS.ProcessEnv;
+    const modOff = !claudeCodeModOn(agentEnvironment);
+    const on = Object.fromEntries(
+      INBOX_TOOL_HOSTS.map((host) => [host, !(host === "claude-code" && modOff) && resolveInboxReminder(config, env, host)]),
+    ) as Record<InboxToolHost, boolean>;
+    // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
+    const wakes = { "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" };
+    return inboxPromptsModel(config, on, via === "local", wakes);
+  };
+
   /** What Settings and the connect snippets read. */
   const settingsModel = (via: RequestVia) => ({
     serverSession,
@@ -1526,6 +1546,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
+    /** Settings → Prompts: the Inbox reminder (editable on this computer) and the plan, review and annotate prompts. */
+    prompts: promptsState(via),
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
@@ -2296,12 +2318,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.diff_style === undefined &&
           body.experimental === undefined &&
           body.tour === undefined &&
+          body.prompts === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, diff_style, experimental, tour, update_check or auto_update is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, diff_style, experimental, tour, prompts, update_check or auto_update is required.");
         }
         // Updating changes this computer: never from a page that came through the tailnet.
         if (updateSwitches && via === "tailnet") return localOnly();
+        // The reminder goes to every agent session on this computer: changed only here, like Settings → Agents.
+        if (body.prompts !== undefined && via === "tailnet") return localOnly();
+        const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
         let tailscaleChange: { on: boolean; replaceExposed: boolean } | undefined;
         if (body.tailscale !== undefined) {
           const value = body.tailscale as { on?: unknown; replace_exposed?: unknown } | null;
@@ -2342,7 +2368,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const diffStyle = body.diff_style === undefined ? diffStyleState() : saveDiffStyle(body.diff_style);
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour });
+        if (promptsChange) saveInboxPromptsChange(promptsChange);
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, prompts: promptsState(via) });
       }
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
       if (path === "/api/inbox/sound/dialog") {

@@ -26,6 +26,8 @@ import type {
   InboxReplyDraftRow,
   InboxDraftStatus,
   InboxUpload,
+  InboxPromptsChange,
+  InboxPromptsSettings,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import type { RecipientConnection } from './deliveryLine';
@@ -230,6 +232,8 @@ export interface SettingsModel {
   experimental?: InboxExperimentalSettings;
   /** The onboarding tour (config.json `inboxTour`): started, finished, skipped. Absent from an Inbox that predates it. */
   tour?: InboxTourState;
+  /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
+  prompts?: InboxPromptsSettings;
   store: {
     dir: string;
     bytes: number;
@@ -732,6 +736,8 @@ export const inboxApi = {
   saveTheme: (theme: InboxThemeConfig) => post<{ theme: InboxThemeConfig | null }>('/api/inbox/settings', { theme }),
   /** The onboarding tour: each `true` stamps now (started, finished, skipped); `notify_again` sets the first thread's ask. */
   saveTour: (change: InboxTourChange) => post<{ tour: InboxTourState }>('/api/inbox/settings', { tour: change }),
+  /** Settings → Prompts: set (a string) or delete (null) the Inbox reminder, shared or one agent's. */
+  savePrompts: (change: InboxPromptsChange) => post<{ prompts: InboxPromptsSettings }>('/api/inbox/settings', { prompts: change }),
   /** The tour's curated fixture (packages/inbox/tour/content/fixture.json), served from the binary on demand. */
   tourFixture: () => get<unknown>('/api/inbox/tour/fixture.json'),
   /** The window's text size, written to config.json `inboxTextSize`. */

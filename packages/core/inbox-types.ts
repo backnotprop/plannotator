@@ -1875,3 +1875,68 @@ export function inboxEngineTooOldForSendNow(version: string | null | undefined):
   }
   return false;
 }
+
+/**
+ * Settings → Prompts (approval "inbox-prompts-page", #2194): what Plannotator
+ * tells agents, as `GET /api/inbox/settings` carries it in `prompts`.
+ */
+export const INBOX_PROMPT_HOSTS = ["claude-code", "pi", "opencode"] as const;
+export type InboxPromptHost = (typeof INBOX_PROMPT_HOSTS)[number];
+
+/** One of the plan, review and annotate prompts (config.json `prompts.<group>.<name>`), read-only in the window. */
+export interface InboxPromptItem {
+  /** `prompts.<group>.<name>`, the config.json key. */
+  key: string;
+  group: "plan" | "review" | "annotate";
+  /** The group's heading: Plan, Code review, Annotate. */
+  group_label: string;
+  label: string;
+  /** Plannotator's own text. */
+  default: string;
+  /** The text in effect for an agent without its own: config.json's, else the default. */
+  text: string;
+  /** config.json sets this prompt (the shared text, or one agent's own). */
+  custom: boolean;
+  /** The agents config.json gives their own text for this prompt (`prompts.<group>.runtimes.<agent>.<name>`). */
+  runtimes: string[];
+  /** A fact about the default, shown while it is in effect ("OpenCode has a shorter default."). */
+  note: string | null;
+}
+
+export interface InboxPromptsSettings {
+  /** The Inbox reminder at session start (config.json `prompts.inbox`). */
+  reminder: {
+    /** `prompts.inbox.reminder`: the person's shared text, or null (the default). */
+    shared: string | null;
+    /** `prompts.inbox.runtimes.<agent>.reminder`: an agent's own text (it wins), or null. */
+    runtimes: Record<InboxPromptHost, string | null>;
+    /** The built-in lines: for hosts whose reply comes back by itself, and for those without it (OpenCode 1). */
+    defaults: { wake: string; no_wake: string };
+    /** The most characters a custom reminder may hold; a longer one is refused. */
+    max: number;
+    /** Whether each agent gets a reminder at all (`inboxReminder`, with the Inbox tool). */
+    on: Record<InboxPromptHost, boolean>;
+    /**
+     * Whether each agent's reply comes back by itself, so its default is `defaults.wake`;
+     * false: the no-wake default (OpenCode 1). Absent from an older Inbox: all true.
+     */
+    wakes?: Record<InboxPromptHost, boolean>;
+    /**
+     * Text config.json holds that is over `max` and so is ignored (the agent gets the
+     * next text in line): its length, else null. Absent from an older Inbox.
+     */
+    over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
+    /** Whether this page may change it: false through the tailnet (it reaches every agent on this computer). */
+    editable: boolean;
+  };
+  /** The plan, review and annotate prompts, in the order the page lists them. */
+  others: InboxPromptItem[];
+}
+
+/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text, null (or blank) deletes the key. */
+export interface InboxPromptsChange {
+  inbox: {
+    reminder?: string | null;
+    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
+  };
+}

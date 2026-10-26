@@ -52,7 +52,7 @@ import type { Host, HttpResult, LoadedPluginInfo } from './host'
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
-  inboxReminderText,
+  inboxReminderFor,
   inboxToolCall,
   inboxToolCallParams,
   inboxToolResultText,
@@ -113,13 +113,14 @@ export const INBOX_REMINDER_BLOCK = 'plannotatorInbox'
 
 /**
  * The first message's context blocks with the Inbox reminder last
- * (`inboxReminderText(toolName)`: fixed text naming the tool as the engine
- * registered it, so tool search finds the deferred tool). Never twice: a
- * block of that name already there (a hook above added it) is left as it is.
+ * (`inboxReminderFor(custom, toolName)`: the person's own text from
+ * config.json, else the fixed line, naming the tool as the engine registered
+ * it, so tool search finds the deferred tool). Never twice: a block of that
+ * name already there (a hook above added it) is left as it is.
  */
-export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[], toolName: string): Array<T | { name: string; text: string }> {
+export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[], toolName: string, custom: string | null = null): Array<T | { name: string; text: string }> {
   if (blocks.some((block) => block?.name === INBOX_REMINDER_BLOCK)) return [...blocks]
-  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: inboxReminderText(toolName) }]
+  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: inboxReminderFor(custom, toolName) }]
 }
 
 /**
@@ -205,14 +206,13 @@ export function reminderSessionResumed(startedAt: unknown, processStartedAt: num
  * The value of `PLANNOTATOR_INBOX_REMINDER`: the reminder naming the tool by
  * its registered full name while the reminder is on, else undefined (unset,
  * which also clears a value inherited from a parent Claude Code). The hook
- * prints it with `echo`, so a value with a backslash (dash's `echo` reads
- * escapes) or a leading `-` is never published; neither occurs in the fixed
- * text or an engine-made tool name.
+ * prints it with `printf "%s\n"` (hooks.json), so every byte comes out as it
+ * is, a custom text's backslashes, leading `-`, `%`, quotes and `$(...)`
+ * included, and nothing in it runs.
  */
-export function inboxReminderEnvValue(on: boolean, toolName: string | null): string | undefined {
+export function inboxReminderEnvValue(on: boolean, toolName: string | null, custom: string | null = null): string | undefined {
   if (!on || !toolName) return undefined
-  const text = inboxReminderText(toolName)
-  return text.includes('\\') || text.startsWith('-') ? undefined : text
+  return inboxReminderFor(custom, toolName)
 }
 
 /** `$.store` key: the Inbox tool list last read live, used when the Inbox is stopped at session start. */

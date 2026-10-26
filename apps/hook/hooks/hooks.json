@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo \"$PLANNOTATOR_INBOX_REMINDER\"",
+            "command": "set \\' ; printf \"%s\\n\" \"$PLANNOTATOR_INBOX_REMINDER\" ; : ' #'",
             "timeout": 5
           }
         ]

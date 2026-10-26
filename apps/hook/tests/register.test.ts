@@ -599,6 +599,31 @@ describe('register', () => {
     expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
   })
 
+  // #2194: config.json `prompts.inbox`. Without a usable one, the bytes are today's.
+  test('prompts.inbox unset (other prompts set, a blank reminder, another agent\'s own): the block and the variable are today\'s, byte for byte', async ($: any, on: any) => {
+    const files = withRegistry()
+    files.set('/home/me/.plannotator/config.json', JSON.stringify({ prompts: { review: { denied: 'Check.' }, inbox: { reminder: '  ', runtimes: { pi: { reminder: 'Pi only.' } } } } }))
+    const w = world(on, { files, fetch: inbox(TOOLS, []) })
+    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    await $.session.start(SESSION)
+    const today = `Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with ${INBOX_TOOL} send_message and keep going. Their reply comes back here. Run \`plannotator inbox --help\` for how it works.`
+    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([{ name: 'plannotatorInbox', text: today }])
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(today)
+  })
+
+  test('prompts.inbox set: Claude Code\'s own text replaces the block, plannotator_inbox in it named as the engine registered it', async ($: any, on: any) => {
+    const files = withRegistry()
+    files.set('/home/me/.plannotator/config.json', JSON.stringify({ prompts: { inbox: { reminder: 'Shared.', runtimes: { 'claude-code': { reminder: 'Ask your upstream session first; plannotator_inbox only when it is gone.' } } } } }))
+    const w = world(on, { files, fetch: inbox(TOOLS, []) })
+    on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
+    await $.session.start(SESSION)
+    const own = `Ask your upstream session first; ${INBOX_TOOL} only when it is gone.`
+    const first = await $.prompt.context({ blocks: [{ name: 'currentDate', text: '2026-10-26' }] })
+    expect(first.blocks).toEqual([{ name: 'currentDate', text: '2026-10-26' }, { name: 'plannotatorInbox', text: own }])
+    expect(await $.prompt.context({ blocks: [{ name: 'currentDate', text: '2026-10-26' }] })).toEqual(first)
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBe(own)
+  })
+
   test('no inbox/inbox.json yet: the tool, but no reminder (it speaks only for an Inbox that has run here)', async ($: any, on: any) => {
     const w = world(on, { fetch: inbox(TOOLS, []) })
     on('prompt.context', ($: any, e: any) => ({ blocks: e.blocks }))
