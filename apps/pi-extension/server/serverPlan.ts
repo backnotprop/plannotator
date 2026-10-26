@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 
 import { contentHash, deleteDraft, loadDraft } from "../generated/draft.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent, type HostCloseOutcome } from "../generated/host-control.ts";
+import { QUESTIONS_UNANSWERED_CODE, unansweredQuestions, unansweredQuestionsMessage } from "../generated/question-block.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
@@ -570,6 +571,13 @@ export async function startPlanReviewServer(options: {
 			let draftGeneration: number | undefined;
 			if (isStaleRevision(body)) {
 				refuseStaleRevision(res);
+				return;
+			}
+			// Every question the agent did not settle needs an answer the
+			// approval carries; skipped ones count as unanswered.
+			const unanswered = unansweredQuestions(currentPlan, Array.isArray(body.questionAnswers) ? body.questionAnswers : []);
+			if (unanswered.length > 0) {
+				json(res, { error: unansweredQuestionsMessage(unanswered), code: QUESTIONS_UNANSWERED_CODE, unanswered }, 422);
 				return;
 			}
 			decisionClaimed = true;
