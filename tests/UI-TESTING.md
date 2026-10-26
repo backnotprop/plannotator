@@ -626,7 +626,7 @@ If you're stuck:
 
 1. Check this guide again
 2. Review existing code for patterns
-3. Look at `CLAUDE.md` for architecture details
+3. Look at `AGENTS.md` (the map) and the guides in `docs/agent-guides/` for architecture details
 4. Check `tests/README.md` for test script details
 5. Open an issue on GitHub with:
    - What you're trying to do

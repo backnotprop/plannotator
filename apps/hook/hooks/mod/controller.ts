@@ -1042,7 +1042,8 @@ export class PlannotatorMod {
    * its process, unless the reviewer's decision is already on disk or the pid
    * no longer names a plannotator process (`STOP_SCRIPT`). A decision such a
    * CLI is still publishing (it waits 1.5 s after the reviewer decides) cannot
-   * be seen and is lost; see "Version skew" in AGENTS.md.
+   * be seen and is lost; see "Version skew" in
+   * docs/agent-guides/claude-code-mod.md.
    */
   private async stopOlderCli(launch: LiveLaunch, id: string, subject: string): Promise<PlannotatorCloseOutcome> {
     const pid = (await this.host.readFile(fileIn(launch.dir, 'pid')).catch(() => '')).trim()

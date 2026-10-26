@@ -120,7 +120,7 @@ Where the door answers. On the loopback listener, the door sits beside the windo
 
 Corrected in P1 (from the review of PR 1776): the first draft kept tailnet requests on the door by their Host header, on the assumption that "through `tailscale serve` the Host is the MagicDNS name". It is the client's own Host: `tailscale serve` passes it through (`r.Out.Host = r.In.Host`), so a tailnet peer sending `Host: localhost` passed the loopback allowlist and reached the window's routes (the pairing offer, `/mcp`, settings, restart). The separation now comes from the socket, as the LAN listener's does, and no Host is read for it.
 
-The allowlist. Each row is the window's handler as it is today, with the request and answer the window uses (`CLAUDE.md`, "Inbox Server"). Exchange numbers point at section 7.
+The allowlist. Each row is the window's handler as it is today, with the request and answer the window uses (`docs/agent-guides/server-and-storage.md`, "Inbox Server"). Exchange numbers point at section 7.
 
 | Door route | Window route | Request | Answer | Exchange |
 |---|---|---|---|---|
@@ -1056,7 +1056,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/messages/msg_01K7000000000000000000004
 curl -sS "$INBOX/api/inbox/device/search?q=retry%20budget&status=waiting" -H "Authorization: Bearer $TOKEN"
 ```
 
-The window's answer unchanged (CLAUDE.md, "Search"): `{ "serverSession": "…", "q": "retry budget", "terms": ["retry", "budget"], "took_ms": 4, "indexing": false, "threads": 412, "totals": { "threads": 1, "messages": 2, "files": 0, "projects": 0 }, "groups": { "threads": [ { "type": "thread", "id": "msg_01K70000000000000000000040", "...": "" } ], "...": "" }, "recent": null }`. The first search after a start may answer `indexing: true` with `groups: null`: ask again a moment later. A bad parameter: `422`.
+The window's answer unchanged (`docs/agent-guides/inbox-notifications-and-agents.md`, "Search"): `{ "serverSession": "…", "q": "retry budget", "terms": ["retry", "budget"], "took_ms": 4, "indexing": false, "threads": 412, "totals": { "threads": 1, "messages": 2, "files": 0, "projects": 0 }, "groups": { "threads": [ { "type": "thread", "id": "msg_01K70000000000000000000040", "...": "" } ], "...": "" }, "recent": null }`. The first search after a start may answer `indexing: true` with `groups: null`: ask again a moment later. A bad parameter: `422`.
 
 ### 7.43 Mark a project read
 
