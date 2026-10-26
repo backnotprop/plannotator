@@ -6,9 +6,11 @@
  * store.ts and model.ts). The height is `rowHeight` or, when the text is
  * larger, the measured height of a line of row text plus padding, so
  * text-only zoom and a minimum font size never overlap rows. Rows look
- * like the sidebar FileBrowser's (13 px muted file names, 11 px folder rows
- * with a chevron and folder icon, `+N -N`, status letters, comment counts),
- * with indent guides drawn the way VS Code's default does (`onHover`: only
+ * like the sidebar FileBrowser's (muted names, a chevron and folder icon,
+ * `+N -N`, status letters, comment counts) set the way VS Code's explorer
+ * sets them: one 13 px size for files and folders, file icons in the folder
+ * icons' column, indent and guides on the inline start side (right-to-left
+ * pages mirror), indent guides drawn the way VS Code's default does (`onHover`: only
  * while the pointer is over the tree; also while the tree has keyboard focus,
  * and always on a screen without hover, #2062), the open file's folder guide a
  * little stronger.
@@ -22,21 +24,23 @@
  * Everything kept across changes is kept by path, since node ids change when
  * a sliced build lands or a snapshot rebuilds: the focused row, a pending
  * reveal, and the row at the top of the view (a change above it moves
- * scrollTop by the change in its row, so what is on screen stays put).
+ * scrollTop by the change in its row, so what is on screen stays put; so does
+ * a change of row height). A filter set while a sliced build runs shows a
+ * quiet "Indexing…" line until the index lands (`aria-busy` meanwhile).
  *
  * Layout reads: `scrollTop` (scroll events), the viewport's `clientHeight` and
  * the text probe's `offsetHeight` (once at mount, then on ResizeObserver
  * callbacks). A cut-off name reads its own width only when the pointer rests
  * on it (HostTitle `cut`).
  */
-import React, { forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { HostTitle } from '../HostTitle';
 import { CountBadge } from '../sidebar/CountBadge';
 import { ROOT, type FileTreeModel, type FileTreeRow } from './model';
 import type { FileTreeBadge, FileTreeMarkerTone, FileTreeStore, FileTreeTone } from './store';
 
 export const FILE_TREE_ROW_HEIGHT = 22;
-export const FILE_TREE_TOUCH_ROW_HEIGHT = 36;
+export const FILE_TREE_TOUCH_ROW_HEIGHT = 44;
 export const FILE_TREE_INDENT = 8;
 
 /** What an icon renderer is told about a row. */
@@ -52,7 +56,8 @@ export interface FileTreeHandle {
   /**
    * Expand the folders above `path`, scroll its row into view (centred when it
    * was out of view) and make it the focused row. False when the path is not
-   * in the tree.
+   * in the tree or the filter hides it. While a sliced build runs, a path not
+   * there yet is revealed once the index lands (true).
    */
   revealPath(path: string, options?: { focus?: boolean }): boolean;
   /** Move keyboard focus into the tree. */
@@ -71,7 +76,7 @@ export interface FileTreeProps {
   renderIcon?: (info: FileTreeIconInfo) => React.ReactNode;
   /**
    * Row height in px, a minimum: rows grow with the text when it is larger
-   * (text-only zoom, a minimum font size). Default 22, or 36 on a touch screen.
+   * (text-only zoom, a minimum font size). Default 22, or 44 on a touch screen.
    */
   rowHeight?: number;
   /** Indent per level in px. Default 8 (FileBrowser uses 14). */
@@ -81,17 +86,15 @@ export interface FileTreeProps {
   /** The tree's accessible name. */
   label?: string;
   /** Words for screen readers. */
-  labels?: { markedBelow?: string };
+  labels?: { markedBelow?: string; indexing?: string };
   className?: string;
   style?: React.CSSProperties;
 }
 
-/** Left padding inside a row before level 0. */
+/** Padding inside a row, on the inline start side, before level 0. */
 const PAD = 8;
-/** The chevron column (FileBrowser's w-3). */
+/** The chevron column (FileBrowser's w-3). Files keep it empty, so file and folder icons line up. */
 const TWISTIE = 12;
-/** A file row starts its icon here past the folder's chevron (FileBrowser's paddingLeft + 15). */
-const FILE_SHIFT = 15;
 
 const LETTER_TONE: Record<FileTreeTone, string> = {
   added: 'text-success',
@@ -112,7 +115,7 @@ const MARKER_TONE: Record<FileTreeMarkerTone, string> = {
 
 function Chevron({ open }: { open: boolean }) {
   return (
-    <svg className={`w-3 h-3 flex-shrink-0 ${open ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+    <svg className={`w-3 h-3 flex-shrink-0 ${open ? 'rotate-90' : 'rtl:-scale-x-100'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
     </svg>
   );
@@ -184,10 +187,10 @@ const RowView = memo(function RowView(p: RowViewProps) {
   const guideLeft = PAD + TWISTIE / 2;
   const disabled = p.badge?.disabled === true;
   const marker = p.badge?.marker;
-  const nameText = p.touch ? 'text-[15px]' : p.isDir ? 'text-[11px]' : 'text-[13px]';
+  const nameText = p.touch ? 'text-[15px]' : 'text-[13px]';
   const base = p.isDir
-    ? 'gap-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/50'
-    : `gap-2 text-muted-foreground ${disabled ? 'opacity-70 cursor-default' : 'hover:bg-muted hover:text-foreground'}`;
+    ? 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+    : `text-muted-foreground ${disabled ? 'opacity-70 cursor-default' : 'hover:bg-muted hover:text-foreground'}`;
   const tint = p.selected ? 'bg-primary/30 text-primary hover:bg-primary/30 hover:text-primary' : !p.isDir && p.count > 0 ? 'bg-primary/[0.08]' : '';
   return (
     <div
@@ -204,16 +207,16 @@ const RowView = memo(function RowView(p: RowViewProps) {
       data-path={p.path}
       data-selected={p.selected || undefined}
       data-ring={p.ring || undefined}
-      className={`absolute inset-x-1 flex items-center pr-2 rounded-sm select-none whitespace-nowrap cursor-pointer data-[ring]:outline data-[ring]:outline-1 data-[ring]:-outline-offset-1 data-[ring]:outline-ring ${base} ${tint} ${nameText}`}
-      style={{ top: p.index * p.height, height: p.height, paddingLeft: p.isDir ? left : left + FILE_SHIFT }}
+      className={`absolute inset-x-1 flex items-center gap-1.5 pe-2 rounded-sm select-none whitespace-nowrap cursor-pointer data-[ring]:outline data-[ring]:outline-1 data-[ring]:-outline-offset-1 data-[ring]:outline-ring ${base} ${tint} ${nameText}`}
+      style={{ top: p.index * p.height, height: p.height, paddingInlineStart: left }}
     >
       {p.depth > 0 && (
         <span
           aria-hidden
           data-guides
-          className="pointer-events-none absolute inset-y-0 opacity-0 transition-opacity duration-100 motion-reduce:transition-none group-hover/ft:opacity-100 group-focus-visible/ft:opacity-100 [@media(hover:none)]:opacity-100"
+          className="pointer-events-none absolute inset-y-0 opacity-0 transition-opacity duration-100 motion-reduce:transition-none group-hover/ft:opacity-100 group-focus-visible/ft:opacity-100 [@media(hover:none)]:opacity-100 rtl:-scale-x-100"
           style={{
-            left: guideLeft,
+            insetInlineStart: guideLeft,
             width: p.depth * p.indent,
             backgroundImage: `repeating-linear-gradient(to right, var(--ft-guide) 0 1px, transparent 1px ${p.indent}px)`,
           }}
@@ -224,15 +227,15 @@ const RowView = memo(function RowView(p: RowViewProps) {
           aria-hidden
           data-guide-strong
           className="pointer-events-none absolute inset-y-0 w-px opacity-0 transition-opacity duration-100 motion-reduce:transition-none group-hover/ft:opacity-100 group-focus-visible/ft:opacity-100 [@media(hover:none)]:opacity-100"
-          style={{ left: guideLeft + p.strongLevel * p.indent, background: 'var(--ft-guide-strong)' }}
+          style={{ insetInlineStart: guideLeft + p.strongLevel * p.indent, background: 'var(--ft-guide-strong)' }}
         />
       )}
-      {p.isDir && <Chevron open={p.expanded} />}
+      {p.isDir ? <Chevron open={p.expanded} /> : <span aria-hidden className="w-3 flex-shrink-0" />}
       {icon != null && icon !== false && icon}
       <HostTitle title={p.displayName} cut>
-        <span dir="auto" className={`truncate min-w-0 ${p.isDir ? '' : 'flex-1'} ${p.badge?.struck ? 'line-through' : ''}`}>{p.displayName}</span>
+        <span dir="auto" className={`truncate min-w-0 flex-1 ${p.badge?.struck ? 'line-through' : ''}`}>{p.displayName}</span>
       </HostTitle>
-      <span className="ml-auto flex flex-shrink-0 items-center gap-1.5 text-[10px]">
+      <span className="ms-auto flex flex-shrink-0 items-center gap-1.5 text-[10px]">
         {marker && (
           <span
             role={marker.label ? 'img' : undefined}
@@ -269,6 +272,25 @@ function strongGuide(model: FileTreeModel, selected: number): { level: number; f
   return { level: model.depthOf(owner), from: at + 1, to: at + model.rowsUnder(owner) };
 }
 
+/**
+ * Where focus goes when its row is gone: the row now in its place while that
+ * is inside the nearest folder above the gone path that is still in the tree
+ * (a whole folder removed keeps focus near where it was), else that folder.
+ */
+function focusAfterRemoval(model: FileTreeModel, path: string, lastIndex: number): number {
+  const total = model.rowCount;
+  const inPlace = model.rowAt(clamp(lastIndex, 0, total - 1));
+  let ancestor = -1;
+  for (let cut = path.lastIndexOf('/'); cut > 0; cut = path.lastIndexOf('/', cut - 1)) {
+    ancestor = model.find(path.slice(0, cut));
+    if (ancestor > ROOT) break;
+  }
+  if (ancestor <= ROOT) return inPlace;
+  if (!model.isVisible(ancestor)) return model.visibleAncestor(ancestor);
+  for (let n = inPlace; n > ROOT; n = model.parentOf(n)) if (n === ancestor) return inPlace;
+  return ancestor;
+}
+
 const TYPEAHEAD_MS = 700;
 /** Room left around a line of text when the text, not `rowHeight`, sets the row height. */
 const ROW_TEXT_PADDING = 2;
@@ -286,6 +308,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const probeRef = useRef<HTMLSpanElement>(null);
   const scrollTopRef = useRef(0);
   const [firstRow, setFirstRow] = useState(0);
+  /** A render after scrollTop was set in code: the row number may be the same while the row height is not. */
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [viewH, setViewH] = useState(0);
   const [textH, setTextH] = useState(0);
   const [focusPath, setFocusPath] = useState<string | null>(null);
@@ -296,7 +320,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const pendingReveal = useRef<string | null>(null);
   const typeahead = useRef({ text: '', at: 0 });
   /** The row at the top of the view, by path, so a change above it does not move what is on screen. */
-  const anchor = useRef<{ path: string; offset: number; version: number } | null>(null);
+  const anchor = useRef<{ path: string; offset: number; version: number; h: number } | null>(null);
 
   // Row height follows the text: a hidden line of row text is measured once and
   // again whenever it changes size (text-only zoom, a minimum font size, a font
@@ -323,20 +347,27 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     return () => ro.disconnect();
   }, []);
 
-  const total = model.rowCount;
+  // A filter waiting for a sliced build has no rows yet: the tree says "Indexing…".
+  const pending = tree.filterPending;
+  const total = pending ? 0 : model.rowCount;
   // A hidden or not-yet-measured tree draws 30 rows rather than none.
   const viewport = viewH > 0 ? viewH : 30 * h;
   const pageRows = Math.max(1, Math.floor(viewport / h));
-  const top = clamp(firstRow, 0, Math.max(0, total - pageRows));
+  // The window comes from scrollTop and the row height in use, never a row
+  // number worked out with an earlier height (a height change would blank it).
+  // `firstRow` is what re-renders on scroll.
+  void firstRow;
+  const top = clamp(Math.floor(scrollTopRef.current / h), 0, Math.max(0, total - pageRows));
   const start = Math.max(0, top - overscan);
   const end = Math.min(total, top + pageRows + 1 + overscan);
-  const rows: FileTreeRow[] = model.rows(start, end - start);
+  const rows: FileTreeRow[] = pending ? [] : model.rows(start, end - start);
 
   // The focused row, kept by path: hidden under a closed folder → that folder;
-  // gone → the row now in its place.
-  let focus = focusPath === null ? -1 : model.find(focusPath);
+  // gone → the row now in its place while that is still inside the nearest
+  // folder above it that is left, else that folder.
+  let focus = focusPath === null || pending ? -1 : model.find(focusPath);
   if (focus > ROOT && !model.isVisible(focus)) focus = model.visibleAncestor(focus);
-  if (focusPath !== null && focus <= ROOT && total > 0) focus = model.rowAt(clamp(lastFocusIndex.current, 0, total - 1));
+  if (focusPath !== null && !pending && focus <= ROOT && total > 0) focus = focusAfterRemoval(model, focusPath, lastFocusIndex.current);
   const focusIndex = focus > ROOT ? model.indexOfId(focus) : -1;
   if (focusIndex >= 0) lastFocusIndex.current = focusIndex;
   // The focused row is always in the DOM, so aria-activedescendant never points at nothing.
@@ -356,6 +387,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       scrollTopRef.current = next;
       if (el) el.scrollTop = next;
       setFirstRow(Math.floor(next / h));
+      redraw();
     },
     [total, h, viewport],
   );
@@ -378,18 +410,34 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   // top row for next time.
   useLayoutEffect(() => {
     const a = anchor.current;
-    if (a && a.version !== version && scrollTopRef.current > 0) {
+    const el = scrollRef.current;
+    let hostScrolled = false;
+    if (a && a.version !== version && el) {
+      // A host that set scrollTop in the same task as the change (its scroll
+      // event has not come yet): its position wins. A scrollTop the browser
+      // clamped because the tree got shorter is not the host's.
+      const actual = el.scrollTop;
+      const max = el.scrollHeight - el.clientHeight;
+      const clamped = actual < scrollTopRef.current && actual >= max - 1;
+      if (Math.abs(actual - scrollTopRef.current) > 1 && !clamped) {
+        hostScrolled = true;
+        scrollTopRef.current = actual;
+        setFirstRow(Math.floor(actual / h));
+        redraw();
+      }
+    }
+    if (a && !hostScrolled && (a.version !== version || a.h !== h) && scrollTopRef.current > 0) {
       let id = model.find(a.path);
       if (id > ROOT && !model.isVisible(id)) id = model.visibleAncestor(id);
       const at = id > ROOT ? model.indexOfId(id) : -1;
       if (at >= 0) {
-        const y = at * h + a.offset;
+        const y = at * h + (a.h === h ? a.offset : Math.round((a.offset * h) / a.h));
         if (y !== scrollTopRef.current) scrollTo(y);
       }
     }
     const topIndex = Math.floor(scrollTopRef.current / h);
-    const topId = model.rowAt(clamp(topIndex, 0, total - 1));
-    anchor.current = topId > ROOT ? { path: model.pathOf(topId), offset: scrollTopRef.current - topIndex * h, version } : null;
+    const topId = total > 0 ? model.rowAt(clamp(topIndex, 0, total - 1)) : -1;
+    anchor.current = topId > ROOT ? { path: model.pathOf(topId), offset: scrollTopRef.current - topIndex * h, version, h } : null;
   }, [version, model, h, total, scrollTo, firstRow]);
 
   // Focus held on a row that is gone or hidden moves for good to the row that shows it.
@@ -410,15 +458,17 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
 
   useImperativeHandle(ref, () => {
     const revealPath = (path: string, options?: { focus?: boolean }): boolean => {
-      if (tree.model.find(path) <= ROOT) {
-        // While a sliced build runs the path may not be in the preview yet: reveal it once the index lands.
+      if (tree.filterPending || tree.model.find(path) <= ROOT) {
+        // While a sliced build runs the path may not be in the preview yet (or
+        // a filter waits for the index): reveal it once the index lands.
         if (!tree.loading) return false;
         void tree.whenReady().then(() => {
-          if (tree.model.find(path) > ROOT) revealPath(path, options);
+          if (!tree.loading && tree.model.find(path) > ROOT) revealPath(path, options);
         });
         return true;
       }
-      tree.reveal(path);
+      // A path the filter hides is not revealed, and opens nothing.
+      if (tree.reveal(path) < 0) return false;
       if (options?.focus !== false) setFocusPath(tree.model.pathOf(tree.model.find(path)));
       pendingReveal.current = path;
       setRevealTick((t) => t + 1);
@@ -477,7 +527,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || pending) return;
     const cur = focusIndex;
     const id = focus;
     let handled = true;
@@ -559,6 +609,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const ringId = hasFocus && keyboard ? focus : -1;
   const activeDescendant = hasFocus && focusIndex >= 0 ? `${domPrefix}-${focus}` : undefined;
   const dotLabel = labels?.markedBelow ?? 'Contains changes';
+  const indexingId = `${domPrefix}-indexing`;
 
   const treeStyle = useMemo(
     () =>
@@ -578,6 +629,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       aria-label={label}
       aria-activedescendant={activeDescendant}
       aria-busy={tree.loading || undefined}
+      aria-describedby={pending ? indexingId : undefined}
       tabIndex={0}
       data-file-tree=""
       className={`group/ft relative h-full overflow-auto outline-none ${className ?? ''}`}
@@ -596,10 +648,16 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
         ref={probeRef}
         aria-hidden
         data-ft-probe=""
-        className={`pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap ${touch ? 'text-[15px]' : 'text-[13px]'}`}
+        className={`pointer-events-none invisible absolute start-0 top-0 whitespace-nowrap ${touch ? 'text-[15px]' : 'text-[13px]'}`}
       >
         Ag
       </span>
+      {pending && (
+        // Read through aria-describedby (a tree holds tree items only).
+        <div id={indexingId} aria-hidden data-ft-indexing="" className={`px-3 text-muted-foreground/70 ${touch ? 'text-[15px]' : 'text-[13px]'}`} style={{ lineHeight: `${h}px` }}>
+          {labels?.indexing ?? 'Indexing…'}
+        </div>
+      )}
       <div role="presentation" style={{ position: 'relative', height: total * h, minHeight: '100%' }}>
         {rows.map((r) => {
           const path = model.pathOf(r.id);

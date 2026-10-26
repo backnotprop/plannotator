@@ -8,15 +8,18 @@
  * `add` / `remove` (or `setPaths` with a fresh snapshot).
  *
  * Built in slices (`sliced: true`, what `useFileTree` asks for): a large list
- * first shows a small index of its top-level entries, which is exactly what
- * the tree shows with nothing open, then builds the full index a few
- * milliseconds at a time between tasks and swaps it in. Changes made in the
- * meantime are applied to both. The swap gives every node a new id, which is
- * why everything outside the model (focus, reveal, scroll anchor) is kept by
- * path.
+ * first shows a small index of the rows the tree shows at the start (its
+ * top-level entries, and what is inside the folders given as open), then
+ * builds the full index a few milliseconds at a time between tasks and swaps
+ * it in. The build starts once someone uses the store (`subscribe`,
+ * `whenReady` or `resume`). Changes made in the meantime are applied to both;
+ * a filter set meanwhile waits for the full index (`filterPending`). A large
+ * snapshot (`setPaths` changing over a quarter of the paths) is built the
+ * same way. The swap gives every node a new id, which is why everything
+ * outside the model (focus, reveal, scroll anchor) is kept by path.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { FileTreeModel, normalizeTreePath, ROOT, type FileTreeValues } from './model';
+import { FileTreeModel, isPlainPath, normalizeTreePath, ROOT, type FileTreeValues } from './model';
 import { treeFilterTest } from './filter';
 
 /** Colour family for a status letter (FileBrowser's git letters). */
@@ -74,22 +77,65 @@ function badgeValues(badges: ReadonlyMap<string, FileTreeBadge> | null): Map<str
   return out;
 }
 
-/** The top-level entries of a path list: what the tree shows with nothing open. */
-function topLevel(paths: readonly string[]): string[] {
+/** A preview with more rows than this is built as part of the full index instead (see `visibleEntries`). */
+const PREVIEW_MAX = 20_000;
+
+/**
+ * The entries a path list shows with only `expanded` open: each path cut at
+ * its first folder that is not open (a folder entry ends in `/`). With
+ * nothing open these are the top-level entries. Null when there are more
+ * than `max` (the preview would cost as much as the index).
+ */
+function visibleEntries(paths: readonly string[], expanded: ReadonlySet<string>, max: number): string[] | null {
   const seen = new Set<string>();
+  const open = expanded.size > 0;
   for (const p of paths) {
-    // A plain path (most of a folder walk) needs only its first slash.
-    if (p.length > 0 && p.charCodeAt(0) !== 47 && p.charCodeAt(0) !== 46 && !p.includes('//') && !p.endsWith('/')) {
-      const slash = p.indexOf('/');
-      seen.add(slash < 0 ? p : `${p.slice(0, slash)}/`);
-      continue;
+    if (isPlainPath(p)) {
+      let start = 0;
+      for (;;) {
+        const slash = p.indexOf('/', start);
+        if (slash < 0) {
+          seen.add(p);
+          break;
+        }
+        if (!open || !expanded.has(p.slice(0, slash))) {
+          seen.add(p.slice(0, slash + 1));
+          break;
+        }
+        start = slash + 1;
+      }
+    } else {
+      const norm = normalizeTreePath(p);
+      if (!norm) continue;
+      const segs = norm.segments;
+      let key = '';
+      for (let i = 0; i < segs.length; i++) {
+        key = i === 0 ? segs[0] : `${key}/${segs[i]}`;
+        const last = i === segs.length - 1;
+        if (last) {
+          seen.add(norm.dir ? `${key}/` : key);
+          break;
+        }
+        if (!open || !expanded.has(key)) {
+          seen.add(`${key}/`);
+          break;
+        }
+      }
     }
-    const norm = normalizeTreePath(p);
-    if (!norm) continue;
-    const top = norm.segments[0];
-    seen.add(norm.segments.length > 1 || norm.dir ? `${top}/` : top);
+    if (seen.size > max) return null;
   }
   return [...seen];
+}
+
+/** Folder keys for a list of paths given as open. */
+function expandedKeys(paths: Iterable<string> | undefined): Set<string> {
+  const out = new Set<string>();
+  if (!paths) return out;
+  for (const p of paths) {
+    const key = normalizeTreePath(p)?.key;
+    if (key) out.add(key);
+  }
+  return out;
 }
 
 /** Run `fn` after the browser has had a turn (a message, not a 4 ms-clamped timer). */
@@ -111,32 +157,97 @@ function nextTurn(fn: () => void): () => void {
   return () => clearTimeout(t);
 }
 
-type Op = (model: FileTreeModel) => unknown;
+type FilterTest = (lowercasePath: string) => boolean;
+type Change = (model: FileTreeModel) => boolean | void;
+
+/**
+ * A change, kept while the index builds so it lands on the full index too.
+ * `expansion` changes only touch which folders are open; `paths` changes are
+ * replaced by a new snapshot; `other` is a host's `batch`, always kept.
+ */
+type Op =
+  | { kind: 'expansion' | 'paths' | 'other'; run: Change }
+  | { kind: 'values'; values: Map<string, FileTreeValues> }
+  | { kind: 'filter'; test: FilterTest | null };
+
+function applyOp(model: FileTreeModel, op: Op): boolean {
+  switch (op.kind) {
+    case 'filter':
+      if (op.test === null && !model.filtered) return false;
+      model.setFilter(op.test);
+      return true;
+    case 'values':
+      model.setValues(op.values);
+      return true;
+    default:
+      return op.run(model) !== false;
+  }
+}
+
+/**
+ * Drop filter changes a later one makes moot: a filter followed by another
+ * with only expansion changes between (those touch the filter's own open
+ * folders, which the next filter recomputes). Ten keystrokes typed while the
+ * index builds then cost one filter pass, not ten.
+ */
+function compactOps(ops: readonly Op[]): Op[] {
+  const out: Op[] = [];
+  for (const op of ops) {
+    if (op.kind === 'filter') {
+      let k = out.length - 1;
+      while (k >= 0 && out[k].kind === 'expansion') k--;
+      const prev = out[k];
+      if (prev && prev.kind === 'filter' && (prev.test !== null || k === out.length - 1)) out.length = k;
+    }
+    out.push(op);
+  }
+  return out;
+}
+
+interface BuildJob {
+  model: FileTreeModel;
+  steps: Generator<void, void, void>;
+  /** Building the index, then filling the filter's lowercase paths when a filter waits. */
+  phase: 'build' | 'filter';
+  /** The folders open when the build started. */
+  expanded: string[] | undefined;
+  /** The filter set when the build started. */
+  test: FilterTest | null;
+  /** Every change since, in order. */
+  ops: Op[];
+}
 
 export class FileTreeStore {
   private current: FileTreeModel;
-  /** A sliced build: the model being built, its steps, the filter when it started, and every change made since, in order. */
-  private building: { model: FileTreeModel; steps: Generator<void, void, void>; test: ((lc: string) => boolean) | null; ops: Op[] } | null = null;
+  private building: BuildJob | null = null;
   private cancelTurn: (() => void) | null = null;
+  /** The build runs only once someone uses the store (a subscriber, `whenReady` or `resume`), so a store made and dropped (React's StrictMode) costs no build. */
+  private active = false;
+  private paused = false;
+  private finalized = false;
   private readyWaiters: Array<() => void> = [];
   private filterQuery = '';
-  private test: ((lc: string) => boolean) | null = null;
+  private test: FilterTest | null = null;
   private version = 0;
   private listeners = new Set<() => void>();
   private badgeMap = new Map<string, FileTreeBadge>();
   private badgeSource: ReadonlyMap<string, FileTreeBadge> | null = null;
   private values = new Map<string, FileTreeValues>();
+  private sliced: boolean;
   private initialExpanded: string[] | undefined;
   readonly displayName: (name: string) => string;
 
   constructor(paths: Iterable<string> = [], options: FileTreeStoreOptions = {}) {
     this.displayName = options.displayName ?? ((name) => name);
     this.initialExpanded = options.expanded ? [...options.expanded] : undefined;
+    this.sliced = options.sliced ?? false;
     if (options.badges) this.indexBadges(options.badges);
     const list = Array.isArray(paths) ? (paths as string[]) : [...paths];
-    if (options.sliced && list.length >= SLICE_MIN_PATHS) {
-      this.current = new FileTreeModel(topLevel(list), { values: this.values });
-      this.startBuild(list);
+    const preview = this.sliced && list.length >= SLICE_MIN_PATHS ? visibleEntries(list, expandedKeys(this.initialExpanded), PREVIEW_MAX) : null;
+    if (preview) {
+      // The preview is exactly the rows the full tree shows at the start.
+      this.current = new FileTreeModel(preview, { expanded: this.initialExpanded, values: this.values });
+      this.startBuild(list, this.initialExpanded, null, []);
     } else {
       this.current = new FileTreeModel(list, { expanded: this.initialExpanded, values: this.values });
     }
@@ -147,33 +258,68 @@ export class FileTreeStore {
     return this.current;
   }
 
-  /** The full index is still being built (the tree shows the top-level entries). */
+  /** The full index is still being built (the tree shows its starting rows). */
   get loading(): boolean {
     return this.building !== null;
   }
 
-  /** Resolves once the full index is on screen. */
+  /** A filter is set and the index it needs is still being built: there are no filtered rows to show yet. */
+  get filterPending(): boolean {
+    return this.building !== null && this.test !== null;
+  }
+
+  /** Resolves once the full index is on screen (or the store was disposed for good). */
   whenReady(): Promise<void> {
-    if (!this.building) return Promise.resolve();
+    if (!this.building || this.finalized) return Promise.resolve();
+    this.activate();
     return new Promise((resolve) => this.readyWaiters.push(resolve));
   }
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
+    this.activate();
     return () => this.listeners.delete(listener);
   };
 
   getVersion = (): number => this.version;
 
-  /** Pause a build in progress (the component using the store unmounted). `resume` picks it up again. */
+  /**
+   * Pause a build in progress (the component using the store unmounted).
+   * `resume` picks it up again; when nothing resumes it within a turn (a real
+   * unmount, not React's StrictMode remount), anyone waiting on `whenReady`
+   * is let go.
+   */
   dispose(): void {
+    this.paused = true;
     this.cancelTurn?.();
     this.cancelTurn = null;
+    setTimeout(() => {
+      if (!this.paused) return;
+      this.finalized = true;
+      this.releaseWaiters();
+    }, 0);
   }
 
   /** Continue a build that `dispose` paused (React mounts effects twice in development). */
   resume(): void {
-    if (this.building && !this.cancelTurn) this.cancelTurn = nextTurn(() => this.pump());
+    this.paused = false;
+    this.finalized = false;
+    this.activate();
+  }
+
+  private activate(): void {
+    this.active = true;
+    this.schedule();
+  }
+
+  private schedule(): void {
+    if (this.building && this.active && !this.paused && !this.cancelTurn) this.cancelTurn = nextTurn(() => this.pump());
+  }
+
+  private releaseWaiters(): void {
+    const waiters = this.readyWaiters;
+    this.readyWaiters = [];
+    for (const w of waiters) w();
   }
 
   private commit(): void {
@@ -181,87 +327,138 @@ export class FileTreeStore {
     for (const listener of this.listeners) listener();
   }
 
-  /** Apply `op` to the tree on screen and, while a build runs, to the index being built. */
+  /**
+   * Apply a change to the tree on screen and, while a build runs, keep it for
+   * the index being built. While a filter waits for the index, the preview
+   * (never filtered) is left alone: the change only makes sense on the
+   * filtered tree.
+   */
   private run(op: Op): boolean {
-    this.building?.ops.push(op);
-    const changed = op(this.current) !== false;
+    const job = this.building;
+    if (job) {
+      job.ops.push(op);
+      if (this.test !== null) return true;
+    }
+    const changed = applyOp(this.current, op);
     if (changed) this.commit();
     return changed;
   }
 
   /** Run several changes on the tree as one update (one version bump, one render). */
   batch(change: (model: FileTreeModel) => boolean | void): boolean {
-    return this.run(change);
+    return this.run({ kind: 'other', run: change });
   }
 
   // ---------------------------------------------------------------- build
 
-  private startBuild(paths: string[]): void {
+  private startBuild(paths: string[], expanded: string[] | undefined, test: FilterTest | null, ops: Op[]): void {
     this.cancelTurn?.();
-    const model = new FileTreeModel(paths, { expanded: this.initialExpanded, values: this.values, deferBuild: true });
-    this.building = { model, steps: model.build(), test: this.test, ops: [] };
-    this.cancelTurn = nextTurn(() => this.pump());
+    this.cancelTurn = null;
+    const model = new FileTreeModel(paths, { expanded, values: this.values, deferBuild: true });
+    this.building = { model, steps: model.build(), phase: 'build', expanded, test, ops };
+    this.schedule();
   }
 
   private pump(): void {
+    this.cancelTurn = null;
     const job = this.building;
     if (!job) return;
     const until = performance.now() + SLICE_MS;
     while (performance.now() < until) {
-      if (job.steps.next().done) {
-        this.finishBuild(job);
-        return;
+      if (!job.steps.next().done) continue;
+      if (job.phase === 'build' && this.filterWaits(job)) {
+        // Fill the filter's lowercase paths in slices too, so the swap is one cheap pass.
+        job.phase = 'filter';
+        job.steps = job.model.prepareFilter();
+        continue;
       }
+      this.finishBuild(job);
+      return;
     }
-    this.cancelTurn = nextTurn(() => this.pump());
+    this.schedule();
   }
 
-  private finishBuild(job: NonNullable<FileTreeStore['building']>): void {
-    const { model, ops } = job;
+  private filterWaits(job: BuildJob): boolean {
+    return job.test !== null || job.ops.some((op) => op.kind === 'filter' && op.test !== null);
+  }
+
+  private finishBuild(job: BuildJob): void {
+    const { model } = job;
     // The new index, then every change the preview took meanwhile, in the same order.
-    if (job.test) model.setFilter(job.test);
-    for (const op of ops) op(model);
+    const ops = compactOps(job.test ? [{ kind: 'filter', test: job.test }, ...job.ops] : job.ops);
+    for (const op of ops) applyOp(model, op);
     this.current = model;
     this.building = null;
     this.cancelTurn = null;
     this.commit();
-    const waiters = this.readyWaiters;
-    this.readyWaiters = [];
-    for (const w of waiters) w();
+    this.releaseWaiters();
   }
 
   // ---------------------------------------------------------------- paths
 
-  /** Make the tree hold exactly `paths` (a fresh snapshot): only the difference is applied. */
+  /**
+   * Make the tree hold exactly `paths` (a fresh snapshot): only the
+   * difference is applied. A sliced store builds a large difference (over a
+   * quarter of the paths) in slices like the first build, its open folders
+   * and filter kept.
+   */
   setPaths(paths: Iterable<string>): boolean {
     const list = Array.isArray(paths) ? (paths as string[]) : [...paths];
-    if (this.building) {
-      // The build in progress is out of date: start again from this list.
-      this.current.setPaths(topLevel(list));
-      this.startBuild(list);
+    const job = this.building;
+    if (job) {
+      // The build in progress is out of date: start again from this list,
+      // keeping every change made since it started except the path changes
+      // the snapshot replaces.
+      const kept = job.ops.filter((op) => op.kind !== 'paths' && op.kind !== 'values');
+      this.refreshPreview(list);
+      this.startBuild(list, job.expanded, job.test, kept);
       this.commit();
       return true;
     }
-    return this.run((m) => m.setPaths(list));
+    if (!this.sliced || list.length < SLICE_MIN_PATHS) return this.run({ kind: 'paths', run: (m) => m.setPaths(list) });
+    const diff = this.current.diff(list);
+    if (diff.adds.length === 0 && diff.removes.length === 0) return false;
+    if (!FileTreeModel.rebuildFor(diff)) return this.run({ kind: 'paths', run: (m) => m.applyDiff(diff) });
+    const expanded = [...this.current.baseExpandedPaths()];
+    this.refreshPreview(list, expanded);
+    this.startBuild(list, expanded, this.test, []);
+    this.commit();
+    return true;
+  }
+
+  /**
+   * Show the new snapshot's starting rows while its index builds. When those
+   * would be too many to build quickly, the tree on screen stays as the
+   * preview until the index lands.
+   */
+  private refreshPreview(list: string[], expanded: string[] = [...this.current.baseExpandedPaths()]): void {
+    const entries = visibleEntries(list, expandedKeys(expanded), PREVIEW_MAX);
+    if (entries) this.current = new FileTreeModel(entries, { expanded, values: this.values });
   }
 
   /** List paths (a trailing `/` lists an empty folder). Under a filter, a new match shows with its folders open. */
   add(paths: string | Iterable<string>): boolean {
     const list = typeof paths === 'string' ? [paths] : [...paths];
-    return this.run((m) => {
-      let changed = false;
-      for (const p of list) changed = m.add(p) || changed;
-      return changed;
+    return this.run({
+      kind: 'paths',
+      run: (m) => {
+        let changed = false;
+        for (const p of list) changed = m.add(p) || changed;
+        return changed;
+      },
     });
   }
 
   /** Remove paths and everything under them. */
   remove(paths: string | Iterable<string>): boolean {
     const list = typeof paths === 'string' ? [paths] : [...paths];
-    return this.run((m) => {
-      let changed = false;
-      for (const p of list) changed = m.remove(p) || changed;
-      return changed;
+    return this.run({
+      kind: 'paths',
+      run: (m) => {
+        let changed = false;
+        for (const p of list) changed = m.remove(p) || changed;
+        return changed;
+      },
     });
   }
 
@@ -274,7 +471,8 @@ export class FileTreeStore {
   /**
    * Show only the paths that match `query` (FileBrowser's rules) and their
    * folders, all open. An empty query shows everything with the unfiltered
-   * expansion back. One pass over the index (a few ms for 150k paths).
+   * expansion back. One pass over the index (a few ms for 150k paths). While
+   * the index builds, the filter is applied when it lands (`filterPending`).
    */
   setFilter(query: string): boolean {
     if (query === this.filterQuery) return false;
@@ -282,8 +480,11 @@ export class FileTreeStore {
     this.filterQuery = query;
     if (test === null && this.test === null) return false;
     this.test = test;
-    this.building?.ops.push((m) => m.setFilter(test));
-    this.current.setFilter(test);
+    if (this.building) {
+      this.building.ops.push({ kind: 'filter', test });
+    } else {
+      this.current.setFilter(test);
+    }
     this.commit();
     return true;
   }
@@ -300,18 +501,27 @@ export class FileTreeStore {
   }
 
   expand(path: string): boolean {
-    return this.run((m) => m.expand(m.find(path)));
+    return this.run({ kind: 'expansion', run: (m) => m.expand(m.find(path)) });
   }
 
   collapse(path: string): boolean {
-    return this.run((m) => m.collapse(m.find(path)));
+    return this.run({ kind: 'expansion', run: (m) => m.collapse(m.find(path)) });
   }
 
+  /** Open a closed folder or close an open one, as the tree on screen shows it. */
   toggle(path: string): boolean {
-    return this.run((m) => {
-      const id = m.find(path);
-      if (id <= ROOT) return false;
-      return m.isExpanded(id) ? m.collapse(id) : m.expand(id);
+    const id = this.current.find(path);
+    // Resolved here, so the index being built gets the same open or close the
+    // person saw. While a filter waits for the index there is nothing on
+    // screen to resolve against: the index decides.
+    if (id > ROOT && !this.filterPending) return this.current.isExpanded(id) ? this.collapse(path) : this.expand(path);
+    return this.run({
+      kind: 'expansion',
+      run: (m) => {
+        const n = m.find(path);
+        if (n <= ROOT) return false;
+        return m.isExpanded(n) ? m.collapse(n) : m.expand(n);
+      },
     });
   }
 
@@ -320,30 +530,46 @@ export class FileTreeStore {
    * under it. One pass and one render.
    */
   expandAll(path?: string): boolean {
-    return this.run((m) => {
-      if (path === undefined) return m.expandAll();
-      const id = m.find(path);
-      if (id <= ROOT) return false;
-      const a = m.expandAncestors(id);
-      const b = m.expandAll(id);
-      return a || b;
+    return this.run({
+      kind: 'expansion',
+      run: (m) => {
+        if (path === undefined) return m.expandAll();
+        const id = m.find(path);
+        if (id <= ROOT) return false;
+        const a = m.expandAncestors(id);
+        const b = m.expandAll(id);
+        return a || b;
+      },
     });
   }
 
   /** Collapse everything (no path), or a folder and every folder under it. */
   collapseAll(path?: string): boolean {
-    return this.run((m) => {
-      if (path === undefined) return m.collapseAll();
-      const id = m.find(path);
-      return id > ROOT ? m.collapseAll(id) : false;
+    return this.run({
+      kind: 'expansion',
+      run: (m) => {
+        if (path === undefined) return m.collapseAll();
+        const id = m.find(path);
+        return id > ROOT ? m.collapseAll(id) : false;
+      },
     });
   }
 
-  /** Expand the folders above `path` so its row shows. Returns its row, or -1 when it is not in the tree. */
+  /**
+   * Expand the folders above `path` so its row shows. Returns its row, or -1
+   * when it is not in the tree or the filter hides it (nothing is opened then).
+   */
   reveal(path: string): number {
-    this.run((m) => {
-      const id = m.find(path);
-      return id > ROOT ? m.expandAncestors(id) : false;
+    const m = this.current;
+    const id = m.find(path);
+    if (m.filtered && (id <= ROOT || !m.isShown(id))) return -1;
+    this.run({
+      kind: 'expansion',
+      run: (model) => {
+        const n = model.find(path);
+        if (n <= ROOT || (model.filtered && !model.isShown(n))) return false;
+        return model.expandAncestors(n);
+      },
     });
     return this.current.indexOf(path);
   }
@@ -358,7 +584,7 @@ export class FileTreeStore {
     if (badges === this.badgeSource) return false;
     this.indexBadges(badges);
     const values = this.values;
-    this.building?.ops.push((m) => m.setValues(values));
+    this.building?.ops.push({ kind: 'values', values });
     this.current.setValues(values);
     this.commit();
     return true;

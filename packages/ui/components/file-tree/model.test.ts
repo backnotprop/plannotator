@@ -255,6 +255,11 @@ function check(model: FileTreeModel, ref: Reference) {
   }
   expect(model.expandedPaths()).toEqual(new Set([...ref.expanded]));
   expect(model.nodeCount).toBe(ref.nodes().size);
+  // The listed set a snapshot diffs against holds exactly the listed entries.
+  const listed = [...ref.files, ...[...ref.dirs].map((d) => `${d}/`)].sort();
+  expect(model.listedCount).toBe(listed.length);
+  expect([...model.listedPaths()].sort()).toEqual(listed);
+  expect(model.diff(listed)).toEqual({ adds: [], removes: [], size: listed.length });
 }
 
 // ---------------------------------------------------------------- generators

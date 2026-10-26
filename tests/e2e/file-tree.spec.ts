@@ -7,7 +7,11 @@
  *   closed above it (and does not at the very top, where a new row shows);
  * - row height follows the text: with the browser's minimum font size at
  *   24 px, rows grow so no text box spills into the next row, and every row is
- *   still one height (the window stays exact).
+ *   still one height (the window stays exact); a change of row height while
+ *   scrolled keeps the same row at the top and rows on screen;
+ * - a host that sets scrollTop and changes the tree in one task keeps its
+ *   scrollTop;
+ * - file and folder icons line up, and right-to-left pages mirror the indent.
  *
  * The page is the tree's bench page (packages/ui/bench/file-tree, `?mode=live`),
  * built with vite into a temp folder and served from it. No binary, no data
@@ -152,3 +156,78 @@ test('at the default font, rows are the 22 px the tree asks for', async ({ page 
   const height = await page.evaluate(() => (document.querySelector('[role="treeitem"]') as HTMLElement).offsetHeight);
   expect(height).toBe(22);
 });
+
+const rowsOnScreen = (page: Page) =>
+  page.evaluate(() => {
+    const tree = (window as any).__h.tree() as HTMLElement;
+    const top = tree.scrollTop;
+    const bottom = top + tree.clientHeight;
+    return [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')].filter((r) => r.offsetTop + r.offsetHeight > top && r.offsetTop < bottom).length;
+  });
+
+test('a row height change while scrolled keeps the top row and rows on screen', async ({ page }) => {
+  await open(page);
+  await scrollToRow(page, 'g300.ts');
+  expect(await topPath(page)).toBe('g300.ts');
+  // Larger text (as text-only zoom or a minimum font size does): the probe grows, rows grow.
+  await page.addStyleTag({ content: '[data-file-tree] [role="treeitem"], [data-ft-probe] { font-size: 22px !important; }' });
+  await page.waitForTimeout(100);
+  const height = await page.evaluate(() => (document.querySelector('[role="treeitem"]') as HTMLElement).offsetHeight);
+  expect(height).toBeGreaterThan(22);
+  expect(await topPath(page)).toBe('g300.ts');
+  expect(await rowsOnScreen(page)).toBeGreaterThan(10);
+  // And back.
+  await page.evaluate(() => document.querySelectorAll('style').forEach((s) => { if (s.textContent?.includes('22px !important')) s.remove(); }));
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => (document.querySelector('[role="treeitem"]') as HTMLElement).offsetHeight)).toBe(22);
+  expect(await topPath(page)).toBe('g300.ts');
+  expect(await rowsOnScreen(page)).toBeGreaterThan(10);
+});
+
+test('a host that scrolls and changes the tree in one task keeps its scrollTop', async ({ page }) => {
+  await open(page);
+  await scrollToRow(page, 'g300.ts');
+  const target = await page.evaluate(() => {
+    const h = (window as any).__h;
+    const tree = h.tree() as HTMLElement;
+    const y = h.store.model.indexOf('g100.ts') * 22;
+    tree.scrollTop = y;
+    h.store.add('c1.ts');
+    return y;
+  });
+  await page.waitForTimeout(80);
+  expect(await scrollTop(page)).toBe(target);
+  expect(await rowsOnScreen(page)).toBeGreaterThan(10);
+});
+
+async function iconEdges(page: Page) {
+  await change(page, "s.expand('a')");
+  return page.evaluate(() => {
+    const row = (p: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-path="${p}"]`)!;
+    const folderIcon = row('a').querySelectorAll('svg')[1].getBoundingClientRect();
+    const fileIcon = row('g000.ts').querySelector('svg')!.getBoundingClientRect();
+    const childIcon = row('a/one.ts').querySelector('svg')!.getBoundingClientRect();
+    const guides = row('a/one.ts').querySelector<HTMLElement>('[data-guides]')!.getBoundingClientRect();
+    const r = row('a').getBoundingClientRect();
+    return { folderIcon: { left: folderIcon.left, right: folderIcon.right }, fileIcon: { left: fileIcon.left, right: fileIcon.right }, childIcon: { left: childIcon.left, right: childIcon.right }, guides: { left: guides.left, right: guides.right }, row: { left: r.left, right: r.right } };
+  });
+}
+
+test('file and folder icons line up, and a right-to-left page mirrors the indent', async ({ page }) => {
+  await open(page);
+  const ltr = await iconEdges(page);
+  expect(ltr.fileIcon.left).toBe(ltr.folderIcon.left);
+  expect(ltr.childIcon.left).toBe(ltr.folderIcon.left + 8);
+  expect(ltr.guides.left - ltr.row.left).toBeLessThan(ltr.childIcon.left - ltr.row.left);
+
+  await page.goto(`${base}/?mode=live&theme=light`);
+  await page.waitForFunction(() => (window as any).__h?.ready === true);
+  await page.evaluate(() => { document.getElementById('live')!.dir = 'rtl'; });
+  const rtl = await iconEdges(page);
+  expect(rtl.fileIcon.right).toBe(rtl.folderIcon.right);
+  expect(rtl.childIcon.right).toBe(rtl.folderIcon.right - 8);
+  // Mirrored: the indent sits on the right, measured from the row's right edge as LTR measures from its left.
+  expect(rtl.row.right - rtl.folderIcon.right).toBe(ltr.folderIcon.left - ltr.row.left);
+  expect(rtl.row.right - rtl.guides.right).toBe(ltr.guides.left - ltr.row.left);
+});
+

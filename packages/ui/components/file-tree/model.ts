@@ -116,7 +116,7 @@ export function normalizeTreePath(path: string): NormalizedTreePath | null {
  * A file path the tree reads as written: no leading or trailing `/`, no empty
  * or `.` segment. Most paths from a folder walk; they skip normalization.
  */
-function isPlainPath(path: string): boolean {
+export function isPlainPath(path: string): boolean {
   const n = path.length;
   if (n === 0 || path.charCodeAt(0) === 47 || path.charCodeAt(n - 1) === 47) return false;
   if (path === '.' || path.startsWith('./') || path.endsWith('/.')) return false;
@@ -179,6 +179,8 @@ export class FileTreeModel {
   private pathCache: (string | undefined)[] = [];
   private lcCache: (string | undefined)[] = [];
   private lcNames: (string | undefined)[] = [];
+  /** Every listed entry by key (a folder listed with `/` keeps its slash), so a snapshot diffs without walking the tree. */
+  private listed = new Set<string>();
   private baseExpanded = new Set<number>();
   private filterExpanded: Set<number> | null = null;
   /** The expansion in use: the filter's while a filter is set. */
@@ -863,6 +865,7 @@ export class FileTreeModel {
     this.pathCache = [];
     this.lcCache = [];
     this.lcNames = [];
+    this.listed = new Set();
     this.baseExpanded = new Set();
     this.filterExpanded = null;
     this.expandedSet = this.baseExpanded;
@@ -905,6 +908,7 @@ export class FileTreeModel {
         let n = ROOT;
         for (const seg of norm.segments) n = this.childOrNew(n, seg);
         this.flags[n] |= norm.dir ? F_DIR : F_FILE;
+        this.listed.add(norm.dir ? `${norm.key}/` : norm.key);
         continue;
       }
       const lim = Math.min(path.length, prev.length);
@@ -927,6 +931,7 @@ export class FileTreeModel {
       }
       prev = path;
       this.flags[n] |= F_FILE;
+      this.listed.add(path);
     }
     yield;
 
@@ -991,7 +996,10 @@ export class FileTreeModel {
       if (c === undefined) {
         const parentWasDir = n === ROOT || this.isDir(n);
         c = this.alloc(n, nid, hidden);
-        if (last) this.flags[c] |= norm.dir ? F_DIR : F_FILE;
+        if (last) {
+          this.flags[c] |= norm.dir ? F_DIR : F_FILE;
+          this.listed.add(norm.dir ? `${norm.key}/` : norm.key);
+        }
         this.insertChild(n, c, !last || norm.dir);
         if (!hidden) this.bump(n, 1);
         if (!parentWasDir) this.reposition(n);
@@ -1002,6 +1010,7 @@ export class FileTreeModel {
         if ((this.flags[c] & bit) === 0) {
           const wasDir = this.isDir(c);
           this.flags[c] |= bit;
+          this.listed.add(norm.dir ? `${norm.key}/` : norm.key);
           if (this.isDir(c) !== wasDir) this.reposition(c);
           changed = true;
         }
@@ -1036,6 +1045,7 @@ export class FileTreeModel {
     if ((this.flags[id] & bit) === 0) return false;
     const wasDir = this.isDir(id);
     this.flags[id] &= ~bit;
+    this.listed.delete(norm.dir ? `${norm.key}/` : norm.key);
     if (this.kids[id].length > 0) {
       this.refreshShown(id);
       return true;
@@ -1068,6 +1078,12 @@ export class FileTreeModel {
     while (stack.length > 0) {
       const n = stack.pop()!;
       for (const c of this.kids[n]) stack.push(c);
+      const f = this.flags[n];
+      if (f & (F_FILE | F_DIR)) {
+        const key = this.pathOf(n);
+        if (f & F_FILE) this.listed.delete(key);
+        if (f & F_DIR) this.listed.delete(`${key}/`);
+      }
       this.childKey.delete(this.parent[n] * KEY_SHIFT + this.nameId[n]);
       this.forgetExpansion(n);
       this.flags[n] = 0;
@@ -1101,12 +1117,10 @@ export class FileTreeModel {
       const key = treePathKey(p);
       if (key !== null) next.add(key);
     }
-    const current = this.listedPaths();
-    const currentSet = new Set(current);
     const adds: string[] = [];
     const removes: string[] = [];
-    for (const p of next) if (!currentSet.has(p)) adds.push(p);
-    for (const p of current) if (!next.has(p)) removes.push(p);
+    for (const p of next) if (!this.listed.has(p)) adds.push(p);
+    for (const p of this.listed) if (!next.has(p)) removes.push(p);
     return { adds, removes, size: next.size };
   }
 
@@ -1117,15 +1131,42 @@ export class FileTreeModel {
    */
   setPaths(paths: Iterable<string>): boolean {
     const list = Array.isArray(paths) ? (paths as string[]) : [...paths];
-    const { adds, removes, size } = this.diff(list);
-    if (adds.length === 0 && removes.length === 0) return false;
-    if (adds.length + removes.length > Math.max(2000, size / 4)) {
+    const diff = this.diff(list);
+    if (diff.adds.length === 0 && diff.removes.length === 0) return false;
+    if (FileTreeModel.rebuildFor(diff)) {
       this.reset(list, this.baseExpandedPaths());
       return true;
     }
-    for (const p of adds) this.add(p);
-    for (const p of removes) this.unlist(p);
+    this.applyDiff(diff);
     return true;
+  }
+
+  /** A difference this large is cheaper as a rebuild than as single changes. */
+  static rebuildFor(diff: { adds: string[]; removes: string[]; size: number }): boolean {
+    return diff.adds.length + diff.removes.length > Math.max(2000, diff.size / 4);
+  }
+
+  /** Apply a difference from `diff` (adds before removes, so a folder that stays never empties). */
+  applyDiff(diff: { adds: string[]; removes: string[] }): void {
+    for (const p of diff.adds) this.add(p);
+    for (const p of diff.removes) this.unlist(p);
+  }
+
+  /**
+   * Fill the filter's lowercase paths in steps, so the first filter after a
+   * build costs one pass and no task runs long.
+   */
+  *prepareFilter(): Generator<void, void, void> {
+    const order = this.preorderAll();
+    for (let i = 1; i < order.length; i++) {
+      if ((i & 4095) === 0) yield;
+      this.lowercasePath(order[i]);
+    }
+  }
+
+  /** Listed entries (a folder listed with `/` keeps its slash). */
+  get listedCount(): number {
+    return this.listed.size;
   }
 
   // ---------------------------------------------------------------- expansion

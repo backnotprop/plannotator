@@ -320,4 +320,70 @@ describe.if(hasDom)('FileTree', () => {
     await act(async () => { tree.setFilter(''); });
     expect(item('src')!.getAttribute('aria-expanded')).toBe('false');
   });
+
+  test('removing the folder that holds the focused row keeps focus inside the nearest folder left', async () => {
+    const paths = ['src/a/one.ts', 'src/a/two.ts', 'src/zz.ts', 'src/b.ts', 'zz-after.md', 'aa-before.md'];
+    const tree = new FileTreeStore(paths, { expanded: ['src', 'src/a'] });
+    await mount({ tree });
+    await focusTree();
+    await press('o');
+    expect(focusedPath()).toBe('src/a/one.ts');
+    // The row now in src/a/one.ts's place is still inside src: it gets focus.
+    await act(async () => { tree.remove('src/a'); });
+    expect(focusedPath()).toBe('src/zz.ts');
+  });
+
+  test('removing the folder of the focused row, with nothing left below it in the parent, focuses the parent', async () => {
+    const tree = new FileTreeStore(['src/', 'src/a/one.ts', 'zz.md'], { expanded: ['src', 'src/a'] });
+    await mount({ tree });
+    await focusTree();
+    await press('o');
+    expect(focusedPath()).toBe('src/a/one.ts');
+    // The row now in its place is zz.md, outside src: src, the nearest folder left, takes focus.
+    await act(async () => { tree.remove('src/a'); });
+    expect(focusedPath()).toBe('src');
+  });
+
+  test('revealPath refuses a path the filter hides, and opens nothing', async () => {
+    const tree = new FileTreeStore(PATHS);
+    const handle = createRef<FileTreeHandle>();
+    await mount({ tree }, handle);
+    await act(async () => { tree.setFilter('guide'); });
+    let result = true;
+    await act(async () => { result = handle.current!.revealPath('src/components/deep/Widget.tsx'); });
+    expect(result).toBe(false);
+    await act(async () => { tree.setFilter(''); });
+    expect(tree.isExpanded('src')).toBe(false);
+  });
+
+  test('a filter set while the index builds shows "Indexing" and no rows, then the matches', async () => {
+    const paths = [...Array.from({ length: 60_000 }, (_, i) => `big/d${i % 60}/f${i}.ts`), 'docs/guide.md', 'top.md'];
+    const tree = new FileTreeStore(paths, { sliced: true });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root!.render(<FileTree tree={tree} labels={{ indexing: 'Indexing the folder' }} />));
+    act(() => { tree.setFilter('guide'); });
+    expect(items()).toHaveLength(0);
+    const busy = treeEl();
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    const described = document.getElementById(busy.getAttribute('aria-describedby')!);
+    expect(described?.textContent).toBe('Indexing the folder');
+    await act(async () => { await tree.whenReady(); });
+    expect(shown()).toEqual(['docs', 'docs/guide.md']);
+    expect(treeEl().hasAttribute('aria-describedby')).toBe(false);
+    expect(treeEl().hasAttribute('aria-busy')).toBe(false);
+  });
+
+  test('file and folder icons start at the same inline offset, and indent is logical', async () => {
+    const tree = new FileTreeStore(PATHS);
+    await mount({ tree });
+    const dir = item('src')!;
+    const file = item('README.md')!;
+    expect(dir.style.paddingInlineStart).toBe(file.style.paddingInlineStart);
+    expect(dir.style.paddingLeft).toBe('');
+    // Both rows hold a 12 px twistie column before the icon: a chevron, or an empty span.
+    expect(dir.children[0]!.tagName.toLowerCase()).toBe('svg');
+    expect(file.children[0]!.className).toContain('w-3');
+  });
 });
