@@ -139,6 +139,7 @@ jobs:
           packages/ui/components/ImageZoomStage.wheelHint.test.tsx
           packages/ui/components/Viewer.imageRegions.test.tsx
           packages/ui/components/HostTitle.dom.test.tsx
+          packages/ui/components/RefHoverCard.dom.test.tsx
           packages/inbox/images.test.tsx
           packages/inbox/inlineImages.test.tsx
           packages/inbox/refusedImages.test.tsx
@@ -413,6 +414,7 @@ jobs:
           packages/ui/components/CommentPopover.multiTarget.test.tsx
           packages/ui/aiProviderConfigPersistence.test.tsx
           packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
+          packages/ui/components/sidebar/FileBrowser.fileLimit.test.tsx
           packages/ui/components/ui/mobile-foundation.test.tsx
           packages/ui/components/Settings.vim.test.tsx
           packages/ui/components/Settings.annotateParity.test.tsx

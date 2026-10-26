@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import type { Annotation, Block } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
@@ -355,6 +356,8 @@ export function MessageBody({
   // A tall screenshot in the body shows its top, cropped like the gallery's
   // (inbox.css); a click still opens it whole.
   const bodyRef = useRef<HTMLDivElement>(null);
+  // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
+  const refCard = useRefHoverCards(bodyRef);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -620,6 +623,7 @@ export function MessageBody({
   return (
     <ImageResolverContext.Provider value={resolveImage}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
+      {refCard}
       {(!replyParts || shown !== '') && (
       <Viewer
         ref={viewerRef}
