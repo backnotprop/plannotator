@@ -1,15 +1,13 @@
 // Guards the real Pele -> sanitizer -> viewer boundary, not just the npm API.
-import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { installInertDiagramSvgParser } from '../test-setup/diagramSvg';
 import { diagramFinder, diagramHitSource, renderDiagram } from './diagram-render';
-import { __setMermaidRuntimeLoaderForTests } from './mermaid';
 
 const hasDom = typeof document !== 'undefined';
 let restoreParser: (() => void) | undefined;
 beforeAll(() => { if (hasDom) restoreParser = installInertDiagramSvgParser(); });
 afterAll(() => restoreParser?.());
-afterEach(() => __setMermaidRuntimeLoaderForTests(undefined));
-const theme = { colorTheme: 'github', mode: 'dark', mermaidEngine: 'pele' } as const;
+const theme = { colorTheme: 'github', mode: 'dark' } as const;
 
 describe.if(hasDom)('Pele render integration', () => {
   test('sanitizes actual output and gives edges widened hit targets, excluding arrowheads', async () => {
@@ -38,28 +36,13 @@ describe.if(hasDom)('Pele render integration', () => {
     expect(finder.findTarget(svg, anchor, 'integration')).toBe(cluster);
   });
 
-  test('keeps Mermaid as the default and dispatches the finder from the displayed SVG', async () => {
-    let mermaidLoads = 0;
-    __setMermaidRuntimeLoaderForTests(async () => {
-      mermaidLoads++;
-      return {
-        initialize() {},
-        async render(id: string) {
-          return { svg: `<svg id="${id}" viewBox="0 0 10 10" aria-roledescription="flowchart"><g class="node" id="${id}-flowchart-A-0"><text>Start</text></g></svg>` };
-        },
-      } as any;
-    });
-    const pele = await renderDiagram('mermaid', 'alternative', 'flowchart TD\n A[Start] --> B', theme);
-    expect(pele.ok).toBe(true);
-    expect(mermaidLoads).toBe(0);
-    const mermaid = await renderDiagram('mermaid', 'default', 'flowchart TD\n A --> B', { colorTheme: 'github', mode: 'dark' });
-    expect(mermaid.ok).toBe(true);
-    expect(mermaidLoads).toBe(1);
-    if (!pele.ok || !mermaid.ok) throw new Error('render failed');
+  test('renders Mermaid-syntax fences with Pele by default and dispatches the matching finder', async () => {
+    const result = await renderDiagram('mermaid', 'default', 'flowchart TD\n A[Start] --> B', theme);
+    expect(result.ok).toBe(true);
+    if (result.ok === false) throw new Error(result.message);
+    expect(result.svgNode.id).toBe('plannotator-pele-default');
     const anchor = { family: 'flowchart', kind: 'node', id: 'A', label: 'Start' } as const;
-    const finder = diagramFinder('mermaid');
-    expect(finder.findTarget(pele.svgNode, anchor, 'alternative')?.getAttribute('data-id')).toBe('A');
-    expect(finder.findTarget(mermaid.svgNode, anchor, 'default')?.id).toBe('default-flowchart-A-0');
+    expect(diagramFinder('mermaid').findTarget(result.svgNode, anchor, 'default')?.getAttribute('data-id')).toBe('A');
   });
 
   test('keeps whole-diagram comments restorable on every rendered family', async () => {
@@ -88,13 +71,10 @@ describe.if(hasDom)('Pele render integration', () => {
     }
   });
 
-  test('reports malformed source without silently changing engines', async () => {
-    let mermaidLoads = 0;
-    __setMermaidRuntimeLoaderForTests(async () => { mermaidLoads++; throw new Error('must not load'); });
+  test('reports malformed source without silently changing renderers', async () => {
     const result = await renderDiagram('mermaid', 'invalid', 'not a diagram', theme);
     expect(result.ok).toBe(false);
     if (result.ok === true) throw new Error('invalid source rendered');
     expect(result.runtimeUnavailable).toBe(false);
-    expect(mermaidLoads).toBe(0);
   });
 });

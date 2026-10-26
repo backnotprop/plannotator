@@ -275,7 +275,7 @@ One renderer slot and one canvas render every Mermaid and Graphviz diagram — t
 
 ### Optional Pele renderer
 
-Settings → Display → Diagram renderer offers **Pele (experimental)** for existing Mermaid fences. Mermaid remains the default; Graphviz is unchanged. The preference is browser-local and updates mounted diagrams and their popouts. Direct `DiagramViewer` hosts can opt in with `theme.mermaidEngine: 'pele'`; omitting it keeps Mermaid. See [Pele support and limitations](PELE.md), including comment support.
+All Mermaid-syntax diagram fences are rendered with Pele by default; Mermaid is not used as a renderer. Graphviz fences remain on Graphviz. See [Pele support and limitations](PELE.md), including comment support.
 
 ### Host toolbar seams (0.43.0)
 

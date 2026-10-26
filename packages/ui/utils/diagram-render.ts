@@ -34,14 +34,10 @@
  */
 import DOMPurify from 'dompurify';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
-import { MERMAID_FINDER, type DiagramFinder } from './diagram-anchor';
-import { PELE_COMPAT_FINDER, PELE_FINDER } from './diagram-anchor-pele';
+import type { DiagramFinder } from './diagram-anchor';
+import { PELE_FINDER } from './diagram-anchor-pele';
 import { GRAPHVIZ_FINDER } from './diagram-anchor-graphviz';
 import { getGraphvizRetryDelayMs, loadGraphvizRuntime, type GraphvizRuntime } from './graphviz';
-import { loadMathRenderer } from './math';
-import { getMermaidRetryDelayMs, loadMermaidRuntime } from './mermaid';
-import { hasMermaidMath } from './mermaid-math-slot';
-import { applyMermaidTheme, mermaidThemeKey, type MermaidThemeMode } from './mermaidTheme';
 import {
   loadPeleRuntime,
   PELE_OUTPUT_LIMIT,
@@ -53,8 +49,6 @@ import {
 
 export type { DiagramKind } from '@plannotator/core/diagram-anchor';
 
-type Mermaid = Awaited<ReturnType<typeof loadMermaidRuntime>>;
-
 /**
  * The (palette, mode) a render is for: the same pair `useTheme()` resolves
  * for code fences, plus the node shadow amount the user chose. The mermaid
@@ -65,15 +59,14 @@ type Mermaid = Awaited<ReturnType<typeof loadMermaidRuntime>>;
  */
 export interface DiagramTheme {
   readonly colorTheme: string;
-  readonly mode: MermaidThemeMode;
+  readonly mode: 'dark' | 'light';
   /**
    * Node drop shadow strength, 0..1 (see `mermaidTheme.buildMermaidShadow`).
    * Absent means the shipped default, so a host that builds its own
    * `DiagramTheme` renders exactly what Plannotator renders.
    */
   readonly shadowAmount?: number;
-  /** Optional alternative Mermaid-syntax renderer. Unset keeps Mermaid. */
-  readonly mermaidEngine?: 'mermaid' | 'pele';
+
 }
 
 export type DiagramRenderError = {
@@ -491,62 +484,9 @@ async function loadWithRetry<T>(load: () => Promise<T>, delayMs: number): Promis
   }
 }
 
-async function renderMermaid(runtime: Mermaid, renderId: string, source: string): Promise<DiagramRenderResult> {
-  try {
-    const { svg } = await runtime.render(renderId, source);
-    const svgNode = sanitizeDiagramSvg(svg);
-    if (svgNode === null) {
-      return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
-    }
-    widenEdgeHitAreas(svgNode);
-    return { ok: true, svgNode, findTarget: MERMAID_FINDER.findTarget };
-  } catch (error) {
-    return {
-      ok: false,
-      message: errorMessage(error, 'Failed to render diagram'),
-      line: errorLine(error),
-      runtimeUnavailable: false,
-    };
-  }
-}
-
-const mermaidRenderer: DiagramRenderer = {
-  finder: PELE_COMPAT_FINDER,
-  async render(renderId, source, theme) {
-    if (theme.mermaidEngine === 'pele') return renderPele(renderId, source);
-
-    let runtime: Mermaid;
-    try {
-      runtime = await loadWithRetry(loadMermaidRuntime, getMermaidRetryDelayMs());
-    } catch (error) {
-      return {
-        ok: false,
-        message: errorMessage(error, 'Failed to render diagram'),
-        line: null,
-        runtimeUnavailable: true,
-      };
-    }
-    // A `$$` label makes Mermaid render KaTeX. On a host that redirects
-    // Mermaid's `katex` import to `utils/mermaid-math-slot` the label is
-    // typeset through the math slot, which must be filled by then: warm it
-    // with the registered loader first. A filled slot resolves at once; a
-    // load failure is left to the render, whose error names it.
-    if (hasMermaidMath(source)) {
-      try {
-        await loadMathRenderer();
-      } catch {
-        // Reported by the render below.
-      }
-    }
-    // Derive every Mermaid theme variable from the page's tokens before each
-    // render, so the diagram follows the palette and mode. Keyed on the
-    // runtime plus (palette, mode, shadow amount), so the lazy runtime is
-    // themed on its first render and re-initialized only when one changes.
-    // With no tokens on the page it is a no-op and the static
-    // MERMAID_CONFIG (securityLevel strict) applies.
-    applyMermaidTheme(runtime, mermaidThemeKey(theme.colorTheme, theme.mode, theme.shadowAmount));
-    return renderMermaid(runtime, renderId, source);
-  },
+const peleRenderer: DiagramRenderer = {
+  finder: PELE_FINDER,
+  render: renderPele,
 };
 
 /** A Graphviz default color, as `viz` writes it: a named default or its
@@ -707,7 +647,7 @@ async function renderPele(renderId: string, source: string): Promise<DiagramRend
 }
 
 const RENDERERS: Record<DiagramKind, DiagramRenderer> = {
-  mermaid: mermaidRenderer,
+  mermaid: peleRenderer,
   graphviz: graphvizRenderer,
 };
 
