@@ -5,6 +5,7 @@
  * ready all along.
  */
 import { describe, expect, test } from 'bun:test';
+import fc from 'fast-check';
 import { FileTreeStore } from './store';
 
 const PATHS = [
@@ -19,27 +20,45 @@ function listing(store: FileTreeStore): string[] {
   return m.rows(0, m.rowCount).map((r) => `${'  '.repeat(r.depth)}${r.name}${r.isDir ? (r.expanded ? '/ open' : '/') : ''}`);
 }
 
+/**
+ * Let the build run to the end and return the gaps a message posted between
+ * tasks saw: a long task shows as a long gap. The probe runs one more turn
+ * after the index lands, so the task that swapped it in is counted too.
+ */
+async function buildGaps(store: FileTreeStore): Promise<number[]> {
+  const gaps: number[] = [];
+  let last = performance.now();
+  let ready = false;
+  let finish = () => {};
+  const done = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => {
+    const now = performance.now();
+    gaps.push(now - last);
+    last = now;
+    if (!ready) {
+      ch.port2.postMessage(null);
+      return;
+    }
+    ch.port1.close();
+    finish();
+  };
+  ch.port2.postMessage(null);
+  await store.whenReady();
+  ready = true;
+  await done;
+  return gaps;
+}
+
 describe('FileTreeStore sliced build', () => {
   test('the preview is the collapsed tree, and the build lands in short slices', async () => {
     const sliced = new FileTreeStore(PATHS, { sliced: true });
     const whole = new FileTreeStore(PATHS);
     expect(sliced.loading).toBe(true);
     expect(listing(sliced)).toEqual(listing(whole));
-    // Measure the gaps the build leaves: a message posted between slices must get a turn quickly.
-    const gaps: number[] = [];
-    let last = performance.now();
-    let probing = true;
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => {
-      const now = performance.now();
-      gaps.push(now - last);
-      last = now;
-      if (probing) ch.port2.postMessage(null);
-    };
-    ch.port2.postMessage(null);
-    await sliced.whenReady();
-    probing = false;
-    ch.port1.close();
+    const gaps = await buildGaps(sliced);
     expect(sliced.loading).toBe(false);
     expect(listing(sliced)).toEqual(listing(whole));
     expect(gaps.length).toBeGreaterThan(2);
@@ -68,7 +87,7 @@ describe('FileTreeStore sliced build', () => {
     expect(sliced.model.totals(id)).toEqual(whole.model.totals(whole.model.find('pkg3')));
   });
 
-  test('a new snapshot while building starts the build again from it', async () => {
+  test('a new snapshot while building lands on the full index', async () => {
     const sliced = new FileTreeStore(PATHS, { sliced: true });
     const next = PATHS.filter((p) => !p.startsWith('pkg1/')).concat('fresh.ts');
     sliced.setPaths(next);
@@ -111,26 +130,13 @@ describe('FileTreeStore sliced build', () => {
     expect(listing(sliced)).toEqual(listing(whole));
   });
 
-  test('ten filter keystrokes while building cost one pass at the swap, no task over 50 ms', async () => {
+  test('ten filter keystrokes while building cost one filter pass, no task over 50 ms (the swap included)', async () => {
     const big = Array.from({ length: 150_000 }, (_, i) => `pkg${i % 40}/src/dir${i % 900}/file${i}.ts`);
     const sliced = new FileTreeStore(big, { sliced: true });
     sliced.subscribe(() => {});
     for (const q of ['f', 'fi', 'fil', 'file', 'file1', 'file12', 'file123', 'file12', 'file1', 'file1/']) sliced.setFilter(q);
     expect(sliced.filterPending).toBe(true);
-    const gaps: number[] = [];
-    let last = performance.now();
-    let probing = true;
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => {
-      const now = performance.now();
-      gaps.push(now - last);
-      last = now;
-      if (probing) ch.port2.postMessage(null);
-    };
-    ch.port2.postMessage(null);
-    await sliced.whenReady();
-    probing = false;
-    ch.port1.close();
+    const gaps = await buildGaps(sliced);
     expect(sliced.filterPending).toBe(false);
     const whole = new FileTreeStore(big);
     whole.setFilter('file1/');
@@ -215,5 +221,81 @@ describe('FileTreeStore sliced build', () => {
     twice.resume();
     await done;
     expect(twice.loading).toBe(false);
+  });
+});
+
+describe('FileTreeStore sliced against built at once', () => {
+  // Over SLICE_MIN_PATHS, so the sliced store really builds in slices.
+  const BULK = Array.from({ length: 4_200 }, (_, i) => `bulk/d${i % 60}/f${i}.ts`);
+  const SMALL = ['pkg1/a.ts', 'pkg1/sub/b.ts', 'pkg2/c.ts', 'docs/x.md', 'top.md'];
+  const TARGET = fc.constantFrom('pkg1', 'pkg1/sub', 'pkg1/a.ts', 'pkg2', 'docs', 'bulk', 'bulk/d3', 'new', 'new/n.ts');
+  /** One change, made on the sliced store and on the store built at once. */
+  type StoreOp = (sliced: FileTreeStore, whole: FileTreeStore) => void;
+  const both =
+    (change: (s: FileTreeStore) => unknown): StoreOp =>
+    (sliced, whole) => {
+      change(sliced);
+      change(whole);
+    };
+  const OP: fc.Arbitrary<StoreOp> = fc.oneof(
+    TARGET.map((p) => both((s) => s.expand(p))),
+    TARGET.map((p) => both((s) => s.collapse(p))),
+    // A toggle on a row the person sees is the open or close they saw, even
+    // where the preview has not yet opened what a host's change opens deeper down.
+    TARGET.map((p): StoreOp => (sliced, whole) => {
+      const seen = sliced.loading && !sliced.filterPending && sliced.model.find(p) > 0;
+      const open = sliced.isExpanded(p);
+      sliced.toggle(p);
+      if (!seen) whole.toggle(p);
+      else if (open) whole.collapse(p);
+      else whole.expand(p);
+    }),
+    fc.option(TARGET, { nil: undefined }).map((p) => both((s) => s.expandAll(p))),
+    fc.option(TARGET, { nil: undefined }).map((p) => both((s) => s.collapseAll(p))),
+    TARGET.map((p) => both((s) => s.reveal(p))),
+    TARGET.map((p) => both((s) => s.add(p.includes('.') ? p : `${p}/added.ts`))),
+    TARGET.map((p) => both((s) => s.remove(p))),
+    fc.constantFrom('', 'a', 'pkg1/', 'f12', 'zz').map((q) => both((s) => s.setFilter(q))),
+    // A snapshot: some of the small paths, the bulk whole or (a rebuild) halved.
+    fc
+      .tuple(fc.subarray(SMALL), fc.boolean(), fc.boolean())
+      .map(([small, half, extra]) => {
+        const list = [...(half ? BULK.filter((_, i) => i % 2 === 0) : BULK), ...small, ...(extra ? ['new/n.ts'] : [])];
+        return both((s) => s.setPaths(list));
+      }),
+  );
+
+  function state(store: FileTreeStore) {
+    return { rows: listing(store), expanded: [...store.expandedPaths()].sort() };
+  }
+
+  test('a folder removed while building, then brought back by a snapshot, comes back closed', async () => {
+    const ops = (s: FileTreeStore) => {
+      s.toggle('pkg1');
+      s.remove('pkg1');
+      s.setPaths([...BULK, ...SMALL]);
+    };
+    const sliced = new FileTreeStore([...BULK, ...SMALL], { sliced: true });
+    expect(sliced.loading).toBe(true);
+    ops(sliced);
+    await sliced.whenReady();
+    const whole = new FileTreeStore([...BULK, ...SMALL]);
+    ops(whole);
+    expect(whole.isExpanded('pkg1')).toBe(false);
+    expect(sliced.isExpanded('pkg1')).toBe(false);
+    expect(state(sliced)).toEqual(state(whole));
+  });
+
+  test('any changes made while the index builds end as they do on a store built at once', async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.array(OP, { maxLength: 12 }), async (ops) => {
+        const sliced = new FileTreeStore([...BULK, ...SMALL], { sliced: true });
+        const whole = new FileTreeStore([...BULK, ...SMALL]);
+        for (const op of ops) op(sliced, whole);
+        await sliced.whenReady();
+        expect(state(sliced)).toEqual(state(whole));
+      }),
+      { numRuns: 60 },
+    );
   });
 });

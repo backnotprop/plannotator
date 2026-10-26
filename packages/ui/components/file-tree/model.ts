@@ -283,6 +283,11 @@ export class FileTreeModel {
     return this.test !== null;
   }
 
+  /** The filter's test, or null. */
+  get filterTest(): ((lowercasePath: string) => boolean) | null {
+    return this.test;
+  }
+
   isAlive(id: number): boolean {
     return id > ROOT && id < this.cap && (this.flags[id] & F_ALIVE) !== 0;
   }
@@ -1148,21 +1153,45 @@ export class FileTreeModel {
 
   /** Apply a difference from `diff` (adds before removes, so a folder that stays never empties). */
   applyDiff(diff: { adds: string[]; removes: string[] }): void {
-    for (const p of diff.adds) this.add(p);
-    for (const p of diff.removes) this.unlist(p);
+    const steps = this.applyDiffSteps(diff);
+    while (!steps.next().done) {
+      /* run to the end */
+    }
+  }
+
+  /** `applyDiff` in steps of a few hundred paths, for a large difference applied between tasks. */
+  *applyDiffSteps(diff: { adds: string[]; removes: string[] }): Generator<void, void, void> {
+    let n = 0;
+    for (const p of diff.adds) {
+      this.add(p);
+      if ((++n & 255) === 0) yield;
+    }
+    for (const p of diff.removes) {
+      this.unlist(p);
+      if ((++n & 255) === 0) yield;
+    }
   }
 
   /**
    * Fill the filter's lowercase paths in steps, so the first filter after a
-   * build costs one pass and no task runs long.
+   * build costs one pass and no task runs long. Each path is also searched
+   * once here: JavaScriptCore keeps a joined string as pieces (a rope) until
+   * its first search, and flattening 150k of them inside the first filter
+   * pass took ~30 ms. The search's result is kept so the optimizer cannot
+   * drop it.
    */
   *prepareFilter(): Generator<void, void, void> {
     const order = this.preorderAll();
+    let flattened = 0;
     for (let i = 1; i < order.length; i++) {
       if ((i & 4095) === 0) yield;
-      this.lowercasePath(order[i]);
+      if (!this.lowercasePath(order[i]).includes('//')) flattened++;
     }
+    this.flattenedPaths = flattened;
   }
+
+  /** How many lowercase paths `prepareFilter` flattened (kept so that search is not optimized away). */
+  flattenedPaths = 0;
 
   /** Listed entries (a folder listed with `/` keeps its slash). */
   get listedCount(): number {

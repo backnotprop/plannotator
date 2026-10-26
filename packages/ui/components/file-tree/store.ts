@@ -12,11 +12,14 @@
  * top-level entries, and what is inside the folders given as open), then
  * builds the full index a few milliseconds at a time between tasks and swaps
  * it in. The build starts once someone uses the store (`subscribe`,
- * `whenReady` or `resume`). Changes made in the meantime are applied to both;
- * a filter set meanwhile waits for the full index (`filterPending`). A large
- * snapshot (`setPaths` changing over a quarter of the paths) is built the
- * same way. The swap gives every node a new id, which is why everything
- * outside the model (focus, reveal, scroll anchor) is kept by path.
+ * `whenReady` or `resume`). Changes made in the meantime are applied to the
+ * preview and queued; once the index is built they are replayed on it in
+ * order, one per step, so it ends as a store built at once would. A filter
+ * set meanwhile waits for the full index (`filterPending`). A snapshot
+ * (`setPaths`) during the build is queued the same way. A large snapshot
+ * (changing over a quarter of the paths) is built in slices too. The swap
+ * gives every node a new id, which is why everything outside the model
+ * (focus, reveal, scroll anchor) is kept by path.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FileTreeModel, isPlainPath, normalizeTreePath, ROOT, type FileTreeValues } from './model';
@@ -161,14 +164,16 @@ type FilterTest = (lowercasePath: string) => boolean;
 type Change = (model: FileTreeModel) => boolean | void;
 
 /**
- * A change, kept while the index builds so it lands on the full index too.
- * `expansion` changes only touch which folders are open; `paths` changes are
- * replaced by a new snapshot; `other` is a host's `batch`, always kept.
+ * A change, kept while the index builds and replayed on it in order.
+ * `expansion` changes only touch which folders are open (the replay skips
+ * them when a later filter makes them moot); `snapshot` is a `setPaths` made
+ * during the build.
  */
 type Op =
   | { kind: 'expansion' | 'paths' | 'other'; run: Change }
   | { kind: 'values'; values: Map<string, FileTreeValues> }
-  | { kind: 'filter'; test: FilterTest | null };
+  | { kind: 'filter'; test: FilterTest | null }
+  | { kind: 'snapshot'; paths: string[] };
 
 function applyOp(model: FileTreeModel, op: Op): boolean {
   switch (op.kind) {
@@ -179,42 +184,46 @@ function applyOp(model: FileTreeModel, op: Op): boolean {
     case 'values':
       model.setValues(op.values);
       return true;
+    case 'snapshot':
+      return model.setPaths(op.paths);
     default:
       return op.run(model) !== false;
   }
 }
 
 /**
- * Drop filter changes a later one makes moot: a filter followed by another
- * with only expansion changes between (those touch the filter's own open
- * folders, which the next filter recomputes). Ten keystrokes typed while the
- * index builds then cost one filter pass, not ten.
+ * Where the replay goes next from `ops[i]`: `i`, or a later op that makes
+ * `ops[i]` moot. A filter followed by another with only expansion changes
+ * between is moot (those touch the filter's own open folders, which the next
+ * filter recomputes), so ten keystrokes typed while the index builds cost one
+ * filter pass. (A snapshot is never moot: one that removes a folder forgets
+ * that it was open, even when the next brings it back.)
  */
-function compactOps(ops: readonly Op[]): Op[] {
-  const out: Op[] = [];
-  for (const op of ops) {
-    if (op.kind === 'filter') {
-      let k = out.length - 1;
-      while (k >= 0 && out[k].kind === 'expansion') k--;
-      const prev = out[k];
-      if (prev && prev.kind === 'filter' && (prev.test !== null || k === out.length - 1)) out.length = k;
-    }
-    out.push(op);
+function skipMoot(ops: readonly Op[], i: number): number {
+  for (;;) {
+    const op = ops[i];
+    if (op.kind !== 'filter') return i;
+    let j = i + 1;
+    while (j < ops.length && ops[j].kind === 'expansion') j++;
+    const later = ops[j];
+    if (!later || later.kind !== 'filter' || (op.test === null && j !== i + 1)) return i;
+    i = j;
   }
-  return out;
 }
 
 interface BuildJob {
   model: FileTreeModel;
   steps: Generator<void, void, void>;
-  /** Building the index, then filling the filter's lowercase paths when a filter waits. */
-  phase: 'build' | 'filter';
-  /** The folders open when the build started. */
-  expanded: string[] | undefined;
-  /** The filter set when the build started. */
-  test: FilterTest | null;
-  /** Every change since, in order. */
+  /**
+   * Building the index, filling the filter's lowercase paths when a filter
+   * waits, then replaying `ops` (`apply` while a snapshot's difference is
+   * applied in steps).
+   */
+  phase: 'build' | 'filter' | 'replay' | 'apply';
+  /** Every change since the build started, in order. */
   ops: Op[];
+  /** The next op to replay. */
+  next: number;
 }
 
 export class FileTreeStore {
@@ -351,11 +360,13 @@ export class FileTreeStore {
 
   // ---------------------------------------------------------------- build
 
+  /** Build `paths` in slices with `expanded` open, then replay the filter `test` and `ops` on it. */
   private startBuild(paths: string[], expanded: string[] | undefined, test: FilterTest | null, ops: Op[]): void {
     this.cancelTurn?.();
     this.cancelTurn = null;
     const model = new FileTreeModel(paths, { expanded, values: this.values, deferBuild: true });
-    this.building = { model, steps: model.build(), phase: 'build', expanded, test, ops };
+    const queued: Op[] = test ? [{ kind: 'filter', test }, ...ops] : ops;
+    this.building = { model, steps: model.build(), phase: 'build', ops: queued, next: 0 };
     this.schedule();
   }
 
@@ -363,31 +374,61 @@ export class FileTreeStore {
     this.cancelTurn = null;
     const job = this.building;
     if (!job) return;
-    const until = performance.now() + SLICE_MS;
+    const start = performance.now();
+    const until = start + SLICE_MS;
     while (performance.now() < until) {
-      if (!job.steps.next().done) continue;
-      if (job.phase === 'build' && this.filterWaits(job)) {
-        // Fill the filter's lowercase paths in slices too, so the swap is one cheap pass.
-        job.phase = 'filter';
-        job.steps = job.model.prepareFilter();
+      if (job.phase !== 'replay') {
+        if (!job.steps.next().done) continue;
+        if (job.phase === 'apply') {
+          job.phase = 'replay';
+        } else if (job.phase === 'build' && job.ops.some((op) => op.kind === 'filter' && op.test !== null)) {
+          // Fill the filter's lowercase paths in slices too, so a filter pass is cheap.
+          job.phase = 'filter';
+          job.steps = job.model.prepareFilter();
+        } else {
+          job.phase = 'replay';
+        }
         continue;
       }
-      this.finishBuild(job);
-      return;
+      if (job.next >= job.ops.length) {
+        this.finishBuild(job);
+        return;
+      }
+      // A snapshot's diff is one long step (~20 ms for 150k paths): give it a task of its own.
+      if (job.ops[job.next].kind === 'snapshot' && performance.now() - start > 1) break;
+      if (!this.replayStep(job)) return;
     }
     this.schedule();
   }
 
-  private filterWaits(job: BuildJob): boolean {
-    return job.test !== null || job.ops.some((op) => op.kind === 'filter' && op.test !== null);
+  /**
+   * Replay one queued change on the index being built: one per step, so no
+   * task runs long and the swap itself is cheap. False when a large snapshot
+   * started a new build.
+   */
+  private replayStep(job: BuildJob): boolean {
+    const i = skipMoot(job.ops, job.next);
+    const op = job.ops[i];
+    job.next = i + 1;
+    if (op.kind !== 'snapshot') {
+      applyOp(job.model, op);
+      return true;
+    }
+    const { model } = job;
+    const diff = model.diff(op.paths);
+    if (diff.adds.length === 0 && diff.removes.length === 0) return true;
+    if (!FileTreeModel.rebuildFor(diff)) {
+      job.phase = 'apply';
+      job.steps = model.applyDiffSteps(diff);
+      return true;
+    }
+    // What a synchronous store does (a rebuild that keeps open folders and the filter), in slices.
+    this.startBuild(op.paths, [...model.baseExpandedPaths()], model.filterTest, job.ops.slice(job.next));
+    return false;
   }
 
   private finishBuild(job: BuildJob): void {
-    const { model } = job;
-    // The new index, then every change the preview took meanwhile, in the same order.
-    const ops = compactOps(job.test ? [{ kind: 'filter', test: job.test }, ...job.ops] : job.ops);
-    for (const op of ops) applyOp(model, op);
-    this.current = model;
+    this.current = job.model;
     this.building = null;
     this.cancelTurn = null;
     this.commit();
@@ -400,18 +441,16 @@ export class FileTreeStore {
    * Make the tree hold exactly `paths` (a fresh snapshot): only the
    * difference is applied. A sliced store builds a large difference (over a
    * quarter of the paths) in slices like the first build, its open folders
-   * and filter kept.
+   * and filter kept. During a build the snapshot is queued like any change,
+   * so the changes before it land first (the tree shows its starting rows
+   * meanwhile).
    */
   setPaths(paths: Iterable<string>): boolean {
     const list = Array.isArray(paths) ? (paths as string[]) : [...paths];
     const job = this.building;
     if (job) {
-      // The build in progress is out of date: start again from this list,
-      // keeping every change made since it started except the path changes
-      // the snapshot replaces.
-      const kept = job.ops.filter((op) => op.kind !== 'paths' && op.kind !== 'values');
+      job.ops.push({ kind: 'snapshot', paths: list });
       this.refreshPreview(list);
-      this.startBuild(list, job.expanded, job.test, kept);
       this.commit();
       return true;
     }
