@@ -1,8 +1,11 @@
 /**
  * FileTree — a virtualized file tree for large path lists.
  *
- * Renders only the rows in view plus `overscan` above and below, at a fixed
- * row height, from a `FileTreeStore` (see store.ts and model.ts). Rows look
+ * Renders only the rows in view plus `overscan` above and below (and the
+ * focused row wherever it is), all one height, from a `FileTreeStore` (see
+ * store.ts and model.ts). The height is `rowHeight` or, when the text is
+ * larger, the measured height of a line of row text plus padding, so
+ * text-only zoom and a minimum font size never overlap rows. Rows look
  * like the sidebar FileBrowser's (13 px muted file names, 11 px folder rows
  * with a chevron and folder icon, `+N -N`, status letters, comment counts),
  * with indent guides drawn the way VS Code's default does (`onHover`: only
@@ -15,9 +18,15 @@
  * parent, Home/End, PageUp/PageDown, type-ahead, Enter and Space open a file
  * or toggle a folder. Nothing global is registered.
  *
- * Layout reads: `scrollTop` (scroll events) and the viewport height (one
- * `clientHeight` read at mount, then ResizeObserver). A cut-off name reads its
- * own width only when the pointer rests on it (HostTitle `cut`).
+ * Everything kept across changes is kept by path, since node ids change when
+ * a sliced build lands or a snapshot rebuilds: the focused row, a pending
+ * reveal, and the row at the top of the view (a change above it moves
+ * scrollTop by the change in its row, so what is on screen stays put).
+ *
+ * Layout reads: `scrollTop` (scroll events), the viewport's `clientHeight` and
+ * the text probe's `offsetHeight` (once at mount, then on ResizeObserver
+ * callbacks). A cut-off name reads its own width only when the pointer rests
+ * on it (HostTitle `cut`).
  */
 import React, { forwardRef, memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { HostTitle } from '../HostTitle';
@@ -59,7 +68,10 @@ export interface FileTreeProps {
   onToggle?: (path: string, expanded: boolean) => void;
   /** Icons. Default: FileBrowser's folder and file glyphs. Return null for none. Keep the function stable. */
   renderIcon?: (info: FileTreeIconInfo) => React.ReactNode;
-  /** Fixed row height in px. Default 22, or 36 on a touch screen. */
+  /**
+   * Row height in px, a minimum: rows grow with the text when it is larger
+   * (text-only zoom, a minimum font size). Default 22, or 36 on a touch screen.
+   */
   rowHeight?: number;
   /** Indent per level in px. Default 8 (FileBrowser uses 14). */
   indent?: number;
@@ -217,7 +229,7 @@ const RowView = memo(function RowView(p: RowViewProps) {
       {p.isDir && <Chevron open={p.expanded} />}
       {icon != null && icon !== false && icon}
       <HostTitle title={p.displayName} cut>
-        <span className={`truncate min-w-0 ${p.isDir ? '' : 'flex-1'} ${p.badge?.struck ? 'line-through' : ''}`}>{p.displayName}</span>
+        <span dir="auto" className={`truncate min-w-0 ${p.isDir ? '' : 'flex-1'} ${p.badge?.struck ? 'line-through' : ''}`}>{p.displayName}</span>
       </HostTitle>
       <span className="ml-auto flex flex-shrink-0 items-center gap-1.5 text-[10px]">
         {marker && (
@@ -257,38 +269,56 @@ function strongGuide(model: FileTreeModel, selected: number): { level: number; f
 }
 
 const TYPEAHEAD_MS = 700;
+/** Room left around a line of text when the text, not `rowHeight`, sets the row height. */
+const ROW_TEXT_PADDING = 2;
 
 export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(props, ref) {
   const { tree, selectedPath = null, onOpen, onToggle, renderIcon = defaultFileTreeIcon, indent = FILE_TREE_INDENT, overscan = 10, label = 'Files', labels, className, style } = props;
-  useSyncExternalStore(tree.subscribe, tree.getVersion, tree.getVersion);
+  const version = useSyncExternalStore(tree.subscribe, tree.getVersion, tree.getVersion);
   const model = tree.model;
   const coarse = useCoarsePointer();
-  const h = props.rowHeight ?? (coarse ? FILE_TREE_TOUCH_ROW_HEIGHT : FILE_TREE_ROW_HEIGHT);
+  const touch = (props.rowHeight ?? (coarse ? FILE_TREE_TOUCH_ROW_HEIGHT : FILE_TREE_ROW_HEIGHT)) >= FILE_TREE_TOUCH_ROW_HEIGHT;
+  const minRow = props.rowHeight ?? (coarse ? FILE_TREE_TOUCH_ROW_HEIGHT : FILE_TREE_ROW_HEIGHT);
   const domPrefix = `ft${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const probeRef = useRef<HTMLSpanElement>(null);
   const scrollTopRef = useRef(0);
   const [firstRow, setFirstRow] = useState(0);
   const [viewH, setViewH] = useState(0);
-  const [focusId, setFocusId] = useState(-1);
+  const [textH, setTextH] = useState(0);
+  const [focusPath, setFocusPath] = useState<string | null>(null);
   const [hasFocus, setHasFocus] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
   const [revealTick, setRevealTick] = useState(0);
   const lastFocusIndex = useRef(0);
-  const pendingReveal = useRef<{ id: number } | null>(null);
+  const pendingReveal = useRef<string | null>(null);
   const typeahead = useRef({ text: '', at: 0 });
+  /** The row at the top of the view, by path, so a change above it does not move what is on screen. */
+  const anchor = useRef<{ path: string; offset: number; version: number } | null>(null);
 
-  // Viewport height: one read at mount, then ResizeObserver (no forced layout).
+  // Row height follows the text: a hidden line of row text is measured once and
+  // again whenever it changes size (text-only zoom, a minimum font size, a font
+  // that loads late). Every row is the same height, so the window stays exact.
+  const h = Math.max(minRow, textH > 0 ? Math.ceil(textH) + ROW_TEXT_PADDING : 0);
+
+  // Viewport height and text height: one read each at mount, then ResizeObserver.
+  // Both read clientHeight / offsetHeight, so padding never makes them disagree.
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
+    const probe = probeRef.current;
+    if (!el || !probe) return;
     setViewH(el.clientHeight);
+    setTextH(probe.offsetHeight);
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
-      const next = entries[entries.length - 1]?.contentRect.height;
-      if (typeof next === 'number') setViewH(next);
+      for (const entry of entries) {
+        if (entry.target === el) setViewH(el.clientHeight);
+        else setTextH((entry.target as HTMLElement).offsetHeight);
+      }
     });
     ro.observe(el);
+    ro.observe(probe);
     return () => ro.disconnect();
   }, []);
 
@@ -301,12 +331,18 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const end = Math.min(total, top + pageRows + 1 + overscan);
   const rows: FileTreeRow[] = model.rows(start, end - start);
 
-  // The focused row: gone → the row now in its place; hidden → its visible folder.
-  let focus = focusId;
-  if (focus > ROOT && !model.isAlive(focus)) focus = model.rowAt(clamp(lastFocusIndex.current, 0, total - 1));
-  else if (focus > ROOT && !model.isVisible(focus)) focus = model.visibleAncestor(focus);
+  // The focused row, kept by path: hidden under a closed folder → that folder;
+  // gone → the row now in its place.
+  let focus = focusPath === null ? -1 : model.find(focusPath);
+  if (focus > ROOT && !model.isVisible(focus)) focus = model.visibleAncestor(focus);
+  if (focusPath !== null && focus <= ROOT && total > 0) focus = model.rowAt(clamp(lastFocusIndex.current, 0, total - 1));
   const focusIndex = focus > ROOT ? model.indexOfId(focus) : -1;
   if (focusIndex >= 0) lastFocusIndex.current = focusIndex;
+  // The focused row is always in the DOM, so aria-activedescendant never points at nothing.
+  if (focusIndex >= 0 && (focusIndex < start || focusIndex >= end)) {
+    const row = model.rowFor(focus);
+    if (row) rows.push(row);
+  }
 
   const selectedId = selectedPath ? model.find(selectedPath) : -1;
   const strong = strongGuide(model, selectedId);
@@ -335,45 +371,81 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     [h, viewport, scrollTo],
   );
 
+  // After the tree changes, keep the top row where it was (rows are absolutely
+  // placed, so the browser's own scroll anchoring cannot). Not at the very top:
+  // a new row there should show, as with CSS scroll anchoring. Then note the
+  // top row for next time.
+  useLayoutEffect(() => {
+    const a = anchor.current;
+    if (a && a.version !== version && scrollTopRef.current > 0) {
+      let id = model.find(a.path);
+      if (id > ROOT && !model.isVisible(id)) id = model.visibleAncestor(id);
+      const at = id > ROOT ? model.indexOfId(id) : -1;
+      if (at >= 0) {
+        const y = at * h + a.offset;
+        if (y !== scrollTopRef.current) scrollTo(y);
+      }
+    }
+    const topIndex = Math.floor(scrollTopRef.current / h);
+    const topId = model.rowAt(clamp(topIndex, 0, total - 1));
+    anchor.current = topId > ROOT ? { path: model.pathOf(topId), offset: scrollTopRef.current - topIndex * h, version } : null;
+  }, [version, model, h, total, scrollTo, firstRow]);
+
+  // Focus held on a row that is gone or hidden moves for good to the row that shows it.
+  useLayoutEffect(() => {
+    if (focusPath === null || focus <= ROOT) return;
+    const shown = model.pathOf(focus);
+    if (shown !== focusPath) setFocusPath(shown);
+  }, [version, focusPath, focus, model]);
+
   // revealPath: scroll once the expanded rows are in the spacer.
   useLayoutEffect(() => {
-    const pending = pendingReveal.current;
-    if (!pending) return;
+    const path = pendingReveal.current;
+    if (path === null) return;
     pendingReveal.current = null;
-    const at = model.indexOfId(pending.id);
+    const at = model.indexOf(path);
     if (at >= 0) ensureVisible(at, true);
   }, [revealTick, model, ensureVisible]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      revealPath(path, options) {
-        const id = tree.model.find(path);
-        if (id <= ROOT) return false;
-        tree.batch((m) => m.expandAncestors(id));
-        if (options?.focus !== false) setFocusId(id);
-        pendingReveal.current = { id };
-        setRevealTick((t) => t + 1);
+  useImperativeHandle(ref, () => {
+    const revealPath = (path: string, options?: { focus?: boolean }): boolean => {
+      if (tree.model.find(path) <= ROOT) {
+        // While a sliced build runs the path may not be in the preview yet: reveal it once the index lands.
+        if (!tree.loading) return false;
+        void tree.whenReady().then(() => {
+          if (tree.model.find(path) > ROOT) revealPath(path, options);
+        });
         return true;
-      },
+      }
+      tree.reveal(path);
+      if (options?.focus !== false) setFocusPath(tree.model.pathOf(tree.model.find(path)));
+      pendingReveal.current = path;
+      setRevealTick((t) => t + 1);
+      return true;
+    };
+    return {
+      revealPath,
       focus() {
         scrollRef.current?.focus();
       },
-    }),
-    [tree],
-  );
+    };
+  }, [tree]);
+
+  const focusRow = (id: number) => setFocusPath(id > ROOT ? model.pathOf(id) : null);
 
   const moveTo = (index: number) => {
     if (total === 0) return;
     const i = clamp(index, 0, total - 1);
-    setFocusId(model.rowAt(i));
+    focusRow(model.rowAt(i));
     ensureVisible(i);
   };
 
   const toggle = (id: number) => {
+    const path = model.pathOf(id);
     const open = !model.isExpanded(id);
-    tree.batch((m) => (open ? m.expand(id) : m.collapse(id)));
-    onToggle?.(model.pathOf(id), open);
+    if (open) tree.expand(path);
+    else tree.collapse(path);
+    onToggle?.(path, open);
   };
 
   const activate = (id: number) => {
@@ -421,7 +493,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       case 'ArrowRight':
         if (id > ROOT && model.isDir(id)) {
           if (!model.isExpanded(id)) toggle(id);
-          else if (model.childrenOf(id).length > 0) moveTo(cur + 1);
+          else if (model.shownChildCount(id) > 0) moveTo(cur + 1);
         } else if (cur < 0) moveTo(0);
         break;
       case 'ArrowLeft':
@@ -456,11 +528,12 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   };
 
   const onClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const rowEl = (event.target as Element).closest?.('[data-node]');
+    const rowEl = (event.target as Element).closest?.('[data-path]');
     if (!rowEl) return;
-    const id = Number(rowEl.getAttribute('data-node'));
-    if (!model.isAlive(id)) return;
-    setFocusId(id);
+    const path = rowEl.getAttribute('data-path')!;
+    const id = model.find(path);
+    if (id <= ROOT) return;
+    setFocusPath(path);
     activate(id);
   };
 
@@ -470,7 +543,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     if (focusIndex < 0 && total > 0) {
       const sel = selectedId > ROOT ? model.indexOfId(selectedId) : -1;
       const at = sel >= 0 ? sel : clamp(Math.floor(scrollTopRef.current / h), 0, total - 1);
-      setFocusId(model.rowAt(at));
+      focusRow(model.rowAt(at));
     }
   };
 
@@ -479,10 +552,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     scrollTopRef.current = y;
     const row = Math.floor(y / h);
     if (row !== firstRow) setFirstRow(row);
+    else if (anchor.current) anchor.current.offset = y - row * h;
   };
 
   const ringId = hasFocus && keyboard ? focus : -1;
-  const activeDescendant = hasFocus && focusIndex >= start && focusIndex < end ? `${domPrefix}-${focus}` : undefined;
+  const activeDescendant = hasFocus && focusIndex >= 0 ? `${domPrefix}-${focus}` : undefined;
   const dotLabel = labels?.markedBelow ?? 'Contains changes';
 
   const treeStyle = useMemo(
@@ -490,6 +564,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       ({
         '--ft-guide': 'color-mix(in oklab, var(--muted-foreground) 28%, transparent)',
         '--ft-guide-strong': 'color-mix(in oklab, var(--muted-foreground) 70%, transparent)',
+        overflowAnchor: 'none',
         ...style,
       }) as React.CSSProperties,
     [style],
@@ -501,6 +576,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       role="tree"
       aria-label={label}
       aria-activedescendant={activeDescendant}
+      aria-busy={tree.loading || undefined}
       tabIndex={0}
       data-file-tree=""
       className={`group/ft relative h-full overflow-auto outline-none ${className ?? ''}`}
@@ -514,6 +590,15 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
         if (event.target === event.currentTarget) setHasFocus(false);
       }}
     >
+      {/* A line of row text (the rows' font and line height), measured for the row height. */}
+      <span
+        ref={probeRef}
+        aria-hidden
+        data-ft-probe=""
+        className={`pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap ${touch ? 'text-[15px]' : 'text-[13px]'}`}
+      >
+        Ag
+      </span>
       <div role="presentation" style={{ position: 'relative', height: total * h, minHeight: '100%' }}>
         {rows.map((r) => {
           const path = model.pathOf(r.id);
@@ -523,7 +608,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
           const deletions = totals ? totals.deletions : (badge?.deletions ?? 0);
           return (
             <RowView
-              key={r.id}
+              key={path}
               domId={`${domPrefix}-${r.id}`}
               id={r.id}
               index={r.index}
@@ -546,7 +631,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
               count={totals ? totals.count : (badge?.count ?? 0)}
               dot={r.isDir && !r.expanded && r.markedBelow && additions === 0 && deletions === 0}
               dotLabel={dotLabel}
-              touch={h >= FILE_TREE_TOUCH_ROW_HEIGHT}
+              touch={touch}
               renderIcon={renderIcon}
             />
           );

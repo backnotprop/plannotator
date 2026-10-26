@@ -89,6 +89,7 @@ plannotator/
 │   │   ├── components/           # Viewer, Toolbar, Settings, etc.
 │   │   │   ├── icons/            # Shared SVG icon components (themeIcons, etc.)
 │   │   │   ├── diagram/          # The diagram engine's viewer (DiagramViewer, DiagramCanvas, DiagramOverlay, DiagramComposer, DiagramSourcePane, DiagramPopout + hooks); DiagramBlock.tsx is the fence side
+│   │   │   ├── file-tree/        # Virtualized file tree for large path lists (model.ts index, store.ts, FileTree.tsx); not wired into any screen yet (see "File tree" in guides-and-shared-ui.md)
 │   │   │   ├── plan-diff/        # PlanDiffBadge, PlanDiffViewer, clean/raw diff views
 │   │   │   └── sidebar/          # SidebarContainer, SidebarTabs, VersionBrowser, ArchiveBrowser
 │   │   ├── shortcuts/            # Keyboard shortcut registry (see Keyboard Shortcuts section below)

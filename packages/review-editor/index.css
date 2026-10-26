@@ -7,6 +7,9 @@
 
 /* Tell Tailwind where to scan for classes */
 @source "../ui/components/**/*.tsx";
+/* The file tree is not used here, and this stylesheet is part of the pinned
+   guides.show viewer: its classes must not change the viewer's CSS hash. */
+@source not "../ui/components/file-tree/**";
 @source "../ui/hooks/**/*.ts";
 @source "./*.tsx";
 @source "./components/**/*.tsx";

@@ -13,10 +13,16 @@
  * PIERRE_TREES_DIR points the Pierre column at an installed @pierre/trees
  * (1.0.0-beta.6 measured); without it the column is skipped.
  *
- * Every number is the median of `--runs` fresh pages. Long tasks come from a
+ * Every number is the median of `--runs` fresh pages. Each change is timed two
+ * ways, the same for every tree: wall time from the call to two frames later
+ * (so ~33 ms is the frame floor), and main-thread work (the change in CDP's
+ * TaskDuration across it: script, style, layout and paint the change cost).
+ * "Cold" is the first time in a page; "warm" repeats the folder's close-all /
+ * open-all `--warm` times (default 3) in the same page. Long tasks come from a
  * PerformanceObserver; scroll frame times are requestAnimationFrame deltas
  * while scrollTop moves 40 px a frame for 3 s ("scroll") and jumps to a random
- * place every frame for 2 s ("jump").
+ * place every frame for 2 s ("jump"). The new tree loads the way useFileTree
+ * loads it (sliced: top-level rows first, the full index between tasks).
  */
 import { chromium, devices } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -64,12 +70,13 @@ async function bench() {
   const pathsFile = resolve(opt('paths')!);
   const folder = opt('folder')!;
   const runs = Number(opt('runs', '3'));
+  const warmCycles = Number(opt('warm', '3'));
   let impls = opt('impls', 'new,new-tips,pl-browser,pierre')!.split(',');
   if (!process.env.PIERRE_TREES_DIR) impls = impls.filter((i) => i !== 'pierre');
   await build();
   const server = serve(pathsFile);
   const browser = await chromium.launch({ headless: true });
-  const out: Record<string, any> = { paths: pathsFile, folder, runs, at: new Date().toISOString(), impls: {} };
+  const out: Record<string, any> = { paths: pathsFile, folder, runs, warmCycles, at: new Date().toISOString(), impls: {} };
   for (const impl of impls) {
     const per: any[] = [];
     for (let run = 0; run < runs; run++) {
@@ -85,86 +92,117 @@ async function bench() {
       await cdp.send('Performance.enable');
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(String(e)));
-      await page.goto(`http://127.0.0.1:${server.port}/?mode=bench&impl=${impl}&theme=light`);
-      await page.waitForFunction(() => (window as any).__h?.ready === true, null, { timeout: 300000 });
-      const longest = () =>
-        page.evaluate(() => {
-          const lt = (window as any).__long as { s: number; d: number }[];
-          return { total: lt.reduce((a, b) => a + b.d, 0), longest: Math.max(0, ...lt.map((x) => x.d)) };
-        });
-      const reset = () => page.evaluate(() => { (window as any).__long.length = 0; });
-      const heap = async () => {
-        await cdp.send('HeapProfiler.collectGarbage');
+      const metrics = async () => {
         const m = await cdp.send('Performance.getMetrics');
         const g = (n: string) => m.metrics.find((x: any) => x.name === n)?.value ?? 0;
-        return { jsHeapMB: g('JSHeapUsedSize') / 1048576, nodes: g('Nodes') };
+        return { task: g('TaskDuration') * 1000, script: g('ScriptDuration') * 1000, heapMB: g('JSHeapUsedSize') / 1048576, nodes: g('Nodes') };
       };
+      const longTasks = () =>
+        page.evaluate(() => {
+          const lt = (window as any).__long as { s: number; d: number }[];
+          (window as any).__long = [];
+          return { longest: Math.max(0, ...lt.map((x) => x.d)), over50: lt.length };
+        });
+      /** One change: wall time to two frames later, main-thread work (CDP TaskDuration), longest task. */
+      const op = async (expr: string, arg?: unknown) => {
+        await longTasks();
+        const m0 = await metrics();
+        const r = await page.evaluate(([e, a]) => (window as any).__h[e as string](a), [expr, arg] as const);
+        const m1 = await metrics();
+        const lt = await longTasks();
+        const ms = typeof r === 'number' ? r : r.ms;
+        return { wall: ms, work: m1.task - m0.task, script: m1.script - m0.script, longest: lt.longest, visible: typeof r === 'number' ? null : r.visible, rows: await page.evaluate(() => (window as any).__h.rowCount()) };
+      };
+
+      await page.goto(`http://127.0.0.1:${server.port}/?mode=bench&impl=${impl}&theme=light`);
+      await page.waitForFunction(() => (window as any).__h?.ready === true, null, { timeout: 300000 });
+      if (impl.startsWith('new')) await page.waitForFunction(() => (window as any).__h?.fullReady === true, null, { timeout: 300000 });
       const first = await page.evaluate(() => {
         const h = (window as any).__h;
+        const end = h.marks.fullReady ?? h.marks.painted;
         const lt = ((window as any).__long as { s: number; d: number }[]).filter((x) => x.s + x.d >= h.marks.dataReceived);
-        return { renderMs: h.marks.painted - h.marks.dataReceived, rows: h.rowCount(), domNodes: h.domNodes(), longest: Math.max(0, ...lt.map((x) => x.d)) };
+        return {
+          renderMs: h.marks.painted - h.marks.dataReceived,
+          readyMs: end - h.marks.dataReceived,
+          rows: h.rowCount(),
+          longest: Math.max(0, ...lt.map((x) => x.d)),
+          over50: lt.length,
+        };
       });
-      const heapLoad = await heap();
-      await reset();
-      const expandOne = await page.evaluate(async (p) => {
-        const h = (window as any).__h;
-        const parts = p.split('/');
-        let ms = 0;
-        for (let i = 1; i <= parts.length; i++) ms = await h.expand(parts.slice(0, i).join('/'));
-        return { ms, rows: h.rowCount() };
-      }, folder);
-      await reset();
-      const expandAll = await page.evaluate(async (p) => {
-        const h = (window as any).__h;
-        const r = await h.expandAllUnder(`${p}/`);
-        return { ...r, work: h.lastWork ?? null, rows: h.rowCount(), domNodes: h.domNodes() };
-      }, folder);
-      const expandAllTasks = await longest();
-      const heapExpanded = await heap();
-      await reset();
+      await page.evaluate(() => { (window as any).__long = []; });
+      const heapLoad = await (async () => { await cdp.send('HeapProfiler.collectGarbage'); return metrics(); })();
+
+      // Cold: open the folder's ancestors one by one, then everything under it.
+      const parts = folder.split('/');
+      let expandOne: any = null;
+      for (let i = 1; i <= parts.length; i++) expandOne = await op('expand', parts.slice(0, i).join('/'));
+      const expandAll = await op('expandAllUnder', `${folder}/`);
+      await cdp.send('HeapProfiler.collectGarbage');
+      const heapExpanded = await metrics();
+      const domNodes = await page.evaluate(() => (window as any).__h.domNodes());
+      await longTasks();
       const scroll = await page.evaluate(async () => (window as any).__h.scrollTest(3000, 40, false));
-      const scrollTasks = await longest();
-      await reset();
+      const scrollTasks = await longTasks();
       const jump = await page.evaluate(async () => (window as any).__h.scrollTest(2000, 0, true));
-      const jumpTasks = await longest();
-      await reset();
-      const collapse = await page.evaluate(async (p) => {
-        const h = (window as any).__h;
-        h.scroller().scrollTop = 0;
-        const ms = await h.collapse(p);
-        return { ms, work: h.lastWork ?? null, rows: h.rowCount() };
-      }, folder);
-      const collapseTasks = await longest();
+      const jumpTasks = await longTasks();
+      await page.evaluate(() => { (window as any).__h.scroller().scrollTop = 0; });
+      const collapse = await op('collapse', folder);
+
+      // Warm: the same page, the folder's subtree closed and opened again.
+      const warm: any[] = [];
+      await op('expand', folder);
+      for (let i = 0; i < warmCycles; i++) {
+        const c = await op('collapseAllUnder', `${folder}/`);
+        const e = await op('expandAllUnder', `${folder}/`);
+        warm.push({ collapse: c, expand: e });
+      }
+
       let everything: any = null;
       if (impl !== 'pl-browser') {
-        await reset();
-        const exp = await page.evaluate(async () => ({ ...(await (window as any).__h.expandEverything()), work: (window as any).__h.lastWork ?? null }));
-        const expTasks = await longest();
-        await reset();
-        const scrollAll = await page.evaluate(async () => (window as any).__h.scrollTest(2000, 0, true));
-        await reset();
-        const col = await page.evaluate(async () => ({ ...(await (window as any).__h.collapseEverything()), work: (window as any).__h.lastWork ?? null }));
-        const colTasks = await longest();
-        everything = { expand: exp, expandTasks: expTasks, jump: scrollAll, collapse: col, collapseTasks: colTasks };
+        const exp = await op('expandEverything');
+        await longTasks();
+        const j = await page.evaluate(async () => (window as any).__h.scrollTest(2000, 0, true));
+        const jTasks = await longTasks();
+        const col = await op('collapseEverything');
+        const exp2 = await op('expandEverything');
+        const col2 = await op('collapseEverything');
+        everything = { expand: exp, jump: j, jumpTasks: jTasks, collapse: col, expandWarm: exp2, collapseWarm: col2 };
       }
-      per.push({ first, heapLoad, expandOne, expandAll, expandAllTasks, heapExpanded, scroll, scrollTasks, jump, jumpTasks, collapse, collapseTasks, everything, errors: errors.slice(0, 3) });
+      let filter: any = null;
+      if (impl.startsWith('new')) {
+        const keys: any[] = [];
+        for (const q of ['p', 'pl', 'ple', 'plex', 'plex w', 'plex wo', 'plex wof', 'plex woff']) keys.push(await op('filter', q));
+        const clear = await op('filter', '');
+        filter = { keys, clear };
+      }
+      per.push({ first, heapLoad, expandOne, expandAll, heapExpanded, domNodes, scroll, scrollTasks, jump, jumpTasks, collapse, warm, everything, filter, errors: errors.slice(0, 3) });
       await ctx.close();
-      console.log(impl, run, JSON.stringify({ first: round(first.renderMs), expandAll: round(expandAll.ms), rows: expandAll.rows, scrollP95: round(scroll.p95), errors: errors.length }));
+      console.log(impl, run, JSON.stringify({ first: round(first.renderMs), ready: round(first.readyMs), loadLongest: round(first.longest), expandAllWall: round(expandAll.wall), expandAllWork: round(expandAll.work), errors: errors.length }));
     }
     const pick = (f: (x: any) => number | null | undefined) => round(median(per.map((x) => f(x) ?? NaN)));
+    const warmPick = (f: (w: any) => number) => round(median(per.flatMap((x) => x.warm.map(f))));
     out.impls[impl] = {
       median: {
         firstPaintMs: pick((x) => x.first.renderMs),
-        firstLongestTaskMs: pick((x) => x.first.longest),
-        heapAfterLoadMB: pick((x) => x.heapLoad.jsHeapMB),
-        expandOneMs: pick((x) => x.expandOne.ms),
-        expandAllMs: pick((x) => x.expandAll.ms),
-        expandAllLongestTaskMs: pick((x) => x.expandAllTasks.longest),
+        fullIndexReadyMs: pick((x) => x.first.readyMs),
+        loadLongestTaskMs: pick((x) => x.first.longest),
+        loadTasksOver50: pick((x) => x.first.over50),
+        heapAfterLoadMB: pick((x) => x.heapLoad.heapMB),
+        expandOneWallMs: pick((x) => x.expandOne.wall),
+        expandOneWorkMs: pick((x) => x.expandOne.work),
+        expandAllWallMs: pick((x) => x.expandAll.wall),
         expandAllWorkMs: pick((x) => x.expandAll.work),
+        expandAllLongestTaskMs: pick((x) => x.expandAll.longest),
+        expandAllWarmWallMs: warmPick((w) => w.expand.wall),
+        expandAllWarmWorkMs: warmPick((w) => w.expand.work),
+        collapseWallMs: pick((x) => x.collapse.wall),
+        collapseWorkMs: pick((x) => x.collapse.work),
+        collapseAllWarmWallMs: warmPick((w) => w.collapse.wall),
+        collapseAllWarmWorkMs: warmPick((w) => w.collapse.work),
         visibleRowsAfterExpandAll: per[0].expandAll.visible,
         domRowsAfterExpandAll: per[0].expandAll.rows,
-        domNodesAfterExpandAll: pick((x) => x.expandAll.domNodes),
-        heapExpandedMB: pick((x) => x.heapExpanded.jsHeapMB),
+        domNodesAfterExpandAll: pick((x) => x.domNodes),
+        heapExpandedMB: pick((x) => x.heapExpanded.heapMB),
         scrollP50FrameMs: pick((x) => x.scroll.p50),
         scrollP95FrameMs: pick((x) => x.scroll.p95),
         scrollMaxFrameMs: pick((x) => x.scroll.max),
@@ -173,18 +211,21 @@ async function bench() {
         jumpP95FrameMs: pick((x) => x.jump.p95),
         jumpMaxFrameMs: pick((x) => x.jump.max),
         jumpLongestTaskMs: pick((x) => x.jumpTasks.longest),
-        collapseMs: pick((x) => x.collapse.ms),
-        collapseLongestTaskMs: pick((x) => x.collapseTasks.longest),
-        collapseWorkMs: pick((x) => x.collapse.work),
-        everythingExpandMs: pick((x) => x.everything?.expand.ms),
-        everythingExpandLongestTaskMs: pick((x) => x.everything?.expandTasks.longest),
+        everythingExpandWallMs: pick((x) => x.everything?.expand.wall),
         everythingExpandWorkMs: pick((x) => x.everything?.expand.work),
+        everythingExpandWarmWorkMs: pick((x) => x.everything?.expandWarm.work),
+        everythingExpandLongestTaskMs: pick((x) => x.everything?.expand.longest),
         everythingVisibleRows: per[0].everything?.expand.visible ?? null,
         everythingJumpP95FrameMs: pick((x) => x.everything?.jump.p95),
         everythingJumpMaxFrameMs: pick((x) => x.everything?.jump.max),
-        everythingCollapseMs: pick((x) => x.everything?.collapse.ms),
-        everythingCollapseLongestTaskMs: pick((x) => x.everything?.collapseTasks.longest),
+        everythingCollapseWallMs: pick((x) => x.everything?.collapse.wall),
         everythingCollapseWorkMs: pick((x) => x.everything?.collapse.work),
+        everythingCollapseWarmWorkMs: pick((x) => x.everything?.collapseWarm.work),
+        everythingCollapseLongestTaskMs: pick((x) => x.everything?.collapse.longest),
+        filterKeystrokeMaxWorkMs: pick((x) => (x.filter ? Math.max(...x.filter.keys.map((k: any) => k.work)) : null)),
+        filterKeystrokeMedianWorkMs: pick((x) => (x.filter ? median(x.filter.keys.map((k: any) => k.work)) : null)),
+        filterKeystrokeLongestTaskMs: pick((x) => (x.filter ? Math.max(...x.filter.keys.map((k: any) => k.longest)) : null)),
+        filterClearWorkMs: pick((x) => x.filter?.clear.work),
       },
       runs: per,
     };

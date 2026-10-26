@@ -3,7 +3,7 @@
  *
  * Built once from a list of paths. Every path segment is interned (a folder
  * named `src` is one string however many times it appears) and every node is a
- * slot in a set of typed arrays: parent, name, depth, flags, and two counts.
+ * slot in a set of typed arrays: parent, name, depth, flags, counts.
  *
  * `inner[n]` is the number of rows under `n` WHEN `n` IS EXPANDED, kept for
  * every folder whether it is open or not. A node's visible rows are
@@ -20,10 +20,15 @@
  * Adds and removes (a live folder watch) update the index in place: a new
  * node is inserted in its parent's sorted children (binary search) and the
  * delta goes up the ancestors; a removed subtree is detached, its counts taken
- * off its ancestors, its ids freed for reuse. `setPaths` diffs a full snapshot
- * against what the index holds and applies only the difference, or rebuilds
- * when most of the list changed (a rebuild of 150k paths takes ~100 ms, about
- * what applying 50k single changes costs).
+ * off its ancestors, its ids freed for reuse. Ids are only meaningful inside
+ * one model: callers that keep a node across changes keep its path.
+ *
+ * Filter: a filter hides every node that neither matches nor holds a match
+ * (FileBrowser's rule). Hidden nodes stay in the index and are skipped by the
+ * counts, so setting a filter is one pass over the nodes, and adds and removes
+ * under a filter stay incremental. While a filter is set the tree uses its own
+ * expansion (every folder holding a match starts open; a new match opens its
+ * folders) and the unfiltered expansion waits for the filter to clear.
  *
  * Kinds: a node is a folder when it has children or was listed with a trailing
  * `/`; otherwise it is a file. A path listed as a file that also prefixes other
@@ -35,13 +40,30 @@
  * total.
  *
  * Roll-ups: the host attaches values to paths (a change mark, lines added
- * and deleted, a comment count); every node keeps their sums over its subtree,
- * updated by delta on add and remove, so a folder's "+12 -3", its comment count
- * and "this collapsed folder holds changes" are one read in render, never a
- * walk.
+ * and deleted, a comment count); every node keeps their sums over its subtree
+ * (hidden nodes included), updated by delta on add and remove, so a folder's
+ * "+12 -3", its comment count and "this collapsed folder holds changes" are
+ * one read in render, never a walk.
+ *
+ * Building can run in slices (`build()` is a generator; the constructor runs it
+ * to the end), so a host can keep every task at load short.
  */
 
 export const ROOT = 0;
+
+const F_ALIVE = 1;
+/** Listed as a file. */
+const F_FILE = 2;
+/** Listed as a folder (the path ended in `/`). */
+const F_DIR = 4;
+/** The host marked this path. */
+const F_MARK = 8;
+/** Hidden by the filter. */
+const F_HIDE = 16;
+
+const EMPTY: readonly number[] = Object.freeze([]) as readonly number[];
+/** parent * 2^32 + nameId: unique while ids stay under 2^21. */
+const KEY_SHIFT = 4294967296;
 
 /** What the host attaches to one path; folders show the sums of these over their subtree. */
 export interface FileTreeValues {
@@ -61,18 +83,6 @@ function normalizeValues(values: ReadonlyMap<string, FileTreeValues>): Map<strin
   return out;
 }
 
-const F_ALIVE = 1;
-/** Listed as a file. */
-const F_FILE = 2;
-/** Listed as a folder (the path ended in `/`). */
-const F_DIR = 4;
-/** The host marked this path. */
-const F_MARK = 8;
-
-const EMPTY: readonly number[] = Object.freeze([]) as readonly number[];
-/** parent * 2^32 + nameId: unique while ids stay under 2^21. */
-const KEY_SHIFT = 4294967296;
-
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 /** The tree's name order: case-insensitive, numbers by value, ties by code point. */
@@ -91,9 +101,9 @@ export interface NormalizedTreePath {
 
 /**
  * A path as the tree reads it: `/` separated, leading `/` and `./` and empty
- * or `.` segments dropped, a trailing `/` marking a folder. Backslashes are
- * names, not separators (they are legal in POSIX file names). Null when
- * nothing is left.
+ * or `.` segments dropped, a trailing `/` marking a folder. `..` and
+ * backslashes are names, not path syntax (both are legal in POSIX file names);
+ * names are not Unicode-normalized. Null when nothing is left.
  */
 export function normalizeTreePath(path: string): NormalizedTreePath | null {
   const dir = path.endsWith('/');
@@ -130,12 +140,20 @@ export interface FileTreeRow {
   name: string;
   isDir: boolean;
   expanded: boolean;
-  /** Number of siblings, this node included (aria-setsize). */
+  /** Number of shown siblings, this node included (aria-setsize). */
   setSize: number;
   /** 1-based position among them (aria-posinset). */
   posInSet: number;
   /** The host marked a node below this one. */
   markedBelow: boolean;
+}
+
+export interface FileTreeModelOptions {
+  /** Folders open at the start (paths). */
+  expanded?: Iterable<string>;
+  values?: ReadonlyMap<string, FileTreeValues>;
+  /** Don't build in the constructor: the caller runs `build()` (in slices). */
+  deferBuild?: boolean;
 }
 
 export class FileTreeModel {
@@ -145,6 +163,8 @@ export class FileTreeModel {
   private depthArr = new Int32Array(0);
   private flags = new Uint8Array(0);
   private inner = new Int32Array(0);
+  /** Children not hidden by the filter. */
+  private shownKids = new Int32Array(0);
   private marks = new Int32Array(0);
   private sumAdd = new Int32Array(0);
   private sumDel = new Int32Array(0);
@@ -157,14 +177,32 @@ export class FileTreeModel {
   private nameIds = new Map<string, number>();
   private childKey = new Map<number, number>();
   private pathCache: (string | undefined)[] = [];
-  private expandedSet = new Set<number>();
+  private lcCache: (string | undefined)[] = [];
+  private lcNames: (string | undefined)[] = [];
+  private baseExpanded = new Set<number>();
+  private filterExpanded: Set<number> | null = null;
+  /** The expansion in use: the filter's while a filter is set. */
+  private expandedSet = this.baseExpanded;
+  private test: ((lowercasePath: string) => boolean) | null = null;
   /** Per-path values the host gave (marks and the numbers folders sum). */
   private values = new Map<string, FileTreeValues>();
   private live = 0;
+  private pendingPaths: Iterable<string> | null;
+  private pendingExpanded: Iterable<string> | undefined;
 
-  constructor(paths: Iterable<string> = [], options: { expanded?: Iterable<string>; values?: ReadonlyMap<string, FileTreeValues> } = {}) {
+  constructor(paths: Iterable<string> = [], options: FileTreeModelOptions = {}) {
     if (options.values) this.values = normalizeValues(options.values);
-    this.reset(paths, options.expanded);
+    this.pendingPaths = paths;
+    this.pendingExpanded = options.expanded;
+    this.clear(0);
+    if (!options.deferBuild) this.runBuild();
+  }
+
+  private runBuild(): void {
+    const steps = this.build();
+    while (!steps.next().done) {
+      /* run to the end */
+    }
   }
 
   // ---------------------------------------------------------------- storage
@@ -173,17 +211,24 @@ export class FileTreeModel {
     if (min <= this.cap) return;
     let cap = Math.max(64, this.cap * 2);
     while (cap < min) cap *= 2;
-    const g32 = (a: Int32Array) => { const b = new Int32Array(cap); b.set(a); return b; };
+    const g32 = (a: Int32Array) => {
+      const b = new Int32Array(cap);
+      b.set(a);
+      return b;
+    };
     this.parent = g32(this.parent);
     this.nameId = g32(this.nameId);
     this.depthArr = g32(this.depthArr);
     this.inner = g32(this.inner);
+    this.shownKids = g32(this.shownKids);
     this.marks = g32(this.marks);
     this.sumAdd = g32(this.sumAdd);
     this.sumDel = g32(this.sumDel);
     this.sumCount = g32(this.sumCount);
     this.pos = g32(this.pos);
-    const f = new Uint8Array(cap); f.set(this.flags); this.flags = f;
+    const f = new Uint8Array(cap);
+    f.set(this.flags);
+    this.flags = f;
     this.cap = cap;
   }
 
@@ -197,14 +242,15 @@ export class FileTreeModel {
     return id;
   }
 
-  private alloc(p: number, nid: number): number {
+  private alloc(p: number, nid: number, hidden: boolean): number {
     const id = this.freeIds.length > 0 ? this.freeIds.pop()! : this.nextId++;
     if (id >= this.cap) this.grow(id + 1);
     this.parent[id] = p;
     this.nameId[id] = nid;
     this.depthArr[id] = p === ROOT ? 0 : this.depthArr[p] + 1;
-    this.flags[id] = F_ALIVE;
+    this.flags[id] = hidden ? F_ALIVE | F_HIDE : F_ALIVE;
     this.inner[id] = 0;
+    this.shownKids[id] = 0;
     this.marks[id] = 0;
     this.sumAdd[id] = 0;
     this.sumDel[id] = 0;
@@ -212,6 +258,7 @@ export class FileTreeModel {
     this.pos[id] = -1;
     this.kids[id] = EMPTY as number[];
     this.pathCache[id] = undefined;
+    this.lcCache[id] = undefined;
     this.childKey.set(p * KEY_SHIFT + nid, id);
     this.live++;
     return id;
@@ -224,9 +271,14 @@ export class FileTreeModel {
     return this.inner[ROOT] ?? 0;
   }
 
-  /** Nodes in the index, folders included. */
+  /** Nodes in the index, folders included (hidden ones too). */
   get nodeCount(): number {
     return this.live;
+  }
+
+  /** A filter is set. */
+  get filtered(): boolean {
+    return this.test !== null;
   }
 
   isAlive(id: number): boolean {
@@ -239,6 +291,11 @@ export class FileTreeModel {
 
   isExpanded(id: number): boolean {
     return this.expandedSet.has(id);
+  }
+
+  /** Not hidden by the filter. */
+  isShown(id: number): boolean {
+    return (this.flags[id] & F_HIDE) === 0;
   }
 
   nameOf(id: number): string {
@@ -254,17 +311,55 @@ export class FileTreeModel {
     return this.parent[id];
   }
 
+  /** Children, hidden ones included. */
   childrenOf(id: number): readonly number[] {
     return this.kids[id];
+  }
+
+  /** Children not hidden by the filter. */
+  shownChildCount(id: number): number {
+    return this.shownKids[id];
   }
 
   pathOf(id: number): string {
     const cached = this.pathCache[id];
     if (cached !== undefined) return cached;
-    const p = this.parent[id];
-    const path = p === ROOT ? this.nameOf(id) : `${this.pathOf(p)}/${this.nameOf(id)}`;
-    this.pathCache[id] = path;
-    return path;
+    // Walk up to the nearest ancestor with a cached path, then fill the cache on the way down.
+    const chain: number[] = [];
+    let n = id;
+    while (n !== ROOT && this.pathCache[n] === undefined) {
+      chain.push(n);
+      n = this.parent[n];
+    }
+    let prefix = n === ROOT ? '' : this.pathCache[n]!;
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const c = chain[i];
+      prefix = prefix === '' ? this.nameOf(c) : `${prefix}/${this.nameOf(c)}`;
+      this.pathCache[c] = prefix;
+    }
+    return prefix;
+  }
+
+  /** A name lowercased with backslashes read as `/`, once per interned name. */
+  private lowercaseName(nid: number): string {
+    let lc = this.lcNames[nid];
+    if (lc === undefined) {
+      lc = this.names[nid].replace(/\\/g, '/').toLowerCase();
+      this.lcNames[nid] = lc;
+    }
+    return lc;
+  }
+
+  /** The path lowercased with backslashes read as `/` (what the filter matches): the parent's plus this name's. */
+  private lowercasePath(id: number): string {
+    let lc = this.lcCache[id];
+    if (lc === undefined) {
+      const p = this.parent[id];
+      const name = this.lowercaseName(this.nameId[id]);
+      lc = p === ROOT ? name : `${this.lowercasePath(p)}/${name}`;
+      this.lcCache[id] = lc;
+    }
+    return lc;
   }
 
   /** The node at `path`, or -1. */
@@ -282,7 +377,11 @@ export class FileTreeModel {
     return n;
   }
 
-  /** Rows under `id` as shown now. */
+  /** Rows under `id` as shown now (0 when collapsed). */
+  rowsUnder(id: number): number {
+    return this.vis(id);
+  }
+
   private vis(id: number): number {
     return this.expandedSet.has(id) ? this.inner[id] : 0;
   }
@@ -301,14 +400,9 @@ export class FileTreeModel {
     return { additions: this.sumAdd[id], deletions: this.sumDel[id], count: this.sumCount[id], marked: this.marks[id] };
   }
 
-  /** Rows under `id` as shown now (0 when collapsed). */
-  rowsUnder(id: number): number {
-    return this.vis(id);
-  }
-
-  /** Every ancestor of `id` is expanded. */
+  /** Shown, and every ancestor shown and expanded. */
   isVisible(id: number): boolean {
-    if (!this.isAlive(id)) return false;
+    if (!this.isAlive(id) || !this.isShown(id)) return false;
     let p = this.parent[id];
     while (p !== ROOT) {
       if (!this.expandedSet.has(p)) return false;
@@ -317,11 +411,18 @@ export class FileTreeModel {
     return true;
   }
 
-  /** The row `id` shows on, or `id`'s highest collapsed ancestor's when it is hidden. */
+  /**
+   * The row `id` shows on: itself when visible, else the highest collapsed
+   * folder above it (or, when the filter hides it, above its nearest shown
+   * ancestor). -1 when nothing above it shows.
+   */
   visibleAncestor(id: number): number {
     if (!this.isAlive(id)) return -1;
-    let shown = id;
-    let p = this.parent[id];
+    let n = id;
+    while (n !== ROOT && !this.isShown(n)) n = this.parent[n];
+    if (n === ROOT) return -1;
+    let shown = n;
+    let p = this.parent[n];
     while (p !== ROOT) {
       if (!this.expandedSet.has(p)) shown = p;
       p = this.parent[p];
@@ -338,6 +439,7 @@ export class FileTreeModel {
       let found = false;
       for (let k = 0; k < ch.length; k++) {
         const c = ch[k];
+        if (this.flags[c] & F_HIDE) continue;
         const size = 1 + this.vis(c);
         if (i < size) {
           if (i === 0) return c;
@@ -361,7 +463,10 @@ export class FileTreeModel {
       const p = this.parent[x];
       const ch = this.kids[p];
       const at = this.pos[x];
-      for (let k = 0; k < at; k++) idx += 1 + this.vis(ch[k]);
+      for (let k = 0; k < at; k++) {
+        const c = ch[k];
+        if ((this.flags[c] & F_HIDE) === 0) idx += 1 + this.vis(c);
+      }
       x = p;
     }
     return idx;
@@ -373,7 +478,97 @@ export class FileTreeModel {
     return id < 0 ? -1 : this.indexOfId(id);
   }
 
-  private row(c: number, index: number, depth: number, setSize: number, posInSet: number): FileTreeRow {
+  /**
+   * Calls `visit` for each visible row from `start` on, in order, until it
+   * returns true or the rows run out. Finds `start` by counts, then walks
+   * forward with a cursor (each next row is O(1) amortized).
+   */
+  scan(start: number, visit: (id: number, index: number, depth: number, setSize: number, posInSet: number) => boolean | void): void {
+    if (start < 0) start = 0;
+    if (start >= this.rowCount) return;
+    const flags = this.flags;
+    const dirs: number[] = [];
+    const at: number[] = [];
+    const nth: number[] = [];
+    let n = ROOT;
+    let i = start;
+    descend: for (;;) {
+      const ch = this.kids[n];
+      let shownBefore = 0;
+      for (let k = 0; k < ch.length; k++) {
+        const c = ch[k];
+        if (flags[c] & F_HIDE) continue;
+        const size = 1 + this.vis(c);
+        if (i < size) {
+          dirs.push(n);
+          at.push(k);
+          nth.push(shownBefore);
+          if (i === 0) break descend;
+          i -= 1;
+          n = c;
+          continue descend;
+        }
+        i -= size;
+        shownBefore++;
+      }
+      return;
+    }
+    let index = start;
+    while (dirs.length > 0) {
+      const top = dirs.length - 1;
+      const parentId = dirs[top];
+      const c = this.kids[parentId][at[top]];
+      if (visit(c, index, top, this.shownKids[parentId], nth[top] + 1) === true) return;
+      index++;
+      if (this.shownKids[c] > 0 && this.expandedSet.has(c)) {
+        const ch = this.kids[c];
+        let k = 0;
+        while (flags[ch[k]] & F_HIDE) k++;
+        dirs.push(c);
+        at.push(k);
+        nth.push(0);
+        continue;
+      }
+      while (dirs.length > 0) {
+        const t = dirs.length - 1;
+        const ch = this.kids[dirs[t]];
+        let k = at[t] + 1;
+        while (k < ch.length && flags[ch[k]] & F_HIDE) k++;
+        if (k < ch.length) {
+          at[t] = k;
+          nth[t]++;
+          break;
+        }
+        dirs.pop();
+        at.pop();
+        nth.pop();
+      }
+    }
+  }
+
+  /** Up to `count` visible rows from `start`. */
+  rows(start: number, count: number): FileTreeRow[] {
+    const out: FileTreeRow[] = [];
+    if (count <= 0) return out;
+    this.scan(start, (id, index, depth, setSize, posInSet) => {
+      out.push(this.rowOf(id, index, depth, setSize, posInSet));
+      return out.length >= count;
+    });
+    return out;
+  }
+
+  /** The row for a visible node (null when it does not show). */
+  rowFor(id: number): FileTreeRow | null {
+    const index = this.indexOfId(id);
+    if (index < 0) return null;
+    const p = this.parent[id];
+    const ch = this.kids[p];
+    let posInSet = 1;
+    for (let k = 0; k < this.pos[id]; k++) if ((this.flags[ch[k]] & F_HIDE) === 0) posInSet++;
+    return this.rowOf(id, index, this.depthArr[id], this.shownKids[p], posInSet);
+  }
+
+  private rowOf(c: number, index: number, depth: number, setSize: number, posInSet: number): FileTreeRow {
     const isDir = this.isDir(c);
     return {
       id: c,
@@ -388,97 +583,46 @@ export class FileTreeModel {
     };
   }
 
-  /**
-   * Calls `visit` for each visible row from `start` on, in order, until it
-   * returns true or the rows run out. Finds `start` by counts, then walks
-   * forward with a cursor (each next row is O(1) amortized).
-   */
-  scan(start: number, visit: (id: number, index: number, depth: number, setSize: number, posInSet: number) => boolean | void): void {
-    if (start < 0) start = 0;
-    if (start >= this.rowCount) return;
-    const dirs: number[] = [];
-    const at: number[] = [];
-    let n = ROOT;
-    let i = start;
-    descend: for (;;) {
-      const ch = this.kids[n];
-      for (let k = 0; k < ch.length; k++) {
-        const c = ch[k];
-        const size = 1 + this.vis(c);
-        if (i < size) {
-          dirs.push(n);
-          at.push(k);
-          if (i === 0) break descend;
-          i -= 1;
-          n = c;
-          continue descend;
-        }
-        i -= size;
-      }
-      return;
-    }
-    let index = start;
-    while (dirs.length > 0) {
-      const top = dirs.length - 1;
-      const ch = this.kids[dirs[top]];
-      const c = ch[at[top]];
-      if (visit(c, index, top, ch.length, at[top] + 1) === true) return;
-      index++;
-      if (this.kids[c].length > 0 && this.expandedSet.has(c)) {
-        dirs.push(c);
-        at.push(0);
-        continue;
-      }
-      while (dirs.length > 0) {
-        const t = dirs.length - 1;
-        if (++at[t] < this.kids[dirs[t]].length) break;
-        dirs.pop();
-        at.pop();
-      }
-    }
-  }
-
-  /** Up to `count` visible rows from `start`. */
-  rows(start: number, count: number): FileTreeRow[] {
-    const out: FileTreeRow[] = [];
-    if (count <= 0) return out;
-    this.scan(start, (id, index, depth, setSize, posInSet) => {
-      out.push(this.row(id, index, depth, setSize, posInSet));
-      return out.length >= count;
-    });
-    return out;
-  }
-
-  /** Paths of the expanded folders. */
+  /** Paths of the expanded folders (the filter's expansion while a filter is set). */
   expandedPaths(): Set<string> {
     const out = new Set<string>();
     for (const id of this.expandedSet) out.add(this.pathOf(id));
     return out;
   }
 
-  /** Every path the index holds as listed (folders listed with a trailing `/`), in tree order. */
+  /** Paths of the folders open without a filter. */
+  baseExpandedPaths(): Set<string> {
+    const out = new Set<string>();
+    for (const id of this.baseExpanded) out.add(this.pathOf(id));
+    return out;
+  }
+
+  /** Every path the index holds as listed (folders listed with a trailing `/`), in tree order, hidden ones included. */
   listedPaths(): string[] {
     const out: string[] = [];
-    const walk = (n: number) => {
-      for (const c of this.kids[n]) {
-        const f = this.flags[c];
-        if (f & F_DIR) out.push(`${this.pathOf(c)}/`);
-        if (f & F_FILE) out.push(this.pathOf(c));
-        walk(c);
-      }
-    };
-    walk(ROOT);
+    const stack: number[] = [];
+    const root = this.kids[ROOT];
+    for (let k = root.length - 1; k >= 0; k--) stack.push(root[k]);
+    while (stack.length > 0) {
+      const c = stack.pop()!;
+      const f = this.flags[c];
+      if (f & F_DIR) out.push(`${this.pathOf(c)}/`);
+      if (f & F_FILE) out.push(this.pathOf(c));
+      const ch = this.kids[c];
+      for (let k = ch.length - 1; k >= 0; k--) stack.push(ch[k]);
+    }
     return out;
   }
 
   // ---------------------------------------------------------------- counts
 
-  /** `inner[p]` changed by `delta`: pass it up while the folders are open. */
+  /** `inner[p]` changed by `delta`: pass it up while the folders are shown and open. */
   private bump(p: number, delta: number): void {
     if (delta === 0) return;
     while (p >= 0) {
       this.inner[p] += delta;
-      if (p !== ROOT && !this.expandedSet.has(p)) return;
+      if (p === ROOT) return;
+      if (this.flags[p] & F_HIDE || !this.expandedSet.has(p)) return;
       p = this.parent[p];
     }
   }
@@ -501,7 +645,10 @@ export class FileTreeModel {
 
   /** Take a whole subtree's sums off `n` and its ancestors. */
   private subtractTotals(n: number, from: number): void {
-    const m = this.marks[from], a = this.sumAdd[from], d = this.sumDel[from], c = this.sumCount[from];
+    const m = this.marks[from];
+    const a = this.sumAdd[from];
+    const d = this.sumDel[from];
+    const c = this.sumCount[from];
     while (n >= 0) {
       this.marks[n] -= m;
       this.sumAdd[n] -= a;
@@ -518,23 +665,119 @@ export class FileTreeModel {
     this.addUp(id, v, 1);
   }
 
-  /** Recompute `inner` for every folder in `top`'s subtree, bottom-up. */
-  private recount(top: number): void {
+  /** Every alive node under `top` (top included), parents before children. */
+  private preorder(top: number): number[] {
     const order: number[] = [top];
     for (let i = 0; i < order.length; i++) {
       const ch = this.kids[order[i]];
       for (let k = 0; k < ch.length; k++) if (this.kids[ch[k]].length > 0) order.push(ch[k]);
     }
+    return order;
+  }
+
+  /** Recompute `inner` for every folder in `top`'s subtree, bottom-up. */
+  private recount(top: number): void {
+    const order = this.preorder(top);
+    const flags = this.flags;
     for (let i = order.length - 1; i >= 0; i--) {
       const n = order[i];
       const ch = this.kids[n];
       let s = 0;
       for (let k = 0; k < ch.length; k++) {
         const c = ch[k];
+        if (flags[c] & F_HIDE) continue;
         s += this.expandedSet.has(c) ? 1 + this.inner[c] : 1;
       }
       this.inner[n] = s;
     }
+  }
+
+  // ---------------------------------------------------------------- filter
+
+  private matchesItself(n: number): boolean {
+    return this.test !== null && (this.flags[n] & (F_FILE | F_DIR)) !== 0 && this.test(this.lowercasePath(n));
+  }
+
+  /** Show or hide one node, keeping its parent's counts. */
+  private setShown(n: number, show: boolean): void {
+    const hidden = (this.flags[n] & F_HIDE) !== 0;
+    if (hidden !== show) return;
+    const p = this.parent[n];
+    if (show) {
+      this.flags[n] &= ~F_HIDE;
+      this.shownKids[p]++;
+      this.bump(p, 1 + this.vis(n));
+    } else {
+      this.shownKids[p]--;
+      this.bump(p, -(1 + this.vis(n)));
+      this.flags[n] |= F_HIDE;
+    }
+  }
+
+  /**
+   * Under a filter, `n` shows when it matches or holds a shown node: re-decide
+   * it and its ancestors after a change at `n`. A folder that starts to show
+   * opens (matches stay open).
+   */
+  private refreshShown(n: number): void {
+    if (this.test === null) return;
+    while (n !== ROOT && this.isAlive(n)) {
+      const want = this.shownKids[n] > 0 || this.matchesItself(n);
+      if (want === this.isShown(n)) return;
+      if (want && this.shownKids[n] > 0) this.expand(n);
+      this.setShown(n, want);
+      n = this.parent[n];
+    }
+  }
+
+  /**
+   * Show only the nodes `test` keeps (it gets the lowercased path, backslashes
+   * as `/`, of each listed path) and the folders that hold them, every such
+   * folder open. Null clears the filter and brings back the unfiltered
+   * expansion. One pass over the nodes.
+   */
+  setFilter(test: ((lowercasePath: string) => boolean) | null): void {
+    const order = this.preorderAll();
+    const flags = this.flags;
+    if (test === null) {
+      this.test = null;
+      this.filterExpanded = null;
+      this.expandedSet = this.baseExpanded;
+      for (const n of order) {
+        flags[n] &= ~F_HIDE;
+        this.shownKids[n] = this.kids[n].length;
+      }
+      this.recount(ROOT);
+      return;
+    }
+    this.test = test;
+    const exp = new Set<number>();
+    this.filterExpanded = exp;
+    this.expandedSet = exp;
+    for (let i = order.length - 1; i >= 0; i--) {
+      const n = order[i];
+      const ch = this.kids[n];
+      let shown = 0;
+      for (let k = 0; k < ch.length; k++) if ((flags[ch[k]] & F_HIDE) === 0) shown++;
+      this.shownKids[n] = shown;
+      if (n === ROOT) break;
+      const show = shown > 0 || ((flags[n] & (F_FILE | F_DIR)) !== 0 && test(this.lowercasePath(n)));
+      if (show) {
+        flags[n] &= ~F_HIDE;
+        if (shown > 0) exp.add(n);
+      } else flags[n] |= F_HIDE;
+    }
+    this.recount(ROOT);
+  }
+
+  /** Every alive node, the root first, parents before children. */
+  private preorderAll(): number[] {
+    const order: number[] = [ROOT];
+    for (let i = 0; i < order.length; i++) {
+      const ch = this.kids[order[i]];
+      for (let k = 0; k < ch.length; k++) order.push(ch[k]);
+    }
+    return order;
   }
 
   // ---------------------------------------------------------------- order
@@ -560,6 +803,7 @@ export class FileTreeModel {
     }
     ch.splice(lo, 0, c);
     for (let k = lo; k < ch.length; k++) this.pos[ch[k]] = k;
+    if ((this.flags[c] & F_HIDE) === 0) this.shownKids[p]++;
   }
 
   private detach(c: number): void {
@@ -569,6 +813,7 @@ export class FileTreeModel {
     ch.splice(at, 1);
     for (let k = at; k < ch.length; k++) this.pos[ch[k]] = k;
     if (ch.length === 0) this.kids[p] = EMPTY as number[];
+    if ((this.flags[c] & F_HIDE) === 0) this.shownKids[p]--;
   }
 
   /** `c` changed kind (file ↔ folder): move it to its place among its siblings. */
@@ -579,12 +824,12 @@ export class FileTreeModel {
 
   // ---------------------------------------------------------------- build
 
-  /** The child of `n` named `seg`, made (unsorted) when missing. Only for `reset`. */
+  /** The child of `n` named `seg`, made (unsorted) when missing. Only for `build`. */
   private childOrNew(n: number, seg: string): number {
     const nid = this.intern(seg);
     let c = this.childKey.get(n * KEY_SHIFT + nid);
     if (c === undefined) {
-      c = this.alloc(n, nid);
+      c = this.alloc(n, nid, false);
       let ch = this.kids[n];
       if (ch === EMPTY) {
         ch = [];
@@ -595,21 +840,20 @@ export class FileTreeModel {
     return c;
   }
 
-  /** Replace everything with `paths`. Expanded folders and marks given by path are kept where they still exist. */
-  reset(paths: Iterable<string>, expanded?: Iterable<string>): void {
-    const list = Array.isArray(paths) ? (paths as string[]) : [...paths];
+  private clear(capacity: number): void {
     this.cap = 0;
     this.parent = new Int32Array(0);
     this.nameId = new Int32Array(0);
     this.depthArr = new Int32Array(0);
     this.flags = new Uint8Array(0);
     this.inner = new Int32Array(0);
+    this.shownKids = new Int32Array(0);
     this.marks = new Int32Array(0);
     this.sumAdd = new Int32Array(0);
     this.sumDel = new Int32Array(0);
     this.sumCount = new Int32Array(0);
     this.pos = new Int32Array(0);
-    this.grow(Math.max(64, Math.ceil(list.length * 1.25) + 16));
+    this.grow(Math.max(64, capacity));
     this.kids = [EMPTY as number[]];
     this.freeIds = [];
     this.nextId = 1;
@@ -617,11 +861,31 @@ export class FileTreeModel {
     this.nameIds = new Map();
     this.childKey = new Map();
     this.pathCache = [];
-    this.expandedSet = new Set();
+    this.lcCache = [];
+    this.lcNames = [];
+    this.baseExpanded = new Set();
+    this.filterExpanded = null;
+    this.expandedSet = this.baseExpanded;
     this.live = 0;
     this.flags[ROOT] = F_ALIVE;
     this.parent[ROOT] = -1;
     this.depthArr[ROOT] = -1;
+  }
+
+  /**
+   * Build the index from the paths given to the constructor (or `reset`), as
+   * steps: each `next()` does a bounded amount of work (~2,000 paths, or the
+   * children of a few hundred folders), so a caller can yield between them.
+   * The model is not usable until the generator finishes.
+   */
+  *build(): Generator<void, void, void> {
+    const paths = this.pendingPaths ?? [];
+    const expanded = this.pendingExpanded;
+    const filter = this.test;
+    this.pendingPaths = null;
+    this.pendingExpanded = undefined;
+    const list = Array.isArray(paths) ? (paths as string[]) : [...paths];
+    this.clear(Math.ceil(list.length * 1.25) + 16);
 
     // 1. Nodes, unsorted. A folder walk lists paths in order, so each path
     // shares a prefix with the one before it: the shared folders are taken
@@ -629,7 +893,9 @@ export class FileTreeModel {
     let prev = '';
     const prevEnds: number[] = [];
     const prevIds: number[] = [];
-    for (const path of list) {
+    for (let at = 0; at < list.length; at++) {
+      if ((at & 2047) === 2047) yield;
+      const path = list[at];
       if (!isPlainPath(path)) {
         const norm = normalizeTreePath(path);
         prev = '';
@@ -641,7 +907,6 @@ export class FileTreeModel {
         this.flags[n] |= norm.dir ? F_DIR : F_FILE;
         continue;
       }
-      // Shared folders: whole segments of `prev` that `path` repeats and goes on from.
       const lim = Math.min(path.length, prev.length);
       let same = 0;
       while (same < lim && path.charCodeAt(same) === prev.charCodeAt(same)) same++;
@@ -663,30 +928,35 @@ export class FileTreeModel {
       prev = path;
       this.flags[n] |= F_FILE;
     }
+    yield;
 
-    // 2. Sort every folder's children once, by name rank (one collator sort of the unique names).
-    const order = new Int32Array(this.names.length);
-    for (let i = 0; i < order.length; i++) order[i] = i;
-    const names = this.names;
-    order.sort((a, b) => compareTreeNames(names[a], names[b]));
-    const rank = new Int32Array(this.names.length);
-    for (let i = 0; i < order.length; i++) rank[order[i]] = i;
-    const nameId = this.nameId;
+    // 2. Sort each folder's children, a few hundred folders per step.
     const kids = this.kids;
     const flags = this.flags;
-    const dirKey = (c: number) => (kids[c].length > 0 || (flags[c] & F_DIR) !== 0 ? 0 : 1);
+    const names = this.names;
+    const nameId = this.nameId;
+    const isDirKey = (c: number) => (kids[c].length > 0 || (flags[c] & F_DIR) !== 0 ? 0 : 1);
+    const cmp = (a: number, b: number) => isDirKey(a) - isDirKey(b) || compareTreeNames(names[nameId[a]], names[nameId[b]]);
+    let work = 0;
     for (let n = 0; n < this.nextId; n++) {
       const ch = kids[n];
       if (ch.length === 0) continue;
-      if (ch.length > 1) ch.sort((a, b) => dirKey(a) - dirKey(b) || rank[nameId[a]] - rank[nameId[b]]);
+      if (ch.length > 1) ch.sort(cmp);
       for (let k = 0; k < ch.length; k++) this.pos[ch[k]] = k;
+      this.shownKids[n] = ch.length;
+      work += ch.length;
+      if (work > 4000) {
+        work = 0;
+        yield;
+      }
     }
+    yield;
 
-    // 3. Expansion, marks, counts.
+    // 3. Expansion, values, counts, filter.
     if (expanded) {
       for (const p of expanded) {
         const id = this.find(p);
-        if (id > ROOT && this.isDir(id)) this.expandedSet.add(id);
+        if (id > ROOT && this.isDir(id)) this.baseExpanded.add(id);
       }
     }
     for (const key of this.values.keys()) {
@@ -694,6 +964,14 @@ export class FileTreeModel {
       if (id > ROOT) this.attachValues(id, key);
     }
     this.recount(ROOT);
+    if (filter) this.setFilter(filter);
+  }
+
+  /** Replace everything with `paths` (synchronously). Expanded folders given by path are kept where they still exist; a filter stays set. */
+  reset(paths: Iterable<string>, expanded?: Iterable<string>): void {
+    this.pendingPaths = paths;
+    this.pendingExpanded = expanded;
+    this.runBuild();
   }
 
   /** List one path (a trailing `/` lists a folder). True when anything changed. */
@@ -701,6 +979,7 @@ export class FileTreeModel {
     const norm = normalizeTreePath(path);
     if (!norm) return false;
     const segs = norm.segments;
+    const hidden = this.test !== null;
     let n = ROOT;
     let changed = false;
     let prefix = '';
@@ -711,10 +990,10 @@ export class FileTreeModel {
       let c = this.childKey.get(n * KEY_SHIFT + nid);
       if (c === undefined) {
         const parentWasDir = n === ROOT || this.isDir(n);
-        c = this.alloc(n, nid);
+        c = this.alloc(n, nid, hidden);
         if (last) this.flags[c] |= norm.dir ? F_DIR : F_FILE;
         this.insertChild(n, c, !last || norm.dir);
-        this.bump(n, 1);
+        if (!hidden) this.bump(n, 1);
         if (!parentWasDir) this.reposition(n);
         this.attachValues(c, prefix);
         changed = true;
@@ -728,6 +1007,10 @@ export class FileTreeModel {
         }
       }
       n = c;
+    }
+    if (changed && this.test !== null) {
+      this.refreshShown(n);
+      if (this.isShown(n)) this.expandAncestors(n);
     }
     return changed;
   }
@@ -753,36 +1036,49 @@ export class FileTreeModel {
     if ((this.flags[id] & bit) === 0) return false;
     const wasDir = this.isDir(id);
     this.flags[id] &= ~bit;
-    if (this.kids[id].length > 0) return true;
+    if (this.kids[id].length > 0) {
+      this.refreshShown(id);
+      return true;
+    }
     if ((this.flags[id] & (F_FILE | F_DIR)) === 0) {
       this.deleteSubtree(id);
       return true;
     }
     if (this.isDir(id) !== wasDir) {
-      this.expandedSet.delete(id);
+      this.forgetExpansion(id);
       this.reposition(id);
     }
+    this.refreshShown(id);
     return true;
+  }
+
+  private forgetExpansion(id: number): void {
+    this.baseExpanded.delete(id);
+    this.filterExpanded?.delete(id);
   }
 
   private deleteSubtree(id: number): void {
     const p = this.parent[id];
+    const shown = this.isShown(id);
+    const rows = 1 + this.vis(id);
     this.detach(id);
-    this.bump(p, -(1 + this.vis(id)));
+    if (shown) this.bump(p, -rows);
     this.subtractTotals(p, id);
     const stack = [id];
     while (stack.length > 0) {
       const n = stack.pop()!;
       for (const c of this.kids[n]) stack.push(c);
       this.childKey.delete(this.parent[n] * KEY_SHIFT + this.nameId[n]);
-      this.expandedSet.delete(n);
+      this.forgetExpansion(n);
       this.flags[n] = 0;
       this.kids[n] = EMPTY as number[];
       this.pathCache[n] = undefined;
+      this.lcCache[n] = undefined;
       this.freeIds.push(n);
       this.live--;
     }
     this.prune(p);
+    if (this.isAlive(p)) this.refreshShown(p);
   }
 
   /** `p` lost a child: drop it when it is an empty folder nobody listed, or turn it back into a file. */
@@ -791,19 +1087,15 @@ export class FileTreeModel {
     const f = this.flags[p];
     if (f & F_DIR) return;
     if (f & F_FILE) {
-      this.expandedSet.delete(p);
+      this.forgetExpansion(p);
       this.reposition(p);
       return;
     }
     this.deleteSubtree(p);
   }
 
-  /**
-   * Make the index hold exactly `paths`. Applies the difference (adds before
-   * removes, so a folder that stays never empties and keeps its expansion), or
-   * rebuilds when more than a quarter of the list changed.
-   */
-  setPaths(paths: Iterable<string>): boolean {
+  /** The difference between what the index lists and `paths`. */
+  diff(paths: Iterable<string>): { adds: string[]; removes: string[]; size: number } {
     const next = new Set<string>();
     for (const p of paths) {
       const key = treePathKey(p);
@@ -815,9 +1107,20 @@ export class FileTreeModel {
     const removes: string[] = [];
     for (const p of next) if (!currentSet.has(p)) adds.push(p);
     for (const p of current) if (!next.has(p)) removes.push(p);
+    return { adds, removes, size: next.size };
+  }
+
+  /**
+   * Make the index hold exactly `paths`. Applies the difference (adds before
+   * removes, so a folder that stays never empties and keeps its expansion), or
+   * rebuilds when more than a quarter of the list changed.
+   */
+  setPaths(paths: Iterable<string>): boolean {
+    const list = Array.isArray(paths) ? (paths as string[]) : [...paths];
+    const { adds, removes, size } = this.diff(list);
     if (adds.length === 0 && removes.length === 0) return false;
-    if (adds.length + removes.length > Math.max(2000, next.size / 4)) {
-      this.reset(next, this.expandedPaths());
+    if (adds.length + removes.length > Math.max(2000, size / 4)) {
+      this.reset(list, this.baseExpandedPaths());
       return true;
     }
     for (const p of adds) this.add(p);
@@ -830,14 +1133,14 @@ export class FileTreeModel {
   expand(id: number): boolean {
     if (!this.isAlive(id) || !this.isDir(id) || this.expandedSet.has(id)) return false;
     this.expandedSet.add(id);
-    this.bump(this.parent[id], this.inner[id]);
+    if (this.isShown(id)) this.bump(this.parent[id], this.inner[id]);
     return true;
   }
 
   collapse(id: number): boolean {
     if (!this.expandedSet.has(id)) return false;
     this.expandedSet.delete(id);
-    this.bump(this.parent[id], -this.inner[id]);
+    if (this.isShown(id)) this.bump(this.parent[id], -this.inner[id]);
     return true;
   }
 
@@ -859,13 +1162,16 @@ export class FileTreeModel {
     const stack = [top];
     while (stack.length > 0) {
       const n = stack.pop()!;
-      if (n !== ROOT && this.isDir(n) && !this.expandedSet.has(n)) { this.expandedSet.add(n); changed = true; }
+      if (n !== ROOT && this.isDir(n) && !this.expandedSet.has(n)) {
+        this.expandedSet.add(n);
+        changed = true;
+      }
       const ch = this.kids[n];
       for (let k = 0; k < ch.length; k++) if (this.isDir(ch[k])) stack.push(ch[k]);
     }
     if (!changed) return false;
     this.recount(top);
-    if (top !== ROOT) this.bump(this.parent[top], this.vis(top) - before);
+    if (top !== ROOT && this.isShown(top)) this.bump(this.parent[top], this.vis(top) - before);
     return true;
   }
 
@@ -889,7 +1195,7 @@ export class FileTreeModel {
     }
     if (!changed) return false;
     this.recount(top);
-    this.bump(this.parent[top], this.vis(top) - before);
+    if (this.isShown(top)) this.bump(this.parent[top], this.vis(top) - before);
     return true;
   }
 
@@ -899,7 +1205,10 @@ export class FileTreeModel {
   setValues(values: ReadonlyMap<string, FileTreeValues>): void {
     for (const [key, v] of this.values) {
       const id = this.find(key);
-      if (id > ROOT) { this.flags[id] &= ~F_MARK; this.addUp(id, v, -1); }
+      if (id > ROOT) {
+        this.flags[id] &= ~F_MARK;
+        this.addUp(id, v, -1);
+      }
     }
     this.values = normalizeValues(values);
     for (const key of this.values.keys()) {

@@ -98,19 +98,6 @@ h.scrollTest = async (ms = 3000, step = 40, jump = false) => {
   };
 };
 
-async function settleRows(before: number) {
-  const tEnd = performance.now() + 30000;
-  let last = -1;
-  let still = 0;
-  while (performance.now() < tEnd) {
-    await frames(1);
-    const n = h.rowCount();
-    if (n !== before && n === last) {
-      if (++still >= 2) return;
-    } else still = 0;
-    last = n;
-  }
-}
 
 function dirsUnder(paths: string[], prefix: string): string[] {
   const dirs = new Set<string>();
@@ -122,49 +109,67 @@ function dirsUnder(paths: string[], prefix: string): string[] {
   return [...dirs].sort();
 }
 
-// ---------------------------------------------------------------- new tree
+// ---------------------------------------------------------------- one timing for every tree
 
-/** Records the store version each commit rendered, so a timing can stop at the commit. */
-function CommitProbe({ store }: { store: FileTreeStore }) {
-  const version = React.useSyncExternalStore(store.subscribe, store.getVersion);
-  React.useLayoutEffect(() => {
-    h.committed = version;
-    h.committedAt = performance.now();
+/**
+ * Wall time from the change until it is on screen, the same rule for every
+ * tree: the later of two frames after the call and the last DOM change the
+ * tree made (a React render that yields between frames keeps changing the DOM
+ * after two frames; Pierre renders inside a shadow root, observed too).
+ */
+async function timed(fn: () => void): Promise<number> {
+  const panel = document.querySelector('#panel') as HTMLElement;
+  let last = 0;
+  const mo = new MutationObserver(() => {
+    last = performance.now();
   });
-  return null;
+  const opts = { subtree: true, childList: true, attributes: true, characterData: true };
+  mo.observe(panel, opts);
+  const sr = shadowRoot();
+  if (sr) mo.observe(sr, opts);
+  const t0 = performance.now();
+  fn();
+  await frames(2);
+  let end = performance.now();
+  // Wait until two frames pass with no change.
+  let quiet = 0;
+  while (quiet < 2 && performance.now() - t0 < 60000) {
+    const before = last;
+    await frames(1);
+    quiet = last === before ? quiet + 1 : 0;
+  }
+  mo.disconnect();
+  end = Math.max(end, last);
+  return end - t0;
 }
+
+// ---------------------------------------------------------------- new tree
 
 function NewTree({ store }: { store: FileTreeStore }) {
   return (
     <TooltipProvider>
       <FileTree tree={store} rowHeight={22} label="Files" />
-      <CommitProbe store={store} />
     </TooltipProvider>
   );
 }
 
 function mountNew(paths: string[]) {
   if (impl === 'new-tips') setComponentTooltips(true);
-  const store = new FileTreeStore(paths);
+  // As useFileTree builds it: top-level rows first, the full index in slices.
+  const store = new FileTreeStore(paths, { sliced: true });
   h.store = store;
-  /** Time to two frames after the change (the method the reference number used); `h.lastWork` is the change plus React's commit. */
-  const t = async (fn: () => void) => {
-    const t0 = performance.now();
-    fn();
-    const target = store.getVersion();
+  void store.whenReady().then(async () => {
     await frames(2);
-    h.lastWork = h.committed === target ? h.committedAt - t0 : null;
-    return performance.now() - t0;
-  };
-  h.expand = (p: string) => t(() => store.expand(p));
-  h.collapse = (p: string) => t(() => store.collapse(p));
-  h.expandAllUnder = async (prefix: string) => {
-    const folder = prefix.replace(/\/$/, '');
-    const ms = await t(() => store.expandAll(folder));
-    return { ms, visible: store.model.rowCount };
-  };
-  h.expandEverything = async () => ({ ms: await t(() => store.expandAll()), visible: store.model.rowCount });
-  h.collapseEverything = async () => ({ ms: await t(() => store.collapseAll()), visible: store.model.rowCount });
+    mark('fullReady');
+    h.fullReady = true;
+  });
+  h.expand = (p: string) => timed(() => store.expand(p));
+  h.collapse = (p: string) => timed(() => store.collapse(p));
+  h.expandAllUnder = async (prefix: string) => ({ ms: await timed(() => store.expandAll(prefix.replace(/\/$/, ''))), visible: store.model.rowCount });
+  h.collapseAllUnder = async (prefix: string) => ({ ms: await timed(() => store.collapseAll(prefix.replace(/\/$/, ''))), visible: store.model.rowCount });
+  h.expandEverything = async () => ({ ms: await timed(() => store.expandAll()), visible: store.model.rowCount });
+  h.collapseEverything = async () => ({ ms: await timed(() => store.collapseAll()), visible: store.model.rowCount });
+  h.filter = async (q: string) => ({ ms: await timed(() => store.setFilter(q)), visible: store.model.rowCount });
   return store;
 }
 
@@ -181,36 +186,18 @@ async function mountPierre(paths: string[]) {
   wrap.style.height = '100%';
   panel.appendChild(wrap);
   model.render({ containerWrapper: wrap });
-  h.expand = async (p: string) => {
-    const t0 = performance.now();
-    (model.getItem(p) as any)?.expand();
-    await frames(2);
-    return performance.now() - t0;
+  const item = (p: string) => model.getItem(p) as any;
+  h.expand = (p: string) => timed(() => item(p)?.expand());
+  h.collapse = (p: string) => timed(() => item(p)?.collapse());
+  // Pierre has no expand-all: one expand() per folder, the way the first harness measured it.
+  h.expandAllUnder = async (prefix: string) => ({ ms: await timed(() => { for (const d of dirsUnder(h.paths, prefix)) item(d)?.expand?.(); }), visible: model.getVisibleCount() });
+  h.collapseAllUnder = async (prefix: string) => {
+    const folder = prefix.replace(/\/$/, '');
+    const dirs = dirsUnder(h.paths, prefix).filter((d) => d === folder || d.startsWith(prefix)).reverse();
+    return { ms: await timed(() => { for (const d of dirs) item(d)?.collapse?.(); }), visible: model.getVisibleCount() };
   };
-  h.collapse = async (p: string) => {
-    const t0 = performance.now();
-    (model.getItem(p) as any)?.collapse();
-    await frames(2);
-    return performance.now() - t0;
-  };
-  h.expandAllUnder = async (prefix: string) => {
-    const t0 = performance.now();
-    for (const d of dirsUnder(h.paths, prefix)) (model.getItem(d) as any)?.expand?.();
-    await frames(2);
-    return { ms: performance.now() - t0, visible: model.getVisibleCount() };
-  };
-  h.expandEverything = async () => {
-    const t0 = performance.now();
-    for (const d of dirsUnder(h.paths, '')) (model.getItem(d) as any)?.expand?.();
-    await frames(2);
-    return { ms: performance.now() - t0, visible: model.getVisibleCount() };
-  };
-  h.collapseEverything = async () => {
-    const t0 = performance.now();
-    for (const d of dirsUnder(h.paths, '').reverse()) (model.getItem(d) as any)?.collapse?.();
-    await frames(2);
-    return { ms: performance.now() - t0, visible: model.getVisibleCount() };
-  };
+  h.expandEverything = async () => ({ ms: await timed(() => { for (const d of dirsUnder(h.paths, '')) item(d)?.expand?.(); }), visible: model.getVisibleCount() });
+  h.collapseEverything = async () => ({ ms: await timed(() => { for (const d of dirsUnder(h.paths, '').reverse()) item(d)?.collapse?.(); }), visible: model.getVisibleCount() });
 }
 
 // ---------------------------------------------------------------- old FileBrowser
@@ -220,31 +207,25 @@ function OldBrowser({ tree, dirPath = '/root', expandedInit }: { tree: VaultNode
   useEffect(() => {
     if (mode !== 'bench') return;
     const key = (p: string) => `${dirPath}:${p}`;
-    h.expand = async (p: string) => {
-      const b = h.rowCount();
-      const t0 = performance.now();
-      setExpanded((s) => new Set(s).add(key(p)));
-      await settleRows(b);
-      return performance.now() - t0;
-    };
-    h.collapse = async (p: string) => {
-      const b = h.rowCount();
-      const t0 = performance.now();
-      setExpanded((s) => {
-        const n = new Set(s);
-        n.delete(key(p));
-        return n;
-      });
-      await settleRows(b);
-      return performance.now() - t0;
-    };
+    h.expand = (p: string) => timed(() => setExpanded((s) => new Set(s).add(key(p))));
+    h.collapse = (p: string) =>
+      timed(() =>
+        setExpanded((s) => {
+          const n = new Set(s);
+          n.delete(key(p));
+          return n;
+        }),
+      );
     h.expandAllUnder = async (prefix: string) => {
       const dirs = dirsUnder(h.paths, prefix).map(key);
-      const b = h.rowCount();
-      const t0 = performance.now();
-      setExpanded((s) => new Set([...s, ...dirs]));
-      await settleRows(b);
-      return { ms: performance.now() - t0, visible: h.rowCount() };
+      const ms = await timed(() => setExpanded((s) => new Set([...s, ...dirs])));
+      return { ms, visible: h.rowCount() };
+    };
+    h.collapseAllUnder = async (prefix: string) => {
+      const folder = key(prefix.replace(/\/$/, ''));
+      const under = key(prefix);
+      const ms = await timed(() => setExpanded((s) => new Set([...s].filter((k) => k !== folder && !k.startsWith(under)))));
+      return { ms, visible: h.rowCount() };
     };
   }, [dirPath]);
   return (
@@ -311,6 +292,36 @@ const SMALL_BADGES = new Map<string, FileTreeBadge>([
   ['CHANGELOG.md', { letter: 'U', tone: 'untracked', label: 'Untracked' }],
 ]);
 
+/**
+ * `?mode=live`: a store the browser proofs drive through `window.__h` (tests/e2e/file-tree.spec.ts):
+ * folders a/ and b/ above 500 files g000…g499, in a 320 × 600 panel.
+ */
+function Live() {
+  const [store] = useState(() => {
+    const paths = ['a/one.ts', 'a/two.ts', 'b/x.ts', ...Array.from({ length: 500 }, (_, i) => `g${String(i).padStart(3, '0')}.ts`)];
+    return new FileTreeStore(paths);
+  });
+  h.store = store;
+  h.tree = () => document.querySelector('[role="tree"]') as HTMLElement;
+  /** The path of the row whose top is at or just above the tree's scrollTop. */
+  h.topPath = () => {
+    const tree: HTMLElement = h.tree();
+    const rows = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+    const top = tree.scrollTop;
+    let best: HTMLElement | null = null;
+    for (const r of rows) if (r.offsetTop <= top + 0.5 && (!best || r.offsetTop > best.offsetTop)) best = r;
+    return best?.dataset.path ?? null;
+  };
+  useEffect(() => {
+    h.ready = true;
+  }, []);
+  return (
+    <div id="live" style={{ width: 320, height: 600 }} className="bg-card">
+      <FileTree tree={store} />
+    </div>
+  );
+}
+
 function Shots() {
   const set = q.get('set') ?? 'small';
   const ref = useRef<FileTreeHandle>(null);
@@ -359,6 +370,10 @@ function Shots() {
 
 (async () => {
   const root = document.getElementById('root')!;
+  if (mode === 'live') {
+    ReactDOM.createRoot(root).render(<Live />);
+    return;
+  }
   if (mode === 'shots') {
     ReactDOM.createRoot(root).render(
       <TooltipProvider>

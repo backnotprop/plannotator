@@ -235,6 +235,74 @@ describe.if(hasDom)('FileTree', () => {
     expect(item('src/zeta.ts')!.textContent).toContain('U');
   });
 
+  test('focus is kept by path: a removed row hands focus to its neighbour, and a later add does not take it', async () => {
+    const tree = new FileTreeStore(PATHS, { expanded: ['src'] });
+    await mount({ tree });
+    await focusTree();
+    await press('End');
+    expect(focusedPath()).toBe('README.md');
+    await act(async () => { tree.remove('README.md'); });
+    expect(focusedPath()).toBe('bun.lock');
+    // The freed id is reused by the next node made: focus must not follow it.
+    await act(async () => { tree.add('src/zzz-new.ts'); });
+    expect(focusedPath()).toBe('bun.lock');
+    await act(async () => { tree.add('README.md'); });
+    expect(focusedPath()).toBe('bun.lock');
+  });
+
+  test('under a filter, a live add does not move focus', async () => {
+    const tree = new FileTreeStore(PATHS);
+    await mount({ tree });
+    await act(async () => { tree.setFilter('b'); });
+    await focusTree();
+    await press('b');
+    await press('r');
+    expect(focusedPath()).toBe('src/bravo.ts');
+    await act(async () => { tree.add('a-new/ab.ts'); });
+    expect(shown()).toContain('a-new/ab.ts');
+    expect(focusedPath()).toBe('src/bravo.ts');
+    await act(async () => { tree.remove('src/beta.ts'); });
+    expect(focusedPath()).toBe('src/bravo.ts');
+  });
+
+  test('the focused row stays in the DOM when it is scrolled far out of view', async () => {
+    const paths = Array.from({ length: 2000 }, (_, i) => `f${String(i).padStart(4, '0')}.ts`);
+    const tree = new FileTreeStore(paths);
+    await mount({ tree, rowHeight: 20 });
+    await focusTree();
+    expect(focusedPath()).toBe('f0000.ts');
+    await act(async () => {
+      treeEl().scrollTop = 30000;
+      treeEl().dispatchEvent(new Event('scroll'));
+    });
+    expect(item('f0000.ts')).not.toBeNull();
+    expect(focusedPath()).toBe('f0000.ts');
+    expect(item('f1500.ts')).not.toBeNull();
+  });
+
+  test('a sliced build shows the top-level rows first, then the whole tree; reveal waits for it', async () => {
+    const paths = [...Array.from({ length: 120_000 }, (_, i) => `big/d${i % 60}/f${i}.ts`), 'small/a.ts', 'top.md'];
+    const tree = new FileTreeStore(paths, { sliced: true });
+    expect(tree.loading).toBe(true);
+    const handle = createRef<FileTreeHandle>();
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root!.render(<FileTree ref={handle} tree={tree} />));
+    expect(tree.loading).toBe(true);
+    expect(shown()).toEqual(['big', 'small', 'top.md']);
+    act(() => {
+      expect(handle.current!.revealPath('big/d7/f5947.ts')).toBe(true);
+    });
+    await act(async () => { await tree.whenReady(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(tree.loading).toBe(false);
+    expect(tree.isExpanded('big/d7')).toBe(true);
+    expect(item('big/d7/f5947.ts')).not.toBeNull();
+    await focusTree();
+    expect(focusedPath()).toBe('big/d7/f5947.ts');
+  });
+
   test('folders show the sums of their files and the filter keeps matches fully open', async () => {
     const tree = new FileTreeStore(PATHS);
     await mount({ tree });
