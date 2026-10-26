@@ -493,6 +493,24 @@ import { DiffFileTree } from "@plannotator/ui/components/DiffFileTree";
 
 For a custom row, use the atoms (`DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `ChangeTypeLetter`, `DiffCounts`, `diffFileTreeIndent`) with `buildDiffFileTree` and `useDiffFileTreeExpansion`, as the review does. See HANDOFF.md § "Diff file tree".
 
+### File tree for large folders (`components/file-tree`; unreleased)
+
+A virtualized tree over a plain list of paths, built for whole folders (150k paths, node_modules included). Not yet used by any Plannotator screen; it is meant to take over the sidebar FileBrowser's rendering without changing what users see.
+
+```tsx
+import { FileTree, useFileTree, type FileTreeHandle } from "@plannotator/ui/components/file-tree";
+
+const tree = useFileTree(paths, { badges, filter });   // a FileTreeStore, kept in step with paths/badges/filter
+<FileTree ref={handle} tree={tree} selectedPath={open} onOpen={openFile} />
+handle.current?.revealPath("src/deep/file.ts");        // expands its folders, scrolls, focuses
+```
+
+- **Store** (`createFileTreeStore` / `FileTreeStore`): `setPaths` (a snapshot; only the difference is applied), `add` / `remove` (a live folder watch), `expand` / `collapse` / `toggle` / `expandAll(path?)` / `collapseAll(path?)` (one update, one render), `setBadges`, `setFilter`, `batch`. A trailing `/` lists an empty folder.
+- **Badges** are the host's, by path: `{ letter, tone, additions, deletions, count, marker, struck, disabled, label, rollup }`. Folders show the sums of their files (`+N -N`, the count) and a dot when collapsed over a lettered change; the sums are kept in the index, never computed in render. Visible text is letters, numbers and glyphs only: words go in `label`, read by screen readers.
+- **Look**: FileBrowser's rows (13 px muted file names, 11 px folder rows with chevron and folder icon, its colours, `CountBadge`), indent guides shown while the pointer is over the tree (VS Code's `onHover`), the open file's folder guide stronger. Props: `rowHeight` (22, 36 on a coarse pointer), `indent` (8; FileBrowser's is 14), `renderIcon` (default FileBrowser's two glyphs), `label`, `labels`. A cut name shows whole through `HostTitle` with `cut` (a native title by default, ui's Tooltip with `componentTooltips`).
+- **Keys** (one tab stop, `aria-activedescendant`): Up/Down, Right/Left (open or enter, close or go to parent), Home/End, PageUp/PageDown, type-ahead, Enter/Space. No global shortcuts.
+- **Order**: folders first, then `Intl.Collator(undefined, { numeric: true, sensitivity: "base" })`, ties by code point.
+
 ## Consuming it (e.g. from Workspaces)
 
 ```bash
