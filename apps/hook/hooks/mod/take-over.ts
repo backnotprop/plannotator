@@ -23,7 +23,8 @@ export const SHELL_TOOL = 'Bash'
 /** The tool input a main-loop Bash call's command stands for; null runs it as written. */
 export function shellTakeOver(command: unknown, fromSubagent: boolean): PlannotatorToolInput | null {
   if (fromSubagent || typeof command !== 'string') return null
-  return plannotatorCommandToToolInput(command)
+  // The mod publishes over the tailnet: `--tailscale` is taken over too (#2166).
+  return plannotatorCommandToToolInput(command, { tailscale: true })
 }
 
 /** The Bash tool's result record, carrying the tool's text as the command's output. */

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEve
 import { Icon, type IconName } from '../icons';
 
 /** `thumb`: 👍 Looks good (the emoji itself, as plan review's button draws it). */
-export type InboxToastIcon = 'check' | 'warn' | 'archive' | 'mute' | 'thumb';
+export type InboxToastIcon = 'check' | 'warn' | 'archive' | 'mute' | 'thumb' | 'unpin';
 
 export interface InboxToastModel {
   /** Bumped per toast, so a new one replays its entrance. */
@@ -30,7 +30,7 @@ export interface InboxToastModel {
   speech?: string;
 }
 
-const ICONS: Record<Exclude<InboxToastIcon, 'thumb'>, IconName> = { check: 'checkCircle', warn: 'warn', archive: 'archive', mute: 'mute' };
+const ICONS: Record<Exclude<InboxToastIcon, 'thumb'>, IconName> = { check: 'checkCircle', warn: 'warn', archive: 'archive', mute: 'mute', unpin: 'pinOff' };
 
 /**
  * What the window's live region says for a toast, as sentences, and how to

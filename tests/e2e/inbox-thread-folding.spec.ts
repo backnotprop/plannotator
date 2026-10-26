@@ -343,7 +343,7 @@ test('keys: n goes to the first new message, k and j move between messages; neve
 test("Expand all gives back today's fully open thread; scrolled up past the new message already read, no pill comes back; n goes down to it", async () => {
   const { page, ids } = world;
   await pane().locator('[data-expand-all]').click();
-  await expect(pane().locator('[data-expand-all]')).toHaveText('Fold all');
+  await expect(pane().locator('[data-expand-all]')).toHaveAttribute('aria-label', 'Fold the earlier messages');
   for (const id of ids) await expect(article(id)).toHaveAttribute('data-open', '');
   await expect(pane().locator('[data-folded]')).toHaveCount(0);
   await expect(pane().locator('[data-middle-fold]')).toHaveCount(0);
@@ -368,7 +368,7 @@ test("Expand all gives back today's fully open thread; scrolled up past the new 
   await expect(pill).toHaveAttribute('data-off', '');
   // Fold all: back to lines, the new message's included; the last stays open.
   await pane().locator('[data-expand-all]').click();
-  await expect(pane().locator('[data-expand-all]')).toHaveText('Expand all');
+  await expect(pane().locator('[data-expand-all]')).toHaveAttribute('aria-label', 'Expand all messages');
   await expect(article(ids[6]!)).toHaveAttribute('data-open', '');
   await expect(pane().locator('[data-middle-fold]')).toHaveText('3 earlier messages');
   expect(world.errors).toEqual([]);

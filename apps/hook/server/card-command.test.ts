@@ -59,6 +59,9 @@ function sandbox() {
     GIT_CONFIG_NOSYSTEM: "1",
     PLANNOTATOR_INBOX_CONNECT: "0",
   };
+  // The Board is something the person turns on (config.json `inboxBoard`, off by default): on here.
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
   return { root, dataDir, project, browserMarker, env };
 }
 
@@ -113,7 +116,7 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(made.stderr).toBe("");
     expect(made.code).toBe(0);
     const created = JSON.parse(made.stdout) as { card: { id: string; agent: unknown } };
-    expect(created.card).toMatchObject({ column: "asked", said: "lane started" });
+    expect(created.card).toMatchObject({ column: "backlog", said: "lane started" });
     // Outside an agent session, the card is nobody's in particular.
     expect(created.card.agent).toMatchObject({ kind: "agent", session: null });
     expect(existsSync(box.browserMarker)).toBe(false);
@@ -124,7 +127,7 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(moved.stdout).toContain("Moved to Your look");
     expect(moved.stdout).toContain('You: "pick one of five options"');
     expect((await card(box, ["say", id, "--you", "pick one of five options, or none"])).code).toBe(0);
-    expect((await card(box, ["move", id, "building", "--pr", "backnotprop/plannotator#2020"])).stdout).toContain("PRs backnotprop/plannotator#2020");
+    expect((await card(box, ["move", id, "building", "--pr", "backnotprop/plannotator#2020"])).stdout).toContain("links backnotprop/plannotator#2020");
     const shipped = await card(box, ["ship", id, "--say", "merged"]);
     expect(shipped.stderr).toBe("");
     expect(shipped.stdout).toContain("Shipped");
@@ -166,16 +169,27 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect((await card(box, [])).code).toBe(2);
   }, 30_000);
 
-  test("--help prints its usage; plannotator --help never lists it, and a typo is never pointed at it (unreleased)", async () => {
+  test("with the Board off, a card command exits 1 with board_off and writes nothing", async () => {
+    const box = sandbox();
+    await seed(box);
+    writeFileSync(join(box.dataDir, "config.json"), JSON.stringify({ inboxBoard: false }));
+    const made = await card(box, ["create", "While off"]);
+    expect(made.code).toBe(1);
+    expect(made.stdout).toBe("");
+    expect(made.stderr).toStartWith("board_off: ");
+    writeFileSync(join(box.dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
+    expect((await card(box, ["list", "--anyone"])).stdout).toContain("All 0 cards");
+  }, 30_000);
+
+  test("--help prints its usage, and plannotator --help lists it (released with the Board page)", async () => {
     const box = sandbox();
     const help = await card(box, ["--help"]);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("plannotator card create <title>");
-    expect(HIDDEN_SUBCOMMANDS.has("card")).toBe(true);
+    expect(help.stdout).toContain("--ref <issue or PR>");
+    expect(HIDDEN_SUBCOMMANDS.has("card")).toBe(false);
     const top = await plannotator(box, ["--help"]);
-    expect(top.stdout).toContain("plannotator inbox");
-    expect(top.stdout).not.toContain("plannotator card");
-    expect((await plannotator(box, ["cardd"])).stderr).not.toContain("plannotator card");
+    expect(top.stdout).toContain("plannotator card <create|move|say|link|ship|drop|list>");
   }, 30_000);
 });
 

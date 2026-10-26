@@ -8,7 +8,7 @@
 import { getRepoInfo, summarizeLocalChanges, type LocalChangesSummary, type RepoInfo } from "./sources/git";
 import { ghStatus, listRepoPullRequests, listReviewRequested, type GhStatus, type PullRequestRow, type WaitingRow } from "./sources/github";
 import type { Runner } from "./sources/runner";
-import { listRecent, type RecentEntry } from "./store";
+import { listRecent, listRecentEverywhere, type RecentEntry } from "./store";
 
 export type DashboardGh = GhStatus | { state: "not-github" };
 
@@ -56,7 +56,8 @@ export async function loadDashboard(runner: Runner, cwd: string | undefined, opt
     if (repo && !repo.github) ghState = { state: "not-github" };
   }
   const headByPR = new Map(prs.map((p) => [p.number, p.headRefOid]));
-  const recent = repo ? listRecent(repo.repoKey, { headForPR: (n) => headByPR.get(n) || undefined, limit: options.recentLimit ?? 12 }) : [];
+  // No folder open: the recent guides of every repository on this machine.
+  const recent = repo ? listRecent(repo.repoKey, { headForPR: (n) => headByPR.get(n) || undefined, limit: options.recentLimit ?? 12 }) : listRecentEverywhere({ limit: options.recentLimit ?? 12 });
   const currentBranchPR = repo ? prs.find((p) => p.headRefName === repo.branch) ?? null : null;
   return { repo, local, gh: ghState, prs, currentBranchPR, waiting, recent, notes, loadedAt: now() };
 }

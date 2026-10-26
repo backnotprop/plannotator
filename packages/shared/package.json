@@ -4,9 +4,11 @@
   "private": true,
   "exports": {
     "./agents": "./agents.ts",
+    "./child-env": "./child-env.ts",
     "./annotatable": "./annotatable.ts",
     "./annotate-bundle": "./annotate-bundle.ts",
     "./diff-files": "./diff-files.ts",
+    "./file-browser-files": "./file-browser-files.ts",
     "./app-html": "./app-html.ts",
     "./diagram-engine-assets": "./diagram-engine-assets.ts",
     "./compress": "./compress.ts",
@@ -31,6 +33,7 @@
     "./pr-context-live": "./pr-context-live.ts",
     "./pr-artifact-document": "./pr-artifact-document.ts",
     "./pr-provider": "./pr-provider.ts",
+    "./pr-github-account": "./pr-github-account.ts",
     "./pr-stack": "./pr-stack.ts",
     "./project": "./project.ts",
     "./storage": "./storage.ts",
@@ -58,6 +61,7 @@
     "./config": "./config.ts",
     "./data-dir": "./data-dir.ts",
     "./update-check": "./update-check.ts",
+    "./usage-counts": "./usage-counts.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",
@@ -98,8 +102,10 @@
     "./open-in-apps": "./open-in-apps.ts",
     "./port-range": "./port-range.ts",
     "./tailscale": "./tailscale.ts",
+    "./tailnet-audience": "./tailnet-audience.ts",
     "./plan-review-lifecycle": "./plan-review-lifecycle.ts",
     "./review-profiles": "./review-profiles.ts",
+    "./agent-program": "./agent-program.ts",
     "./commit-avatars": "./commit-avatars.ts",
     "./generated-files": "./generated-files.ts",
     "./annotate-client-lease": "./annotate-client-lease.ts",
@@ -108,6 +114,7 @@
     "./guide-format": "./guide-format.ts",
     "./guide-viewer-manifest": "./guide-viewer-manifest.ts",
     "./guide-format-fixtures": "./guide-format-fixtures.ts",
+    "./live-proxy-port": "./live-proxy-port.ts",
     "./live-proxy-core": "./live-proxy-core.ts",
     "./loopback-host": "./loopback-host.ts",
     "./request-origin": "./request-origin.ts",
@@ -116,9 +123,13 @@
     "./browser-intent": "./browser-intent.ts",
     "./host-control": "./host-control.ts",
     "./live-probe": "./live-probe.ts",
+    "./plannotator-server-marker": "./plannotator-server-marker.ts",
+    "./plannotator-ports": "./plannotator-ports.ts",
     "./live-proxy-node": "./live-proxy-node.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/store": "./inbox/store.ts",
+    "./inbox/board-seen": "./inbox/board-seen.ts",
+    "./inbox/card-refs": "./inbox/card-refs.ts",
     "./inbox/list": "./inbox/list.ts",
     "./inbox/project-batch": "./inbox/project-batch.ts",
     "./inbox/search": "./inbox/search.ts",
@@ -136,13 +147,13 @@
     "./inbox/agent-link": "./inbox/agent-link.ts"
   },
   "dependencies": {
-    "@joplin/turndown-plugin-gfm": "^1.0.64",
+    "@joplin/turndown-plugin-gfm": "^1.0.68",
     "@plannotator/core": "workspace:*",
     "chokidar": "^5.0.0",
     "parse5": "^7.3.0",
     "turndown": "^7.2.4"
   },
   "devDependencies": {
-    "fast-check": "4.9.0"
+    "fast-check": "4.10.2"
   }
 }

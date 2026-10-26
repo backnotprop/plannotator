@@ -158,7 +158,10 @@ export async function handleReviewCommand(
     client.app.log({ level: "info", message: `Fetching ${getMRLabel(prRef)} ${getMRNumberLabel(prRef)} from ${getDisplayRepo(prRef)}...` });
 
     try {
-      await checkPRAuth(prRef);
+      // A GitHub PR the active gh account can't see runs as another signed-in
+      // account that can (#2157); the provider scopes its gh calls to this repo.
+      const access = await checkPRAuth(prRef);
+      if (access.notice) client.app.log({ level: "info", message: `[Plannotator] ${access.notice}` });
     } catch (err) {
       const cliName = getCliName(prRef);
       client.app.log({ level: "error", message: err instanceof Error ? err.message : `${cliName} auth check failed` });

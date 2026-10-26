@@ -23,6 +23,13 @@ import {
 	type RequestHostPolicy,
 } from "../generated/request-host.ts";
 import { isAutoUrlHost, resolveAutoHostCached } from "../generated/tailscale.ts";
+import {
+	LIVE_PROXIED_REFUSED_CODE,
+	LIVE_PROXIED_REFUSED_MESSAGE,
+	PLANNOTATOR_LIVE_PROXY_HEADER,
+	PLANNOTATOR_SERVER_HEADER,
+	PLANNOTATOR_SERVER_HEADER_VALUE,
+} from "../generated/plannotator-server-marker.ts";
 import { isRemoteSession } from "./network.ts";
 
 function remoteExtraHosts(): string[] {
@@ -43,7 +50,12 @@ function hostHeader(req: IncomingMessage): string | undefined {
 }
 
 export interface PiRequestHostGuard {
-	/** Answers 403 and returns true when the request's Host is not allowed. */
+	/**
+	 * Answers 403 and returns true when the request's Host is not allowed.
+	 * Also marks the response as a Plannotator server's (every Pi handler calls
+	 * this first), and refuses a request annotate's live app proxy forwarded,
+	 * so the live proxy never fronts this server.
+	 */
 	refuse(req: IncomingMessage, res: ServerResponse): boolean;
 	/** Refuse disallowed WebSocket upgrades on `server` (call before it listens). */
 	attach(server: Server): void;
@@ -76,8 +88,9 @@ export function createRequestHostGuard(): PiRequestHostGuard {
 				if (event === "upgrade") {
 					const req = args[0] as IncomingMessage;
 					const socket = args[1] as Duplex;
-					if (!allows(req)) {
-						const body = hostNotAllowedMessage(hostHeader(req));
+					const proxied = req.headers[PLANNOTATOR_LIVE_PROXY_HEADER] !== undefined;
+					if (proxied || !allows(req)) {
+						const body = proxied ? LIVE_PROXIED_REFUSED_MESSAGE : hostNotAllowedMessage(hostHeader(req));
 						socket.end(
 							`HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
 						);
@@ -88,6 +101,16 @@ export function createRequestHostGuard(): PiRequestHostGuard {
 			}) as typeof server.emit;
 		},
 		refuse(req, res) {
+			res.setHeader(PLANNOTATOR_SERVER_HEADER, PLANNOTATOR_SERVER_HEADER_VALUE);
+			if (req.headers[PLANNOTATOR_LIVE_PROXY_HEADER] !== undefined) {
+				res.writeHead(403, {
+					"Content-Type": "text/plain; charset=utf-8",
+					"X-Content-Type-Options": "nosniff",
+					"X-Plannotator-Error": LIVE_PROXIED_REFUSED_CODE,
+				});
+				res.end(LIVE_PROXIED_REFUSED_MESSAGE);
+				return true;
+			}
 			if (allows(req)) return false;
 			const body = hostNotAllowedMessage(hostHeader(req));
 			res.writeHead(403, {

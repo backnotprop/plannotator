@@ -5,10 +5,11 @@
  * both get real files, and the user's own checkout is never touched).
  */
 
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { deriveGuideRepoKeyFromRemote } from "@plannotator/shared/guide-store";
 import type { RepoInfo } from "./git";
-import { changedFilesFromPatch, commitExists, type ChangedFileInfo } from "./git";
+import { changedFilesFromPatch, commitExists, getRepoInfo, type ChangedFileInfo } from "./git";
 import type { Runner } from "./runner";
 
 export type GhStatus =
@@ -150,8 +151,9 @@ export function parsePullRequestRef(input: string, repo?: RepoInfo): number | nu
   return Number(url[4]);
 }
 
-export async function viewPullRequest(runner: Runner, cwd: string, number: number): Promise<PullRequestDetail> {
-  const r = await gh(runner, cwd, ["pr", "view", String(number), "--json", "number,title,url,body,author,headRefName,headRefOid,baseRefName,baseRefOid"]);
+/** `ghRepo` names the repository (`[host/]owner/repo`) instead of the one gh finds from `cwd`'s remotes. */
+export async function viewPullRequest(runner: Runner, cwd: string, number: number, ghRepo?: string): Promise<PullRequestDetail> {
+  const r = await gh(runner, cwd, ["pr", "view", String(number), ...(ghRepo ? ["--repo", ghRepo] : []), "--json", "number,title,url,body,author,headRefName,headRefOid,baseRefName,baseRefOid"]);
   if (r.code !== 0) throw new Error(r.stderr.trim() || `gh pr view exited with ${r.code}`);
   const p = parseJson<Record<string, unknown>>(r.stdout);
   if (!p) throw new Error("gh pr view returned something that is not JSON");
@@ -296,4 +298,178 @@ export async function removePullRequestWorktree(runner: Runner, repoRoot: string
   if (!isInside(worktreesRoot(storageDir), path) || !existsSync(path)) return false;
   const r = await gitIn(runner, repoRoot)(["worktree", "remove", "--force", "--", path], repoRoot, 60_000);
   return r.code === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Pull requests of a repository that is not open: a blobless clone in storage
+// ---------------------------------------------------------------------------
+
+/** A PR URL (`https://<host>/<owner>/<repo>/pull/<n>`), or null. */
+export function parsePullRequestUrl(input: string): { host: string; owner: string; repo: string; number: number } | null {
+  const m = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/.exec(input.trim());
+  if (!m) return null;
+  return { host: m[1].toLowerCase(), owner: m[2], repo: m[3].replace(/\.git$/, ""), number: Number(m[4]) };
+}
+
+/** `owner/repo` on github.com, else `host/owner/repo`: the form `gh` takes for `--repo` and `repo clone`. */
+export function ghRepoArg(ref: { host: string; owner: string; repo: string }): string {
+  return ref.host === "github.com" ? `${ref.owner}/${ref.repo}` : `${ref.host}/${ref.owner}/${ref.repo}`;
+}
+
+/** `[host/]owner/repo` back into its parts (host github.com when left out). */
+export function parseGhRepoArg(arg: string): { host: string; owner: string; repo: string } | null {
+  const parts = arg.split("/").filter(Boolean);
+  if (parts.length === 2) return { host: "github.com", owner: parts[0], repo: parts[1] };
+  if (parts.length === 3) return { host: parts[0].toLowerCase(), owner: parts[1], repo: parts[2] };
+  return null;
+}
+
+/** The guide store shelf of a GitHub repository: the same key a local checkout of it gets. */
+export function repoKeyForGhRepo(arg: string): string | null {
+  const ref = parseGhRepoArg(arg);
+  return ref ? deriveGuideRepoKeyFromRemote(`https://${ref.host}/${ref.owner}/${ref.repo}.git`) : null;
+}
+
+/** A shelf key (`github.com__owner__repo`) back into the form gh takes, or null for a key that is not a GitHub repository. */
+export function ghRepoOfKey(repoKey: string): string | null {
+  const parts = repoKey.split("__");
+  if (parts.length !== 3 || !parts[0].includes(".")) return null;
+  return ghRepoArg({ host: parts[0], owner: parts[1], repo: parts[2] });
+}
+
+/** Where the extension keeps its clone of a repository, by its shelf key. */
+export function repoClonePath(storageDir: string, repoKey: string): string {
+  return join(storageDir, "repos", repoKey);
+}
+
+/**
+ * Whether a pull request (by its URL's host, owner and repo) belongs to the
+ * repository open in VS Code. Owner and repo compare case-insensitively, and
+ * the host only loosely: an SSH host alias (`git@github-work:org/repo`, no
+ * dot in the name) or `ssh.github.com` (port 443) is the same GitHub as
+ * `github.com`, so the open repository's own PRs never look like another
+ * repository's.
+ */
+export function isOpenRepository(open: RepoInfo | null | undefined, ref: { host: string; owner: string; repo: string }): boolean {
+  const gh = open?.github;
+  if (!gh) return false;
+  if (gh.owner.toLowerCase() !== ref.owner.toLowerCase() || gh.repo.replace(/\.git$/i, "").toLowerCase() !== ref.repo.replace(/\.git$/i, "").toLowerCase()) return false;
+  const a = canonicalGitHubHost(gh.host);
+  const b = canonicalGitHubHost(ref.host);
+  return a === b || !gh.host.includes(".");
+}
+
+function canonicalGitHubHost(host: string): string {
+  const h = host.toLowerCase().replace(/:\d+$/, "");
+  return h === "ssh.github.com" || h === "www.github.com" ? "github.com" : h;
+}
+
+/** Clones being made in this window, by path: a second caller waits for the first. */
+const cloning = new Map<string, Promise<RepoInfo>>();
+
+/** A `*.cloning-*` folder older than this was left by a window that stopped mid-clone. */
+const STALE_CLONE_MS = 60 * 60_000;
+
+/**
+ * A repository that is not open in VS Code, for guiding one of its pull
+ * requests: a blobless, no-checkout clone (`gh repo clone`, so the user's own
+ * gh auth and protocol apply) kept in the extension's storage and reused.
+ * The PR itself then goes through the same per-PR worktree as any PR.
+ *
+ * The clone is made in a folder of its own and moved into place only when it
+ * is complete, so two callers (or two windows) never delete each other's
+ * clone; one that loses the race uses the winner's. gh lends git its
+ * credentials only for the clone command itself, so the clone gets gh as its
+ * credential helper in its own config (nothing outside it is changed): the
+ * later fetches of the PR head, the base and on-demand blobs need it for a
+ * private repository over HTTPS.
+ */
+export function ensureRepoClone(runner: Runner, ghRepo: string, storageDir: string, onStep: (step: string) => void = () => {}, options: { ghPath?: string | null; now?: () => number } = {}): Promise<RepoInfo> {
+  const repoKey = repoKeyForGhRepo(ghRepo);
+  if (!repoKey) return Promise.reject(new Error(`${ghRepo} is not a GitHub repository name.`));
+  const path = repoClonePath(storageDir, repoKey);
+  const running = cloning.get(path);
+  if (running) return running;
+  const job = cloneOnce(runner, ghRepo, path, onStep, options).finally(() => cloning.delete(path));
+  cloning.set(path, job);
+  return job;
+}
+
+async function cloneOnce(runner: Runner, ghRepo: string, path: string, onStep: (step: string) => void, options: { ghPath?: string | null; now?: () => number }): Promise<RepoInfo> {
+  const now = options.now ?? Date.now;
+  sweepStaleClones(path, now());
+  if (!existsSync(join(path, ".git"))) {
+    onStep(`Cloning ${ghRepo} (no checkout, files fetched as needed)`);
+    mkdirSync(dirname(path), { recursive: true });
+    const temp = `${path}.cloning-${process.pid}-${now()}`;
+    const r = await gh(runner, dirname(path), ["repo", "clone", ghRepo, temp, "--", "--filter=blob:none", "--no-checkout", "--quiet"], 600_000);
+    if (r.code !== 0) {
+      rmSync(temp, { recursive: true, force: true });
+      throw new Error(`Could not clone ${ghRepo}: ${r.stderr.trim().split("\n").pop() || `gh exited with ${r.code}`}`);
+    }
+    await useGhForCredentials(runner, temp, ghRepo, options.ghPath);
+    if (existsSync(join(path, ".git"))) rmSync(temp, { recursive: true, force: true });
+    else {
+      try {
+        renameSync(temp, path);
+      } catch (err) {
+        // Another window moved its clone in first: use that one.
+        rmSync(temp, { recursive: true, force: true });
+        if (!existsSync(join(path, ".git"))) throw err;
+      }
+    }
+  }
+  const info = await getRepoInfo(runner, path);
+  if (!info) throw new Error(`The clone of ${ghRepo} at ${path} is not a git repository.`);
+  return info;
+}
+
+/** `credential.https://<host>.helper` = gh, in the clone's own config only (what `gh auth setup-git` would set globally). */
+async function useGhForCredentials(runner: Runner, clone: string, ghRepo: string, ghPath: string | null | undefined): Promise<void> {
+  const ref = parseGhRepoArg(ghRepo);
+  if (!ref || !ghPath) return;
+  const key = `credential.https://${ref.host}.helper`;
+  const g = gitIn(runner, clone);
+  await g(["config", "--local", key, ""]);
+  await g(["config", "--local", "--add", key, `!${shellQuoteForGit(ghPath)} auth git-credential`]);
+}
+
+/**
+ * A program path for a git `!` credential helper, which git runs with
+ * `sh -c` (Git for Windows too, through its bundled sh): POSIX single quotes,
+ * so `$`, backticks and backslashes stay literal (`'` becomes `'\''`). A
+ * Windows path comes out as `gh auth setup-git` itself writes it
+ * (`'C:\Program Files\GitHub CLI\gh.exe'`).
+ */
+export function shellQuoteForGit(path: string): string {
+  return `'${path.replace(/'/g, "'\\''")}'`;
+}
+
+/** Folders left by a clone that never finished (its window closed or was killed). */
+function sweepStaleClones(path: string, now: number): void {
+  const dir = dirname(path);
+  const prefix = `${path.slice(dir.length + 1)}.cloning-`;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    const full = join(dir, name);
+    try {
+      if (now - statSync(full).mtimeMs > STALE_CLONE_MS) rmSync(full, { recursive: true, force: true });
+    } catch {
+      // Gone already.
+    }
+  }
+}
+
+/** A PR's current head commit, by `gh pr view` (`--repo` for another repository, else the one gh finds in `cwd`). */
+export async function pullRequestHead(runner: Runner, ghRepo: string | null, number: number, cwd?: string): Promise<string | null> {
+  const r = await gh(runner, cwd, ["pr", "view", String(number), ...(ghRepo ? ["--repo", ghRepo] : []), "--json", "headRefOid"]);
+  if (r.code !== 0) return null;
+  const p = parseJson<{ headRefOid?: string }>(r.stdout);
+  return p?.headRefOid || null;
 }

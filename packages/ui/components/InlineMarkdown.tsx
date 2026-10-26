@@ -502,32 +502,50 @@ function emitPlainTextWithBareUrls(
   }
 }
 
-/** An image a host resolver chose; a load failure shows the placeholder. */
+/**
+ * An image a host resolver chose; a load failure shows the placeholder.
+ *
+ * The `<img>` element itself never leaves the document: on failure the
+ * placeholder is inserted BEFORE it (React's reference node is then the
+ * `<img>`, which it owns) and the `<img>` is hidden. Replacing the `<img>`
+ * would make React insert before the node that follows it, and when that is
+ * a text node the annotation highlighter already moved into a `<mark>` (a
+ * restored comment starting right after the image), `insertBefore` throws
+ * and the whole document unmounts. A loaded image's DOM is unchanged.
+ */
 const HostResolvedImage: React.FC<{
   src: string;
   alt: string;
+  /** The src as written in the markdown (`data-image-src`, read by the image viewer's region comments). */
+  writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
-}> = ({ src, alt, onImageClick }) => {
+}> = ({ src, alt, writtenSrc, onImageClick }) => {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  if (failedSrc === src) {
-    return (
-      <span className={UNAVAILABLE_IMAGE_CLASS} title="Image could not be loaded" data-image-unavailable="">
-        {alt || 'Image'}
-      </span>
-    );
-  }
+  const failed = failedSrc === src;
   return (
-    <img
-      src={src}
-      alt={alt}
-      className="max-w-full rounded my-2 cursor-zoom-in"
-      loading="lazy"
-      onError={() => setFailedSrc(src)}
-      onClick={(e) => {
-        e.stopPropagation();
-        onImageClick?.(src, alt);
-      }}
-    />
+    <>
+      {failed && (
+        <span key="unavailable" className={`${UNAVAILABLE_IMAGE_CLASS} annotation-exclude`} title="Image could not be loaded" data-image-unavailable="">
+          {alt || 'Image'}
+        </span>
+      )}
+      <img
+        key="image"
+        src={src}
+        alt={failed ? '' : alt}
+        data-image-src={writtenSrc}
+        data-image-failed={failed ? '' : undefined}
+        hidden={failed || undefined}
+        aria-hidden={failed || undefined}
+        className={failed ? undefined : 'max-w-full rounded my-2 cursor-zoom-in'}
+        loading="lazy"
+        onError={() => setFailedSrc(src)}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!failed) onImageClick?.(src, alt);
+        }}
+      />
+    </>
   );
 };
 
@@ -1085,12 +1103,13 @@ export const InlineMarkdown: React.FC<{
         resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.
-          <HostResolvedImage key={key++} src={imgSrc} alt={alt} onImageClick={onImageClick} />
+          <HostResolvedImage key={key++} src={imgSrc} alt={alt} writtenSrc={src} onImageClick={onImageClick} />
         ) : (
           <img
             key={key++}
             src={imgSrc}
             alt={alt}
+            data-image-src={src}
             className="max-w-full rounded my-2 cursor-zoom-in"
             loading="lazy"
             onClick={(e) => {

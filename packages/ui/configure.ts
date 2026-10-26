@@ -18,7 +18,9 @@ import { configStore } from './config';
 import type { ServerSyncFn } from './config/configStore';
 import type { ExternalAnnotationEvent, VaultNode } from './types';
 import { setComponentTooltips } from './components/HostTitle';
+import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setDigitHexIssueRefs } from './components/InlineMarkdown';
+import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
@@ -45,6 +47,7 @@ export type {
   IdentityGenerator,
   AlertIconRenderer,
   FenceThemeResolver,
+  RefCardTransport,
 };
 
 type ExternalAnnotationBase = { id: string; source?: string };
@@ -135,6 +138,20 @@ export interface PlannotatorUIConfig {
    * before. The Plannotator Inbox passes true (#1932).
    */
   digitHexIssueRefs?: boolean;
+  /**
+   * Make the selection toolbar's Copy button (Viewer and HtmlViewer) copy rich
+   * text: text/html plus text/plain in one clipboard write, and show Copy
+   * where `hideCopyButton` hid it (the Viewer on desktop). Default: false,
+   * Copy exactly as before. Plannotator's plan review, annotate, code review
+   * and Inbox pass true (#1972, `utils/richCopyPolicy`).
+   */
+  richCopy?: boolean;
+  /**
+   * Fetch an issue / PR / MR hover card's data (`components/RefHoverCard`).
+   * Default: none, so no card is drawn and nothing is requested. The
+   * Plannotator Inbox passes one over its `/api/inbox/ref` route.
+   */
+  refCardTransport?: RefCardTransport;
   /** Re-hydrate settings from the installed (SYNCHRONOUS) storageBackend after install. */
   loadSettingsFromBackend?: boolean;
 }
@@ -161,6 +178,8 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.fenceTheme) setFenceThemeResolver(config.fenceTheme);
   if (config.componentTooltips !== undefined) setComponentTooltips(config.componentTooltips);
   if (config.digitHexIssueRefs !== undefined) setDigitHexIssueRefs(config.digitHexIssueRefs);
+  if (config.richCopy !== undefined) setRichCopyEnabled(config.richCopy);
+  if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).
   if (config.loadSettingsFromBackend) configStore.loadFromBackend();
 }

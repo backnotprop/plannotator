@@ -6,6 +6,7 @@
  * data. Purge removes the known Plannotator data inventory while preserving
  * unknown top-level entries rather than guessing that custom files are ours.
  */
+import { childPath } from "@plannotator/shared/child-env";
 import {
   existsSync,
   lstatSync,
@@ -60,6 +61,13 @@ const KNOWLEDGE_SKILLS = [
   "plannotator",
 ] as const;
 
+// /plannotator-inbox (apps/skills/{claude,core}/plannotator-inbox): installed
+// to the Claude and shared-agent scopes, ~/.kiro/skills and $VIBE_HOME/skills,
+// plus an OpenCode command stub and a Gemini command. Kept out of
+// CORE_SKILLS for the same reason as the knowledge skill: it never had a
+// legacy ~/.claude/commands file or a Codex-home era.
+const INBOX_SKILL = "plannotator-inbox";
+
 const EXTRA_SKILLS = [
   "plannotator-compound",
   "plannotator-setup-goal",
@@ -74,6 +82,7 @@ const LEGACY_COMMAND_NAMES = [
 const KIRO_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
+  INBOX_SKILL,
   // The knowledge skill installs into ~/.kiro/skills like the action skills.
   // Safe to name here: this list only ever removes ~/.kiro/skills/<name>
   // directories, never a command file a user may own.
@@ -90,6 +99,7 @@ const VIBE_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
   "plannotator-last",
+  INBOX_SKILL,
   "plannotator",
 ] as const;
 
@@ -132,6 +142,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "update-result.json",
   "update.lock",
   "update.log",
+  "update.log.1",
   "update-notes",
   "install-flags.json",
 ] as const;
@@ -337,7 +348,7 @@ export function createDefaultUninstallEnvironment(): UninstallEnvironment {
     dataDir: getPlannotatorDataDir(),
     execPath: process.execPath,
     env,
-    which: (command) => Bun.which(command),
+    which: (command) => Bun.which(command, { PATH: childPath() }),
     runCommand: defaultRunCommand,
     scheduleWindowsSelfDelete: defaultScheduleWindowsSelfDelete,
   };
@@ -829,7 +840,7 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
-  for (const skill of [...CORE_SKILLS, ...KNOWLEDGE_SKILLS]) {
+  for (const skill of [...CORE_SKILLS, INBOX_SKILL, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),
       request,
@@ -898,6 +909,10 @@ function removeInstalledFiles(
       );
     }
   }
+  // The /plannotator-inbox OpenCode stub the installer writes (never a Claude command).
+  for (const configDir of paths.configDirs) {
+    removePath(join(configDir, "opencode", "commands", `${INBOX_SKILL}.md`), request, state);
+  }
 
   // @plannotator/opencode's postinstall writes the knowledge skill here so
   // OpenCode's `{skill,skills}/**/SKILL.md` scan under its config dir finds it.
@@ -918,6 +933,7 @@ function removeInstalledFiles(
     "plannotator-review",
     "plannotator-annotate",
     "plannotator-last",
+    INBOX_SKILL,
   ]) {
     removePath(
       join(environment.homeDir, ".gemini", "commands", `${command}.toml`),
@@ -1027,6 +1043,11 @@ function removeInstallerData(
       state,
     );
   }
+  // Usage counts (packages/shared/usage-counts.ts) are worth nothing to keep
+  // and a reinstall should start clean: every uninstall removes them, purge or
+  // not. An opt-out (`usageCounts: false` in config.json) stays with the config,
+  // which a plain uninstall keeps.
+  removePath(join(state.dataDir, "usage-counts"), request, state);
 }
 
 function purgeLocalData(
@@ -2472,7 +2493,7 @@ async function defaultScheduleWindowsSelfDelete(
   target: string,
   parent: string | null,
 ): Promise<boolean> {
-  const powershell = Bun.which("powershell.exe") || Bun.which("pwsh.exe");
+  const powershell = Bun.which("powershell.exe", { PATH: childPath() }) || Bun.which("pwsh.exe", { PATH: childPath() });
   if (!powershell) return false;
 
   try {

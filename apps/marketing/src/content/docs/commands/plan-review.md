@@ -75,6 +75,28 @@ If you want a replacement or an insertion, ask for it in a comment ("Change `Web
 
 A comment saves with `Cmd/Ctrl+Enter`; plain Enter adds a new line. If `Cmd/Ctrl+Enter` is taken on your computer, or you prefer chat-style keys, turn on **Enter saves a comment** in Settings → General: Enter then saves and Shift+Enter adds a new line, in every comment box (plan review, annotate, code review and the Inbox's file comments). `Cmd/Ctrl+Enter` keeps saving. The setting is kept in your browser; other Plannotator tabs already open, an open Inbox tab included, pick up a change after a reload. The Inbox's reply box is a message, not a comment: Enter there stays a new line.
 
+## Comments on part of an image
+
+Click an image in the plan to open it in the image viewer. The viewer has a small **Move | Region** switch over the image (at the bottom on a phone):
+
+- **Move** (the default): drag moves the image, the wheel or a pinch zooms.
+- **Region**: drag draws a box over the part of the image you mean, at any zoom. The comment box opens beside it; **Save** adds the comment and Region stays on, so you can draw several boxes in a row. `Esc` goes back to Move. On a phone one finger draws and two fingers move and zoom the image.
+
+With the keyboard, choose Region, frame the spot with **Actual size** and the arrow or page keys on the focused image, then press `Enter`: the comment is about the part of the image on screen.
+
+The count beside the switch opens the comments on that image; choosing one zooms to its box. The comments are also listed in the annotations panel like any other, and selecting one there opens the viewer on its box. To change a box, delete the comment and draw it again.
+
+Your agent receives the image as written in the plan, its line, and the box in the image's own pixels, so it can crop the exact spot:
+
+```
+## 2. (line 63) Feedback on a region of the image figures/status-colors.png
+Image: figures/status-colors.png (line 63)
+Region: x=1820 y=380 w=420 h=160 (of 3664×1453)
+> the "paused" box should be grey, not orange
+```
+
+This works for images written in markdown (`![alt](path)`), in plan review and in annotate. A share link keeps the comment but not its box.
+
 ## Image attachments
 
 You can paste or upload images and attach them to annotations. Images are given human-readable names (e.g., "login-mockup") and referenced in the exported feedback. This is useful for sharing mockups, screenshots, or diagrams alongside your annotations.

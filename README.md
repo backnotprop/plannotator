@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a>
+  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#plannotator-inbox">Plannotator Inbox</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a>
 </p>
 
 # Plannotator
@@ -83,6 +83,25 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
 <p align="center">
   <img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="720" />
 </p>
+
+## Plannotator Inbox
+
+<p align="center">
+  <a href="https://plannotator.ai/inbox/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/inbox-dark.webp" />
+      <img src=".github/assets/inbox-light.webp" alt="Plannotator Inbox: threads from several agents grouped by what each needs, with a question and an attached screenshot open beside the list" width="720" />
+    </picture>
+  </a>
+</p>
+
+The Plannotator Inbox is one local window where your agents leave you messages, questions, files, and guided reviews while they keep working. Answer a question with a click, annotate a file, and press Send when you can. Nothing holds an agent session open while you do, and your reply goes back to the session that asked.
+
+```
+plannotator inbox
+```
+
+Claude Code, Pi, and OpenCode connect through Plannotator's plugins, and your replies arrive as their next turn. Any other agent reaches it over MCP with `plannotator inbox mcp`, and `plannotator inbox --help` is the guide an agent reads. [Watch the demo](https://plannotator.ai/assets/inbox-film.mp4) · [More on the Inbox](https://plannotator.ai/inbox/) · [Docs](https://plannotator.ai/docs/reference/inbox/)
 
 ## Herdr Annotate: Plannotator in the Terminal
 

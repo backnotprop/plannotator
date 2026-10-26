@@ -2,6 +2,8 @@
  * IDE integration — opens plan diffs in external IDEs
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
+
 /**
  * Open two files in VS Code's diff viewer.
  *
@@ -13,6 +15,7 @@ export async function openEditorDiff(
 ): Promise<{ ok: true } | { error: string }> {
   try {
     const proc = Bun.spawn(["code", "--diff", oldPath, newPath], {
+      env: childEnv(),
       stdout: "ignore",
       stderr: "pipe",
     });

@@ -6,13 +6,14 @@
  * agent connections are the bridge's real doors driven as a connection
  * drives them (the harness of inbox-ended-session.spec.ts).
  *
- * One session asks three questions over two messages; the person presses
- * Re-ask; the note waits Queued (the session is working) with Send now, the
+ * One session asks three questions over two messages; the person opens the
+ * "N open questions" list and presses its last item, Re-ask (owner,
+ * 2026-10-23: no Re-ask button in the foot); the note waits Queued (the session is working) with Send now, the
  * row is in Sent, the connection is handed the note with the Re-ask wake
  * line; delivered; the agent re-asks two with `Replaces:` lines and drops
  * one with `supersedes`, and the old cards read Replaced and No longer
  * applies. Then: a session that ended (the choice, "Who should ask again?"),
- * and the foot on a phone in WebKit.
+ * one open question (Re-ask in the singular), and the sheet on a phone in WebKit.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs (desktop 1440 and 1280, light and dark, and a phone) land in
@@ -132,6 +133,25 @@ async function shot(page: Page, name: string, schemes: readonly ('light' | 'dark
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
+/** Opens the thread's "N open questions" list and answers its Re-ask item (absent when Re-ask is not offered). */
+async function openReask(page: Page) {
+  const trigger = page.locator('section.ib-pane .ib-pfoot [data-open-questions]');
+  if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
+  const list = page.locator('[data-open-questions-list]');
+  await expect(list).toBeVisible();
+  return list.locator('[data-reask]');
+}
+
+/** Re-ask is not offered: the list (when there is one) has no Re-ask item. */
+async function expectNoReask(page: Page) {
+  const foot = page.locator('section.ib-pane .ib-pfoot');
+  await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
+  if ((await foot.locator('[data-open-questions]').count()) === 0) return;
+  await expect(await openReask(page)).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
+}
+
 async function waitFor<T>(what: string, check: () => T | null | undefined | false, timeoutMs = 15_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -200,25 +220,29 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
   const pane = page.locator('section.ib-pane');
   await expect(pane.getByRole('heading', { name: 'Billing migration: two calls before I cut over' })).toBeVisible();
   const foot = pane.locator('.ib-pfoot');
-  const reask = foot.getByRole('button', { name: 'Re-ask', exact: true });
-  await expect(reask).toBeVisible();
-  // Beside Reply, the same height, on one row.
-  const [reply, re] = await Promise.all([foot.getByRole('button', { name: 'Reply', exact: true }).boundingBox(), reask.boundingBox()]);
-  expect(Math.abs(reply!.y - re!.y)).toBeLessThanOrEqual(1);
-  expect(re!.x).toBeGreaterThan(reply!.x);
+  // No Re-ask button in the foot: it is the last item of the "3 open questions" list.
+  await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
+  await expect(foot.locator('[data-open-questions]')).toHaveText('3 open questions');
+  const reask = await openReask(page);
+  await expect(reask).toHaveText('Re-ask in one new message');
+  await expect(reask).toHaveAttribute('role', 'menuitem');
   await reask.hover();
-  await expect(page.getByText('Ask Claude Code to ask the 3 open questions again, together in one message with fresh context.', { exact: false })).toBeVisible();
+  await expect(page.locator('[data-pn-tooltip]').getByText('Ask Claude Code to ask the 3 open questions again, together in one message with fresh context.', { exact: false })).toBeVisible();
   await shot(page, '1-open-1440');
   await page.mouse.move(10, 10);
+  await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.waitForTimeout(300);
+  await openReask(page);
   await shot(page, '1-open-1280', ['light']);
+  await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await reask.click();
+  await (await openReask(page)).click();
   const note = pane.locator('[data-reask-note]');
   await expect(note.locator('.ib-reask-l')).toHaveText('You asked Claude Code to ask the 3 open questions again, together in one message. They stay open here until it does.');
-  await expect(reask).toHaveCount(0);
+  await expect(page.locator('[data-open-questions-list]')).toHaveCount(0);
+  await expectNoReask(page);
   await expect(pane.locator('[data-delivery="queued"]')).toContainText(/Undelivered(?: \d+ min)? · Claude Code is working · goes in by itself in /);
   await expect(pane.locator('[data-send-now]')).toBeVisible();
   await expect(pane.getByText(/^Asked again \d{1,2}:\d{2} [AP]M$/).first()).toBeVisible();
@@ -257,7 +281,7 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
   );
   await expect(pane.getByText('Here are the two that still need you.', { exact: false })).toBeVisible();
   await expect.poll(() => sectionOf(world.threadId)).toBe('waiting');
-  await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
+  await expectNoReask(page);
   await shot(page, '3-reasked-1440', ['light']);
   // Every message open (a thread opened before them folds the older ones).
   const expand = page.getByRole('button', { name: /Expand all/ });
@@ -266,6 +290,45 @@ test('Re-ask: the note waits Queued with Send now, the row is Sent, the agent ge
   await expect(pane.locator('[data-replaced-tag]').filter({ hasText: 'Replaced' })).toHaveCount(2);
   await expect(pane.locator('[data-replaced-tag]').filter({ hasText: 'No longer applies' })).toHaveCount(1);
   await shot(page, '3-old-cards-1440');
+  expect(world.errors).toEqual([]);
+});
+
+test('one open question, no pick: Re-ask shows, and the note and the wake read in the singular (owner, 2026-10-23)', async () => {
+  const { page } = world;
+  // The asking session's connection from the test before (still polling), else a new one.
+  let asker = world.connections.find((c) => c.session === world.asker);
+  if (!asker) {
+    asker = new Connection(world.asker, false);
+    world.connections.push(asker);
+  }
+  const one = await world.claude.send(
+    { project_path: world.billing, thread: 'cache warmup', subject: 'Cache warmup: one call', body: q('Warm the cache before the cut-over?', 'A cold cache adds about 40 s to the first requests.', ['Warm it first', 'Skip it'], 'Warm it first') },
+    { wakes: true },
+  );
+  await page.goto(`${world.url}#thread=${one.thread_id}`);
+  const pane = page.locator('section.ib-pane');
+  await expect(pane.getByRole('heading', { name: 'Cache warmup: one call' })).toBeVisible();
+  // One open question in a short thread: the list's button shows, with Re-ask in the singular at its foot.
+  await expect(pane.locator('.ib-pfoot [data-open-questions]')).toHaveText('1 open question');
+  const reask = await openReask(page);
+  await expect(reask).toHaveText('Re-ask in a new message');
+  await expect(page.locator('[data-open-questions-list] .ib-oq-row')).toHaveCount(1);
+  // The list as it opens: the question, then Re-ask, no heading or foot line.
+  await page.mouse.move(10, 10);
+  await shot(page, '1b-one-question-list-1440');
+  await reask.hover();
+  await expect(page.locator('[data-pn-tooltip]').getByText('Ask Claude Code to ask the open question again, with fresh context. If it no longer applies, it is closed; until then it stays open here.')).toBeVisible();
+  await shot(page, '1b-one-question-1440');
+  await page.mouse.move(10, 10);
+  await reask.click();
+  await expect(pane.locator('[data-reask-note] .ib-reask-l')).toHaveText('You asked Claude Code to ask the open question again. It stays open here until it does.');
+  await expectNoReask(page);
+  const command = await waitFor('the one-question note', () => asker!.commands.find((c) => c.reask === true && c.thread_id === one.thread_id));
+  expect(command.body.split('\n')[0]).toBe('Please ask your open question in this thread again, in one new message, so the person can answer it in one place.');
+  expect(inboxWakeText(command).split('\n')[1]).toBe(
+    'The person asked, from the Plannotator Inbox, for the open question in this thread to be asked again, in one new message. The question and what to do with it follow. Answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.',
+  );
+  await shot(page, '1b-one-question-sent-1440', ['light']);
   expect(world.errors).toEqual([]);
 });
 
@@ -283,7 +346,7 @@ test('the session that asked ended: Re-ask asks who should ask again, and the pi
   const pane = page.locator('section.ib-pane');
   // Ended means 60 s with no sign of the session (the grace), read on the window's refresh.
   await expect(pane.locator('[data-asker-ended="live"]')).toBeVisible({ timeout: 100_000 });
-  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Re-ask', exact: true }).click();
+  await (await openReask(page)).click();
   const choice = pane.locator('[data-route-choice]');
   await expect(choice.getByRole('group', { name: 'Who should ask again?' })).toBeVisible();
   await expect(choice.locator('[data-route-session="claude-session-taker"] input')).toBeFocused();
@@ -299,7 +362,7 @@ test('the session that asked ended: Re-ask asks who should ask again, and the pi
   expect(world.errors).toEqual([]);
 });
 
-test('phone (WebKit, iPhone 15): Reply and Re-ask side by side, 44 px', async () => {
+test('phone (WebKit, iPhone 15): Reply and the open-questions button side by side, 44 px, and Re-ask a 44 px row of the sheet', async () => {
   const phoneThread = await world.claude.send({ project_path: world.billing, thread: 'release notes', subject: 'Release notes: two questions', body: [q('Ship the notes today?', 'The draft is ready.', ['Today', 'Tomorrow'], 'Today'), '', q('Mention the API change?', 'It affects two customers.', ['Yes', 'No'], 'Yes')].join('\n') }, { wakes: true });
   let own: Browser | null = null;
   try {
@@ -309,12 +372,17 @@ test('phone (WebKit, iPhone 15): Reply and Re-ask side by side, 44 px', async ()
       const page = await context.newPage();
       await page.goto(`${world.url}#thread=${phoneThread.thread_id}`);
       const foot = page.locator('.ib-pfoot');
-      const reask = foot.getByRole('button', { name: 'Re-ask', exact: true });
-      await expect(reask).toBeVisible();
-      const [reply, re] = await Promise.all([foot.getByRole('button', { name: 'Reply', exact: true }).boundingBox(), reask.boundingBox()]);
+      const open = foot.locator('[data-open-questions]');
+      await expect(open).toBeVisible();
+      const [reply, oq] = await Promise.all([foot.getByRole('button', { name: 'Reply', exact: true }).boundingBox(), open.boundingBox()]);
       expect(reply!.height).toBe(44);
-      expect(re!.height).toBe(44);
-      expect(Math.abs(reply!.y - re!.y)).toBeLessThanOrEqual(1);
+      expect(oq!.height).toBe(44);
+      expect(Math.abs(reply!.y - oq!.y)).toBeLessThanOrEqual(1);
+      await open.click();
+      const reask = page.locator('[data-open-questions-list] [data-reask]');
+      await expect(reask).toHaveText('Re-ask in one new message');
+      expect((await reask.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await page.waitForTimeout(300);
       await page.screenshot({ path: join(proofDir, `5-phone-${scheme}.png`) });
       await context.close();
     }

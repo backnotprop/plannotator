@@ -198,16 +198,17 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => heading(el) === 'General', 'General');
   expect(navLink(el, 'general').getAttribute('aria-current')).toBe('page');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Devices', 'Archived', 'Storage', 'About']);
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Prompts', 'Devices', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
     '#settings/agents',
+    '#settings/prompts',
     '#settings/devices',
     '#settings/archived',
     '#settings/storage',
     '#settings/about',
   ]);
-  for (const section of ['agents', 'devices', 'archived', 'storage', 'about', 'general'] as const) {
+  for (const section of ['agents', 'prompts', 'devices', 'archived', 'storage', 'about', 'general'] as const) {
     act(() => navLink(el, section).click());
     await until(() => window.location.hash === `#settings/${section}`, `#settings/${section}`);
     await until(() => navLink(el, section).getAttribute('aria-current') === 'page', `${section} marked current`);
@@ -426,7 +427,7 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   await until(() => el.querySelector('[data-settings-list]') !== null, 'the list of sections');
   expect(el.querySelector('.ib-snav')).toBeNull();
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
-  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'devices', 'archived', 'storage', 'about']);
+  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'archived', 'storage', 'about']);
   act(() => links.find((a) => a.getAttribute('data-settings-link') === 'devices')!.click());
   await until(() => heading(el) === 'Devices', 'Devices');
   expect(window.location.hash).toBe('#settings/devices');

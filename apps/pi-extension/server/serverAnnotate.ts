@@ -114,6 +114,8 @@ import { createAnnotateDecisionSettler, isNothingToSendFeedbackBody } from "../g
 
 export interface AnnotateServerResult {
 	port: number;
+	/** The live proxy port, when annotating a running app. */
+	liveProxyPort?: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
 	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages"; closedBy?: "agent"; unsentAnnotations?: number }>;
@@ -1134,7 +1136,7 @@ export async function startAnnotateServer(options: {
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (isAgentTerminalSide(body.agentTerminalSide)) toSave.agentTerminalSide = body.agentTerminalSide;
 				if (typeof body.agentTerminalDefaultAgent === "string") toSave.agentTerminalDefaultAgent = body.agentTerminalDefaultAgent;
-				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
+				if (Object.keys(toSave).length > 0 && !saveConfig(toSave as Parameters<typeof saveConfig>[0])) return json(res, { error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, 500);
 				if (agentToolSaveFailed(toSave)) return json(res, { error: "Could not save the setting to config.json." }, 500);
 				json(res, { ok: true });
 			} catch {
@@ -1528,6 +1530,7 @@ export async function startAnnotateServer(options: {
 
 	return {
 		port,
+		liveProxyPort: liveProxy?.port,
 		portSource,
 		url: buildAdvertisedUrl(port),
 		waitForDecision: () => decisionPromise,

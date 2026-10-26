@@ -21,7 +21,7 @@ function isTypingSomewhere(): boolean {
 
 /**
  * The review windows' "a new version is out" toast (design §4.5): from the
- * server's advert only, at most once per version and once every three days
+ * server's advert only, at most once per version and once a day
  * (claimUpdateToast), queued behind the first-run dialogs (`blocked`) and
  * never while a composer or dialog has focus. A blocked attempt is not
  * consumed: it looks again, and gives up for this load after two minutes.

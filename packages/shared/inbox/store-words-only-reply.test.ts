@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import { inboxWakeText } from "./connection";
+import { inboxWakeClosingLine, inboxWakeText } from "./connection";
 import type { InboxAuthor, InboxQuestion } from "@plannotator/core/inbox-types";
 import { InboxStore } from "./store";
 
@@ -57,8 +57,8 @@ describe("a reply that answers nothing", () => {
     expect(result.questions.map((q) => q.state)).toEqual(["open", "open", "open"]);
     expect(store.pendingReplies("ses_a").map((m) => m.body)).toEqual([result.reply.body]);
     // The wake carries the new body verbatim, under its unchanged header.
-    const wake = inboxWakeText({ subject: "Before I build the invoice list", id: result.reply.id, body: result.reply.body });
-    expect(wake.endsWith(`\n\n${result.reply.body}`)).toBe(true);
+    const wake = inboxWakeText({ subject: "Before I build the invoice list", id: result.reply.id, thread_id: result.reply.thread_id, body: result.reply.body });
+    expect(wake.endsWith(`\n\n${result.reply.body}\n\n${inboxWakeClosingLine(result.reply.thread_id)}`)).toBe(true);
   });
 
   test("without skip_unanswered (the phone door, an older window, the MCP): the same words-only reply", () => {

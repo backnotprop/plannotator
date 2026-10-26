@@ -751,4 +751,25 @@ describe("the update control never answers through the tailnet", () => {
     });
     expect(((await local.json()) as Json).show).toBe(true);
   });
+
+  // The Inbox reminder goes into every agent session on this computer: the
+  // owner's page over the tailnet reads Settings → Prompts but cannot change it.
+  test("Settings → Prompts is read-only through the tailnet", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const inbox = await start(dataDir, ts.run);
+    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+    const read = await throughServe(inbox, "/api/inbox/settings", { headers: own });
+    expect(read.status).toBe(200);
+    expect((((await read.json()) as Json).prompts as { reminder: { editable: boolean } }).reminder.editable).toBe(false);
+    const write = await throughServe(inbox, "/api/inbox/settings", {
+      method: "POST",
+      headers: own,
+      body: JSON.stringify({ serverSession: inbox.serverSession, prompts: { inbox: { reminder: "Mine." } } }),
+    });
+    expect(await codeOf(write)).toEqual([403, "local_only"]);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).prompts).toBeUndefined();
+    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`);
+    expect((((await local.json()) as Json).prompts as { reminder: { editable: boolean } }).reminder.editable).toBe(true);
+  });
 });

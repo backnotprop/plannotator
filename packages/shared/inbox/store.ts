@@ -27,6 +27,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
 import {
   checkInboxAnswer,
   composeInboxReaskBody,
@@ -37,6 +38,7 @@ import {
   deriveInboxSubject,
   derivePersonThreadSubject,
   inboxQuestionState,
+  inboxQuestionWaitsOnPerson,
   isInboxQuestionSupersedable,
   parseInboxQuestionBlocks,
   parseInboxSupersedeRef,
@@ -58,6 +60,7 @@ import {
   type InboxAck,
   type InboxAddressee,
   type InboxAuthor,
+  type InboxDecision,
   type InboxGuideRef,
   type InboxLine,
   type InboxMessage,
@@ -67,6 +70,7 @@ import {
   type InboxQuestion,
   type InboxQuestionRecord,
   type InboxReplyDraft,
+  type InboxPin,
   type InboxSupersededBy,
   type InboxListRow,
   type InboxListSection,
@@ -119,7 +123,9 @@ import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { checkInboxReplyDraftInput, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
-import { INBOX_CARD_PR_HINT, parseInboxCardPr } from "./cards";
+import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
+import { INBOX_CARD_PR_HINT } from "./cards";
+import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
   INBOX_CARD_COLUMN_LABELS,
   INBOX_CARD_KEY_MAX,
@@ -128,7 +134,15 @@ import {
   INBOX_CARD_REASON_MAX,
   INBOX_CARD_TITLE_MAX,
   inboxCardColumnIndex,
-  isInboxCardColumn,
+  inboxCardColumnOf,
+  readInboxCard,
+  isInboxCardSeenOnlyChange,
+  isInboxCardSentWaiting,
+  normalizeInboxCardNotes,
+  inboxCardHistory,
+  inboxCardRefsOf,
+  type InboxCardRef,
+  type InboxCardHistoryEntry,
   isInboxCardDropUnseen,
   isInboxCardLiveColumn,
   isInboxCardPersonColumn,
@@ -470,6 +484,12 @@ export interface InboxDeliveryPresence {
   connection(session: string): InboxDeliveryConnection | null;
   /** Whether the session that asked is still there, with the sessions route's grace (`askerLive`). */
   askerLive(session: string): boolean;
+  /**
+   * Whether an item may not have reached its session though it was handed on
+   * (a Codex `codex queue` call that ran out of time): the row says it is
+   * saved for the agent's next read. Absent: never.
+   */
+  uncertain?(session: string, itemId: string): boolean;
   /** The server's wait before an item goes into a busy session's turn by itself (`INBOX_AUTO_SEND_AFTER_MS`). Absent: never. */
   autoSendAfterMs?: number;
   /**
@@ -535,8 +555,18 @@ export class InboxStore {
    * by thread id: files outside the event log, read at load and kept here.
    */
   private readonly replyDrafts = new Map<string, InboxReplyDraft>();
+  /**
+   * The threads pinned to the window's sidebar, in pin order (pins.ts,
+   * approval "inbox-pinned-threads"): a file outside the event log, read at
+   * load. Read by nothing that routes, lists or answers an agent.
+   */
+  private pinList: InboxPin[] = [];
+  /** Told when the pins change (no store line is written for them). */
+  private readonly pinListeners = new Set<() => void>();
   /** The Board's cards, by id (approval "inbox-board"). Read by nothing that routes or lists threads. */
   private readonly cards = new Map<string, InboxCard>();
+  /** The seq of the line that last wrote to each card (a drop's seen mark is not a write): the Board's unread rule. */
+  private readonly cardHeardSeq = new Map<string, number>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly tornFiles = new Set<string>();
@@ -572,7 +602,10 @@ export class InboxStore {
     this.replyDrafts.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
-    if (!existsSync(projectsDir)) return;
+    if (!existsSync(projectsDir)) {
+      this.loadPins();
+      return;
+    }
     const lines: InboxLine[] = [];
     for (const key of readdirSync(projectsDir)) {
       const folder = join(projectsDir, key);
@@ -598,6 +631,7 @@ export class InboxStore {
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
+    this.loadPins();
   }
 
   /**
@@ -682,7 +716,13 @@ export class InboxStore {
         break;
       case "card":
         // Cards are their own records: nothing here touches routing or the list.
-        this.cards.set(line.record.id, line.record);
+        // A card stored before Asked became Backlog reads as Backlog (inboxCardColumnOf).
+        {
+          const card = readInboxCard(line.record);
+          const prev = this.cards.get(card.id);
+          if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
+          this.cards.set(card.id, card);
+        }
         break;
     }
   }
@@ -776,6 +816,111 @@ export class InboxStore {
   subscribe(listener: InboxListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** The pins changed (pinned, unpinned, reordered, or a deleted thread left them): no store line is written. */
+  onPinsChange(listener: () => void): () => void {
+    this.pinListeners.add(listener);
+    return () => this.pinListeners.delete(listener);
+  }
+
+  private pinsChanged(): void {
+    for (const listener of this.pinListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the write.
+      }
+    }
+  }
+
+  /**
+   * Read pins.json and keep the pins of threads that exist. Pruning happens
+   * here, on load, rather than when a thread is deleted, because the delete
+   * paths (deleteThread, deleteProject) end in a full reload, and because an
+   * Inbox that predates pins may have deleted a pinned thread while this file
+   * sat on disk: every load is where a pin can outlive its thread, so every
+   * load drops it and writes the file back. Called at the end of every load.
+   */
+  private loadPins(): void {
+    const before = this.pinList;
+    const read = readInboxPins(this.dir);
+    const kept = read.filter((pin) => this.isThreadRoot(pin.thread_id));
+    this.pinList = kept;
+    if (kept.length !== read.length) {
+      try {
+        writeInboxPins(this.dir, kept);
+      } catch {
+        // Best effort: the next load prunes it again.
+      }
+    }
+    // A reload that dropped a pin the window still draws: tell it.
+    if (before.some((pin) => !kept.some((k) => k.thread_id === pin.thread_id))) this.pinsChanged();
+  }
+
+  private isThreadRoot(threadId: string): boolean {
+    return this.messages.get(threadId)?.thread_id === threadId;
+  }
+
+  /** The pinned threads, in pin order (the sidebar's order). */
+  pins(): readonly InboxPin[] {
+    return this.pinList;
+  }
+
+  private commitPins(next: InboxPin[]): readonly InboxPin[] {
+    const same = next.length === this.pinList.length && next.every((pin, i) => pin.thread_id === this.pinList[i]!.thread_id && pin.pinned_at === this.pinList[i]!.pinned_at);
+    if (same) return this.pinList;
+    writeInboxPins(this.dir, next);
+    this.pinList = next;
+    this.pinsChanged();
+    return next;
+  }
+
+  /**
+   * Pin a thread (at the bottom) or unpin it. Any thread may be pinned, an
+   * archived one too, with no limit. Pinning a pinned thread, or unpinning one
+   * that is not, changes nothing. Writes no store line.
+   */
+  setPinned(threadId: string, pinned: boolean): readonly InboxPin[] {
+    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const has = this.pinList.some((pin) => pin.thread_id === threadId);
+    if (has === pinned) return this.pinList;
+    return this.commitPins(pinned ? [...this.pinList, { thread_id: threadId, pinned_at: this.now().toISOString() }] : this.pinList.filter((pin) => pin.thread_id !== threadId));
+  }
+
+  /**
+   * Put the pins in an order (Move up, Move down): a permutation of the
+   * threads pinned NOW. The threads `order` names that are pinned come first,
+   * in that order, then every other pin in its place, so a window that has
+   * not seen another tab's pin never drops it. A named thread that is not
+   * pinned (another tab unpinned it, or it no longer exists) is skipped: an
+   * order never pins and never unpins.
+   */
+  orderPins(value: unknown): readonly InboxPin[] {
+    const order = checkInboxPinOrder(value);
+    const byId = new Map(this.pinList.map((pin) => [pin.thread_id, pin]));
+    const named: InboxPin[] = [];
+    for (const id of order) {
+      const pin = byId.get(id);
+      if (pin) named.push(pin);
+    }
+    const namedIds = new Set(named.map((pin) => pin.thread_id));
+    return this.commitPins([...named, ...this.pinList.filter((pin) => !namedIds.has(pin.thread_id))]);
+  }
+
+  /**
+   * Unpin's Undo: pin exactly one thread again at `index` (clamped to the
+   * pins as they are now) with the `pinned_at` it had. A thread that is
+   * pinned again already (another tab) keeps its place; one that no longer
+   * exists is refused (`thread_not_found`).
+   */
+  restorePin(value: unknown): readonly InboxPin[] {
+    const restore = checkInboxPinRestore(value);
+    if (!this.isThreadRoot(restore.thread_id)) throw new InboxError("thread_not_found", `No thread ${restore.thread_id}.`);
+    if (this.pinList.some((pin) => pin.thread_id === restore.thread_id)) return this.pinList;
+    const next = [...this.pinList];
+    next.splice(Math.min(restore.index, next.length), 0, { thread_id: restore.thread_id, pinned_at: restore.pinned_at });
+    return this.commitPins(next);
   }
 
   /** A thread's reply draft was saved or deleted: its row's `unsent` (and section) changed with no store line. */
@@ -1256,6 +1401,7 @@ export class InboxStore {
       return connection ? { busy: connection.busy, send_now: connection.send_now } : null;
     };
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
+    const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
     // How long it waited on a busy session, and whether it goes in by itself (approval "inbox-busy-agent-reply"):
     // the server's clock while it waits, the item's own record once the Inbox marked it.
     const waitOf = (item: InboxMessage, session: string | null) => {
@@ -1304,7 +1450,7 @@ export class InboxStore {
           delivered: !!last.delivery,
           undelivered: !last.delivery && !askerLive(lastTo.session),
           askerEnded: false,
-          wakes: true,
+          wakes: !uncertain(lastTo.session, last.id),
           sendingNow: !!last.deliver_now_at,
           connection,
           ...waitOf(last, lastTo.session),
@@ -1334,7 +1480,7 @@ export class InboxStore {
         delivered: !!deliveredAt,
         undelivered: false,
         askerEnded,
-        wakes: wakingSession !== null || (askedSession !== null && connection != null),
+        wakes: (wakingSession !== null || (askedSession !== null && connection != null)) && !uncertain(replySession, last.id),
         sendingNow: !!last.deliver_now_at,
         connection,
         ...waitOf(last, replySession),
@@ -1406,6 +1552,80 @@ export class InboxStore {
       if (row) out.push(row);
     }
     return out.sort((a, b) => b.last_at.localeCompare(a.last_at) || b.thread_id.localeCompare(a.thread_id));
+  }
+
+  /**
+   * Decision mode's projection (approval "inbox-decision-mode", brief §10):
+   * every question and action item that waits on the person (core's
+   * `inboxQuestionWaitsOnPerson`) in a live agent message, across threads, in
+   * queue order. What a waiting Re-ask note lists is left out, since the
+   * agent is about to ask it again (per note, so a thread where one session
+   * was asked to re-ask still shows another session's questions); a thread
+   * whose every open question is listed (the list puts it in Sent) shows
+   * nothing. Read only; no record.
+   */
+  openDecisions(filter: { projectId?: string | null } = {}): InboxDecision[] {
+    const candidates: InboxDecisionCandidate[] = [];
+    for (const [threadId] of this.threadMembers) {
+      const root = this.messages.get(threadId);
+      if (!root || root.thread_id !== threadId) continue;
+      if (filter.projectId && root.project_id !== filter.projectId) continue;
+      const waiting: { message: InboxMessage; question: InboxQuestion }[] = [];
+      // What a waiting Re-ask note lists is about to be asked again: left out, per note (so per session).
+      const reasked = this.reaskListedIds(threadId);
+      for (const message of this.threadMessages(threadId)) {
+        if (message.author.kind !== "agent" || this.closedByArchive(message)) continue;
+        for (const question of this.questionsOf(message.id)) {
+          // A listed question the person picked since still waits for their Send (as the list's rule 2a reads it).
+          const reask = question.state === "open" && reasked.has(`${message.id}/${question.key}`);
+          if (inboxQuestionWaitsOnPerson(question) && !reask) waiting.push({ message, question });
+        }
+      }
+      if (waiting.length === 0) continue;
+      const row = this.listRow(threadId);
+      if (!row) continue;
+      for (const { message, question } of waiting) {
+        const author = message.author as Extract<InboxAuthor, { kind: "agent" }>;
+        const inBlock = (ref: string) =>
+          [question.context ?? "", ...question.choices.flatMap((c) => [c.label, c.description ?? ""])].some((text) => text.includes(ref));
+        const images = [...(message.inline_images ?? [])].sort((a, b) => Number(inBlock(b.ref)) - Number(inBlock(a.ref)));
+        candidates.push({
+          seq: this.messageSeq.get(message.id) ?? 0,
+          decision: {
+            id: `${message.id}/${question.key}`,
+            question,
+            message: { id: message.id, created_at: message.created_at, author: message.author, excerpt: inboxDecisionExcerpt(message.body) },
+            pictures: {
+              inline: images.map((image) => ({
+                attachment_id: image.id,
+                ref: image.ref,
+                name: image.name,
+                media_type: image.media_type ?? null,
+                width: image.width ?? null,
+                height: image.height ?? null,
+              })),
+              attachments: (message.attachments ?? []).map((file) => ({
+                attachment_id: file.id,
+                name: file.name,
+                kind: file.kind,
+                size: file.size,
+                media_type: file.media_type ?? null,
+                paths: [file.path, ...(file.named_path ? [file.named_path] : [])],
+              })),
+            },
+            thread: { id: threadId, subject: row.subject, thread_name: row.thread_name, project: row.project, section: row.section },
+            session: {
+              key: author.session ? `s:${author.host ?? ""}\u0000${author.session}` : `m:${message.id}`,
+              host: author.host,
+              session: author.session,
+              name: author.name,
+              wakes: message.wakes === true,
+            },
+          },
+        });
+      }
+    }
+    return orderInboxDecisions(candidates);
   }
 
   /** The list, placed in its sections; a project filter keeps the sections and drops other rows. */
@@ -2826,6 +3046,7 @@ export class InboxStore {
     mode: "pick" | "send",
     /** Each entry's index in the request's `questions` (a Send's entries are planned per message). */
     indices?: readonly number[],
+    options: { unsentOnly?: boolean } = {},
   ): { record: InboxQuestionRecord; answer: QuestionAnswer | null | undefined }[] {
     const records = new Map(this.questionRecords(message.id).map((r) => [r.key, r]));
     const seen = new Set<string>();
@@ -2856,6 +3077,13 @@ export class InboxStore {
       if (record.revision !== entry.revision) {
         throw refusalError({ code: "question_revision_conflict", key: entry.key, current_revision: record.revision });
       }
+      // `unsentOnly` (decision mode): a question a reply already sent takes no new pick (nor a cleared one). Its
+      // revision matches when the pick raced the Send (read before it, saved after), and saving it would reopen an
+      // answer the agent already has. Without it a sent question takes a pick again, as the thread-state model has
+      // it (the window never offers one; adr/implementation/inbox-thread-state.md).
+      if (mode === "pick" && options.unsentOnly === true && record.answer !== null && record.revision > 0 && record.sent_revision === record.revision) {
+        throw refusalError({ code: "question_already_sent", key: entry.key });
+      }
       let answer: QuestionAnswer | null | undefined;
       if (entry.answer === null) {
         if (mode === "send") throw new InboxError("validation_error", `${field}.answer: a Send cannot clear a pick.`, { field: `${field}.answer` });
@@ -2876,12 +3104,13 @@ export class InboxStore {
   }
 
   /** Save picks at once (no reply is written): each revision goes up by one. */
-  savePicks(messageId: string, entries: readonly InboxAnswerEntry[]): InboxQuestion[] {
+  /** `unsentOnly`: refuse a pick on a question a reply already sent (`question_already_sent`), as decision mode asks. */
+  savePicks(messageId: string, entries: readonly InboxAnswerEntry[], options: { unsentOnly?: boolean } = {}): InboxQuestion[] {
     const message = this.targetMessage(messageId);
     if (!Array.isArray(entries) || entries.length === 0) {
       throw new InboxError("validation_error", "questions: at least one question is required.", { field: "questions" });
     }
-    const plan = this.planAnswers(message, entries, "pick");
+    const plan = this.planAnswers(message, entries, "pick", undefined, options);
     const at = this.stamp();
     for (const { record, answer } of plan) {
       this.appendQuestion(
@@ -3185,7 +3414,20 @@ export class InboxStore {
     if (!messages.some((m) => m.author.kind === "person" && (m.reask?.length ?? 0) > 0)) return false;
     const states = new Map<string, string>();
     for (const m of messages) if (m.author.kind === "agent") for (const q of this.questionsOf(m.id)) states.set(`${m.id}/${q.key}`, q.state);
-    const covered = new Set<string>();
+    const listed = this.reaskListedIn(messages);
+    const open = [...states].filter(([, state]) => state === "open").map(([id]) => id);
+    return open.length > 0 && open.every((id) => listed.has(id));
+  }
+
+  /**
+   * The questions (`<message id>/<key>`) a Re-ask note in these messages lists
+   * while the note still waits: the session it went to (its `to`, else the
+   * session of the message it answers) has not written since. Per note, so
+   * per session: another session's questions in the same thread are not in it.
+   */
+  private reaskListedIn(messages: readonly InboxMessage[], options: { live?: boolean } = {}): Set<string> {
+    const listed = new Set<string>();
+    const presence = this.deliveryPresence;
     messages.forEach((note, index) => {
       if (note.author.kind !== "person" || (note.reask?.length ?? 0) === 0) return;
       const asked = note.reply_to ? this.messages.get(note.reply_to) : undefined;
@@ -3195,10 +3437,38 @@ export class InboxStore {
         .slice(index + 1)
         .some((m) => m.author.kind === "agent" && m.author.session === by.session && (m.author.host ?? "") === (by.host ?? ""));
       if (wrote) return;
-      for (const id of note.reask!) if (states.get(id) === "open") covered.add(id);
+      // `live`: only while that session is still there (the sessions route's grace). A note to a session that ended
+      // waits on nobody who will ask again. Only a session that wakes can be told ended (the thread's rule): the note
+      // went `to` a live session, or the asking message came through a connection that wakes its session. An agent
+      // that reads the Inbox through MCP may be blocked in wait_for_reply right now, so its note always waits.
+      const wakes = note.to ? true : asked?.wakes === true;
+      if (options.live && presence && by.session && wakes && !presence.askerLive(by.session)) return;
+      for (const id of note.reask!) listed.add(id);
     });
-    const open = [...states].filter(([, state]) => state === "open").map(([id]) => id);
-    return open.length > 0 && open.every((id) => covered.has(id));
+    return listed;
+  }
+
+  /**
+   * The questions of a thread a still-waiting Re-ask note lists: the agent is
+   * about to ask them again, so decision mode leaves those still open out (the
+   * rest of the thread, another session's questions included, stays).
+   *
+   * A note waits exactly as the list's rule 2a reads it: until the session it
+   * went to writes in the thread again, and only for what it lists that is
+   * still open (answered, superseded, set aside or archived, a question is no
+   * longer hidden; one the person picks since shows, waiting for its Send).
+   * One bound more than the list: only while that session is still there
+   * (presence's `askerLive`, with its grace), so a note to a session that ended
+   * never hides its questions for good; the list's row may still read Sent then.
+   * That bound holds only for a session that wakes (the note went `to` a live
+   * session, or the asked message has `wakes`), the one kind that can be told
+   * ended: an MCP-only agent's note waits until it writes again. With no
+   * presence (tests, tools) every session counts as there.
+   */
+  reaskListedIds(threadId: string): Set<string> {
+    const messages = this.threadMessages(threadId);
+    if (!messages.some((m) => m.author.kind === "person" && (m.reask?.length ?? 0) > 0)) return new Set();
+    return this.reaskListedIn(messages, { live: true });
   }
 
   /**
@@ -3797,6 +4067,7 @@ export class InboxStore {
     this.annotations.clear();
     this.unsentAnnotations.clear();
     this.cards.clear();
+    this.cardHeardSeq.clear();
     this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
@@ -3864,25 +4135,53 @@ export class InboxStore {
     const out: { message: InboxMessage; seq: number }[] = [];
     for (const message of this.messages.values()) {
       if (message.author.kind !== "person") continue;
-      const owner = this.isOwner(message, session);
-      const tag = owner ? null : tagOf(message, session);
-      if (tag) {
-        if (tag.delivery || options.tags === false) continue;
-        out.push({ message, seq: this.messageSeq.get(message.id) ?? 0 });
-        continue;
-      }
-      if (message.delivery || !owner) continue;
-      // A 👍 taken back before it went is never delivered.
-      if (isAckNote(message) && !this.ackNoteLive(message)) continue;
-      const seq = this.messageSeq.get(message.id) ?? 0;
-      // A New message, or a reply the person sent to another session, is
-      // settled only by its delivery to the session it names (its own
-      // wait_for_reply records one), never by another agent's read; so is a
-      // reply that tags agents.
-      if (!message.to && !hasTags(message) && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) continue;
-      out.push({ message, seq });
+      if (this.pendingFor(message, session, options)) out.push({ message, seq: this.messageSeq.get(message.id) ?? 0 });
     }
     return out.sort((a, b) => a.seq - b.seq).map((entry) => entry.message);
+  }
+
+  /**
+   * `pendingReplies` for many sessions in ONE pass over the messages (the
+   * Codex wake, which delivers for every Codex thread itself): each session
+   * that has something waiting, with its items oldest first. A person's item
+   * is looked at only for its owner and the sessions it tags.
+   */
+  pendingRepliesFor(sessions: ReadonlySet<string>, options: { tags?: boolean } = {}): Map<string, InboxMessage[]> {
+    const found = new Map<string, { message: InboxMessage; seq: number }[]>();
+    if (sessions.size === 0) return new Map();
+    for (const message of this.messages.values()) {
+      if (message.author.kind !== "person") continue;
+      const candidates: string[] = [];
+      if (message.to) candidates.push(message.to.session);
+      else {
+        const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+        if (asked?.author.kind === "agent" && asked.author.session) candidates.push(asked.author.session);
+      }
+      for (const tag of message.tags ?? []) candidates.push(tag.session);
+      for (const session of new Set(candidates)) {
+        if (!sessions.has(session) || !this.pendingFor(message, session, options)) continue;
+        const list = found.get(session) ?? found.set(session, []).get(session)!;
+        list.push({ message, seq: this.messageSeq.get(message.id) ?? 0 });
+      }
+    }
+    return new Map([...found].map(([session, list]) => [session, list.sort((a, b) => a.seq - b.seq).map((entry) => entry.message)]));
+  }
+
+  /** Whether a person's `message` waits for `session` (the rules of `pendingReplies`). */
+  private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
+    const owner = this.isOwner(message, session);
+    const tag = owner ? null : tagOf(message, session);
+    if (tag) return !tag.delivery && options.tags !== false;
+    if (message.delivery || !owner) return false;
+    // A 👍 taken back before it went is never delivered.
+    if (isAckNote(message) && !this.ackNoteLive(message)) return false;
+    const seq = this.messageSeq.get(message.id) ?? 0;
+    // A New message, or a reply the person sent to another session, is
+    // settled only by its delivery to the session it names (its own
+    // wait_for_reply records one), never by another agent's read; so is a
+    // reply that tags agents.
+    if (!message.to && !hasTags(message) && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
+    return true;
   }
 
   /**
@@ -4342,6 +4641,25 @@ export class InboxStore {
     return new Map([...latest].map(([session, { message }]) => [session, message]));
   }
 
+  /**
+   * The agent sessions on `host` the person's items can wake: sessions whose
+   * messages came through a waking connection (`wakes`), sessions a person's
+   * message is addressed to (`to`), and sessions a reply tags with a wake.
+   * One pass over the messages (the Codex wake builds its index from it once).
+   */
+  wakingSessionsOfHost(host: string): Set<string> {
+    const out = new Set<string>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "agent") {
+        if (message.wakes === true && message.author.host === host && message.author.session) out.add(message.author.session);
+        continue;
+      }
+      if (message.to?.host === host) out.add(message.to.session);
+      for (const tag of message.tags ?? []) if (tag.host === host && tag.wakes) out.add(tag.session);
+    }
+    return out;
+  }
+
   /** The thread each agent session last wrote in (any project): compose's "Last: <subject>". */
   lastThreadsBySession(): Map<string, { id: string; subject: string | null; at: string; project_id: string }> {
     const latest = new Map<string, { message: InboxMessage; seq: number }>();
@@ -4373,10 +4691,10 @@ export class InboxStore {
     return this.cards.get(id) ?? null;
   }
 
-  /** A card as readers get it: only the linked threads that still exist. */
+  /** A card as readers get it: only the linked threads that still exist, and the seq of its last write. */
   cardWire(card: InboxCard): InboxCardWire {
     const threads = card.threads.filter((id) => this.messages.get(id)?.thread_id === id);
-    return threads.length === card.threads.length ? card : { ...card, threads };
+    return { ...card, threads, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
   }
 
   /**
@@ -4384,10 +4702,12 @@ export class InboxStore {
    * `projectIds`, or everywhere) is marked seen, one line per card. Not a
    * write to the card itself: `heard_at` stays. Answers the cards it marked.
    */
-  markCardDropsSeen(projectIds: ReadonlySet<string> | null = null): InboxCard[] {
+  markCardDropsSeen(projectIds: ReadonlySet<string> | null = null, cardIds: ReadonlySet<string> | null = null): InboxCard[] {
     const marked: InboxCard[] = [];
     for (const card of this.listCards({ projectIds, columns: new Set(["dropped"]) })) {
       if (!isInboxCardDropUnseen(card)) continue;
+      // Only the drops the person was shown (the window names them): one that landed after the page drew stays unseen.
+      if (cardIds && !cardIds.has(card.id)) continue;
       const at = this.stamp();
       const next: InboxCard = { ...card, dropped: { ...card.dropped!, seen_at: at } };
       this.appendCard(next, at);
@@ -4457,14 +4777,30 @@ export class InboxStore {
     return out;
   }
 
-  private cardPrs(values: readonly unknown[]): InboxCardPr[] {
-    const out: InboxCardPr[] = [];
-    for (const value of values) {
-      const pr = parseInboxCardPr(value);
-      if (!pr) throw new InboxError("validation_error", `${INBOX_CARD_PR_HINT} Not a PR: ${JSON.stringify(String(value).slice(0, 200))}.`, { field: "pr" });
-      if (!out.some((known) => known.ref === pr.ref)) out.push(pr);
-    }
+  /**
+   * The references `prs` (each a PR: the card action's `pr`) and `refs` (any
+   * source: an issue, a PR, …) name, through the source registry
+   * (card-refs.ts), added to `known` each once (by URL).
+   */
+  private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[]): InboxCardRef[] {
+    const out = [...known];
+    const add = (value: unknown, hint: "pr" | "any") => {
+      const ref = parseInboxCardRef(value, hint);
+      if (!ref) {
+        const field = hint === "pr" ? "pr" : "ref";
+        const help = hint === "pr" ? INBOX_CARD_PR_HINT : INBOX_CARD_REF_HINT;
+        throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
+      }
+      if (!out.some((k) => k.url === ref.url || k.ref === ref.ref)) out.push(ref);
+    };
+    for (const value of prs) add(value, "pr");
+    for (const value of refs) add(value, "any");
     return out;
+  }
+
+  /** The PRs among a card's references, as step 1's `prs` (still written, for an older Inbox). */
+  private prsOf(refs: readonly InboxCardRef[]): InboxCardPr[] {
+    return refs.filter((ref) => ref.kind === "pr").map((ref) => ({ ref: ref.ref, url: ref.url }));
   }
 
   private cardText(value: unknown, field: string, max: number): string {
@@ -4474,15 +4810,17 @@ export class InboxStore {
   }
 
   private cardColumn(value: unknown): InboxCardColumn {
-    if (!isInboxCardColumn(value)) {
+    // `asked` (the old name of Backlog) is still read, so a caller from before the rename keeps working.
+    const column = inboxCardColumnOf(value);
+    if (column === null) {
       throw new InboxError("validation_error", `column: one of ${Object.keys(INBOX_CARD_COLUMN_LABELS).join(", ")}.`, { field: "column" });
     }
-    return value;
+    return column;
   }
 
   /**
    * A new card in `project_id`. From a thread (`threads`), the title defaults
-   * to the thread's subject. It starts in Asked unless a column is given: a
+   * to the thread's subject. It starts in Backlog unless a column is given: a
    * live column, or Shipped for work already done; the Icebox only by the
    * person, Dropped never. An agent that puts it in Your look or Your review
    * says what the person owes (`you`). The agent that makes a card is the
@@ -4497,12 +4835,20 @@ export class InboxStore {
     you?: unknown;
     threads?: readonly unknown[];
     prs?: readonly unknown[];
+    refs?: readonly unknown[];
     idempotency_key?: unknown;
+    notes?: unknown;
+    /** The person's message that sends the new card to an agent: checked before the card is written, one line for both. */
+    send_thread_id?: unknown;
   }): { card: InboxCard; replayed: boolean } {
     const project = this.projectsById.get(input.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
     const byAgent = input.by.kind === "agent";
+    const sending = input.send_thread_id !== undefined && input.send_thread_id !== null;
+    if (sending && byAgent) throw new InboxError("validation_error", "thread_id: only the person sends a card to an agent.", { field: "thread_id" });
+    const target = sending ? this.cardSendTarget(project.id, input.send_thread_id) : null;
     const threads = this.cardThreads(input.threads ?? [], project.id);
+    if (target && !threads.includes(target.thread)) threads.push(target.thread);
     let titleValue = input.title;
     if ((titleValue === undefined || titleValue === null || titleValue === "") && threads.length > 0) {
       // The agent did not write the subject: characters a title refuses (bidi controls) are dropped, not refused.
@@ -4523,18 +4869,22 @@ export class InboxStore {
       const known = this.cardByKey(project.id, key);
       if (known) {
         if (known.title !== title) throw new InboxError("idempotency_key_reused", "This idempotency_key made another card.", { card_id: known.id });
+        // A retry that sends: the card the key made is sent now if it was not (sendCard is a no-op when it was).
+        if (target) return { card: this.sendCard(known.id, { thread_id: input.send_thread_id }), replayed: true };
         return { card: known, replayed: true };
       }
     }
-    const column = input.column === undefined || input.column === null ? "asked" : this.cardColumn(input.column);
+    const column = input.column === undefined || input.column === null ? "backlog" : this.cardColumn(input.column);
     if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or shipped), never dropped.", { field: "column" });
     if (column === "icebox" && byAgent) throw this.iceboxRefusal();
+    if (target && column !== "backlog") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Backlog.", { field: "thread_id" });
     const said = input.say === undefined || input.say === null ? null : this.cardText(input.say, "say", INBOX_CARD_LINE_MAX);
     const you: string | null = input.you === undefined || input.you === null ? null : this.cardText(input.you, "you", INBOX_CARD_LINE_MAX);
     if (you !== null && !isInboxCardPersonColumn(column)) throw this.youRefusal();
     if (byAgent && isInboxCardPersonColumn(column) && you === null) throw this.youRequired(column);
-    const prs = this.cardPrs(input.prs ?? []);
-    this.checkLinkCounts(threads.length, prs.length);
+    const refs = this.cardRefs([], input.prs ?? [], input.refs ?? []);
+    const prs = this.prsOf(refs);
+    this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
     const card: InboxCard = {
       id: inboxId("crd"),
@@ -4545,7 +4895,7 @@ export class InboxStore {
       said,
       threads,
       prs,
-      agent: byAgent ? input.by : null,
+      agent: target ? target.to : byAgent ? input.by : null,
       created_at: at,
       created_by: input.by,
       moved_at: at,
@@ -4554,6 +4904,9 @@ export class InboxStore {
       dropped: null,
       aside_from: null,
       idempotency_key: key,
+      notes: this.cardNotes(input.notes),
+      sent: target ? { at, to: target.to, thread_id: target.thread } : null,
+      refs,
     };
     this.appendCard(card, at);
     return { card, replayed: false };
@@ -4580,8 +4933,10 @@ export class InboxStore {
       title?: unknown;
       threads?: readonly unknown[];
       prs?: readonly unknown[];
+      refs?: readonly unknown[];
       reason?: unknown;
       restore?: boolean;
+      notes?: unknown;
     },
   ): InboxCard {
     const card = this.cards.get(id);
@@ -4595,6 +4950,8 @@ export class InboxStore {
       !given(input.title) &&
       !(input.threads && input.threads.length > 0) &&
       !(input.prs && input.prs.length > 0) &&
+      !(input.refs && input.refs.length > 0) &&
+      input.notes === undefined &&
       !input.restore
     ) {
       throw new InboxError("validation_error", "Nothing to change: pass column, say, you, title, thread_id or pr.");
@@ -4605,7 +4962,7 @@ export class InboxStore {
       if (card.column !== "icebox" && card.column !== "dropped") {
         throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}, not the Icebox or Dropped: nothing to restore.`);
       }
-      column = card.aside_from ?? "asked";
+      column = card.aside_from ?? "backlog";
     } else if (given(input.column)) {
       column = this.cardColumn(input.column);
     }
@@ -4643,9 +5000,9 @@ export class InboxStore {
     const title = given(input.title) ? this.cardText(input.title, "title", INBOX_CARD_TITLE_MAX) : card.title;
     const threads = [...card.threads];
     for (const thread of this.cardThreads(input.threads ?? [], card.project_id)) if (!threads.includes(thread)) threads.push(thread);
-    const prs = [...card.prs];
-    for (const pr of this.cardPrs(input.prs ?? [])) if (!prs.some((known) => known.ref === pr.ref)) prs.push(pr);
-    this.checkLinkCounts(threads.length, prs.length);
+    const refs = this.cardRefs(inboxCardRefsOf(card), input.prs ?? [], input.refs ?? []);
+    const prs = this.prsOf(refs);
+    this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
     // Leaving a live column (or Shipped) for the Icebox or Dropped remembers it, so restoring goes back there.
     const asideFrom =
@@ -4664,14 +5021,95 @@ export class InboxStore {
       said,
       threads,
       prs,
+      refs,
       moved_at: moves ? at : card.moved_at,
       heard_at: at,
       heard_by: input.by,
       dropped,
       aside_from: asideFrom,
+      notes: input.notes === undefined ? card.notes : this.cardNotes(input.notes),
     };
     this.appendCard(next, at);
     return next;
+  }
+
+  private cardNotes(value: unknown): string | null {
+    const result = normalizeInboxCardNotes(value);
+    if ("error" in result) throw new InboxError("validation_error", result.error, { field: "notes" });
+    return result.notes;
+  }
+
+  /**
+   * What happened to a card, newest first (the opened card's History). Read
+   * from its project's cards.jsonl when asked (one card opened), so memory
+   * holds only each card's latest snapshot, never every line of every card.
+   */
+  cardHistory(id: string): InboxCardHistoryEntry[] {
+    const card = this.cards.get(id);
+    if (!card) return [];
+    const project = this.projectsById.get(card.project_id);
+    let text = "";
+    try {
+      if (project) text = readFileSync(join(this.projectFolder(project), CARDS_FILE), "utf8");
+    } catch {
+      // No file to read (removed under us): the card as it stands is all there is.
+    }
+    const lines: { seq: number; card: InboxCard }[] = [];
+    for (const raw of text.split("\n")) {
+      const line = parseInboxLine(raw);
+      if (line?.kind === "card" && line.record.id === id) lines.push({ seq: line.seq, card: readInboxCard(line.record) });
+    }
+    lines.sort((a, b) => a.seq - b.seq);
+    return inboxCardHistory(lines.length > 0 ? lines.map((line) => line.card) : [card]);
+  }
+
+  /**
+   * The person sent a card to an agent (step 2): `thread_id` is the thread
+   * they just started for it (compose's Send, its body the card's notes),
+   * addressed to one session. The card links the thread and becomes that
+   * agent's (`agent`, so the agent's `card list` shows it as its own), and
+   * keeps `sent` so the Board says "Sent to <agent>" until the card moves.
+   * Only the person sends, only a card in Backlog, only into a thread of the
+   * card's own project that the person started.
+   */
+  sendCard(id: string, input: { thread_id: unknown }): InboxCard {
+    const card = this.cards.get(id);
+    if (!card) throw new InboxError("card_not_found", `No card ${id}.`);
+    const { thread, to } = this.cardSendTarget(card.project_id, input.thread_id);
+    // A retry of the same send (the window's Send or Start, after an answer that was lost) changes nothing.
+    if (isInboxCardSentWaiting(card) && card.sent!.thread_id === thread && card.sent!.to.kind === "agent" && to.kind === "agent" && card.sent!.to.session === to.session) {
+      return card;
+    }
+    if (card.column !== "backlog") {
+      throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}: only a Backlog card is sent to an agent.`, { field: "op" });
+    }
+    const at = this.stamp();
+    const next: InboxCard = {
+      ...card,
+      threads: card.threads.includes(thread) ? card.threads : [...card.threads, thread],
+      agent: to,
+      heard_at: at,
+      heard_by: { kind: "person" },
+      sent: { at, to, thread_id: thread },
+    };
+    this.checkLinkCounts(next.threads.length, next.refs.length);
+    this.appendCard(next, at);
+    return next;
+  }
+
+  /**
+   * Where a card goes when the person sends it: `threadId` is the person's
+   * message for it (a thread they started, or a New message in the card's
+   * thread), in `projectId`, addressed to one agent session. Checked before
+   * anything is written, so a refused send leaves no card and no line.
+   */
+  private cardSendTarget(projectId: string, threadId: unknown): { thread: string; to: InboxAuthor } {
+    const [thread] = this.cardThreads([threadId], projectId);
+    const sentMessage = typeof threadId === "string" ? this.messages.get(threadId.trim()) : undefined;
+    if (!sentMessage || sentMessage.author.kind !== "person" || !sentMessage.to || (sentMessage.id === sentMessage.thread_id && !sentMessage.started_by_person)) {
+      throw new InboxError("validation_error", "thread_id: the person's message for this card (a thread they started, or a message in its thread), addressed to one agent session.", { field: "thread_id" });
+    }
+    return { thread: thread!, to: { kind: "agent", host: sentMessage.to.host, session: sentMessage.to.session, name: INBOX_HOST_NAMES[sentMessage.to.host] ?? null } };
   }
 
   private checkLinkCounts(threads: number, prs: number): void {

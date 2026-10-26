@@ -133,15 +133,16 @@ export function reaskTargets(messages: readonly InboxMessageWire[], live: (messa
 }
 
 /**
- * Re-ask is offered when two or more questions wait in the thread (open or
- * picked, not sent: approval "2+ questions are open") and some session has
- * an open one it can be asked for again. `messages`: the thread's live ones.
+ * Re-ask is offered when a question or action item waits in the thread (open,
+ * or a question picked and not sent; owner, 2026-10-23: "re-ask should show
+ * for even 1 question back in a thread") and some session has an open one it
+ * can be asked for again. `messages`: the thread's live ones.
  */
 export function reaskOffered(targets: readonly ReaskTarget[], messages?: readonly InboxMessageWire[]): boolean {
   const waiting = messages
     ? messages.reduce((n, m) => n + (m.author.kind === 'agent' ? itemsOf(m).filter(isWaiting).length : 0), 0)
     : targets.reduce((n, t) => n + t.open + t.picked, 0);
-  return waiting >= 2 && targets.some((t) => t.kind === 'reask' && t.open > 0);
+  return waiting >= 1 && targets.some((t) => t.kind === 'reask' && t.open > 0);
 }
 
 /** "Claude Code", "Claude Code and Pi", or "2 sessions" when two share a name. */
@@ -169,16 +170,17 @@ export function reaskTooltip(targets: readonly ReaskTarget[]): string {
   const actions = targets.reduce((n, t) => n + (t.actions ?? 0), 0);
   const picks = targets.reduce((n, t) => n + t.picked, 0);
   const several = targets.filter((t) => t.kind === 'reask').length > 1;
+  const pickWords = picks > 0 ? ` Your ${plural(picks, 'pick')} ${picks === 1 ? 'is' : 'are'} sent too.` : '';
+  // One open question or action item: singular words, nothing to put "together".
+  if (open === 1) {
+    const item = actions === 1 ? 'the open action item' : 'the open question';
+    return `Ask ${reaskWho(targets)} to ask ${item} again, with fresh context. If it no longer applies, it is closed; until then it stays open here.${pickWords}`;
+  }
   if (actions > 0) {
     const items = reaskItems(open, actions).replace(/^the /, several ? 'their ' : 'the ');
-    const pickWords = picks > 0 ? ` Your ${plural(picks, 'pick')} ${picks === 1 ? 'is' : 'are'} sent too.` : '';
     return `Ask ${reaskWho(targets)} to ask ${items} again, ${several ? 'each together in one message' : 'together in one message'} with fresh context. Those that no longer apply are closed; until then they stay open here.${pickWords}`;
   }
-  const what =
-    open === 1
-      ? `the open question again${several ? '' : ', with fresh context'}`
-      : `${several ? 'their' : 'the'} ${open} open questions again, ${several ? 'each together in one message' : 'together in one message'} with fresh context`;
-  const pickWords = picks > 0 ? ` Your ${plural(picks, 'pick')} ${picks === 1 ? 'is' : 'are'} sent too.` : '';
+  const what = `${several ? 'their' : 'the'} ${open} open questions again, ${several ? 'each together in one message' : 'together in one message'} with fresh context`;
   return `Ask ${reaskWho(targets)} to ask ${what}. Questions that no longer apply are closed; until then they stay open here.${pickWords}`;
 }
 

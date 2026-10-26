@@ -15,7 +15,8 @@
  * `turn.complete`'s answer as `done`. Busy = Claude is mid-turn: reported as
  * `busy`, so the reviewer chooses wait or interrupt; an interrupt aborts the
  * running turn with `$.turn.abort`, except a question's turn the person typed
- * into (turns.ts, take-over), which is theirs. Plan review does not block the session
+ * into (turns.ts, take-over), which is theirs, and a turn another plugin's
+ * prompt started, which that plugin may be waiting on. Plan review does not block the session
  * under the mod, so the status is never `blocked`.
  */
 
@@ -43,6 +44,9 @@ export const BRIDGE_REFUSED_STATUSES: readonly number[] = [401, 403, 404, 405, 5
  */
 export const TAKEN_OVER_INTERRUPT_TEXT =
   'The session is now answering another message, so Plannotator will not stop it. Ask when it finishes instead.'
+/** Why "Interrupt and ask now" refuses a turn another plugin's prompt started. */
+export const OTHER_PLUGIN_INTERRUPT_TEXT =
+  'The session is answering a message from another plugin, so Plannotator will not stop it. Ask when it finishes instead.'
 
 /** Used when a `taken_over` comes without a message. */
 const TAKEN_OVER_FALLBACK_NOTE =
@@ -225,6 +229,11 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
     // A question's turn that the person typed into is theirs now: never stopped from Plannotator.
     if (turns.isTakenOver(running)) {
       emit({ type: 'interrupted', interruptId, ok: false, message: TAKEN_OVER_INTERRUPT_TEXT })
+      return
+    }
+    // Another plugin's prompt started it: that plugin may be waiting on its answer, so it is never stopped from here.
+    if (turns.isOtherPluginTurn(running)) {
+      emit({ type: 'interrupted', interruptId, ok: false, message: OTHER_PLUGIN_INTERRUPT_TEXT })
       return
     }
     try {

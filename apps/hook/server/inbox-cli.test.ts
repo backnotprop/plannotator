@@ -17,7 +17,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, isPidAlive, readInboxRegistry, writeInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { startInboxServer } from "@plannotator/server/inbox";
-import { INBOX_SERVED_TOOLS } from "@plannotator/server/inbox-mcp";
+import { INBOX_DEFAULT_SERVED_TOOLS } from "@plannotator/server/inbox-mcp";
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { runPlannotatorUninstall } from "@plannotator/server/uninstall";
 import { INBOX_MAX_REQUEST_BYTES } from "@plannotator/shared/inbox/connection";
@@ -270,7 +270,7 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     expect((await inboxStatus(box.dataDir)).state).toBe("running");
     expect(existsSync(box.browserMarker)).toBe(false);
 
-    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual([...INBOX_SERVED_TOOLS].sort());
+    expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual([...INBOX_DEFAULT_SERVED_TOOLS].sort());
     const sent = (
       await client.callTool({
         name: "send_message",
@@ -320,6 +320,7 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
 
 describe("plannotator inbox mcp inside an agent session", () => {
   const CLAUDE_SESSION = "0f3c2a51-7d4e-4b8a-9e21-5c6d7e8f9a0b";
+  const CODEX_THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5c";
 
   async function shim(box: Sandbox, cwd: string, extraEnv: Record<string, string>): Promise<Client> {
     const client = new Client({ name: "shim-session", version: "1.0.0" });
@@ -345,7 +346,9 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(piHost).toBe("pi");
     expect(piName).toBeDefined();
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "opencode", "pi"]);
+    // Codex has no plannotator_inbox tool: the Inbox wakes it itself (`codex queue`), and the shim sends as its thread.
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "codex", "opencode", "pi"]);
+    expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
   });
 
   test("the session tag is read strictly; anything malformed is ignored", () => {
@@ -378,9 +381,37 @@ describe("plannotator inbox mcp inside an agent session", () => {
     ]) {
       expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: tag })).toBeNull();
     }
+    // Codex sets CODEX_THREAD_ID in the commands its shell runs: a thread id (a UUID), nothing else.
+    expect(inboxHostSessionFromEnv({ CODEX_THREAD_ID: CODEX_THREAD })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `codex:${CODEX_THREAD}` })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
+    for (const bad of ["", "abc", `${CODEX_THREAD} `, "--yolo", "ses_01ABC"]) expect(inboxHostSessionFromEnv({ CODEX_THREAD_ID: bad })).toBeNull();
+    expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "pi-1", CODEX_THREAD_ID: CODEX_THREAD })?.host).toBe("pi");
     expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "" })).toBeNull();
     expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "a;b" })).toBeNull();
     expect(inboxHostSessionFromEnv({})).toBeNull();
+  });
+
+  test("a call from Codex is its thread's: the thread id from _meta, host codex, whatever the environment says", () => {
+    const meta = { threadId: CODEX_THREAD, "x-codex-turn-metadata": { turn_started_at_unix_ms: 1 } };
+    const fill = (name: string, args: Record<string, unknown>, callMeta: unknown, clientName?: string | null) =>
+      fillInboxToolArguments(
+        { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args, _meta: callMeta as Record<string, unknown> } },
+        "/work",
+        "ses_OWN",
+        { host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" },
+        clientName,
+      ).params!;
+    expect(fill("send_message", { body: "hi" }, meta).arguments).toEqual({ body: "hi", project_path: "/work", agent_session: CODEX_THREAD, agent_host: "codex", agent_name: "Codex" });
+    // The _meta stays on the call: the Inbox reads the turn from it.
+    expect(fill("send_message", { body: "hi" }, meta)._meta).toEqual(meta);
+    expect(fill("read_thread", {}, meta).arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
+    // Codex's client name alone is enough (a call without turn metadata).
+    expect(fill("wait_for_reply", {}, { threadId: CODEX_THREAD }, "codex-mcp-client").arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
+    // Not from Codex, or no thread id: the environment's session, as before.
+    expect(fill("send_message", { body: "hi" }, { threadId: CODEX_THREAD }).arguments).toMatchObject({ agent_session: CLAUDE_SESSION, agent_host: "claude-code" });
+    expect(fill("send_message", { body: "hi" }, { threadId: "nope", "x-codex-turn-metadata": {} }).arguments).toMatchObject({ agent_session: CLAUDE_SESSION });
+    // The agent's own session stands.
+    expect(fill("send_message", { body: "hi", agent_session: "mine" }, meta).arguments).toEqual({ body: "hi", project_path: "/work", agent_session: "mine" });
   });
 
   test("host and name are filled only on the tools that record an author, and only when the agent left them out", () => {
@@ -482,6 +513,36 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(await poll("another-session")).toEqual([]);
   }, 90_000);
 
+  test("the shim inside a Claude Code session whose bridge polls now is told the reply arrives by itself; without the poll, to wait_for_reply", async () => {
+    const box = sandbox();
+    const project = gitProject(box);
+    const registry = (await background(box)).registry!;
+    const client = await shim(box, project, { PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}` });
+    const textOf = (result: unknown) => ((result as { content: { text: string }[] }).content[0]!.text);
+
+    // No bridge poll for that session yet: nothing will hand it the reply, so it must ask.
+    const before = textOf(await client.callTool({ name: "send_message", arguments: { body: "Before the poll.", idempotency_key: "wake-0" } }));
+    expect(before).toContain("reply won't arrive in this session by itself");
+
+    // The mod's wake polls the bridge as that session (held open, as the mod's long poll is).
+    const controller = new AbortController();
+    const held = fetch(`http://127.0.0.1:${registry.port}${INBOX_BRIDGE_POLL_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${registry.token}` },
+      body: JSON.stringify({ session: CLAUDE_SESSION, host: "claude-code", waitMs: 20_000 }),
+      signal: controller.signal,
+    }).catch(() => undefined);
+    cleanups.push(() => {
+      controller.abort();
+      return held.then(() => undefined);
+    });
+    await Bun.sleep(300);
+
+    const after = textOf(await client.callTool({ name: "send_message", arguments: { body: "After the poll.", idempotency_key: "wake-1" } }));
+    expect(after).toContain("The person's reply arrives in this session by itself");
+    expect(after).not.toContain("wait_for_reply with this thread_id");
+  }, 90_000);
+
   test("an explicit agent_session wins; a malformed tag is ignored (one fresh id per process); Pi's PI_SESSION_ID is that session", async () => {
     const box = sandbox();
     const project = gitProject(box);
@@ -505,6 +566,15 @@ describe("plannotator inbox mcp inside an agent session", () => {
     const pi = await shim(box, project, { PI_SESSION_ID: piSession });
     const fromPi = (await pi.callTool({ name: "send_message", arguments: { body: "From Pi's bash.", idempotency_key: "pi-1" } })).structuredContent as { thread_id: string };
     expect(await author(registry.port, fromPi.thread_id, 0)).toEqual({ kind: "agent", host: "pi", session: piSession, name: "Pi" });
+
+    // Codex: its MCP client (codex-mcp-client) names the thread on every call; the shim sends as that thread.
+    const codex = new Client({ name: "codex-mcp-client", version: "0.160.0" });
+    await codex.connect(new StdioClientTransport({ command: process.execPath, args: ["run", entry, "inbox", "mcp"], cwd: project, env: box.env, stderr: "pipe" }));
+    cleanups.push(() => codex.close());
+    const fromCodex = (
+      await codex.callTool({ name: "send_message", arguments: { body: "From a Codex thread.", idempotency_key: "codex-1" }, _meta: { threadId: CODEX_THREAD } })
+    ).structuredContent as { thread_id: string };
+    expect(await author(registry.port, fromCodex.thread_id, 0)).toEqual({ kind: "agent", host: "codex", session: CODEX_THREAD, name: "Codex" });
   }, 90_000);
 });
 
@@ -611,6 +681,90 @@ describe("plannotator inbox (a person)", () => {
     proc.kill("SIGTERM");
     expect(await proc.exited).toBe(143);
   }, 60_000);
+});
+
+/** The URL the fake browser got: --open never waits for the browser, so it may land a moment after the command exits. */
+async function browserOpened(box: Sandbox): Promise<string> {
+  const deadline = Date.now() + 5_000;
+  while (!existsSync(box.browserMarker) && Date.now() < deadline) await Bun.sleep(25);
+  return existsSync(box.browserMarker) ? readFileSync(box.browserMarker, "utf8").trim() : "";
+}
+
+describe("plannotator inbox --open (the /plannotator-inbox commands)", () => {
+  test("starts a stopped Inbox detached, opens the browser on it, prints the URL and returns", async () => {
+    const box = sandbox();
+    const opened = await cli(box, ["inbox", "--open"]);
+    track(box);
+    expect(opened.code).toBe(0);
+    const registry = readInboxRegistry(box.dataDir)!;
+    expect(opened.stdout).toBe(`${registry.url}\n`);
+    // Detached: the command exited and the Inbox it started lives on.
+    expect(registry.pid).not.toBe(opened.pid);
+    expect(isPidAlive(registry.pid)).toBe(true);
+    expect(await browserOpened(box)).toBe(registry.url);
+
+    // Running already: opens the same Inbox again and starts nothing.
+    rmSync(box.browserMarker);
+    const again = await cli(box, ["inbox", "--open"]);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toBe(`${registry.url}\n`);
+    expect(await browserOpened(box)).toBe(registry.url);
+    expect(readInboxRegistry(box.dataDir)!.pid).toBe(registry.pid);
+  }, 60_000);
+
+  // A browser the opener starts can keep the opener's output open for as long
+  // as it runs (xdg-open starting a fresh Firefox): --open must not wait for it.
+  test("returns at once when the browser it starts keeps running", async () => {
+    const box = sandbox();
+    await background(box);
+    const registry = readInboxRegistry(box.dataDir)!;
+    const lingering = join(box.root, "lingering-browser.sh");
+    writeFileSync(lingering, `#!/bin/sh\necho "$1" >> '${box.browserMarker}'\nsleep 5 &\nexit 0\n`);
+    chmodSync(lingering, 0o755);
+    box.env.PLANNOTATOR_BROWSER = lingering;
+    box.env.BROWSER = lingering;
+    const startedAt = Date.now();
+    const opened = await cli(box, ["inbox", "--open"]);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(opened.code).toBe(0);
+    expect(opened.stdout).toBe(`${registry.url}\n`);
+    expect(await browserOpened(box)).toBe(registry.url);
+  }, 60_000);
+
+  test("over SSH with no browser set, runs no opener on the remote host and says how to reach the Inbox", async () => {
+    const box = sandbox();
+    await background(box);
+    const registry = readInboxRegistry(box.dataDir)!;
+    // Stand-ins for the system openers, first on PATH: neither may run.
+    const bin = join(box.root, "openers");
+    mkdirSync(bin);
+    for (const name of ["open", "xdg-open"]) {
+      writeFileSync(join(bin, name), `#!/bin/sh\necho "$1" >> '${box.browserMarker}'\n`);
+      chmodSync(join(bin, name), 0o755);
+    }
+    box.env.PATH = `${bin}:${box.env.PATH}`;
+    delete box.env.PLANNOTATOR_BROWSER;
+    delete box.env.BROWSER;
+    box.env.PLANNOTATOR_REMOTE = "1";
+    const opened = await cli(box, ["inbox", "--open"]);
+    expect(opened.code).toBe(0);
+    expect(opened.stdout).toBe(`${registry.url}\n`);
+    expect(opened.stderr).toContain(`ssh -L ${registry.port}:127.0.0.1:${registry.port}`);
+    expect(opened.stderr).toContain("--tailscale");
+    expect(existsSync(box.browserMarker)).toBe(false);
+  }, 60_000);
+
+  test("refuses --background and --no-open beside it, starting nothing", async () => {
+    const box = sandbox();
+    for (const other of ["--background", "--no-open"]) {
+      const result = await cli(box, ["inbox", "--open", other]);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain(other);
+    }
+    expect(readInboxRegistry(box.dataDir)).toBeNull();
+    expect(existsSync(box.browserMarker)).toBe(false);
+  }, 30_000);
 });
 
 describe("uninstall --purge and the Inbox", () => {

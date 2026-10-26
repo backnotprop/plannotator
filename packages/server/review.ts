@@ -9,6 +9,7 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
+import { childPath } from "@plannotator/shared/child-env";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@plannotator/shared/diagram-engine-assets";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsFileBytesForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
@@ -138,6 +140,7 @@ import {
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/shared/guide-viewer-manifest";
 import {
   MARKER_ENGINES,
+  resolveMarkerBinary,
   composeMarkerReviewPrompt,
   buildMarkerCommand,
   parseMarkerStreamOutput,
@@ -165,6 +168,7 @@ import {
 } from "@plannotator/shared/pr-artifact-document";
 import { agentToolHostForServer, createAIRuntime } from "./ai-runtime";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control";
+import { sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
@@ -1522,19 +1526,20 @@ export async function startReviewServer(
           // authenticated/usable — a broken claude repair would itself become
           // the newest failed job and hijack the recovery panel next render,
           // a doom loop. Marker engines' binary name can differ from the
-          // engine id (Cursor's CLI binary is `agent`, not `cursor`), so
-          // resolve via MARKER_ENGINES[...].binary before falling back to the
-          // engine id itself for claude/codex.
+          // engine id (Cursor's CLI is `cursor-agent`, or Cursor's own
+          // `agent`), so resolve via resolveMarkerBinary before falling back to
+          // the engine id itself for claude/codex.
           const failedEngine = typeof config?.engine === "string" && config.engine ? config.engine : undefined;
-          const failedEngineBinary = failedEngine
-            ? MARKER_ENGINES[failedEngine as MarkerEngineId]?.binary ?? failedEngine
-            : undefined;
+          const failedMarker = failedEngine ? MARKER_ENGINES[failedEngine as MarkerEngineId] : undefined;
+          const failedEngineInstalled = failedMarker
+            ? !!(await resolveMarkerBinary(failedMarker, (name) => Bun.which(name, { PATH: childPath() }) ?? null))
+            : !!failedEngine && !!Bun.which(failedEngine, { PATH: childPath() });
           const repairEngine =
-            failedEngine && Bun.which(failedEngineBinary!)
+            failedEngine && failedEngineInstalled
               ? failedEngine
-              : Bun.which("claude")
+              : Bun.which("claude", { PATH: childPath() })
                 ? "claude"
-                : Bun.which("codex")
+                : Bun.which("codex", { PATH: childPath() })
                   ? "codex"
                   : (failedEngine ?? "claude");
           repair = { payload };
@@ -1888,7 +1893,7 @@ export async function startReviewServer(
   // AI provider setup (graceful — capabilities report unavailable if no provider is registered)
   // Set once bound: "Ask this session" answers only a loopback Host with this port.
   let boundPort: number | undefined;
-  const aiRuntime = aiEnabled ? await createAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
+  const aiRuntime = aiEnabled ? await createAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge, getServerPort: () => boundPort, ...(options.tailnetPublished === true ? { tailnet: sessionTailnetGate } : {}) }) : null;
 
   const isRemote = isRemoteSession();
   // The app page is served compressed only to sessions reachable from another
@@ -2040,7 +2045,7 @@ export async function startReviewServer(
 
   const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
-    Bun.serve({
+    Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
         port,
         // Bun's default 10s idleTimeout kills requests that legitimately park:
@@ -2062,6 +2067,7 @@ export async function startReviewServer(
             token: hostControlToken,
             getServerPort: () => boundPort,
             control: hostControl,
+            ...(options.tailnetPublished === true ? { fromThisMachine: (r: Request) => sessionTailnetAudience(r) === "local" } : {}),
           });
           if (hostControlResponse) return hostControlResponse;
 
@@ -2646,7 +2652,7 @@ export async function startReviewServer(
               ) {
                 return Response.json({ superseded: true });
               }
-              saveConfig({ reviewAnalysis });
+              if (!saveConfig({ reviewAnalysis })) return Response.json({ error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, { status: 500 });
               if (!nextCallFlowEnabled) callFlowService.cancelAll();
               return Response.json({ semanticDiff, callFlow });
             } catch {
@@ -3799,7 +3805,7 @@ export async function startReviewServer(
               }
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
-              if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
+              if (Object.keys(toSave).length > 0 && !saveConfig(toSave as Parameters<typeof saveConfig>[0])) return Response.json({ error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, { status: 500 });
               if (agentToolSaveFailed(toSave)) return Response.json({ error: "Could not save the setting to config.json." }, { status: 500 });
               return Response.json({ ok: true });
             } catch {
@@ -4278,7 +4284,7 @@ export async function startReviewServer(
             { status: 500, headers: { "Content-Type": "text/plain" } },
           );
         },
-    }),
+    })),
   );
 
   const port = server.port!;

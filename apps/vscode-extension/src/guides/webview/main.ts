@@ -8,6 +8,7 @@
 import "./style.css";
 import type {
   ActivityRow,
+  AnswerViewState,
   ChapterViewState,
   GeneratingViewState,
   GuideViewState,
@@ -19,6 +20,10 @@ import type {
 } from "../webview-protocol";
 import { renderInlineMarkdown, renderMarkdown } from "./markdown";
 import { checkMermaid, renderMermaid } from "./diagram";
+import { h, icon } from "./dom";
+import { renderBottlenecks, renderPermissions } from "./approvals";
+import { answerFrame } from "./answer-frame";
+import { fromWebviewHost } from "./host-messages";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void; getState(): unknown; setState(state: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -27,27 +32,11 @@ const command = (name: string, ...args: unknown[]) => post({ type: "command", co
 
 const root = document.getElementById("root")!;
 
-type Child = Node | string | null | undefined | false;
-function h(tag: string, attrs: Record<string, string | number | boolean | undefined | null | ((e: Event) => void)> = {}, ...children: Child[]): HTMLElement {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (v === undefined || v === null || v === false) continue;
-    if (typeof v === "function") el.addEventListener(k.replace(/^on/, "").toLowerCase(), v as EventListener);
-    else if (k === "class") el.className = String(v);
-    else el.setAttribute(k, v === true ? "" : String(v));
-  }
-  for (const c of children) if (c !== null && c !== undefined && c !== false) el.append(c);
-  return el;
-}
-
-function icon(name: string, extra = ""): HTMLElement {
-  return h("span", { class: `codicon codicon-${name} ${extra}`, "aria-hidden": "true" });
-}
-
 let state: ViewState | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 window.addEventListener("message", (event: MessageEvent<ToWebview>) => {
+  if (!fromWebviewHost(event)) return;
   const msg = event.data;
   if (!msg || typeof msg !== "object") return;
   if (msg.type === "state") {
@@ -75,6 +64,7 @@ function render(): void {
     state.mode === "home" ? renderHome(state)
       : state.mode === "generating" ? renderGenerating(state)
       : state.mode === "guide" ? renderGuide(state)
+      : state.mode === "answer" ? renderAnswer(state)
       : renderChapter(state),
   );
   const list = root.querySelector(".pn-activity-list");
@@ -89,34 +79,47 @@ function render(): void {
 function renderHome(s: HomeViewState): HTMLElement {
   const repoLine = s.repo
     ? h("div", { class: "pn-meta" }, icon("repo"), ` ${s.repo.name}`, h("span", { class: "pn-dot" }, "·"), icon("git-branch"), ` ${s.repo.branch}`, h("span", { class: "pn-dot" }, "·"), s.repo.host)
-    : h("div", { class: "pn-meta" }, "Open a folder that is a git repository to see its changes and pull requests.");
+    : h("div", { class: "pn-meta" }, icon("folder"), " No folder open: guided reviews and pull requests from all your repositories.");
   const banner = h("div", { class: "pn-banner" },
     icon("sparkle", "pn-agent-mark"),
     h("span", {}, "New guides use ", h("b", {}, s.defaults.agent), " · ", h("b", {}, s.defaults.model), " · ", h("b", {}, s.defaults.effort), ", with your own ", s.defaults.agent, " settings."),
     h("a", { class: "pn-action", href: "#", onclick: (e) => { e.preventDefault(); command("changeDefaults"); } }, "Change defaults"),
   );
   const cards = h("div", { class: "pn-cards" });
-  const pr = s.cards.pr;
-  cards.append(
-    h("button", { class: `pn-card${pr?.current ? " pn-card-primary" : ""}`, onclick: () => command(pr?.current ? "guideCurrentPR" : "guidePullRequest"), disabled: !pr },
-      h("div", { class: "pn-card-title" }, icon("git-pull-request"), " Pull request"),
-      h("div", { class: "pn-card-body" }, pr ? (pr.current ? `Guide #${pr.current.number}, the PR for this branch, or pick another open PR.` : "Guide any open PR in this repo, or paste its link.") : s.ghNote ?? "Needs the GitHub CLI (gh)."),
-      pr ? h("div", { class: "pn-card-foot" }, h("span", { class: "pn-chip" }, `${pr.open} open`), pr.waiting ? h("span", { class: "pn-chip pn-chip-warn" }, `${pr.waiting} waiting on you`) : null) : null,
-    ),
-  );
-  const local = s.cards.local;
-  cards.append(
-    h("button", { class: "pn-card", onclick: () => command("guideLocal"), disabled: !local || local.files === 0 },
-      h("div", { class: "pn-card-title" }, icon("git-compare"), " Local changes"),
-      h("div", { class: "pn-card-body" }, local ? `Everything since ${local.baseLabel}, uncommitted and untracked files included.` : "No repository open."),
-      local ? h("div", { class: "pn-card-foot" }, h("span", { class: "pn-add" }, `+${local.additions}`), h("span", { class: "pn-del" }, `−${local.deletions}`), ` ${local.files} ${local.files === 1 ? "file" : "files"}`) : null,
-    ),
-  );
+  if (s.repo) {
+    const pr = s.cards.pr;
+    cards.append(
+      h("button", { class: `pn-card${pr?.current ? " pn-card-primary" : ""}`, onclick: () => command(pr?.current ? "guideCurrentPR" : "guidePullRequest"), disabled: !pr },
+        h("div", { class: "pn-card-title" }, icon("git-pull-request"), " Pull request"),
+        h("div", { class: "pn-card-body" }, pr ? (pr.current ? `Guide #${pr.current.number}, the PR for this branch, or pick another open PR.` : "Guide any open PR in this repo, or paste its link.") : s.ghNote ?? "Needs the GitHub CLI (gh)."),
+        pr ? h("div", { class: "pn-card-foot" }, h("span", { class: "pn-chip" }, `${pr.open} open`), pr.waiting ? h("span", { class: "pn-chip pn-chip-warn" }, `${pr.waiting} waiting on you`) : null) : null,
+      ),
+    );
+    const local = s.cards.local;
+    cards.append(
+      h("button", { class: "pn-card", onclick: () => command("guideLocal"), disabled: !local || local.files === 0 },
+        h("div", { class: "pn-card-title" }, icon("git-compare"), " Local changes"),
+        h("div", { class: "pn-card-body" }, local ? `Everything since ${local.baseLabel}, uncommitted and untracked files included.` : "No changes to guide."),
+        local ? h("div", { class: "pn-card-foot" }, h("span", { class: "pn-add" }, `+${local.additions}`), h("span", { class: "pn-del" }, `−${local.deletions}`), ` ${local.files} ${local.files === 1 ? "file" : "files"}`) : null,
+      ),
+    );
+  } else {
+    cards.append(
+      h("button", { class: "pn-card pn-card-primary", onclick: () => command("openFolder") },
+        h("div", { class: "pn-card-title" }, icon("folder-opened"), " Open a repository"),
+        h("div", { class: "pn-card-body" }, "Open a folder that is a git repository to guide its local changes and its pull requests."),
+      ),
+      h("button", { class: "pn-card", onclick: () => command("guidePullRequest"), disabled: !!s.ghNote },
+        h("div", { class: "pn-card-title" }, icon("git-pull-request"), " Guide a pull request by link"),
+        h("div", { class: "pn-card-body" }, s.ghNote ?? "Paste any GitHub PR link. Guided Reviews clones the repository into its own storage; nothing of yours is checked out."),
+      ),
+    );
+  }
 
   const recent = h("section", { class: "pn-col" },
-    h("div", { class: "pn-section-head" }, h("span", {}, "Recent guides")),
+    h("div", { class: "pn-section-head" }, h("span", {}, s.repo ? "Recent guides" : "Recent guides, all repositories")),
     s.recent.length === 0
-      ? h("div", { class: "pn-empty" }, "No guides for this repo yet. Guides made in Plannotator's web app show here too.")
+      ? h("div", { class: "pn-empty" }, s.repo ? "No guided reviews for this repo yet. Guided reviews made in Plannotator's web app show here too." : "No guided reviews yet. Guided reviews made in Plannotator's web app show here too.")
       : h("div", { class: "pn-rows" }, ...s.recent.map((r) =>
           h("button", { class: "pn-row", onclick: () => command(r.kind === "draft" ? "resumeDraft" : "openGuide", r.id) },
             h("div", { class: "pn-row-main" }, h("div", { class: "pn-row-title" }, r.title), h("div", { class: "pn-row-sub" }, r.sub, r.note ? h("span", { class: r.warn ? "pn-warn" : "pn-muted" }, ` · ${r.note}`) : null)),
@@ -130,11 +133,13 @@ function renderHome(s: HomeViewState): HTMLElement {
     s.waiting.length === 0
       ? h("div", { class: "pn-empty" }, s.ghNote ?? "No pull requests are waiting on your review.")
       : h("div", { class: "pn-rows" }, ...s.waiting.map((w) =>
-          h("div", { class: "pn-row pn-row-static" },
-            h("div", { class: "pn-row-main" }, h("div", { class: "pn-row-title" }, `#${w.number} ${w.title}`), h("div", { class: "pn-row-sub" }, w.sub)),
-            w.inThisRepo
-              ? h("button", { class: "pn-btn", onclick: () => command("guidePullRequest", w.number) }, icon("sparkle"), " Guide")
-              : h("button", { class: "pn-btn pn-btn-ghost", title: "Open on GitHub", onclick: () => command("openExternal", w.url) }, icon("link-external")),
+          // The row opens the PR's guided review (or starts one); only the small button goes to GitHub.
+          h("div", { class: "pn-row pn-row-split" },
+            h("button", { class: "pn-row-open", title: w.inThisRepo || !s.repo ? "Open its guided review, or start one" : `${w.sub.split(" · ")[0]} is not open here: Guided Reviews clones it into its own storage`, onclick: () => command("openPullRequest", { number: w.number, url: w.url }) },
+              h("div", { class: "pn-row-main" }, h("div", { class: "pn-row-title" }, `#${w.number} ${w.title}`), h("div", { class: "pn-row-sub" }, w.sub)),
+              h("span", { class: "pn-pill" }, icon("sparkle"), " Guide"),
+            ),
+            h("button", { class: "pn-btn pn-btn-ghost", title: "Open on GitHub", "aria-label": `Open #${w.number} on GitHub`, onclick: () => command("openExternal", w.url) }, icon("link-external")),
           ),
         )),
   );
@@ -144,7 +149,7 @@ function renderHome(s: HomeViewState): HTMLElement {
     banner,
     ...s.notes.map((n) => h("div", { class: "pn-note" }, icon("info"), ` ${n}`)),
     cards,
-    h("div", { class: "pn-two" }, recent, waiting),
+    h("div", { class: "pn-two" }, s.repo ? recent : waiting, s.repo ? waiting : recent),
   );
 }
 
@@ -199,6 +204,9 @@ function renderGenerating(s: GeneratingViewState): HTMLElement {
   const stats = h("div", { class: "pn-stats" },
     stat("Agent", h("span", {}, icon("sparkle", "pn-agent-mark"), ` ${s.agent}`)),
     stat("Model · effort", s.modelEffort),
+    stat("Approvals", s.approvals.auto
+      ? h("span", { "data-approvals": "auto" }, icon("unlock"), " Automatic", s.approvals.mode ? h("span", { class: "pn-muted" }, ` · ${s.approvals.mode} mode`) : null)
+      : h("span", { "data-approvals": "user" }, icon("person"), " You approve", h("span", { class: "pn-muted" }, " · your settings"))),
     stat("Elapsed", elapsed),
     stat("Cost", s.cost ? h("span", {}, h("b", {}, s.cost), h("span", { class: "pn-muted" }, " reported by the agent")) : h("span", { class: "pn-muted" }, "not reported")),
   );
@@ -223,8 +231,9 @@ function renderGenerating(s: GeneratingViewState): HTMLElement {
         : s.chapters.length ? h("div", { class: "pn-draft-foot pn-ok" }, icon("pass"), " Every changed file is accounted for") : null,
     ),
   );
-  return h("div", { class: "pn-page pn-gen" }, header, statusLine, stats, h("div", { class: "pn-two pn-two-gen" }, activity, draft));
+  return h("div", { class: "pn-page pn-gen" }, header, statusLine, ...renderPermissions(s, command), ...renderBottlenecks(s, command), stats, h("div", { class: "pn-two pn-two-gen" }, activity, draft));
 }
+
 
 function stat(label: string, value: Node | string): HTMLElement {
   return h("div", { class: "pn-stat" }, h("div", { class: "pn-stat-label" }, label), typeof value === "string" ? h("div", { class: "pn-stat-value" }, value) : value);
@@ -331,8 +340,144 @@ function renderChapter(s: ChapterViewState): HTMLElement {
         : h("button", { class: "pn-btn pn-btn-primary", onclick: () => command("markChapterReviewed", s.n, true) }, icon("check"), " Mark chapter reviewed"),
       s.hasNext ? h("button", { class: "pn-btn", onclick: () => command("nextChapter") }, "Next chapter ›") : null,
     ),
-    s.footer ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.footer}`) : null,
+    s.ask ? askBox(s) : null,
+    s.answers?.length ? answersList(s) : null,
+    s.answersFooter ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.answersFooter}`) : s.footer ? h("div", { class: "pn-side-foot pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.footer}`) : null,
   );
+}
+
+/** "Ask the agent about this chapter…": Enter asks what is typed; empty, it opens the question box with suggestions. */
+function askBox(s: ChapterViewState): HTMLElement {
+  const input = h("input", {
+    class: "pn-ask-input",
+    type: "text",
+    placeholder: s.ask!.busy ? `${s.ask!.agent} is answering a question…` : "Ask the agent about this chapter…",
+    "aria-label": `Ask ${s.ask!.agent} about this chapter`,
+    maxlength: 2000,
+  }) as HTMLInputElement;
+  input.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key !== "Enter") return;
+    e.preventDefault();
+    command("ask", s.n, input.value.trim());
+    input.value = "";
+  });
+  return h("div", { class: "pn-ask", "data-ask": "chapter" },
+    h("button", { class: "pn-ask-icon", title: "Suggestions and past questions", "aria-label": "Open the question box", onclick: () => command("ask", s.n, "") }, icon("sparkle")),
+    input,
+  );
+}
+
+function answersList(s: ChapterViewState): HTMLElement {
+  const items = s.answers ?? [];
+  return h("div", { class: "pn-answers", "data-answers": items.length },
+    h("div", { class: "pn-side-head" }, `Answers · ${items.length}`),
+    ...items.map((a) =>
+      h("button", { class: "pn-answer-row", "data-answer": a.id, onclick: () => command("openAnswer", a.id) },
+        icon(a.status === "answering" ? "loading" : a.status === "failed" ? "error" : "sparkle", `pn-answer-icon${a.status === "answering" ? " codicon-modifier-spin" : ""}`),
+        h("div", { class: "pn-answer-main" },
+          h("div", { class: "pn-answer-q" }, a.question, a.isNew ? h("span", { class: "pn-tag pn-tag-new" }, "new") : null),
+          h("div", { class: "pn-muted pn-answer-sub" }, a.sub),
+        ),
+        h("span", { class: "pn-muted pn-answer-when" }, a.when),
+      )),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Answer tab
+// ---------------------------------------------------------------------------
+
+/** The page's frame, kept across renders of the same answer so its scripts keep their state. */
+let answerFrameCache: { key: string; frame: HTMLIFrameElement } | null = null;
+
+function renderAnswer(s: AnswerViewState): HTMLElement {
+  const live = s.status === "answering";
+  const head = h("header", { class: "pn-answer-head" },
+    h("div", { class: "pn-kicker" }, s.kicker),
+    h("h1", { class: "pn-answer-question" }, s.question),
+    h("div", { class: "pn-answer-meta" },
+      h("span", { class: "pn-muted" }, icon("sparkle", "pn-agent-mark"), ` ${s.meta}`),
+      h("span", { class: "pn-answer-tools" },
+        s.jump ? h("button", { class: "pn-btn pn-btn-sm", "data-link": s.jump.link, title: "Back to the code" }, icon("code"), ` ${s.jump.label}`) : null,
+        h("button", { class: "pn-btn pn-btn-sm pn-btn-ghost", title: "More", "aria-label": "More actions", onclick: () => command("answerMenu", s.id) }, icon("ellipsis")),
+      ),
+    ),
+    s.followUpOf ? h("div", { class: "pn-muted pn-answer-prev" }, "Follow-up to ", h("a", { href: "#", class: "pn-loc", onclick: (e) => { e.preventDefault(); command("openAnswer", s.followUpOf!.id); } }, s.followUpOf.question)) : null,
+    s.stale ? h("div", { class: "pn-note pn-warn" }, icon("warning"), ` ${s.stale}`) : null,
+  );
+  const body = h("div", { class: "pn-answer-body" });
+  if (s.page && s.status === "answered") {
+    body.append(
+      h("div", { class: "pn-answer-rule" }, h("span", {}, `Drawn by ${s.agent} · the agent's own page, run in a sandbox: no network, no access to VS Code`)),
+      h("h2", { class: "pn-answer-title" }, s.page.title),
+      cachedFrame(s),
+    );
+  } else if (s.text && (s.status === "text" || s.status === "stopped")) {
+    body.append(
+      h("div", { class: "pn-answer-rule" }, h("span", {}, s.status === "text" ? `Answered in text by ${s.agent}` : "What it wrote before it stopped")),
+      h("div", { class: "pn-prose pn-answer-text" }, renderMarkdown(s.text)),
+    );
+  }
+  if (s.quote && (live || (!s.page && !s.text))) {
+    body.prepend(h("div", { class: "pn-quote" },
+      h("div", { class: "pn-quote-head pn-muted" }, icon("file-code"), ` ${s.quote.header}`),
+      h("pre", { class: "pn-quote-code" }, ...s.quote.lines.map((line, i) => h("div", { class: "pn-quote-line" }, h("span", { class: "pn-quote-n" }, String(s.quote!.start + i)), h("span", {}, line)))),
+    ));
+  }
+  if (live || s.status === "failed" || (s.status === "stopped" && !s.text)) body.append(answerWork(s, live));
+  else if (s.status === "stopped" || s.status === "text") body.append(h("div", { class: "pn-status" }, icon(s.status === "text" ? "info" : "debug-pause"), ` ${s.statusMessage ?? ""}`, h("button", { class: "pn-btn pn-btn-sm", onclick: () => command("answerMenu", s.id, "again") }, "Ask again")));
+  const foot = h("footer", { class: "pn-answer-foot" }, followUpBox(s));
+  return h("div", { class: "pn-page pn-answer" }, head, ...renderPermissions(s, command), body, foot);
+}
+
+function cachedFrame(s: AnswerViewState): HTMLIFrameElement {
+  const key = `${s.id}:${s.page!.html.length}:${s.page!.title}`;
+  if (answerFrameCache?.key === key) return answerFrameCache.frame;
+  const frame = answerFrame(s.page!.html, {
+    link: (link) => post({ type: "link", link, action: "open" }),
+    external: (url) => command("openAnswerExternal", s.id, url),
+  });
+  answerFrameCache = { key, frame };
+  return frame;
+}
+
+/** While the agent works: what it does, what it writes, Stop. Also the end of a run that failed. */
+function answerWork(s: AnswerViewState, live: boolean): HTMLElement {
+  const elapsed = h("span", {}, fmtElapsed((s.endedAt ?? Date.now()) - s.startedAt));
+  if (live) elapsedTimer = setInterval(() => (elapsed.textContent = fmtElapsed(Date.now() - s.startedAt)), 1000);
+  const line = live
+    ? h("div", { class: "pn-answer-working" },
+        h("div", { class: "pn-spinner" }),
+        h("b", {}, `${s.agent} is answering`), h("span", { class: "pn-muted" }, " · ", elapsed, s.cost ? ` · ${s.cost}` : ""),
+        h("button", { class: "pn-btn pn-btn-sm pn-answer-stop", onclick: () => command("stopAnswer", s.id) }, h("span", { class: "pn-stop" }), "Stop"),
+      )
+    : h("div", { class: `pn-status${s.status === "failed" ? " pn-status-error" : ""}` }, icon(s.status === "failed" ? "error" : "debug-pause"), ` ${s.statusMessage ?? ""}`,
+        ...(s.signIn ?? []).map((label) => h("button", { class: "pn-btn pn-btn-sm", onclick: () => command("signIn", label) }, s.signIn!.length === 1 ? "Sign in" : `Sign in: ${label}`)),
+        h("button", { class: "pn-btn pn-btn-sm", onclick: () => command("answerMenu", s.id, "again") }, "Ask again"));
+  const rows = s.activity.filter((a) => a.kind !== "message");
+  return h("div", { class: "pn-answer-work" },
+    line,
+    rows.length ? h("div", { class: "pn-activity-list pn-answer-activity", role: "log", "aria-live": "polite" }, ...rows.map(activityRow)) : null,
+    live && s.stream ? h("div", { class: "pn-answer-stream" }, s.stream) : null,
+  );
+}
+
+function followUpBox(s: AnswerViewState): HTMLElement {
+  const input = h("input", {
+    class: "pn-ask-input",
+    type: "text",
+    placeholder: s.canFollowUp ? "Ask a follow-up…" : `${s.agent} is answering…`,
+    "aria-label": "Ask a follow-up question",
+    disabled: !s.canFollowUp,
+    maxlength: 2000,
+  }) as HTMLInputElement;
+  input.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key !== "Enter" || !input.value.trim()) return;
+    e.preventDefault();
+    command("followUp", s.id, input.value.trim());
+    input.value = "";
+  });
+  return h("div", { class: "pn-ask pn-ask-follow" }, icon("sparkle", "pn-ask-icon"), input, h("span", { class: "pn-muted pn-ask-hint" }, "continues this conversation"));
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +499,9 @@ document.addEventListener("click", (e) => {
   const ext = e.target instanceof Element ? e.target.closest("[data-external]") : null;
   if (ext) {
     e.preventDefault();
-    command("openExternal", ext.getAttribute("data-external"));
+    // In an answer tab the link is the agent's: open it only after the confirm (openAnswerExternal).
+    if (state?.mode === "answer") command("openAnswerExternal", state.id, ext.getAttribute("data-external"));
+    else command("openExternal", ext.getAttribute("data-external"));
     return;
   }
   const action = e.target instanceof Element ? e.target.closest("[data-popover-action]") : null;

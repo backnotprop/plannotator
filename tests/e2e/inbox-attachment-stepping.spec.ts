@@ -397,9 +397,7 @@ test('a phone: the file is full screen under its toolbar; ⋯ opens every file o
   await expect(page.locator('[data-attachment-stepper]')).toHaveCount(0);
   await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
   await shot('06-phone-html');
-  const more = page.locator('[data-full-view-more]');
-  await more.click();
-  await page.locator('[data-full-view-menu-position]').click();
+  await page.locator('[data-full-view-bar] [data-full-view-position]').click();
   const peek = page.getByRole('grid', { name: 'Files in this thread' });
   await expect(peek).toBeVisible();
   await shot('07-phone-list');

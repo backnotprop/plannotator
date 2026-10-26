@@ -134,7 +134,7 @@ function runCommandBytes(
 					const killed = spawnSync(
 						"taskkill.exe",
 						["/pid", String(proc.pid), "/t", "/f"],
-						{ stdio: "ignore", windowsHide: true },
+						{ env: process.env, stdio: "ignore", windowsHide: true },
 					);
 					if (killed.status === 0) return;
 				}
@@ -187,6 +187,21 @@ function runCommandBytes(
 			resolve({ stdout: new Uint8Array(0), stderr: notFoundMessage, exitCode: 1 });
 		});
 	});
+}
+
+/**
+ * `reviewRuntime` with `extraEnv` added to every git child's environment
+ * (after the process env, so it wins). A GitHub PR checkout uses it to run
+ * its fetches as the gh account chosen for that PR (#2157), so git through
+ * gh's credential helper gets that account's token; nothing else does.
+ */
+export function reviewRuntimeWithEnv(extraEnv: Record<string, string>): ReviewGitRuntime {
+	const run = (args: string[], options?: GitCommandOptions): Promise<GitCommandResult> => {
+		const environment = { ...process.env, ...extraEnv };
+		const command = prepareGitCommand(args, options, environment);
+		return runCommand("git", command.args, "git not found", options, command, environment);
+	};
+	return { ...reviewRuntime, runGit: run };
 }
 
 export const reviewRuntime: ReviewGitRuntime = {

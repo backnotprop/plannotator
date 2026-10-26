@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, setSystemTime } from "bun:test";
 import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { ReaderModel } from "./reader-model";
 import { buildFinishedGuide, guideStorePaths, loadSavedGuide, readSidecar, saveFinishedGuide, setChapterReviewed, snapshotOfGuide, writeSidecar } from "./store";
@@ -105,8 +105,15 @@ describe("guides cross between the web app and VS Code", () => {
 
   it("exports a guide kept in memory (guide history off) exactly as the same guide saved", () => {
     const g = saved("test__export-mem");
-    const fromDisk = buildSavedGuideSnapshot(g.repoKey, g.envelope)!;
-    expect(snapshotOfGuide(g)).toEqual(fromDisk);
+    // Each snapshot is stamped with `exportedAt: now`: freeze the clock so the two compare equal.
+    setSystemTime(new Date("2026-10-23T12:00:00.000Z"));
+    let fromDisk;
+    try {
+      fromDisk = buildSavedGuideSnapshot(g.repoKey, g.envelope)!;
+      expect(snapshotOfGuide(g)).toEqual(fromDisk);
+    } finally {
+      setSystemTime();
+    }
     const memory = buildFinishedGuide({ repoKey: "test__never-written", snapshot: fromDisk, source: g.sidecar.source!, agent: { id: "claude-code", label: "Claude Code" }, focus: {} });
     expect(guideStorePaths("test__never-written").exists).toBe(false);
     expect(parseGuideSnapshot(snapshotOfGuide(memory)!).ok).toBe(true);

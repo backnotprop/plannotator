@@ -10,6 +10,10 @@ import type { ReviewSourceRecord } from "./store";
 
 const MAX_LISTED_FILES = 400;
 
+/** What the run is for: a review needs no edits, and the guide is written only through the builder's tools. */
+export const READ_ONLY_NOTE =
+  "This is a review: you do not need to edit, create or delete any file. Read and search the code as you need, and write the guide only with the guide_* tools.";
+
 /** What to review, one line: core's prompt reads "Write a guided review of <target>." */
 export function shortTarget(source: ReviewSourceRecord): string {
   if (source.kind === "pr" && source.pr) return `pull request #${source.pr.number}, "${source.pr.title}" (${source.pr.url})`;
@@ -54,6 +58,6 @@ export function buildGuidePrompt(input: {
   });
   // Core's first paragraph names the target; where the files are, how to see the diff and the exact paths follow it.
   const cut = prompt.indexOf("\n\n");
-  const context = `${describeTarget(input.source)}\n\n${changedFilesBlock(input.files)}`;
+  const context = `${describeTarget(input.source)}\n\n${changedFilesBlock(input.files)}\n\n${READ_ONLY_NOTE}`;
   return cut < 0 ? `${prompt}\n\n${context}` : `${prompt.slice(0, cut)}\n\n${context}${prompt.slice(cut)}`;
 }

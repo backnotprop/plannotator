@@ -30,6 +30,7 @@ import { registerInboxGuideTools } from "./inbox-guides";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, questionWords, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
 import { registerInboxSearchTool } from "./inbox-mcp-search";
 import { registerInboxCardTool } from "./inbox-mcp-cards";
+export { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp-cards";
 import { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, TEXT_COMPLETE_META, type ToolResult } from "./inbox-mcp-result";
 
 // The result helpers live in inbox-mcp-result.ts (no import cycle for the tool modules); re-exported for older importers.
@@ -43,8 +44,19 @@ export const INBOX_WAIT_MAX_SECONDS = 50;
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "wait_for_reply", "get_guide_brief", "submit_guide", "card"] as const;
 
-/** The tools this Inbox serves: every one, except `card` while INBOX_CARD_ACTION_ON holds it back. */
+/**
+ * The tools this Inbox serves with the Board on: every one, except `card`
+ * while INBOX_CARD_ACTION_ON holds it back in the code.
+ */
 export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_MCP_TOOLS.filter((name) => name !== "card" || INBOX_CARD_ACTION_ON);
+
+/**
+ * The tools an Inbox serves by default: the Board is off until the person
+ * turns it on (config.json `inboxBoard`, approval "inbox-board" 2026-10-26),
+ * so `card` is not in its tools/list.
+ */
+export const INBOX_DEFAULT_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_SERVED_TOOLS.filter((name) => name !== "card");
+
 
 /** Under Claude Code's 2,048-character cap on server instructions. */
 export const INBOX_MCP_INSTRUCTIONS = [
@@ -105,6 +117,28 @@ export const INBOX_STOP_EXAMPLE = [
 ].join("\n");
 
 /**
+ * The optional contract lines (approval "inbox-decision-mode", agent contract
+ * lines), as one block: the body field's description carries it, with the
+ * rule that most questions need none of them. Taught only here and in the
+ * connection's short `body`, never in QUESTION_AUTHORING_GUIDE (plan review;
+ * Claude Code's 2,048-character cut). inbox.test.ts parses it with the
+ * store's own parser.
+ */
+export const INBOX_CONTRACT_EXAMPLE = [
+  ":::question",
+  "Which checkout drawer should ship?",
+  "Stakes: ships to all of checkout on Thursday; changing it later costs a week of QA.",
+  "",
+  "- [ ] A · Total on top — ![Drawer A](drawer-a.png) closest to today",
+  "- [ ] B · Total pinned with Pay — ![Drawer B](drawer-b.png) the total never scrolls away",
+  "",
+  "Recommended: B · Total pinned with Pay",
+  "",
+  "Why: on a phone only B keeps the total next to the button.",
+  ":::",
+].join("\n");
+
+/**
  * send_message's `body`, as an agent reads it. The `Stopped:` and `Holds up:`
  * lines live here, not in QUESTION_AUTHORING_GUIDE (shared with plan review,
  * where they mean nothing) and not in send_message's own description (cut at
@@ -121,6 +155,15 @@ export const SEND_BODY_DESCRIPTION = [
   `- \`Holds up: <work>; <work>\` names the work that waits on the answer while you go on: listed under "${sectionLabel("holding")}" (a \`Stopped:\` line wins). A \`none\` entry holds nothing up.`,
   "",
   INBOX_STOP_EXAMPLE,
+  "",
+  "Optional lines after the question, for a decision that needs them. Most questions need none of these:",
+  "- `Stakes: <one sentence>`: what the choice affects, in product terms. Give one whenever you write `Stopped:` or `Holds up:`.",
+  "- `Shows: ![alt](path)` or `Shows: [name](file)`: the one picture or file the decision is about (put long detail in that file, not the block).",
+  "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
+  "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
+  "- A picture choice, when the options are visual: `- [ ] Label — ![alt](path) consequence`. The picture picks it; the label is the answer you get back.",
+  "",
+  INBOX_CONTRACT_EXAMPLE,
   "",
   // Action items (approval "inbox-next-actions"): when to write one, and when not.
   INBOX_ACTION_GUIDE,
@@ -183,7 +226,7 @@ export interface InboxMcpContext {
    * wait_for_reply holds the session present while it waits
    * (packages/server/inbox-sessions.ts).
    */
-  presence?: { seen: (session: string) => void; hold: (session: string) => () => void };
+  presence?: { seen: (session: string) => void; hold: (session: string, threadId?: string | null) => () => void };
   /** The ⌘K search index (packages/server/inbox-search.ts), for the agents' read-only search tool. */
   searchIndex?: InboxSearchIndex;
   /**
@@ -194,6 +237,24 @@ export interface InboxMcpContext {
    * project for a path.
    */
   findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean }>;
+  /**
+   * Whether the Inbox itself knows the sender's session is woken by the
+   * person's reply, whatever its own connection said: a Claude Code, Pi or
+   * OpenCode session whose bridge polls now (the stdio shim run inside it
+   * sends as that session, and the connection delivers the reply), or a Codex
+   * thread the Inbox wakes itself (`meta`: the call's `_meta`; a thread id,
+   * not `codex exec`, and a Codex CLI that runs `codex queue`;
+   * packages/server/inbox-codex-wake.ts).
+   * Absent: only a caller's own connection wakes it (`callerWakes`).
+   */
+  sessionWakes?: (host: unknown, session: unknown, meta: unknown) => Promise<boolean>;
+  /**
+   * Whether the Board is on (config.json `inboxBoard`, read on every
+   * request). Off: `card` is not in tools/list, and a call (from a session
+   * that listed it while it was on) gets `board_off` with nothing written.
+   * Absent: on, as before the switch.
+   */
+  boardOn?: () => boolean;
 }
 
 
@@ -208,9 +269,25 @@ export function callerWakes(ctx: unknown): boolean {
   return meta?.[INBOX_WAKES_META_KEY] === true;
 }
 
+/**
+ * Whether a sender's session is woken by the person's reply: its own
+ * connection says so (`callerWakes`), or the Inbox knows that session is
+ * woken (`sessionWakes`: its bridge polls now, or a Codex thread it wakes).
+ */
+export async function senderWakes(context: Pick<InboxMcpContext, "sessionWakes">, ctx: unknown, input: { agent_host?: string; agent_session?: string }): Promise<boolean> {
+  if (callerWakes(ctx)) return true;
+  if (!context.sessionWakes) return false;
+  const meta = (ctx as { mcpReq?: { _meta?: unknown } } | undefined)?.mcpReq?._meta;
+  return context.sessionWakes(input.agent_host?.trim(), input.agent_session?.trim(), meta).catch(() => false);
+}
+
 /** The send tools' last sentence for a caller whose reply arrives by itself. */
 export const INBOX_REPLY_ARRIVES_TEXT =
   "The person's reply arrives in this session by itself, as a new message once the session is idle: end your turn, or go on with other work; do not call wait_for_reply.";
+
+/** The same place for a sender nothing wakes (an MCP client, OpenCode 1, an older connection, a session whose bridge does not poll): it has to ask. */
+export const INBOX_REPLY_WAITS_TEXT =
+  "The person's reply won't arrive in this session by itself: call wait_for_reply with this thread_id for the answer, or go on and read_thread later.";
 
 
 function threadUrl(base: string, threadId: string): string {
@@ -551,6 +628,18 @@ export function imagesNotShownText(list: readonly ImageNotShown[]): string {
   return text;
 }
 
+/**
+ * The send tools' nudge (approval "inbox-decision-mode", agent contract
+ * lines): a question the agent is stopped or held up on that has no
+ * `Stakes:` line. Never a refusal. "" when there is none.
+ */
+export function noStakesText(count: number): string {
+  if (count <= 0) return "";
+  return count === 1
+    ? " 1 question you are stopped or held up on has no `Stakes:` line; next time add one (what the choice affects, one sentence) so the person can decide in one look."
+    : ` ${count} questions you are stopped or held up on have no \`Stakes:\` line; next time add one to each (what the choice affects, one sentence) so the person can decide in one look.`;
+}
+
 /** A message id (`msg_` and a 26-character ULID), as an agent might pass one as `thread` by mistake. */
 const MESSAGE_ID_SHAPE = /^msg_[0-9A-HJKMNP-TV-Z]{26}$/i;
 
@@ -594,7 +683,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; noStakes: number; naming: InboxSendResult["naming"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -656,8 +745,14 @@ export async function sendAgentMessage(
   const superseded = store.supersededBy(message.id);
   const markedDone = result.done ?? [];
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
+  // A question the agent is stopped or held up on, with no `Stakes:` line:
+  // the result nudges (never refuses), so the person can decide in one look.
+  const noStakes = (message.questions ?? [])
+    .filter((q) => q.kind !== "action" && (q.stopped !== null || q.holds_up.length > 0) && !q.stakes)
+    .map((q) => q.key);
   return {
     imagesNotShown: notShown,
+    noStakes: noStakes.length,
     superseded: superseded.length,
     actions: actions.length,
     done: markedDone.length,
@@ -690,6 +785,8 @@ export async function sendAgentMessage(
       /** Images the body shows that the window will not (missing, not an image, too large, hidden, remote). */
       ...(notShown.length > 0 ? { images_not_shown: notShown.slice(0, IMAGES_NOT_SHOWN_MAX) } : {}),
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
+      /** Keys of the Stopped / Holds up questions with no `Stakes:` line (a nudge; the message was sent). */
+      ...(noStakes.length > 0 ? { no_stakes: noStakes } : {}),
     },
   };
 }
@@ -847,7 +944,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .array(z.string())
             .optional()
             .describe(
-              "Files to show the person beside your message, e.g. [\"docs/plan.md\", \"/tmp/checkout.png\", \"src/retry.mjs\"]: absolute (anywhere you can read) or relative to project_path. Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.",
+              "Files to show the person beside your message, e.g. [\"docs/plan.md\", \"/tmp/checkout.png\", \"src/retry.mjs\"]: absolute (anywhere you can read) or relative to project_path. For something visual, a screenshot or image usually reads fastest; attach the HTML or source too when they should open or click through it. Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.",
             ),
         })
         .strict(),
@@ -856,7 +953,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const sent = await sendAgentMessage(context, project, input, undefined, callerWakes(ctx));
+        const wakes = await senderWakes(context, ctx, input);
+        const sent = await sendAgentMessage(context, project, input, undefined, wakes);
         const asked =
           (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
           (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "") +
@@ -864,7 +962,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           supersededWords(sent.structured.superseded as string[]) +
           (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${callerWakes(ctx) ? INBOX_REPLY_ARRIVES_TEXT : "Call wait_for_reply with this thread_id for the answer, or go on and read_thread later."}${imagesNotShownText(sent.imagesNotShown)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${wakes ? INBOX_REPLY_ARRIVES_TEXT : INBOX_REPLY_WAITS_TEXT}${imagesNotShownText(sent.imagesNotShown)}${noStakesText(sent.noStakes)}`,
           sent.structured,
         );
       }),
@@ -1002,7 +1100,14 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       guarded(async () => {
         // An open wait is presence: the session that asked is not "ended" while it waits here.
         const holder = input.agent_session?.trim();
-        const release = holder ? context.presence?.hold(holder) : undefined;
+        // Which thread the wait returns from (null: every thread it asked), so a Codex wake leaves just those to it.
+        let scope: string | null = null;
+        try {
+          scope = threadOf(store, input);
+        } catch {
+          // Refused below.
+        }
+        const release = holder ? context.presence?.hold(holder, scope) : undefined;
         try {
           const single = threadOf(store, input);
           const caller = input.agent_session?.trim() || null;
@@ -1139,8 +1244,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);
 
-  // The Board's cards (approval "inbox-board"): packages/server/inbox-mcp-cards.ts. Held back with INBOX_CARD_ACTION_ON.
-  if (INBOX_CARD_ACTION_ON) registerInboxCardTool(server, context);
+  // The Board's cards (approval "inbox-board"): packages/server/inbox-mcp-cards.ts. Held back in the code with
+  // INBOX_CARD_ACTION_ON, and served only while the person has the Board on (the server is made per request).
+  if (INBOX_CARD_ACTION_ON && (context.boardOn?.() ?? true)) registerInboxCardTool(server, context);
 
   return server;
 }

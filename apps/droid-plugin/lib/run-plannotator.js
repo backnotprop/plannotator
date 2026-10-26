@@ -37,7 +37,9 @@ function writeIfPresent(stream, text) {
   stream.write(text.endsWith("\n") ? text : `${text}\n`);
 }
 
-function runPlannotator(args) {
+// `options.timeout` (ms) bounds a command that must return quickly; reviews
+// wait for the reviewer and pass none.
+function runPlannotator(args, options = {}) {
   const repoBin = findRepoBin(process.cwd());
   const env = {
     ...process.env,
@@ -45,15 +47,18 @@ function runPlannotator(args) {
     PLANNOTATOR_ORIGIN: "droid",
   };
 
+  const timeout = options.timeout;
   let result = childProcess.spawnSync("plannotator", args, {
     encoding: "utf8",
     env,
+    ...(timeout ? { timeout } : {}),
   });
 
   if (result.error && result.error.code === "ENOENT" && repoBin) {
     result = childProcess.spawnSync(process.execPath, [repoBin, ...args], {
       encoding: "utf8",
       env,
+      ...(timeout ? { timeout } : {}),
     });
   }
 

@@ -185,15 +185,36 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
   }
 }
 
+/**
+ * What happens to the person's reply, for an agent that reaches the Inbox:
+ * Plannotator's own connection puts it into the session as a new turn; an
+ * agent reached through MCP (or OpenCode 1, which has the tool but no wake)
+ * reads it when it next checks. Null when the agent does not reach the Inbox,
+ * or when it is not known (Claude Code on Windows).
+ */
+export function repliesOf(row: InboxAgentRow, platform?: ConnectContext['platform']): { text: string; wakes: boolean } | null {
+  if (!row.reach.on) return null;
+  if (row.reach.kind === 'tool') {
+    if (row.tool?.mod_off) return null;
+    // Claude Code's mod stands down on Windows (no /bin/sh), so nothing wakes it there: say no more than the Reaches row.
+    if (row.id === 'claude-code' && platform === 'windows') return null;
+    if (row.id === 'opencode' && row.plugin?.generation === '1') return { text: "seen when it checks the Inbox; OpenCode 1 can't be woken", wakes: false };
+    return { text: 'arrive as a new turn', wakes: true };
+  }
+  // Codex: the Inbox wakes it itself (`codex queue`) when it found a Codex that can (the server's `wakes`).
+  if (row.reach.kind === 'mcp' && row.wakes === true) return { text: 'arrive as a new turn', wakes: true };
+  if (row.reach.kind === 'mcp') return { text: "seen when it checks the Inbox; it can't be woken", wakes: false };
+  return null;
+}
+
 /** Agents whose instructions live in their own settings, not a file. */
 const NO_NOTE_FILE: Partial<Record<InboxAgentId, string>> = {
-  cursor: 'Cursor keeps its rules in its own settings, so there is no file to add a note to.',
   kiro: 'Kiro CLI has no global instructions file, so there is no file to add a note to.',
 };
 
-function Row({ k, v, r, sub, warn, na }: { k: string; v: ReactNode; r?: ReactNode; sub?: ReactNode; warn?: boolean; na?: boolean }) {
+function Row({ k, v, r, sub, warn, na, data }: { k: string; v: ReactNode; r?: ReactNode; sub?: ReactNode; warn?: boolean; na?: boolean; data?: Record<`data-${string}`, string> }) {
   return (
-    <div className={`ib-agrow${na ? ' ib-agna' : ''}`}>
+    <div className={`ib-agrow${na ? ' ib-agna' : ''}`} {...data}>
       <span className="ib-agk">{k}</span>
       <span className="ib-agv">{v}</span>
       <span className="ib-agr">{r}</span>
@@ -214,8 +235,11 @@ function AgentGroup({
   pending,
   busy,
   sessions,
+  platform,
 }: {
   row: InboxAgentRow;
+  /** This computer's platform (the window's), for what wakes a session. */
+  platform?: ConnectContext['platform'];
   noteText: string;
   onChange: (change: Change) => void;
   pending: Set<string>;
@@ -268,6 +292,7 @@ function AgentGroup({
   const modOff = row.tool?.mod_off === true;
   // Claude Code's MCP entry is one the person added by hand (`claude mcp add`): Plannotator never writes or removes it.
   const handMcp = row.id === 'claude-code' && reach.kind === 'mcp';
+  const replies = repliesOf(row, platform);
   const reachSwitchable = (reach.kind === 'tool' || reach.kind === 'mcp') && reach.state !== 'foreign' && reach.state !== 'unreadable' && !modOff && !handMcp;
   const note = row.note;
   const noteOn = note?.state === 'added' || note?.state === 'edited';
@@ -280,7 +305,9 @@ function AgentGroup({
         ? note.create
           ? 'would create'
           : 'no note yet'
-        : note.state === 'unavailable'
+        : note.state === 'manual'
+          ? 'copy into Settings → Rules'
+          : note.state === 'unavailable'
           ? 'no file yet'
           : ''
     : '';
@@ -289,7 +316,7 @@ function AgentGroup({
       ? note.reason
       : note?.state === 'edited'
       ? "You edited this note, so Plannotator won't update it. Turning it off removes it as you left it."
-      : note?.state === 'unavailable' || note?.state === 'damaged' || note?.state === 'refused'
+      : note?.state === 'manual' || note?.state === 'unavailable' || note?.state === 'damaged' || note?.state === 'refused'
         ? note.reason
         : note?.shared_with && note.shared_with.length > 0
           ? `This file is shared with ${note.shared_with.map((id) => INBOX_AGENT_LABELS[id]).join(' and ')}: one section, kept while either has it on.`
@@ -322,6 +349,7 @@ function AgentGroup({
           ) : null
         }
       />
+      {replies && <Row k="Your replies" v={replies.text} data={{ 'data-agent-replies': replies.wakes ? 'wake' : 'check' }} />}
       {row.tool && reach.kind !== 'tool' && (
         <Row
           k="The Inbox tool"
@@ -363,10 +391,10 @@ function AgentGroup({
             k="Note in its instructions"
             v={
               <>
-                <code>{note.path}</code>
+                {note.path ? <code>{note.path}</code> : row.id === 'cursor' ? 'Cursor User Rules' : null}
                 {noteState && <> · {noteState}</>}
                 <button type="button" className="ib-lnk" aria-expanded={show} aria-controls={`${id}-note`} onClick={() => setShow((open) => !open)}>
-                  {show ? 'Hide' : 'Show'}
+                  {show ? 'Hide' : row.id === 'cursor' ? 'Show note' : 'Show'}
                 </button>
               </>
             }
@@ -379,13 +407,14 @@ function AgentGroup({
               ) : null
             }
             sub={noteSub}
-            warn={(note.state === 'unavailable' || note.state === 'damaged' || note.state === 'refused') && noteSub !== null}
+            warn={(note.state === 'manual' || note.state === 'unavailable' || note.state === 'damaged' || note.state === 'refused') && noteSub !== null}
           />
           {show && (
             <div className="ib-agrow ib-agnote" id={`${id}-note`}>
               <span />
               <div className="ib-cbox">
-                <pre>{noteText}</pre>
+                {row.id === 'cursor' && <p>Copy this text into Cursor Settings → Rules. Plannotator cannot detect, update or remove a copied rule.</p>}
+                <pre>{row.id === 'cursor' ? noteText.split('\n').filter((line) => !line.startsWith('<!-- plannotator-inbox:')).join('\n') : noteText}</pre>
               </div>
             </div>
           )}
@@ -478,6 +507,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
             pending={pending}
             busy={busy.has(row.id)}
             onChange={(input) => void change(row.id, input)}
+            {...(context ? { platform: context.platform } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
         ))}

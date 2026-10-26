@@ -196,7 +196,7 @@ test.skipIf(!hasDom)('Add: only the ticked notes are sent; results in the same r
   // The results view: focus on Done, the live region says what was written, the band is gone.
   expect(document.activeElement).toBe(button(el, 'Done'));
   expect(el.querySelector('[data-anote-band]')).toBeNull();
-  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe('Each agent reads it from its next session. Fix the file, then try again here or in Settings → Agents.');
+  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe('Managed notes are read from each agent’s next session. Fix the file, then try again here or in Settings → Agents.');
   expect(el.querySelector('[aria-live="polite"]')?.textContent).toBe("Added the note to Codex. Couldn't add the note to Gemini CLI.");
 
   act(() => button(el, 'Try again').click());

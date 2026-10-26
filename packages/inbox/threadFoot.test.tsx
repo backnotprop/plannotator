@@ -190,7 +190,7 @@ test.skipIf(!hasDom)('the draft status and the skip chip come after the buttons,
   await until(() => !!foot(el), 'the foot');
   // Before a pick: the buttons alone, no status.
   expect(foot(el).querySelector('[data-foot-status]')).toBeNull();
-  expect(labels(foot(el))).toEqual(['Reply', 'Re-ask', '2 open questions']);
+  expect(labels(foot(el))).toEqual(['Reply', '2 open questions']);
 
   await pickFirst(el);
   const row = foot(el);
@@ -198,7 +198,7 @@ test.skipIf(!hasDom)('the draft status and the skip chip come after the buttons,
   // The order a screen reader reads: the buttons in today's order, then the status.
   expect(buttons!.matches('[data-foot-buttons]')).toBe(true);
   expect(status!.matches('[data-foot-status]')).toBe(true);
-  expect(labels(buttons!)).toEqual(['Send', 'Edit draft', 'Re-ask', '2 open questions']);
+  expect(labels(buttons!)).toEqual(['Send', 'Edit draft', '2 open questions']);
   expect(status!.querySelector('[data-draft-foot]')!.textContent).toContain('1 pick');
   expect(status!.querySelector('[data-skip-chip="keep"]')).not.toBeNull();
 

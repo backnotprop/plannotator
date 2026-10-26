@@ -1607,7 +1607,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                           description={
                             updateCheckSetting.env !== undefined
                               ? 'Set by PLANNOTATOR_UPDATE_CHECK in your environment.'
-                              : 'This computer asks GitHub about once an hour, never your browser. Off makes no request at all.'
+                              : 'This computer asks GitHub every few minutes, never your browser. Off makes no request at all.'
                           }
                         />
                       </>

@@ -12,6 +12,11 @@ export interface ThreadRowMenuProps {
   rowOf: (threadId: string) => InboxListRow | null;
   /** Mark read and Move back are offered (the list has the row's hover action). */
   canMarkRead: boolean;
+  /**
+   * Whether a thread is pinned to the sidebar (approval "inbox-pinned-threads"): Pin thread or Unpin
+   * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins): no item.
+   */
+  pinnedOf?: (threadId: string) => boolean;
   onAction: (row: InboxListRow, action: RowMenuAction) => void;
   /** The row whose menu is open (its muted background), or null when it closes. */
   onTarget: (threadId: string | null) => void;
@@ -26,6 +31,8 @@ export interface ThreadRowMenuProps {
 }
 
 const LABELS: Record<RowMenuAction, { label: string; icon: IconName }> = {
+  pin: { label: 'Pin thread', icon: 'pin' },
+  unpin: { label: 'Unpin thread', icon: 'pinOff' },
   'copy-link': { label: 'Copy link', icon: 'link' },
   'copy-id': { label: 'Copy thread ID', icon: 'hash' },
   read: { label: 'Mark read', icon: 'checkCircle' },
@@ -47,8 +54,9 @@ function rowElementOf(target: EventTarget | null): HTMLElement | null {
 /**
  * The thread rows' right-click menu: one menu for the whole list (its body is
  * the trigger), aimed at the row the right-click (or the platform's
- * context-menu key, or Shift+F10, on a focused row) lands on. Copy link, Copy
- * thread ID, then Mark read (or Move back) and Archive where they apply.
+ * context-menu key, or Shift+F10, on a focused row) lands on. Pin thread (or
+ * Unpin thread) in its own group, then Copy link, Copy thread ID, then Mark
+ * read (or Move back) and Archive where they apply.
  * Anywhere else in the list the browser's own menu shows. Opening it never
  * opens the thread or moves the selection. Escape, Tab and an item put focus
  * on the row (wherever focus was before the right-click); a write that takes
@@ -156,9 +164,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     window.addEventListener('pointerdown', done, true);
     keyGuard.current = done;
   };
-  const actions = target ? rowMenuActions(target, props.canMarkRead) : [];
+  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null) : [];
+  const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
   const copies = actions.filter((a) => a === 'copy-link' || a === 'copy-id');
-  const writes = actions.filter((a) => a !== 'copy-link' && a !== 'copy-id');
+  const writes = actions.filter((a) => a === 'read' || a === 'unread' || a === 'archive');
   const item = (action: RowMenuAction) => (
     <Menu.Item
       key={action}
@@ -167,8 +176,8 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
       data-row-action={action}
       onClick={() => {
         if (!target) return;
-        // With a thread open the row stays in place: nothing to follow.
-        if (action !== 'copy-link' && action !== 'copy-id' && !props.held) {
+        // With a thread open the row stays in place: nothing to follow. A pin never moves a row.
+        if (action !== 'copy-link' && action !== 'copy-id' && action !== 'pin' && action !== 'unpin' && !props.held) {
           pendingFocus.current = { id: target.thread_id, order: rowOrder(), until: Date.now() + 5000, state: rowState(target.thread_id) };
         }
         props.onAction(target, action);
@@ -252,6 +261,9 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
               close();
             }}
           >
+            {/* Pin thread first, in its own group (approval "inbox-pinned-threads"). */}
+            {pinning.map(item)}
+            {pinning.length > 0 && <Menu.Separator className="ib-pm-sep" />}
             {copies.map(item)}
             {writes.length > 0 && <Menu.Separator className="ib-pm-sep" />}
             {writes.map(item)}

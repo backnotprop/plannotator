@@ -18,7 +18,7 @@
  * only while it is still the one they were saved as (its `updated_at`).
  */
 
-import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId, type InboxReplyDraft } from "@plannotator/core/inbox-types";
 import { INBOX_DRAFT_BODY_MAX } from "./drafts";
@@ -91,6 +91,7 @@ export function writeInboxReplyDraft(inboxDirPath: string, draft: InboxReplyDraf
   const file = fileOf(inboxDirPath, draft.thread_id);
   const temp = `${file}.${process.pid}.tmp`;
   writeFileSync(temp, `${JSON.stringify(draft)}\n`, { mode: 0o600 });
+  chmodSync(temp, 0o600); // `mode` applies only on create: a left-over temp file keeps its old mode.
   renameSync(temp, file);
 }
 

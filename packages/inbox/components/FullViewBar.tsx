@@ -11,9 +11,10 @@ import { Tip as HoverTip } from './Tip';
  * desktop, bottom right with 44 px targets on a phone. In order: Back to the
  * thread (where the file cannot sit beside the thread: a phone, a stacked
  * window), the pen (HTML that takes comments), the comment count (opens the
- * comments drawer), the position `N/M ⌄` (opens the file peek; not on a
- * phone), ⋯ (Open in, Download, the other version), Side by side, and
- * » Hide tools.
+ * comments drawer), the position `N/M ⌄` (opens the file peek; on a phone a
+ * pill that opens the peek's bottom sheet in one tap), ⋯ (Open in, Download,
+ * the other version), Side by side, × Exit full screen (desktop only: what
+ * Escape's last step does, not a pick), and » Hide tools in the corner.
  *
  * Hide tucks the toolbar into a handle flush with the corner (‹, the comment
  * count, an amber dot when the file changed since it was sent). A pointer in
@@ -52,7 +53,11 @@ export interface FullViewBarProps {
   handleCount: number;
   /** The file changed since it was sent (or is gone): an amber dot on the handle. */
   changed: boolean;
-  /** The position and its peek (a thread with two or more files, not on a phone). */
+  /**
+   * The position and its peek (a thread with two or more files). On a phone it
+   * is the `4/9 ⌄` pill that opens the peek's bottom sheet in one tap (the pane
+   * draws the sheet: no `renderPeek`).
+   */
   position: {
     index: number;
     total: number;
@@ -60,8 +65,8 @@ export interface FullViewBarProps {
     open: boolean;
     peekId: string;
     onOpenChange: (open: boolean) => void;
-    /** The peek, drawn under the bar while open; it closes through `close` with its reason. */
-    renderPeek: (close: (reason: 'key' | 'outside') => void) => ReactNode;
+    /** The peek, drawn under the bar while open (desktop); it closes through `close` with its reason. */
+    renderPeek?: (close: (reason: 'key' | 'outside') => void) => ReactNode;
   } | null;
   /** ⋯: the trigger and its menu (OpenIn.tsx `FullScreenMore`), with whether its menu is open. */
   more: ReactNode;
@@ -72,6 +77,13 @@ export interface FullViewBarProps {
    * stacked window), which leads the bar instead.
    */
   leave: { kind: 'exit' | 'back'; onLeave: () => void };
+  /**
+   * × Exit full screen, just before » (the corner stays »'s: a pointer that
+   * reveals the toolbar there lands on the pin, never on ×). What Escape's
+   * last step does: the file goes back beside the thread, not a pick. Only
+   * where Side by side is the way out (`leave.kind` `exit`, not a phone).
+   */
+  onExitFull?: () => void;
   /** The Hide / Show tools chord (`Mod+Shift+X`, HTML only), shown in the tooltips. */
   chord: string | null;
   /** The comments drawer is open beside the page (desktop): the dock sits left of it. */
@@ -98,13 +110,14 @@ function Keys({ binding }: { binding: string }) {
   );
 }
 
-function Tip({ text, note, binding, phone, children }: { text: string; note?: string; binding?: string | null; phone: boolean; children: React.ReactElement }) {
+function Tip({ text, note, binding, phone, passEscape, children }: { text: string; note?: string; binding?: string | null; phone: boolean; passEscape?: boolean; children: React.ReactElement }) {
   // A phone has no hover: a tooltip there only opens on focus, unseen, and takes the next Escape for itself. The buttons carry their names.
   if (phone) return children;
   return (
     <Tooltip
       side={phone ? 'top' : 'bottom'}
       wide
+      escapePassesThrough={passEscape}
       content={
         <span className="flex flex-col gap-1">
           <span>{text}</span>
@@ -208,9 +221,9 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [state]);
 
-  /** The peek closed from the keyboard or by a choice: focus back on the position (not after a press elsewhere). */
+  /** The peek closed from the keyboard or by a choice: focus back on the position (not after a press elsewhere). A phone's sheet is the pane's, which puts focus back itself. */
   const refocus = useRef(false);
-  const peekOpen = position?.open ?? false;
+  const peekOpen = (position?.open ?? false) && position?.renderPeek !== undefined;
   useEffect(() => {
     if (peekOpen) refocus.current = true;
     else if (refocus.current) {
@@ -371,11 +384,16 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
             <button
               type="button"
               ref={posRef}
-              className="ib-fvb ib-fvposb"
+              className={`ib-fvb ib-fvposb${phone ? ' ib-fvpill' : ''}`}
               aria-haspopup="grid"
               aria-expanded={position.open}
               aria-controls={position.open ? position.peekId : undefined}
-              aria-label={`${position.index + 1} of ${position.total}, ${position.name}. Show every file in this thread`}
+              // A phone's pill: its name starts with the text it shows (WCAG 2.5.3, Label in Name), then says it in words.
+              aria-label={
+                phone
+                  ? `${position.index + 1}/${position.total}: file ${position.index + 1} of ${position.total}, ${position.name}. Show every file`
+                  : `${position.index + 1} of ${position.total}, ${position.name}. Show every file in this thread`
+              }
               onClick={() => position.onOpenChange(!position.open)}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown' && !position.open) {
@@ -392,7 +410,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
                 <Icon name="chevD" size={12} />
               </span>
             </button>
-            {position.open && (
+            {position.open && position.renderPeek && (
               <div className="ib-fvpeek" data-step-list="">
                 {position.renderPeek(closePeek)}
               </div>
@@ -402,6 +420,21 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
         <span className="ib-fvdv" aria-hidden="true" />
         {props.more}
         {props.leave.kind === 'exit' && leaveButton}
+        {props.onExitFull && props.leave.kind === 'exit' && !phone && (
+          // Its tooltip says Esc, so one Esc on it leaves (the tooltip does not keep that press).
+          <Tip text="Exit full screen" binding="Escape" phone={phone} passEscape>
+            <button
+              type="button"
+              className="ib-fvb"
+              onClick={props.onExitFull}
+              aria-label="Exit full screen"
+              aria-keyshortcuts="Escape"
+              data-full-view-close=""
+            >
+              <Icon name="x" size={iconSize} />
+            </button>
+          </Tip>
+        )}
         <Tip text={hideText} binding={props.chord} phone={phone}>
           <button
             type="button"

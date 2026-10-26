@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useTheme } from './ThemeProvider';
 import { THEME_MODES } from './themeModes';
-import { themesForHalf, type ThemeHalf } from '../utils/themeRegistry';
+import type { ThemeHalf, ThemeInfo } from '../utils/themeRegistry';
+import { useThemePaletteHalves } from '../hooks/useThemePaletteHalves';
 import { configStore } from '../config/configStore';
 import { useConfigValue } from '../config/useConfig';
 import { faviconDataUrl, type FaviconStyle } from '@plannotator/core/favicon';
@@ -56,27 +57,19 @@ const FaviconStyleControl: React.FC<{ selected: FaviconStyle }> = ({ selected })
   </div>
 );
 
+// The picker's state lives in hooks/useThemePaletteHalves; re-exported here so existing imports keep working.
+export { useThemePaletteHalves, type ThemePaletteHalves } from '../hooks/useThemePaletteHalves';
+
+/** The five colors a palette tile shows for one half, in ThemeTab's order. */
+export function paletteSwatchColors(theme: ThemeInfo, half: ThemeHalf): string[] {
+  const colors = theme.colors[half];
+  return [colors.primary, colors.secondary, colors.accent, colors.background, colors.foreground];
+}
+
 export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
-  const {
-    mode,
-    setMode,
-    lightTheme,
-    darkTheme,
-    setHalfTheme,
-    availableThemes,
-    preferredMode,
-    manageFavicon,
-  } = useTheme();
+  const { mode, setMode, manageFavicon } = useTheme();
   const faviconStyle = useConfigValue('faviconStyle');
-
-  // Which half the grid assigns to. Follows the mode you are actually seeing,
-  // so opening Settings in dark mode edits the dark half first.
-  const [half, setHalf] = useState<ThemeHalf>(preferredMode);
-  useEffect(() => setHalf(preferredMode), [preferredMode]);
-
-  const pair: Record<ThemeHalf, string> = { light: lightTheme, dark: darkTheme };
-  const themes = themesForHalf(availableThemes, half);
-  const nameOf = (id: string) => availableThemes.find(theme => theme.id === id)?.name ?? id;
+  const { half, setHalf, pair, themes, nameOf, choose } = useThemePaletteHalves();
 
   const summary = (
     <div className={`flex items-center gap-1.5 text-[11px] text-muted-foreground ${compact ? '' : 'flex-wrap'}`}>
@@ -190,11 +183,10 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
         <div className={`grid gap-2 overflow-y-auto pr-1 ${compact ? 'grid-cols-4' : 'grid-cols-3'}`}>
           {themes.map(theme => {
             const isSelected = pair[half] === theme.id;
-            const colors = theme.colors[half];
             return (
               <button
                 key={theme.id}
-                onClick={() => setHalfTheme(half, theme.id)}
+                onClick={() => choose(half, theme.id)}
                 className={`relative p-2 rounded-md border text-left transition-colors ${
                   isSelected
                     ? 'border-primary bg-primary/5'
@@ -209,7 +201,7 @@ export const ThemeTab: React.FC<ThemeTabProps> = ({ onPreview, compact }) => {
                 )}
                 {/* Color swatches */}
                 <div className="flex gap-1 mb-1.5">
-                  {[colors.primary, colors.secondary, colors.accent, colors.background, colors.foreground].map((color, i) => (
+                  {paletteSwatchColors(theme, half).map((color, i) => (
                     <div
                       key={i}
                       className="w-3 h-3 rounded-full border border-border/50"

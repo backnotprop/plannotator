@@ -27,10 +27,11 @@ In these sessions "Ask this session" is the only Ask AI option. There is no prov
 - Stopping a question stops only that question.
 - If the session closes or can't be reached, Plannotator says so. It does not switch to a different AI.
 - **OpenCode 2 plan review:** the agent is waiting for your plan decision, so it cannot run a full turn. You get a quick answer from the session's context ("Quick answer from this session"), and nothing is added to the conversation.
+- **Over your tailnet (`--tailscale`):** "Ask this session" works on this computer and, on your phone or another device, only for the Tailscale login that owns this computer. Nothing to set up: Plannotator asks Tailscale who owns the machine. Anyone else on your tailnet who opens the review gets the providers below instead, never the agent session.
 
 You pick a provider as before (see below) when:
 
-- the session is in remote mode or published with `--tailscale`
+- the session is in remote mode, or you open a `--tailscale` session with a Tailscale login other than the one that owns the computer
 - Plannotator was opened from OpenCode 1
 - the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`, Windows)
 - you run the `plannotator` CLI yourself, outside an agent session

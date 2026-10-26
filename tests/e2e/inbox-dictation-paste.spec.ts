@@ -34,7 +34,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { forgetFileViewChoice } from './file-view';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { FORCE_PLAIN_TEXT_PASTE_FLAG } from '../../packages/ui/utils/pasteInsert';
+import { chromiumPasteBugAffected, FORCE_PLAIN_TEXT_PASTE_FLAG } from '../../packages/ui/utils/pasteInsert';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -500,6 +500,16 @@ test('the workaround on, the bug not hit: a dictation is inserted exactly once (
 test('an engine without the bug (this Chromium is neither 155 nor 156): the browser pastes, the page does not', async () => {
   const p = await context.newPage();
   try {
+    // Playwright 1.64 ships Chromium 156: on macOS that engine HAS the bug, so
+    // the workaround is on and this premise does not hold. Linux (CI) and any
+    // other version keep the native path. The gate is the app's own.
+    const affected = chromiumPasteBugAffected(
+      await p.evaluate(() => {
+        const nav = navigator as Navigator & { userAgentData?: { brands?: { brand: string; version: string }[]; platform?: string } };
+        return { userAgent: nav.userAgent, platform: nav.platform, userAgentData: nav.userAgentData ? { brands: nav.userAgentData.brands, platform: nav.userAgentData.platform } : null };
+      }),
+    );
+    test.skip(affected, 'this Chromium is 155 or 156 on macOS, where the workaround is on by design');
     await recordPasteInputs(p, { drop: false, force: false });
     await p.goto(`${url}#thread=${threadId}`);
     await openReply(p);

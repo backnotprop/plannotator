@@ -38,6 +38,12 @@ delete process.env.PLANNOTATOR_AGENT_TOOL;
 // (apps/relay/test) sets its `wrangler dev` URL in the env it spawns.
 process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
 
+// Usage counts (packages/shared/usage-counts.ts): a source run sends nowhere
+// unless PLANNOTATOR_TELEMETRY_URL names a loopback endpoint. A contributor's
+// shell must not name one for every test; tests that need it pass it in the
+// env they hand the sender or the process they spawn.
+delete process.env.PLANNOTATOR_TELEMETRY_URL;
+
 // The Inbox publishes itself over the tailnet when this is on: a contributor
 // who set it in their shell must not make every Inbox test run the real
 // `tailscale` CLI. Tests that need it inject a scripted runner.

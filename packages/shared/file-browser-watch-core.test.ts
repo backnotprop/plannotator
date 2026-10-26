@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync, type FSWatcher } from "node:fs";
+import { mkdtempSync, rmSync, watch as nodeFsWatch, writeFileSync, type FSWatcher } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -63,18 +63,21 @@ function makeTempDir(): string {
 }
 
 describe("file-browser-watch-core", () => {
-	test("a native-watch creation failure falls back to chokidar without losing events", async () => {
+	test("a native-watch creation failure falls back without losing events", async () => {
 		const root = makeTempDir();
-		const throwingNativeWatch = () => {
-			throw new Error("recursive watch unavailable");
-		};
+		const throwingNativeWatch = ((path, watchOptions, listener) => {
+			if (watchOptions && "recursive" in watchOptions && watchOptions.recursive) {
+				throw new Error("recursive watch unavailable");
+			}
+			return nodeFsWatch(path, watchOptions, listener);
+		}) as typeof import("node:fs").watch;
 		const { registry, recorded, subscribe } = makeRegistry({
 			contentWatchBackend: "native",
 			nativeWatch: throwingNativeWatch,
 		});
 		try {
 			subscribe("client", dirTarget(root));
-			// Let the deferred warmup run and chokidar's scan settle.
+			// Let the deferred directory watcher warm up.
 			await Bun.sleep(250);
 			writeFileSync(join(root, "plan.md"), "created");
 			await waitFor(() => (recorded.get("client")?.events.length ?? 0) > 0);
@@ -86,17 +89,20 @@ describe("file-browser-watch-core", () => {
 	});
 
 	test(
-		"a native-watch runtime error swaps to chokidar and forces a catch-up refresh",
+		"a native-watch runtime error swaps to the fallback and forces a catch-up refresh",
 		async () => {
 			const root = makeTempDir();
 			// A fake native watcher: created successfully, then fails at runtime.
 			let created: (EventEmitter & { close: () => void }) | null = null;
-			const fakeNativeWatch = (() => {
-				const emitter = new EventEmitter() as EventEmitter & { close: () => void };
-				emitter.close = () => {};
-				created = emitter;
-				return emitter;
-			}) as unknown as typeof import("node:fs").watch;
+			const fakeNativeWatch = ((path, watchOptions, listener) => {
+				if (watchOptions && "recursive" in watchOptions && watchOptions.recursive) {
+					const emitter = new EventEmitter() as EventEmitter & { close: () => void };
+					emitter.close = () => {};
+					created = emitter;
+					return emitter;
+				}
+				return nodeFsWatch(path, watchOptions, listener);
+			}) as typeof import("node:fs").watch;
 			const { registry, recorded, subscribe } = makeRegistry({
 				contentWatchBackend: "native",
 				nativeWatch: fakeNativeWatch,
@@ -108,8 +114,8 @@ describe("file-browser-watch-core", () => {
 				// The swap itself forces one refresh so changes made during the
 				// gap are not lost.
 				await waitFor(() => (recorded.get("client")?.events.length ?? 0) > 0);
-				// And the chokidar replacement keeps delivering real events, with the
-				// swap counted as a second construction in the diagnostics.
+				// The replacement keeps delivering real events, with the swap counted
+				// as a second construction in diagnostics.
 				expect(registry.diagnostics().contentWatcherStarts).toBe(2);
 				await Bun.sleep(250);
 				const before = recorded.get("client")?.events.length ?? 0;

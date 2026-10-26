@@ -18,6 +18,7 @@ import {
 import type { Annotation, EditorMode, HostDraft, ImageAttachment, InputMethod } from "../../types";
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
+import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
@@ -909,9 +910,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       return true;
     }, [readOnly, vimModeEnabled]);
 
+    // A composer hidden with its target (a slide the page hid) is not on
+    // screen: it neither blocks Vim's document focus nor counts as an open
+    // overlay. Escape still closes it, as its own rung (below).
+    const composerShown = !!hook.commentPopover && hook.pinVisible;
+    const composerHidden = !!hook.commentPopover && !hook.pinVisible;
+
     useVimDocumentFocus({
       enabled: !readOnly && vimModeEnabled,
-      blocked: !!hook.toolbarState || !!hook.commentPopover || !!hook.quickLabelPicker,
+      blocked: !!hook.toolbarState || composerShown || !!hook.quickLabelPicker,
       focusDocument: focusVimDocument,
     });
 
@@ -1013,6 +1020,27 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}set-host-navigates`, active: true });
     }, [iframeReadyVersion, hostNavigates]);
 
+    // The hidden composer's Escape rung: with focus outside the iframe,
+    // Escape closes the hidden draft (its text stays in the draft store) and
+    // is used, so the next press reaches the rest of the ladder. Capture
+    // phase, so it runs before the Vim document-focus rung. Inside the
+    // iframe the bridge closes the draft and the hook closes the composer.
+    const handleCommentCloseRef = useRef(hook.handleCommentClose);
+    handleCommentCloseRef.current = hook.handleCommentClose;
+    useEffect(() => {
+      if (readOnly || !composerHidden) return;
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+        if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return;
+        e.preventDefault();
+        handleCommentCloseRef.current();
+      };
+      window.addEventListener('keydown', onKeyDown, true);
+      return () => window.removeEventListener('keydown', onKeyDown, true);
+    }, [readOnly, composerHidden]);
+
     // Parent-side Esc rung: with focus outside the iframe the bridge never
     // sees the keydown. Any open composer/toolbar/picker still closes first —
     // their state is read from this render's closure, so an Esc that closed
@@ -1023,6 +1051,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         !!hook.toolbarState || !!hook.commentPopover || !!hook.quickLabelPicker || !!globalCommentPopover;
       const onKeyDown = (e: KeyboardEvent) => {
         if (e.key !== 'Escape' || e.defaultPrevented) return;
+        // A hidden composer is closed by its own rung above.
         if (overlayOpen) return;
         // A text field or dialog owns its own Escape.
         const target = e.target as HTMLElement | null;
@@ -1065,7 +1094,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
 
     const vimOverlayWasOpenRef = useRef(false);
     useEffect(() => {
-      const overlayOpen = !!hook.toolbarState || !!hook.commentPopover || !!hook.quickLabelPicker;
+      const overlayOpen = !!hook.toolbarState || composerShown || !!hook.quickLabelPicker;
       const wasOpen = vimOverlayWasOpenRef.current;
       vimOverlayWasOpenRef.current = overlayOpen;
       if (
@@ -1080,7 +1109,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           { type: `${PREFIX}focus-vim` },
         );
       }
-    }, [hook.commentPopover, hook.quickLabelPicker, hook.toolbarState, readOnly, vimModeEnabled]);
+    }, [composerShown, hook.quickLabelPicker, hook.toolbarState, readOnly, vimModeEnabled]);
 
     useEffect(() => {
       if (iframeReadyVersion === 0) return;
@@ -1323,6 +1352,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               positionMode="center-above"
               element={hook.toolbarState.element}
               copyText={hook.toolbarState.selectionText}
+              getRichCopy={getRichCopyEnabled() ? hook.toolbarState.getRichCopy : undefined}
               // HTML/live surfaces are comment-only: no Delete, no label
               // picker, no Alt+digit labels (commentOnly). Exactly ONE label
               // affordance is restored: the hardcoded 👍 "Looks good". The
@@ -1341,8 +1371,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             document.body,
           )}
 
-        {/* Comment popover portal */}
-        {!readOnly && hook.commentPopover &&
+        {/* Hidden with its target (a slide the page hid): CommentPopover's draft
+            store keeps the text and images, and shown again it does not take
+            focus from where the person is. */}
+        {!readOnly && hook.pinVisible && hook.commentPopover &&
           createPortal(
             <CommentPopover
               anchorEl={hook.commentPopover.anchorEl}
@@ -1370,6 +1402,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               onRemoveTargetChip={targetChips ? hook.removeDraftTarget : undefined}
               onHoverTargetChip={targetChips ? hook.flashDraftTarget : undefined}
               refocusToken={targetChips ? hook.composerFocusToken : undefined}
+              autoFocus={hook.composerAutoFocus}
               captureStrayKeys={multiSelectActive}
               yieldState={multiSelectActive ? composerYield : undefined}
             />,

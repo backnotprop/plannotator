@@ -188,7 +188,7 @@ export async function resolveReaderSides(
     return { gitRoot: repoRoot, baseRev: `${sha}^`, head: { kind: "rev", rev: sha }, moved: false };
   }
 
-  if (kind === "workspace") return { error: "Guides of a multi-repository workspace open in Plannotator's web app only." };
+  if (kind === "workspace") return { error: "Guided reviews of a multi-repository workspace open in Plannotator's web app only." };
 
   // Local changes: the head is the working tree (the real files).
   const baseRev = sidecar?.baseSha ?? (await mergeBaseFor(runner, repoRoot, env.review?.base, "HEAD"));

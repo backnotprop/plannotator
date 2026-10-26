@@ -179,18 +179,22 @@ export interface UseLinkedDocReturn {
   /** Whether a fetch is in progress */
   isLoading: boolean;
   /** Open a linked document by path (saves plan state, fetches doc, swaps).
-   *  `revealSidebar: false` leaves the sidebar exactly as it was. */
+   *  `revealSidebar: false` leaves the sidebar exactly as it was.
+   *  `restoreScroll: true` (with a `scrollViewport`) returns the reader to
+   *  where they were when they last left this linked document for another
+   *  one: a host's Back to a document that is not the root (a review of
+   *  several files goes back to the file a link was followed from). */
   open: (
     docPath: string,
     buildUrl?: (path: string) => string,
     targetTab?: SidebarTab,
-    options?: { revealSidebar?: boolean },
+    options?: { revealSidebar?: boolean; restoreScroll?: boolean },
   ) => Promise<void>;
   /** Open an already-loaded linked document without refetching from disk */
   openLoaded: (
     doc: LinkedDocLoadData & { filepath: string },
     targetTab?: SidebarTab,
-    options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean },
+    options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean; restoreScroll?: boolean },
   ) => void;
   /** Return to the plan (caches doc annotations, restores plan state). With a
    *  `scrollViewport`, the reader's place in the root comes back too, unless
@@ -311,13 +315,17 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
 
   // Cache linked doc annotations keyed by filepath (persists across back/forth within session)
   const docCache = useRef<Map<string, CachedDocState>>(new Map());
+  // Where the reader was in each linked document when they left it for
+  // another one, keyed by normalized path. Read only by an open() that asks
+  // for `restoreScroll` (the root's place lives in savedPlanState instead).
+  const docScrollAnchors = useRef<Map<string, ScrollAnchor>>(new Map());
 
   const defaultBuildUrl = useCallback(
     (path: string) => `/api/doc?path=${encodeURIComponent(path)}`,
     []
   );
 
-  const restoreRootScroll = useCallback((anchor: ScrollAnchor) => {
+  const restoreScrollAnchorSettled = useCallback((anchor: ScrollAnchor) => {
     cancelScrollRestore();
     let stopped = false;
     const frames = new Set<number>();
@@ -427,7 +435,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     setError(null);
     savedPlanState.current = null;
     onAfterBack?.();
-    if (restoreScroll && saved.scrollAnchor) restoreRootScroll(saved.scrollAnchor);
+    if (restoreScroll && saved.scrollAnchor) restoreScrollAnchorSettled(saved.scrollAnchor);
     else cancelScrollRestore();
 
     // Re-apply plan annotation highlights after DOM settles
@@ -452,7 +460,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     onBeforeNavigate,
     getDocumentMarkdown,
     onAfterBack,
-    restoreRootScroll,
+    restoreScrollAnchorSettled,
     cancelScrollRestore,
   ]);
 
@@ -463,6 +471,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       snapshotCurrent?: boolean;
       notifyDocumentLoaded?: boolean;
       revealSidebar?: boolean;
+      restoreScroll?: boolean;
     } = {},
   ) => {
     const snapshotCurrent = options.snapshotCurrent ?? true;
@@ -513,7 +522,12 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       }
       setDocAnnotationCount(total);
     } else if (linkedDoc) {
-      // Already viewing a linked doc — cache its annotations before moving on
+      // Already viewing a linked doc — remember the reader's place in it and
+      // cache its annotations before moving on
+      const viewport = scrollViewportRef.current;
+      if (viewport) {
+        docScrollAnchors.current.set(normalizeBrowserPath(linkedDoc.filepath), captureScrollAnchor(viewport));
+      }
       docCache.current.set(linkedDoc.filepath, {
         annotations: [...annotations],
         globalAttachments: [...globalAttachments],
@@ -567,6 +581,13 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     if (revealSidebar) sidebar.open(targetTab ?? "toc");
     onDocumentActivated?.(data);
 
+    // Back to a linked document the reader left for another one: put them
+    // back where they were, exactly as back() does for the root.
+    const scrollAnchor = options.restoreScroll
+      ? docScrollAnchors.current.get(normalizeBrowserPath(data.filepath))
+      : undefined;
+    if (scrollAnchor) restoreScrollAnchorSettled(scrollAnchor);
+
     // Re-apply cached annotations after DOM settles
     if (cached?.annotations.length) {
       setTimeout(() => {
@@ -598,17 +619,20 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
     onDocumentActivated,
     getDocumentMarkdown,
     back,
+    cancelScrollRestore,
+    restoreScrollAnchorSettled,
   ]);
 
   const openLoaded = useCallback((
     doc: LinkedDocLoadData & { filepath: string },
     targetTab?: SidebarTab,
-    options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean },
+    options?: { notifyDocumentLoaded?: boolean; revealSidebar?: boolean; restoreScroll?: boolean },
   ) => {
     activateDocument(doc, targetTab, {
       snapshotCurrent: true,
       notifyDocumentLoaded: options?.notifyDocumentLoaded,
       revealSidebar: options?.revealSidebar,
+      restoreScroll: options?.restoreScroll,
     });
   }, [activateDocument]);
 
@@ -617,7 +641,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
       docPath: string,
       buildUrl?: (path: string) => string,
       targetTab?: SidebarTab,
-      options?: { revealSidebar?: boolean },
+      options?: { revealSidebar?: boolean; restoreScroll?: boolean },
     ) => {
       onBeforeNavigate?.();
       setIsLoading(true);
@@ -643,6 +667,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
         activateDocument({ ...data, filepath: data.filepath }, targetTab, {
           snapshotCurrent: false,
           revealSidebar: options?.revealSidebar,
+          restoreScroll: options?.restoreScroll,
         });
       } catch {
         setError("Failed to connect to server");
@@ -700,6 +725,7 @@ export function useLinkedDoc(options: UseLinkedDocOptions): UseLinkedDocReturn {
 
     savedPlanState.current = null;
     docCache.current = new Map(state.docs);
+    docScrollAnchors.current = new Map();
     let total = 0;
     for (const cached of docCache.current.values()) {
       total += cached.annotations.length + cached.globalAttachments.length;

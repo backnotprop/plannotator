@@ -460,6 +460,10 @@ export const BRIDGE_SCRIPT = `(function() {
   // --- Selection ---
   var pendingSelection = null;
   var pendingRange = null; // live range for the pending selection (scroll tracking)
+  // The pending text selection's own text, uncapped: what plain-text Copy
+  // writes. Range.toString() would lose the rendered line breaks between
+  // blocks and keep the source indentation.
+  var pendingCopyText = '';
   var pendingPinEl = null; // element pinned by a pinpoint click (outline + scroll tracking)
   var pendingPinAnchor = null; // serialized anchor for the pending pin
   var pendingPinKey = null; // target key for the primary pinpoint target (multi-select)
@@ -571,7 +575,8 @@ export const BRIDGE_SCRIPT = `(function() {
     }
     skipNextClear = false; // a real text selection happened
     var range = sel.getRangeAt(0);
-    var text = capSelectionText(sel.toString().trim());
+    var fullText = sel.toString().trim();
+    var text = capSelectionText(fullText);
     if (!text) return false;
 
     // A draft now owns the surface: kill the click-to-select hover
@@ -580,6 +585,7 @@ export const BRIDGE_SCRIPT = `(function() {
 
     var rect = range.getBoundingClientRect();
     pendingRange = range;
+    pendingCopyText = fullText;
     pendingSelection = {
       text: text,
       startContainerPath: getNodePath(range.startContainer),
@@ -597,6 +603,13 @@ export const BRIDGE_SCRIPT = `(function() {
       targetKey: (extras && extras.targetKey) || undefined,
       targetLabel: (extras && extras.targetLabel) || undefined,
       context: (extras && extras.context) || undefined,
+      // This bridge answers rich-copy-request for a text selection (the
+      // toolbar's rich-text Copy). Optional and additive: an older bridge
+      // omits it and Copy stays plain text, so no protocol version bump.
+      richCopy: (extras && extras.pinpoint) ? undefined : true,
+      // The quote above was cut to MAX_SELECTION_TEXT: a plain-text copy made
+      // from it alone (no answer to rich-copy-request) says so.
+      textCut: text.length < fullText.length ? true : undefined,
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
     });
     renderAnnotationOverlay(); // draft selection highlight (overlay-projected)
@@ -644,6 +657,46 @@ export const BRIDGE_SCRIPT = `(function() {
     if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data || !e.data.type) return;
     var type = e.data.type;
+
+    // Copy (rich text) was pressed in the parent: build the pending text
+    // range's markup now (never on selection). A throw or an oversized range
+    // answers without markup, so the parent copies plain text.
+    if (type === PREFIX + 'rich-copy-request') {
+      // Text and markup are each capped at 256 KiB: past it the text is cut
+      // (never at half a surrogate pair) and marked, and the markup is not
+      // built at all (too large for rich text).
+      var copyHtml = '';
+      var copyText = '';
+      var copyTruncated = false;
+      var copyTooLarge = false;
+      try {
+        if (pendingRange && pendingSelection && pendingSelection.startContainerPath) {
+          copyText = pendingCopyText || pendingRange.toString();
+          if (copyText.length > 262144) {
+            var copyCut = 262144;
+            var copyLast = copyText.charCodeAt(copyCut - 1);
+            if (copyLast >= 0xd800 && copyLast <= 0xdbff) copyCut -= 1;
+            copyText = copyText.slice(0, copyCut);
+            copyTruncated = true;
+            copyTooLarge = true;
+          } else {
+            copyHtml = htmlForRange(pendingRange);
+            if (copyHtml.length > 262144) copyTooLarge = true;
+          }
+        }
+      } catch (err) {
+        copyHtml = '';
+      }
+      postToParent({
+        type: PREFIX + 'rich-copy',
+        id: typeof e.data.id === 'string' ? e.data.id : '',
+        html: copyTooLarge ? '' : copyHtml,
+        text: copyText,
+        truncated: copyTruncated,
+        tooLarge: copyTooLarge
+      });
+      return;
+    }
 
     if (type === PREFIX + 'create-mark') {
       var id = e.data.id;
@@ -1362,6 +1415,10 @@ export const BRIDGE_SCRIPT = `(function() {
     return pinpointBoxEl;
   }
   function positionPinpointBox(el) {
+    if (pendingPinHidden(el)) {
+      if (pinpointBoxEl) pinpointBoxEl.style.display = 'none';
+      return;
+    }
     var r = el.getBoundingClientRect();
     var box = getPinpointBoxEl();
     box.style.display = 'block';
@@ -1515,6 +1572,8 @@ export const BRIDGE_SCRIPT = `(function() {
       if (annotateModeActive && currentInputMethod !== 'pinpoint' && lastPointer && !pendingPinEl && !pendingSelection) {
         setHoverHighlight(committedHighlightIdAtCached(lastPointer.x, lastPointer.y));
       }
+      // Before the boxes: it may re-find a replaced target they then follow.
+      reconcilePendingPinVisibility();
       positionMultiTargetBoxes();
       if (pendingPinEl && pendingPinEl.isConnected) {
         positionPinpointBox(pendingPinEl);
@@ -3507,7 +3566,91 @@ export const BRIDGE_SCRIPT = `(function() {
     }
   }
 
+  // A draft's composer hides with its target and keeps the draft: a slide the
+  // page hid (display:none, visibility:hidden, no box) is not a scroll-out.
+  // Offscreen targets stay visible to support roaming multi-select. A target
+  // the page REPLACED with a new element (a framework re-render, a live-app
+  // route change) is found again through its anchor, the way restore re-finds
+  // committed targets; one that cannot be found keeps the composer visible,
+  // so a draft is never left where nobody can reach it.
+  var pendingPinVisible = true;
+  var pendingPinSearchGen = 0;
+  function pendingPinHidden(el) {
+    if (!el || !el.isConnected) return false;
+    if (targetStyleHidden(el)) return true;
+    var rect = el.getBoundingClientRect();
+    return layoutActive() && !rect.width && !rect.height;
+  }
+
+  function refindPendingTarget(anchor, taken) {
+    var found = resolveAnchorElement(anchor);
+    if (!found || isViewerOverlayNode(found)) return null;
+    for (var i = 0; i < taken.length; i++) if (taken[i] === found) return null;
+    return found;
+  }
+
+  // Re-find detached draft targets, once per DOM generation each. Returns
+  // whether the primary moved to a new element.
+  function refreshPendingTargets() {
+    var taken = [pendingPinEl];
+    for (var t = 0; t < pendingMultiTargets.length; t++) taken.push(pendingMultiTargets[t].el);
+    var moved = false;
+    if (pendingPinEl && !pendingPinEl.isConnected && pendingPinAnchor && pendingPinSearchGen !== domGeneration) {
+      pendingPinSearchGen = domGeneration;
+      var found = refindPendingTarget(pendingPinAnchor, taken);
+      if (found) {
+        pendingPinEl = found;
+        // The text range belonged to the replaced element: commit as an
+        // element pin on the new one (as a promoted primary does).
+        if (pendingRange && !rangeAlive(pendingRange)) pendingRange = null;
+        if (pendingSelection && pendingSelection.startContainerPath) {
+          pendingSelection = { element: true, text: pendingSelection.text };
+        }
+        moved = true;
+      }
+    }
+    for (var i = 0; i < pendingMultiTargets.length; i++) {
+      var entry = pendingMultiTargets[i];
+      if (!entry.el || entry.el.isConnected || !entry.anchor || entry.searchGen === domGeneration) continue;
+      entry.searchGen = domGeneration;
+      var next = refindPendingTarget(entry.anchor, taken);
+      if (next) { entry.el = next; taken.push(next); }
+    }
+    return moved;
+  }
+
+  // Re-anchor the parent's composer on the pin (it cannot see the page).
+  function postPendingPinRect() {
+    if (!pendingSelection || !pendingPinEl || !pendingPinEl.isConnected) return;
+    var tracked = pendingRange && rangeAlive(pendingRange) ? pendingRange : pendingPinEl;
+    var r = tracked.getBoundingClientRect();
+    postToParent({
+      type: PREFIX + 'selection-rect',
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height }
+    });
+  }
+
+  function reconcilePendingPinVisibility() {
+    if (!pendingPinEl) return;
+    var moved = refreshPendingTargets();
+    var visible = !pendingPinHidden(pendingPinEl);
+    for (var i = 0; !visible && i < pendingMultiTargets.length; i++) {
+      visible = !pendingPinHidden(pendingMultiTargets[i].el);
+    }
+    // A detached primary has no geometry: never leave its outline behind.
+    if (!pendingPinEl.isConnected && pinpointBoxEl) pinpointBoxEl.style.display = 'none';
+    var shown = visible && !pendingPinVisible;
+    if (visible !== pendingPinVisible) {
+      pendingPinVisible = visible;
+      postToParent({ type: PREFIX + 'pin-visibility', visible: visible });
+      if (!visible && pinpointBoxEl) pinpointBoxEl.style.display = 'none';
+    }
+    if (visible && (moved || shown)) postPendingPinRect();
+  }
+
   function clearPendingPin() {
+    pendingPinVisible = true;
+    pendingPinSearchGen = 0;
     pendingPinEl = null;
     pendingPinContext = null;
     pendingPinAnchor = null;
@@ -3563,6 +3706,7 @@ export const BRIDGE_SCRIPT = `(function() {
   }
 
   function positionBoxToEl(box, el) {
+    if (pendingPinHidden(el)) { box.style.display = 'none'; return; }
     var r = el.getBoundingClientRect();
     box.style.display = 'block';
     box.style.left = r.left + 'px';
@@ -3694,6 +3838,7 @@ export const BRIDGE_SCRIPT = `(function() {
    */
   function removeMultiTargetByKey(key, echo) {
     if (!key) return;
+    schedulePinpointReconcile();
     if (key === pendingPinKey) {
       if (!pendingMultiTargets.length) {
         // Last target gone — the draft is cancelled.
@@ -3710,6 +3855,7 @@ export const BRIDGE_SCRIPT = `(function() {
       var next = pendingMultiTargets.shift();
       destroyMultiTargetBox(next.box);
       pendingPinEl = next.el;
+      pendingPinSearchGen = 0;
       pendingPinAnchor = next.anchor;
       pendingPinKey = next.key;
       pendingPinLabel = next.label;
@@ -3777,6 +3923,7 @@ export const BRIDGE_SCRIPT = `(function() {
     var key = makeTargetKey();
     var box = createMultiTargetBox(el);
     pendingMultiTargets.push({ key: key, el: el, anchor: anchor, label: label, text: text, point: point, context: context, box: box });
+    schedulePinpointReconcile();
     postToParent({
       type: PREFIX + 'multi-target-added',
       key: key,
@@ -3911,6 +4058,8 @@ export const BRIDGE_SCRIPT = `(function() {
     multiSelectArmed = false;
     multiSelectMax = MAX_MULTI_TARGETS;
     pendingPinEl = el;
+    pendingPinVisible = true;
+    pendingPinSearchGen = 0;
     pendingPinAnchor = buildElementAnchor(el);
     pendingPinKey = makeTargetKey();
     pendingPinLabel = pinpointHoverLabel(el);
@@ -5310,6 +5459,29 @@ export const BRIDGE_SCRIPT = `(function() {
       vimAddedBodyTabIndex = false;
     }
     if (document.body) document.body.removeAttribute('data-plannotator-vim-focus-owner');
+  }
+
+  // Selected markup for the parent's rich-text Copy button, built only when
+  // the button is pressed (rich-copy-request). Keeps the enclosing formatting
+  // that cloneContents omits for text endpoints (the same semantic ancestors
+  // selectionRangeToHtml keeps) and absolutizes links.
+  function htmlForRange(range) {
+    var holder = document.createElement('div');
+    var fragment = range.cloneContents();
+    var ancestor = range.commonAncestorContainer.nodeType === 1
+      ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+    while (ancestor && ancestor !== document.body) {
+      if (ancestor.matches('a,b,blockquote,code,del,em,h1,h2,h3,h4,h5,h6,i,li,ol,p,pre,s,strong,sub,sup,table,tbody,td,tfoot,th,thead,tr,u,ul')) {
+        var wrapper = ancestor.cloneNode(false);
+        while (fragment.firstChild) wrapper.appendChild(fragment.firstChild);
+        fragment.appendChild(wrapper);
+      }
+      ancestor = ancestor.parentElement;
+    }
+    holder.appendChild(fragment);
+    var links = holder.querySelectorAll('a[href]');
+    for (var i = 0; i < links.length; i++) links[i].setAttribute('href', links[i].href);
+    return holder.innerHTML;
   }
 
   function copyVimText(text) {

@@ -1,0 +1,66 @@
+/* Plannotator Graphite. Dark half: a near-neutral graphite tuned to stay readable
+   in daylight (lifted ground, larger surface steps, secondary text at APCA Lc 60+,
+   the purple primary kept inside sRGB). Light half: Plannotator's light, unchanged.
+   Approved 2026-10-24 (.product/approved/plannotator-graphite/). */
+.theme-plannotator-graphite {
+  --background: oklch(0.225 0.006 286);
+  --foreground: oklch(0.945 0.003 286);
+  --card: oklch(0.295 0.006 286);
+  --card-foreground: oklch(0.945 0.003 286);
+  --popover: oklch(0.375 0.006 286);
+  --popover-foreground: oklch(0.945 0.003 286);
+  --primary: oklch(0.765 0.124 283);
+  --primary-foreground: oklch(0.20 0.01 286);
+  --secondary: oklch(0.740 0.123 180);
+  --secondary-foreground: oklch(0.20 0.01 286);
+  --muted: oklch(0.355 0.006 286);
+  --muted-foreground: oklch(0.820 0.007 286);
+  --accent: oklch(0.765 0.156 60);
+  --accent-foreground: oklch(0.20 0.01 286);
+  --destructive: oklch(0.770 0.124 25);
+  --destructive-foreground: oklch(0.20 0.01 286);
+  --border: oklch(0.435 0.006 286);
+  --input: oklch(0.355 0.006 286);
+  --ring: oklch(0.765 0.124 283);
+  --success: oklch(0.735 0.170 150);
+  --success-foreground: oklch(0.20 0.01 286);
+  --warning: oklch(0.760 0.144 85);
+  --warning-foreground: oklch(0.20 0.01 286);
+
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: oklch(0.355 0.006 286);
+  --focus-highlight: oklch(0.745 0.116 200);
+}
+
+.theme-plannotator-graphite.light {
+  /* Plannotator light inherits this from its own dark block; keep the same value. */
+  --focus-highlight: oklch(0.70 0.20 200);
+  --background: oklch(0.97 0.005 260);
+  --foreground: oklch(0.18 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 260);
+  --primary: oklch(0.50 0.25 280);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.50 0.18 180);
+  --secondary-foreground: oklch(1 0 0);
+  --muted: oklch(0.92 0.01 260);
+  --muted-foreground: oklch(0.40 0.02 260);
+  --accent: oklch(0.60 0.22 50);
+  --accent-foreground: oklch(0.18 0.02 260);
+  --destructive: oklch(0.50 0.25 25);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.88 0.01 260);
+  --input: oklch(0.92 0.01 260);
+  --ring: oklch(0.50 0.25 280);
+  --success: oklch(0.45 0.20 150);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.55 0.18 85);
+  --warning-foreground: oklch(0.18 0.02 260);
+
+  --code-bg: oklch(0.92 0.01 260);
+}

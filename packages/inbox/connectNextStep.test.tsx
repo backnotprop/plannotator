@@ -15,6 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { ComposeSessionsModel } from './api';
 import { SCENARIOS, agentsModel, missing, ready, toolOff } from './connectSteps.fixtures';
+import { MCP_WAKE_LINE, WAKE_LINE, mcpWakeLine, wakeLine } from './connectSteps';
 
 const hasDom = typeof document !== 'undefined';
 const { EmptyState } = (hasDom ? await import('./components/EmptyState') : {}) as typeof import('./components/EmptyState');
@@ -107,7 +108,7 @@ test.skipIf(!hasDom)('typical: the next step turns on Pi\'s Inbox tool, naming i
   expect(hero.querySelectorAll('.ib-btn.ib-pri')).toHaveLength(1);
   expect(hero.querySelector('pre')).toBeNull();
 
-  expect([...listOf(m.el, 'Already connected')].map(text)).toEqual(['Claude Code plugin · running now', 'Codex MCP', 'Cursor MCP']);
+  expect([...listOf(m.el, 'Already connected')].map(text)).toEqual(['Claude Code plugin · running now', 'Codex MCP · sees replies when it checks', 'Cursor MCP · sees replies when it checks']);
   expect([...listOf(m.el, 'Left to do')].map(text)).toEqual(['Pi now', 'OpenCode install']);
 
   const message = button(m.el, 'Message Claude Code')!;
@@ -171,7 +172,7 @@ test.skipIf(!hasDom)('Not now puts the step off: OpenCode is next, with its plug
   await click(fold);
   const mcp = [...card(m.el).querySelectorAll('pre')].map(text);
   expect(mcp[1]).toBe('"mcp": { "plannotator-inbox": { "type": "local", "command": ["/opt/plannotator","inbox","mcp"], "enabled": true } }');
-  expect(text(card(m.el))).toContain("Works, but your replies won't come back into the session by themselves.");
+  expect(text(card(m.el))).toContain("Works, but OpenCode sees your replies only when it checks the Inbox; they don't arrive as a new turn.");
 });
 
 test.skipIf(!hasDom)('plugin missing: Claude Code\'s install command, restart, Use MCP instead; Pi through MCP is done but left to give its extension', async () => {
@@ -182,7 +183,7 @@ test.skipIf(!hasDom)('plugin missing: Claude Code\'s install command, restart, U
   expect(hero.querySelector('pre')?.textContent).toBe('claude plugin marketplace add backnotprop/plannotator\nclaude plugin install plannotator@plannotator');
   expect(text(hero)).toContain('Run it in a terminal, then restart Claude Code.');
   expect(button(hero, 'Use MCP instead')).toBeDefined();
-  expect([...listOf(m.el, 'Already connected')].map(text)).toEqual(['Pi MCP, no wake', 'Codex MCP']);
+  expect([...listOf(m.el, 'Already connected')].map(text)).toEqual(['Pi MCP · sees replies when it checks', 'Codex MCP · sees replies when it checks']);
   expect([...listOf(m.el, 'Left to do')].map(text)).toEqual(['Claude Code now', 'Pi install', 'OpenCode: not on this computer']);
   await click(button(hero, 'Not now')!);
   const next = card(m.el);
@@ -396,4 +397,37 @@ test.skipIf(!hasDom)('the OpenCode plugin line follows a later read that learns 
   current = agentsModel({ opencode: { ...missing('opencode'), plugin: { installed: false, generation: '1' } } });
   act(() => render());
   expect(text(card(host).querySelector('pre'))).toBe('"plugin": ["@plannotator/opencode@latest"]');
+});
+
+test.skipIf(!hasDom)('the screen says plainly which agents a reply wakes: once under the lists, and over the other agents\' picker', async () => {
+  const m = mount(SCENARIOS.typical(), { sessions: live });
+  const notes = [...m.el.querySelectorAll('[data-wake-note]')];
+  expect(notes).toHaveLength(1);
+  // Codex is on this computer (typical): the line names it.
+  expect(text(notes[0]!)).toBe(wakeLine(['codex']));
+  // It sits after the lists and before Try it.
+  const order = [...m.el.querySelectorAll('.ib-cl, [data-wake-note], .ib-try')];
+  expect(order.map((el) => el.className.split(' ')[0])).toEqual(['ib-cl', 'ib-note', 'ib-try']);
+  await click(button(m.el, 'Another agent or editor')!);
+  expect(text(m.el.querySelector('[data-wake-note="mcp"]'))).toBe(mcpWakeLine(['codex']));
+  // A component tooltip or plain text, never a native title.
+  expect(m.el.querySelector('[data-wake-note] [title], [data-wake-note][title]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('nothing found: the card asks which agent; the line under it says what a reply does, once', () => {
+  const m = mount(SCENARIOS.none());
+  expect(text(card(m.el).querySelector('p'))).toBe('Which agent do you use?');
+  expect(m.el.querySelectorAll('[data-wake-note=""]')).toHaveLength(1);
+  // No Codex here: the line is unchanged, it never names Codex.
+  expect(text(m.el.querySelector('[data-wake-note]'))).toBe(WAKE_LINE);
+  expect(text(m.el.querySelector('[data-wake-note]'))).not.toContain('Codex');
+});
+
+test.skipIf(!hasDom)('without Codex on this computer, neither wake line names it', async () => {
+  const m = mount(agentsModel({ 'claude-code': ready() }));
+  expect(text(m.el.querySelector('[data-wake-note=""]'))).toBe(WAKE_LINE);
+  const other = button(m.el, 'Another agent or editor');
+  expect(other).toBeTruthy();
+  await click(other!);
+  expect(text(m.el.querySelector('[data-wake-note="mcp"]'))).toBe(MCP_WAKE_LINE);
 });

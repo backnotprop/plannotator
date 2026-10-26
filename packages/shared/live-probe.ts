@@ -13,7 +13,7 @@
  * node:http APIs.
  */
 
-import { isLoopbackHostname } from "./live-proxy-core";
+import { isLoopbackHostname, isPlannotatorLiveTarget, isPlannotatorUpstreamResponse } from "./live-proxy-core";
 
 export const LIVE_PROBE_TIMEOUT_MS = 3000;
 
@@ -40,6 +40,17 @@ export interface LiveAppProbeResult {
   probeError: string | null;
   /** Final URL when the probe redirected off the target's loopback origin. */
   probeRedirectedTo: string | null;
+  /**
+   * The target is a Plannotator server (a port a Plannotator registry names,
+   * or a response carrying the Plannotator server header). Never live: the
+   * proxy would give the proxied page same-origin writes on that server.
+   */
+  plannotator: boolean;
+}
+
+export interface LiveAppProbeOptions {
+  /** Ports Plannotator servers hold (listPlannotatorServerPorts); refused before any request. */
+  plannotatorPorts?: Iterable<number>;
 }
 
 /**
@@ -55,7 +66,12 @@ export async function probeLiveAppTarget(
   targetUrl: string,
   parsedUrl: URL,
   fetchImpl: typeof fetch = fetch,
+  options: LiveAppProbeOptions = {},
 ): Promise<LiveAppProbeResult> {
+  if (isPlannotatorLiveTarget(parsedUrl, options.plannotatorPorts ?? [])) {
+    return { liveEligible: false, probeError: null, probeRedirectedTo: null, plannotator: true };
+  }
+  let plannotator = false;
   let liveEligible = false;
   let probeError: string | null = null;
   let probeRedirectedTo: string | null = null;
@@ -77,11 +93,12 @@ export async function probeLiveAppTarget(
     } catch {
       finalOnOrigin = false;
     }
-    liveEligible = probe.status < 500 && contentType.includes("text/html") && finalOnOrigin;
+    plannotator = isPlannotatorUpstreamResponse(probe.headers);
+    liveEligible = !plannotator && probe.status < 500 && contentType.includes("text/html") && finalOnOrigin;
   } catch (err) {
     probeError = err instanceof Error ? err.message : String(err);
   }
-  return { liveEligible, probeError, probeRedirectedTo };
+  return { liveEligible, probeError, probeRedirectedTo, plannotator };
 }
 
 // --- Shared user-facing messages ---------------------------------------------
@@ -108,6 +125,9 @@ export function buildForceAppFailureMessage(
   targetUrl: string,
   probe: LiveAppProbeResult,
 ): string {
+  if (probe.plannotator) {
+    return `--app: ${targetUrl} is a Plannotator server; live annotation never proxies a Plannotator server, because the proxied page would get same-origin access to it`;
+  }
   if (probe.probeError !== null) {
     return `--app: could not reach ${targetUrl}: ${probe.probeError}`;
   }
@@ -115,6 +135,14 @@ export function buildForceAppFailureMessage(
     return `--app: ${targetUrl} redirected off its loopback origin (${probe.probeRedirectedTo}); live mode requires the app to serve HTML from the probed origin`;
   }
   return `--app: ${targetUrl} did not return an HTML page`;
+}
+
+/**
+ * Fallback notice when the target is a Plannotator server: live mode never
+ * proxies one, so the session degrades to static conversion and says why.
+ */
+export function buildLivePlannotatorFallbackNotice(targetUrl: string): string {
+  return `${targetUrl} is a Plannotator server, which live annotation never proxies; using static conversion.`;
 }
 
 /**

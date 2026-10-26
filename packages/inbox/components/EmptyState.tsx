@@ -9,13 +9,17 @@ import {
   OPENCODE_PLUGIN_LINES,
   PI_EXTENSION_INSTALL,
   PLUGIN_HOSTS,
+  mcpWakeLine,
+  mcpWakingHostsHere,
   TRY_PROMPT,
+  wakeLine,
   blockedText,
   connectPlan,
   doneNote,
   harnessOf,
   isPluginHost,
   laterNote,
+  mcpFoldHint,
   stepEyebrow,
   stepText,
   stepTitle,
@@ -130,7 +134,7 @@ function McpFold({ host, context }: { host: PluginHost; context: ConnectContext 
   return (
     <Fold label="Use MCP instead" id={id}>
       <CodeBox text={text} label={host === 'opencode' ? 'opencode.json' : undefined} />
-      <p className="ib-cn-hint">Works, but your replies won&apos;t come back into the session by themselves.</p>
+      <p className="ib-cn-hint">{mcpFoldHint(host === 'claude-code' ? 'Claude Code' : host === 'pi' ? 'Pi' : 'OpenCode')}</p>
     </Fold>
   );
 }
@@ -190,6 +194,24 @@ export interface EmptyStateProps {
   onAgents: (next: InboxAgentsModel) => void;
   /** Open compose addressed to a live session. */
   onMessage: (session: string, opener: HTMLElement | null) => void;
+  /**
+   * The notifications ask (NotificationAsk with `firstRun`), drawn under
+   * "Try it": the moment before the first question arrives. App decides
+   * when (never while a one-time dialog is open).
+   */
+  ask?: ReactNode;
+  /** The screen's heading in place of "No agent has written yet" (the tour's step 6: "Now, let's connect your agents"). */
+  heading?: string;
+  /** A line above everything (the tour's step 6: back in the person's own Inbox). */
+  lead?: string;
+  /**
+   * "Want to see it work first? Take the 2-minute tour" at the screen's foot
+   * (approval "inbox-onboarding-tour"): once the tour was finished or left,
+   * the entry screen no longer opens and this quiet link stays. Absent: none.
+   */
+  onTakeTour?: () => void;
+  /** Try it's prompt to copy in place of the test message (the tour's step 6: one real question, with pictures). */
+  tryPrompt?: string;
 }
 
 /**
@@ -203,7 +225,7 @@ export interface EmptyStateProps {
  * plugin is a command to copy, and the screen moves on by itself once the
  * agents are read again (App re-reads them while this screen shows).
  */
-export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessions, onAgents, onMessage }: EmptyStateProps) {
+export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessions, onAgents, onMessage, ask, heading, lead, onTakeTour, tryPrompt }: EmptyStateProps) {
   const [skipped, setSkipped] = useState<string[]>([]);
   const [busy, setBusy] = useState<InboxAgentId | null>(null);
   const [error, setError] = useState<{ id: InboxAgentId; text: string } | null>(null);
@@ -265,7 +287,7 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
         <h3 ref={stepHeading} tabIndex={-1}>
           Connect your first agent
         </h3>
-        <p>Plannotator&apos;s own connections bring your replies back into the session by themselves. Which agent do you use?</p>
+        <p>Which agent do you use?</p>
         <div className="ib-cn-acts">
           <Choice
             label="Your agent"
@@ -463,9 +485,21 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
       </div>
       <div className="ib-lbody">
         <div className="ib-empty" data-inbox-empty="" aria-busy={loading || undefined}>
-          <h2>No agent has written yet</h2>
+          {lead && (
+            <p className="ib-tour-lead" role="status">
+              <Icon name="check" size={14} />
+              {lead}
+            </p>
+          )}
+          <h2 tabIndex={-1}>{heading ?? 'No agent has written yet'}</h2>
           {hero}
           {lists}
+          {!loading && (
+            <p className="ib-note ib-cn-wake" data-wake-note="">
+              <Icon name="info" />
+              <span>{wakeLine(mcpWakingHostsHere(agents))}</span>
+            </p>
+          )}
           {!loading && (
           <div className="ib-try">
             <h3 ref={tryHeading} tabIndex={-1}>
@@ -493,15 +527,29 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
               <p>{who}</p>
             )}
             <div className="ib-try-quote">
-              <span>{TRY_PROMPT}</span>
-              <CopyButton text={TRY_PROMPT} />
+              <span>{tryPrompt ?? TRY_PROMPT}</span>
+              <CopyButton text={tryPrompt ?? TRY_PROMPT} />
             </div>
+            {ask && <div data-first-run-ask="">{ask}</div>}
           </div>
           )}
           {context && !loading && (
             <Fold label="Another agent or editor" sub="VS Code, Zed, JetBrains, Goose, any MCP client" id={pickerId}>
+              <p className="ib-note ib-cn-wake" data-wake-note="mcp">
+                <Icon name="info" />
+                <span>{mcpWakeLine(mcpWakingHostsHere(agents))}</span>
+              </p>
               <ConnectPicker harnesses={OTHER_HARNESSES} initial="vscode" context={context} icons />
             </Fold>
+          )}
+          {onTakeTour && (
+            <p className="ib-tour-again" data-tour-again="">
+              Want to see it work first?{' '}
+              <button type="button" className="ib-lnk" onClick={onTakeTour}>
+                Take the 2-minute tour
+              </button>
+              : how we built the Inbox with the Inbox.
+            </p>
           )}
           <div className="ib-sr" aria-live="polite">
             {said}

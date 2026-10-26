@@ -211,7 +211,7 @@ describe('QuestionBlock', () => {
     expect(answerOf(1)?.selected).toEqual(['Dot', 'Banner']);
     expect(button(cards(el)[1], 'Accept recommended')).toBeUndefined();
 
-    await click(button(cards(el)[2], 'Use')!);
+    await click(button(cards(el)[2], 'Accept recommended')!);
     expect(answerOf(2)?.text).toBe('Two phones, one offline.');
     // A settled question has no Accept recommended.
     expect(button(cards(el)[3], 'Accept recommended')).toBeUndefined();
@@ -249,8 +249,8 @@ describe('QuestionBlock', () => {
   }
 
   test.skipIf(!hasDom)('multi recommending only a suggestion: a tick hides Accept recommended, as before', async () => {
-    // Once answered, the Suggested line is gone, so Accept would clear the
-    // ticks for text the card no longer shows.
+    // Accept would clear the ticks for the recommended answer, which is a
+    // row of its own the reviewer can tick beside them.
     const el = await mount(<Harness markdown={`:::question-multi\nWhich indicators ship?\n\n- [ ] Dot\n- [ ] Banner\n\nRecommended: a sound, nothing visual\n:::\n`} />);
     const card = () => cards(el)[0];
     expect(button(card(), 'Accept recommended')).toBeDefined();
@@ -275,8 +275,10 @@ describe('QuestionBlock', () => {
     const use = button(cards(suggested)[0], 'Accept recommended')!;
     use.focus();
     await click(use);
-    expect(document.activeElement === cards(suggested)[0].querySelector('input[type="text"]')).toBe(true);
-    expect((document.activeElement as HTMLInputElement).value).toBe('something else entirely');
+    // The agent's own answer is a row of the list: its control takes focus.
+    const row = cards(suggested)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!;
+    expect(document.activeElement === row).toBe(true);
+    expect(row.checked).toBe(true);
   });
 
   test.skipIf(!hasDom)('single: a pick of another choice still hides Accept recommended', async () => {
@@ -491,16 +493,190 @@ describe('QuestionBlock', () => {
     ':::',
   ].join('\n');
 
-  test.skipIf(!hasDom)('a choice question whose recommendation names none of its choices shows it, and Use fills Other', async () => {
+  // One concept (the owner, 2026-10-24: "What is the difference between
+  // suggested/recommended?"; and "It should be inline as an answer, not an
+  // isolated thing"): the agent's recommended answer that is none of its
+  // choices is one more answer row, drawn as a choice, with the same
+  // Recommended tag, after the choices and before "Other…".
+  test.skipIf(!hasDom)('a recommendation naming none of the choices is one more answer row, tagged Recommended, before Other', async () => {
     const el = await mount(<Harness markdown={UNMATCHED} />);
     const card = cards(el)[0];
-    const line = card.querySelector<HTMLElement>('[data-question-suggested]');
-    expect(line?.textContent).toContain('SQLite on the box');
-    expect(card.getAttribute('aria-describedby')?.split(' ')).toContain(line!.id);
-    await click(button(card, 'Use')!);
+    expect(card.textContent).not.toContain('Suggested');
+    const rows = Array.from(card.querySelectorAll<HTMLLabelElement>('label[data-question-option]'));
+    expect(rows.map((r) => r.textContent)).toEqual(['Redis', 'Memcached', 'SQLite on the box Recommended']);
+    const row = rows[2];
+    expect(row.hasAttribute('data-question-suggested')).toBe(true);
+    // The same control as the choices: a radio in the same group, named by
+    // its row (text and tag).
+    const input = row.querySelector<HTMLInputElement>('input')!;
+    const redis = rows[0].querySelector<HTMLInputElement>('input')!;
+    expect(input.type).toBe('radio');
+    expect(input.name).toBe(redis.name);
+    expect(row.contains(input)).toBe(true);
+    expect(row.className).toBe(rows[0].className);
+    // Then "Other…", empty.
+    const otherField = card.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    expect(row.compareDocumentPosition(otherField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Not a describedby line any more.
+    expect(card.getAttribute('aria-describedby')).toBeNull();
+    // One button for it: Accept recommended.
+    expect(Array.from(card.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Add note', 'Skip', 'Accept recommended']);
+  });
+
+  test.skipIf(!hasDom)('picking the recommended row stores the Other answer Accept recommended stores; the row stays', async () => {
+    const el = await mount(<Harness markdown={UNMATCHED} />);
+    const card = () => cards(el)[0];
+    const row = () => card().querySelector<HTMLLabelElement>('label[data-question-suggested]')!;
+    const otherField = () => card().querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    await click(row().querySelector('span')!);
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'SQLite on the box' });
-    // Answered, the line goes (as a text question's does).
-    expect(cards(el)[0].querySelector('[data-question-suggested]')).toBeNull();
+    expect(row().querySelector('input')!.checked).toBe(true);
+    // The text is on the row, not repeated in the Other field.
+    expect(otherField().value).toBe('');
+    expect(button(card(), 'Accept recommended')).toBeUndefined();
+    // A choice replaces it, and the row is still there to pick again.
+    await click(rowText(card(), 'Redis'));
+    expect(answerOf(0)).toMatchObject({ selected: ['Redis'] });
+    expect(answerOf(0)?.other).toBeUndefined();
+    expect(row().querySelector('input')!.checked).toBe(false);
+    // Accept recommended (on a fresh card) gives exactly the row's answer.
+    await click(row().querySelector('span')!);
+    const viaRow = answerOf(0);
+    await act(async () => root!.unmount());
+    host!.remove();
+    const again = await mount(<Harness markdown={UNMATCHED} />);
+    await click(button(cards(again)[0], 'Accept recommended')!);
+    expect(answerOf(0)).toEqual(viaRow);
+    // Typing in Other replaces the recommended answer.
+    await type(cards(again)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!, 'Postgres');
+    expect(answerOf(0)).toMatchObject({ selected: [], other: 'Postgres' });
+    expect(cards(again)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!.checked).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('pick any: the recommended row is a checkbox that adds its text beside the ticked choices', async () => {
+    const multi = [':::question-multi', 'Which stores?', '- [ ] Redis', '- [ ] Memcached', 'Recommended: SQLite on the box', ':::'].join('\n');
+    const el = await mount(<Harness markdown={multi} />);
+    const card = () => cards(el)[0];
+    const row = () => card().querySelector<HTMLLabelElement>('label[data-question-suggested]')!;
+    expect(row().querySelector('input')!.type).toBe('checkbox');
+    await click(rowText(card(), 'Redis'));
+    await click(row().querySelector('span')!);
+    expect(answerOf(0)).toMatchObject({ selected: ['Redis'], other: 'SQLite on the box' });
+    await click(row().querySelector('span')!);
+    expect(answerOf(0)).toMatchObject({ selected: ['Redis'] });
+    expect(answerOf(0)?.other).toBeUndefined();
+  });
+
+  test.skipIf(!hasDom)('typing in Other, one character at a time, never turns into the recommended row', async () => {
+    // The re-review of #2139: with `Recommended: Yes` naming no choice, typing
+    // "Yes, but slower" blanked the field at "Yes" and stored ", but slower".
+    const md = [':::question', 'Pick?', '- [ ] Redis', '- [ ] No', 'Recommended: Yes', ':::'].join('\n');
+    const el = await mount(<Harness markdown={md} />);
+    const otherField = () => cards(el)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const row = () => cards(el)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!;
+    await act(async () => otherField().focus());
+    for (const ch of 'Yes, but slower') {
+      await type(otherField(), otherField().value + ch);
+      expect(row().checked).toBe(false);
+    }
+    expect(otherField().value).toBe('Yes, but slower');
+    expect(answerOf(0)).toMatchObject({ selected: [], other: 'Yes, but slower' });
+    // Typed whole, the agent's own words stay the reviewer's Other answer too.
+    for (let i = 0; i < ', but slower'.length; i++) await type(otherField(), otherField().value.slice(0, -1));
+    expect(otherField().value).toBe('Yes');
+    expect(row().checked).toBe(false);
+    expect(answerOf(0)?.other).toBe('Yes');
+  });
+
+  test.skipIf(!hasDom)('a stored answer that is the recommended text reads as the row, and stays it when Other is focused', async () => {
+    const [q] = indexQuestionBlocks(parseMarkdownToBlocks(UNMATCHED));
+    const initial = upsertQuestionAnswerAnnotation([], q.blockId, { v: 1, key: q.question.key, kind: 'single', prompt: q.question.prompt, selected: [], other: 'SQLite on the box' }, q.question.key);
+    const el = await mount(<Harness markdown={UNMATCHED} initial={initial} />);
+    const otherField = () => cards(el)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const row = () => cards(el)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!;
+    expect(row().checked).toBe(true);
+    expect(otherField().value).toBe('');
+    await act(async () => otherField().focus());
+    expect(row().checked).toBe(true);
+    expect(otherField().value).toBe('');
+    await type(otherField(), 'P');
+    expect(row().checked).toBe(false);
+    expect(answerOf(0)).toMatchObject({ selected: [], other: 'P' });
+  });
+
+  test.skipIf(!hasDom)('pick any: ticking the recommended row keeps the typed Other text, and unticking puts it back', async () => {
+    const multi = [':::question-multi', 'Which stores?', '- [ ] Redis', '- [ ] Memcached', 'Recommended: SQLite on the box', ':::'].join('\n');
+    const el = await mount(<Harness markdown={multi} />);
+    const card = () => cards(el)[0];
+    const row = () => card().querySelector<HTMLLabelElement>('label[data-question-suggested]')!;
+    const otherField = () => card().querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    await click(rowText(card(), 'Redis'));
+    await type(otherField(), 'Postgres with a long reason');
+    await click(row().querySelector('span')!);
+    expect(answerOf(0)).toMatchObject({ selected: ['Redis'], other: 'SQLite on the box' });
+    expect(otherField().value).toBe('');
+    await click(row().querySelector('span')!);
+    expect(answerOf(0)).toMatchObject({ selected: ['Redis'], other: 'Postgres with a long reason' });
+    expect(otherField().value).toBe('Postgres with a long reason');
+    expect(row().querySelector('input')!.checked).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('pick any: text that Skip cleared never comes back when the row is unticked later', async () => {
+    const multi = [':::question-multi', 'Which stores?', '- [ ] Redis', '- [ ] Memcached', 'Recommended: SQLite on the box', ':::'].join('\n');
+    const el = await mount(<Harness markdown={multi} />);
+    const card = () => cards(el)[0];
+    const row = () => card().querySelector<HTMLLabelElement>('label[data-question-suggested]')!;
+    const otherField = () => card().querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    await type(otherField(), 'Mine');
+    await click(row().querySelector('span')!);
+    await click(button(card(), 'Skip')!);
+    await click(button(card(), 'Unskip')!);
+    await click(row().querySelector('span')!);
+    await click(row().querySelector('span')!);
+    expect(answerOf(0)?.other).toBeUndefined();
+    expect(otherField().value).toBe('');
+  });
+
+  test.skipIf(!hasDom)('a read-only card shows the recommended row, checked when the answer was it', async () => {
+    const [q] = indexQuestionBlocks(parseMarkdownToBlocks(UNMATCHED));
+    const initial = upsertQuestionAnswerAnnotation([], q.blockId, { v: 1, key: q.question.key, kind: 'single', prompt: q.question.prompt, selected: [], other: 'SQLite on the box' }, q.question.key);
+    const el = await mount(<Harness markdown={UNMATCHED} readOnly initial={initial} />);
+    const card = cards(el)[0];
+    expect(card.querySelector<HTMLInputElement>('label[data-question-suggested] input')!.checked).toBe(true);
+    // The Other row is not drawn: the answer is the recommended row.
+    expect(card.querySelector('input[aria-label^="Other answer"]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)("a text question's recommended answer carries the Recommended tag, not \"Suggested\"", async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    const card = cards(el)[2];
+    const line = card.querySelector<HTMLElement>('[data-question-suggested]')!;
+    expect(line.textContent).toContain('Recommended');
+    expect(line.textContent).toContain('Two phones, one offline.');
+    expect(card.textContent).not.toContain('Suggested');
+    expect(card.getAttribute('aria-describedby')?.split(' ')).toContain(line.id);
+  });
+
+  test.skipIf(!hasDom)("the owner's block: the recommendation marks the choice it begins, one Accept button, the Context line as context", async () => {
+    const owners = [
+      ':::question',
+      'What happens to a pin when you archive the thread?',
+      'Recommended: Unpin it',
+      '- Unpin it: the toast says "Archived · Unpinned", and Undo restores both',
+      '- Keep it pinned',
+      "Context: an archived thread gets nothing new, because the agent's next message starts a new thread.",
+      ':::',
+    ].join('\n');
+    const el = await mount(<Harness markdown={owners} />);
+    const card = cards(el)[0];
+    expect(card.querySelector('[data-question-suggested]')).toBeNull();
+    expect(Array.from(card.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Add note', 'Skip', 'Accept recommended']);
+    const options = Array.from(card.querySelectorAll('[data-question-part="choice"]')).map((o) => o.textContent);
+    expect(options[0]).toContain('Recommended');
+    expect(options[1]).toBe('Keep it pinned');
+    expect(card.textContent).toContain('Context: an archived thread gets nothing new');
+    await click(button(card, 'Accept recommended')!);
+    expect(answerOf(0)?.selected).toEqual(['Unpin it: the toast says "Archived · Unpinned", and Undo restores both']);
   });
 
   test.skipIf(!hasDom)('a read-only card draws the Other row only when the answer used it', async () => {

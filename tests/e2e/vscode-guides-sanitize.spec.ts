@@ -148,3 +148,32 @@ test("a diagram cannot loosen Mermaid's security level or bind a click to script
   // Only the guide link survives, as a data-link the webview's own handler acts on.
   expect(await page.evaluate(() => Array.from(document.querySelectorAll('#host [data-link]')).map((e) => e.getAttribute('data-link')))).toEqual(['symbol:computeBackoff']);
 });
+
+test('agent text cannot set the attributes the webview acts on (data-external, data-link, data-popover-*)', async ({ page }) => {
+  await open(page);
+  await page.evaluate((text) => (window as any).__guides.markdown(text), [
+    '<span data-external="https://evil.example/a">a span</span> <p data-link="code:x.ts" data-popover-action="open" data-popover-link="code:y.ts">p</p>',
+    '<a href="https://example.com/ok" data-external="https://evil.example/b">a real link</a> [md](https://example.com/md) [sym](symbol:computeBackoff)',
+  ].join('\n\n'));
+  const marked = await page.evaluate(() => Array.from(document.querySelectorAll('#host [data-external], #host [data-link], #host [data-popover-action], #host [data-popover-link]')).map((el) => [el.tagName.toLowerCase(), el.textContent, el.getAttribute('data-external'), el.getAttribute('data-link')]));
+  // Only real links carry them, set from their own href by the extension.
+  expect(marked).toEqual([
+    ['a', 'a real link', 'https://example.com/ok', null],
+    ['a', 'md', 'https://example.com/md', null],
+    ['a', 'sym', null, 'symbol:computeBackoff'],
+  ]);
+  const anyData = (await allAttributes(page)).filter((a) => /@data-/.test(a) && !/@data-(external|link)=/.test(a));
+  expect(anyData).toEqual([]);
+});
+
+test('a diagram label cannot carry data-external or data-link either', async ({ page }) => {
+  await open(page);
+  const r = await page.evaluate((src) => (window as any).__guides.mermaid(src), [
+    'flowchart LR',
+    `  A["<span data-external='https://evil.example/x' data-link='code:z.ts'>label</span>"]-->B`,
+    '  click B "chapter:2"',
+  ].join('\n'));
+  expect(r.ok).toBe(true);
+  const attrs = await page.evaluate(() => Array.from(document.querySelectorAll('#host [data-external], #host [data-link]')).map((el) => [el.getAttribute('data-external'), el.getAttribute('data-link')]));
+  expect(attrs).toEqual([[null, 'chapter:2']]);
+});

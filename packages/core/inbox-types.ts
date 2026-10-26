@@ -17,13 +17,14 @@
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
-import { INBOX_CARD_ACTION_ON, type InboxCard } from "./inbox-cards";
+import type { InboxCard } from "./inbox-cards";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
 export * from "./inbox-attachments";
 export * from "./inbox-open-in";
 export * from "./inbox-delivery";
+export * from "./inbox-codex";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
@@ -260,6 +261,19 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   codex: "Codex",
   cursor: "Cursor",
 };
+
+/**
+ * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
+ * Pi and OpenCode 2 through Plannotator's own connection (OpenCode 1 has the
+ * tool but no wake), and Codex through MCP alone, where the Inbox puts the
+ * reply into the Codex thread with `codex queue` (Codex CLI
+ * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts).
+ * The one list: wording that names which agents a reply wakes reads it.
+ */
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "codex"] as const;
+
+/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex. */
+export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex"];
 
 /** How the person sees an agent: the name it gave, else its host's name, else "An agent". */
 export function inboxAgentName(author: { kind: string; host?: string | null; name?: string | null } | null | undefined): string {
@@ -743,10 +757,34 @@ export interface InboxQuestionChoice {
   description: string | null;
   recommended: boolean;
   settled: boolean;
+  /**
+   * A picture choice (`- [ ] Label — ![alt](path)`): the image, its src as
+   * the body writes it (the message image route and the captured
+   * `inline_images` take that same src). Present only on a picture choice;
+   * absent from records written before picture choices.
+   */
+  image?: { alt: string; src: string };
+}
+
+/**
+ * The optional contract lines of a question block (approval
+ * "inbox-decision-mode", agent contract lines): read at send time, kept on
+ * the record and served with the question. Each is present only when the
+ * block carries it; absent from older records.
+ */
+export interface InboxQuestionContract {
+  /** `Stakes:` — what the choice affects. */
+  stakes?: string;
+  /** `Shows:` — the one picture (`image`) or file (`link`) the decision is about, its src as written. */
+  shows?: { kind: "image" | "link"; label: string; src: string };
+  /** `Why:` — why the recommendation. */
+  why?: string;
+  /** `Reversible: no — <why>`: the answer cannot be taken back. Absent means reversible. */
+  reversible?: { value: false; why: string | null };
 }
 
 /** The parsed facts of a question block, kept on its record. */
-export interface InboxQuestionFacts {
+export interface InboxQuestionFacts extends InboxQuestionContract {
   context: string | null;
   choices: InboxQuestionChoice[];
   /** Plannotator's older names per choice (core `aliases`), in choice order; never served. */
@@ -899,7 +937,7 @@ export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "supers
  * exactly (`asked_by_checked_at` omitted, as Workspaces omits it outside its
  * two comment lists), plus the Inbox's `message_id`.
  */
-export interface InboxQuestion {
+export interface InboxQuestion extends InboxQuestionContract {
   key: string;
   position: number;
   /** `"action"` for an action item; read it with `readInboxQuestionKind` (fail-closed). */
@@ -932,6 +970,51 @@ export interface InboxQuestion {
   action?: InboxActionFacts | null;
   /** On an action item: what came of it, or null while open. Absent on a question and from an older Inbox. */
   action_result?: InboxActionResult | null;
+}
+
+/**
+ * Decision mode (approval "inbox-decision-mode", experimental): one open or
+ * picked question or action item, with what a card needs to be answered
+ * without opening its thread. `GET /api/inbox/decisions` lists them; a
+ * read-only projection over the store (no record of its own).
+ */
+export interface InboxDecision {
+  /** `<message id>/<key>`. */
+  id: string;
+  /** The question as `GET /api/inbox/threads/:id` serves it (its `revision` is what a pick sends). */
+  question: InboxQuestion;
+  message: {
+    id: string;
+    created_at: string;
+    author: InboxAuthor;
+    /** The body's prose before its first block, cut to about 280 characters; null when there is none. */
+    excerpt: string | null;
+  };
+  /**
+   * Pictures and files the decision can show, as references only (bytes come
+   * from the attachment and message-image routes): the message's captured
+   * images whose `ref` the question names (its context, its choices), and the
+   * message's attached files.
+   */
+  pictures: {
+    inline: { attachment_id: string; ref: string; name: string; media_type: string | null; width: number | null; height: number | null }[];
+    /** `paths` (additive): the file's real path, and the path it was named by when that was a link; a `Shows:` file is matched by them. */
+    attachments: { attachment_id: string; name: string; kind: string; size: number; media_type: string | null; paths?: string[] }[];
+  };
+  thread: { id: string; subject: string | null; thread_name: string | null; project: { id: string; name: string }; section: InboxSectionId };
+  /**
+   * The agent session that asked: one reply per session per thread
+   * (`key`: `s:<host>\u0000<session>`, or `m:<message id>` for a message with
+   * no session, which is a reply of its own).
+   */
+  session: { key: string; host: string | null; session: string | null; name: string | null; wakes: boolean };
+}
+
+export interface InboxDecisionsModel {
+  serverSession: string;
+  cursor: number;
+  /** In queue order: each session's decisions together, a thread at a time, the most blocked session first, Stopped first. */
+  decisions: InboxDecision[];
 }
 
 /** Workspaces' `NotificationQuestionSummary`: a row's questions, summed. */
@@ -1034,6 +1117,14 @@ export interface InboxListRow extends InboxThreadSummary {
   unsent?: InboxRowUnsent | null;
   /** When the oldest open question was asked, or null when none is open. */
   waiting_since: string | null;
+  /**
+   * When the person pinned the thread to the sidebar (approval
+   * "inbox-pinned-threads"), or null. Only on the list model the window and
+   * the phone read (`GET /api/inbox/threads`), never on anything an agent
+   * reads. Additive: absent from an older Inbox.
+   */
+  pinned_at?: string | null;
+
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
    * a look; the Inbox's own notes, `isInboxNote`, do not).
@@ -1293,6 +1384,35 @@ export function isInboxSoundVolume(value: unknown): value is number {
 }
 
 /**
+ * The onboarding tour (approval "inbox-onboarding-tour"; config.json
+ * `inboxTour`, through GET and POST /api/inbox/settings `tour`), kept per
+ * machine and written by the server only. `seen_at`: the tour was started;
+ * `finished_at`: it reached the end; `skipped_at`: the person left it, or
+ * chose "Connect my agents" on the entry screen. Once finished or skipped the
+ * first-run screen no longer opens on the entry screen; a quiet "Take the
+ * tour" link stays. `notify_again`: the tour ended with notifications not on,
+ * so the person's first real thread offers them once more, inline.
+ */
+export interface InboxTourState {
+  version: number;
+  seen_at: string | null;
+  finished_at: string | null;
+  skipped_at: string | null;
+  notify_again: boolean;
+}
+
+/** What POST /api/inbox/settings `tour` takes: each `true` stamps now; `notify_again` sets the flag. */
+export interface InboxTourChange {
+  seen?: boolean;
+  finished?: boolean;
+  skipped?: boolean;
+  notify_again?: boolean;
+}
+
+/** The tour's content version: the fixture's `v`, recorded with each stamp. */
+export const INBOX_TOUR_VERSION = 2;
+
+/**
  * The Inbox window's text size (config.json `inboxTextSize`, through GET and
  * POST /api/inbox/settings `text_size`): the body size in px the whole type
  * ramp scales from (packages/inbox/inbox.css `--ib-type`). 14 is the window
@@ -1387,8 +1507,8 @@ export interface InboxConnectReport {
 }
 
 /** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */
-export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini";
-export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode"];
+export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini" | "cursor";
+export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode", "cursor"];
 
 /**
  * Where an agent's note would go and how it stands:
@@ -1405,7 +1525,7 @@ export interface InboxAgentNoteStatus {
   path: string | null;
   /** The file is a link; `target` is where it leads (shown). */
   target: string | null;
-  state: "absent" | "added" | "edited" | "damaged" | "refused" | "unavailable";
+  state: "absent" | "added" | "edited" | "damaged" | "refused" | "unavailable" | "manual";
   /** Adding it creates the file. */
   create: boolean;
   /** Plannotator created the file (removing the note deletes it when nothing else is left). */
@@ -1451,6 +1571,13 @@ export interface InboxAgentRow {
    * alone: 1), for the plugin line that version reads.
    */
   plugin?: { installed: boolean; disabled?: boolean; managed?: boolean; generation?: "1" | "2" } | null;
+  /**
+   * An agent its MCP connection alone wakes (INBOX_MCP_WAKING_HOSTS: Codex),
+   * connected through MCP: whether this Inbox can wake it now (Codex: a Codex
+   * CLI INBOX_CODEX_QUEUE_MIN_VERSION or later it can run). Absent for every
+   * other row and from an older Inbox.
+   */
+  wakes?: boolean;
 }
 
 export interface InboxAgentsModel {
@@ -1557,15 +1684,38 @@ export type InboxToolCostHost = "pi" | "opencode";
  * card action and 9,364 (2,268) with it, estimated, not re-measured on Pi.
  * Renaming "to-do" to "action item" (owner, #2059) moved the entry by 5 bytes
  * (8,228; 1,962 tokens), and "Action items you asked for" by 5 more (8,233;
- * 1,963 tokens): the stated cost stands.
+ * 1,963 tokens): the stated cost stands. The question contract lines
+ * (approval "inbox-decision-mode": `Stakes:`, `Shows:`, `Why:`,
+ * `Reversible:`, picture choices) added one paragraph to `body`, measured on
+ * Pi with the cost test (INBOX_TOOL_COST_DUMP): 8,248 → 8,701 bytes, 1,964 →
+ * 2,086 tokens with o200k_base (+453 bytes, +122 tokens). So 8,701 bytes
+ * without the card action and 9,817 with it (9,364 + 453, estimated).
+ * The screenshot nudge in `attachments` ("For something visual, a screenshot
+ * or image usually reads fastest…") added one sentence, measured on Pi with
+ * the cost test: 8,701 → 8,841 bytes (+140; about +30 tokens, so the rounded
+ * token figure stands). So 8,841 without the card action and 9,957 with it
+ * (9,817 + 140, estimated).
+ * The Board's step 2 switched the card action on (INBOX_CARD_ACTION_ON), with
+ * its `ref` argument and the Backlog wording: measured on Pi with the cost
+ * test, 10,131 bytes; tokens scaled from the last o200k_base count (2,086 for
+ * 8,701 bytes, so about 2,430) and stated high, as always. The review then let
+ * `column` take `asked` (the old name of backlog, listed in the schema and
+ * its description): measured again, 10,171 bytes (+40).
+ * Then the Board became something the person turns on (config.json
+ * `inboxBoard`, off by default; approval "inbox-board" 2026-10-26): an Inbox
+ * lists `card` only while it is on, so what a user gets by default is the
+ * entry WITHOUT `card`, and that is the stated cost. With the Board on it is
+ * the 10,171 bytes above.
  */
-const INBOX_TOOL_COST_NOW = INBOX_CARD_ACTION_ON ? { bytes: 9364, tokens: 2700 } : { bytes: 8189, tokens: 2300 };
+const INBOX_TOOL_COST_NOW = { bytes: 8841, tokens: 2500 };
+/** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 10171, tokens: 2900 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
 };
 
-/** "about 8 KB, roughly 2,300 tokens" for a host's measured cost. */
+/** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
 export function inboxToolCostText(host: InboxToolCostHost): string {
   const cost = INBOX_TOOL_COST[host];
   return `about ${Math.round(cost.bytes / 1000)} KB, roughly ${cost.tokens.toLocaleString("en-US")} tokens`;
@@ -1619,6 +1769,17 @@ export interface InboxRowUnsent {
   comments: number;
 }
 
+/**
+ * Archived: resolved, and not come back. Not shown in the window's list;
+ * Settings lists it. A thread an agent wrote in after the archive is back in
+ * the list while something there waits, and returns here once handled. One
+ * rule for the server's list (shared/inbox/list.ts re-exports it) and the
+ * window (a list row's count, a pinned row).
+ */
+export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_from_archive">): boolean {
+  return row.resolved_at !== null && row.back_from_archive !== true;
+}
+
 /** The thread holds something the person has not sent: reply words, picks or comments. */
 export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boolean {
   return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0);
@@ -1636,6 +1797,18 @@ export interface InboxReplyDraft {
   body: string;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
+ * window furniture only. Kept in `inbox/pins.json`, in pin order, outside the
+ * event log, so agents, the MCP, search and the phone's event stream never
+ * see it. A pin changes nothing about the thread: not its section, routing,
+ * questions or delivery.
+ */
+export interface InboxPin {
+  thread_id: string;
+  pinned_at: string;
 }
 
 /** A row on the Drafts page's "Replies not sent" (`GET /api/inbox/drafts` `replies`). */
@@ -1735,4 +1908,69 @@ export function inboxEngineTooOldForSendNow(version: string | null | undefined):
     if (have[i]! !== min[i]!) return have[i]! < min[i]!;
   }
   return false;
+}
+
+/**
+ * Settings → Prompts (approval "inbox-prompts-page", #2194): what Plannotator
+ * tells agents, as `GET /api/inbox/settings` carries it in `prompts`.
+ */
+export const INBOX_PROMPT_HOSTS = ["claude-code", "pi", "opencode"] as const;
+export type InboxPromptHost = (typeof INBOX_PROMPT_HOSTS)[number];
+
+/** One of the plan, review and annotate prompts (config.json `prompts.<group>.<name>`), read-only in the window. */
+export interface InboxPromptItem {
+  /** `prompts.<group>.<name>`, the config.json key. */
+  key: string;
+  group: "plan" | "review" | "annotate";
+  /** The group's heading: Plan, Code review, Annotate. */
+  group_label: string;
+  label: string;
+  /** Plannotator's own text. */
+  default: string;
+  /** The text in effect for an agent without its own: config.json's, else the default. */
+  text: string;
+  /** config.json sets this prompt (the shared text, or one agent's own). */
+  custom: boolean;
+  /** The agents config.json gives their own text for this prompt (`prompts.<group>.runtimes.<agent>.<name>`). */
+  runtimes: string[];
+  /** A fact about the default, shown while it is in effect ("OpenCode has a shorter default."). */
+  note: string | null;
+}
+
+export interface InboxPromptsSettings {
+  /** The Inbox reminder at session start (config.json `prompts.inbox`). */
+  reminder: {
+    /** `prompts.inbox.reminder`: the person's shared text, or null (the default). */
+    shared: string | null;
+    /** `prompts.inbox.runtimes.<agent>.reminder`: an agent's own text (it wins), or null. */
+    runtimes: Record<InboxPromptHost, string | null>;
+    /** The built-in lines: for hosts whose reply comes back by itself, and for those without it (OpenCode 1). */
+    defaults: { wake: string; no_wake: string };
+    /** The most characters a custom reminder may hold; a longer one is refused. */
+    max: number;
+    /** Whether each agent gets a reminder at all (`inboxReminder`, with the Inbox tool). */
+    on: Record<InboxPromptHost, boolean>;
+    /**
+     * Whether each agent's reply comes back by itself, so its default is `defaults.wake`;
+     * false: the no-wake default (OpenCode 1). Absent from an older Inbox: all true.
+     */
+    wakes?: Record<InboxPromptHost, boolean>;
+    /**
+     * Text config.json holds that is over `max` and so is ignored (the agent gets the
+     * next text in line): its length, else null. Absent from an older Inbox.
+     */
+    over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
+    /** Whether this page may change it: false through the tailnet (it reaches every agent on this computer). */
+    editable: boolean;
+  };
+  /** The plan, review and annotate prompts, in the order the page lists them. */
+  others: InboxPromptItem[];
+}
+
+/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text, null (or blank) deletes the key. */
+export interface InboxPromptsChange {
+  inbox: {
+    reminder?: string | null;
+    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
+  };
 }

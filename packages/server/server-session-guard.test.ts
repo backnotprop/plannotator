@@ -10,7 +10,8 @@
  * its own tab), the matching one must still settle, and a body without one
  * (an older client, an empty exit) must keep working.
  *
- * Temp PLANNOTATOR_DATA_DIR per test; nothing touches the real data dir.
+ * Temp PLANNOTATOR_DATA_DIR per test; nothing touches the real data dir. The
+ * PR-mode review servers run their `gh` commands through a fake runtime.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
@@ -26,6 +27,9 @@ import {
   startReviewServer as startPiReviewServer,
 } from "../../apps/pi-extension/server";
 import { SERVER_SESSION_MISMATCH_CODE } from "@plannotator/shared/server-session";
+import { setPRCommandRuntimeForTests as setBunPRCommandRuntime } from "./pr";
+import { setPRCommandRuntimeForTests as setPiPRCommandRuntime } from "../../apps/pi-extension/server/pr";
+import { createFakePRRuntime } from "../../tests/helpers/fake-pr-runtime";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const PATCH = "diff --git a/src/parse.ts b/src/parse.ts\n@@ -1 +1 @@\n-a\n+b\n";
@@ -49,6 +53,8 @@ function sandbox(): string {
 }
 
 afterEach(() => {
+  setBunPRCommandRuntime(null);
+  setPiPRCommandRuntime(null);
   if (saved) {
     for (const key of ENV_KEYS) {
       if (saved[key] === undefined) delete process.env[key];
@@ -251,6 +257,8 @@ for (const runtime of ["bun", "pi"] as const) {
   describe(`${runtime} review /api/pr-action`, () => {
     test("a foreign nonce is refused before anything is posted; the matching one posts", async () => {
       sandbox();
+      const prCommands = createFakePRRuntime();
+      (runtime === "bun" ? setBunPRCommandRuntime : setPiPRCommandRuntime)(prCommands.runtime);
       const posted: unknown[] = [];
       const submitter = (async (...args: unknown[]) => {
         posted.push(args);

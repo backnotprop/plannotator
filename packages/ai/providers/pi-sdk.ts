@@ -69,6 +69,10 @@ class PiProcess {
 			// (same reasoning as codex-app-server.ts).
 			this.proc = Bun.spawn(command, {
 				cwd,
+				// The LIVE env, never Bun's startup env (which still holds the
+				// variables the CLI scrubbed, like the bridge token): see
+				// packages/shared/child-env.ts.
+				env: { ...process.env },
 				stdin: "pipe",
 				stdout: "pipe",
 				stderr: "ignore",

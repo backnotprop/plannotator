@@ -13,6 +13,8 @@
 
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import { readInboxQuestionKind } from '@plannotator/core/inbox-types';
+import { inboxQuestionWaitsOnPerson } from '@plannotator/core/inbox-questions';
+import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
 import { formatCount } from './format';
 
 /** One row of the list. */
@@ -35,8 +37,8 @@ const isQuestion = (q: InboxQuestion) => {
   return kind !== 'unknown' && kind !== 'action';
 };
 
-/** Open, or picked and not sent. */
-const waits = (q: InboxQuestion) => q.state === 'open' || q.state === 'picked';
+/** Open, or picked and not sent: core's one "waits on the person" rule (decision mode and the list read it too). */
+const waits = (q: InboxQuestion) => inboxQuestionWaitsOnPerson(q);
 
 /**
  * The thread's open questions, in thread order, and how many replaced ones
@@ -64,37 +66,33 @@ export function threadOpenQuestions(
 }
 
 /**
- * Whether the button is shown. Two or more open questions: always. One:
- * only where it adds something, i.e. when its card may be out of sight: its
- * message is folded (or hidden in the middle fold), or the thread is
- * long (`OPEN_QUESTIONS_LONG_THREAD` messages or more, where a card scrolls
- * off and the fold starts folding).
- * One open question in a short, unfolded thread sits on screen with the
- * thread's own controls, so the button would only repeat it.
+ * Whether the button is shown: whenever a question waits (owner, 2026-10-23:
+ * the list now also holds Re-ask, so it must never be out of reach), or Re-ask
+ * is offered with no question listed (only action items wait).
  */
-export const OPEN_QUESTIONS_LONG_THREAD = 4;
-
-export function openQuestionsShown(questions: readonly OpenQuestion[], options: { messageCount: number; folded: (messageId: string) => boolean }): boolean {
-  if (questions.length === 0) return false;
-  if (questions.length >= 2) return true;
-  const only = questions[0]!;
-  return options.folded(only.messageId) || options.messageCount >= OPEN_QUESTIONS_LONG_THREAD;
+export function openQuestionsShown(questions: readonly OpenQuestion[], reaskShown = false): boolean {
+  return questions.length > 0 || reaskShown;
 }
 
-/** "5 open questions" / "1 open question". */
-export function openQuestionsLabel(n: number): string {
-  return `${formatCount(n)} open question${n === 1 ? '' : 's'}`;
+/** "5 open questions" / "1 open question"; `noun` "action item" when only action items wait. */
+export function openQuestionsLabel(n: number, noun: OpenQuestionsNoun = 'question'): string {
+  return `${formatCount(n)} open ${noun}${n === 1 ? '' : 's'}`;
 }
 
-/** The list's heading: "5 open questions in this thread". */
-export function openQuestionsHeading(n: number): string {
-  return `${openQuestionsLabel(n)} in this thread`;
+/** What the button counts: questions, or action items when no question waits. */
+export type OpenQuestionsNoun = 'question' | 'action item';
+
+/** The list's accessible name: "5 open questions in this thread" (not drawn). */
+export function openQuestionsHeading(n: number, noun: OpenQuestionsNoun = 'question'): string {
+  return `${openQuestionsLabel(n, noun)} in this thread`;
 }
 
-/** The muted line beside the heading: "1 in your draft · 1 replaced, left out" (nothing when both are zero). */
-export function openQuestionsSub(questions: readonly OpenQuestion[], replaced: number): string {
-  const drafts = questions.filter((q) => q.picked).length;
-  return [drafts > 0 ? `${formatCount(drafts)} in your draft` : '', replaced > 0 ? `${formatCount(replaced)} replaced, left out` : ''].filter(Boolean).join(' · ');
+/**
+ * The Re-ask item at the list's foot (owner, 2026-10-23): "Re-ask in a new
+ * message" when it asks for one thing again, else "Re-ask in one new message".
+ */
+export function reaskItemLabel(asked: number): string {
+  return asked === 1 ? 'Re-ask in a new message' : 'Re-ask in one new message';
 }
 
 /** Where a question's card sits, as a row says it. */
@@ -122,4 +120,62 @@ export function openQuestionState(q: OpenQuestion): OpenQuestionState {
   if (q.question.stopped) return { kind: 'stopped' };
   if (q.question.holds_up.length > 0) return { kind: 'holds', count: q.question.holds_up.length };
   return null;
+}
+
+/** The row's question is skipped in the person's draft: the row goes quiet, and the card's Skip reads "Unskip". */
+export function openQuestionSkipped(q: OpenQuestion): boolean {
+  return q.question.answer?.skipped === true;
+}
+
+/**
+ * What the select mode's button does with the ticked rows (approval
+ * "oq-skip-select", variant A): a ticked question not skipped yet is skipped,
+ * a ticked skipped one is unskipped. Only questions that take a Skip count.
+ */
+export function skipSelection(questions: readonly OpenQuestion[], ticked: ReadonlySet<string>): { skip: OpenQuestion[]; unskip: OpenQuestion[] } {
+  const skip: OpenQuestion[] = [];
+  const unskip: OpenQuestion[] = [];
+  for (const q of questions) {
+    if (!ticked.has(q.id) || !openQuestionSkippable(q)) continue;
+    (openQuestionSkipped(q) ? unskip : skip).push(q);
+  }
+  return { skip, unskip };
+}
+
+/**
+ * What "Skip all N" covers: the open questions with nothing picked. A draft
+ * pick, and a question already skipped, stay as they are.
+ */
+export function skipAllCandidates(questions: readonly OpenQuestion[]): OpenQuestion[] {
+  return questions.filter((q) => !q.picked && !openQuestionSkipped(q) && openQuestionSkippable(q));
+}
+
+/**
+ * Whether a row can be skipped: exactly when its card offers Skip (an open or picked
+ * question; a sent, closed or replaced one, and an action item, take none).
+ * The list holds only such questions, so this is a guard, not a filter.
+ */
+export function openQuestionSkippable(q: OpenQuestion): boolean {
+  return isQuestion(q.question) && waits(q.question);
+}
+
+/**
+ * What a Skip from the list saves: the answer the card's own Skip makes from
+ * the same starting answer (ui's QuestionBlock `toggleSkip`, then its
+ * `commit`). Skipped already: the skip comes off (Unskip), the note stays.
+ * Otherwise the choices, Other and the text go and `skipped` is set, the note
+ * staying. An answer left with nothing in it is null (the pick is cleared).
+ * `base` is the card's: its saved or pending answer, else the question's
+ * empty answer.
+ */
+export function skipToggledAnswer(base: QuestionAnswer): QuestionAnswer | null {
+  let next: QuestionAnswer;
+  if (base.skipped) {
+    const { skipped: _skipped, ...rest } = base;
+    next = rest;
+  } else {
+    const { other: _other, text: _text, ...rest } = base;
+    next = { ...rest, selected: [], skipped: true };
+  }
+  return isQuestionAnswerEmpty(next) ? null : next;
 }

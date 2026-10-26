@@ -4,6 +4,7 @@ import { plural } from '../format';
 import { Icon } from '../icons';
 import { pickWords, type JumpTarget } from './ReplacedQuestion';
 import { Tip } from './Tip';
+import { sentAnswersHeading, type SentAnswer, type SentAnswerGroup } from '../sentReply';
 
 /** One answer the reply carries: a pick saved (or being saved) on a card. */
 export interface DraftAnswer {
@@ -86,6 +87,75 @@ export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswe
               </Fragment>
             ))
           : answers.map(row)}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The answers a sent reply carried, under the person's own words (display
+ * only: the agent got them as "Answers to your questions" in the body). One
+ * row each, "Q1 <prompt> → <answer>", a skip marked as one; grouped under the
+ * message that asked when the reply answered several. A row takes the person
+ * to its card. The prompt and answer are cut with an ellipsis and shown whole
+ * in a tooltip.
+ */
+export function SentAnswers({ groups, onJump }: { groups: readonly SentAnswerGroup[]; onJump?: (target: JumpTarget) => void }) {
+  const headingId = useId();
+  if (groups.length === 0) return null;
+  const several = groups.length > 1;
+  const row = (a: SentAnswer, group: SentAnswerGroup) => {
+    const inner = (
+      <>
+        <span className="ib-ranswer-n">Q{a.number}</span>{' '}
+        <Tip content={a.prompt} cut>
+          <span className="ib-ranswer-p">{a.prompt}</span>
+        </Tip>{' '}
+        <Tip content={a.answer} cut>
+          <span className={a.skipped ? 'ib-ranswer-a ib-ranswer-skip' : 'ib-ranswer-a'} data-sent-skipped={a.skipped ? '' : undefined}>
+            {a.answer}
+          </span>
+        </Tip>
+      </>
+    );
+    const label = `Q${a.number}, ${a.prompt}: ${a.answer}.${several ? ` ${group.name}.` : ''}`;
+    return (
+      <li key={a.id}>
+        {onJump ? (
+          <button
+            type="button"
+            className="ib-ranswer"
+            data-sent-answer={a.id}
+            aria-label={`${label} Show the question.`}
+            onClick={() => onJump({ kind: 'question', messageId: a.messageId, key: a.key })}
+          >
+            {inner}
+          </button>
+        ) : (
+          <div className="ib-ranswer" data-sent-answer={a.id} aria-label={label} role="group">
+            {inner}
+          </div>
+        )}
+      </li>
+    );
+  };
+  return (
+    <div className="ib-ranswers ib-sentanswers" data-sent-answers="" role="group" aria-labelledby={headingId}>
+      <p className="ib-ranswers-h" id={headingId}>
+        <Icon name="check" size={13} />
+        {sentAnswersHeading(groups)}
+      </p>
+      <ul className="ib-ranswers-l">
+        {several
+          ? groups.map((g) => (
+              <Fragment key={g.messageId}>
+                <li className="ib-ranswers-g" data-sent-answers-group={g.messageId} aria-hidden="true">
+                  {g.name}
+                </li>
+                {g.answers.map((a) => row(a, g))}
+              </Fragment>
+            ))
+          : groups[0]!.answers.map((a) => row(a, groups[0]!))}
       </ul>
     </div>
   );

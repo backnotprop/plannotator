@@ -7,16 +7,22 @@
  *
  * One session asks over eight messages; the person looks, picks on one card,
  * and the agent replaces one question and asks two more. Reopened, the first
- * messages fold. The "N open questions" button sits after Re-ask, its list
- * names each question's state and place, and choosing a folded one opens its
+ * messages fold. The "N open questions" button sits after Edit draft (no
+ * Re-ask button in the foot: Re-ask is the list's last item, owner,
+ * 2026-10-23), its list names each question's state and place with no drawn
+ * heading or foot line, and choosing a folded one opens its
  * message and rings its card. Then the list as a bottom sheet on a phone
  * (WebKit, iPhone 15). Then the foot's buttons on one row with a pick waiting
  * (beside a file at 1100, 1280 and 1440, and on phones), and the "N new" pill
- * on a phone never lying over a foot button.
+ * on a phone never lying over a foot button. Last, skipping from the list
+ * (approval "oq-skip-select", variant A): no Skip on a row, a skipped row
+ * quiet at rest, "Skip…" entering a select mode whose ticks save nothing until
+ * "Skip N", which saves what the card's own Skip saves; then the phone sheet.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs (desktop 1440 and a phone, light and dark) land in
- * PLANNOTATOR_OPEN_Q_SHOTS, or .local/proof/open-questions/.
+ * PLANNOTATOR_OPEN_Q_SHOTS, or .local/proof/open-questions/ (the Skip shots:
+ * skip-rest-*.png, skip-select-*.png and skip-phone-*.png).
  */
 
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -79,7 +85,8 @@ async function expectOneRow(page: Page): Promise<void> {
         }),
       rowRight: row.parentElement!.getBoundingClientRect().right,
     }));
-    expect(boxes.length).toBeGreaterThanOrEqual(3);
+    // At least Reply (or Send and Edit draft) and the open questions button (Re-ask is in its list).
+    expect(boxes.length).toBeGreaterThanOrEqual(2);
     expect(new Set(boxes.map((b) => b.top)).size, JSON.stringify(boxes)).toBe(1);
     for (const b of boxes) expect(b.right, JSON.stringify({ boxes, rowRight })).toBeLessThanOrEqual(rowRight + 0.5);
   }).toPass({ timeout: 5000 });
@@ -159,7 +166,7 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop: the button sits after Re-ask, its list names state and place, and a folded question opens and rings', async () => {
+test('desktop: the button sits after Edit draft, its list names state and place, then Re-ask and "Skip…", and a folded question opens and rings', async () => {
   const { page, ids } = world;
   await page.goto(`${world.url}#thread=${world.threadId}`);
   const pane = page.locator('section.ib-pane');
@@ -170,8 +177,9 @@ test('desktop: the button sits after Re-ask, its list names state and place, and
   await expect(button).toHaveText('6 open questions');
   await expect(button).toHaveAttribute('aria-haspopup', 'menu');
   await expect(button).toHaveAttribute('aria-expanded', 'false');
-  const reask = foot.getByRole('button', { name: 'Re-ask', exact: true });
-  const [re, oq] = await Promise.all([reask.boundingBox(), button.boundingBox()]);
+  await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
+  const edit = foot.getByRole('button', { name: 'Edit draft', exact: true });
+  const [re, oq] = await Promise.all([edit.boundingBox(), button.boundingBox()]);
   expect(Math.abs(re!.y - oq!.y)).toBeLessThanOrEqual(1);
   expect(oq!.x).toBeGreaterThan(re!.x);
   // The skip chip is unchanged beside it.
@@ -182,10 +190,17 @@ test('desktop: the button sits after Re-ask, its list names state and place, and
   await expect(list).toBeVisible();
   await expect(button).toHaveAttribute('aria-expanded', 'true');
   await expect(list).toHaveAttribute('role', 'menu');
-  await expect(list.locator('.ib-oq-head > b')).toHaveText('6 open questions in this thread');
-  await expect(list.locator('.ib-oq-sub')).toHaveText('1 in your draft · 1 replaced, left out');
-  const rows = list.getByRole('menuitem');
+  // Named, not titled: no drawn heading, count line or foot line.
+  await expect(list).toHaveAttribute('aria-label', '6 open questions in this thread');
+  await expect(list).not.toContainText('in this thread');
+  await expect(list).not.toContainText('Choose one');
+  const rows = list.locator('.ib-oq-row');
   await expect(rows).toHaveCount(6);
+  // The rows, then the last row: Re-ask and "Skip…" (approval "oq-skip-select"). No Skip on any row.
+  await expect(list.getByRole('menuitem')).toHaveCount(8);
+  await expect(list.locator('[data-open-question-skip]')).toHaveCount(0);
+  await expect(list.getByRole('menuitem').nth(6)).toHaveText('Re-ask in one new message');
+  await expect(list.getByRole('menuitem').last()).toHaveText('Skip…');
   await expect(rows.nth(1)).toContainText('How many times should a rate-limited charge be retried?');
   await expect(rows.nth(1).locator('.ib-oq-when')).toHaveText(/ · in a folded message$/);
   await expect(rows.nth(2).locator('.ib-b-stop')).toHaveText('Stopped');
@@ -228,7 +243,7 @@ test('phone (WebKit, iPhone 15) with a pick waiting: the buttons on one row, and
       const page = await context.newPage();
       await page.goto(`${world.url}#thread=${world.threadId}`);
       const button = page.locator('.ib-pfoot [data-open-questions]');
-      // A pick waits: Send, Edit draft, Re-ask and this button share one row, so the label is as short as it must be.
+      // A pick waits: Send, Edit draft and this button share one row, so the label is as short as it must be.
       await expect(page.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toContainText('1 pick');
       await expect(button).toHaveText(/^6( open)?$/);
       await expect(button).toHaveAttribute('aria-label', '6 open questions');
@@ -266,8 +281,9 @@ test('beside a file (the 440 px thread column) with a pick waiting: every foot b
     await expect(pane).toHaveClass(/ib-withfile/);
     await expect(pane.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toContainText('1 pick');
     const button = pane.locator('.ib-pfoot [data-open-questions]');
-    await expect(button).toHaveAttribute('aria-label', '6 open questions');
-    await expect(button).toHaveText(/^6( open)?$/);
+    // Without a Re-ask button beside it (it is in the list now) the full words may fit; the name is whole either way.
+    await expect(button).toHaveAccessibleName('6 open questions');
+    await expect(button).toHaveText(/^6( open)?( questions)?$/);
     await expectOneRow(page);
     if (width === 1280) {
       await page.mouse.move(10, 10);
@@ -310,9 +326,9 @@ test('phone (Chromium, Pixel 7): the "N new" pill never lies over a foot button'
     const page = await context.newPage();
     await page.goto(`${world.url}#thread=${first.thread_id as string}`);
     const foot = page.locator('.ib-pfoot');
-    // Reply, Re-ask and "2 open": no empty middle in the row.
+    // Reply and "2 open" (Re-ask is in its list): the pill keeps clear of them.
     await expect(foot.locator('[data-open-questions]')).toHaveAttribute('aria-label', '2 open questions');
-    await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toBeVisible();
+    await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
     const pill = page.locator('[data-new-pill]');
     await expect(pill).not.toHaveAttribute('data-off', '');
     await expect(pill).toBeVisible();
@@ -334,5 +350,159 @@ test('phone (Chromium, Pixel 7): the "N new" pill never lies over a foot button'
     expect(world.errors).toEqual([]);
   } finally {
     await context.close();
+  }
+});
+
+async function serverQuestion(messageId: string): Promise<{ state: string; answer: Record<string, unknown> | null }> {
+  const res = await fetch(`http://127.0.0.1:${registry().port}/api/inbox/threads/${world.threadId}`);
+  const body = (await res.json()) as { thread: { messages: { id: string; questions?: { state: string; answer: Record<string, unknown> | null }[] }[] } };
+  return body.thread.messages.find((m) => m.id === messageId)!.questions![0]!;
+}
+
+/** The answer without what names its question: what a Skip wrote. */
+const skipShape = (a: Record<string, unknown> | null) => {
+  if (!a) return null;
+  const { key: _k, prompt: _p, sourceLine: _l, ...rest } = a;
+  return rest;
+};
+
+test('Skip from the list: "Skip…", tick two, "Skip 2" saves what the card\'s Skip saves; Escape and Unskip; then the phone sheet', async () => {
+  const { page, ids } = world;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${world.url}#thread=${world.threadId}`);
+  const pane = page.locator('section.ib-pane');
+  await expect(pane.getByRole('heading', { name: 'Retry worker for failed Stripe charges' })).toBeVisible();
+  // The card's own Skip on the runbook question (the last message, drawn open).
+  const runbook = pane.locator(`[data-message-id="${ids.at(-1)}"] [data-question-key]`);
+  await runbook.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(runbook.getByRole('button', { name: 'Unskip', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => (await serverQuestion(ids.at(-1)!)).state).toBe('picked');
+  const byCard = await serverQuestion(ids.at(-1)!);
+
+  const button = pane.locator('.ib-pfoot [data-open-questions]');
+  await button.click();
+  const list = page.locator('[data-open-questions-list]');
+  await expect(list).toBeVisible();
+  const row = (messageId: string) => list.locator(`[data-open-question^="${messageId}/"]`);
+  const skipMode = list.locator('[data-open-questions-skip-mode]');
+  // At rest the runbook row is quiet: the skip glyph for its number, "Skipped", no Skip pill anywhere.
+  await expect(row(ids.at(-1)!)).toHaveAttribute('data-skipped', '');
+  await expect(row(ids.at(-1)!).locator('.ib-oq-skipped')).toHaveText('Skipped');
+  await expect(row(ids.at(-1)!).locator('.ib-oq-draft')).toHaveCount(0);
+  await expect(list.locator('[data-open-question-skip]')).toHaveCount(0);
+
+  // The keyboard: End reaches "Skip…", Enter enters select mode, Space ticks, Escape drops the ticks.
+  await skipMode.focus();
+  await page.keyboard.press('Enter');
+  await expect(row(ids[0]!)).toHaveAttribute('role', 'menuitemcheckbox');
+  await expect(row(ids[0]!)).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(row(ids[0]!)).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await expect(list).toBeVisible();
+  await expect(pane).toBeVisible();
+  await expect(skipMode).toBeFocused();
+  await expect(row(ids[0]!)).toHaveAttribute('role', 'menuitem');
+
+  // The pointer: tick the queue (folded) and rate-limit (middle fold) questions; nothing saved until the button.
+  await skipMode.click();
+  await row(ids[0]!).click();
+  await row(ids[1]!).click();
+  await expect(row(ids[1]!)).toHaveAttribute('aria-checked', 'true');
+  await expect(list.locator('[data-open-questions-select-head]')).toHaveText('2 selected');
+  const apply = list.locator('[data-open-questions-apply]');
+  await expect(apply).toHaveText('Skip 2');
+  await expect(list.locator('[data-open-questions-skip-all]')).toHaveText(/^Skip all \d+$/);
+  expect((await serverQuestion(ids[0]!)).state).toBe('open');
+  await page.mouse.move(10, 10);
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(proofDir, `skip-select-${scheme}.png`) });
+  }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await apply.click();
+  await expect(list).toBeVisible();
+  await expect(skipMode).toBeFocused();
+  // Saved exactly as the card's Skip saved its own: a pick marked skipped, in the draft until the Send.
+  for (const id of [ids[0]!, ids[1]!]) {
+    await expect.poll(async () => (await serverQuestion(id)).state).toBe('picked');
+    const saved = await serverQuestion(id);
+    expect(skipShape(saved.answer)).toEqual({ ...skipShape(byCard.answer), kind: 'single' });
+    await expect(row(id)).toHaveAttribute('data-skipped', '');
+  }
+  expect(skipShape(byCard.answer)).toMatchObject({ selected: [], skipped: true });
+  await expect(button).toHaveText('6 open questions');
+  // At rest again: three skipped rows, quiet.
+  await page.mouse.move(10, 10);
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: join(proofDir, `skip-rest-${scheme}.png`) });
+  }
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await skipMode.focus();
+  await page.keyboard.press('Escape');
+  await expect(list).toHaveCount(0);
+  await expect(pane.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toContainText('4 picks');
+  expect(world.errors).toEqual([]);
+
+  // The phone sheet: 44 px targets; tick the queue question and Unskip it.
+  let own: Browser | null = null;
+  try {
+    own = await webkit.launch({ args: [] });
+    const context = await own.newContext({ ...devices['iPhone 15'], colorScheme: 'light', reducedMotion: 'reduce' });
+    const phone = await context.newPage();
+    await phone.goto(`${world.url}#thread=${world.threadId}`);
+    await phone.locator('.ib-pfoot [data-open-questions]').click();
+    const sheet = phone.locator('[data-open-questions-list]');
+    await expect(sheet).toBeVisible();
+    const phoneSkip = sheet.locator('[data-open-questions-skip-mode]');
+    expect((await phoneSkip.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    for (const scheme of ['light', 'dark'] as const) {
+      await phone.emulateMedia({ colorScheme: scheme });
+      await phone.waitForTimeout(300);
+      await phone.screenshot({ path: join(proofDir, `skip-phone-rest-${scheme}.png`) });
+    }
+    await phone.emulateMedia({ colorScheme: 'light' });
+    await phoneSkip.click();
+    const queue = sheet.locator(`[data-open-question^="${ids[0]}/"]`);
+    const stripe = sheet.locator(`[data-open-question^="${ids[2]}/"]`);
+    const logging = sheet.locator(`[data-open-question^="${ids[6]}/"]`);
+    const apply = sheet.locator('[data-open-questions-apply]');
+    // Two open questions ticked: "Skip 2", as the approved phone shot.
+    await stripe.click();
+    await logging.click();
+    await expect(logging).toHaveAttribute('aria-checked', 'true');
+    await expect(apply).toHaveText('Skip 2');
+    const viewport = phone.viewportSize()!;
+    for (const target of [sheet.locator('[data-open-questions-cancel]'), sheet.locator('[data-open-questions-apply]'), sheet.locator('[data-open-questions-skip-all]'), sheet.locator('[data-open-questions-close]')]) {
+      const box = (await target.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      // The head and the bar stay in view; only the rows scroll.
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+    }
+    // Rows never squeeze into each other (only the list scrolls).
+    const boxes = await sheet.locator('.ib-oq-row').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom })));
+    for (let i = 1; i < boxes.length; i += 1) expect(boxes[i]!.top).toBeGreaterThanOrEqual(boxes[i - 1]!.bottom - 1);
+    for (const scheme of ['light', 'dark'] as const) {
+      await phone.emulateMedia({ colorScheme: scheme });
+      await phone.waitForTimeout(300);
+      await phone.screenshot({ path: join(proofDir, `skip-phone-select-${scheme}.png`) });
+    }
+    // A skipped row ticked too: the button names both; untick the two open ones and it reads Unskip 1.
+    await queue.click();
+    await expect(apply).toHaveText('Skip 2, unskip 1');
+    await stripe.click();
+    await logging.click();
+    await expect(apply).toHaveText('Unskip 1');
+    await apply.click();
+    await expect(sheet).toBeVisible();
+    await expect(queue).not.toHaveAttribute('data-skipped', '');
+    await expect.poll(async () => (await serverQuestion(ids[0]!)).state).toBe('open');
+    await context.close();
+  } finally {
+    await own?.close();
   }
 });

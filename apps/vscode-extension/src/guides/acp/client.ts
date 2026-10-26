@@ -1,8 +1,11 @@
 /**
  * The extension as an ACP v1 client (SPEC 4.1). It starts the agent as a
  * child process over stdio, with the user's own environment, and adds no
- * tools of its own beyond the builder's MCP server: no `fs/*`, no
- * `terminal/*` (the agent reads with its own tools). It advertises terminal
+ * tools of its own beyond the builder's MCP server: every listed agent reads,
+ * searches and runs commands with its own tools, so `fs/*` and `terminal/*`
+ * are not advertised. An agent that calls `fs/read_text_file` anyway is
+ * served (reading never needs to fail); write and terminal methods, which
+ * were not advertised, answer "method not found". It advertises terminal
  * sign-in (`auth.terminal`), so the agent lists its own login commands for
  * the "Sign in" button. Permission requests go to
  * a callback that shows the agent's own options; this module never answers
@@ -11,15 +14,20 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   ClientSideConnection,
   PROTOCOL_VERSION,
+  RequestError,
   ndJsonStream,
   type Agent,
   type AuthMethod,
   type Client,
+  type AgentCapabilities,
   type InitializeResponse,
+  type LoadSessionResponse,
   type McpServer,
   type NewSessionResponse,
   type PromptResponse,
@@ -56,6 +64,38 @@ export interface AcpClientInfo {
 const STDERR_TAIL = 8 * 1024;
 /** How long a stopped agent gets to end before its whole process group is killed. */
 const KILL_GRACE_MS = 3000;
+
+/**
+ * What the client offers the agent: terminal sign-in, so it can list its login
+ * commands. No file system or terminal: the agents Guides starts all bring
+ * their own, and an agent that does not see these uses its own tools.
+ */
+export const CLIENT_CAPABILITIES = {
+  fs: { readTextFile: false, writeTextFile: false },
+  terminal: false,
+  auth: { terminal: true },
+} as const;
+
+/** The largest file `fs/read_text_file` reads (10 MB). */
+export const MAX_CLIENT_READ_BYTES = 10 * 1024 * 1024;
+
+function notOffered(method: string): never {
+  throw RequestError.methodNotFound(`${method} (not offered by this client: the agent's own tools do this)`);
+}
+
+/** `fs/read_text_file`: the file's text, from `line` (1-based) for `limit` lines when given. */
+export async function readTextFileForAgent(params: { path: string; line?: number | null; limit?: number | null }): Promise<{ content: string }> {
+  if (!isAbsolute(params.path)) throw RequestError.invalidParams(undefined, "path must be absolute");
+  const info = await stat(params.path);
+  if (!info.isFile()) throw RequestError.invalidParams(undefined, `${params.path} is not a file`);
+  if (info.size > MAX_CLIENT_READ_BYTES) throw RequestError.invalidParams(undefined, `${params.path} is ${info.size} bytes; the client reads files up to ${MAX_CLIENT_READ_BYTES} bytes`);
+  const text = await readFile(params.path, "utf8");
+  if (params.line == null && params.limit == null) return { content: text };
+  const lines = text.split("\n");
+  const start = Math.max(0, (params.line ?? 1) - 1);
+  const end = params.limit == null ? lines.length : start + Math.max(0, params.limit);
+  return { content: lines.slice(start, end).join("\n") };
+}
 
 /** The ACP JSON-RPC error code for "authentication required". */
 export const ACP_AUTH_REQUIRED_CODE = -32000;
@@ -121,6 +161,16 @@ export class AcpClient {
       sessionUpdate: async (params) => {
         this.handlers.onUpdate(params);
       },
+      // Reading is served even though it is not advertised. Writing and terminals
+      // were not advertised; left out, the SDK would answer `fs/write_text_file`
+      // with an empty success that wrote nothing, so they say so instead.
+      readTextFile: (params) => readTextFileForAgent(params),
+      writeTextFile: async () => notOffered("fs/write_text_file"),
+      createTerminal: async () => notOffered("terminal/create"),
+      terminalOutput: async () => notOffered("terminal/output"),
+      releaseTerminal: async () => notOffered("terminal/release"),
+      waitForTerminalExit: async () => notOffered("terminal/wait_for_exit"),
+      killTerminal: async () => notOffered("terminal/kill"),
     };
     this.connection = new ClientSideConnection((_agent: Agent) => client, stream);
     child.stderr?.setEncoding("utf8");
@@ -158,7 +208,7 @@ export class AcpClient {
       client.initializeResult = await client.raceExit(
         client.connection.initialize({
           protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: { auth: { terminal: true } },
+          clientCapabilities: CLIENT_CAPABILITIES,
           clientInfo,
         }),
         "initialize",
@@ -185,6 +235,11 @@ export class AcpClient {
 
   get hasExited(): boolean {
     return this.exited;
+  }
+
+  /** What the agent said it can do in `initialize` (`loadSession`, …). */
+  get agentCapabilities(): AgentCapabilities {
+    return this.initializeResult?.agentCapabilities ?? {};
   }
 
   /** The sign-ins the agent offered in `initialize`. */
@@ -221,6 +276,15 @@ export class AcpClient {
 
   newSession(cwd: string, mcpServers: McpServer[], meta?: Record<string, unknown>): Promise<NewSessionResponse> {
     return this.raceExit(this.connection.newSession({ cwd, mcpServers, ...(meta && { _meta: meta }) }), "session/new");
+  }
+
+  /**
+   * `session/load`: reopen an earlier session (only when the agent advertises
+   * `loadSession`). The agent replays the conversation as `session/update`
+   * notifications before it answers.
+   */
+  loadSession(sessionId: string, cwd: string, mcpServers: McpServer[]): Promise<LoadSessionResponse> {
+    return this.raceExit(this.connection.loadSession({ sessionId, cwd, mcpServers }), "session/load");
   }
 
   async setConfigOption(sessionId: string, configId: string, value: string): Promise<SessionConfigOption[]> {
@@ -333,4 +397,35 @@ export function readConfigSelect(configOptions: readonly SessionConfigOption[] |
     return { configId: option.id, name: option.name, current: String(option.currentValue), options: flat };
   }
   return null;
+}
+
+/**
+ * The first select option among `configOptions` with this category, else with
+ * one of these ids (agents name the same thing differently: Mistral Vibe's
+ * effort is category `thinking`, Kiro's effort id is `effortLevel`).
+ */
+function readSelectBy(configOptions: readonly SessionConfigOption[] | null | undefined, category: string, ids: readonly string[]): ConfigSelect | null {
+  const byCategory = readConfigSelect(configOptions, category);
+  if (byCategory) return byCategory;
+  for (const id of ids) {
+    const option = (configOptions ?? []).find((o) => o.id === id && o.type === "select");
+    if (option) return readConfigSelect([{ ...option, category }] as SessionConfigOption[], category);
+  }
+  return null;
+}
+
+/** The session's model select. */
+export function readModelSelect(configOptions: readonly SessionConfigOption[] | null | undefined): ConfigSelect | null {
+  return readSelectBy(configOptions, "model", ["model"]);
+}
+
+/** The session's effort (reasoning, thinking) select. */
+export function readEffortSelect(configOptions: readonly SessionConfigOption[] | null | undefined): ConfigSelect | null {
+  return readSelectBy(configOptions, "thought_level", ["thought_level", "thinking", "thinking_effort", "reasoning_effort", "effort", "effortLevel"])
+    ?? readSelectBy(configOptions, "thinking", []);
+}
+
+/** The session's mode select. */
+export function readModeSelect(configOptions: readonly SessionConfigOption[] | null | undefined): ConfigSelect | null {
+  return readSelectBy(configOptions, "mode", ["mode"]);
 }

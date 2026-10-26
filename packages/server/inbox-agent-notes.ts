@@ -17,6 +17,7 @@
  *    `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` (Pi reads only one); `AGENTS.md`
  *    created only when none does.
  *  - Gemini CLI: `~/.gemini/<context.fileName>`, default `GEMINI.md`.
+ *  - Cursor: manual copy to Settings → Rules; Cursor documents no supported global rules file.
  *
  * The block sits between markers at the END of the file. Exactly one start
  * before exactly one end: the block is ours; none: appended; anything else:
@@ -173,6 +174,8 @@ function claudeRulesFile(e: AgentEnvironment): string {
 export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTarget {
   const exists = (path: string) => existsSync(path);
   switch (agent) {
+    case "cursor":
+      return { path: null, create: false, reason: "Cursor User Rules are managed in Settings → Rules; Plannotator cannot install, update or remove a copied rule." };
     case "claude-code":
       return { path: claudeRulesFile(e), create: !exists(claudeRulesFile(e)), reason: null };
     case "codex": {
@@ -287,6 +290,9 @@ function sharers(agent: InboxNoteAgentId, path: string, dataDir: string): InboxN
 
 export function noteStatus(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment): InboxAgentNoteStatus {
   const target = noteTarget(agent, e);
+  if (agent === "cursor") {
+    return { agent, path: null, target: null, state: "manual", create: false, created: false, reason: target.reason, shared_with: [] };
+  }
   const record = readInboxAgentNotes(dataDir).notes[agent];
   const real = target.path ? resolved(target.path) : null;
   const linked = target.path && real && real !== target.path ? displayPath(real, e) : null;
@@ -463,6 +469,8 @@ function removeNoteFrom(agent: InboxNoteAgentId, dataDir: string, e: AgentEnviro
 /** Every file a note could be in for `agent` (for the uninstall scan when the record is gone). */
 function candidatePaths(agent: InboxNoteAgentId, e: AgentEnvironment): string[] {
   switch (agent) {
+    case "cursor":
+      return [];
     case "codex":
       return [join(codexHome(e), "AGENTS.override.md"), join(codexHome(e), "AGENTS.md")];
     case "pi":
@@ -551,7 +559,8 @@ export async function noteCandidateIds(options: ConnectOptions): Promise<InboxNo
   const out: InboxNoteAgentId[] = [];
   for (const id of INBOX_NOTE_AGENT_IDS) {
     if (failed.has(id) || !agentSpec(id).detect(e)) continue;
-    if (noteStatus(id, options.dataDir, e).state !== "absent") continue;
+    const state = noteStatus(id, options.dataDir, e).state;
+    if (state !== "absent" && state !== "manual") continue;
     if ((await inboxAgentReach(id, options)).on) out.push(id);
   }
   return out;
@@ -568,7 +577,7 @@ export function noteHolderIds(options: Pick<ConnectOptions, "dataDir" | "environ
   const records = readInboxAgentNotes(options.dataDir).notes;
   return INBOX_NOTE_AGENT_IDS.filter((id) => {
     if (records[id]) return true;
-    if (!agentSpec(id).detect(options.environment)) return false;
+    if (id === "cursor" || !agentSpec(id).detect(options.environment)) return false;
     const state = noteStatus(id, options.dataDir, options.environment).state;
     return state === "added" || state === "edited";
   });

@@ -16,12 +16,16 @@
  *  - Nothing found: the first step for Claude Code, Pi or OpenCode, MCP folded,
  *    every other agent or editor in the picker at the end.
  *  - Tool locked off (PLANNOTATOR_INBOX_TOOL=0): the locked tools are not steps.
+ *  - Which agents a reply wakes: Claude Code through its plugin and Codex
+ *    through MCP; the screen's one line, then Settings → Agents' "Your
+ *    replies" rows (shots into PLANNOTATOR_WAKE_SHOTS, `wake-*.png`).
  *
  * Every computer is shot desktop (1440 by 900) and phone (390 wide, full
  * page), light and dark, at 2x, into PLANNOTATOR_FIRST_RUN_SHOTS (default
  * .local/proof/first-run), named like the mock's (`c-<scenario>[-phone]-<scheme>.png`).
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
+import { markTourDecided } from '../helpers/tour-decided';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -63,6 +67,11 @@ const codexMcp: Setup = ({ home, bin, binary: self }) => {
   mkdirSync(join(home, '.codex'), { recursive: true });
   writeFileSync(join(home, '.codex', 'config.toml'), `[mcp_servers.plannotator-inbox]\ncommand = ${JSON.stringify(self)}\nargs = ["inbox", "mcp"]\n`);
 };
+/** A Codex the Inbox can wake: it answers --version as Codex 0.160 (the Inbox then runs `codex queue`; never here: no thread asks). */
+const codexQueueMcp: Setup = (computer) => {
+  codexMcp(computer);
+  writeFileSync(join(computer.bin, 'codex'), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.160.0"; exit 0; fi\necho "this stub never queues" >&2\nexit 1\n', { mode: 0o755 });
+};
 const cursorMcp: Setup = ({ home, binary: self }) => json(join(home, '.cursor', 'mcp.json'), { mcpServers: { 'plannotator-inbox': { command: self, args: ['inbox', 'mcp'] } } });
 
 const SETUPS: Record<string, { setup: Setup[]; env?: Record<string, string>; live?: boolean }> = {
@@ -78,6 +87,8 @@ const SETUPS: Record<string, { setup: Setup[]; env?: Record<string, string>; liv
     ],
   },
   none: { setup: [] },
+  wake: { setup: [claudePlugin, codexMcp] },
+  codexWakes: { setup: [claudePlugin, codexQueueMcp] },
   locked: { setup: [claudePlugin, piExtension, ({ bin }) => stub(bin, 'opencode'), codexMcp, cursorMcp], env: { PLANNOTATOR_INBOX_TOOL: '0' } },
 };
 
@@ -89,6 +100,8 @@ function start(name: keyof typeof SETUPS): Computer {
   for (const dir of [home, bin, dataDir]) mkdirSync(dir, { recursive: true });
   const self = realpathSync(binary);
   for (const setup of SETUPS[name]!.setup) setup({ home, bin, binary: self });
+  // The first-run connect screen itself, not the tour's entry screen (inbox-tour.spec.ts proves that one).
+  markTourDecided(dataDir);
   const env: Record<string, string> = {
     // Only the stubs and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,
@@ -192,7 +205,7 @@ test('typical: turn on Pi\'s Inbox tool (its measured cost named), Claude Code r
     await expect(hero(page).locator('h3')).toHaveText("Turn on Pi's Inbox tool");
     await expect(hero(page).locator('.ib-cn-eb')).toHaveText('Next step · 1 of 2');
     await expect(hero(page).locator('p b')).toHaveText(/^about \d+ KB, roughly [\d,]+ tokens$/);
-    await expect(listItems(page, 'Already connected')).toHaveText(['Claude Code plugin · running now', 'Codex MCP', 'Cursor MCP']);
+    await expect(listItems(page, 'Already connected')).toHaveText(['Claude Code plugin · running now', 'Codex MCP · sees replies when it checks', 'Cursor MCP · sees replies when it checks']);
     await expect(listItems(page, 'Left to do')).toHaveText(['Pi now', 'OpenCode install']);
     await expect(page.getByRole('button', { name: 'Message Claude Code' })).toBeVisible();
     await expect(page.locator('.ib-try-where')).toHaveText('Claude Code is running in plannotator. It answers here.');
@@ -220,7 +233,7 @@ test('plugin missing: Claude Code\'s install command to copy; once the plugin is
   const errors: string[] = [];
   const page = await openWindow(browser, c, errors);
   await expect(hero(page).locator('h3')).toHaveText("Connect Claude Code with Plannotator's plugin");
-  await expect(listItems(page, 'Already connected')).toHaveText(['Pi MCP, no wake', 'Codex MCP']);
+  await expect(listItems(page, 'Already connected')).toHaveText(['Pi MCP · sees replies when it checks', 'Codex MCP · sees replies when it checks']);
   await expect(listItems(page, 'Left to do')).toHaveText(['Claude Code now', 'Pi install', 'OpenCode: not on this computer']);
   await shoot(page, 'missing');
 
@@ -265,8 +278,57 @@ test('locked: PLANNOTATOR_INBOX_TOOL=0 keeps Claude Code\'s and Pi\'s tools off;
   await expect(hero(page).locator('h3')).toHaveText("Connect OpenCode with Plannotator's plugin");
   await expect(hero(page).locator('.ib-cn-eb')).toHaveText('Next step · last one');
   await expect(listItems(page, 'Left to do')).toHaveText(['OpenCode now', 'Claude Code locked by PLANNOTATOR_INBOX_TOOL=0', 'Pi locked by PLANNOTATOR_INBOX_TOOL=0']);
-  await expect(page.getByRole('button', { name: 'Turn on' })).toHaveCount(0);
+  // No step turns a locked tool on (the notifications ask under Try it has its own Turn on).
+  await expect(hero(page).getByRole('button', { name: 'Turn on' })).toHaveCount(0);
+  await expect(page.locator('[data-connect-lists] button')).toHaveCount(0);
   await shoot(page, 'locked');
+  await page.context().close();
+  expect(errors).toEqual([]);
+});
+
+test('which agents a reply wakes: said once on the first-run screen, and per agent in Settings → Agents', async ({ browser }) => {
+  const c = start('wake');
+  const errors: string[] = [];
+  const page = await openWindow(browser, c, errors);
+  await expect(listItems(page, 'Already connected')).toHaveText(['Claude Code plugin', 'Codex MCP · sees replies when it checks']);
+  await expect(page.locator('[data-wake-note]')).toHaveText(
+    "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi and OpenCode 2, and in Codex 0.149 or later through MCP. Other agents see your reply the next time they check the Inbox.",
+  );
+  const out = resolve(process.env.PLANNOTATOR_WAKE_SHOTS ?? shots);
+  mkdirSync(out, { recursive: true });
+  const both = async (name: string, phone: boolean) => {
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.setViewportSize(phone ? PHONE : DESKTOP);
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+      await page.waitForFunction((dark) => document.documentElement.classList.contains('light') !== dark, scheme === 'dark', { timeout: 3000 });
+      await page.waitForTimeout(400);
+      await page.mouse.move(0, 0);
+      await page.screenshot({ path: join(out, `wake-${name}${phone ? '-phone' : ''}-${scheme}.png`), fullPage: true });
+    }
+  };
+  await both('first-run', false);
+  await both('first-run', true);
+  await page.setViewportSize(DESKTOP);
+  await page.goto(`${c.url}#settings/agents`);
+  const claude = page.locator('[data-agent="claude-code"] [data-agent-replies]');
+  const codex = page.locator('[data-agent="codex"] [data-agent-replies]');
+  await expect(claude).toHaveText(/Your replies\s*arrive as a new turn/);
+  await expect(codex).toHaveText(/Your replies\s*seen when it checks the Inbox; it can't be woken/);
+  // No native titles on the new lines.
+  await expect(page.locator('[data-wake-note] [title], [data-agent-replies] [title]')).toHaveCount(0);
+  await both('settings-agents', false);
+  await both('settings-agents', true);
+  await page.context().close();
+  expect(errors).toEqual([]);
+});
+
+test('a Codex the Inbox can wake (0.149 or later) reads as woken: Already connected and Settings → Agents', async ({ browser }) => {
+  const c = start('codexWakes');
+  const errors: string[] = [];
+  const page = await openWindow(browser, c, errors);
+  await expect(listItems(page, 'Already connected')).toHaveText(['Claude Code plugin', 'Codex MCP · replies arrive as a new turn']);
+  await page.goto(`${c.url}#settings/agents`);
+  await expect(page.locator('[data-agent="codex"] [data-agent-replies]')).toHaveText(/Your replies\s*arrive as a new turn/);
   await page.context().close();
   expect(errors).toEqual([]);
 });

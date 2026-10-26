@@ -21,6 +21,7 @@
  * PNGs of the proved states land in .local/proof/notifications/.
  */
 
+import { markTourDecided } from '../helpers/tour-decided';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -207,6 +208,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
+  // The first-run screen's notifications ask, not the tour's entry screen (inbox-tour.spec.ts proves that one).
+  markTourDecided(dataDir);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   await context.addInitScript(recordNotifications);
   const page = await context.newPage();
@@ -240,13 +243,19 @@ test.afterAll(async () => {
   }
 });
 
-test('the ask appears when the first thread arrives, never on first paint, and stays until answered', async () => {
+test('the first-run screen asks before the first question; once the first thread arrives the ask is above the list, and stays until answered', async () => {
   const { page } = world;
   await page.goto(world.url);
   await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
   expect(await page.evaluate(() => Notification.permission)).toBe('default');
-  await page.waitForTimeout(500);
-  await expect(page.locator('[data-notification-ask]')).toHaveCount(0);
+  // The moment before the first question (the onboarding audit, finding 3): under Try it, in its own words.
+  const firstRun = page.locator('[data-first-run-ask] [data-notification-ask="ask"]');
+  await expect(firstRun).toBeVisible();
+  await expect(firstRun).toContainText('Get a desktop notice when the first question arrives.');
+  await expect(firstRun.getByRole('button', { name: 'Turn on' })).toBeVisible();
+  await expect(page.locator('[data-notification-ask]')).toHaveCount(1);
+  expect(await calls()).toEqual([]);
+  await shot('6.0-ask-first-run');
 
   const claude = await agent('Claude Code', 'claude-code');
   const sent = await claude.send({ project_path: world.billing, body: DEMO_MESSAGES.stopped });

@@ -32,6 +32,16 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'plannotator-graphite',
+    name: 'Plannotator Graphite',
+    builtIn: true,
+    modeSupport: 'both',
+    colors: {
+      dark: { primary: 'oklch(0.765 0.124 283)', secondary: 'oklch(0.740 0.123 180)', accent: 'oklch(0.765 0.156 60)', background: 'oklch(0.225 0.006 286)', foreground: 'oklch(0.945 0.003 286)' },
+      light: { primary: 'oklch(0.50 0.25 280)', secondary: 'oklch(0.50 0.18 180)', accent: 'oklch(0.60 0.22 50)', background: 'oklch(0.97 0.005 260)', foreground: 'oklch(0.18 0.02 260)' },
+    },
+  },
+  {
     id: 'simple',
     name: 'Simple',
     builtIn: true,

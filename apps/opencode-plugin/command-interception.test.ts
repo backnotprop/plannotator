@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 import PlannotatorPlugin from "./index";
@@ -24,7 +24,7 @@ const environment = createTestEnvironment(envKeys, "plannotator-oc1-intercept-")
 
 afterEach(() => environment.restore());
 
-const COMMANDS = ["plannotator-review", "plannotator-annotate", "plannotator-last"] as const;
+const COMMANDS = ["plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-inbox"] as const;
 
 function makeClient() {
   return {
@@ -78,6 +78,39 @@ describe("OpenCode 1 command interception", () => {
       });
     }
   }
+
+  // /plannotator-inbox opens the Inbox (`plannotator inbox --open`, a stand-in
+  // here) and its own message carries the address, so the one turn OpenCode 1
+  // runs for it tells the user where the Inbox is; a toast shows it too.
+  test.skipIf(process.platform === "win32")("/plannotator-inbox: the command's own message carries the Inbox address", async () => {
+    environment.reset();
+    const root = environment.makeTempDir();
+    process.env.PLANNOTATOR_DATA_DIR = root;
+    const calls = path.join(root, "calls");
+    const binary = path.join(root, "fake-plannotator");
+    writeFileSync(binary, `#!/bin/sh\necho "$*" >> '${calls}'\necho 'http://localhost:61234/'\n`, { mode: 0o755 });
+    process.env.PLANNOTATOR_BIN = binary;
+
+    const client: any = makeClient();
+    const sent: unknown[] = [];
+    client.session.prompt = async (request: unknown) => {
+      sent.push(request);
+      return {};
+    };
+    const toasts: unknown[] = [];
+    client.tui = { showToast: async (request: unknown) => toasts.push(request) };
+    const plugin = await PlannotatorPlugin({ client, directory: root } as never, { runtime: "embedded" } as never) as Record<string, any>;
+
+    const parts: any[] = [{ type: "text", text: "stub body" }];
+    await plugin["command.execute.before"]({ command: "plannotator-inbox", sessionID: "ses_1", arguments: "" }, { parts });
+
+    // The CLI, never the embedded runtime (which cannot host the Inbox).
+    expect(readFileSync(calls, "utf8").trim()).toBe("inbox --open");
+    // No second prompt: the address rides the command's own message.
+    expect(sent).toHaveLength(0);
+    expect(parts.map((part) => part.text).join("\n")).toContain("http://localhost:61234/");
+    expect(JSON.stringify(toasts)).toContain("http://localhost:61234/");
+  });
 
   // OpenCode runs a model turn for the command's own message whatever the hook
   // does, so feedback sent as a separate prompt ran a SECOND turn that answered

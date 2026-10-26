@@ -4,6 +4,7 @@
  * CallDiff is a Node-native, synchronous Tree-sitter library. Plannotator runs
  * it in a short-lived Node 22 worker and never imports it into Bun or Pi.
  */
+import { childEnv } from "./child-env";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
@@ -978,6 +979,7 @@ async function runCommand(
         if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
         else if (process.platform === "win32" && child.pid) {
           const killed = spawnSync("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], {
+            env: childEnv(),
             stdio: "ignore",
             windowsHide: true,
           });

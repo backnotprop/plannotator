@@ -19,7 +19,7 @@ When Claude calls `ExitPlanMode`, or you run `/plannotator-review`, `/plannotato
 - When you decide, your decision arrives in the session as a message from the Plannotator plugin, and Claude continues from there.
 - If Claude revises the plan while the review is open, the same tab updates to the new version. Your comments stay.
 - After you approve a plan, Claude calls `ExitPlanMode` once more and works from the exact plan text you approved.
-- Claude can open Plannotator itself with its `plannotator` tool, for example when you ask it to "open notes.md in Plannotator". A plain `plannotator review`, `annotate` or `last` command that Claude runs in Bash opens the same way.
+- Claude can open Plannotator itself with its `plannotator` tool, for example when you ask it to "open notes.md in Plannotator". A plain `plannotator review`, `annotate` or `last` command that Claude runs in Bash opens the same way. To read it on your phone, ask Claude to open it over Tailscale: the tool's `tailscale` option serves it on your tailnet (HTTPS, never public), and "Ask this session" works there for your Tailscale login.
 - Ask AI in the review is answered by this Claude session. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
 - The status line shows the reviews that are waiting for you.
 - A review stays open if you close the terminal. Resume the session (for example with `claude --continue`) and the decision is delivered.
@@ -138,6 +138,10 @@ Opens any markdown file in the annotation UI. See the [annotate docs](/docs/comm
 ### `/plannotator-last`
 
 Annotates the agent's most recent message. See the [annotate last docs](/docs/commands/annotate-last/) for details.
+
+### `/plannotator-inbox`
+
+Opens your [Plannotator Inbox](/docs/reference/inbox/) in the browser, starting it if needed, and shows its address. Use it when you closed the Inbox tab.
 
 Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
 

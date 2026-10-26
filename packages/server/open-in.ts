@@ -17,6 +17,7 @@
  *   - terminal               -> open the file's parent directory
  */
 
+import { childEnv, childPath } from "@plannotator/shared/child-env";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -172,7 +173,7 @@ function spawnDetached(
   friendlyName: string,
 ): Promise<OpenInLaunchResult> {
   try {
-    Bun.spawn([cmd, ...args], { stdout: "ignore", stderr: "ignore" });
+    Bun.spawn([cmd, ...args], { env: childEnv(), stdout: "ignore", stderr: "ignore" });
     return Promise.resolve({ ok: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -331,12 +332,12 @@ function isAppAvailable(app: OpenInApp, platform: OpenInPlatform): boolean {
 
   if (platform === "win") {
     const bin = app.win?.bin;
-    return !!bin && !!Bun.which(bin);
+    return !!bin && !!Bun.which(bin, { PATH: childPath() });
   }
 
   // linux
   const bin = app.linux?.bin;
-  return !!bin && !!Bun.which(bin);
+  return !!bin && !!Bun.which(bin, { PATH: childPath() });
 }
 
 export interface AvailableOpenInApp {

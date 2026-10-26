@@ -168,7 +168,8 @@ describe("jj compare targets", () => {
     : test.skip;
 
   // Every `jj` process below runs against a throwaway JJ_CONFIG. Reading the
-  // developer's real config is banned outright by CLAUDE.md, and it is also
+  // developer's real config is banned outright by the Testing Rules
+  // (docs/agent-guides/project-and-development.md), and it is also
   // what makes these fixtures reproducible: commit signing, a custom
   // `immutable_heads()` alias or a non-default `git.push-bookmark-prefix` in a
   // real config would otherwise fail or silently reshape them.

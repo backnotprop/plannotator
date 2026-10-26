@@ -3,8 +3,9 @@ import { formatInboxVideoTime, inboxVideoMeta, readInboxVideoTime, type InboxAtt
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
-import { InboxApiError, inboxApi } from '../api';
-import { attachmentDownloadUrl, attachmentVideoUrl, compareVideoTimes, videoCommentAnnotation, videoFrameName, videoTimeOf } from '../attachments';
+import { InboxApiError } from '../api';
+import { useInboxFileSource, type FileSuggestion } from '../fileSource';
+import { compareVideoTimes, videoCommentAnnotation, videoFrameName, videoTimeOf } from '../attachments';
 import { formatBytes, plural } from '../format';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
@@ -79,7 +80,16 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   onSave: (annotation: Annotation) => Promise<boolean>;
   onError: (message: string) => void;
   phone?: boolean;
-}>(function VideoAttachmentView({ attachment, version, annotations, selectedId, onSelect, readOnly, onSave, onError, phone }, ref) {
+  /** A still to show before it plays; absent: the film's first frame. */
+  poster?: string;
+  /**
+   * A suggested comment (the tour's): the first pause fills the box with it and pins that moment and its
+   * frame, as typing does; the person keeps it with one press, or writes over it.
+   */
+  suggestion?: FileSuggestion;
+}>(function VideoAttachmentView({ attachment, version, annotations, selectedId, onSelect, readOnly, onSave, onError, phone, poster, suggestion }, ref) {
+  const source = useInboxFileSource();
+  const suggested = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [duration, setDuration] = useState<number | null>(attachment.duration_ms ? attachment.duration_ms / 1000 : null);
@@ -97,7 +107,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   /** A phone opens the row from "Comment at 1:42". */
   const [composing, setComposing] = useState(false);
   // The `#t` fragment asks for the first frame, a free poster.
-  const src = `${attachmentVideoUrl(attachment, version)}#t=0.001`;
+  const src = `${source.videoUrl(attachment, version)}#t=0.001`;
 
   // A frame's local URL is let go once it is replaced or the view goes.
   const frameRef = useRef<Frame | null>(null);
@@ -179,7 +189,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     let image: ImageAttachment | null = markup;
     if (!image && frame) {
       try {
-        const kept = await inboxApi.uploadMarkup(frame.blob);
+        const kept = await source.keepMarkup(frame.blob);
         image = { path: kept.path, name: videoFrameName(attachment.name, time) };
       } catch (cause) {
         // The comment still goes; only the frame is missing.
@@ -210,10 +220,12 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
               {formatBytes(attachment.current?.size ?? attachment.size)}. This video&rsquo;s format can&rsquo;t play here; download it to open it.
             </span>
           </span>
-          <a className="ib-btn ib-pri" href={attachmentDownloadUrl(attachment, version)} download={attachment.name}>
-            <Icon name="download" size={14} />
-            Download
-          </a>
+          {source.writes && (
+            <a className="ib-btn ib-pri" href={source.downloadUrl(attachment, version)} download={attachment.name}>
+              <Icon name="download" size={14} />
+              Download
+            </a>
+          )}
         </div>
       </div>
     );
@@ -310,6 +322,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
             src={src}
             controls
             preload="metadata"
+            poster={poster}
             playsInline
             aria-label={attachment.name}
             data-video-player=""
@@ -325,6 +338,13 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
               if (Number.isFinite(d) && d > 0) setDuration(d);
             }}
             onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
+            onPause={() => {
+              // The first pause, with nothing written yet: the suggestion fills the box, and the moment pins.
+              if (!suggestion || suggested.current || readOnly || text.trim() !== '' || phone) return;
+              suggested.current = true;
+              setText(suggestion.comment);
+              void pin();
+            }}
             onSeeked={(event) => setCurrent(event.currentTarget.currentTime)}
             onError={(event) => {
               const code = event.currentTarget.error?.code;
@@ -408,6 +428,10 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
             className="ib-btn ib-pri ib-vbig"
             onClick={() => {
               setComposing(true);
+              if (suggestion && !suggested.current && text.trim() === '') {
+                suggested.current = true;
+                setText(suggestion.comment);
+              }
               void pin();
               requestAnimationFrame(() => textRef.current?.focus());
             }}
@@ -428,7 +452,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           // Nothing drawn: the plain frame still rides the comment.
           if (!hasDrawings) return;
           try {
-            const kept = await inboxApi.uploadMarkup(blob);
+            const kept = await source.keepMarkup(blob);
             setMarkup({ path: kept.path, name: `${videoFrameName(attachment.name, pinned ?? current)}, marked up` });
           } catch (cause) {
             onError(cause instanceof InboxApiError ? cause.message : 'The drawing was not kept.');

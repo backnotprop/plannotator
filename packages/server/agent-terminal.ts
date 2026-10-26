@@ -1,3 +1,4 @@
+import { childPath } from "@plannotator/shared/child-env";
 import { randomBytes } from "node:crypto";
 import {
   buildAgentTerminalWsPath,
@@ -11,7 +12,7 @@ import {
   type ResolvedAgentTerminalRuntime,
 } from "./agent-terminal-runtime";
 
-type AgentTerminalSocketData = {
+export type AgentTerminalSocketData = {
   upstream: WebSocket | null;
   pending: string[];
 };
@@ -351,7 +352,7 @@ function listAgents(core: WebTuiCore): AgentTerminalAgent[] {
     return {
       id,
       name: formatAgentName(id),
-      available: !!Bun.which(config.detectCommand),
+      available: !!Bun.which(config.detectCommand, { PATH: childPath() }),
     };
   });
 }

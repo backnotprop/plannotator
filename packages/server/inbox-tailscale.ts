@@ -450,7 +450,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       warnedExposure = false;
     }
     saveConfig({ inboxTailscale: on });
-    if (loadConfig().inboxTailscale !== on) throw new InboxError("config_not_saved", "config.json could not be written; nothing changed.");
+    if (loadConfig().inboxTailscale !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // The saved switch decides from now on, not this run's flag.
     runFlag = false;
     if (on) publish();

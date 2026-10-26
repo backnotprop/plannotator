@@ -486,7 +486,7 @@ describe("node live proxy: security posture", () => {
     // never getServerHostname() or any env-dependent interface.
     const source = readFileSync(join(import.meta.dir, "live-proxy-node.ts"), "utf-8");
     expect(source).toContain('const LOOPBACK_HOST = "127.0.0.1";');
-    expect(source).toContain("server.listen(0, LOOPBACK_HOST");
+    expect(source).toContain("server.listen(candidate, LOOPBACK_HOST");
     expect(source).not.toContain("getServerHostname");
   });
 

@@ -2,6 +2,7 @@
  * Code navigation — Bun runtime adapter and request handler.
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import {
   type CodeNavRequest,
   type CodeNavRuntime,
@@ -22,6 +23,7 @@ const bunCodeNavRuntime: CodeNavRuntime = {
     try {
       proc = Bun.spawn([command, ...args], {
         cwd: options?.cwd,
+        env: childEnv(),
         stdout: "pipe",
         stderr: "pipe",
       });

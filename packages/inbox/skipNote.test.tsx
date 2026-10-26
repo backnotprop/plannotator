@@ -289,12 +289,22 @@ test.skipIf(!hasDom)('Re-ask pressed while a pick and a note are still saving: t
   act(() => (cards(el())[0]!.querySelector('[data-question-option] input') as HTMLInputElement).click());
   await until(async () => (await readThread(world.stopped)).thread.messages[0]!.questions![0]!.state === 'picked', 'the first pick saved');
   await settle();
-  // The second question is still open as drawn: Re-ask is offered.
-  expect(el().querySelector('[data-reask]')).not.toBeNull();
+  // The second question is still open as drawn: the open-questions list (Re-ask at its foot, owner,
+  // 2026-10-23) is offered. Open it now, so pressing Re-ask below is one synchronous click.
+  const trigger = el().querySelector('[data-open-questions]') as HTMLElement;
+  expect(trigger).not.toBeNull();
+  await act(async () => {
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    trigger.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    trigger.click();
+  });
+  await until(() => !!document.querySelector('[data-open-questions-list] [data-reask]'), 'Re-ask in the list');
   // Pick the second and write a note on the first; Re-ask before either save lands.
   act(() => (cards(el())[1]!.querySelector('[data-question-option] input') as HTMLInputElement).click());
   note(cards(el())[0]!, 'Keep it simple');
-  act(() => (el().querySelector('[data-reask]') as HTMLButtonElement).click());
+  act(() => (document.querySelector('[data-open-questions-list] [data-reask]') as HTMLElement).click());
   const body = await sentReply();
   // Nothing is open any more, so no Re-ask note: one plain reply carrying both picks and the note.
   expect(body).toContain('### Q1. Which layout should the invoice list use? (line 4)\nAnswer: Cards\nNote: Keep it simple');

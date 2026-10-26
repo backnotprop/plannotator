@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, resolveInboxReminder, resolveSharingEnabled } from "@plannotator/shared/config";
+import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled } from "@plannotator/shared/config";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
 import {
@@ -546,7 +546,8 @@ Do NOT proceed with implementation until your plan is approved.`;
       if (
         cmd !== "plannotator-last" &&
         cmd !== "plannotator-annotate" &&
-        cmd !== "plannotator-review"
+        cmd !== "plannotator-review" &&
+        cmd !== "plannotator-inbox"
       ) return;
 
       output.parts.length = 0;
@@ -596,10 +597,15 @@ Do NOT proceed with implementation until your plan is approved.`;
   };
 
   async function runPlannotatorCommand(
-    cmd: "plannotator-last" | "plannotator-annotate" | "plannotator-review",
+    cmd: "plannotator-last" | "plannotator-annotate" | "plannotator-review" | "plannotator-inbox",
     input: { sessionID: string; arguments?: string },
     client: any,
   ): Promise<void> {
+    // The Inbox is the CLI's own server: the embedded runtime cannot host it.
+    if (cmd === "plannotator-inbox") {
+      await handleCliCommand({ command: cmd, client, sessionId: input.sessionID, rawArgs: "", commandTurn: true });
+      return;
+    }
     // input.arguments is the raw tail string from OpenCode's command dispatcher —
     // needed so --gate / --json reach the handlers' parseAnnotateArgs.
     const event = {
@@ -754,7 +760,10 @@ Do NOT proceed with implementation until your plan is approved.`;
       // `tools` switch it off, gets none. `inboxReminder` turns it off.
       // A lookup that fails reuses the session's last answer (no answer yet:
       // no line), so the system prompt cannot flip between requests.
-      if (resolveInboxReminder(loadConfig(), process.env, "opencode")) {
+      const inboxConfig = loadConfig();
+      if (resolveInboxReminder(inboxConfig, process.env, "opencode")) {
+        // The person's own line (config.json prompts.inbox) or the no-wake default, decided once here.
+        const reminderText = resolveInboxReminderText(inboxConfig, "opencode", { wakes: false });
         const planTransform = plugin["experimental.chat.system.transform"];
         const lastAnswer = new Map<string, boolean>();
         plugin["experimental.chat.system.transform"] = async (input, output) => {
@@ -776,7 +785,7 @@ Do NOT proceed with implementation until your plan is approved.`;
           }
           if (lastAnswer.size > 500 && !lastAnswer.has(input.sessionID)) lastAnswer.clear();
           lastAnswer.set(input.sessionID, hasInbox);
-          if (hasInbox) addInboxReminderOpenCode1(output.system);
+          if (hasInbox) addInboxReminderOpenCode1(output.system, reminderText);
         };
       }
     }

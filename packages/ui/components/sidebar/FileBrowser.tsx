@@ -455,9 +455,18 @@ const DirSection: React.FC<{
           selectionPending={selectionPending}
         />
       ))}
+      {dir.truncated && <FileLimitNote limit={dir.fileLimit} />}
     </div>
   );
 };
+
+/** The folder holds more supported files than the server lists; say so once, quietly, at the foot of its tree. */
+export const FileLimitNote: React.FC<{ limit?: number }> = ({ limit }) => (
+  <div data-file-limit-note className="px-2 pt-2 pb-1 text-[10px] leading-snug text-muted-foreground">
+    {limit ? `Showing the first ${limit.toLocaleString("en-US")} files.` : "Showing some of the files."}{" "}
+    Raise <code className="font-mono">PLANNOTATOR_FILE_BROWSER_MAX_FILES</code> to see more.
+  </div>
+);
 
 export const FileBrowser: React.FC<FileBrowserProps> = ({
   dirs,

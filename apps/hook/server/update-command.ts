@@ -50,6 +50,7 @@ export interface UpdateCommandDeps {
   now?: () => number;
   out?: (text: string) => void;
   err?: (text: string) => void;
+  fetchReleasePage?: () => Promise<FetchReleaseResult>;
   fetchRelease?: () => Promise<FetchReleaseResult>;
   runInstaller?: (launch: InstallerLaunch, write: (chunk: string) => void) => Promise<number>;
 }
@@ -97,10 +98,16 @@ export async function runUpdateCommand(args: string[], deps: UpdateCommandDeps):
     now,
     enabled: () => true,
     force: true,
+    ...(deps.fetchReleasePage && { fetchReleasePage: deps.fetchReleasePage }),
     ...(deps.fetchRelease && { fetchRelease: deps.fetchRelease }),
   });
   if (checked.outcome === "failed") {
-    err(`Could not ask GitHub for the latest release: ${checked.error}\n`);
+    // The install script finds the newest release on its own (the API, else
+    // the release page), so it works when this check does not.
+    err(
+      `Could not ask GitHub for the latest release: ${checked.error}\n` +
+        `To install the newest release anyway, run:\n  ${command}\n`,
+    );
     return 1;
   }
   const latest = knownLatestRelease(readUpdateState(dataDir))?.version ?? null;

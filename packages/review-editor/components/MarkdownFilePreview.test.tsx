@@ -49,11 +49,12 @@ let host: HTMLElement | null = null;
 let added: Array<{ filePath: string; text: string; anchor: MarkdownPreviewAnchor }> = [];
 let setViewFromTest: ((view: MarkdownPreviewView) => void) | null = null;
 
-function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH }: {
+function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH, holdRemote }: {
   initial?: CodeAnnotation[];
   oldText?: string;
   newText?: string;
   patch?: string;
+  holdRemote?: boolean;
 }) {
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>(initial);
   const [view, setView] = useState<MarkdownPreviewView>('diff');
@@ -88,6 +89,7 @@ function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH }: 
         patch={patch}
         contents={{ fileContents: { forPath: 'docs/guide.md', old: oldText, new: newText }, loading: false, stale: false }}
         variant="single"
+        holdRemoteImages={holdRemote}
       />
     </ReviewStateProvider>
   );
@@ -424,5 +426,36 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(imported).toEqual([urls.engine, `${urls.engine}?r=1`]);
     expect(host.querySelector('[data-stub-diagram]')?.textContent).toBe('flowchart LR\n  A --> B');
     expect(host.querySelector('[data-review-diagram]')).toBeNull();
+  });
+});
+
+// Picture choices in a question block (approval "inbox-decision-mode"): a PR
+// preview holds their remote pictures like any other, so they are counted in
+// "N remote images are not loaded" and load with the button.
+describe('MarkdownFilePreview: held remote pictures in a question block', () => {
+  const PICTURES = [
+    '# Guide',
+    '',
+    ':::question',
+    'Which drawer?',
+    '- [ ] A — ![Drawer A](https://example.com/a.png)',
+    '- [ ] B — ![Drawer B](https://example.com/b.png)',
+    ':::',
+    '',
+  ].join('\n');
+
+  test.skipIf(!hasDom)('held pictures draw the held placeholder, are counted, and load', async () => {
+    const patch = ['diff --git a/docs/guide.md b/docs/guide.md', '--- a/docs/guide.md', '+++ b/docs/guide.md', '@@ -1 +1,7 @@', ' # Guide', ...PICTURES.split('\n').slice(1, -1).map((l) => `+${l}`), ''].join('\n');
+    const el = await mount({ oldText: '# Guide\n', newText: PICTURES, patch, holdRemote: true });
+    await settle();
+    const held = Array.from(el.querySelectorAll('fieldset [data-image-unavailable]'));
+    expect(held.length).toBe(2);
+    for (const placeholder of held) expect(placeholder.getAttribute('title')).toMatch(/^Remote image, not loaded/);
+    expect(el.textContent).toContain('2 remote images are not loaded');
+    const load = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Load remote images'))!;
+    await act(async () => { load.click(); });
+    await settle();
+    const pictures = Array.from(el.querySelectorAll<HTMLImageElement>('fieldset img[data-question-picture]'));
+    expect(pictures.map((img) => img.getAttribute('src'))).toEqual(['https://example.com/a.png', 'https://example.com/b.png']);
   });
 });

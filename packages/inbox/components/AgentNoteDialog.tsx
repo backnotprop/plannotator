@@ -49,6 +49,12 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
   }, [phase, focusDone]);
 
   const single = rows.length === 1;
+  const cursorOnly = rows.every((row) => row.id === 'cursor');
+  const visibleNote = cursorOnly ? noteText.split('\n').filter((line) => !line.startsWith('<!-- plannotator-inbox:')).join('\n') : noteText;
+  const isManual = (agent: string) => {
+    const result = status[agent];
+    return result?.kind === 'done' && result.result.ok && result.result.action === 'manual';
+  };
   const asked = rows.map((row) => row.id as InboxNoteAgentId);
   const picked = rows.filter((row) => picks[row.id]);
   const primary = primaryAction(picked.map((row) => row.label));
@@ -75,9 +81,10 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
       for (const result of results) next[result.agent] = { kind: 'done', result };
       return next;
     });
-    const ok = results.filter((result) => result.ok).map((result) => INBOX_AGENT_LABELS[result.agent]);
+    const ok = results.filter((result) => result.ok && result.action !== 'manual').map((result) => INBOX_AGENT_LABELS[result.agent]);
+    const manual = results.some((result) => result.ok && result.action === 'manual');
     const bad = results.filter((result) => !result.ok).map((result) => INBOX_AGENT_LABELS[result.agent]);
-    setLive([ok.length ? `Added the note to ${joinNames(ok)}.` : '', bad.length ? `Couldn't add the note to ${joinNames(bad)}.` : ''].filter(Boolean).join(' '));
+    setLive([ok.length ? `Added the note to ${joinNames(ok)}.` : '', manual ? 'Copy the note into Cursor Settings → Rules. Plannotator cannot track or remove it.' : '', bad.length ? `Couldn't add the note to ${joinNames(bad)}.` : ''].filter(Boolean).join(' '));
   };
   const failedAll = (agents: InboxNoteAgentId[], err: unknown): InboxNoteResult[] =>
     agents.map((agent) => ({ ok: false, agent, reason: err instanceof Error ? err.message : String(err), path: null }));
@@ -116,18 +123,24 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
   const anyFailed = doneRows.some((row) => { const s = status[row.id]; return s?.kind === 'done' && !s.result.ok; });
   const done = phase === 'done';
 
+  const hasManual = okRows.some((row) => isManual(row.id));
+  const manualOnly = hasManual && okRows.every((row) => isManual(row.id));
   const title = done
-    ? okRows.length > 0
-      ? `Added the note to ${whoLabel(okRows.map((row) => row.label))}`
-      : 'The note was not added'
+    ? manualOnly
+      ? 'Copy the note into Cursor Settings → Rules'
+      : okRows.length > 0
+        ? `Added the note to ${whoLabel(okRows.filter((row) => !isManual(row.id)).map((row) => row.label))}`
+        : 'The note was not added'
     : single
       ? `Add the note to ${rows[0]!.label}?`
       : 'Tell your agents about the Inbox';
   const desc = done
     ? null
-    : single
-      ? "A short note in its instructions tells it to send you decisions and finished work here while you're away. Plain text you can edit or delete."
-      : "Plannotator can add a short note to each agent's instructions, so they send you decisions and finished work here while you're away. Plain text you can edit or delete.";
+    : cursorOnly
+      ? 'Copy this note into Cursor Settings → Rules. Plannotator cannot detect, update or remove a copied rule.'
+      : single
+        ? "A short note in its instructions tells it to send you decisions and finished work here while you're away. Plain text you can edit or delete."
+        : `Plannotator can add a short note to each selected agent's instructions. ${rows.some((row) => row.id === 'cursor') ? 'Cursor needs a manual copy into Settings → Rules, which Plannotator cannot track or remove. ' : ''}Plain text you can edit or delete.`;
 
   return (
     <Modal
@@ -215,8 +228,9 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
               })}
             </ul>
             <p className="ib-anote-doneline">
-              {[okRows.length > 0 ? 'Each agent reads it from its next session.' : '', anyFailed ? 'Fix the file, then try again here or in Settings → Agents.' : ''].filter(Boolean).join(' ')}
+              {[okRows.some((row) => !isManual(row.id)) ? 'Managed notes are read from each agent’s next session.' : '', hasManual ? 'Copy the note below into Cursor Settings → Rules. Plannotator cannot detect, update or remove a copied rule.' : '', anyFailed ? 'Fix the file, then try again here or in Settings → Agents.' : ''].filter(Boolean).join(' ')}
             </p>
+            {hasManual && <div className="ib-anote-note"><pre tabIndex={0} aria-label="The note to copy into Cursor User Rules"><NoteText text={visibleNote} /></pre></div>}
           </>
         ) : (
           <>
@@ -258,7 +272,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
             {preview && (
               <div className="ib-anote-note" id={`${id}-note`}>
                 <pre tabIndex={0} aria-label="The note Plannotator adds">
-                  <NoteText text={noteText} />
+                  <NoteText text={visibleNote} />
                 </pre>
               </div>
             )}
@@ -268,7 +282,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
       <div className="ib-anote-foot" data-busy={busy || undefined}>
         {done ? (
           <>
-            <span className="ib-anote-later">Remove it any time in Settings → Agents.</span>
+            <span className="ib-anote-later">{manualOnly ? 'Plannotator cannot remove a copied Cursor rule.' : hasManual ? 'Managed notes can be removed in Settings → Agents; copied Cursor rules stay in your settings.' : 'Remove it any time in Settings → Agents.'}</span>
             <button type="button" className="ib-btn ib-pri" data-anote-done="" ref={doneRef} onClick={close}>
               Done
             </button>
@@ -282,7 +296,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
               </button>
             )}
             <button type="button" className="ib-btn ib-pri" data-anote-primary="" aria-disabled={busy || undefined} onClick={() => void add()}>
-              {busy ? 'Adding…' : primary.label}
+              {busy ? 'Preparing…' : picked.length === 1 && picked[0]?.id === 'cursor' ? 'Show note to copy' : primary.label}
             </button>
           </>
         )}

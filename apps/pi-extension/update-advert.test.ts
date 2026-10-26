@@ -73,3 +73,21 @@ describe("updateAvailable on the Pi servers", () => {
 		}
 	});
 });
+
+describe("updateCheckFailing on the Pi servers (checking has failed for hours)", () => {
+	test("says so with Pi's own command, which needs no GitHub", async () => {
+		const since = Date.now() - 4 * 60 * 60_000;
+		writeUpdateState(
+			{ latestRelease: { tag: "0.0.1", fetchedAt: since - 60_000 }, releaseCheck: { attemptedAt: Date.now(), failedAt: Date.now(), failingSince: since, error: "offline" } },
+			dataDir,
+		);
+		const plan = await startPlanReviewServer({ plan: "# Plan", origin: "pi", htmlContent: MINIMAL_HTML });
+		try {
+			const body = await payload(plan.url);
+			expect(body.updateCheckFailing).toEqual({ since: new Date(since).toISOString(), error: "couldn't reach GitHub", command: "pi update --extensions" });
+			expect(body.updateAvailable).toBeUndefined();
+		} finally {
+			plan.stop();
+		}
+	});
+});

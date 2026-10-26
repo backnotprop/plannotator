@@ -2,7 +2,10 @@
  * /api/draft in PR mode survives a changed PR diff (#1590), and every
  * decision clears it under both keys. Local reviews keep the content-hash key.
  *
- * Temp PLANNOTATOR_DATA_DIR per test; PATH emptied so no platform CLI runs.
+ * Temp PLANNOTATOR_DATA_DIR per test. The server's PR commands (the platform
+ * user, viewed files, PR context) go to a fake runtime, never the real `gh`:
+ * emptying PATH did not do that, since Bun resolves a spawn without `env` on
+ * the PATH the process started with.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
@@ -10,10 +13,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { startReviewServer } from './review';
+import { setPRCommandRuntimeForTests } from './pr';
+import { createFakePRRuntime, type FakePRRuntime } from '../../tests/helpers/fake-pr-runtime';
 
-const ENV_KEYS = ['PLANNOTATOR_AI', 'PLANNOTATOR_DATA_DIR', 'PATH', 'PLANNOTATOR_PORT', 'PLANNOTATOR_REMOTE', 'PLANNOTATOR_BROWSER'] as const;
+const ENV_KEYS = ['PLANNOTATOR_AI', 'PLANNOTATOR_DATA_DIR', 'PLANNOTATOR_PORT', 'PLANNOTATOR_REMOTE', 'PLANNOTATOR_BROWSER'] as const;
 const saved: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 const tempDirs: string[] = [];
+let prCommands: FakePRRuntime | null = null;
 
 const prMetadata: PRMetadata = {
   platform: 'github',
@@ -45,13 +51,16 @@ function sandbox(): string {
   process.env.PLANNOTATOR_REMOTE = '0';
   process.env.PLANNOTATOR_BROWSER = '/usr/bin/true';
   delete process.env.PLANNOTATOR_PORT;
-  process.env.PATH = makeTempDir('plannotator-draft-pr-path-');
+  prCommands = createFakePRRuntime();
+  setPRCommandRuntimeForTests(prCommands.runtime);
   const dataDir = makeTempDir('plannotator-draft-pr-data-');
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   return dataDir;
 }
 
 afterEach(() => {
+  setPRCommandRuntimeForTests(null);
+  prCommands = null;
   for (const key of ENV_KEYS) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key]!;
@@ -159,6 +168,15 @@ describe('PR review drafts across a push', () => {
       expect(res.status).toBe(404);
       expect((await res.json()).draftGeneration).toBe(4);
     });
+  });
+});
+
+describe('platform commands', () => {
+  test('a PR session runs its gh commands through the fake runtime, not a process', async () => {
+    sandbox();
+    await withSession(PATCH_BEFORE_PUSH, prMetadata, (url) => saveDraft(url, 3));
+    const commands = prCommands!.calls.map((call) => [call.cmd, ...call.args].join(' '));
+    expect(commands).toContain('gh api user --jq .login --hostname github.invalid');
   });
 });
 

@@ -5,6 +5,7 @@
  * Runtime-agnostic: uses only node:fs, node:os, node:child_process.
  */
 
+import { childEnv } from "./child-env";
 import { join } from "path";
 import { getPlannotatorDataDir } from "./data-dir";
 import {
@@ -26,6 +27,7 @@ import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig } f
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
+import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor } from './inbox/connection';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -75,6 +77,19 @@ export interface PromptConfig {
     approved?: string;
     approvedWithNotes?: string;
   };
+  /**
+   * The Plannotator Inbox's reminder at session start (approval
+   * "inbox-prompts-page", #2194): `reminder` for every host, and
+   * `runtimes.<claude-code|pi|opencode>.reminder` for one host, which wins.
+   * Set, it REPLACES the built-in line (INBOX_REMINDER_TEXT /
+   * INBOX_REMINDER_TEXT_NO_WAKE); empty, whitespace or longer than
+   * INBOX_REMINDER_MAX_CHARS counts as unset. Whether the reminder is sent at
+   * all stays `inboxReminder`. Read once per session start.
+   */
+  inbox?: {
+    reminder?: string;
+    runtimes?: Partial<Record<InboxToolHost, { reminder?: string }>>;
+  };
 }
 
 const PROMPT_SECTIONS = ["review", "plan", "annotate"] as const;
@@ -101,7 +116,48 @@ export function mergePromptConfig(
     }
   }
 
+  // The Inbox section merges key by key, each host's entry too, so writing one
+  // key keeps the others; a key the write sets to undefined is deleted, and an
+  // entry or section left empty goes with it. Only when the write names
+  // `inbox`: otherwise whatever config.json holds there is kept verbatim.
+  if (partial && Object.prototype.hasOwnProperty.call(partial, "inbox")) {
+    result.inbox = mergeInboxPromptConfig(current?.inbox, partial.inbox);
+    if (Object.values(result).every((value) => value === undefined)) return undefined;
+  }
+
   return result as PromptConfig;
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function withoutUndefined(value: Record<string, unknown>): Record<string, unknown> | undefined {
+  const kept = Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined));
+  return Object.keys(kept).length > 0 ? kept : undefined;
+}
+
+function mergeInboxPromptConfig(current: unknown, partial: unknown): PromptConfig["inbox"] {
+  const par = plainRecord(partial);
+  if (!par) return partial as PromptConfig["inbox"];
+  const cur = plainRecord(current) ?? {};
+  const merged: Record<string, unknown> = { ...cur, ...par };
+  if (Object.prototype.hasOwnProperty.call(par, "runtimes")) {
+    const parRuntimes = plainRecord(par.runtimes);
+    if (!parRuntimes) {
+      merged.runtimes = par.runtimes;
+    } else {
+      const runtimes: Record<string, unknown> = { ...plainRecord(cur.runtimes) };
+      for (const [host, entry] of Object.entries(parRuntimes)) {
+        const parEntry = plainRecord(entry);
+        runtimes[host] = parEntry ? withoutUndefined({ ...plainRecord(runtimes[host]), ...parEntry }) : entry;
+      }
+      merged.runtimes = withoutUndefined(runtimes);
+    }
+  } else if (cur.runtimes !== undefined) {
+    merged.runtimes = cur.runtimes;
+  }
+  return withoutUndefined(merged) as PromptConfig["inbox"];
 }
 
 export interface PlannotatorConfig {
@@ -249,7 +305,7 @@ export interface PlannotatorConfig {
    */
   autoUpdate?: boolean;
   /**
-   * Update notices: whether Plannotator asks GitHub (about once an hour per machine,
+   * Update notices: whether Plannotator asks GitHub (every few minutes per machine,
    * from the machine, never the browser) whether a newer stable release
    * exists, and tells you in the Inbox, the review windows and the terminal.
    * `false` makes no automatic request at all, which also stops auto-update;
@@ -328,6 +384,36 @@ export interface PlannotatorConfig {
    * `{ text_size }`.
    */
   inboxTextSize?: number;
+  /**
+   * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
+   * when it was started, finished or skipped, and whether the first real thread
+   * offers notifications once more. Written by the server only, through POST
+   * /api/inbox/settings `{ tour }`.
+   */
+  inboxTour?: { version?: number; seen_at?: string | null; finished_at?: string | null; skipped_at?: string | null; notify_again?: boolean };
+  /**
+   * Experimental features, each off unless switched on (owner, approval
+   * "inbox-decision-mode": experimental features ship off by default behind a
+   * flag the person turns on). Read through `resolveExperimental`;
+   * PLANNOTATOR_EXPERIMENTAL wins over this key. Written by the Inbox's
+   * Settings → General → Experimental through POST /api/inbox/settings
+   * `{ experimental: { decision_mode } }`.
+   */
+  experimental?: { decisionMode?: boolean };
+  /**
+   * The Board's one-time first-visit dialog (approval "inbox-board", intro
+   * amendment): `shownAt` once a page on this computer claimed it
+   * (`POST /api/inbox/board/intro`, a compare-and-set), once per machine.
+   */
+  inboxBoardIntro?: { shownAt?: string };
+  /**
+   * The Board (approval "inbox-board", 2026-10-26 amendment): something the
+   * person turns on, off by default. On: the sidebar's Board row and page,
+   * and the Inbox serves the agents' `card` tool. Off: neither, every card
+   * kept. Written by the Inbox's Settings → General (`POST
+   * /api/inbox/settings` `{ board: { on } }`), read on every request.
+   */
+  inboxBoard?: boolean;
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
@@ -486,6 +572,21 @@ export interface PlannotatorConfig {
    * 'totman' (production brand mascot) or 'classic' (historical dark-navy P tile).
    */
   favicon?: FaviconStyle;
+  /**
+   * Usage counts for experimental features (packages/shared/usage-counts.ts).
+   * Absent or `true`: on for each counted feature while that feature is on.
+   * `false`: off for every feature. An object turns single features off
+   * (`{ "decisionMode": false }`). `PLANNOTATOR_TELEMETRY=0` and
+   * `DO_NOT_TRACK=1` turn counts off whatever this says; nothing turns them on.
+   * Written by `plannotator telemetry --off` / `--on`.
+   */
+  usageCounts?: boolean | Record<string, boolean>;
+  /**
+   * The usage-counts notice version the person was shown, per feature
+   * (`{ "decisionMode": 1 }`). Written only by the notice UI (phase 2).
+   * Counting needs at least the registry's `notice` for that feature.
+   */
+  usageCountsNotice?: Record<string, number>;
 }
 
 /** Parse the only server-writable call-review analysis flags. */
@@ -523,13 +624,41 @@ export function loadConfig(): PlannotatorConfig {
   try {
     const configPath = getConfigPath();
     if (!existsSync(configPath)) return {};
-    const raw = readFileSync(configPath, "utf-8");
+    // A UTF-8 BOM (Notepad's "UTF-8 with BOM") is not part of the JSON.
+    const raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null ? parsed : {};
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
     return {};
   }
+}
+
+/**
+ * config.json as saveConfig reads it before a merge. A missing file (or one
+ * holding only whitespace) is an empty config, so a first save creates it as
+ * before. A file that exists but cannot be read, or is not a JSON object, is
+ * refused: merging onto loadConfig's `{}` and writing would replace every
+ * setting in it with the one key being saved.
+ */
+function readConfigForSave(configPath: string): { ok: true; config: PlannotatorConfig } | { ok: false; reason: string } {
+  let raw: string;
+  try {
+    raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") return { ok: true, config: {} };
+    return { ok: false, reason: `it could not be read (${code ?? String(e)})` };
+  }
+  if (raw.trim() === "") return { ok: true, config: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "it is not valid JSON" };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ok: false, reason: "it is not a JSON object" };
+  return { ok: true, config: parsed as PlannotatorConfig };
 }
 
 // --- config.json write serialization ----------------------------------------
@@ -691,10 +820,17 @@ function writeConfigAtomic(configPath: string, contents: string): void {
  * (in this process or another one sharing the data dir) cannot drop each
  * other's keys. See the lock notes above for the failure mode: it degrades to
  * the old unlocked behavior with a warning, never to a hang.
+ *
+ * A config.json that exists but cannot be read or is not a JSON object is
+ * never written over (readConfigForSave): the save is refused with a warning
+ * and the file is left in place, so fixing it brings every setting back.
+ * Returns whether the file was written; callers that report a save check it
+ * (or read the value back).
  */
-export function saveConfig(partial: Partial<PlannotatorConfig>): void {
+export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
   let lockPath: string | null = null;
   let locked = false;
+  let saved = false;
   try {
     mkdirSync(getConfigDir(), { recursive: true });
     lockPath = getConfigLockPath();
@@ -706,32 +842,45 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
       );
     }
 
-    const current = loadConfig();
+    const read = readConfigForSave(getConfigPath());
+    if (!read.ok) {
+      process.stderr.write(
+        `[plannotator] Warning: not saving config.json because ${read.reason}; `
+        + `the settings in it are kept. Fix or remove ${getConfigPath()} to save settings again.\n`,
+      );
+      return false;
+    }
+    const current = read.config;
     configSaveMergeWindowHook?.();
-    const mergedDiffOptions = (current.diffOptions || partial.diffOptions)
-      ? { ...current.diffOptions, ...partial.diffOptions }
-      : undefined;
-    const mergedTheme = (current.theme || partial.theme)
-      ? { ...current.theme, ...partial.theme }
-      : undefined;
-    const mergedReviewAnalysis = (current.reviewAnalysis || partial.reviewAnalysis)
-      ? { ...current.reviewAnalysis, ...partial.reviewAnalysis }
-      : undefined;
-    const mergedPrompts = mergePromptConfig(current.prompts, partial.prompts);
-    const merged = {
-      ...current,
-      ...partial,
-      diffOptions: mergedDiffOptions,
-      theme: mergedTheme,
-      reviewAnalysis: mergedReviewAnalysis,
-      prompts: mergedPrompts,
+    // The nested settings merge key by key (one experimental switch saved keeps the others), but a
+    // hand-edited config.json may hold anything there. A key the write does not name is kept verbatim,
+    // whatever it holds; one it names merges only when both sides are plain objects, else the write's
+    // value replaces it (a string `theme` is never spread into characters).
+    const plain = (value: unknown): value is Record<string, unknown> =>
+      !!value && typeof value === "object" && !Array.isArray(value);
+    const merged: Record<string, unknown> = { ...current, ...partial };
+    const nested = (key: "experimental" | "diffOptions" | "theme" | "reviewAnalysis" | "prompts") => {
+      const cur = (current as Record<string, unknown>)[key];
+      const par = (partial as Record<string, unknown>)[key];
+      if (par === undefined) {
+        if (cur !== undefined) merged[key] = cur;
+        return;
+      }
+      if (!plain(cur) || !plain(par)) {
+        merged[key] = par;
+        return;
+      }
+      merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
+    for (const key of ["experimental", "diffOptions", "theme", "reviewAnalysis", "prompts"] as const) nested(key);
     writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
+    saved = true;
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);
   } finally {
     if (locked && lockPath) releaseConfigLock(lockPath);
   }
+  return saved;
 }
 
 /**
@@ -740,7 +889,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): void {
  */
 export function detectGitUser(cwd?: string): string | null {
   try {
-    const name = execSync("git config user.name", { cwd, encoding: "utf-8", timeout: 3000 }).trim();
+    const name = execSync("git config user.name", { cwd, env: childEnv(), encoding: "utf-8", timeout: 3000 }).trim();
     return name || null;
   } catch {
     return null;
@@ -1224,6 +1373,22 @@ export function resolveInboxReminder(
 }
 
 /**
+ * The Inbox reminder a `host` session starts with, once resolveInboxReminder
+ * said it gets one: the person's own text from config.json
+ * (`prompts.inbox.runtimes.<host>.reminder`, then `prompts.inbox.reminder`;
+ * `plannotator_inbox` in it renamed to `toolName`), else exactly today's line
+ * (`inboxReminderText(toolName, { wakes })`). Hosts call it once per session
+ * start, with the switch: the line sits in the cached prompt prefix.
+ */
+export function resolveInboxReminderText(
+  config: PlannotatorConfig,
+  host: InboxToolHost,
+  options: { wakes?: boolean; toolName?: string } = {},
+): string {
+  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes });
+}
+
+/**
  * Resolve whether the Plannotator Inbox serves phones (pairing, the device
  * door, the tailnet and Wi-Fi listeners, the relay, Settings' Phones block).
  *
@@ -1242,6 +1407,54 @@ export function resolveInboxPhones(
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return coerceConfigBoolean(config.inboxPhones, false);
+}
+
+/**
+ * The experimental features this build knows: the name PLANNOTATOR_EXPERIMENTAL
+ * lists (kebab case) and the key it is saved under in config.json
+ * `experimental` (camel case). Small on purpose: a fuller flag registry is a
+ * separate piece of work and can grow out of this table.
+ */
+export const EXPERIMENTAL_FEATURES = {
+  "decision-mode": "decisionMode",
+} as const;
+
+export type ExperimentalFeature = keyof typeof EXPERIMENTAL_FEATURES;
+
+/**
+ * What PLANNOTATOR_EXPERIMENTAL says about one feature, or undefined when it
+ * says nothing. The variable is a comma list of feature names: a name listed
+ * turns that feature on, a name with a leading `-` turns it off (`-decision-mode`);
+ * names are trimmed and compared case-insensitively, and unknown names are ignored.
+ */
+export function parseExperimentalEnv(name: ExperimentalFeature, env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const raw = env.PLANNOTATOR_EXPERIMENTAL;
+  if (!raw) return undefined;
+  let decided: boolean | undefined;
+  for (const part of raw.split(",")) {
+    const token = part.trim().toLowerCase();
+    if (token === name) decided = true;
+    else if (token === `-${name}`) decided = false;
+  }
+  return decided;
+}
+
+/**
+ * Whether an experimental feature is on.
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_EXPERIMENTAL (comma list)  →  config.experimental.<key>  →  default false
+ */
+export function resolveExperimental(
+  config: PlannotatorConfig,
+  name: ExperimentalFeature,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const fromEnv = parseExperimentalEnv(name, env);
+  if (fromEnv !== undefined) return fromEnv;
+  const saved = config.experimental;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return false;
+  return parseConfigBoolean((saved as Record<string, unknown>)[EXPERIMENTAL_FEATURES[name]]) ?? false;
 }
 
 /** The PLANNOTATOR_INBOX_TAILSCALE override, or undefined when it does not decide. */

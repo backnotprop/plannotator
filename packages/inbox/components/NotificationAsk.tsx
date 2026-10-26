@@ -53,6 +53,7 @@ export function NotificationAsk({
   onSettings,
   movedFrom = null,
   soundOn = false,
+  firstRun = false,
 }: {
   kind: AskKind;
   onTurnOn: () => void;
@@ -63,6 +64,8 @@ export function NotificationAsk({
   movedFrom?: string | null;
   /** The question sound is on (sound.ts): a fresh install learns it here, not from a dialog. */
   soundOn?: boolean;
+  /** Drawn on the first-run screen, before any agent wrote: the words speak of the first question. */
+  firstRun?: boolean;
 }) {
   const browser = browserName();
   if (kind === 'blocked') {
@@ -86,7 +89,7 @@ export function NotificationAsk({
         }
       >
         <span className="ib-mut">
-          {browser === 'this browser' ? 'This browser' : browser} blocks notifications for {window.location.host}, so you get no notice when an agent stops on you.
+          {browser === 'this browser' ? 'This browser' : browser} blocks notifications for {window.location.host}, so you get no notice when an agent {firstRun ? 'asks you its first question' : 'stops on you'}.
         </span>
       </AskShell>
     );
@@ -108,7 +111,14 @@ export function NotificationAsk({
         </>
       }
     >
-      {kind === 'ask' ? (
+      {kind === 'ask' && firstRun ? (
+        <>
+          <b>Get a desktop notice when the first question arrives.</b>{' '}
+          <span className="ib-mut">
+            Turn it on before you try it, so you hear from your agent while this tab is in the background. Your browser asks once.{soundOn && ' Sound is on.'}
+          </span>
+        </>
+      ) : kind === 'ask' ? (
         <>
           <b>Get a desktop notice when an agent needs you.</b>{' '}
           <span className="ib-mut">

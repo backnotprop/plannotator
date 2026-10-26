@@ -82,6 +82,7 @@ describe("readPlanFile", () => {
 		writeFileSync(planPath, plan);
 
 		expect(readPlanFile(planPath, plan)?.dir).toBe(dir);
+		expect(readPlanFile(planPath, plan)?.path).toBe(join(dir, "plan.md"));
 	});
 
 	test("refuses a path whose file holds something other than the plan", () => {

@@ -10,7 +10,7 @@
  * The Pi mirror is apps/pi-extension/agent-tool-config.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -79,6 +79,22 @@ describe("POST /api/config on the Bun servers", () => {
         expect((await post(server.url, { agentTool: "true" })).status).toBe(200);
         expect(loadConfig().agentTool).toBe(false);
       } finally {
+        server.stop();
+      }
+    });
+    test(`${name}: a config.json it cannot read is never written over, and the write does not answer 200`, async () => {
+      const bytes = '{ "theme": { "mode": "dark" }, "displayName": "Ada", }\n';
+      writeFileSync(join(dataDir, "config.json"), bytes);
+      const server = await start();
+      const savedWrite = process.stderr.write;
+      process.stderr.write = (() => true) as typeof process.stderr.write;
+      try {
+        const res = await post(server.url, { displayName: "Bo" });
+        expect(res.status).toBe(500);
+        expect(((await res.json()) as { error: string }).error).toContain("fix or remove it");
+        expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe(bytes);
+      } finally {
+        process.stderr.write = savedWrite;
         server.stop();
       }
     });

@@ -19,6 +19,7 @@ import {
   INBOX_WAKE_INSTRUCTION,
   INBOX_WAKES_META_KEY,
   inboxRedirectedLine,
+  inboxWakeClosingLine,
   inboxWakeText,
   parseInboxBridgeCommands,
 } from "@plannotator/shared/inbox/connection";
@@ -323,7 +324,7 @@ describe("the Pi and OpenCode wake (agent-link) for a redirected reply", () => {
       const lines = delivered[0]!.text.split("\n");
       expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
       expect(lines[2]).toBe(inboxRedirectedLine("Claude Code", sent.id));
-      expect(delivered[0]!.text.endsWith(`\n\n${sent.body}`)).toBe(true);
+      expect(delivered[0]!.text.endsWith(`\n\n${sent.body}\n\n${inboxWakeClosingLine(asked.thread_id)}`)).toBe(true);
       let delivery: unknown = null;
       for (let i = 0; i < 100 && !delivery; i++) {
         delivery = (await thread(server, asked.thread_id)).messages.find((m) => m.id === sent.id)?.delivery ?? null;

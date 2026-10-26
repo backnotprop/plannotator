@@ -85,7 +85,7 @@ async function agentSends(body: string, reply_to?: string): Promise<string> {
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-const TESTS = 10;
+const TESTS = 11;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -475,4 +475,26 @@ test.skipIf(!hasDom)('a screen reader closing the thread (a click with no pointe
   act(() => (el.querySelector('section.ib-pane [aria-label="Close the thread"]') as HTMLButtonElement).click());
   await until(() => el.querySelector('section.ib-pane') === null, 'the close');
   expect(document.activeElement).toBe(rowOf(el, first));
+});
+
+// Pins (approval "inbox-pinned-threads"): a pin is the person's own write on window furniture, so pinning
+// the open thread from its header leaves the held list exactly as it is: its rows in their order, and the
+// agent's news still waiting behind "N new".
+test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the "N new" line unchanged', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  await openRow(el, first);
+  const late = await agentSends('A late note while the thread is open.');
+  act(() => pokeStream!());
+  await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
+  const held = order(el);
+  const notice = el.querySelector('[data-inbox-notice]')!.textContent;
+  expect(notice).toContain('1 new in');
+  const toggle = el.querySelector<HTMLButtonElement>('[data-pin-toggle]')!;
+  act(() => toggle.click());
+  await until(() => el.querySelector(`[data-pinned-row="${first}"]`) !== null, 'the pinned row');
+  await wait(150);
+  expect(order(el)).toEqual(held);
+  expect(rowOf(el, late)).toBeNull();
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toBe(notice);
 });

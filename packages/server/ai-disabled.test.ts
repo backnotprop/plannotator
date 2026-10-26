@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import type { PRMetadata } from "@plannotator/shared/pr-types";
 import type { WorktreePool } from "@plannotator/shared/worktree-pool";
 import { fileURLToPath } from "node:url";
+import { createFakePRRuntime } from "../../tests/helpers/fake-pr-runtime";
 
 const SPA_HTML = "<!doctype html><html><body>test</body></html>";
 const ISOLATED_CHILD_ENV = "PLANNOTATOR_AI_DISABLED_TEST_CHILD";
@@ -73,6 +74,10 @@ async function verifyDisabledServers(): Promise<void> {
       import("./review"),
       import("../../apps/pi-extension/server"),
     ]);
+    // The PR-mode server below asks gh for the user, viewed files and PR
+    // context at startup: a fake runtime answers, never the real gh.
+    const { setPRCommandRuntimeForTests } = await import("../../apps/pi-extension/server/pr");
+    setPRCommandRuntimeForTests(createFakePRRuntime().runtime);
 
     servers.push(await startBunReviewServer({
       rawPatch: "",
@@ -162,6 +167,8 @@ async function verifyDisabledServers(): Promise<void> {
     expect(worktreeEnsureCalls).toBe(0);
   } finally {
     for (const server of servers) server.stop();
+    const { setPRCommandRuntimeForTests } = await import("../../apps/pi-extension/server/pr");
+    setPRCommandRuntimeForTests(null);
   }
 }
 

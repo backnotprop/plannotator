@@ -220,7 +220,7 @@ export function RouteChoice({
         <legend>{reask ? 'Who should ask again?' : 'Where should this reply go?'}</legend>
         <p className="ib-why" id={whyId}>
           {reask
-            ? `The ${asking.name} session that asked has ended. The session you pick reads this thread, then asks the ${reaskCount === 1 ? 'open question' : `${reaskCount} open questions`} again in one message.`
+            ? `The ${asking.name} session that asked has ended. The session you pick reads this thread, then asks ${reaskCount === 1 ? 'the open question again' : `the ${reaskCount} open questions again in one message`}.`
             : `The ${asking.name} session that asked has ended. Your reply stays as you wrote it.`}
         </p>
         {state.rows.length > 0 && (

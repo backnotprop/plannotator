@@ -15,7 +15,8 @@
  * unit-testable with a fake adapter and no DOM, and a host can build the
  * same adapter over its own document state.
  */
-import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
+import { AnnotationType, type Annotation, type Block, type ImageRegion } from '@plannotator/ui/types';
+import { regionOf } from '@plannotator/ui/components/ImageRegions';
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { collectQuestionAnswers } from '@plannotator/ui/utils/questionAnswers';
 import {
@@ -146,6 +147,8 @@ export interface AnnotationView {
   pageUrl?: string;
   /** Set on the human's answer to a question: that question's `key` (see `questions`). */
   answersQuestion?: string;
+  /** Set on a comment on part of an image (#2100): the image's src as written, its line, and the box in the image's own pixels. */
+  imageRegion?: ImageRegion;
 }
 
 /**
@@ -303,6 +306,8 @@ function viewOf(
   };
   if (capped.truncated) view.truncated = true;
   if (annotation.pageUrl) view.pageUrl = annotation.pageUrl;
+  const region = regionOf(annotation);
+  if (region) view.imageRegion = region;
   if (annotation.questionAnswer != null) {
     const answerKey = collectQuestionAnswers([annotation]).keys().next().value;
     if (answerKey) view.answersQuestion = answerKey;
@@ -312,7 +317,8 @@ function viewOf(
 
 /** The document's questions and answers, in document order, then orphaned answers. */
 export function questionViews(blocks: readonly Block[], annotations: readonly Annotation[], outline: readonly OutlineEntry[]): QuestionView[] {
-  const indexed = indexQuestionBlocks(blocks);
+  // The lines plan review shows as plain text stay in each question's context here too.
+  const indexed = indexQuestionBlocks(blocks, { contractLines: false });
   const answers = collectQuestionAnswers(annotations);
   const seen = new Set<string>();
   const questionsByKey = new Map(indexed.map(({ question }) => [question.key, question]));

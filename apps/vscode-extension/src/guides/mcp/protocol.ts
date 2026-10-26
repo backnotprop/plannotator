@@ -21,6 +21,8 @@ export interface McpToolResult {
 }
 
 export interface McpToolHandler {
+  /** What the server tells the agent it is for (MCP `initialize` instructions); the builder's text when absent. */
+  instructions?: string;
   listTools(): readonly McpToolDefinition[];
   callTool(name: string, args: unknown): Promise<McpToolResult>;
 }
@@ -59,7 +61,7 @@ export function createMcpMessageHandler(handler: McpToolHandler, serverVersion: 
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: MCP_SERVER_NAME, version: serverVersion },
-          instructions: "Tools that build the guided review draft held by the Plannotator VS Code extension. Call guide_read to see the draft; call guide_finish when done.",
+          instructions: handler.instructions ?? "Tools that build the guided review draft held by the Plannotator VS Code extension. Call guide_read to see the draft; call guide_finish when done.",
         });
       }
       case "ping":

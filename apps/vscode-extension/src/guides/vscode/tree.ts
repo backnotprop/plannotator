@@ -9,7 +9,7 @@ import { basename, dirname } from "node:path";
 import type { DashboardModel } from "../dashboard";
 import type { GenerationState } from "../generation";
 import type { ReaderModel } from "../reader-model";
-import type { PullRequestRow, WaitingRow } from "../sources/github";
+import { isOpenRepository, parsePullRequestUrl, type PullRequestRow, type WaitingRow } from "../sources/github";
 import type { RecentEntry } from "../store";
 import { chapterColorId } from "./intel";
 
@@ -21,6 +21,7 @@ export type TreeNode =
   | { kind: "recent"; entry: RecentEntry }
   | { kind: "waiting"; row: WaitingRow }
   | { kind: "note"; id: string; text: string; icon: string; tooltip?: string }
+  | { kind: "action"; id: "openFolder" | "prByLink" }
   | { kind: "gen"; id: string; row: "agent" | "draft" | "left" }
   | { kind: "guideTitle" }
   | { kind: "chapter"; index: number }
@@ -74,7 +75,7 @@ export function getChildren(data: TreeData, node?: TreeNode): TreeNode[] {
         }
         case "repo": {
           if (data.loading && !d) return [{ kind: "note", id: "loading", text: "Loading…", icon: "loading~spin" }];
-          if (!d?.repo) return [{ kind: "note", id: "norepo", text: "Open a git repository to guide its changes", icon: "info" }];
+          if (!d?.repo) return [{ kind: "action", id: "openFolder" }, { kind: "action", id: "prByLink" }];
           const rows: TreeNode[] = [{ kind: "local" }];
           if (d.gh.state === "ok") rows.push({ kind: "prs" });
           else if (d.gh.state === "missing") rows.push({ kind: "note", id: "gh", text: "Pull requests need the GitHub CLI (gh)", icon: "info" });
@@ -112,6 +113,7 @@ export function getParent(data: TreeData, node: TreeNode): TreeNode | undefined 
       return { kind: "prs" };
     case "local":
     case "prs":
+    case "action":
       return { kind: "section", id: "repo" };
     case "recent":
       return { kind: "section", id: "recent" };
@@ -140,6 +142,8 @@ export function nodeId(node: TreeNode): string {
       return `waiting:${node.row.url}`;
     case "note":
       return `note:${node.id}`;
+    case "action":
+      return `action:${node.id}`;
     case "gen":
       return `gen:${node.row}`;
     case "chapter":
@@ -214,7 +218,9 @@ export function getTreeItem(data: TreeData, node: TreeNode): vscode.TreeItem {
       t.description = tags.join(" · ");
       t.tooltip = new vscode.MarkdownString(`**#${p.number} ${escapeMd(p.title)}**\n\n${p.baseRefName} ← ${p.headRefName} · ${p.changedFiles} files · +${p.additions} −${p.deletions}`);
       t.contextValue = "pn.pr";
-      t.command = { command: "plannotator.guides.guidePullRequest", title: "Guide this pull request", arguments: [p.number] };
+      // Opens its guided review when one exists for the PR's head, else starts one. Never the browser.
+      // A row of this repository's own PR list: always the open repository, so only its number is passed.
+      t.command = { command: "plannotator.guides.openPullRequest", title: "Open the guided review", arguments: [p.number] };
       return t;
     }
     case "recent": {
@@ -228,7 +234,7 @@ export function getTreeItem(data: TreeData, node: TreeNode): vscode.TreeItem {
       } else {
         const done = e.progress && e.progress.total > 0 && e.progress.reviewed === e.progress.total;
         t.iconPath = e.moved ? new vscode.ThemeIcon("warning", new vscode.ThemeColor("editorWarning.foreground")) : new vscode.ThemeIcon(done ? "pass" : "book", done ? new vscode.ThemeColor("testing.iconPassed") : undefined);
-        t.description = [e.label, e.sessionOnly ? "not saved (this session only)" : e.moved ? "head moved" : e.progress ? `${e.progress.reviewed}/${e.progress.total}` : "", relativeTime(e.at)].filter(Boolean).join(" · ");
+        t.description = [e.repoName && !d?.repo ? e.repoName : "", e.label, e.sessionOnly ? "not saved (this session only)" : e.moved ? "head moved" : e.progress ? `${e.progress.reviewed}/${e.progress.total}` : "", relativeTime(e.at)].filter(Boolean).join(" · ");
         t.contextValue = "pn.guide";
         t.command = { command: "plannotator.guides.openGuide", title: "Open guide", arguments: [e.id] };
       }
@@ -238,13 +244,22 @@ export function getTreeItem(data: TreeData, node: TreeNode): vscode.TreeItem {
       const w = node.row;
       const t = item(`#${w.number} ${w.title}`);
       t.iconPath = new vscode.ThemeIcon("git-pull-request", new vscode.ThemeColor("charts.yellow"));
-      const inRepo = !!d?.repo?.github && w.repo.toLowerCase() === d.repo.displayName.toLowerCase();
+      const ref = parsePullRequestUrl(w.url);
+      const inRepo = !!ref && isOpenRepository(d?.repo, ref);
       t.description = `${w.repo} · @${w.author}`;
-      t.contextValue = inRepo ? "pn.waiting" : "pn.waitingOther";
-      t.command = inRepo
-        ? { command: "plannotator.guides.guidePullRequest", title: "Guide this pull request", arguments: [w.number] }
-        : { command: "plannotator.guides.openPullRequestOnGitHub", title: "Open on GitHub", arguments: [w.url] };
-      if (!inRepo) t.tooltip = "Another repository: open it in VS Code to guide it here (phase 2 lists other repositories).";
+      t.contextValue = "pn.waiting";
+      t.command = { command: "plannotator.guides.openPullRequest", title: "Open the guided review", arguments: [{ number: w.number, url: w.url }] };
+      if (!inRepo) t.tooltip = `${w.repo}, not open here: Guided Reviews clones it into its own storage to guide this pull request.`;
+      return t;
+    }
+    case "action": {
+      const folder = node.id === "openFolder";
+      const t = item(folder ? "Open a folder…" : "Guide a pull request by link…");
+      t.iconPath = new vscode.ThemeIcon(folder ? "folder-opened" : "git-pull-request");
+      t.description = folder ? "a git repository, to guide its changes" : "any GitHub PR";
+      t.command = folder
+        ? { command: "plannotator.guides.openFolder", title: "Open a folder" }
+        : { command: "plannotator.guides.guidePullRequest", title: "Guide a pull request by link" };
       return t;
     }
     case "note": {

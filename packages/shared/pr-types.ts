@@ -16,15 +16,38 @@ export interface CommandResult {
   exitCode: number;
 }
 
+/**
+ * Per-command options a runtime honors. `env` is ADDED to the process
+ * environment for that one child (never replacing it): the GitHub provider
+ * uses it to run `gh` as another signed-in account for one review
+ * (pr-github-account.ts). A runtime that ignores it runs as the active account.
+ */
+export interface CommandOptions {
+  env?: Record<string, string>;
+}
+
+/**
+ * What a review startup's auth check learned. GitHub only today: when the
+ * active gh account cannot see the PR and another signed-in account can,
+ * `notice` says which account the review uses and `childEnv` carries its
+ * token for the review's own children. Never print `childEnv`.
+ */
+export interface PRAuthResult {
+  notice?: string;
+  childEnv?: Record<string, string>;
+}
+
 export interface PRRuntime {
   runCommand: (
     cmd: string,
     args: string[],
+    options?: CommandOptions,
   ) => Promise<CommandResult>;
   runCommandWithInput?: (
     cmd: string,
     args: string[],
     input: string,
+    options?: CommandOptions,
   ) => Promise<CommandResult>;
   /**
    * HTTP client for platforms reached over REST rather than a CLI

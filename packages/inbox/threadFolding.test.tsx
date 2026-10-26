@@ -243,7 +243,7 @@ test.skipIf(!hasDom)('read messages fold to lines; the new, the last and one hol
   expect(article(el, 'msg_A4')!.querySelector('.ib-newtag')!.textContent).toBe('New');
   expect(el.querySelector('[data-thread-meta]')!.textContent).toContain('7 messages');
   expect(el.querySelector('[data-thread-meta]')!.textContent).toContain('1 new since you looked');
-  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Expand all');
+  expect(el.querySelector('[data-expand-all]')!.getAttribute('aria-label')).toBe('Expand all messages');
   // Every folded line and every open header is a button that says whether it is open.
   expect(article(el, 'msg_A1')!.querySelector('[data-fold-head]')!.getAttribute('aria-expanded')).toBe('false');
   expect(article(el, 'msg_A4')!.querySelector('[data-fold-head]')!.getAttribute('aria-expanded')).toBe('true');
@@ -306,12 +306,12 @@ test.skipIf(!hasDom)('the middle fold opens to lines and focuses the first; Expa
 
   act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
   expect(shown(el)).toEqual(['msg_A1:open', 'msg_P1:open', 'msg_A2:open', 'msg_P2:open', 'msg_A3:open', 'msg_P3:open', 'divider', 'msg_A4:open']);
-  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Fold all');
+  expect(el.querySelector('[data-expand-all]')!.getAttribute('aria-label')).toBe('Fold the earlier messages');
   expect(article(el, 'msg_A1')!.querySelector('[data-message-id="msg_A1"]')).not.toBeNull();
 
   act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
   expect(shown(el)).toEqual(['msg_A1:line', 'fold', 'msg_A3:line', 'msg_P3:line', 'divider', 'msg_A4:open']);
-  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Expand all');
+  expect(el.querySelector('[data-expand-all]')!.getAttribute('aria-label')).toBe('Expand all messages');
 });
 
 test.skipIf(!hasDom)('opening a line keeps it where it was: the scroll moves by however much the thread above it changed', async () => {
@@ -522,7 +522,7 @@ test.skipIf(!hasDom)('a reply the person sends during the visit is a look: every
   // Folded, the lines above the reply are not drawn as unread either.
   act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
   act(() => (el.querySelector('[data-expand-all]') as HTMLButtonElement).click());
-  expect(el.querySelector('[data-expand-all]')!.textContent).toBe('Expand all');
+  expect(el.querySelector('[data-expand-all]')!.getAttribute('aria-label')).toBe('Expand all messages');
   expect(el.querySelector('.ib-fl-unread')).toBeNull();
   expect(el.querySelector('.ib-newtag')).toBeNull();
   // The agent writes again after the reply: that one is new.

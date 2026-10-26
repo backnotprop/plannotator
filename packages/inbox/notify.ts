@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxAuthor, InboxListRow, InboxMessage, InboxNotifyReach, InboxSectionId } from '@plannotator/core/inbox-types';
+import { inboxQuestionWaitsForList } from '@plannotator/core/inbox-questions';
 import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
 import { agentName, plural } from './format';
 import { pageInFront } from './sound';
@@ -276,6 +277,13 @@ export interface InboxNotifications {
   permission: NotificationPermission | 'unsupported';
   /** The line to draw above the list, or null. */
   ask: AskKind | null;
+  /**
+   * The line to draw on the first-run screen ("No agent has written yet"),
+   * or null. The moment before the first question arrives, so it does not
+   * wait for a thread as `ask` does; every other rule (dismissed, off,
+   * per-origin, moved, blocked) is the same.
+   */
+  firstRunAsk: AskKind | null;
   /** Whether any open Inbox tab can show a notification (the server's report; null until known). */
   reach: InboxNotifyReach | null;
   setReach: (reach: InboxNotifyReach) => void;
@@ -300,7 +308,8 @@ export interface InboxNotifications {
 export function useInboxNotifications(options: {
   settings: NotificationSettings | null;
   onSettings: (next: NotificationSettings) => void;
-  openThread: (threadId: string) => void;
+  /** `questionId`: the question it notified about (`<message id>/<key>`), absent for a new thread. */
+  openThread: (threadId: string, questionId?: string) => void;
   openList: () => void;
   /** New questions arrived (before any notification rule): the sound decides for itself (sound.ts). */
   onQuestions?: () => void;
@@ -450,8 +459,10 @@ export function useInboxNotifications(options: {
     } else if (event.kind === 'question') {
       const q = event.question;
       const id = `${q.message_id}/${q.key}`;
-      // A new question is open at revision 0; a pick or a Send of an old one is not an item.
-      if (q.state !== 'open' || q.revision !== 0 || counted.current.has(id)) return;
+      // A new question is open at revision 0; a pick or a Send of an old one is not an item. What
+      // waits is the list's own rule (core inboxQuestionWaitsForList), so a notice, the list and the
+      // Decide count agree: an orphaned record never notifies.
+      if (!inboxQuestionWaitsForList(q) || q.state !== 'open' || q.revision !== 0 || counted.current.has(id)) return;
       counted.current.add(id);
       pending.current.push({ messageId: q.message_id, key: id });
     }
@@ -486,7 +497,9 @@ export function useInboxNotifications(options: {
         section: row?.section ?? null,
         asks: burst.current.get(item.threadId)?.asks ?? item.asks,
       });
-      open = () => openRef.current.thread(item.threadId);
+      // The question it notified about (`<message id>/<key>`), so decision mode can open on its card.
+      const question = item.keys.filter((key) => !key.startsWith('thread:')).at(-1);
+      open = () => openRef.current.thread(item.threadId, question);
     } else {
       const entries = [...burst.current.values()];
       text = burstNotificationText(
@@ -633,6 +646,7 @@ export function useInboxNotifications(options: {
   );
 
   const ask = options.settings && permission !== 'unsupported' ? askKind(options.settings, permission, window.location.origin, hasThreads) : null;
+  const firstRunAsk = options.settings && permission !== 'unsupported' ? askKind(options.settings, permission, window.location.origin, true) : null;
 
-  return { permission, ask, reach, setReach, windowReport, reportWindow, slept, dismissSlept, sendTest, observe, flush, turnOn, notNow, setEnabled };
+  return { permission, ask, firstRunAsk, reach, setReach, windowReport, reportWindow, slept, dismissSlept, sendTest, observe, flush, turnOn, notNow, setEnabled };
 }

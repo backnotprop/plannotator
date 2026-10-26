@@ -10,7 +10,7 @@ import {
 	type FileBrowserWatchTarget,
 	type WatchEntryHandle,
 } from "../generated/file-browser-watch-core.ts";
-import { isFileBrowserExcludedPath } from "../generated/reference-common.ts";
+import { isFileBrowserWatchExcludedPath } from "../generated/reference-common.ts";
 import { resolveUserPath } from "../generated/resolve-file.ts";
 import { getGitMetadataWatchPaths } from "../generated/workspace-status.ts";
 import { json } from "./helpers.ts";
@@ -55,7 +55,7 @@ export const __fileBrowserWatchTestHooks = {
 export function isFileBrowserWatchIgnoredPath(path: string, root: string): boolean {
 	const rel = relative(root, path).replace(/\\/g, "/");
 	if (!rel || rel.startsWith("..") || isAbsolute(rel)) return false;
-	return isFileBrowserExcludedPath(rel);
+	return isFileBrowserWatchExcludedPath(rel);
 }
 
 function isValidDirectory(dirPath: string): boolean {

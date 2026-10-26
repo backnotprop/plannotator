@@ -22,6 +22,12 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
+import {
+  closeServer,
+  deniedLowPort,
+  occupyConsecutivePorts,
+  reserveFreePort,
+} from "../../../tests/helpers/live-port";
 
 const serverDir = import.meta.dir;
 const cliEntry = join(serverDir, "index.ts");
@@ -283,6 +289,102 @@ describe("annotate CLI on an occupied fixed port", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("is already in use");
     expect(result.stdout).toBe("");
+  }, 20_000);
+});
+
+describe("annotate CLI when the live proxy cannot bind (PLANNOTATOR_LIVE_PORT)", () => {
+  // `plannotator annotate http://localhost:<app>` starts a loopback proxy on
+  // PLANNOTATOR_LIVE_PORT. When no port there can be used, that is a startup
+  // failure: one clean stderr line, never a stack trace. The fake app lives in
+  // this process, so the CLI is spawned asynchronously.
+  async function runLive(livePort: string, extraArgs: string[] = []) {
+    const app = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response("<html><head></head><body>app</body></html>", {
+        headers: { "Content-Type": "text/html" },
+      }),
+    });
+    // The editor gets a port of its own: a random one could be a port the
+    // test just freed (some systems hand ports out in order).
+    const editorPort = await reserveFreePort();
+    try {
+      const child = Bun.spawn(
+        [process.execPath, cliEntry, "annotate", `http://localhost:${app.port}/`, ...extraArgs],
+        {
+          cwd: fixtureDir,
+          env: {
+            ...process.env,
+            PLANNOTATOR_CWD: fixtureDir,
+            PLANNOTATOR_DATA_DIR: dataDir,
+            PLANNOTATOR_REMOTE: "0",
+            PLANNOTATOR_PORT: String(editorPort),
+            PLANNOTATOR_LIVE_PORT: livePort,
+            NO_BROWSER,
+            PLANNOTATOR_BROWSER: NO_BROWSER,
+            PLANNOTATOR_INBOX_CONNECT: "0",
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const exitCode = await child.exited;
+      return {
+        exitCode,
+        stdout: await new Response(child.stdout).text(),
+        stderr: await new Response(child.stderr).text(),
+      };
+    } finally {
+      app.stop(true);
+    }
+  }
+
+  function failureLines(stderr: string): string[] {
+    // Only the usual "Resolved:" note may precede the failure.
+    return stderr.trim().split("\n").filter((line) => line && !line.startsWith("Resolved:"));
+  }
+
+  test("every port busy exits 1 with one line, no stack", async () => {
+    const { start, servers } = await occupyConsecutivePorts(2);
+    try {
+      const result = await runLive(`${start}-${start + 1}`);
+      expect(result.exitCode).toBe(1);
+      expect(failureLines(result.stderr)).toEqual([
+        `Plannotator: live app proxy every port in PLANNOTATOR_LIVE_PORT ${start}-${start + 1} is already in use. Close another live annotation session or set PLANNOTATOR_LIVE_PORT to a different port or range.`,
+      ]);
+      expect(result.stderr).not.toMatch(/\n\s+at /);
+      expect(result.stdout).toBe("");
+    } finally {
+      await Promise.all(servers.map(closeServer));
+    }
+  }, 20_000);
+
+  test("is a gate startup failure (exit 2) under a strict annotate gate", async () => {
+    const { start, servers } = await occupyConsecutivePorts(1);
+    try {
+      const result = await runLive(String(start), ["--gate", "--json", "--require-approval"]);
+      expect(result.exitCode).toBe(2);
+      expect(failureLines(result.stderr)).toEqual([
+        `Plannotator: live app proxy port ${start} (PLANNOTATOR_LIVE_PORT) is already in use. Close another live annotation session or set PLANNOTATOR_LIVE_PORT to a different port or range.`,
+      ]);
+      expect(result.stdout).toBe("");
+    } finally {
+      await Promise.all(servers.map(closeServer));
+    }
+  }, 20_000);
+
+  test("a port this user may not bind is one line too (skipped as root)", async () => {
+    const denied = await deniedLowPort();
+    if (denied === null) {
+      console.log("skip: no denied low port here (root, or low ports are open)");
+      return;
+    }
+    const result = await runLive(String(denied));
+    expect(result.exitCode).toBe(1);
+    expect(failureLines(result.stderr)).toEqual([
+      `Plannotator: live app proxy port ${denied} (PLANNOTATOR_LIVE_PORT) could not be used (EACCES: permission denied). Ports below 1024 usually need root. Set PLANNOTATOR_LIVE_PORT to a different port or range.`,
+    ]);
+    expect(result.stderr).not.toMatch(/\n\s+at /);
   }, 20_000);
 });
 

@@ -14,7 +14,8 @@ name: Inbox window e2e
 # Bonjour on the runner, so the typed-address path); surface.spec.ts drives
 # the surface a phone hosts (apps/hook/dist/surface.html) in WebKit, the
 # engine WKWebView is, and the VS Code Guides webview's sanitizer and Mermaid
-# path (vscode-guides-sanitize.spec.ts, no binary needed). Runs only when the
+# path (vscode-guides-sanitize.spec.ts) and its answer frame
+# (vscode-guides-answer.spec.ts), no binary needed. Runs only when the
 # Inbox, the ui and the guide viewer it composes, the binary entry or the build
 # could have changed.
 
@@ -26,9 +27,13 @@ on:
       - 'packages/inbox/**'
       - 'apps/inbox/**'
       - 'packages/server/inbox*'
+      - 'packages/server/ref-cards*'
+      - 'packages/core/forge-ref*'
       - 'packages/shared/inbox/**'
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
+      - 'packages/shared/update-check.ts'
+      - 'packages/server/auto-update.ts'
       - 'packages/server/html-assets.ts'
       - 'packages/server/tailscale-serve.ts'
       - 'packages/server/request-host-guard.ts'
@@ -57,6 +62,7 @@ on:
       - 'scripts/inbox-sim.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
+      - 'apps/vscode-extension/src/guides/webview-csp.ts'
       - 'apps/vscode-extension/scripts/esbuild.config.ts'
       - 'apps/vscode-extension/package.json'
       - '.github/workflows/inbox-e2e.yml'
@@ -67,9 +73,13 @@ on:
       - 'packages/inbox/**'
       - 'apps/inbox/**'
       - 'packages/server/inbox*'
+      - 'packages/server/ref-cards*'
+      - 'packages/core/forge-ref*'
       - 'packages/shared/inbox/**'
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
+      - 'packages/shared/update-check.ts'
+      - 'packages/server/auto-update.ts'
       - 'packages/server/html-assets.ts'
       - 'packages/server/tailscale-serve.ts'
       - 'packages/server/request-host-guard.ts'
@@ -98,6 +108,7 @@ on:
       - 'scripts/inbox-sim.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
+      - 'apps/vscode-extension/src/guides/webview-csp.ts'
       - 'apps/vscode-extension/scripts/esbuild.config.ts'
       - 'apps/vscode-extension/package.json'
       - '.github/workflows/inbox-e2e.yml'
@@ -149,6 +160,15 @@ jobs:
 
       - name: Run the Inbox window proof
         run: bun run test:e2e:inbox
+
+      # The update notices need a release-numbered binary (a 0.0.0-dev one has
+      # no update control): the same build with 0.28.10, against a fake GitHub.
+      - name: Run the update specs on a release-numbered binary
+        run: |
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
+            --define '__CLI_VERSION__="0.28.10"' --outfile .local/plannotator-0.28.10
+          PLANNOTATOR_E2E_RELEASE_BINARY="$PWD/.local/plannotator-0.28.10" \
+            bunx playwright test -c tests/e2e/playwright.config.ts inbox-update-notice inbox-updates.spec
 
       - name: Replay the phone door's contract exchanges and the Wi-Fi listener on the binary
         run: |

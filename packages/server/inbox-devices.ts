@@ -32,6 +32,7 @@
  * certificate and a Bonjour record (inbox-lan.ts, contract section 3).
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
@@ -267,7 +268,7 @@ export interface InboxDevicesContext {
 function computerName(): string {
   if (process.platform === "darwin") {
     try {
-      const out = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 });
+      const out = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000, env: childEnv() });
       const name = out.status === 0 ? out.stdout.trim() : "";
       if (name) return name;
     } catch {

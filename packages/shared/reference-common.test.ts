@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isFileBrowserExcludedPath } from "./reference-common";
+import { isFileBrowserExcludedPath, isFileBrowserWatchExcludedPath } from "./reference-common";
 
 describe("isFileBrowserExcludedPath", () => {
 	test("matches excluded folders at any path depth", () => {
@@ -22,5 +22,16 @@ describe("isFileBrowserExcludedPath", () => {
 	test("normalizes windows separators and leading slashes", () => {
 		expect(isFileBrowserExcludedPath("\\repo\\docs\\node_modules")).toBe(true);
 		expect(isFileBrowserExcludedPath("/repo/docs/node_modules/pkg/readme.md")).toBe(true);
+	});
+});
+
+describe("isFileBrowserWatchExcludedPath", () => {
+	test("skips everything the listing skips, plus .jj/ for the watcher only", () => {
+		expect(isFileBrowserWatchExcludedPath("docs/node_modules/pkg")).toBe(true);
+		expect(isFileBrowserWatchExcludedPath(".jj/repo/store")).toBe(true);
+		expect(isFileBrowserWatchExcludedPath("sub\\.jj\\op_store")).toBe(true);
+		expect(isFileBrowserWatchExcludedPath("docs/plan.md")).toBe(false);
+		// The file listing and folder annotate keep their own rules.
+		expect(isFileBrowserExcludedPath(".jj/repo/store")).toBe(false);
 	});
 });

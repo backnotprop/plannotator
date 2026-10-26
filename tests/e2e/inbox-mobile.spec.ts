@@ -493,9 +493,8 @@ for (const phone of [
       await pane.locator('.ib-att-t', { hasText: 'retry-policy.md' }).click();
       const view = page.locator('section.ib-view');
       await expect(view.getByText('Failed refunds are retried with exponential backoff')).toBeVisible();
-      // No stepper on a phone: ⋯ opens every file of the thread, and a pick steps there (a replace, like a step).
-      await view.locator('[data-full-view-more]').click();
-      await page.locator('[data-full-view-menu-position]').click();
+      // No stepper on a phone: the toolbar's pill opens every file of the thread, and a pick steps there (a replace, like a step).
+      await view.locator('[data-full-view-bar] [data-full-view-position]').click();
       await page.getByRole('grid', { name: 'Files in this thread' }).getByRole('gridcell').nth(1).click();
       await expect(view.getByText('The on-call is paged once per refund')).toBeVisible();
       expect(await page.evaluate(() => (window.history.state as { ibFrom?: string } | null)?.ibFrom)).toBe(`#thread=${world.threads.attach}`);

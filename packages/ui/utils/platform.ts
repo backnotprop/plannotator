@@ -15,6 +15,11 @@ export const submitHint = isMac ? '⌘↵' : 'Ctrl+Enter';
  */
 export const modKeyWord = isMac ? 'Cmd' : 'Ctrl';
 /**
+ * The primary modifier as a screen reader should say it in a sentence
+ * ("hold Command and scroll"), for live-region text.
+ */
+export const modKeySpoken = isMac ? 'Command' : 'Control';
+/**
  * The primary modifier's own `KeyboardEvent.key` name, for features that arm
  * on the modifier being HELD rather than on a chord. Pair with `isModKeyHeld`:
  * this identifies the key itself, that reads the held flag off any event.

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import type { Annotation, Block } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
+import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
+import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxListRow, InboxMessageWire, InboxProjectRepo, InboxQuestion, InboxSentRecipient, InboxThread, InboxUpload } from '@plannotator/core/inbox-types';
-import { isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
+import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, useRefRepo } from '../links';
@@ -15,11 +19,13 @@ import { annotationOf, attachmentFeedback, isFileComment } from '../attachments'
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { OpenInSurface } from './OpenIn';
-import { attachmentSequence } from '../stepping';
+import { stepsOf } from '../stepping';
+import { artifactKey, artifactOfFile, threadArtifacts } from '../artifacts';
+import { ArtifactsView } from './ArtifactsView';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
 import type { InboxToastModel } from './Toast';
 import { AnnotationsChip } from './AnnotationsChip';
-import { agentName, clockTime, dayWords, fullTime, plural, whenTime } from '../format';
+import { agentName, clockTime, dayWords, formatCount, fullTime, plural, whenTime } from '../format';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
@@ -31,7 +37,7 @@ import { useReplyDraft } from '../replyDraft';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
-import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
+import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
 import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
@@ -56,7 +62,8 @@ import { ReaskNote } from './ReaskNote';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField } from './ComposerField';
-import { ReplyAnswers, draftAnswerWords, type DraftAnswer } from './ReplyAnswers';
+import { ReplyAnswers, SentAnswers, draftAnswerWords, type DraftAnswer } from './ReplyAnswers';
+import { sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
 import { paintTagReferences, type TagMarkPlace } from '../tagHighlight';
@@ -71,8 +78,8 @@ import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
 import { OpenQuestionsButton } from './OpenQuestions';
-import { laidOutChildren, pillHitsButtons } from '../footFit';
-import { openQuestionsShown, placeOf, threadOpenQuestions, type OpenQuestionPlace } from '../openQuestions';
+import { fitWholeFootRow, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
+import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
 import { selectionToolbarShowing } from '../selectionToolbar';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, type SendTarget, type SentContents } from '../sendTargets';
 
@@ -182,6 +189,20 @@ function HoldingChips({ holdings }: { holdings: Holding[] }) {
 const questionStatesOf = (message: InboxMessageWire): InboxQuestionState[] => (message.questions ?? []).map((q) => q.state);
 
 /**
+ * A question's empty answer as its card builds it (ui's QuestionBlock:
+ * `emptyQuestionAnswer` of the question Viewer indexes from the same body),
+ * so a Skip from the open-questions list saves what the card's Skip saves.
+ */
+function emptyAnswerFor(message: InboxMessageWire, q: { key: string; prompt: string; question: InboxQuestion }): QuestionAnswer {
+  const indexed = indexQuestionBlocks(parseMarkdownToBlocks(message.body, { frontmatter: false }), { decisionLines: false }).find(
+    (i) => i.question.key === q.key,
+  );
+  if (indexed) return emptyQuestionAnswer(indexed);
+  const kind = q.question.kind === 'multi' || q.question.kind === 'text' ? q.question.kind : 'single';
+  return { v: 1, key: q.key, kind, prompt: capQuestionPrompt(q.prompt), selected: [] };
+}
+
+/**
  * The session a Send reaches, when its message names one: the last target's
  * when words or annotations ride on it (`carries`; the latest agent message,
  * or the last pick or skip when the same session wrote both), otherwise the
@@ -222,6 +243,8 @@ export function commentTags(record: InboxAnnotationRecord): string[] {
   return Array.isArray(mentions) ? mentions.filter((id): id is string => typeof id === 'string') : [];
 }
 
+const NO_SENT_ANSWERS: readonly SentAnswerGroup[] = [];
+
 /** One message's text, with its question cards (exported for its DOM test). */
 export function MessageBody({
   message,
@@ -237,6 +260,12 @@ export function MessageBody({
   renderReplacesLine,
   renderActions,
   comments,
+  sentAnswers,
+  onJumpQuestion,
+  imageBase,
+  onImage,
+  pictureBadge,
+  inlineRefOf,
 }: {
   message: InboxMessageWire;
   /** The thread's project root: relative links start there or at the message's own folder. */
@@ -280,18 +309,65 @@ export function MessageBody({
     onSave: (annotation: Annotation) => Promise<boolean>;
     onUnanchored?: (report: { attempted: readonly string[]; unanchored: readonly string[] }) => void;
     onPainted?: () => void;
+    /** Words the comment box opens with for this selection (the tour's suggested comment); absent: an empty box. */
+    suggest?: (selectedText: string) => string | undefined;
   };
+  /**
+   * The person's own sent reply (sentReply.ts): the answers it carried, read
+   * from the thread's questions. The reply is then drawn in the person's
+   * words, these answers as a short list, then its comments and files; the
+   * agent-facing parts of the body ("Answered N questions.", the still-open
+   * line, "## Answers to your questions") are left out. Display only: the
+   * stored body and what agents get are unchanged.
+   */
+  sentAnswers?: readonly SentAnswerGroup[];
+  /** A row of `sentAnswers` was pressed: show its question. */
+  onJumpQuestion?: (target: JumpTarget) => void;
+  /**
+   * Where the body's images load from, in place of the message's own image
+   * route (`inboxMessageImageBase`): the onboarding tour's assets
+   * (`inbox-tour:`, images.ts). Absent: the message's route.
+   */
+  imageBase?: string;
+  /** An image the body shows (a picture choice's zoom included) was opened: the host shows it. Absent: the thread's viewer. */
+  onImage?: (src: string, alt: string) => void;
+  /** A label over each picture choice's picture (ui QuestionBlock `pictureBadge`); absent: none. */
+  pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
+  /**
+   * The src as the body wrote it, read back from an image URL the body drew: what finds the image's captured
+   * file (`inline_images`, by `ref`). Absent: the message's own image route (inlineImageRefFromSrc). The
+   * tour passes its own, for images drawn from its assets.
+   */
+  inlineRefOf?: (src: string) => string | null;
 }) {
   // A person's message ends with the skills block the window pasted when it
   // was sent: folded behind one quiet line (SkillsLine). An agent's message
   // is shown whole, whatever it says.
   const skills = useMemo(() => (message.author.kind === 'person' ? splitInboxSkillsBlock(message.body) : null), [message.author.kind, message.body]);
-  const shown = skills ? skills.before : message.body;
+  const sent = skills ? skills.before : message.body;
+  const replyParts = useMemo(() => sentReplyParts(message, sent, sentAnswers ?? []), [message, sent, sentAnswers]);
+  const shown = replyParts ? replyParts.words : sent;
+  const restShown = replyParts ? replyParts.rest : '';
   const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false }), [shown]);
+  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false }) : []), [restShown]);
   const refRepo = useRefRepo(repo);
+  // The body's images go through a host resolver that names the same URL ui's
+  // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
+  // draws an image the Inbox refuses (403 image_hidden, 404) as its alt text in
+  // a quiet chip instead of a broken-image icon: markdown images, `<img>` in
+  // raw-HTML blocks and question cards' pictures alike. Remote, `data:` and
+  // `blob:` sources keep their URL (HtmlBlock's default test: `https:host/a.png`
+  // is remote too).
+  const imageBaseDir = imageBase ?? inboxMessageImageBase(message.id);
+  const resolveImage = useCallback<ImageResolver>(
+    (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),
+    [imageBaseDir],
+  );
   // A tall screenshot in the body shows its top, cropped like the gallery's
   // (inbox.css); a click still opens it whole.
   const bodyRef = useRef<HTMLDivElement>(null);
+  // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
+  const refCard = useRefHoverCards(bodyRef);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -312,17 +388,20 @@ export function MessageBody({
   const openImageRef = useRef(onOpenInlineImage);
   openImageRef.current = onOpenInlineImage;
   const [fallback, setFallback] = useState<{ src: string; alt: string } | null>(null);
+  const refOfRef = useRef(inlineRefOf);
+  refOfRef.current = inlineRefOf;
+  const refOf = useCallback((src: string) => (refOfRef.current ? refOfRef.current(src) : inlineImageRefFromSrc(src, message.id)), [message.id]);
   const imageOf = useCallback(
     (src: string | null) => {
-      const ref = src ? inlineImageRefFromSrc(src, message.id) : null;
+      const ref = src ? refOf(src) : null;
       return ref === null ? null : (inlineRef.current.find((image) => image.ref === ref) ?? null);
     },
-    [message.id],
+    [refOf],
   );
   /** Open one of the body's images: its captured file in the viewer, else the lightbox. False: not one of them. */
   const openImage = useCallback(
     (src: string | null, alt: string): boolean => {
-      if (!src || inlineImageRefFromSrc(src, message.id) === null) return false;
+      if (!src || refOf(src) === null) return false;
       // An image that failed to load (outside the project, gone) opens nothing: an empty lightbox helps no one.
       if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) return true;
       const image = imageOf(src);
@@ -330,15 +409,19 @@ export function MessageBody({
       else setFallback({ src, alt });
       return true;
     },
-    [imageOf, message.id],
+    [imageOf, refOf],
   );
-  const onImageClick = useCallback((src: string, alt: string) => void openImage(src, alt), [openImage]);
+  const onImageRef = useRef(onImage);
+  onImageRef.current = onImage;
+  const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     for (const img of body.querySelectorAll<HTMLImageElement>('img')) {
+      // A question card's picture (a picture choice, `Shows:`): the card makes it pick, or opens it with its own button.
+      if (img.hasAttribute('data-question-picture')) continue;
       const src = img.getAttribute('src');
-      const ref = src ? inlineImageRefFromSrc(src, message.id) : null;
+      const ref = src ? refOf(src) : null;
       if (ref === null || img.hasAttribute('data-ib-broken')) continue;
       const image = imageOf(src);
       const name = image?.name ?? ref.split(/[\\/]/).pop() ?? 'image';
@@ -356,14 +439,14 @@ export function MessageBody({
     // Markdown images reach openImage through Viewer's onImageClick; an image in a raw-HTML block has no handler of its own.
     const onClick = (event: MouseEvent) => {
       const img = event.target instanceof HTMLImageElement ? event.target : null;
-      if (!img || img.classList.contains('cursor-zoom-in')) return;
+      if (!img || img.classList.contains('cursor-zoom-in') || img.hasAttribute('data-question-picture')) return;
       if (openImage(img.getAttribute('src'), img.alt)) event.preventDefault();
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
       const img = event.target instanceof HTMLImageElement ? event.target : null;
-      if (img && openImage(img.getAttribute('src'), img.alt)) event.preventDefault();
+      if (img && !img.hasAttribute('data-question-picture') && openImage(img.getAttribute('src'), img.alt)) event.preventDefault();
     };
     body.addEventListener('click', onClick);
     body.addEventListener('keydown', onKey);
@@ -551,7 +634,10 @@ export function MessageBody({
   );
 
   return (
-    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} ref={bodyRef}>
+    <ImageResolverContext.Provider value={resolveImage}>
+    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
+      {refCard}
+      {(!replyParts || shown !== '') && (
       <Viewer
         ref={viewerRef}
         blocks={blocks}
@@ -561,6 +647,7 @@ export function MessageBody({
         onSelectAnnotation={comments ? selectComment : noop}
         selectedAnnotationId={comments ? selectedComment : null}
         textComments={comments !== undefined}
+        suggestComment={comments?.suggest}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
         mode="selection"
@@ -568,7 +655,7 @@ export function MessageBody({
         maxWidth={null}
         stickyActions={false}
         disableCodePathValidation
-        imageBaseDir={inboxMessageImageBase(message.id)}
+        imageBaseDir={imageBaseDir}
         onImageClick={onImageClick}
         resolveLocalLink={resolveLocalLink}
         refRepo={refRepo}
@@ -580,12 +667,42 @@ export function MessageBody({
         renderQuestionFooter={renderFooter}
         // The Inbox records no decisions: a `Decision:` line an older agent wrote is context.
         questionDecisionLines={false}
+        // The Inbox draws the contract lines (Stakes, Shows, Why, Can't be undone), approval "inbox-decision-mode".
+        questionContractLines
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
+        questionPictureBadge={pictureBadge}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
         renderDirectiveBlock={renderActions ? directiveBlock : undefined}
       />
+      )}
+      {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}
+      {replyParts && restShown && (
+        <div data-sent-rest="">
+        <Viewer
+          blocks={restBlocks}
+          markdown={restShown}
+          annotations={NO_ANNOTATIONS}
+          onAddAnnotation={noop}
+          onSelectAnnotation={noop}
+          selectedAnnotationId={null}
+          allowImages={false}
+          mode="selection"
+          taterMode={false}
+          maxWidth={null}
+          stickyActions={false}
+          disableCodePathValidation
+          imageBaseDir={imageBaseDir}
+          onImageClick={onImageClick}
+          resolveLocalLink={resolveLocalLink}
+          refRepo={refRepo}
+          answerOnly
+          readOnly
+          questionDecisionLines={false}
+        />
+        </div>
+      )}
       {skills && <SkillsLine split={skills} />}
       {tagLabels && (
         <div className="ib-tg-marks" ref={tagLayerRef} aria-hidden="true" data-tag-marks="">
@@ -598,10 +715,13 @@ export function MessageBody({
       )}
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </ImageResolverContext.Provider>
   );
 }
 
 export interface ThreadPaneProps {
+  /** A line under the subject, from the window (the tour's notifications ask, once more, in the first real thread). */
+  notice?: React.ReactNode;
   thread: InboxThread;
   /**
    * The thread's list row's `sent`: the person's reply is the last message
@@ -670,11 +790,20 @@ export interface ThreadPaneProps {
   onAction?: (messageId: string, key: string, mark: ActionMark | null, info: { agent: string; prompt: string }) => Promise<boolean>;
   /** Archive (`true`) or Unarchive. Absent: the pane calls the resolve route itself. */
   onArchive?: (archived: boolean) => void;
+  /**
+   * The thread is pinned to the sidebar (approval "inbox-pinned-threads"), and
+   * the header's pin toggle. Absent (an older Inbox keeps no pins): no toggle.
+   */
+  pinned?: boolean;
+  /** Resolves once the pin is written and the list read again (the header waits on it before the next click's request). */
+  onPin?: (pinned: boolean) => void | Promise<unknown>;
   /** The thread whose reply box should open (the warning toast's Reply); the pane calls `onReplyOpened` once it has. */
   replyRequest?: string | null;
   onReplyOpened?: () => void;
   /** On a phone the header leads with a Back button named for the screen under the thread ("Inbox", a project). */
   backLabel?: string;
+  /** A thread opened from a Board card: the chip naming the card, under the subject (board/CardChip.tsx). */
+  cardChip?: React.ReactNode;
   /** A phone: one screen at a time, so an open file takes the whole window (phone.ts). */
   phone?: boolean;
   /**
@@ -710,6 +839,13 @@ export interface ThreadPaneProps {
    */
   landing?: { messageId: string; terms: readonly string[]; questionKey: string | null } | null;
   onLanded?: () => void;
+  /**
+   * The Artifacts view is on (approval "inbox-thread-artifacts", `#thread=…&artifacts`):
+   * the thread's body is swapped for a grid of every artifact across its messages.
+   */
+  artifacts?: boolean;
+  /** Turn the Artifacts view on or off (the header's button, "Back to the thread"). Absent: no Artifacts button. */
+  onArtifacts?: (open: boolean) => void;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -867,7 +1003,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, replyRequest, onReplyOpened, backLabel = 'Inbox', phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, landing = null, onLanded }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1040,6 +1176,13 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
   const sectionRef = useRef<HTMLElement>(null);
   /** After a fold changes: keep the message the person acted on in place, then move focus. */
   const anchorRef = useRef<{ id: string | null; top: number; focus: string | null; folding: boolean } | null>(null);
+  /** Stops holding the place put back after a file (threadPlace.ts `holdPlace`); everything that scrolls the thread calls it first. */
+  const holdRef = useRef<(() => void) | null>(null);
+  const stopHold = () => {
+    holdRef.current?.();
+    holdRef.current = null;
+  };
+  useEffect(() => () => holdRef.current?.(), []);
   const [announced, setAnnounced] = useState('');
   const announce = (text: string) => {
     setAnnounced('');
@@ -1134,6 +1277,9 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
 
   /** Scroll to a card or a message, focus it, and ring it briefly; a folded message opens first. */
   const jumpTo = useCallback((target: JumpTarget) => {
+    // A place held after a file closed must not pull the thread back while the message unfolds.
+    holdRef.current?.();
+    holdRef.current = null;
     if (unfold(target.messageId)) {
       requestAnimationFrame(() => jumpNow(target));
       return;
@@ -1148,6 +1294,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
         ? body.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(target.messageId)}"]`)
         : body.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"] [data-question-key="${CSS.escape(target.key)}"]`);
     if (!element) return;
+    stopHold();
     const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     element.scrollIntoView?.({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
     if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', '-1');
@@ -1211,6 +1358,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
       }
       const card = target.questionKey ? body.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"] [data-question-key="${CSS.escape(target.questionKey)}"]`) : null;
       const element = card ?? article;
+      stopHold();
       element.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
       if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', '-1');
       element.focus({ preventScroll: true });
@@ -1226,7 +1374,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
       landedHits.current = { messageId: target.messageId, terms: target.terms };
       onLandedRef.current?.();
     };
-    // A folded message opens first, then the landing measures it.
+    // A folded message opens first, then the landing measures it. A place held after a file must not pull it back.
+    stopHold();
     if (unfold(target.messageId)) requestAnimationFrame(() => requestAnimationFrame(land));
     else requestAnimationFrame(land);
     // articleOf reads the body's ref.
@@ -1451,8 +1600,23 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
   /** Bumped when the person opens a file, so focus moves into its pane. */
   const [paneFocus, setPaneFocus] = useState(0);
   const paneRef = useRef<AttachmentPaneHandle>(null);
-  /** Every attachment of the thread in thread order: what the pane steps through. */
-  const steps = useMemo(() => attachmentSequence(thread.messages, attachments, inlineImages), [thread.messages, attachments, inlineImages]);
+  /**
+   * The thread's artifacts (artifacts.ts): one list, read by the Artifacts view
+   * (newest first) and by the viewer's stepping and its peek (thread order, the
+   * guided reviews left out: they open their own reader).
+   */
+  const artifactList = useMemo(() => threadArtifacts(thread.messages, attachments, inlineImages), [thread.messages, attachments, inlineImages]);
+  /** Every file of the thread in thread order: what the pane steps through. */
+  const steps = useMemo(() => stepsOf(artifactList), [artifactList]);
+  /** The Artifacts view swaps the thread's body for the grid (the messages never change). */
+  const artifactsOn = artifactsRoute;
+  /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
+  const artifactsButton = onArtifacts !== undefined && ((files !== null && artifactList.length > 0) || artifactsOn);
+  const artifactsButtonRef = useRef<HTMLButtonElement>(null);
+  const artifactsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const artifactsBodyRef = useRef<HTMLDivElement>(null);
+  /** The tile last opened from the grid: focus comes back to it when its file or guide closes. */
+  const artifactOpened = useRef<string | null>(null);
   const openFile = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'>, version: 'current' | 'sent' = 'current', focus: string | null = null, view: FileView | null = null) => {
     // A tile's ⋯ names a view for this file alone. The file already open keeps the view it is in (a comment
     // card in the reply box, its tile again: a one-off view from the ⋯ stays). Else the remembered choice,
@@ -1461,8 +1625,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
     onOpenFile({ id: attachment.id, version, focus, view: view ?? kept ?? openingView(attachment) });
   };
   /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file asks first). */
-  const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }, view: FileView | null = null) => {
+  /** `opening`: called only when the file does open (not after "Keep writing" on a typed comment). */
+  const openFromMessage = (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }, view: FileView | null = null, opening?: () => void) => {
     const go = () => {
+      opening?.();
       openFile(attachment, 'current', null, view);
       setPaneFocus((n) => n + 1);
     };
@@ -1478,7 +1644,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
     }
     // A comment on a message's text: that message, its passage brought into view and rung.
     if (record.message) {
+      // A place held after a file must not pull the thread back over the passage (show() scrolls inside rAF).
+      stopHold();
       const show = () => {
+        stopHold();
         const mark = bodyRef.current?.querySelector<HTMLElement>(
           `[data-message-id="${CSS.escape(record.message_id)}"] [data-bind-id="${CSS.escape(record.id)}"], [data-message-id="${CSS.escape(record.message_id)}"] [data-highlight-id="${CSS.escape(record.id)}"]`,
         );
@@ -1632,16 +1801,157 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
     [onSeen, thread.thread_id],
   );
   // On a phone the pill sits in the foot and covers none of the thread.
-  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers, pill: chrome.pill > 0 && !phone, onSeen: sawOne });
+  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn, pill: chrome.pill > 0 && !phone, onSeen: sawOne });
   // The thread on screen, for notifications: a question in it raises nothing while it is visible.
   const screenRef = useRef(onScreenChange);
   screenRef.current = onScreenChange;
-  const paneCovered = covered || fileCovers;
+  const paneCovered = covered || fileCovers || artifactsOn;
   showingRef.current = !paneCovered;
   useEffect(() => {
     screenRef.current?.({ threadId: thread.thread_id, covered: paneCovered });
   }, [thread.thread_id, paneCovered]);
   useEffect(() => () => screenRef.current?.(null), []);
+
+  // The Artifacts view: opening it moves focus to its heading, leaving it returns focus to the Artifacts
+  // button (the messages keep the scroll they had). Only on a change in this pane, never on the first draw
+  // (a reload or a link lands where the window puts focus).
+  const artifactsWas = useRef(artifactsOn);
+  const threadScroll = useRef(0);
+  useLayoutEffect(() => {
+    if (artifactsWas.current === artifactsOn) return;
+    artifactsWas.current = artifactsOn;
+    if (artifactsOn) {
+      artifactsHeadingRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
+    const button = artifactsButtonRef.current;
+    if (button) button.focus();
+    else bodyRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
+  }, [artifactsOn]);
+  // The thread's scroll, kept while the grid is shown over it.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || artifactsOn) return;
+    const keep = () => {
+      threadScroll.current = body.scrollTop;
+    };
+    body.addEventListener('scroll', keep, { passive: true });
+    return () => body.removeEventListener('scroll', keep);
+  }, [artifactsOn]);
+  // ── Your place in the thread, around a file (threadPlace.ts) ──
+  // Beside a file the thread is a narrow column, under a full-screen file it is covered, and on a phone or a
+  // stacked window it is display:none (WebKit then forgets its scrollTop). Each time that changes, the place
+  // on screen is read and put back once the new layout is laid out: the tile or image the person opened at the
+  // same distance from the top, else the first thing that was in view. A hidden layout keeps the place it was
+  // given, so closing the file brings the thread back where it was. Never the open-time landing (the New
+  // divider): that runs once per thread.
+  const placeKey = placeLayoutKey({ thread: thread.thread_id, file: fileCovers ? 'covered' : file ? 'side' : 'none', grid: artifactsOn, guide: covered });
+  /** The last tile, image or link a click or key in the thread was aimed at, and whether it came from the keyboard. */
+  const lastOpener = useRef<{ el: HTMLElement; keyboard: boolean; at: number } | null>(null);
+  /** The tile or image the open file was opened from by keyboard: focus goes back to it when the file closes. */
+  const returnFocus = useRef<{ el: HTMLElement; selector: string | null } | null>(null);
+  /**
+   * `saved`: the place to put back. `placedTop`: the scrollTop it was put back at; a scroll elsewhere (the person,
+   * `n`, a jump to a card) means the place on screen is the one to read next time, else `saved` is kept as it
+   * was (beside a file the thread is narrower and taller, and reading it there would lose what a clamp cost).
+   */
+  const place = useRef<{ committed: string; read: string | null; saved: ThreadPlace | null; placedTop: number | null }>({ committed: placeKey, read: null, saved: null, placedTop: null });
+  // Read in render, not in an effect: by the time any effect runs React has committed the new layout (the
+  // thread already narrowed, hidden or uncovered), so the old place can no longer be measured.
+  if (place.current.committed !== placeKey && place.current.read !== placeKey) {
+    place.current.read = placeKey;
+    const was = parsePlaceLayout(place.current.committed);
+    const body = bodyRef.current;
+    const sameThread = was.thread === thread.thread_id;
+    // The opener counts only when it opens the file that is opening now (not a button pressed a moment ago).
+    const recent = lastOpener.current && performance.now() - lastOpener.current.at < 2000 ? lastOpener.current : null;
+    const opener = sameThread && was.file === 'none' && file && recent && opensFile(recent.el, file.id) ? recent : null;
+    stopHold();
+    const untouched = was.file !== 'none' && place.current.saved !== null && place.current.placedTop !== null && body !== null && Math.abs(body.scrollTop - place.current.placedTop) <= 1;
+    if (!sameThread) place.current.saved = null;
+    else if (placeShown(was) && body && !untouched) {
+      place.current.saved = capturePlace(body, opener?.el ?? null);
+      place.current.placedTop = null;
+    }
+    // A file opening from the messages on screen: remember what opened it by keyboard, for focus on the way back.
+    if (sameThread && was.file === 'none' && file && placeShown(was)) returnFocus.current = opener?.keyboard ? { el: opener.el, selector: placeSelector(opener.el) } : null;
+  }
+  useLayoutEffect(() => {
+    const was = parsePlaceLayout(place.current.committed);
+    place.current.committed = placeKey;
+    place.current.read = null;
+    const now = parsePlaceLayout(placeKey);
+    if (placeLayoutKey(was) === placeKey) return;
+    const body = bodyRef.current;
+    // The file closed: whatever focus it is owed is settled here (the Artifacts grid gives focus back itself).
+    const focusBack = now.file === 'none' && was.file !== 'none' ? returnFocus.current : null;
+    if (now.file === 'none') returnFocus.current = null;
+    if (!body || !placeShown(now)) return;
+    const saved = place.current.saved;
+    const placed = () => {
+      place.current.placedTop = body.scrollTop;
+    };
+    // A file opening beside the thread moves the thread only when what was opened would leave the view: the
+    // narrower column keeps what the person sees above it (the message's head row) where it can.
+    if (saved && now.file === 'side' && was.file === 'none' && placeInView(body, saved)) placed();
+    else if (saved && restorePlace(body, saved)) {
+      placed();
+      stopHold();
+      holdRef.current = holdPlace(body, saved, placed, undefined, sectionRef.current ?? body);
+    }
+    // Focus back on what opened the file by keyboard, if nothing else has it.
+    if (focusBack) {
+      const active = document.activeElement;
+      if (!active || active === document.body || !active.isConnected) {
+        const target = focusBack.el.isConnected && body.contains(focusBack.el) ? focusBack.el : focusBack.selector ? body.querySelector<HTMLElement>(focusBack.selector) : null;
+        target?.focus({ preventScroll: true });
+      }
+    }
+    // Only the layout matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeKey]);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const onClick = (event: MouseEvent) => {
+      const el = openerOf(event.target, body);
+      lastOpener.current = el ? { el, keyboard: event.detail === 0, at: performance.now() } : null;
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const el = openerOf(event.target, body);
+      lastOpener.current = el ? { el, keyboard: true, at: performance.now() } : null;
+    };
+    body.addEventListener('click', onClick, true);
+    body.addEventListener('keydown', onKey, true);
+    return () => {
+      body.removeEventListener('click', onClick, true);
+      body.removeEventListener('keydown', onKey, true);
+    };
+  }, []);
+
+  // A file or a guided review opened from the grid closes: focus back on its tile, unless something took it.
+  const gridCovered = file !== null || covered;
+  const gridCoveredWas = useRef(gridCovered);
+  // A step in the viewer moves on to another file: focus comes back to the tile of the file last open.
+  if (file && artifactOpened.current && !artifactOpened.current.startsWith('guide:')) {
+    const open = artifactOfFile(artifactList, file.id);
+    artifactOpened.current = open ? artifactKey(open) : file.id;
+  }
+  useEffect(() => {
+    const was = gridCoveredWas.current;
+    gridCoveredWas.current = gridCovered;
+    if (!was || gridCovered || !artifactsOn) return;
+    const key = artifactOpened.current;
+    if (!key) return;
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      artifactsBodyRef.current?.querySelector<HTMLElement>(`[data-artifact-tile="${CSS.escape(key)}"]`)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [gridCovered, artifactsOn]);
 
   // Arrivals while the thread is open: announced to a screen reader, drawn
   // with a short entrance, and, when the person is at the end of the thread,
@@ -1668,7 +1978,10 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
     const article = articleOf(first.id);
     if (!article) return;
     const by = followBy(measureFirstLines(article), body.getBoundingClientRect());
-    if (by > 0) body.scrollBy?.({ top: by, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    if (by > 0) {
+      stopHold();
+      body.scrollBy?.({ top: by, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    }
     // `announce` and `articleOf` are this render's; only a new thread payload matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread]);
@@ -1748,14 +2061,17 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
     if (!body || !first) return;
     const target = below ? (newBelow(body, passedIds(), false)[0] ?? first) : first;
     const divider = target === first ? body.querySelector<HTMLElement>('[data-new-divider]') : null;
+    holdRef.current?.();
+    holdRef.current = null;
     (divider ?? target).scrollIntoView?.({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
     target.querySelector<HTMLElement>('[data-fold-head]')?.focus({ preventScroll: true });
   }, [passedIds]);
 
   // j / k move between messages (and the middle fold), n goes to the first
-  // new one; Enter and Space are the buttons' own. Never while typing.
+  // new one; Enter and Space are the buttons' own. Never while typing, and
+  // never while the Artifacts grid stands in for the messages.
   useEffect(() => {
-    if (one) return;
+    if (one || artifactsOn) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       if (event.key !== 'j' && event.key !== 'k' && event.key !== 'n') return;
@@ -1793,7 +2109,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [one, jumpNew]);
+  }, [one, artifactsOn, jumpNew]);
 
   // Another window (or a phone's Send) saved, sent or discarded this thread's draft, or this one did:
   // its copy here follows. A box with no edits since its last save or read takes the new words (or
@@ -1978,6 +2294,18 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
           return [{ id, messageId: m.id, key: q.key, number: q.position + 1, prompt: q.prompt, answer: draftAnswerWords(answer), messageName: `${agentName(m.author)}'s message, ${whenTime(m.created_at)}` }];
         }),
   );
+
+  // The person's own sent replies are drawn in their words, with the answers they carried as a
+  // short list read from the questions (sentReply.ts): never the agent-facing answers section.
+  const sentAnswersByReply = useMemo(() => {
+    const out = new Map<string, SentAnswerGroup[]>();
+    for (const m of thread.messages) {
+      if (m.author.kind !== 'person') continue;
+      const groups = sentAnswersOf(m, thread.messages, (asked) => `${agentName(asked.author)}'s message, ${whenTime(asked.created_at)}`);
+      if (groups.length > 0) out.set(m.id, groups);
+    }
+    return out;
+  }, [thread.messages]);
 
   const openBox = () => {
     setNewMessage(null);
@@ -2421,7 +2749,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
             name: last.delivery ? toName(last, last.delivery) : last.to ? toName(last, last.to) : hostName(lastTo.host),
             deliveredAt: last.delivery?.at ?? null,
             time: whenTime,
-            wakes: true,
+            // A Codex reply whose `codex queue` ran out of time may not have gone: saved, not queued.
+            wakes: !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
@@ -2432,7 +2761,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
             // A reply that tags agents: the owner's own delivery, never another recipient's.
             deliveredAt: lastTags.length > 0 ? (last.delivery?.at ?? sent?.recipients?.find((r) => r.owner)?.delivered_at ?? null) : (sent?.checked_at ?? null),
             time: whenTime,
-            wakes: wakingSession !== null || (askedSession !== null && recipientConnection != null),
+            wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             askerEnded: askerEnded && asking ? { name: asking.name } : null,
@@ -2498,6 +2827,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
   const reaskList = resolved && !cameBack ? [] : reaskTargets(thread.messages, liveMessage);
   const reaskShown = reaskOffered(reaskList, thread.messages.filter(liveMessage));
   const reaskOpen = reaskList.reduce((n, t) => n + (t.kind === 'reask' ? t.open : 0), 0);
+  const reaskActions = reaskList.reduce((n, t) => n + (t.kind === 'reask' ? t.actions : 0), 0);
   const [reasking, setReasking] = useState(false);
   /** One idempotency key per target message, kept for a retry. */
   const reaskKeys = useRef<Map<string, string> | null>(null);
@@ -2570,10 +2900,38 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
   };
 
   // Open questions in this thread (approval "inbox-thread-open-questions", option A): the "N open questions"
-  // button beside Re-ask lists them, and a row takes the person to the card (unfolding its message).
-  const openQ = resolved && !cameBack ? { questions: [], replaced: 0 } : threadOpenQuestions(thread.messages, liveMessage);
-  const isFolded = (messageId: string) => fold.folded.has(messageId) || hiddenNow.has(messageId);
-  const openQShown = openQuestionsShown(openQ.questions, { messageCount: thread.messages.length, folded: isFolded });
+  // button lists them (Re-ask at its foot), and a row takes the person to the card (unfolding its message).
+  const openQFromServer = resolved && !cameBack ? { questions: [], replaced: 0 } : threadOpenQuestions(thread.messages, liveMessage);
+  // A pick still being saved shows on its row at once, as on its card (a Skip from the list goes quiet: "Skipped").
+  const openQ = {
+    ...openQFromServer,
+    questions: openQFromServer.questions.map((q): OpenQuestion => {
+      if (!pending.has(q.id)) return q;
+      const answer = pending.get(q.id) ?? null;
+      return { ...q, picked: answer !== null, question: { ...q.question, answer, state: answer ? 'picked' : 'open' } };
+    }),
+  };
+  /**
+   * Skipping from the list (approval "oq-skip-select", variant A): the select
+   * mode's button sets each question skipped or not, exactly as the card's own
+   * Skip / Unskip does. The same starting answer (the saved or pending pick,
+   * else the question's empty answer as the card builds it from the message),
+   * the same toggle (skipToggledAnswer, ui's toggleSkip), and the same save
+   * (`pick`, serialized per thread): a pick marked skipped that goes with the
+   * next Send. Nothing is sent now. A question already as asked is left alone.
+   */
+  const setSkippedFromList = (questions: readonly OpenQuestion[], skipped: boolean) => {
+    for (const q of questions) {
+      const message = thread.messages.find((m) => m.id === q.messageId);
+      if (!message) continue;
+      const current = pending.has(q.id) ? pending.get(q.id)! : (questionById(q.id)?.answer ?? q.question.answer);
+      if ((current?.skipped === true) === skipped) continue;
+      const base = current ?? emptyAnswerFor(message, q);
+      pick(q.messageId, q.key, skipToggledAnswer(base));
+    }
+  };
+  // Shown whenever a question waits, or Re-ask is offered (it lives in the list now, so never out of reach).
+  const openQShown = openQuestionsShown(openQ.questions, reaskShown);
   /** Where each listed card sits now: in a folded message, or above or below the middle of the thread's view. */
   const measureOpenQuestions = (): ReadonlyMap<string, OpenQuestionPlace> => {
     const places = new Map<string, OpenQuestionPlace>();
@@ -2626,6 +2984,40 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
   // While new messages are below the view: a pill that goes to them.
   // On a phone the pill sits over the middle of the foot's row; when a button lies under that middle, above the foot.
   const footRowRef = useRef<HTMLDivElement>(null);
+  /**
+   * How far the closed foot shortened so the buttons and the draft status share one line (footFit.ts
+   * `fitWholeFootRow`: the skip chip, Edit, the open questions count, the draft's words, tighter spacing).
+   * Null: no status, no layout, or even the shortest form does not fit (the status wraps above).
+   */
+  const [rowLevel, setRowLevel] = useState<number | null>(null);
+  const footStatusShown = waiting || draftKept;
+  const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
+  const rowMax: OpenQuestionsLabelForm = phone ? 'short' : 'full';
+  // What the row shows; a change re-fits it (with its width).
+  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, reaskActions, rowMax, phone].join('|');
+  const rowFittedFor = useRef('');
+  const fitRowRef = useRef<(force?: boolean) => void>(() => {});
+  fitRowRef.current = (force = false) => {
+    const row = footRowRef.current;
+    if (!row) return;
+    const key = `${row.getBoundingClientRect().width}|${footSig}`;
+    if (!force && key === rowFittedFor.current) return;
+    rowFittedFor.current = key;
+    const level = footStatusShown ? fitWholeFootRow(row, rowMax, phone) : null;
+    setRowLevel((current) => (current === level ? current : level));
+  };
+  // Every render (after the open questions button drew itself), and whenever the row's width changes.
+  useLayoutEffect(() => fitRowRef.current());
+  useEffect(() => {
+    const row = footRowRef.current;
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => fitRowRef.current());
+    observer.observe(row);
+    // Words measured in a fallback font fit differently once the real one loads.
+    void document.fonts?.ready.then(() => fitRowRef.current(true));
+    return () => observer.disconnect();
+    // The row comes and goes (the reply box, the route choice, the stale guard, compose).
+  }, [footRowShown]);
   const [pillAbove, setPillAbove] = useState(false);
   const pillOnRow = showNew && phone && !waiting && !draftKept;
   const placePill = useCallback(() => {
@@ -2709,6 +3101,50 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
       </button>
     </Tip>
   );
+  // Pin to the sidebar (approval "inbox-pinned-threads"): an icon toggle, the phone's way to pin.
+  // One fixed name ("Pin to the sidebar") with `aria-pressed`, so a screen reader hears the state
+  // change rather than a new control; only the tooltip's words follow the state.
+  // A click shows its state at once and its request waits for the one before it, so a quick
+  // pin-then-unpin sends both, in order, and ends where the person left it.
+  const [pinWant, setPinWant] = useState<{ thread: string; pinned: boolean } | null>(null);
+  const pinChain = useRef<{ thread: string; tail: Promise<unknown>; pending: number }>({ thread: '', tail: Promise.resolve(), pending: 0 });
+  const pinShown = pinWant?.thread === thread.thread_id ? pinWant.pinned : pinned;
+  // What the last click asked for, read synchronously, so two clicks before a render still alternate.
+  const pinWantRef = useRef<{ thread: string; pinned: boolean } | null>(null);
+  const togglePin = () => {
+    if (!onPin) return;
+    const threadId = thread.thread_id;
+    const current = pinWantRef.current?.thread === threadId ? pinWantRef.current.pinned : pinShown;
+    const next = !current;
+    pinWantRef.current = { thread: threadId, pinned: next };
+    setPinWant({ thread: threadId, pinned: next });
+    const chain = pinChain.current.thread === threadId ? pinChain.current : (pinChain.current = { thread: threadId, tail: Promise.resolve(), pending: 0 });
+    chain.pending++;
+    chain.tail = chain.tail
+      .then(() => onPin(next))
+      .catch(() => {})
+      .then(() => {
+        // The last request answered (and the list was read again): the list's state takes over.
+        if (--chain.pending === 0) {
+          if (pinWantRef.current?.thread === threadId) pinWantRef.current = null;
+          setPinWant((want) => (want?.thread === threadId ? null : want));
+        }
+      });
+  };
+  const pinButton = onPin ? (
+    <Tip content={pinShown ? 'Unpin from the sidebar' : 'Pin to the sidebar'}>
+      <button
+        type="button"
+        className="ib-iconbtn ib-pinbtn"
+        onClick={togglePin}
+        aria-pressed={pinShown}
+        aria-label="Pin to the sidebar"
+        data-pin-toggle=""
+      >
+        <Icon name="pin" size={16} />
+      </button>
+    </Tip>
+  ) : null;
   const markReadButton = markReadOffered ? (
     <Tip
       content={
@@ -2721,7 +3157,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
     >
       <button type="button" className="ib-hbtn" data-mark-read="" aria-pressed={readAt !== null} disabled={!markReadEnabled} onClick={() => onMarkRead!(readAt === null)}>
         <Icon name="checkCircle" size={16} />
-        {readAt !== null ? 'Read' : 'Mark read'}
+        <span className="ib-hbtn-l">{readAt !== null ? 'Read' : 'Mark read'}</span>
         <kbd className="ib-kbd ib-wide">E</kbd>
       </button>
     </Tip>
@@ -2735,9 +3171,25 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
     >
-      <div className="ib-phead">
+      <div className="ib-phead" data-artifacts-on={artifactsOn ? '' : undefined}>
         {/* A phone leads with the way back to the list; Archive sits at the right, where the close was. */}
-        {phone ? (
+        {phone && artifactsOn ? (
+          // On a phone Artifacts is a screen of its own: its way back is to the thread (the browser's Back, so the swipe agrees).
+          <>
+            <button type="button" className="ib-pback" onClick={() => onArtifacts?.(false)} aria-label="Back to the thread" data-artifacts-phone-back="">
+              <Icon name="chevL" size={18} />
+              <span className="ib-pback-l">Thread</span>
+            </button>
+            <span className="ib-art-ph-title" aria-hidden="true">
+              Artifacts
+            </span>
+            {artifactList.length > 0 && (
+              <span className="ib-art-ph-n" aria-hidden="true">
+                {artifactList.length}
+              </span>
+            )}
+          </>
+        ) : phone ? (
           <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} data-phone-back="">
             <Icon name="chevL" size={18} />
             <span className="ib-pback-l">{backLabel}</span>
@@ -2770,43 +3222,72 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
             )}
           </>
         )}
-        {/* Mark read leads, furthest from the close; Archive sits beside the close at the right
-            (owner, 2026-10-16). A phone keeps the same order after its way back. */}
-        {markReadButton}
-        {one ? (
-          <span className="ib-sp" />
-        ) : (
+        {/* Mark read leads, furthest from the close, with its label and its E; everything at the right is an icon
+            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, Archive, then the close.
+            A phone keeps the same order after its way back. */}
+        {phone && artifactsOn ? null : (
           <>
-            {/* The subject, once it has scrolled away (the heading stays the one a screen reader reads). */}
-            <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={chrome.subject ? '' : undefined} aria-hidden="true">
-              {thread.subject ?? '(no subject)'}
-            </span>
-            <Tip content={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}>
-              <button
-                type="button"
-                className="ib-ptool"
-                data-expand-all=""
-                onClick={expandAll}
-                aria-label={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
-              >
-                <Icon name={allOpen ? 'collapse' : 'expand'} size={15} />
-                <span className="ib-ptool-l">{allOpen ? 'Fold all' : 'Expand all'}</span>
-              </button>
-            </Tip>
+            {markReadButton}
+            {one && !artifactsOn ? (
+              <span className="ib-sp" />
+            ) : (
+              // The subject, once it has scrolled away, and always over the Artifacts grid (the heading stays the one a screen reader reads).
+              <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                {thread.subject ?? '(no subject)'}
+              </span>
+            )}
+            {pinButton}
+            {artifactsButton && (
+              <Tip content={artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
+                <button
+                  ref={artifactsButtonRef}
+                  type="button"
+                  className="ib-iconbtn ib-artbtn"
+                  aria-label={`Artifacts, ${artifactList.length}`}
+                  aria-pressed={artifactsOn}
+                  onClick={() => onArtifacts?.(!artifactsOn)}
+                  data-artifacts-button=""
+                >
+                  <Icon name="artifacts" size={17} />
+                  <span className="ib-artbtn-n" aria-hidden="true">
+                    {artifactList.length}
+                  </span>
+                </button>
+              </Tip>
+            )}
+            {!one && !artifactsOn && (
+              <Tip content={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}>
+                <button
+                  type="button"
+                  className="ib-iconbtn"
+                  data-expand-all=""
+                  onClick={expandAll}
+                  aria-label={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
+                >
+                  <Icon name={allOpen ? 'collapse' : 'expand'} size={16} />
+                </button>
+              </Tip>
+            )}
+            {archiveButton}
+            {phone || stacked || backBesideFile ? null : (
+              <>
+                <span className="ib-vsep" aria-hidden="true" />
+                <Tip content="Close">
+                  <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close the thread">
+                    <Icon name="x" />
+                  </button>
+                </Tip>
+              </>
+            )}
           </>
         )}
-        {archiveButton}
-        {phone || stacked || backBesideFile ? null : (
-          <Tip content="Close">
-            <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close the thread">
-              <Icon name="x" />
-            </button>
-          </Tip>
-        )}
       </div>
-      <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef}>
+      {/* The Artifacts view swaps the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
+      <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef} hidden={artifactsOn}>
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
+        {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
+        {notice}
         {startedTo && (
           <div className="ib-tmeta" data-started-by="">
             <span>You started this thread</span>
@@ -3099,6 +3580,8 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
                 ) : (
                 <MessageBody
                   message={message}
+                  sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
+                  onJumpQuestion={jumpTo}
                   projectRoot={thread.project.root}
                   repo={thread.project.repo ?? null}
                   onOpenAttachment={openFromMessage}
@@ -3267,7 +3750,27 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
           {announced}
         </div>
       </div>
-      <div className="ib-pfoot">
+      {artifactsOn && (
+        <div className="ib-pbody ib-artbody" ref={artifactsBodyRef}>
+          <ArtifactsView
+            ref={artifactsHeadingRef}
+            artifacts={files === null ? null : artifactList}
+            annotationCounts={countsByPath}
+            openId={file && !shownFull ? file.id : null}
+            // Focus comes back to the tile only when it did open (a typed comment's "Keep writing" keeps the file).
+            onOpen={(artifact) => openFromMessage(artifact.attachment, null, () => (artifactOpened.current = artifactKey(artifact)))}
+            onOpenGuide={(artifact) => {
+              artifactOpened.current = artifactKey(artifact);
+              onOpenGuide(artifact.messageId);
+            }}
+            onOpenAs={phone || fileStacked ? undefined : (artifact, view) => openFromMessage(artifact.attachment, view, () => (artifactOpened.current = artifactKey(artifact)))}
+            onBack={phone ? undefined : () => onArtifacts?.(false)}
+            openIn={openIn}
+            phone={phone}
+          />
+        </div>
+      )}
+      <div className="ib-pfoot" hidden={artifactsOn}>
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {showAskerNote && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
@@ -3451,6 +3954,28 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
                   Cancel
                 </button>
                 <span className="ib-sp" />
+                {/* A phone has no way to paste a picture into the reply (iOS offers no Paste for an image in a plain
+                    text field), so it gets an attach button: the photo library or Files, into the same tiles,
+                    upload path and names as a paste. A desktop stays paste-only (the owner's choice). */}
+                {phone && (
+                  <Tip content="Attach files">
+                    <label className="ib-rattach" aria-label="Attach files">
+                      <Icon name="clip" size={19} />
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,*/*"
+                        className="ib-sr"
+                        data-reply-attach=""
+                        onChange={(event) => {
+                          if (event.target.files) replyFiles.attach(event.target.files);
+                          event.target.value = '';
+                          setError(null);
+                        }}
+                      />
+                    </label>
+                  </Tip>
+                )}
                 {/* The in-thread New message button is off (approval "inbox-acknowledge"); its route and code stay. */}
                 {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
               </div>
@@ -3465,7 +3990,7 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
           {/* Buttons on the left in today's order, the draft status and the skip chip at the right end (approval
               "thread-foot-status-right", option A). Too narrow for one line, the status takes its own line ABOVE the
               buttons (wrap-reverse; one item per line aligns to the start), so it never wraps between them. */}
-          <div className="ib-acts ib-footrow" data-foot-row="" ref={footRowRef}>
+          <div className="ib-acts ib-footrow" data-foot-row="" data-fit={rowLevel ? footRowTokens(rowLevel, phone) : undefined} ref={footRowRef}>
             <div className="ib-footbtns" data-foot-buttons="">
               {(waiting || draftKept) && (
                 <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending} aria-describedby={footStatusIds}>
@@ -3482,25 +4007,33 @@ export function ThreadPane({ thread, sent, onQuestions, onChanged, draftChanged 
                 aria-describedby={waiting || draftKept ? footStatusIds : undefined}
               >
                 <Icon name={waiting || draftKept ? 'pen' : 'reply'} size={15} />
-                {waiting || draftKept ? 'Edit draft' : 'Reply'}
+                {/* Short of room, "Edit", and on a phone the pencil alone (footFit.ts): the words stay as hidden text,
+                    so the name is "Edit draft". */}
+                {waiting || draftKept ? (
+                  <span>
+                    Edit<span className="ib-fl"> draft</span>
+                  </span>
+                ) : (
+                  'Reply'
+                )}
               </button>
-              {/* Re-ask (approval "inbox-reask"): the open questions again, in one message per session. */}
-              {reaskShown && (
-                <Tip content={reaskTooltip(reaskList)}>
-                  <button type="button" className="ib-btn" ref={reaskRef} data-reask="" disabled={reasking} onClick={() => void sendReask()}>
-                    <Icon name="refresh" size={15} />
-                    Re-ask
-                  </button>
-                </Tip>
-              )}
-              {/* The thread's open questions (approval "inbox-thread-open-questions"): a list that takes the person to each card. */}
+              {/* The thread's open questions (approval "inbox-thread-open-questions"): a list that takes the person to each
+                  card, with Re-ask at its foot (owner, 2026-10-23: the open questions again, in one message per session). */}
               {openQShown && (
                 <OpenQuestionsButton
                   questions={openQ.questions}
-                  replaced={openQ.replaced}
+                  actions={reaskActions}
+                  reask={
+                    reaskShown
+                      ? { label: reaskItemLabel(reaskOpen), tooltip: reaskTooltip(reaskList), busy: reasking, onReask: () => void sendReask() }
+                      : null
+                  }
+                  triggerRef={reaskRef}
                   phone={phone}
                   measure={measureOpenQuestions}
                   onPick={(q) => jumpTo({ kind: 'question', messageId: q.messageId, key: q.key })}
+                  onSetSkipped={setSkippedFromList}
+                  rowForm={rowLevel !== null && footStatusShown ? footRowOpenQuestionsForm(rowLevel, rowMax) : null}
                 />
               )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits. */}
@@ -3631,10 +4164,22 @@ function SkipChip({ count, keepOpen, onToggle, id }: { count: number; keepOpen: 
       {/* The icon and the sentence are one item, so where the chip wraps (a narrow reply box) the icon stays with its words. */}
       <span className="ib-skip-s" id={id}>
         {!keepOpen && <Icon name="forward" size={14} />}
-        {keepOpen ? `${plural(count, 'question')} ${count === 1 ? 'stays' : 'stay'} open` : `${plural(count, 'question')} will be skipped`}
+        {/* Short of room, the foot's row drops the middle words ("1 open", "Skip"; footFit.ts, inbox.css): they leave
+            only the eye, so the description and the button's name keep them, and the text reads the same. */}
+        <span>
+          {formatCount(count)}
+          <span className="ib-fl">{keepOpen ? ` question${count === 1 ? ' stays' : 's stay'}` : ` question${count === 1 ? '' : 's'} will be`}</span>
+          {keepOpen ? ' open' : ' skipped'}
+        </span>
       </span>
       <button type="button" onClick={onToggle} data-skip-toggle="">
-        {keepOpen ? `Skip ${them}` : 'Keep open'}
+        {keepOpen ? (
+          <>
+            Skip<span className="ib-fl"> {them}</span>
+          </>
+        ) : (
+          'Keep open'
+        )}
       </button>
     </span>
   );

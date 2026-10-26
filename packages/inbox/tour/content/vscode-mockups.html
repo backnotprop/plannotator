@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guided Reviews in VS Code: four directions</title>
+<style>
+/* ── Page chrome (outside the VS Code window) ─────────────────────────── */
+:root {
+  --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: "SF Mono", Menlo, Monaco, "Cascadia Code", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #0b0c0e; color: #d4d4d4; font-family: var(--ui); }
+.ctl { position: sticky; top: 0; z-index: 50; background: #0b0c0e; border-bottom: 1px solid #26282c; padding: 12px 20px 12px; display: grid; gap: 8px; }
+.ctl h1 { margin: 0; font-size: 13px; font-weight: 600; color: #e6e6e6; letter-spacing: .01em; }
+.ctl h1 span { color: #8b8f96; font-weight: 400; }
+.ctl-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ctl-label { font-size: 11px; color: #8b8f96; text-transform: uppercase; letter-spacing: .06em; width: 58px; }
+[role=tablist] { display: flex; gap: 4px; flex-wrap: wrap; }
+[role=tab] { font: 12.5px var(--ui); color: #c9ccd1; background: #17191c; border: 1px solid #2c2f34; border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+[role=tab]:hover { border-color: #4a4e55; }
+[role=tab][aria-selected=true] { background: #0f3a5c; border-color: #2f7fc1; color: #fff; }
+[role=tab]:focus-visible { outline: 2px solid #4daafc; outline-offset: 2px; }
+.ctl-cap { font-size: 12.5px; color: #b9bdc3; line-height: 1.5; max-width: 1440px; }
+.ctl-cap b { color: #fff; font-weight: 600; }
+.stage { padding: 20px; overflow: auto; }
+body.shot .ctl { display: none; }
+body.shot .stage { padding: 0; }
+
+/* ── VS Code window, Dark Modern ──────────────────────────────────────── */
+.vs { width: 1440px; height: 900px; background: #1f1f1f; color: #cccccc; font: 13px var(--ui); display: flex; flex-direction: column; position: relative; overflow: hidden; border-radius: 10px; box-shadow: 0 0 0 1px #333, 0 30px 80px -20px #000; }
+body.shot .vs { border-radius: 0; box-shadow: none; }
+.titlebar { height: 35px; flex: none; background: #181818; border-bottom: 1px solid #2b2b2b; display: flex; align-items: center; position: relative; }
+.lights { display: flex; gap: 8px; padding-left: 13px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.cc { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; }
+.cc .arrows { color: #9d9d9d; font-size: 14px; letter-spacing: 10px; }
+.cc .box { width: 520px; height: 24px; border: 1px solid #3c3c3c; background: #222; border-radius: 6px; color: #b8b8b8; font-size: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tb-right { margin-left: auto; padding-right: 12px; display: flex; gap: 12px; color: #9d9d9d; }
+.vbody { flex: 1; display: flex; min-height: 0; }
+.activity { width: 48px; flex: none; background: #181818; border-right: 1px solid #2b2b2b; display: flex; flex-direction: column; align-items: center; padding-top: 4px; gap: 2px; }
+.activity .ai { width: 48px; height: 46px; display: flex; align-items: center; justify-content: center; color: #868686; position: relative; }
+.activity .ai.on { color: #d7d7d7; }
+.activity .ai.on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: #0078d4; }
+.activity .grow { flex: 1; }
+.activity .badge { position: absolute; right: 9px; bottom: 9px; background: #0078d4; color: #fff; font-size: 9px; border-radius: 8px; min-width: 15px; height: 15px; display: flex; align-items: center; justify-content: center; }
+.sidebar { flex: none; background: #181818; border-right: 1px solid #2b2b2b; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.sb-title { height: 35px; display: flex; align-items: center; padding: 0 8px 0 20px; font-size: 11px; color: #cccccc; text-transform: uppercase; letter-spacing: .04em; }
+.sb-title .acts { margin-left: auto; color: #9d9d9d; display: flex; gap: 10px; text-transform: none; }
+.sb-sec { height: 22px; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #cccccc; gap: 4px; }
+.tree { font-size: 13px; }
+.tr { height: 22px; display: flex; align-items: center; gap: 6px; padding-right: 10px; color: #cccccc; white-space: nowrap; overflow: hidden; }
+.tr .tw { width: 16px; text-align: center; color: #9d9d9d; font-size: 10px; flex: none; }
+.tr .lbl { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.tr .desc { color: #8b8b8b; font-size: 12px; flex: none; }
+.tr.sel { background: #04395e; outline: 1px solid #0078d4; outline-offset: -1px; color: #fff; }
+.tr.hl { background: #2a2d2e; }
+.cb { width: 14px; height: 14px; border: 1px solid #6b6b6b; border-radius: 3px; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; background: #313131; }
+.cb.on { background: #0078d4; border-color: #0078d4; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.editors { flex: 1; display: flex; min-width: 0; }
+.group { display: flex; flex-direction: column; min-width: 0; border-left: 1px solid #2b2b2b; background: #1f1f1f; }
+.group:first-child { border-left: 0; }
+.tabs { height: 35px; flex: none; background: #181818; display: flex; border-bottom: 1px solid #2b2b2b; }
+.tab { height: 35px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; color: #9d9d9d; border-right: 1px solid #2b2b2b; font-size: 13px; white-space: nowrap; position: relative; }
+.tab.on { background: #1f1f1f; color: #fff; border-bottom: 1px solid #1f1f1f; margin-bottom: -1px; }
+.tab.on::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: #0078d4; }
+.tab i { font-style: italic; }
+.tab .x { color: #9d9d9d; margin-left: 4px; font-size: 13px; }
+.tab .sub { color: #8b8b8b; }
+.tab.on .sub { color: #b8b8b8; }
+.tabs .tacts { margin-left: auto; display: flex; gap: 12px; align-items: center; padding: 0 12px; color: #9d9d9d; }
+.crumbs { height: 22px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 12px; color: #a9a9a9; font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+.crumbs .sep { color: #6b6b6b; }
+.gbody { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.statusbar { height: 22px; flex: none; background: #181818; border-top: 1px solid #2b2b2b; display: flex; align-items: center; font-size: 12px; color: #cccccc; }
+.statusbar .si { padding: 0 8px; display: flex; align-items: center; gap: 5px; height: 22px; white-space: nowrap; }
+.statusbar .si.remote { background: #0078d4; color: #fff; padding: 0 10px; }
+.statusbar .right { margin-left: auto; display: flex; }
+.ico { display: inline-block; width: 16px; height: 16px; vertical-align: middle; }
+.ico svg { width: 16px; height: 16px; display: block; }
+
+/* Syntax (Dark+ token colors; the reader resolves the same Shiki theme as the editor) */
+.k { color: #569cd6; } .kc { color: #c586c0; } .s { color: #ce9178; } .n { color: #b5cea8; } .t { color: #4ec9b0; } .f { color: #dcdcaa; } .v { color: #9cdcfe; } .c { color: #6a9955; } .p { color: #d4d4d4; }
+
+/* ── Native diff editor ───────────────────────────────────────────────── */
+.ned { position: absolute; inset: 0; display: flex; font: 13px/19px var(--mono); }
+.ned .pane { flex: 1; min-width: 0; overflow: hidden; position: relative; }
+.ned .pane + .pane { border-left: 1px solid #2b2b2b; }
+.ned .row { display: flex; height: 19px; white-space: pre; }
+.ned .gn { width: 44px; flex: none; text-align: right; padding-right: 12px; color: #6e7681; }
+.ned .gn.cur { color: #cccccc; }
+.ned .gm { width: 18px; flex: none; color: #8b8b8b; text-align: center; }
+.ned .code { flex: 1; min-width: 0; overflow: hidden; padding-left: 2px; }
+.ned .row.add { background: rgba(155, 185, 85, .20); }
+.ned .row.del { background: rgba(255, 0, 0, .20); }
+.ned .row.add .gm { color: #9bb955; } .ned .row.del .gm { color: #f14c4c; }
+.ned .row.fill { background: repeating-linear-gradient(-45deg, transparent 0 4px, rgba(204,204,204,.07) 4px 5px); }
+.ned .row.sel .code { background: rgba(38, 79, 120, .75); }
+.ned .row.lit { box-shadow: inset 3px 0 0 #3794ff; }
+.ned .lens { height: 19px; padding-left: 64px; font: 11.5px/19px var(--ui); color: #999; white-space: nowrap; overflow: hidden; }
+.ned .lens a { color: #999; text-decoration: none; }
+.ned .lens .bar { color: #555; padding: 0 6px; }
+.ned .ruler { position: absolute; right: 0; top: 0; bottom: 0; width: 14px; border-left: 1px solid #2b2b2b; background: #1f1f1f; }
+.ned .ruler i { position: absolute; right: 2px; width: 4px; display: block; }
+.ned .chap { position: absolute; left: 0; width: 3px; }
+
+/* ── Native widgets ───────────────────────────────────────────────────── */
+.hover { position: absolute; z-index: 20; background: #202020; border: 1px solid #454545; border-radius: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.5); font: 13px/1.45 var(--ui); color: #cccccc; width: 460px; }
+.hover .hcode { font: 12.5px/18px var(--mono); padding: 8px 10px; white-space: pre-wrap; border-bottom: 1px solid #454545; }
+.hover .hdoc { padding: 8px 10px; }
+.hover .hguide { flex-wrap: wrap; padding: 7px 10px; border-top: 1px solid #454545; display: flex; gap: 6px; align-items: center; font-size: 12.5px; color: #b8b8b8; }
+.hover .hacts { padding: 6px 10px; border-top: 1px solid #454545; display: flex; gap: 14px; font-size: 12.5px; }
+.hover .hacts a { color: #4daafc; text-decoration: none; }
+.hover .hacts kbd { font: 11px var(--ui); color: #8b8b8b; margin-left: 4px; }
+.cmt { background: #1f1f1f; border-top: 2px solid #0078d4; border-bottom: 2px solid #0078d4; font: 13px/1.5 var(--ui); color: #cccccc; }
+.cmt .head { height: 28px; display: flex; align-items: center; padding: 0 12px; background: #252526; color: #cccccc; }
+.cmt .head .r { margin-left: auto; color: #9d9d9d; display: flex; gap: 10px; }
+.cmt .body { padding: 10px 14px 10px 14px; }
+.cmt .msg { display: flex; gap: 10px; margin-bottom: 10px; }
+.cmt .av { width: 22px; height: 22px; border-radius: 4px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.cmt .who { font-weight: 600; color: #e6e6e6; }
+.cmt .who span { font-weight: 400; color: #9d9d9d; font-style: italic; margin-left: 6px; }
+.cmt .inp { border: 1px solid #0078d4; background: #313131; border-radius: 2px; height: 52px; padding: 6px 8px; font: 12.5px var(--mono); color: #cccccc; }
+.cmt .btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.vbtn { background: #0078d4; color: #fff; border-radius: 2px; padding: 3px 10px; font-size: 12.5px; display: inline-block; }
+.vbtn.sec { background: #313131; color: #cccccc; border: 1px solid #3c3c3c; }
+.cmt a, .vs a { color: #4daafc; text-decoration: none; }
+.cmt code { font: 12px var(--mono); background: #2b2b2b; padding: 1px 4px; border-radius: 3px; }
+
+/* ── Plannotator guide reader (guide-viewer chain, tokens mapped onto the editor theme) ── */
+.rd { position: absolute; inset: 0; overflow: hidden; background: #1f1f1f; color: #d4d4d4; font: 13.5px/1.6 var(--ui); }
+.rd { --card: #242424; --border: #343434; --muted: #2c2c2c; --mf: #9d9d9d; --primary: #3794ff; --link: #4daafc; --code-bg: #2d2d2d; }
+.rd .strip { height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid #2b2b2b; background: #1c1c1c; white-space: nowrap; }
+.rd .strip .t { font-weight: 600; color: #e6e6e6; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 13px; }
+.rd .strip .meta { color: var(--mf); font-size: 12px; }
+.rd .steps { display: flex; gap: 4px; margin-left: auto; }
+.rd .step { height: 24px; min-width: 26px; padding: 0 8px; border-radius: 12px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #b8b8b8; }
+.rd .step.on { border-color: #3794ff; color: #fff; background: rgba(55,148,255,.12); }
+.rd .step.done { color: #89d185; }
+.rd .racts { display: flex; gap: 6px; }
+.rd .rbtn { height: 24px; padding: 0 9px; border-radius: 5px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #cccccc; background: #252525; white-space: nowrap; }
+.rd .rbtn.pri { background: #0078d4; border-color: #0078d4; color: #fff; }
+.rd .scroll { position: absolute; top: 44px; left: 0; right: 0; bottom: 0; overflow: hidden; padding: 14px 18px 0; }
+.rd.nostrip .scroll { top: 0; }
+.chrow { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.015); padding: 10px 14px; margin-bottom: 12px; }
+.chrow .tt { flex: 1; color: #b8b8b8; font-size: 14px; font-weight: 500; }
+.chrow .m { color: #8b8b8b; font-size: 11.5px; }
+.chrow .pos { font: 10.5px var(--mono); color: #6e6e6e; }
+.pcb { width: 15px; height: 15px; border-radius: 4px; border: 1px solid #6b6b6b; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; flex: none; color: #fff; }
+.pcb.on { background: var(--primary); border-color: var(--primary); }
+.card { border: 1px solid var(--border); border-radius: 8px; background: var(--card); overflow: hidden; margin-bottom: 12px; display: grid; }
+.card .prose { border-right: 1px solid #333; padding: 18px 20px; min-width: 0; }
+.card .prose h3 { margin: 0; font-size: 15px; line-height: 1.35; color: #f0f0f0; font-weight: 600; }
+.card .pmeta { margin-top: 8px; display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--mf); }
+.card .pmeta .pos { font: 11px var(--mono); color: #7b7b7b; }
+.card .prose p { margin: 12px 0 0; color: #c2c2c2; font-size: 13.5px; }
+.card .prose code, .rd code { font: 12px var(--mono); background: var(--code-bg); color: #e0e0e0; padding: 1px 5px; border-radius: 4px; }
+.callout { margin-top: 12px; border-radius: 6px; background: rgba(180,128,215,.12); border-left: 3px solid #b180d7; padding: 9px 12px; font-size: 13px; color: #cfc6d8; }
+.callout b { display: block; font-size: 11px; letter-spacing: .06em; color: #c9a7e6; margin-bottom: 3px; }
+.flist { margin-top: 16px; display: grid; gap: 6px; }
+.fchip { display: flex; align-items: center; gap: 8px; border: 1px solid #333; border-radius: 6px; padding: 6px 10px; background: #1b1b1b; font: 11px var(--mono); }
+.fchip.on { border-color: #3794ff; background: rgba(55,148,255,.08); }
+.fchip .nm { color: #e6e6e6; font-weight: 600; }
+.fchip .dr { color: #7b7b7b; font-size: 10px; flex: 1; }
+.fchip .a { color: #89d185; } .fchip .d { color: #f48771; }
+.askin { margin-top: 14px; border: 1px solid #3c3c3c; border-radius: 6px; padding: 7px 10px; color: #8b8b8b; font-size: 12.5px; background: #1b1b1b; display: flex; gap: 6px; align-items: center; }
+.diffs { background: rgba(255,255,255,.012); padding: 14px 16px; min-width: 0; }
+.fsum { color: #c2c2c2; font-size: 13px; margin: 2px 2px 8px; }
+.pfile { border-radius: 8px; overflow: hidden; background: #181818; border: 1px solid #2c2c2c; margin-bottom: 14px; }
+.pfile .ph { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; font: 12.5px var(--ui); color: #b8b8b8; border-bottom: 1px solid #262626; }
+.pfile .ph .dir { color: #8b8b8b; } .pfile .ph .nm { color: #f0f0f0; font-weight: 600; }
+.pfile .ph .a { color: #89d185; font: 12px var(--mono); } .pfile .ph .d { color: #f48771; font: 12px var(--mono); }
+.pfile .ph .fa { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.pfile .ph .lnk { color: #4daafc; font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+.pd { font: 12.5px/19px var(--mono); }
+.pd .r { display: flex; white-space: pre; height: 19px; }
+.pd .o, .pd .nn { width: 34px; flex: none; text-align: right; padding-right: 8px; color: #5f6670; }
+.pd .bar { width: 3px; flex: none; }
+.pd .cd { flex: 1; min-width: 0; overflow: hidden; padding-left: 10px; }
+.pd .r.add { background: rgba(46,160,67,.13); } .pd .r.add .bar { background: #2ea043; } .pd .r.add .nn { color: #7fbf8a; }
+.pd .r.del { background: rgba(248,81,73,.12); } .pd .r.del .bar { background: #f85149; } .pd .r.del .o { color: #d98a85; }
+.pd .r.sel { background: rgba(55,148,255,.16); } .pd .r.sel .bar { background: #3794ff; }
+.pd .r.flash { box-shadow: inset 0 0 0 1px #3794ff; background: rgba(55,148,255,.10); }
+.pd .r.hunk { color: #6e7681; background: rgba(55,148,255,.05); font-size: 11.5px; }
+.pd .r.hunk .cd { color: #7d8590; }
+.pn-token-hover { text-decoration: underline; text-decoration-color: #4daafc; text-underline-offset: 3px; cursor: pointer; }
+.pn-token-nav { text-decoration: underline; text-decoration-color: #4daafc; color: #4daafc !important; }
+.cursor { position: absolute; z-index: 30; width: 14px; height: 20px; pointer-events: none; }
+.rcard { background: #202020; border: 1px solid #3c3c3c; border-radius: 8px; box-shadow: 0 10px 30px -8px rgba(0,0,0,.6); font: 13px/1.5 var(--ui); color: #cccccc; }
+.thread { margin: 6px 12px 10px 46px; border: 1px solid #3c3c3c; border-left: 3px solid #3794ff; border-radius: 8px; background: #1c1c1c; font: 13px/1.55 var(--ui); white-space: normal; }
+.thread .q { padding: 10px 14px; border-bottom: 1px solid #2c2c2c; display: flex; gap: 10px; }
+.thread .a { padding: 12px 14px; }
+.thread .who { font-size: 12px; color: #9d9d9d; }
+.thread .who b { color: #e6e6e6; font-weight: 600; }
+.thread h4 { margin: 4px 0 8px; font-size: 14px; color: #f0f0f0; }
+.thread p { margin: 8px 0; color: #c8c8c8; }
+.thread a, .rd a { color: var(--link); text-decoration: none; }
+.thread .tacts { display: flex; gap: 6px; padding: 8px 14px; border-top: 1px solid #2c2c2c; align-items: center; }
+.thread .fu { flex: 1; border: 1px solid #3c3c3c; border-radius: 6px; padding: 5px 9px; color: #8b8b8b; font-size: 12.5px; background: #181818; }
+.mini { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center; font: 11.5px var(--mono); margin: 8px 0; background: #181818; border: 1px solid #2c2c2c; border-radius: 6px; padding: 10px 12px; }
+.mini .lab { font: 10.5px var(--ui); letter-spacing: .08em; color: #8b8b8b; text-transform: uppercase; }
+.mini .flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mini .bx { border: 1px solid #555; border-radius: 4px; padding: 2px 7px; color: #ddd; }
+.mini .bx.r { border-color: #f14c4c; } .mini .bx.g { border-color: #89d185; } .mini .bx.y { border-color: #e2b93d; } .mini .bx.b { border-color: #3794ff; }
+.mini .ar { color: #777; }
+.toast { position: absolute; z-index: 25; background: #252526; border: 1px solid #454545; border-radius: 6px; padding: 8px 12px; font-size: 12.5px; color: #cccccc; box-shadow: 0 6px 20px rgba(0,0,0,.5); display: flex; gap: 10px; align-items: center; }
+.toast a { color: #4daafc; }
+.note { position: absolute; z-index: 40; background: #ffd866; color: #1e1e1e; font: 600 12px/1.35 var(--ui); padding: 6px 9px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); max-width: 260px; }
+.note::before { content: attr(data-n); display: inline-flex; width: 17px; height: 17px; border-radius: 50%; background: #1e1e1e; color: #ffd866; align-items: center; justify-content: center; font-size: 10.5px; margin-right: 6px; }
+
+/* Notebook */
+.nb { position: absolute; inset: 0; background: #1f1f1f; overflow: hidden; }
+.nb .ntool { height: 30px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid #2b2b2b; font-size: 12.5px; color: #cccccc; }
+.nb .ntool .k { margin-left: auto; color: #cccccc; display: flex; gap: 6px; align-items: center; }
+.nb .cells { position: absolute; top: 30px; left: 0; right: 0; bottom: 0; overflow: hidden; padding: 10px 26px 0 22px; }
+.cell { position: relative; margin: 0 0 10px 18px; }
+.cell .fb { position: absolute; left: -16px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; }
+.cell.focus .fb { background: #0078d4; }
+.cell.md { padding: 4px 6px; }
+.cell.md h2 { margin: 4px 0 4px; font-size: 20px; color: #e6e6e6; font-weight: 600; }
+.cell.md p { margin: 6px 0; color: #cccccc; font-size: 13.5px; line-height: 1.55; }
+.cell.code { border: 1px solid #333; border-radius: 4px; background: #252526; }
+.cell.code .src { padding: 8px 12px; font: 13px/19px var(--mono); min-height: 34px; display: flex; gap: 10px; }
+.cell.code .run { color: #89d185; }
+.cell .lang { position: absolute; right: 10px; bottom: 6px; font-size: 11px; color: #8b8b8b; }
+.cell .out { margin-top: 4px; }
+.cell .ctb { position: absolute; right: 8px; top: -12px; background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; display: flex; gap: 10px; padding: 3px 8px; color: #b8b8b8; font-size: 12px; z-index: 5; }
+.nbadd { margin: -2px 0 8px 18px; display: flex; gap: 8px; justify-content: center; opacity: .55; font-size: 11.5px; color: #cccccc; }
+.nbadd span { border: 1px solid #3c3c3c; border-radius: 3px; padding: 1px 8px; }
+</style>
+</head>
+<body>
+<header class="ctl">
+  <h1>Guided Reviews in VS Code · four directions <span>· checkout-service PR #482 · 1440×900 · Dark Modern · draft, not approved</span></h1>
+  <div class="ctl-row"><span class="ctl-label" id="lv">Direction</span><div role="tablist" aria-labelledby="lv" id="vtabs"></div></div>
+  <div class="ctl-row"><span class="ctl-label" id="ls">State</span><div role="tablist" aria-labelledby="ls" id="stabs"></div></div>
+  <div class="ctl-cap" id="cap" aria-live="polite"></div>
+</header>
+<main class="stage"><div id="frame"></div></main>
+
+<!-- The real PR #482 patch (northwind/checkout-service), hunks used by the mockups. -->
+<script type="text/plain" id="p-deliver">@@ -1,16 +1,32 @@
+ import { httpClient } from "../net/httpClient";
+ import { logger } from "../observability/logger";
++import { computeBackoff, isRetryable, type RetryPolicy } from "./retryPolicy";
++import { deadLetters } from "./deadLetter";
+ import { signHeaders } from "./sign";
+ import type { WebhookJob } from "./types";
+
+-export async function deliverWebhook(job: WebhookJob): Promise<void> {
++export type DeliveryOutcome =
++  | { kind: "delivered"; attempts: number }
++  | { kind: "retry"; delayMs: number; attempt: number }
++  | { kind: "dead-lettered"; reason: string };
++
++/** Sends one attempt and reports what should happen next. No longer throws on a bad status. */
++export async function deliverWebhook(
++  job: WebhookJob,
++  policy: RetryPolicy,
++): Promise<DeliveryOutcome> {
+   const res = await httpClient.post(job.endpoint, job.payload, {
+     headers: signHeaders(job),
+-    timeoutMs: 10_000,
++    timeoutMs: policy.attemptTimeoutMs,
+   });
+
+-  if (!res.ok) {
+-    logger.warn("webhook delivery failed", { id: job.id, status: res.status });
+-    throw new Error(`delivery failed: ${res.status}`);
++  if (res.ok) return { kind: "delivered", attempts: job.attempt + 1 };
++
++  const attempt = job.attempt + 1;
++  if (!isRetryable(res.status) || attempt >= policy.maxAttempts) {
++    await deadLetters.put(job, { status: res.status, attempts: attempt });
++    logger.warn("webhook dead-lettered", { id: job.id, status: res.status });
++    return { kind: "dead-lettered", reason: `status ${res.status}` };
+   }
++  return { kind: "retry", delayMs: computeBackoff(attempt, policy), attempt };
+ }
+</script>
+<script type="text/plain" id="p-worker">@@ -1,12 +1,13 @@
++import { defaults } from "../config/schema";
+ import { deliverWebhook } from "../webhooks/deliver";
++import { retryPolicyFrom } from "../webhooks/retryPolicy";
+ import type { WebhookJob } from "../webhooks/types";
+
+ export interface Queue { push(job: WebhookJob, opts?: { delayMs?: number }): Promise<void> }
+
+ export async function processJob(queue: Queue, job: WebhookJob): Promise<void> {
+-  try {
+-    await deliverWebhook(job);
+-  } catch {
+-    await queue.push({ ...job, attempt: job.attempt + 1 });
++  const outcome = await deliverWebhook(job, retryPolicyFrom(defaults));
++  if (outcome.kind === "retry") {
++    await queue.push({ ...job, attempt: outcome.attempt }, { delayMs: outcome.delayMs });
+   }
+ }
+</script>
+<script type="text/plain" id="p-deadletter">@@ -0,0 +1,24 @@
++import { db } from "../db";
++import type { WebhookJob } from "./types";
++
++export interface DeadLetterInfo {
++  status: number;
++  attempts: number;
++}
++
++export const deadLetters = {
++  /** Idempotent: a job is dead-lettered at most once. */
++  async put(job: WebhookJob, info: DeadLetterInfo): Promise<void> {
++    await db
++      .insertInto("webhook_dead_letters")
++      .values({
++        job_id: job.id,
++        endpoint: job.endpoint,
++        payload: JSON.stringify(job.payload),
++        last_status: info.status,
++        attempts: info.attempts,
++      })
++      .onConflict((oc: { column(c: string): { doNothing(): unknown } }) => oc.column("job_id").doNothing())
++      .execute();
++  },
++};
+</script>
+<script type="text/plain" id="p-sql">@@ -0,0 +1,10 @@
++CREATE TABLE webhook_dead_letters (
++  job_id      text PRIMARY KEY,
++  endpoint    text NOT NULL,
++  payload     jsonb NOT NULL,
++  last_status integer NOT NULL,
++  attempts    integer NOT NULL,
++  created_at  timestamptz NOT NULL DEFAULT now()
++);
++
++CREATE INDEX webhook_dead_letters_created_at ON webhook_dead_letters (created_at DESC);
+</script>
+<script type="text/plain" id="p-retry">@@ -0,0 +1,24 @@
++import type { Config } from "../config/schema";
++
++/** How often and how long a failed delivery is retried. */
++export interface RetryPolicy {
++  maxAttempts: number;
++  baseDelayMs: number;
++  maxDelayMs: number;
++  attemptTimeoutMs: number;
++}
++
++export function retryPolicyFrom(config: Config): RetryPolicy {
++  return config.webhooks.retry;
++}
++
++/** Exponential backoff with full jitter, clamped to policy.maxDelayMs. */
++export function computeBackoff(attempt: number, policy: RetryPolicy): number {
++  const ceiling = Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** attempt);
++  return Math.floor(Math.random() * ceiling);
++}
++
++/** 5xx and 429 are worth another try; everything else is final. */
++export function isRetryable(status: number): boolean {
++  return status === 429 || status >= 500;
++}
+</script>
+<script type="text/plain" id="f-sign">import { createHmac } from "node:crypto";
+import { secrets } from "../config/secrets";
+import type { WebhookJob } from "./types";
+
+/** HMAC-SHA256 over the raw body, sent as X-Signature. */
+export function signHeaders(job: WebhookJob): Record<string, string> {
+  const body = JSON.stringify(job.payload);
+  const sig = createHmac("sha256", secrets.webhookKey).update(body).digest("hex");
+  return { "X-Signature": `sha256=${sig}`, "X-Webhook-Id": job.id };
+}
+</script>
+
+<script>
+"use strict";
+/* ───────────────────────── data ───────────────────────── */
+const CH = [
+  { n: 1, title: "The retry budget", color: "#e2b93d", files: [["retryPolicy.ts", "src/webhooks", 24, 0], ["schema.ts", "src/config", 10, 2]], reviewed: true },
+  { n: 2, title: "Delivery loop learns to back off", color: "#3794ff", files: [["deliver.ts", "src/webhooks", 21, 5]] },
+  { n: 3, title: "Dead letters get a table", color: "#b180d7", files: [["deadLetter.ts", "src/webhooks", 24, 0], ["0042_webhook_dead_letters.sql", "migrations", 10, 0]] },
+  { n: 4, title: "Worker schedules the retry", color: "#89d185", files: [["worker.ts", "src/queue", 5, 4]] },
+  { n: 5, title: "Tests that pin the behavior", color: "#d18616", files: [["deliver.test.ts", "src/webhooks", 8, 0], ["retryPolicy.test.ts", "src/webhooks", 11, 0]] },
+];
+const TITLE = "Retry failed webhook deliveries with backoff and a dead-letter table";
+
+/* ───────────────────────── helpers ───────────────────────── */
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const KW_CTRL = new Set(["import", "from", "export", "return", "if", "await", "throw", "for", "else", "try", "catch"]);
+const KW = new Set(["async", "function", "const", "type", "interface", "new", "let", "true", "false", "of", "typeof"]);
+const SQL_KW = /^(CREATE|TABLE|INDEX|ON|PRIMARY|KEY|NOT|NULL|DEFAULT|DESC|text|jsonb|integer|timestamptz)$/;
+function hl(line, lang) {
+  const re = /(\/\/.*$|\/\*\*?.*?\*\/)|("(?:[^"\\]|\\.)*"|`[^`]*`|'[^']*')|(\b\d[\d_]*\b)|([A-Za-z_$][\w$]*)|(\s+)|(.)/g;
+  let out = "", m;
+  while ((m = re.exec(line))) {
+    const [all, com, str, num, id, ws] = m;
+    if (com) out += `<span class="c">${esc(com)}</span>`;
+    else if (str) out += `<span class="s">${esc(str)}</span>`;
+    else if (num) out += `<span class="n">${num}</span>`;
+    else if (id) {
+      const rest = line.slice(re.lastIndex);
+      if (lang === "sql") out += SQL_KW.test(id) ? `<span class="k">${id}</span>` : `<span class="v">${id}</span>`;
+      else if (KW_CTRL.has(id)) out += `<span class="kc">${id}</span>`;
+      else if (KW.has(id)) out += `<span class="k">${id}</span>`;
+      else if (/^\s*\(/.test(rest) || /^\s*<[A-Z]/.test(rest)) out += `<span class="f">${id}</span>`;
+      else if (/^[A-Z]/.test(id)) out += `<span class="t">${id}</span>`;
+      else out += `<span class="v">${id}</span>`;
+    } else if (ws) out += ws;
+    else out += `<span class="p">${esc(all)}</span>`;
+  }
+  return out;
+}
+function parsePatch(id) {
+  const raw = document.getElementById(id).textContent.replace(/\n$/, "").split("\n");
+  const h = raw[0].match(/-(\d+)(?:,\d+)? \+(\d+)/);
+  let o = +h[1], n = +h[2];
+  if (o === 0) o = 1;
+  const rows = [];
+  for (const l of raw.slice(1)) {
+    const t = l[0], text = l.slice(1);
+    if (t === "+") rows.push({ k: "add", n: n++, text });
+    else if (t === "-") rows.push({ k: "del", o: o++, text });
+    else rows.push({ k: "ctx", o: o++, n: n++, text });
+  }
+  return { header: raw[0], rows };
+}
+/* Keep rows from the first row whose new line >= from to the last whose new line <= to (deletions in between kept). */
+function windowRows(rows, from, to) {
+  if (!from && !to) return rows;
+  const lo = from ? rows.findIndex((r) => r.n !== undefined && r.n >= from) : 0;
+  let hi = rows.length - 1;
+  if (to) { for (let i = rows.length - 1; i >= 0; i--) if (rows[i].n !== undefined && rows[i].n <= to) { hi = i; break; } }
+  return rows.slice(Math.max(0, lo), hi + 1);
+}
+function mark(html, word, cls, id) {
+  return html.replace(new RegExp(`(<span class="[a-z]+">)${word}(</span>)`), `$1<span class="${cls}"${id ? ` id="${id}"` : ""}>${word}</span>$2`);
+}
+/* Plannotator (Pierre) unified diff. opts: lang, sel:[a,b] (new lines), marks:[{n,word,cls,id}], after:{n:html}, only:[from,to] new-line window */
+function pierre(pid, opts = {}) {
+  const rows = windowRows(parsePatch(pid).rows, opts.only?.[0], opts.only?.[1]);
+  let html = "";
+  for (const r of rows) {
+    let code = hl(r.text, opts.lang);
+    for (const mk of opts.marks || []) if (r.n === mk.n && r.k !== "del") code = mark(code, mk.word, mk.cls, mk.id);
+    const sel = opts.sel && r.n !== undefined && r.k !== "del" && r.n >= opts.sel[0] && r.n <= opts.sel[1];
+    const flash = opts.flash && r.n === opts.flash;
+    html += `<div class="r ${r.k}${sel ? " sel" : ""}${flash ? " flash" : ""}"><span class="o">${r.o ?? ""}</span><span class="nn">${r.n ?? ""}</span><span class="bar"></span><span class="cd">${code || " "}</span></div>`;
+    if (opts.after && r.n !== undefined && r.k !== "del" && opts.after[r.n]) html += opts.after[r.n];
+  }
+  return `<div class="pd">${html}</div>`;
+}
+function pfile(pid, name, dir, a, d, opts = {}) {
+  const acts = opts.acts ?? `<span class="lnk">${I.ext}Open in editor</span><span class="rbtn">${I.diff}Diff</span><span class="pcb"></span><span style="font-size:12px;color:#9d9d9d">Viewed</span>`;
+  return `<div class="pfile"><div class="ph"><span style="color:#8b8b8b">⌄</span><span><span class="dir">${dir}/</span><span class="nm">${name}</span></span><span class="a">+${a}</span>${d ? `<span class="d">-${d}</span>` : `<span class="a">A</span>`}<span class="fa">${acts}</span></div>${pierre(pid, opts)}</div>`;
+}
+/* Native diff editor, inline mode */
+function nativeInline(pid, opts = {}) {
+  const rows = windowRows(parsePatch(pid).rows, opts.from);
+  let html = opts.lens ? `<div class="lens">${opts.lens}</div>` : "";
+  let i = 0;
+  for (const r of rows) {
+    let code = hl(r.text, opts.lang);
+    for (const mk of opts.marks || []) if (r.n === mk.n && r.k !== "del") code = mark(code, mk.word, mk.cls, mk.id);
+    const sel = opts.sel && r.n !== undefined && r.k !== "del" && r.n >= opts.sel[0] && r.n <= opts.sel[1];
+    html += `<div class="row ${r.k}${sel ? " sel" : ""}"><span class="gn">${r.o ?? ""}</span><span class="gn${opts.cur === r.n ? " cur" : ""}">${r.n ?? ""}</span><span class="gm">${r.k === "add" ? "+" : r.k === "del" ? "−" : ""}</span><span class="code">${code || " "}</span></div>`;
+    if (opts.after && r.n !== undefined && r.k !== "del" && opts.after[r.n]) html += opts.after[r.n];
+    i++;
+  }
+  return `<div class="ned"><div class="pane" style="padding-top:${opts.pad ?? 6}px">${opts.chapColor ? `<span class="chap" style="top:${opts.pad ?? 6}px;bottom:0;background:${opts.chapColor}"></span>` : ""}${html}</div>${ruler(rows)}</div>`;
+}
+/* Native diff editor, side by side */
+function nativeSplit(pid, opts = {}) {
+  const { rows } = parsePatch(pid);
+  const L = [], R = [];
+  for (let i = 0; i < rows.length;) {
+    if (rows[i].k === "ctx") { L.push(rows[i]); R.push(rows[i]); i++; continue; }
+    const dels = [], adds = [];
+    while (i < rows.length && rows[i].k === "del") dels.push(rows[i++]);
+    while (i < rows.length && rows[i].k === "add") adds.push(rows[i++]);
+    const m = Math.max(dels.length, adds.length);
+    for (let j = 0; j < m; j++) { L.push(dels[j] || { k: "fill" }); R.push(adds[j] || { k: "fill" }); }
+  }
+  const side = (arr, which) => arr.map((r) => {
+    const num = which === "L" ? r.o : r.n;
+    let code = r.k === "fill" ? "" : hl(r.text, opts.lang);
+    if (which === "R") for (const mk of opts.marks || []) if (r.n === mk.n) code = mark(code, mk.word, mk.cls, mk.id);
+    const k = r.k === "ctx" ? "" : r.k;
+    return `<div class="row ${k}"><span class="gn">${num ?? ""}</span><span class="code">${code || " "}</span></div>`;
+  }).join("");
+  const lens = opts.lens ? `<div class="lens">${opts.lens}</div>` : "";
+  return `<div class="ned" style="${opts.style || ""}"><div class="pane" style="padding-top:4px">${opts.lens ? `<div class="lens"></div>` : ""}${side(L, "L")}</div><div class="pane" style="padding-top:4px">${lens}${side(R, "R")}</div>${ruler(rows)}</div>`;
+}
+function ruler(rows) {
+  const total = rows.length; let s = "";
+  rows.forEach((r, i) => { if (r.k !== "ctx") s += `<i style="top:${(i / total) * 60 + 4}%;height:1.6%;background:${r.k === "add" ? "#587c0c" : "#94151b"}"></i>`; });
+  return `<div class="ruler">${s}</div>`;
+}
+function plainFile(id, opts = {}) {
+  const lines = document.getElementById(id).textContent.replace(/\n$/, "").split("\n");
+  return `<div class="ned"><div class="pane" style="padding-top:4px">${lines.map((t, i) => {
+    let code = hl(t); for (const mk of opts.marks || []) if (i + 1 === mk.n) code = mark(code, mk.word, mk.cls, mk.id);
+    return `<div class="row${opts.lit === i + 1 ? " lit" : ""}" ${opts.lit === i + 1 ? 'style="background:rgba(55,148,255,.10)"' : ""}><span class="gn${opts.lit === i + 1 ? " cur" : ""}">${i + 1}</span><span class="code" style="padding-left:16px">${code || " "}</span></div>`;
+  }).join("")}</div><div class="ruler"></div></div>`;
+}
+
+/* ───────────────────────── icons ───────────────────────── */
+const sv = (d, extra = "") => `<span class="ico"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" ${extra}>${d}</svg></span>`;
+const I = {
+  files: sv('<path d="M4 1.5h5l3 3v8.5H4z"/><path d="M9 1.5v3h3"/><path d="M2.5 4v10.5h7"/>', 'style="width:24px;height:24px"'),
+  search: sv('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l4 4"/>'),
+  scm: sv('<circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="5.5" r="1.6"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/>'),
+  run: sv('<path d="M5 3l8 5-8 5z"/>'),
+  ext: sv('<path d="M6 3H3v10h10v-3"/><path d="M9 2h5v5M14 2L7.5 8.5"/>'),
+  ext2: sv('<rect x="2" y="2" width="5" height="5"/><rect x="9" y="2" width="5" height="5"/><rect x="2" y="9" width="5" height="5"/><rect x="9" y="9" width="5" height="5"/>'),
+  guide: sv('<path d="M2 3h4.5A1.5 1.5 0 0 1 8 4.5V14a1.5 1.5 0 0 0-1.5-1.5H2zM14 3H9.5A1.5 1.5 0 0 0 8 4.5V14a1.5 1.5 0 0 1 1.5-1.5H14z"/>'),
+  account: sv('<circle cx="8" cy="6" r="3"/><path d="M2.5 14c1-3 3-4 5.5-4s4.5 1 5.5 4"/>'),
+  gear: sv('<circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
+  diff: sv('<path d="M5 2v8M2 6h6M3 13h4M10 3h4M12 1v4" /><path d="M9 9h5v5H9z" stroke-dasharray="1.5 1"/>'),
+  spark: sv('<path d="M8 1.5l1.4 4.1L13.5 7 9.4 8.4 8 12.5 6.6 8.4 2.5 7l4.1-1.4z"/>'),
+  ts: `<span style="font:700 9px var(--ui);color:#3178c6;width:16px;display:inline-block;text-align:center">TS</span>`,
+  sql: `<span style="font:700 8px var(--ui);color:#e2b93d;width:16px;display:inline-block;text-align:center">SQL</span>`,
+  split: sv('<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M8 2.5v11"/>'),
+  more: `<span style="letter-spacing:1px">···</span>`,
+  branch: sv('<circle cx="4.5" cy="3.5" r="1.4"/><circle cx="4.5" cy="12.5" r="1.4"/><circle cx="11.5" cy="5.5" r="1.4"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/>'),
+  book: sv('<path d="M2 3h4.5A1.5 1.5 0 0 1 8 4.5V14a1.5 1.5 0 0 0-1.5-1.5H2zM14 3H9.5A1.5 1.5 0 0 0 8 4.5V14a1.5 1.5 0 0 1 1.5-1.5H14z"/>'),
+  sb: sv('<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M5.5 2.5v11"/>'),
+  claude: `<span style="color:#d97757;font-size:13px">✳</span>`,
+  pointer: `<svg class="cursor" viewBox="0 0 14 20"><path d="M1 1v15l4-4 3 7 2.5-1-3-7h5.5z" fill="#fff" stroke="#000" stroke-width="1"/></svg>`,
+};
+
+/* ───────────────────────── frame ───────────────────────── */
+function activity(on = "guide") {
+  const it = (k, ico, extra = "") => `<div class="ai${on === k ? " on" : ""}">${ico}${extra}</div>`;
+  return `<div class="activity">${it("files", I.files)}${it("search", I.search)}${it("scm", I.scm, '<span class="badge">1</span>')}${it("run", I.run)}${it("ext", I.ext2)}${it("guide", I.guide)}<div class="grow"></div>${it("acc", I.account)}${it("gear", I.gear)}</div>`;
+}
+function tabsBar(tabs, acts = "") {
+  return `<div class="tabs">${tabs.map((t) => `<div class="tab${t.on ? " on" : ""}">${t.icon || ""}${t.italic ? `<i>${t.label}</i>` : t.label}${t.sub ? `<span class="sub">${t.sub}</span>` : ""}${t.on || t.x ? `<span class="x">×</span>` : ""}</div>`).join("")}${acts ? `<div class="tacts">${acts}</div>` : ""}</div>`;
+}
+function crumbs(parts) { return `<div class="crumbs">${parts.map((p) => `<span>${p}</span>`).join('<span class="sep">›</span>')}</div>`; }
+function frame({ act = "guide", sidebar = null, sbw = 280, groups, left = [], right = [], overlay = "" }) {
+  const g = groups.map((gr) => `<div class="group" style="${gr.w ? `width:${gr.w}px;flex:none` : "flex:1"}">${tabsBar(gr.tabs, gr.acts)}${gr.crumbs ? crumbs(gr.crumbs) : ""}<div class="gbody">${gr.body}</div></div>`).join("");
+  return `<div class="vs" id="vs">
+  <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="cc"><span class="arrows">←→</span><div class="box">${I.search} checkout-service</div></div><div class="tb-right">${I.sb}${I.split}</div></div>
+  <div class="vbody">${activity(act)}${sidebar ? `<div class="sidebar" style="width:${sbw}px">${sidebar}</div>` : ""}<div class="editors">${g}</div></div>
+  <div class="statusbar"><span class="si remote">⟩⟨</span>${left.map((x) => `<span class="si">${x}</span>`).join("")}<span class="right">${right.map((x) => `<span class="si">${x}</span>`).join("")}</span></div>
+  ${overlay}</div>`;
+}
+const stLeft = (guide) => [`${I.branch} feat/webhook-retries*`, `⊗ 0 ⚠ 0`, guide];
+
+/* ───────────────────────── shared pieces ───────────────────────── */
+const proseCh2 = `<p><code>deliverWebhook</code> no longer throws on a bad status. It returns a <code>DeliveryOutcome</code>: delivered, retry after a delay from <a href="#">computeBackoff</a>, or dead-lettered when the status is not retryable or the budget is spent.</p>
+<div class="callout"><b>IMPORTANT</b>The attempt number is computed here as <code>job.attempt + 1</code> and incremented again by the worker when it re-queues (<a href="#">chapter 4</a>). Check the two agree at the budget boundary.</div>`;
+function chips(ch, active) {
+  return `<div class="flist">${ch.files.map(([nm, dir, a, d], i) => `<div class="fchip${i === active ? " on" : ""}"><span class="nm">${nm}</span><span class="dr">${dir}</span><span class="a">+${a}</span>${d ? `<span class="d">-${d}</span>` : ""}</div>`).join("")}</div>`;
+}
+function chRow(ch, extra = "") {
+  return `<div class="chrow"><span class="pcb${ch.reviewed ? " on" : ""}">${ch.reviewed ? "✓" : ""}</span><span class="dot" style="background:${ch.color}"></span><span class="tt">${ch.title}</span><span class="m">${ch.files.length} file${ch.files.length > 1 ? "s" : ""}${ch.reviewed ? " · reviewed" : ""}</span><span class="pos">0${ch.n} / 05</span><span style="color:#6e6e6e">›</span>${extra}</div>`;
+}
+function strip(cur, opts = {}) {
+  const steps = `<span class="step">Overview</span>` + CH.map((c) => `<span class="step${c.n === cur ? " on" : ""}${c.reviewed ? " done" : ""}"><span class="dot" style="background:${c.color}"></span>${c.reviewed ? "✓" : c.n}</span>`).join("");
+  return `<div class="strip">${I.book}<span class="t">${opts.short ? "PR #482 · Retry failed webhook deliveries…" : `PR #482 · ${TITLE}`}</span><span class="meta">1 of 5 reviewed</span><div class="steps">${steps}</div><div class="racts">${opts.acts ?? `<span class="rbtn">${I.ext}Export</span><span class="rbtn">${I.more}</span>`}</div></div>`;
+}
+const answerHead = `<div class="who">${I.claude} <b>Claude Code</b> · Sonnet · low · 9s · $0.03 · just now</div>`;
+const miniDiagram = `<div class="mini"><span class="lab">Before</span><span class="flow"><span class="bx">post()</span><span class="ar">→</span><span class="bx r">throw Error</span><span class="ar">→</span><span class="bx">processJob catch</span><span class="ar">→</span><span class="bx r">queue.push(job) at once</span></span>
+<span class="lab">After</span><span class="flow"><span class="bx b">deliverWebhook</span><span class="ar">→</span><span class="bx">status?</span><span class="ar">→</span><span class="bx g">delivered</span><span class="bx y">retry · computeBackoff</span><span class="bx r">dead-lettered</span></span></div>`;
+const answerBody = `<h4>Failures used to loop straight back. Now each one gets a decision.</h4>${miniDiagram}
+<p>Before, <a href="#">deliverWebhook</a> threw on any bad status and <a href="#">processJob</a> pushed the job back at once: no delay, no limit, and a <code>404</code> was retried forever. Lines <a href="#">25–31</a> replace the throw with a decision.</p>
+<p>It returns a value because the worker now needs the delay: the outcome carries <code>delayMs</code>, and the worker hands it to <code>queue.push</code>. That half is <a href="#">Chapter 4 · Worker schedules the retry</a>.</p>`;
+
+/* ───────────────────────── Variant A: one Guide tab ───────────────────────── */
+function guidesOutline(curCh, opts = {}) {
+  return `<div class="sb-title">Guided Reviews<span class="acts">${I.more}</span></div>
+  <div class="sb-sec">⌄ PR #482 · 1/5 reviewed</div>
+  <div class="tree">
+   <div class="tr"><span class="tw"></span>${I.book}<span class="lbl">Overview</span></div>
+   ${CH.map((c) => `<div class="tr${c.n === curCh ? " sel" : ""}"><span class="tw"></span><span class="cb${c.reviewed ? " on" : ""}">${c.reviewed ? "✓" : ""}</span><span class="dot" style="background:${c.color}"></span><span class="lbl">${c.n}. ${c.title}</span><span class="desc">${c.files.length}</span></div>`).join("")}
+   <div class="tr" style="color:#8b8b8b"><span class="tw"></span>ⓘ <span class="lbl">All 8 changed files are in a chapter</span></div>
+  </div>
+  <div style="flex:1"></div>
+  <div class="sb-sec">› Answers · 1</div><div class="sb-sec">› Pull requests · 4</div>`;
+}
+function readerA(state) {
+  const narrow = state === 3;
+  const proseW = narrow ? 0 : 320;
+  let diffOpts = { };
+  let after = {};
+  if (state === 2) diffOpts = { marks: [{ n: 31, word: "computeBackoff", cls: "pn-token-hover", id: "hv" }] };
+  if (state === 3) diffOpts = { marks: [{ n: 19, word: "signHeaders", cls: "pn-token-nav", id: "nav" }] };
+  if (state === 4) {
+    diffOpts = { sel: [25, 31] };
+    after[31] = `<div class="thread"><div class="q"><span class="cb on" style="border-radius:50%;width:20px;height:20px;background:#5a5a5a;border-color:#5a5a5a;font-size:10px">MR</span><div><div class="who"><b>You</b> · lines 25–31</div>Why return a value here instead of throwing?</div></div>
+      <div class="a">${answerHead}${answerBody}</div>
+      <div class="tacts"><span class="fu">Ask a follow-up… (continues this conversation)</span><span class="rbtn">Open as page</span><span class="rbtn">Copy as feedback</span><span class="rbtn">Post to PR</span></div></div>`;
+  }
+  const proseNarrow = `<div class="prose" style="border-right:0;border-bottom:1px solid #333;padding:14px 18px"><h3>Delivery loop learns to back off</h3><div class="pmeta"><span class="pos">02 / 05</span><span class="pcb"></span>Reviewed<span style="margin-left:auto;color:#4daafc">Show all prose ⌄</span></div><p style="margin-top:8px"><code>deliverWebhook</code> no longer throws on a bad status. It returns a <code>DeliveryOutcome</code>: delivered, retry after a delay, or dead-lettered.</p></div>`;
+  const prose = `<div class="prose"><h3>Delivery loop learns to back off</h3><div class="pmeta"><span class="pos">02 / 05</span><span class="pcb"></span>Reviewed</div>${proseCh2}${chips(CH[1], 0)}<div class="askin">${I.spark} Ask about this chapter…</div>${state === 4 ? `<div style="margin-top:14px;font-size:11px;letter-spacing:.06em;color:#8b8b8b">ANSWERS · 1</div><div class="fchip" style="margin-top:6px;font-family:var(--ui);font-size:12px">${I.spark}<span style="flex:1;color:#ddd">Why return a value here…</span><span style="color:#8b8b8b">25–31</span></div>` : ""}</div>`;
+  const diffs = `<div class="diffs"><div class="fsum">Returns a <code>DeliveryOutcome</code> instead of throwing; dead-letters non-retryable statuses and spent budgets.</div>${pfile("p-deliver", "deliver.ts", "src/webhooks", 21, 5, { ...diffOpts, after, only: state === 4 || state === 2 ? [14, 33] : state === 3 ? [13, 33] : undefined })}</div>`;
+  const card = narrow
+    ? `<div class="card">${proseNarrow}${diffs}</div>`
+    : `<div class="card" style="grid-template-columns:${proseW}px minmax(0,1fr)">${prose}${diffs}</div>`;
+  return `<div class="rd">${strip(2, { short: narrow })}<div class="scroll">${state === 1 ? chRow(CH[0]) : ""}${card}</div></div>`;
+}
+function variantA(state) {
+  const status = (s) => ({ left: stLeft(`${I.book} Guide · Chapter 2 of 5 · 1/5 reviewed`), right: [s || "", `${I.claude} Claude Code (ACP)`] });
+  if (state === 1) {
+    return frame({ sidebar: guidesOutline(2), sbw: 260, ...status(),
+      groups: [{ tabs: [{ label: "Guided Reviews", icon: I.guide }, { label: "Guide", sub: "PR #482", icon: I.book, on: true }], acts: I.split + I.more, body: readerA(1) }],
+      overlay: `<div class="note" data-n="1" style="left:345px;top:660px">The chapter's prose sits beside its own diff and stays put while the code scrolls.</div>
+        <div class="note" data-n="2" style="left:60px;top:430px;max-width:200px">The side bar is only an outline now. It follows the reader; close it and nothing is lost.</div>
+        <div class="note" data-n="3" style="left:640px;top:42px;max-width:560px">One tab for the whole guide: the next chapter is a scroll, not a new tab.</div>` });
+  }
+  if (state === 2) {
+    const hover = `<div class="hover" data-anchor="hv" data-dx="-30" data-dy="24"><div class="hcode">${hl("function computeBackoff(attempt: number, policy: RetryPolicy): number")}</div><div class="hdoc">Exponential backoff with full jitter, clamped to <code style="font:12px var(--mono)">policy.maxDelayMs</code>.</div><div class="hguide"><span class="dot" style="background:#e2b93d"></span>Changed in <b style="color:#ddd">Chapter 1 · The retry budget</b><span style="color:#89d185">✓ reviewed</span><span style="flex-basis:100%;color:#8b8b8b;font-size:12px">src/webhooks/retryPolicy.ts:16</span></div><div class="hacts"><a href="#">Go to definition<kbd>F12</kbd></a><a href="#">Find references (3)<kbd>⇧F12</kbd></a><a href="#">Open in editor</a></div></div>`;
+    return frame({ sidebar: null, ...status(),
+      groups: [{ tabs: [{ label: "Guided Reviews", icon: I.guide }, { label: "Guide", sub: "PR #482", icon: I.book, on: true }], acts: I.split + I.more, body: readerA(2) }],
+      overlay: hover + `<span data-anchor="hv" data-dx="40" data-dy="4">${I.pointer}</span>
+       <div class="note" data-n="1" style="left:1190px;top:655px;max-width:235px">The hover comes from the language server on the real file (executeHoverProvider), drawn by the reader, with this guide's own line under it.</div>
+       <div class="note" data-n="2" style="left:90px;top:680px;max-width:270px">Side bar closed: the strip at the top is the outline. Diff gets the room.</div>` });
+  }
+  if (state === 3) {
+    return frame({ sidebar: null, ...status("Ln 6, Col 17"),
+      groups: [
+        { w: 700, tabs: [{ label: "Guide", sub: "PR #482", icon: I.book, on: true }], acts: I.more, body: readerA(3) },
+        { tabs: [{ label: "sign.ts", icon: I.ts, on: true, italic: true }], acts: I.split + I.more, crumbs: ["pr-482-c807bee", "src", "webhooks", `${I.ts} sign.ts`, "signHeaders"], body: plainFile("f-sign", { lit: 6 }) },
+      ],
+      overlay: `<span data-anchor="nav" data-dx="34" data-dy="-12">${I.pointer}</span>
+       <div class="toast" style="left:880px;top:330px">${I.book} <span><b>sign.ts</b> is not part of this change. Opened beside, at the definition.</span> <a href="#">Back to the guide</a></div>
+       <div class="note" data-n="1" style="left:330px;top:760px;max-width:340px">⌘-click or F12 in the reader: definitions outside the change open as the real file in a native editor beside. Everything native works there.</div>
+       <div class="note" data-n="2" style="left:880px;top:560px;max-width:300px">A definition that is in the guide (computeBackoff, Chapter 1) scrolls the reader there instead, with "Back to Chapter 2".</div>` });
+  }
+  // state 4
+  return frame({ sidebar: null, ...status(),
+    groups: [{ tabs: [{ label: "Guided Reviews", icon: I.guide }, { label: "Guide", sub: "PR #482", icon: I.book, on: true }], acts: I.split + I.more, body: readerA(4) }],
+    overlay: `<div class="note" data-n="1" style="left:1090px;top:505px;max-width:300px">Select lines, Ask. The question and the answer live right under the lines, in the reader. No comment panel, no extra tab.</div>
+      <div class="note" data-n="2" style="left:80px;top:690px;max-width:260px">The chapter keeps a list of its answers. A long answer opens as a page (today's Answer tab).</div>` });
+}
+
+/* ───────────────────────── Variant B: reader + live native diff ───────────────────────── */
+function readerB(state) {
+  const ch = state === 1 || state === 3 ? 2 : 4;
+  const fileRow = (nm, dir, a, d, summary, on) => `<div class="fchip${on ? " on" : ""}" style="display:block;padding:8px 10px;font-family:var(--ui)"><div style="display:flex;gap:8px;align-items:center;font:11.5px var(--mono)"><span class="nm">${nm}</span><span class="dr">${dir}</span><span class="a">+${a}</span>${d ? `<span class="d">-${d}</span>` : ""}${on ? `<span style="font:11px var(--ui);color:#4daafc">● showing beside</span>` : ""}</div><div style="font-size:12.5px;color:#bdbdbd;margin-top:4px;line-height:1.45">${summary}</div></div>`;
+  let body;
+  if (ch === 2) {
+    const ans = state === 3 ? `<div class="thread" style="margin:14px 0 0;border-left-color:#3794ff"><div class="q"><div><div class="who"><b>You</b> · deliver.ts 25–31</div>Why return a value here instead of throwing?</div></div><div class="a">${answerHead}${answerBody}</div><div class="tacts"><span class="fu">Ask a follow-up…</span><span class="rbtn">Open as page</span></div></div>` : "";
+    body = `${chRow(CH[0])}<div class="card"><div class="prose" style="border-right:0"><h3>Delivery loop learns to back off</h3><div class="pmeta"><span class="pos">02 / 05</span><span class="pcb"></span>Reviewed</div>${proseCh2}<div class="flist">${fileRow("deliver.ts", "src/webhooks", 21, 5, "Returns a <code>DeliveryOutcome</code> instead of throwing; dead-letters non-retryable statuses and spent budgets.", true)}</div>${ans}${state === 1 ? `<div class="askin">${I.spark} Ask about this chapter…</div>` : ""}</div></div>${state === 1 ? chRow(CH[2]) : ""}`;
+  } else {
+    body = `<div class="card"><div class="prose" style="border-right:0;opacity:.55"><h3>Dead letters get a table</h3><div class="pmeta"><span class="pos">03 / 05</span><span class="pcb on">✓</span>Reviewed</div><p>Jobs that give up are written to <code>webhook_dead_letters</code>. The insert ignores a duplicate <code>job_id</code>…</p></div></div>
+    <div class="card" style="border-color:#3794ff"><div class="prose" style="border-right:0"><h3>Worker schedules the retry</h3><div class="pmeta"><span class="pos">04 / 05</span><span class="pcb"></span>Reviewed</div><p>The worker reads the outcome and re-queues with the delay instead of right away. Delivered and dead-lettered jobs are done.</p><div class="flist">${fileRow("worker.ts", "src/queue", 5, 4, "Re-queues with <code>delayMs</code> from the outcome; no more immediate retries.", true)}</div><div class="askin">${I.spark} Ask about this chapter…</div></div></div>${chRow(CH[4])}`;
+  }
+  return `<div class="rd"><div class="strip" style="gap:8px">${I.book}<span class="t">PR #482</span><span class="meta">${ch === 2 ? "Chapter 2" : "Chapter 4"} of 5 · ${ch === 2 ? 1 : 2}/5 reviewed</span><div class="steps">${CH.map((c) => `<span class="step${c.n === ch ? " on" : ""}${c.reviewed || (ch === 4 && c.n === 3) ? " done" : ""}" style="padding:0 6px;min-width:22px"><span class="dot" style="background:${c.color}"></span></span>`).join("")}</div></div><div class="scroll" style="padding:12px 14px 0">${body}</div></div>`;
+}
+function variantB(state) {
+  const st = { left: stLeft(`${I.book} Guide · Chapter ${state === 2 ? 4 : 2} of 5`), right: [state === 2 ? "Ln 9, Col 31" : "Ln 25, Col 3", "Spaces: 2", "UTF-8", "{ } TypeScript", `${I.claude} Claude Code (ACP)`] };
+  const leftW = 560;
+  if (state === 1) {
+    return frame({ ...st, groups: [
+      { w: leftW, tabs: [{ label: "Guide", sub: "PR #482", icon: I.book, on: true }], acts: I.more, body: readerB(1) },
+      { tabs: [{ label: "deliver.ts", sub: "· Chapter 2", icon: I.ts, on: true, italic: true }], acts: "↑ ↓ " + I.split + I.more, crumbs: ["pr-482-c807bee", "src", "webhooks", `${I.ts} deliver.ts`, "deliverWebhook"],
+        body: nativeInline("p-deliver", { lens: `<span style="color:#3794ff">●</span> Chapter 2 of 5 · Delivery loop learns to back off<span class="bar">|</span><a>Mark reviewed</a><span class="bar">|</span><a>Next file ›</a>`, chapColor: "#3794ff", sel: [25, 31] }) }],
+      overlay: `<div class="note" data-n="1" style="left:90px;top:680px;max-width:330px">The reader holds the story: prose, file summaries, progress. Wide enough to read.</div>
+       <div class="note" data-n="2" style="left:1020px;top:830px;max-width:400px">The native diff beside always shows the file you are reading. Hovering "computeBackoff" in the prose lights its lines here.</div>` });
+  }
+  if (state === 2) {
+    const hover = `<div class="hover" data-anchor="hb" data-dx="-20" data-dy="22" style="width:470px"><div class="hcode">${hl("function deliverWebhook(job: WebhookJob, policy: RetryPolicy): Promise<DeliveryOutcome>")}</div><div class="hdoc">Sends one attempt and reports what should happen next. No longer throws on a bad status.</div><div class="hguide"><span class="dot" style="background:#3794ff"></span>Changed in Chapter 2 · Delivery loop learns to back off <span style="color:#89d185">✓</span></div></div>`;
+    return frame({ ...st, groups: [
+      { w: leftW, tabs: [{ label: "Guide", sub: "PR #482", icon: I.book, on: true }], acts: I.more, body: readerB(2) },
+      { tabs: [{ label: "worker.ts", sub: "· Chapter 4", icon: I.ts, on: true, italic: true }], acts: "↑ ↓ " + I.split + I.more, crumbs: ["pr-482-c807bee", "src", "queue", `${I.ts} worker.ts`, "processJob"],
+        body: nativeInline("p-worker", { lens: `<span style="color:#89d185">●</span> Chapter 4 of 5 · Worker schedules the retry<span class="bar">|</span><a>Mark reviewed</a><span class="bar">|</span><a>Next file ›</a>`, chapColor: "#89d185", marks: [{ n: 9, word: "deliverWebhook", cls: "pn-token-hover", id: "hb" }] }) }],
+      overlay: hover + `<span data-anchor="hb" data-dx="30" data-dy="4">${I.pointer}</span>
+       <div class="note" data-n="1" style="left:90px;top:640px;max-width:330px">Scrolling the reader to Chapter 4 swapped the right side to worker.ts in the same preview tab. No tab pile-up.</div>
+       <div class="note" data-n="2" style="left:1030px;top:520px;max-width:300px">VS Code's own hover, F12, peek and edit: unchanged, because it is the real editor.</div>` });
+  }
+  const box = `<div class="cmt" style="margin:4px 14px 4px 64px;white-space:normal"><div class="head">Ask Claude Code · deliver.ts 25–31<span class="r">${I.gear}⌃</span></div><div class="body"><div class="msg"><div class="av" style="background:#5a5a5a;color:#fff">MR</div><div><div class="who">You</div>Why return a value here instead of throwing?</div></div><div class="msg"><div class="av" style="background:#2b2b2b">${I.claude}</div><div><div class="who">Claude Code<span>Sonnet · low · answered in 9s</span></div>Answered in the guide, under Chapter 2. <a href="#">Show the answer ›</a></div></div></div></div>`;
+  return frame({ ...st, groups: [
+    { w: leftW, tabs: [{ label: "Guide", sub: "PR #482", icon: I.book, on: true }], acts: I.more, body: readerB(3) },
+    { tabs: [{ label: "deliver.ts", sub: "· Chapter 2", icon: I.ts, on: true, italic: true }], acts: "↑ ↓ " + I.split + I.more, crumbs: ["pr-482-c807bee", "src", "webhooks", `${I.ts} deliver.ts`, "deliverWebhook"],
+      body: nativeInline("p-deliver", { from: 14, lens: `<span style="color:#3794ff">●</span> Chapter 2 of 5 · Delivery loop learns to back off<span class="bar">|</span><a>Mark reviewed</a><span class="bar">|</span><a>Ask…</a>`, chapColor: "#3794ff", sel: [25, 31], after: { 31: box } }) }],
+    overlay: `<div class="note" data-n="1" style="left:1000px;top:690px;max-width:300px">Asked from the native diff (today's box). The answer no longer opens a third tab: it lands in the reader, under its chapter.</div>` });
+}
+
+/* ───────────────────────── Variant C: native chapters (multi-diff editor) ───────────────────────── */
+function guidesTreeC(cur) {
+  return `<div class="sb-title">Guided Reviews<span class="acts">${I.more}</span></div>
+  <div class="sb-sec">⌄ PR #482 · 1/5 reviewed</div><div class="tree">
+  <div class="tr"><span class="tw"></span>${I.book}<span class="lbl">Overview</span></div>
+  ${CH.map((c) => `<div class="tr${c.n === cur ? " sel" : ""}"><span class="tw">${c.n === cur ? "⌄" : "›"}</span><span class="cb${c.reviewed ? " on" : ""}">${c.reviewed ? "✓" : ""}</span><span class="dot" style="background:${c.color}"></span><span class="lbl">${c.n}. ${c.title}</span><span class="desc">${c.files.length}</span></div>${c.n === cur ? c.files.map(([nm, dir, a, d]) => `<div class="tr" style="padding-left:30px"><span class="cb"></span>${nm.endsWith(".sql") ? I.sql : I.ts}<span class="lbl">${nm}</span><span class="desc">+${a}${d ? ` −${d}` : ""}</span></div>`).join("") : ""}`).join("")}</div>`;
+}
+function mdHeader(name, dir, a, d, extra = "") {
+  return `<div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#252526;border-top:1px solid #333;border-bottom:1px solid #333;font:13px var(--ui);color:#ccc">⌄ ${name.endsWith(".sql") ? I.sql : I.ts}<b style="font-weight:500;color:#e6e6e6">${name}</b><span style="color:#8b8b8b">${dir}</span><span style="color:#89d185;font:12px var(--mono)">+${a}</span>${d ? `<span style="color:#f48771;font:12px var(--mono)">−${d}</span>` : ""}<span style="margin-left:auto;color:#9d9d9d">${extra}</span></div>`;
+}
+function guideThread(title, html, acts) {
+  return `<div class="cmt" style="margin:6px 14px 6px 50px;white-space:normal"><div class="head">${title}<span class="r">⌃</span></div><div class="body"><div class="msg"><div class="av" style="background:#2b2b2b;color:#3794ff">${I.book}</div><div style="min-width:0"><div class="who">Plannotator Guide<span>chapter overview</span></div>${html}</div></div><div class="btns" style="justify-content:flex-start;margin-left:32px">${acts}</div></div></div>`;
+}
+function variantC(state) {
+  const st = (c, ln) => ({ left: stLeft(`${I.book} Guide · Chapter ${c} of 5`), right: [ln, "{ } TypeScript", `${I.claude} Claude Code (ACP)`] });
+  if (state === 1 || state === 3) {
+    const prose = `<div style="font-size:13px;color:#ccc"><code>deliverWebhook</code> no longer throws on a bad status. It returns a <code>DeliveryOutcome</code>: delivered, retry after a delay from <code>computeBackoff</code>, or dead-lettered when the status is not retryable or the budget is spent.<div style="margin-top:6px;color:#c9a7e6">ⓘ Important: the attempt number is computed here as <code>job.attempt + 1</code> and incremented again by the worker (chapter 4).</div></div>`;
+    const thread = guideThread("Chapter 2 of 5 · Delivery loop learns to back off", prose, `<span class="vbtn">✓ Mark chapter reviewed</span><span class="vbtn sec">Next chapter ›</span><span class="vbtn sec">Ask about this chapter…</span>`);
+    const askT = `<div class="cmt" style="margin:4px 14px 4px 50px;white-space:normal"><div class="head">Ask Claude Code · deliver.ts 25–31<span class="r">${I.gear}⌃</span></div><div class="body"><div class="msg"><div class="av" style="background:#5a5a5a;color:#fff">MR</div><div><div class="who">You</div>Why return a value here instead of throwing?</div></div><div class="msg"><div class="av" style="background:#2b2b2b">${I.claude}</div><div style="min-width:0"><div class="who">Claude Code<span>Sonnet · low · 9s · $0.03</span></div><b>Failures used to loop straight back. Now each one gets a decision.</b> Before, <code>deliverWebhook</code> threw on any bad status and <code>processJob</code> pushed the job back at once. Lines 25–31 replace the throw with a decision, and the worker needs <code>delayMs</code> to wait (Chapter 4). <a href="#">Open the full answer (diagram) ›</a></div></div><div class="inp" style="height:30px;border-color:#3c3c3c">Reply…</div></div></div>`;
+    const diffPart = state === 1
+      ? `<div style="position:relative;height:620px">${nativeSplit("p-deliver", {})}</div>`
+      : `<div style="position:relative;height:800px">${nativeInline("p-deliver", { from: 13, pad: 2, sel: [25, 31], after: { 31: askT } })}</div>`;
+    const body = `<div style="position:absolute;inset:0;overflow:hidden">${state === 1 ? thread : ""}${mdHeader("deliver.ts", "src/webhooks", 21, 5, "Returns a DeliveryOutcome instead of throwing")}${diffPart}</div>`;
+    const askOverlay = "";
+    return frame({ sidebar: guidesTreeC(2), sbw: 300, ...st(2, state === 3 ? "Ln 31, Col 1 (408 selected)" : "Ln 1, Col 1"),
+      groups: [{ tabs: [{ label: "Guide", sub: "PR #482", icon: I.book }, { label: "Chapter 2", sub: "· Delivery loop learns to back off", icon: I.diff, on: true }], acts: I.split + I.more, crumbs: ["Chapter 2 · 1 file"], body }],
+      overlay: askOverlay + (state === 1 ? `<div class="note" data-n="1" style="left:360px;top:498px;max-width:360px">Chapter prose rides in a comment thread: the only rich, inline surface the stable API gives an extension inside an editor.</div>
+       <div class="note" data-n="2" style="left:360px;top:585px;max-width:360px">Native side by side at this width still cuts long lines, as today.</div>` :
+       `<div class="note" data-n="1" style="left:1000px;top:790px;max-width:360px">Ask stays a comment thread. A comment renders markdown but no diagram, so a picture still needs its own tab.</div>`) });
+  }
+  // state 2: two-file chapter stacked
+  const hover = `<div class="hover" data-anchor="hc" data-dx="-10" data-dy="22" style="width:430px"><div class="hcode">${hl("type WebhookJob = {\n    id: string;\n    endpoint: string;\n    payload: unknown;\n    attempt: number;\n}")}</div><div class="hguide"><span style="color:#8b8b8b">Not changed in this guide · src/webhooks/types.ts:3</span></div></div>`;
+  const fileA = `${mdHeader("deadLetter.ts", "src/webhooks", 24, 0, "Idempotent insert keyed on job_id.")}<div style="position:relative;height:350px">${nativeSplit("p-deadletter", { marks: [{ n: 11, word: "WebhookJob", cls: "pn-token-hover", id: "hc" }] })}</div>`;
+  const fileB = `${mdHeader("0042_webhook_dead_letters.sql", "migrations", 10, 0, "New table plus a created_at index for the admin list.")}<div style="position:relative;height:220px">${nativeSplit("p-sql", { lang: "sql" })}</div>`;
+  const prose = `<div style="font-size:13px;color:#ccc">Jobs that give up are written to <code>webhook_dead_letters</code>. The insert ignores a duplicate <code>job_id</code>, so a worker that crashes after the insert and retries cannot write a second row.</div>`;
+  return frame({ sidebar: guidesTreeC(3), sbw: 300, ...st(3, "Ln 11, Col 22"),
+    groups: [{ tabs: [{ label: "Guide", sub: "PR #482", icon: I.book }, { label: "Chapter 3", sub: "· Dead letters get a table", icon: I.diff, on: true }], acts: I.split + I.more, crumbs: ["Chapter 3 · 2 files"],
+      body: `<div style="position:absolute;inset:0;overflow:hidden">${guideThread("Chapter 3 of 5 · Dead letters get a table", prose, `<span class="vbtn">✓ Mark chapter reviewed</span><span class="vbtn sec">Next chapter ›</span>`)}${fileA}${fileB}</div>` }],
+    overlay: hover + `<span data-anchor="hc" data-dx="30" data-dy="4">${I.pointer}</span>
+     <div class="note" data-n="1" style="left:380px;top:400px;max-width:360px">Both files of the chapter in one scroll (the multi-diff editor). Native hover and F12 on the head side.</div>` });
+}
+
+/* ───────────────────────── Variant D: guide notebook ───────────────────────── */
+function variantD(state) {
+  const outline = `<div class="sb-title">Explorer<span class="acts">${I.more}</span></div><div class="sb-sec">› checkout-service</div><div class="sb-sec">⌄ Outline</div><div class="tree">
+   <div class="tr"><span class="tw"></span>${I.book}<span class="lbl">Retry failed webhook deliveries…</span></div>
+   <div class="tr" style="padding-left:14px"><span class="tw"></span>#<span class="lbl">Overview</span></div>
+   ${CH.map((c) => `<div class="tr${c.n === 2 ? " sel" : ""}" style="padding-left:14px"><span class="tw"></span><span class="dot" style="background:${c.color}"></span><span class="lbl">${c.n} · ${c.title}</span></div>${c.n === 2 ? `<div class="tr" style="padding-left:36px">${I.ts}<span class="lbl">deliver.ts</span></div>${state === 2 ? `<div class="tr" style="padding-left:36px">${I.spark}<span class="lbl">Ask: why return a value…</span></div>` : ""}` : ""}`).join("")}</div><div style="flex:1"></div><div class="sb-sec">› Timeline</div>`;
+  const chCell = `<div class="cell md"><span class="fb" style="background:#3794ff"></span><h2><span class="dot" style="background:#3794ff;width:10px;height:10px"></span> 2 · Delivery loop learns to back off</h2><p><code style="font:12px var(--mono);background:#2d2d2d;padding:1px 4px;border-radius:3px">deliverWebhook</code> no longer throws on a bad status. It returns a <code style="font:12px var(--mono);background:#2d2d2d;padding:1px 4px;border-radius:3px">DeliveryOutcome</code>: delivered, retry after a delay from computeBackoff, or dead-lettered when the status is not retryable or the budget is spent.</p><p style="color:#c9a7e6">ⓘ Important: the attempt number is computed here as job.attempt + 1 and incremented again by the worker (chapter 4).</p><p style="font-size:12.5px;color:#9d9d9d">☐ Reviewed · 02 / 05</p></div>`;
+  const fileCell = (opts) => `<div class="cell focus"><span class="fb"></span><div class="ctb">${I.diff} Open diff · ${I.ext} Open file · ☐ Viewed</div><div class="out" style="border:1px solid #333;border-radius:4px;overflow:hidden">${pfile("p-deliver", "deliver.ts", "src/webhooks", 21, 5, { acts: "", ...opts })}</div></div>`;
+  if (state === 1) {
+    return frame({ act: "files", sidebar: outline, sbw: 260, left: stLeft(`${I.book} Guide · Chapter 2 of 5`), right: ["Plannotator Guide", `${I.claude} Claude Code (ACP)`],
+      groups: [{ tabs: [{ label: "PR #482.guide", icon: I.book, on: true }], acts: I.split + I.more, crumbs: ["guides", `${I.book} PR #482.guide`, "2 · Delivery loop learns to back off"],
+        body: `<div class="nb"><div class="ntool"><span>+ Code</span><span>+ Markdown</span><span style="color:#8b8b8b">|</span><span>${I.spark} Ask</span><span>⊟ Collapse all</span><span class="k">${I.book} Plannotator Guide</span></div><div class="cells">
+          <div class="cell md" style="opacity:.6"><h2 style="font-size:16px"><span class="dot" style="background:#e2b93d;width:10px;height:10px"></span> 1 · The retry budget  <span style="color:#89d185;font-size:13px">✓ reviewed · 2 files folded</span></h2></div>
+          ${chCell}${fileCell({})}</div></div>` }],
+      overlay: `<div class="note" data-n="1" style="left:60px;top:620px;max-width:220px">Free: the Outline view, sticky cell headers, folding, ⌘F across the guide.</div>
+       <div class="note" data-n="2" style="left:1050px;top:600px;max-width:300px">Diffs are notebook outputs, drawn by a renderer in the notebook's webview: the same Pierre diff as A, with the same proxied hover.</div>
+       <div class="note" data-n="3" style="left:880px;top:118px;max-width:520px">The notebook look comes along: "+ Code / + Markdown", cell chrome, a "kernel" name.</div>` });
+  }
+  return frame({ act: "files", sidebar: outline, sbw: 260, left: stLeft(`${I.book} Guide · Chapter 2 of 5`), right: ["Plannotator Guide", `${I.claude} Claude Code (ACP)`],
+    groups: [{ tabs: [{ label: "PR #482.guide", icon: I.book, on: true }], acts: I.split + I.more, crumbs: ["guides", `${I.book} PR #482.guide`, "Ask: why return a value…"],
+      body: `<div class="nb"><div class="ntool"><span>+ Code</span><span>+ Markdown</span><span style="color:#8b8b8b">|</span><span>${I.spark} Ask</span><span>⊟ Collapse all</span><span class="k">${I.book} Plannotator Guide</span></div><div class="cells" style="padding-top:6px">
+        <div style="position:relative;height:200px;overflow:hidden;margin-left:18px;border:1px solid #333;border-radius:4px">${pfile("p-deliver", "deliver.ts", "src/webhooks", 21, 5, { acts: "", sel: [25, 31], only: [24, 33] })}</div>
+        <div class="nbadd"><span>+ Code</span><span>+ Markdown</span><span>${I.spark} Ask</span></div>
+        <div class="cell code focus"><span class="fb"></span><div class="src"><span class="run">✓</span><span><span class="c">// Ask · deliver.ts 25–31</span><br>Why return a value here instead of throwing?</span></div><span class="lang">Ask · 9s · $0.03</span></div>
+        <div class="cell" style="margin-top:-6px"><div class="out" style="border:1px solid #333;border-top:0;border-radius:0 0 4px 4px;padding:10px 14px;background:#1c1c1c;font:13px/1.55 var(--ui);color:#ccc">${answerHead}${answerBody}</div></div>
+      </div></div>` }],
+    overlay: `<div class="note" data-n="1" style="left:1040px;top:420px;max-width:300px">Ask is a cell: type, run, the answer is its output, saved in the guide in reading order.</div>` });
+}
+
+/* ───────────────────────── router ───────────────────────── */
+const VARIANTS = [
+  { id: "a", name: "A · One Guide tab", fn: variantA, states: [
+    "<b>Read.</b> The whole guide is one editor tab: Plannotator's reader (the guide-viewer chain, Pierre diffs), chapter prose beside its diffs, continuous scroll. The side bar shrinks to an outline that follows the reader.",
+    "<b>Hover.</b> Any token in the reader's diff: the extension calls the language server on the real file (vscode.executeHoverProvider, definition, references) and the reader draws the card, with where it changed in this guide.",
+    "<b>Follow the call.</b> ⌘-click or F12 in the reader. Outside the change, the real file opens in a native editor beside, at the definition. Inside the change, the reader scrolls to it with a Back pill.",
+    "<b>Ask.</b> Select lines in the reader's diff and ask right there; the answer streams in under the lines. The chapter lists its answers; a long answer opens as a page.",
+  ] },
+  { id: "b", name: "B · Reader + live diff", fn: variantB, states: [
+    "<b>Read.</b> Two panes, always paired: the reader (prose, summaries, progress) on the left, VS Code's native diff of the file you are reading on the right.",
+    "<b>Scroll on.</b> Reaching Chapter 4 in the reader swaps the right side to worker.ts in the same preview tab. Hover, F12, peek and editing are VS Code's own.",
+    "<b>Ask.</b> From a native selection (today's comment box). The answer lands in the reader under its chapter instead of a third tab.",
+  ] },
+  { id: "c", name: "C · Native chapters", fn: variantC, states: [
+    "<b>Read.</b> A chapter opens as one multi-file diff editor (vscode.changes). The chapter's prose is a comment thread pinned at the top; the side bar tree stays for orientation.",
+    "<b>Scan a chapter.</b> Both files of Chapter 3 in one native scroll, summaries in their headers, native hover throughout.",
+    "<b>Ask.</b> A comment thread under the lines; the answer is a markdown reply, with a link out for the diagram.",
+  ] },
+  { id: "d", name: "D · Guide notebook", fn: variantD, states: [
+    "<b>Read.</b> The guide as a custom notebook: chapter prose in markdown cells, each file an output cell drawn by a Pierre renderer. Outline, folding, sticky headers come with notebooks.",
+    "<b>Ask.</b> A question is a cell; running it puts the answer in as its output, in reading order, saved with the guide.",
+  ] },
+];
+const params = new URLSearchParams(location.search);
+if (params.get("shot")) document.body.classList.add("shot");
+let vi = Math.max(0, VARIANTS.findIndex((v) => v.id === (params.get("variant") || "a").toLowerCase()));
+let si = Math.max(0, Math.min(VARIANTS[vi].states.length - 1, (+params.get("state") || 1) - 1));
+
+function placeAnchors() {
+  const vs = document.getElementById("vs"); if (!vs) return;
+  const base = vs.getBoundingClientRect();
+  vs.querySelectorAll("[data-anchor]").forEach((el) => {
+    const t = vs.querySelector(`[id="${el.dataset.anchor}"]`); if (!t || t === el) return;
+    const r = t.getBoundingClientRect();
+    el.style.position = "absolute"; el.style.zIndex = el.classList.contains("hover") ? 20 : 30;
+    let left = r.left - base.left + (+el.dataset.dx || 0), top = r.bottom - base.top + (+el.dataset.dy || 0);
+    if (el.classList.contains("hover")) left = Math.min(left, 1440 - el.offsetWidth - 20);
+    el.style.left = left + "px"; el.style.top = top + "px";
+  });
+}
+function tablist(host, items, sel, onPick) {
+  host.innerHTML = items.map((t, i) => `<button role="tab" aria-selected="${i === sel}" tabindex="${i === sel ? 0 : -1}" data-i="${i}">${t}</button>`).join("");
+  host.onclick = (e) => { const b = e.target.closest("[role=tab]"); if (b) onPick(+b.dataset.i, true); };
+  host.onkeydown = (e) => {
+    const n = items.length; let i = sel;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") i = (sel + 1) % n;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") i = (sel - 1 + n) % n;
+    else if (e.key === "Home") i = 0; else if (e.key === "End") i = n - 1; else return;
+    e.preventDefault(); onPick(i, true);
+  };
+}
+function render(focus) {
+  const v = VARIANTS[vi];
+  const url = new URL(location.href); url.searchParams.set("variant", v.id); url.searchParams.set("state", si + 1);
+  history.replaceState(null, "", url);
+  tablist(document.getElementById("vtabs"), VARIANTS.map((x) => x.name), vi, (i, f) => { vi = i; si = 0; render(f && "v"); });
+  tablist(document.getElementById("stabs"), v.states.map((_, i) => `${i + 1}`), si, (i, f) => { si = i; render(f && "s"); });
+  document.getElementById("cap").innerHTML = `<b>${v.name}, state ${si + 1}.</b> ${v.states[si]}`;
+  document.getElementById("frame").innerHTML = v.fn(si + 1);
+  placeAnchors();
+  if (focus) document.querySelector(`#${focus === "v" ? "vtabs" : "stabs"} [aria-selected=true]`).focus();
+  if (params.get("notes") === "0") document.querySelectorAll(".note").forEach((n) => n.remove());
+}
+render();
+</script>
+</body>
+</html>

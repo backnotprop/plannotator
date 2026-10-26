@@ -455,7 +455,9 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     expect(lines[0]).toBe(`Plannotator Inbox: ${SUBJECT} (${replyId})`);
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
     const reply = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)!;
-    expect(wake).toBe(inboxWakeText({ id: replyId, subject: SUBJECT, body: reply.body }));
+    expect(wake).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: SUBJECT, body: reply.body }));
+    // The closing line: the thread and the tool as this host registered it (plannotator_inbox).
+    expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
     const rows = wakeRows(host, session);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.delivery).toBe("queue");

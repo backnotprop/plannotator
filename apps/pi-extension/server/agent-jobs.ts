@@ -26,11 +26,14 @@ import {
 } from "../generated/agent-jobs.ts";
 import { resolveGuideLaunchInstructions } from "../generated/guide-instructions-store.ts";
 import { gitColorFreeEnvironment } from "../generated/review-core.ts";
+import { ghAccountEnvForPRUrl } from "../generated/pr-github-account.ts";
 import type { GuideLaunchReview } from "../generated/guide-format.ts";
 import { allowedToolsOf, CLAUDE_SHELL_BLOCKED_WARNING, detectClaudeShellBlocked, disallowedToolsOf, formatClaudeLogEvent } from "../generated/claude-review.ts";
 import {
 	MARKER_ENGINES,
 	formatMarkerLogEvent,
+	resolveMarkerBinary,
+	withMarkerBinary,
 	type MarkerEngine,
 	type MarkerEngineId,
 	type MarkerModel,
@@ -66,17 +69,32 @@ const SERVER_BUILT_PROVIDERS: ReadonlySet<string> = new Set([
 // which() helper for Node.js
 // ---------------------------------------------------------------------------
 
-export function whichCmd(cmd: string): boolean {
+/** Where `cmd` is on the live PATH (the first match), or null. */
+export function whichPath(cmd: string): string | null {
 	try {
 		const bin = process.platform === "win32" ? "where" : "which";
 		// Pass the live env explicitly: under Bun, execFileSync without `env` looks
 		// the binary up on the STARTUP PATH, not the current process.env.PATH.
-		execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], env: process.env });
-		return true;
+		const out = execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], env: process.env });
+		return out.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
 	} catch {
-		return false;
+		return null;
 	}
 }
+
+export function whichCmd(cmd: string): boolean {
+	return whichPath(cmd) !== null;
+}
+
+/**
+ * A marker engine's CLI by its own name, or another name it is installed under
+ * only when that is the same CLI (Cursor's `agent`, never another program named
+ * `agent`, such as Grok Build's).
+ */
+const markerBinary = (engine: MarkerEngine) => resolveMarkerBinary(engine, whichPath);
+// The check of a second name may run its `--version` (asynchronously, 2 s at
+// most, once per file), so marker availability settles a moment after the
+// handler is made: every reader awaits `capabilitiesReady`.
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -157,9 +175,9 @@ export interface AgentJobHandlerOptions {
  * fails or the CLI is unauthenticated / has no providers configured — the UI falls
  * back to the engine's default picker. Account/config-specific, so never hardcoded.
  */
-async function discoverMarkerModels(engine: MarkerEngine): Promise<MarkerModel[]> {
+async function discoverMarkerModels(engine: MarkerEngine, program: string): Promise<MarkerModel[]> {
 	try {
-		const { stdout } = await execFileAsync(engine.binary, engine.modelsArgv, {
+		const { stdout } = await execFileAsync(program, engine.modelsArgv, {
 			timeout: 5000,
 			encoding: "utf8",
 		});
@@ -190,33 +208,40 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 			name: "Guided Review",
 			// Guided Review also runs on the marker engines (Cursor, OpenCode, Pi) —
 			// same review-mode + binary-on-PATH gating as their own capability
-			// entries below (NOTE: cursor's binary is `agent`).
-			available:
-				whichCmd("claude") ||
-				whichCmd("codex") ||
-				(mode === "review" && Object.values(MARKER_ENGINES).some((engine) => whichCmd(engine.binary))),
+			// entries below (Cursor: `cursor-agent`, or Cursor's own `agent`).
+			available: whichCmd("claude") || whichCmd("codex"),
 		},
 	];
 	// Marker engines (Cursor, OpenCode, Pi) — same shape, one loop. Available
-	// only in review mode when the binary is on PATH (NOTE: cursor's binary is `agent`).
+	// only in review mode when the binary is on PATH (Cursor: `cursor-agent`, or
+	// Cursor's own `agent`).
 	// Model catalogs are discovered LAZILY (see buildCapabilitiesResponse) so a
 	// slow/unauthenticated `<binary> models` spawn never blocks startup.
 	for (const engine of Object.values(MARKER_ENGINES)) {
 		capabilities.push({
 			id: engine.id,
 			name: engine.name,
-			available: mode === "review" && whichCmd(engine.binary),
+			available: false,
 		});
 	}
+	const capabilitiesReady: Promise<void> = mode !== "review"
+		? Promise.resolve()
+		: Promise.all(Object.values(MARKER_ENGINES).map(async (engine) => {
+				const found = await markerBinary(engine).catch(() => null);
+				if (!found) return;
+				for (const c of capabilities) if (c.id === engine.id || c.id === "guide") c.available = true;
+			})).then(() => undefined);
 
 	const markerModelsCache = new Map<string, MarkerModel[]>();
 	async function buildCapabilitiesResponse(): Promise<AgentCapabilities> {
+		await capabilitiesReady;
 		const providers = await Promise.all(capabilities.map(async (c) => {
 			const engine = MARKER_ENGINES[c.id as MarkerEngineId];
 			if (!engine || !c.available) return c;
 			let models = markerModelsCache.get(engine.id);
 			if (!models) {
-				models = await discoverMarkerModels(engine);
+				const program = await markerBinary(engine);
+				models = program ? await discoverMarkerModels(engine, program.name) : [];
 				markerModelsCache.set(engine.id, models);
 			}
 			return { ...c, models };
@@ -300,6 +325,9 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 					PWD: resolvePath(spawnCwd),
 					PLANNOTATOR_AGENT_SOURCE: source,
 					PLANNOTATOR_API_URL: getServerUrl(),
+					// A GitHub PR the active gh account can't see runs as the signed-in
+					// account chosen for its repo (#2157); a job for any other PR gets nothing.
+					...ghAccountEnvForPRUrl(spawnOptions?.prUrl),
 				},
 			});
 
@@ -664,6 +692,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 					let outputPath: string | undefined;
 
 					// Validate provider is a known, available capability
+					await capabilitiesReady;
 					const cap = capabilities.find((c) => c.id === provider);
 					if (!cap || !cap.available) {
 						json(res, { error: `Unknown or unavailable provider: ${provider}` }, 400);
@@ -751,6 +780,13 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 						json(res, { error: 'Missing "command" array' }, 400);
 						return true;
 					}
+
+					// A marker engine starts by the name its CLI was found under
+					// (Cursor's `agent` only when it is Cursor's), never another
+					// program of that name. Guide jobs carry the engine on jobEngine.
+					const spawnEngine = MARKER_ENGINES[provider as MarkerEngineId]
+						?? (jobEngine ? MARKER_ENGINES[jobEngine as MarkerEngineId] : undefined);
+					if (spawnEngine) command = withMarkerBinary(command, spawnEngine, await markerBinary(spawnEngine));
 
 					const job = spawnJob(jobId, provider, command, label, outputPath, {
 						captureStdout,

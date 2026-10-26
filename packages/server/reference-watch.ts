@@ -8,7 +8,7 @@ import {
 	type FileBrowserWatchTarget,
 	type WatchEntryHandle,
 } from "@plannotator/shared/file-browser-watch-core";
-import { isFileBrowserExcludedPath } from "@plannotator/shared/reference-common";
+import { isFileBrowserWatchExcludedPath } from "@plannotator/shared/reference-common";
 import { resolveUserPath } from "@plannotator/shared/resolve-file";
 import { getGitMetadataWatchPaths } from "@plannotator/shared/workspace-status";
 
@@ -53,7 +53,7 @@ export const __fileBrowserWatchTestHooks = {
 export function isFileBrowserWatchIgnoredPath(path: string, root: string): boolean {
 	const rel = relative(root, path).replace(/\\/g, "/");
 	if (!rel || rel.startsWith("..") || isAbsolute(rel)) return false;
-	return isFileBrowserExcludedPath(rel);
+	return isFileBrowserWatchExcludedPath(rel);
 }
 
 function isValidDirectory(dirPath: string): boolean {

@@ -389,8 +389,8 @@ test('on an iPhone (WebKit) an image in a message opens full screen and the tool
     await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-attachment-pane', world.ids['checkout-b-steps.png']!);
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(shotsDir, '08-phone-inline-image-light.png') });
-    await page.locator('[data-full-view-more]').click();
-    await page.locator('[data-full-view-menu-position]').click();
+    // One tap on the toolbar's pill.
+    await page.locator('[data-full-view-bar] [data-full-view-position]').click();
     const sheet = page.locator('[data-image-peek-sheet]');
     await expect(sheet).toBeVisible();
     // Three across.
@@ -1023,4 +1023,170 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   expect(world.errors.filter((e) => !/HTTP 404 \/favicon/.test(e))).toEqual([]);
+});
+
+// #2127: after a plain wheel zooms an image past the screen, the wheel scrolls
+// it instead (#2067 keeps trackpad two-finger scrolling); the viewer now says
+// how to zoom ("Use ⌘ + scroll to zoom", Ctrl off macOS) the moment it starts
+// scrolling, once per viewer open.
+const wheelHintShots = resolve(process.env.PLANNOTATOR_WHEEL_HINT_SHOTS ?? join(shotsDir, 'wheel-hint'));
+
+/** A context whose navigator says macOS or Windows, so the hint names ⌘ or Ctrl. */
+async function platformContext(browser: Browser, platform: 'MacIntel' | 'Win32', viewport: { width: number; height: number }): Promise<BrowserContext> {
+  const context = await browser.newContext({ viewport });
+  await context.addInitScript((value) => {
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => value, configurable: true });
+  }, platform);
+  return context;
+}
+
+/** The image's scale, read from its transform. */
+const scaleOf = (image: ReturnType<Page['locator']>) => image.evaluate((img: HTMLElement) => Number(/scale\(([\d.]+)\)/.exec(img.style.transform)![1]));
+
+/** Five wheel notches about 60 ms apart (one wheel gesture), as the issue's steps send them. */
+async function notches(page: Page, deltaY: number): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await page.mouse.wheel(0, deltaY);
+    await page.waitForTimeout(60);
+  }
+}
+
+/** Light and dark, with the hint on screen (one more scroll keeps it there; a long one shows the top of the image). */
+async function hintShots(page: Page, name: string, deltaY: number): Promise<void> {
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.mouse.wheel(0, deltaY);
+    await expect(page.locator('[data-wheel-hint="shown"]')).toBeVisible();
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: join(wheelHintShots, `${name}-${scheme}.png`) });
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+}
+
+test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scrolls and the viewer says how to zoom', async ({ browser }) => {
+  mkdirSync(wheelHintShots, { recursive: true });
+  const root = join(world.root, 'wheel-hint');
+  mkdirSync(root, { recursive: true });
+  // The issue's image: 1640 × 1400 in a 1440 × 1000 window.
+  writeFileSync(join(root, 'big.png'), await png(browser, screen('Checkout', 'Big', '#2f6f5e', FIELDS), 1640, 1400));
+  const doc = join(root, 'NOTES.md');
+  writeFileSync(doc, ['# Notes', '', '![Big](big.png)', ''].join('\n'));
+  const readyFile = join(root, 'ready.jsonl');
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  let child: ChildProcess | undefined;
+  let url = '';
+  try {
+    child = spawn(builtBinary, ['annotate', doc], { env, cwd: root, stdio: 'ignore' });
+    await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
+    url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
+    for (const [platform, key, spoken] of [
+      ['MacIntel', '⌘', 'Command'],
+      ['Win32', 'Ctrl', 'Control'],
+    ] as const) {
+      const context = await platformContext(browser, platform, { width: 1440, height: 1000 });
+      await context.addCookies(
+        [
+          ['plannotator-plan-look-choice-resolved', 'true'],
+          ['plannotator-announce-tui-herdr-seen', '1'],
+          ['plannotator-announce-ask-session-seen', '1'],
+          ['plannotator-announce-agent-tool-seen', '1'],
+        ].map(([name, value]) => ({ name: name!, value: value!, url })),
+      );
+      const page = await context.newPage();
+      await page.goto(url);
+      await page.locator('article img.cursor-zoom-in').first().click();
+      const overlay = page.locator('[data-image-lightbox]');
+      const stage = overlay.locator('[data-lightbox-stage]');
+      const image = overlay.locator('[data-lightbox-image]');
+      await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1640);
+      await expect(stage).toHaveAttribute('data-lightbox-stage', 'fit');
+      const fit = await scaleOf(image);
+      // The pointer near the image's centre, away from the toolbar.
+      await page.mouse.move(720, 500);
+      await notches(page, -100);
+      const zoomed = await scaleOf(image);
+      expect(zoomed).toBeGreaterThan(fit * 2);
+      await expect(page.locator('[data-wheel-hint]')).toHaveCount(0);
+      await page.waitForTimeout(400);
+      await notches(page, 100);
+      // The wheel scrolls now (the issue's report): the scale stays, and the viewer says how to zoom.
+      expect(await scaleOf(image)).toBe(zoomed);
+      const hint = page.locator('[data-wheel-hint]');
+      await expect(hint).toHaveAttribute('data-wheel-hint', 'shown');
+      await expect(hint.locator('kbd')).toHaveText(key);
+      await expect(hint).toHaveText(new RegExp(`Use\\s+${key === '⌘' ? '⌘' : 'Ctrl'}\\s+\\+ scroll to zoom`));
+      await expect(page.locator('[data-wheel-hint-live]')).toHaveText(`Scrolling moves the image. To zoom, hold ${spoken} and scroll.`);
+      // It takes no pointer: a drag through it still pans.
+      expect(await hint.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
+      await hintShots(page, `annotate-${key === '⌘' ? 'mac-cmd' : 'ctrl'}`, -2000);
+      // Doing what it says zooms out and hides it.
+      const before = await scaleOf(image);
+      await page.keyboard.down(key === '⌘' ? 'Meta' : 'Control');
+      await page.mouse.wheel(0, 100);
+      await page.keyboard.up(key === '⌘' ? 'Meta' : 'Control');
+      await expect.poll(() => scaleOf(image)).toBeLessThan(before);
+      await expect(hint).toHaveAttribute('data-wheel-hint', 'hidden');
+      await expect(page.locator('[data-wheel-hint-live]')).toHaveText('');
+      // The next time the wheel scrolls in this open viewer: no hint again.
+      await page.waitForTimeout(400);
+      await notches(page, 100);
+      await expect(hint).toHaveAttribute('data-wheel-hint', 'hidden');
+      await page.keyboard.press('Escape');
+      await expect(overlay).toBeHidden();
+      // A new open says it once more.
+      await page.locator('article img.cursor-zoom-in').first().click();
+      await page.mouse.move(720, 500);
+      await notches(page, -100);
+      await page.waitForTimeout(400);
+      await page.mouse.wheel(0, 100);
+      await expect(page.locator('[data-wheel-hint]')).toHaveAttribute('data-wheel-hint', 'shown');
+      await context.close();
+    }
+  } finally {
+    if (url) await fetch(new URL('/api/exit', url), { method: 'POST' }).catch(() => {});
+    if (child && child.exitCode === null) {
+      await new Promise((done) => {
+        const timer = setTimeout(done, 5_000);
+        child!.once('exit', () => {
+          clearTimeout(timer);
+          done(undefined);
+        });
+      });
+      // inbox-guard: own child (the annotate CLI this test spawned, never an Inbox)
+      if (child.exitCode === null) child.kill('SIGTERM');
+    }
+  }
+});
+
+test('#2127: the Inbox image view says it too, once while the file viewer is open', async ({ browser }) => {
+  mkdirSync(wheelHintShots, { recursive: true });
+  for (const platform of ['MacIntel', 'Win32'] as const) {
+    const context = await platformContext(browser, platform, { width: 1440, height: 900 });
+    const page = await context.newPage();
+    await page.goto(`${world.url}#thread=${world.threadId}&file=${world.ids['checkout-a-single-page.png']}`);
+    const stage = page.locator('[data-attachment-pane] [data-image-zoom-stage]');
+    await expect(stage).toHaveAttribute('data-image-zoom-stage', 'fit');
+    const box = (await stage.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await notches(page, -100);
+    await expect(stage).toHaveAttribute('data-image-zoom-stage', 'zoom');
+    await expect(page.locator('[data-wheel-hint]')).toHaveCount(0);
+    await page.waitForTimeout(400);
+    await page.mouse.wheel(0, 100);
+    await expect(stage.locator('[data-wheel-hint]')).toHaveAttribute('data-wheel-hint', 'shown');
+    await expect(stage.locator('[data-wheel-hint] kbd')).toHaveText(platform === 'MacIntel' ? '⌘' : 'Ctrl');
+    await hintShots(page, `inbox-${platform === 'MacIntel' ? 'mac-cmd' : 'ctrl'}`, -2000);
+    // Another image of the same viewer: no second hint.
+    await stage.focus();
+    await page.keyboard.press(']');
+    await expect(page.locator('[data-attachment-pane]')).toHaveAttribute('data-attachment-pane', world.ids['checkout-b-steps.png']!);
+    const next = page.locator('[data-attachment-pane] [data-image-zoom-stage]');
+    await expect(next).toHaveAttribute('data-image-zoom-stage', 'fit');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await notches(page, -100);
+    await page.waitForTimeout(400);
+    await notches(page, 100);
+    await expect(next.locator('[data-wheel-hint]')).toHaveCount(0);
+    await context.close();
+  }
 });

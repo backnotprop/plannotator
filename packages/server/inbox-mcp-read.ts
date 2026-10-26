@@ -30,6 +30,7 @@
  */
 
 import { INBOX_HOST_NAMES, inboxAgentName, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
@@ -352,56 +353,6 @@ export function questionWords(q: AgentQuestionRef, withPrompt = false, withAnswe
 }
 
 /**
- * Where a reply's "Answers to your questions" section ends, read by the
- * grammar formatQuestionAnswersSection writes (packages/core/question-block.ts),
- * which composeInboxReplyBody puts last before the reply's feedback and skills
- * block: the heading, a blank line, the "N of M questions answered." line, a
- * blank line, then `### …` blocks of answer lines (`Answer…`, `- …`, `> …`,
- * `Note…`, `Skipped…`), each ended by a blank line. Returns the index of the
- * first line after it, or null when the text does not follow that grammar
- * exactly (then nothing is cut).
- */
-function answersSectionEnd(lines: readonly string[], at: number): number | null {
-  if (lines[at + 1] !== "") return null;
-  // One reply for one session (approval "inbox-explicit-skip"): a sub-section per message,
-  // `### Your message <id>`, each with the same grammar one level down.
-  if (/^### Your message msg_[A-Za-z0-9]+$/.test(lines[at + 2] ?? "")) {
-    let i = at + 2;
-    let groups = 0;
-    while (i < lines.length && /^### Your message msg_[A-Za-z0-9]+$/.test(lines[i]!)) {
-      if (lines[i + 1] !== "") return null;
-      const end = answerBlocksEnd(lines, i + 2, "####");
-      if (end === null) return null;
-      i = end;
-      groups += 1;
-    }
-    return groups > 0 ? i : null;
-  }
-  return answerBlocksEnd(lines, at + 2, "###");
-}
-
-/** The "N of M questions answered." line at `from`, a blank line, then `<h> …` blocks of answer lines; the index after them. */
-function answerBlocksEnd(lines: readonly string[], from: number, h: "###" | "####"): number | null {
-  if (!/^\d+ of \d+ questions? answered\./.test(lines[from] ?? "") || lines[from + 1] !== "") return null;
-  let i = from + 2;
-  let blocks = 0;
-  while (i < lines.length && lines[i]!.startsWith(`${h} `)) {
-    i += 1;
-    let body = 0;
-    while (i < lines.length && lines[i] !== "") {
-      if (!/^(Answer|Note|Skipped|- |> |>$)/.test(lines[i]!)) return null;
-      i += 1;
-      body += 1;
-    }
-    if (body === 0 && lines[i - 1] !== `${h} Unanswered`) return null;
-    blocks += 1;
-    // The block's closing blank line; the section ends at the end of the text.
-    if (i < lines.length) i += 1;
-  }
-  return blocks > 0 ? i : null;
-}
-
-/**
  * A reply's "Answers to your questions" section, left out: each answer is
  * already on its question (the asking message's line or its full form, or
  * the result's `thread.questions`), with its state. Only that section is cut,
@@ -413,7 +364,7 @@ export function withoutAnswersSection(message: InboxMessageWire): string {
   const lines = message.body.split("\n");
   for (let at = 0; at < lines.length; at++) {
     if (!ANSWERS_HEADING.test(lines[at]!) || (at > 0 && lines[at - 1] !== "")) continue;
-    const end = answersSectionEnd(lines, at);
+    const end = inboxAnswersSectionEnd(lines, at);
     if (end === null) continue;
     const marker = `[${QUESTION_ANSWERS_HEADING}: left out here; each answer is on its question above, and expand shows this reply as sent]`;
     const rest = lines.slice(end);

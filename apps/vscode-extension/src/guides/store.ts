@@ -26,6 +26,7 @@ import {
 } from "@plannotator/shared/guide-store";
 import { buildGuideSnapshot, type GuideSnapshot, type GuideSnapshotSource } from "@plannotator/core/guide-format";
 import { guideDraftProgress, parseGuideDraft, type GuideDraft, type GuideFocusRange } from "./core/adapter";
+import { deleteGuideAnswers } from "./ask/answers";
 
 /** What a guide is of, recorded with drafts and guides so a run can resume and a reader can find its files. */
 export interface ReviewSourceRecord {
@@ -50,7 +51,8 @@ export interface ReviewSourceRecord {
 }
 
 export interface AgentChoiceRecord {
-  id: "claude-code";
+  /** The agent's id in `acp/agents.ts` (`claude-code`, `codex`, …), or `custom`. */
+  id: string;
   label: string;
   model?: { id: string; label: string };
   effort?: { id: string; label: string };
@@ -83,6 +85,12 @@ export interface GuideSidecar {
   source?: ReviewSourceRecord;
   agent?: AgentChoiceRecord;
   acpSessionId?: string;
+  /**
+   * The ACP session that answers questions about this guide (the guide's own
+   * when it was loaded, else a new one), and the agent it belongs to, so a
+   * later window can load it.
+   */
+  askSession?: { id: string; agent: string };
   cost?: { amount: number; currency: string };
   /** The overview diagram's render check when the guide was saved: "unchecked" until the reader checks it. */
   diagramCheck?: "ok" | "unchecked" | "failed";
@@ -279,6 +287,7 @@ export function readSidecar(repoKey: string, id: string): GuideSidecar {
     ...(r.source && { source: r.source }),
     ...(r.agent && { agent: r.agent }),
     ...(typeof r.acpSessionId === "string" && { acpSessionId: r.acpSessionId }),
+    ...(r.askSession && typeof r.askSession.id === "string" && typeof r.askSession.agent === "string" && { askSession: { id: r.askSession.id, agent: r.askSession.agent } }),
     ...(r.cost && { cost: r.cost }),
     ...((r.diagramCheck === "ok" || r.diagramCheck === "unchecked" || r.diagramCheck === "failed") && { diagramCheck: r.diagramCheck }),
   };
@@ -314,6 +323,8 @@ export function setChapterReviewed(repoKey: string, id: string, reviewed: boolea
 export function deleteSavedGuide(repoKey: string, id: string): boolean {
   const removed = deleteGuide(repoKey, id);
   if (isValidGuideId(id)) rmSync(join(vscodeDir(repoKey), `${id}.json`), { force: true });
+  // Its answers go with it (they are kept only for this guide).
+  deleteGuideAnswers(repoKey, id);
   return removed;
 }
 
@@ -333,12 +344,50 @@ export interface RecentEntry {
   prNumber?: number;
   /** Kept in memory only (guide history is off). */
   sessionOnly?: boolean;
+  /** Set by `listRecentEverywhere`: the shelf and the repository it names (`owner/repo`). */
+  repoKey?: string;
+  repoName?: string;
+}
+
+/** `github.com__owner__repo` → `owner/repo` (other keys as they are). */
+export function repoNameOfKey(repoKey: string): string {
+  const parts = repoKey.split("__");
+  return parts.length >= 3 ? parts.slice(1).join("/") : repoKey;
+}
+
+/** Every shelf (`host__owner__repo`) that holds saved guides or drafts on this machine. */
+export function allRepoKeys(): string[] {
+  try {
+    return readdirSync(join(getPlannotatorDataDir(), "guides"), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch {
+    return [];
+  }
+}
+
+/** Saved guides and drafts of every repository on this machine, newest first (the dashboard with no folder open). */
+export function listRecentEverywhere(options: { limit?: number } = {}): RecentEntry[] {
+  const all = allRepoKeys().flatMap((repoKey) => listRecent(repoKey).map((e) => ({ ...e, repoKey, repoName: repoNameOfKey(repoKey) })));
+  all.sort((a, b) => b.at - a.at);
+  return all.slice(0, options.limit ?? 12);
 }
 
 /**
- * Saved guides and unfinished drafts of a repository, newest first.
- * `headFor` returns the current head of a PR (or the repo) to flag guides whose head moved.
+ * The guide to open for a pull request: the newest saved guide of that PR
+ * made at `head` (any head when the head is not known). Null when there is
+ * none, so the caller starts a new guide.
  */
+export function guideForPullRequest(repoKey: string, number: number, head?: string | null): string | null {
+  let best: { id: string; at: number } | null = null;
+  for (const { id, envelope } of listGuides(repoKey)) {
+    const prNumber = envelope.review?.source.pr?.number ?? (envelope.prUrl ? Number(/\/pull\/(\d+)/.exec(envelope.prUrl)?.[1]) || undefined : undefined);
+    if (prNumber !== number) continue;
+    const guideHead = envelope.headSha ?? envelope.review?.source.headSha;
+    if (head && guideHead && guideHead !== head) continue;
+    if (!best || envelope.savedAt > best.at) best = { id, at: envelope.savedAt };
+  }
+  return best?.id ?? null;
+}
+
 export function listRecent(
   repoKey: string,
   options: { headForPR?: (n: number) => string | undefined; localHead?: string; limit?: number } = {},

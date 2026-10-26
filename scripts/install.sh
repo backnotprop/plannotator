@@ -2187,6 +2187,7 @@ checkout_failed=0
         copy_skill_if_present apps/skills/claude/plannotator-review "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-annotate "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-last "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-inbox "$CLAUDE_SKILLS_DIR"
         # The plannotator knowledge skill (CLI reference) has no Claude-only
         # injection form — its body is pure prose — so Claude installs the
         # same single-sourced copy Codex gets from apps/skills/core.
@@ -2200,6 +2201,7 @@ checkout_failed=0
         copy_skill_if_present apps/skills/core/plannotator-review "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-annotate "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-last "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/core/plannotator-inbox "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator "$AGENTS_SKILLS_DIR"
         echo "Installed shared agent skills to ${AGENTS_SKILLS_DIR}/"
     else
@@ -2227,6 +2229,8 @@ checkout_failed=0
         # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
         copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
+        # /plannotator-inbox needs no origin label: the shell-neutral core copy.
+        copy_skill_if_present apps/skills/core/plannotator-inbox "$KIRO_SKILLS_DIR"
         # The plannotator knowledge skill (CLI reference) has no Kiro-specific
         # form, so Kiro receives the single-sourced core copy like every other
         # scope. Without it, Kiro users get the action skills but no reference.
@@ -2251,6 +2255,8 @@ checkout_failed=0
         copy_skill_if_present apps/vibe/skills/plannotator-review "$VIBE_SKILLS_DIR"
         copy_skill_if_present apps/vibe/skills/plannotator-annotate "$VIBE_SKILLS_DIR"
         copy_skill_if_present apps/vibe/skills/plannotator-last "$VIBE_SKILLS_DIR"
+        # /plannotator-inbox needs no origin label: the shell-neutral core copy.
+        copy_skill_if_present apps/skills/core/plannotator-inbox "$VIBE_SKILLS_DIR"
         # The plannotator knowledge skill (CLI reference) is agent-agnostic and
         # single-sourced in apps/skills/core; Vibe gets the same copy every
         # other scope does. Without it, Vibe users get launchers but no CLI

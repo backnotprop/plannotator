@@ -9,6 +9,7 @@ import {
   type HostControl,
 } from "@plannotator/shared/host-control";
 import { takeEnvPullSessionBridgeConfig } from "./ai-runtime";
+import { cameThroughTailscale } from "@plannotator/shared/tailnet-audience";
 import { isRemoteSession } from "./remote";
 
 export type { HostControl, HostSessionStatus, HostCloseOutcome } from "@plannotator/shared/host-control";
@@ -16,8 +17,8 @@ export type { HostControl, HostSessionStatus, HostCloseOutcome } from "@plannota
 /**
  * The token the host-control endpoints accept: `explicit` (tests, an
  * in-process caller), else the pull-bridge token the host launched this CLI
- * with. Never in remote mode, and `--tailscale` discards the env token before
- * any server starts. Unlike the pull bridge, NOT turned off by
+ * with. Never in remote mode. A `--tailscale` session keeps it, answering this
+ * machine only (`fromThisMachine`). Unlike the pull bridge, NOT turned off by
  * `PLANNOTATOR_AI=disabled`: closing a review is not an AI feature.
  */
 export function resolveHostControlToken(explicit?: string): string | undefined {
@@ -29,8 +30,23 @@ export function resolveHostControlToken(explicit?: string): string | undefined {
 export function handleHostControl(
   req: Request,
   url: URL,
-  route: { token: string | undefined; getServerPort: () => number | undefined; control: HostControl },
+  route: {
+    token: string | undefined;
+    getServerPort: () => number | undefined;
+    control: HostControl;
+    /**
+     * A `--tailscale` session (#2166): whether the request came from this
+     * machine. A request through `tailscale serve` is answered as if host
+     * control were off, whatever Host or token it carries.
+     */
+    fromThisMachine?: (req: Request) => boolean;
+  },
 ): Response | null {
+  // A request through Tailscale is never this machine's, in any session (a
+  // serve mapping left behind by a crashed `--tailscale` session can point at
+  // a later session on the same port).
+  const fromThisMachine = route.fromThisMachine ? route.fromThisMachine(req) : !cameThroughTailscale(req.headers);
+  if (!fromThisMachine) route = { ...route, token: undefined };
   const answer = handleHostControlRequest(
     {
       method: req.method,

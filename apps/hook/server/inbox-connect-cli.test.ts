@@ -161,15 +161,19 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   mkdirSync(join(w.home, ".codex"), { recursive: true });
   writeFileSync(join(w.home, ".codex", "AGENTS.md"), "Mine.\n");
   mkdirSync(join(w.home, ".gemini"), { recursive: true });
-  const result = await cli(w, ["inbox", "--notes", "codex,gemini"]);
+  const result = await cli(w, ["inbox", "--notes", "codex,gemini,cursor"]);
   expect(result.code).toBe(0);
-  expect(result.stdout).toBe("");
+  expect(result.stdout).toContain("## Plannotator Inbox");
+  expect(result.stdout).not.toContain("plannotator-inbox:start");
+  expect(result.stderr).toContain("Cursor User Rules are managed in Cursor Settings → Rules");
+  expect(result.stderr).toContain("Plannotator cannot detect, update or remove a copied rule.");
   expect(result.stderr).toContain("Codex: Added a marked section to ~/.codex/AGENTS.md.");
   expect(result.stderr).toContain("Gemini CLI: Created ~/.gemini/GEMINI.md.");
   expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain("<!-- plannotator-inbox:start v1");
   expect(existsSync(join(w.home, ".pi"))).toBe(false);
+  expect(existsSync(join(w.home, ".cursor"))).toBe(false);
   expect(existsSync(join(w.home, ".plannotator", "inbox", "inbox.json"))).toBe(false);
-  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini"] });
+  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini", "cursor"] });
 
   const bad = await cli(w, ["inbox", "--notes", "vscode"]);
   expect(bad.code).toBe(1);

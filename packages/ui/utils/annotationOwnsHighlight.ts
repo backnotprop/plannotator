@@ -10,18 +10,20 @@ export const CHECKBOX_ANNOTATION_PREFIX = 'ann-checkbox-';
  *
  * Not: comments made in the plan diff view (`diffContext`, `blockId`
  * `diff-block-N`, drawn by the diff view), general comments, checkbox
- * toggles, and answers to `:::question` blocks (drawn by the question card).
+ * toggles, answers to `:::question` blocks (drawn by the question card), and
+ * comments on part of an image (`imageRegion`, drawn by the image viewer).
  * Restoring any of those through the highlighter finds no text, so it would
  * be reported unanchored and its `blockId` rewritten. Every caller that
  * re-applies a stored list filters with this, and the highlighter skips the
  * same rows itself.
  */
 export function annotationOwnsHighlight(
-  annotation: Pick<Annotation, 'id' | 'type' | 'diffContext' | 'questionAnswer'>,
+  annotation: Pick<Annotation, 'id' | 'type' | 'diffContext' | 'questionAnswer'> & Partial<Pick<Annotation, 'imageRegion'>>,
 ): boolean {
   return !annotation.diffContext
     && annotation.type !== AnnotationType.GLOBAL_COMMENT
     && !annotation.id.startsWith(CHECKBOX_ANNOTATION_PREFIX)
     && annotation.questionAnswer == null
+    && annotation.imageRegion == null
     && !annotation.id.startsWith(QUESTION_ANSWER_ANNOTATION_PREFIX);
 }

@@ -3,6 +3,14 @@ import {
   type ResolvedReviewProfile,
 } from "@plannotator/shared/review-profiles";
 import {
+  CURSOR_CLI_SIGNATURE,
+  isSameProgram,
+  resolveProgram,
+  type ProgramSignature,
+  type ResolvedProgram,
+  type SameProgramCheck,
+} from "@plannotator/shared/agent-program";
+import {
   transformSeverityFindings,
   type ReviewSeverity,
   type ReviewFinding,
@@ -12,7 +20,7 @@ import {
 /**
  * Marker Review Engines — the shared machinery for review CLIs that expose NO
  * schema-validation flag, so their final review output is prose. Cursor (the
- * `agent` binary), OpenCode (`opencode run`), and Pi (`pi --mode json`) are the
+ * `cursor-agent` binary, or `agent` when that is Cursor's), OpenCode (`opencode run`), and Pi (`pi --mode json`) are the
  * three. Because they can't be told to emit validated structured output, they
  * are instead told to emit a marker-delimited JSON block, and we extract the
  * LAST complete block from the reconstructed canonical text.
@@ -217,8 +225,15 @@ export interface MarkerEngine {
   id: MarkerEngineId;
   /** Display name for the capabilities/provider listing (e.g. "Cursor CLI"). */
   name: string;
-  /** The CLI binary to spawn (NOTE: cursor's binary is `agent`). */
+  /** The CLI binary to spawn, by its own name (Cursor's: `cursor-agent`). */
   binary: string;
+  /**
+   * Other names the same CLI is installed under, tried after `binary` (Cursor's
+   * installer also links `agent`). A program found under one is used only when
+   * it has `binarySignature`: other tools install a generic `agent` too.
+   */
+  altBinaries?: readonly string[];
+  binarySignature?: ProgramSignature;
   /** Author string stamped on every annotation this engine produces. */
   author: string;
   /** Build the full argv (binary + flags + trailing prompt) for a review run. */
@@ -369,7 +384,9 @@ function cursorFormatLogEvent(event: MarkerStreamEvent): string | null {
 }
 
 /**
- * Build the `agent -p` command. NOTE the binary is `agent`, NOT `cursor`.
+ * Build the `cursor-agent -p` command. NOTE the binary is `cursor-agent` (or
+ * Cursor's own `agent`, swapped in at spawn by resolveMarkerBinary), NOT
+ * `cursor`, and never another program named `agent`.
  *
  * Read-only posture comes entirely from `--mode ask` + `--sandbox enabled` and
  * the absence of `--force`/`--yolo`. `--trust` is required in headless print
@@ -398,7 +415,7 @@ function cursorBuildArgv(
   // `auto` is Cursor's default model id — omit --model so the CLI chooses.
   const useModel = !!model && model.toLowerCase() !== "auto";
   return [
-    "agent",
+    "cursor-agent",
     "-p",
     "--mode",
     "ask",
@@ -930,7 +947,9 @@ function copilotBuildArgv(prompt: string, model?: string, cwd?: string): string[
 const CURSOR_ENGINE: MarkerEngine = {
   id: "cursor",
   name: "Cursor CLI",
-  binary: "agent",
+  binary: "cursor-agent",
+  altBinaries: ["agent"],
+  binarySignature: CURSOR_CLI_SIGNATURE,
   author: "Cursor",
   buildArgv: cursorBuildArgv,
   extractText: cursorExtractText,
@@ -1276,6 +1295,34 @@ export function composeMarkerReviewPrompt(
 
 export interface MarkerCommandResult {
   command: string[];
+}
+
+/**
+ * The engine's CLI on PATH: `binary`, else an `altBinaries` name that is the
+ * same CLI (Cursor's `agent`, never Grok Build's or another tool's). Null when
+ * none is installed. `which` is the runtime's PATH lookup.
+ */
+export function resolveMarkerBinary(
+  engine: MarkerEngine,
+  which: (name: string) => string | null,
+  sameProgram: SameProgramCheck = isSameProgram,
+): Promise<ResolvedProgram | null> {
+  return resolveProgram({ command: engine.binary, alt: engine.altBinaries, signature: engine.binarySignature }, which, sameProgram);
+}
+
+/**
+ * The argv to spawn: when it starts with one of the engine's names, that name
+ * is replaced by the one resolveMarkerBinary found. When none was found the
+ * argv keeps the engine's own name, so the spawn fails as "not found" rather
+ * than starting another program.
+ */
+export function withMarkerBinary(command: string[], engine: MarkerEngine, resolved: ResolvedProgram | null): string[] {
+  if (!engine.altBinaries?.length) return command;
+  const names = [engine.binary, ...engine.altBinaries];
+  if (command.length === 0 || !names.includes(command[0]!)) return command;
+  // By name: the spawn looks it up on the same PATH and finds the file that
+  // was checked (on Windows with the same .exe/.cmd extension).
+  return [resolved?.name ?? engine.binary, ...command.slice(1)];
 }
 
 /** Build the full argv for a review run with the given engine. */

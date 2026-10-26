@@ -7,6 +7,8 @@
  * an AVAILABLE release, opens the update dialog, and Update now runs the
  * install script once for that version while the button reads Updating….
  *
+ * PLANNOTATOR_E2E_RELEASE_BINARY names a binary compiled with
+ * __CLI_VERSION__="0.28.10" to run instead of the CLI from source (CI does).
  * Needs the built apps (apps/hook/dist), as the other specs do.
  */
 
@@ -39,9 +41,11 @@ test.beforeAll(async () => {
   home = join(root, 'home');
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(home, '.local', 'bin'), { recursive: true });
-  // The running bun counts as the binary the install script manages, so the dialog offers Update now.
+  // The running program (bun, or the release binary) counts as the one the install script manages, so the dialog offers Update now.
+  const release = process.env.PLANNOTATOR_E2E_RELEASE_BINARY;
   const bun = realpathSync(process.env.BUN_BINARY ?? execSync('command -v bun').toString().trim());
-  symlinkSync(bun, join(home, '.local', 'bin', 'plannotator'));
+  const program = release ? realpathSync(release) : bun;
+  symlinkSync(program, join(home, '.local', 'bin', 'plannotator'));
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ latestRelease: { tag: '0.28.12', fetchedAt: Date.now(), publishedAt: '2026-10-09T15:00:00Z' } }));
   mkdirSync(join(dataDir, 'update-notes'));
   writeFileSync(
@@ -57,7 +61,7 @@ test.beforeAll(async () => {
   await new Promise<void>((r) => installer.listen(0, '127.0.0.1', () => r()));
   installerPort = (installer.address() as { port: number }).port;
 
-  inbox = spawn(bun, ['--define', '__CLI_VERSION__="0.28.10"', entry, 'inbox', '--no-open'], {
+  inbox = spawn(program, release ? ['inbox', '--no-open'] : ['--define', '__CLI_VERSION__="0.28.10"', entry, 'inbox', '--no-open'], {
     env: {
       PATH: process.env.PATH ?? '',
       HOME: home,
@@ -89,6 +93,66 @@ test.afterAll(async () => {
   } finally {
     // The Inbox (waited for, SIGKILL if it hangs), then the folder (inbox-scratch.ts).
     await removeInboxScratch();
+  }
+});
+
+// Before Update now runs (the next test changes the state): the dot on the sidebar toggle while the sidebar is closed.
+test('a closed sidebar puts a dot on its toggle while an update waits; open, it goes', async ({ page }) => {
+  const shots = process.env.PLANNOTATOR_UPDATE_DOT_SHOTS ?? proofDir;
+  mkdirSync(shots, { recursive: true });
+  // One thread, so the list (not the first-run screen) is what shows.
+  const project = join(root, 'project');
+  mkdirSync(project, { recursive: true });
+  const sent = await fetch(new URL('/mcp', url), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'send_message', arguments: { body: 'The migration is done; the report is in the PR.', subject: 'Migration finished', project_path: project, agent_session: 'ses_dot', agent_host: 'claude-code' } },
+    }),
+  });
+  expect(sent.status).toBe(200);
+  const trigger = page.locator('.ib-lhead [data-sidebar="trigger"]').first();
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(url);
+    await expect(page.locator('.ib-upd[data-update-state="available"]')).toBeVisible();
+    // The notification ask line is not what the pictures are about.
+    const hide = page.getByRole('button', { name: 'Hide', exact: true });
+    if (await hide.isVisible().catch(() => false)) await hide.click();
+    // Open: the Update button is in view, so the toggle has no dot.
+    await expect(trigger).toHaveAttribute('aria-label', 'Toggle Sidebar');
+    await expect(trigger.locator('.ib-sb-trigger-dot')).toHaveCount(0);
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-label', 'Toggle Sidebar, update available');
+    const dot = trigger.locator('.ib-sb-trigger-dot');
+    await expect(dot).toBeVisible();
+    // Measure once the close has settled (the docked panel goes inert at progress zero).
+    await expect(page.locator('.ib-sb-panel[data-hidden]')).toHaveCount(1);
+    await expect(dot).toHaveAttribute('aria-hidden', 'true');
+    // About 7 px, inside the toggle's top-right quarter.
+    const [d, t] = [await dot.boundingBox(), await trigger.boundingBox()];
+    expect(Math.round(d!.width)).toBe(7);
+    expect(d!.x + d!.width / 2).toBeGreaterThan(t!.x + t!.width / 2);
+    expect(d!.y + d!.height / 2).toBeLessThan(t!.y + t!.height / 2);
+    await page.mouse.move(640, 600);
+    await page.screenshot({ path: join(shots, `desktop-${scheme}.png`) });
+    await page.screenshot({ path: join(shots, `desktop-${scheme}-toggle.png`), clip: { x: t!.x - 12, y: t!.y - 12, width: t!.width + 160, height: t!.height + 24 } });
+    await trigger.click();
+    await expect(dot).toHaveCount(0);
+
+    // A phone: the sheet starts closed, so the dot shows; opening the sheet shows the Update button instead.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(url);
+    const phoneTrigger = page.locator('.ib-lhead [data-sidebar="trigger"]').first();
+    await expect(phoneTrigger).toHaveAttribute('aria-label', 'Toggle Sidebar, update available');
+    await expect(phoneTrigger.locator('.ib-sb-trigger-dot')).toBeVisible();
+    await page.screenshot({ path: join(shots, `phone-${scheme}.png`) });
+    const pt = await phoneTrigger.boundingBox();
+    await page.screenshot({ path: join(shots, `phone-${scheme}-toggle.png`), clip: { x: Math.max(0, pt!.x - 8), y: Math.max(0, pt!.y - 8), width: pt!.width + 160, height: pt!.height + 16 } });
   }
 });
 

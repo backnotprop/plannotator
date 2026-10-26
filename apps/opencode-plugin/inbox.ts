@@ -40,7 +40,7 @@ import {
   InboxWake,
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
-import { INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import { createOpenCodeMessageId, isAskTurnActive } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
 
@@ -188,17 +188,35 @@ export async function findInboxConnection(): Promise<InboxAgentConnection | null
  * templates such as Qwen3's). The no-wake wording: OpenCode 1 cannot deliver
  * a reply as a turn. Never on a title request; never twice. The caller decides
  * whether the request's agent has the tool (`openCode1AgentHasInbox`).
+ *
+ * "Already there": the built-in lines keep the check they always had (found
+ * anywhere in the prompt); a person's own text (config.json prompts.inbox,
+ * #2194) counts only as the end of the last part, where this puts it, so a
+ * short text the prompt happens to contain ("Be concise.") is still added.
  */
-export function addInboxReminderOpenCode1(system: string[]): void {
+export function addInboxReminderOpenCode1(system: string[], reminder: string = INBOX_REMINDER_TEXT_NO_WAKE): void {
   const lower = system.join("\n").toLowerCase();
   if (lower.includes("title generator") || lower.includes("generate a title")) return;
-  if (system.some((part) => part.includes(INBOX_REMINDER_TEXT_NO_WAKE))) return;
+  if (inboxReminderAlreadyAdded(system, reminder)) return;
   const last = system.length - 1;
   if (last < 0) {
-    system.push(INBOX_REMINDER_TEXT_NO_WAKE);
+    system.push(reminder);
     return;
   }
-  system[last] = system[last] ? `${system[last]}\n\n${INBOX_REMINDER_TEXT_NO_WAKE}` : INBOX_REMINDER_TEXT_NO_WAKE;
+  system[last] = system[last] ? `${system[last]}\n\n${reminder}` : reminder;
+}
+
+/**
+ * Whether the system parts already carry this reminder. The built-in lines
+ * (long, fixed): anywhere, as before #2194. Any other text: only as the whole
+ * last part or its last `\n\n` block, exactly where a reminder is added.
+ */
+export function inboxReminderAlreadyAdded(system: readonly string[], reminder: string): boolean {
+  if (reminder === INBOX_REMINDER_TEXT || reminder === INBOX_REMINDER_TEXT_NO_WAKE) return system.some((part) => part.includes(reminder));
+  const last = system[system.length - 1];
+  if (last === undefined) return false;
+  const text = reminder.trim();
+  return last.trim() === text || last.trimEnd().endsWith(`\n\n${text}`);
 }
 
 /** A name against an OpenCode tool-switch key, which may hold `*` wildcards. */

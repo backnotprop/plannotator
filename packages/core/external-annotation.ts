@@ -19,6 +19,7 @@ import {
   parseDiagramAnchor,
   type DiagramAnchor,
 } from "./diagram-anchor";
+import { parseImageRegion, type ImageRegion } from "./image-region";
 import {
   MAX_PAGE_URL_LENGTH,
   parseHtmlAdditionalTargets,
@@ -137,6 +138,9 @@ interface PlanAnnotation {
    *  diagram blocks resolve it against their render; a row that resolves in
    *  no diagram lists as unanchored. */
   diagramAnchor?: DiagramAnchor;
+  /** A comment on part of an image (see `image-region.ts`): the viewer
+   *  draws its box; the export names the image, its line and the box. */
+  imageRegion?: ImageRegion;
 }
 
 const VALID_PLAN_TYPES = ["DELETION", "COMMENT", "GLOBAL_COMMENT"];
@@ -194,6 +198,17 @@ export function transformPlanInput(
       diagramAnchor = parsed;
     }
 
+    // An image region goes through the same fail-closed parser the export
+    // and the feedback archive run: a malformed one is refused, never stored.
+    let imageRegion: ImageRegion | undefined;
+    if (obj.imageRegion !== undefined) {
+      const parsed = parseImageRegion(obj.imageRegion);
+      if (parsed === null) {
+        return { error: `annotations[${i}] invalid "imageRegion" (expected { v: 1, src, sourceLine, box: { x, y, w, h }, naturalWidth, naturalHeight } with the box inside the image)` };
+      }
+      imageRegion = parsed;
+    }
+
     annotations.push({
       id: crypto.randomUUID(),
       blockId: "external",
@@ -206,6 +221,7 @@ export function transformPlanInput(
       author: typeof obj.author === "string" ? obj.author : undefined,
       source,
       ...(diagramAnchor !== undefined && { diagramAnchor }),
+      ...(imageRegion !== undefined && { imageRegion }),
     });
   }
 
@@ -672,6 +688,10 @@ const PLAN_PATCH_FIELDS: Record<string, FieldValidator> = {
   diagramAdditionalTargets: viaArrayParser((value) =>
     parseDiagramAdditionalTargets(value, MAX_DIAGRAM_ADDITIONAL_TARGETS),
   ),
+  imageRegion: viaParser(
+    parseImageRegion,
+    'expected { v: 1, src, sourceLine, box: { x, y, w, h }, naturalWidth, naturalHeight } with the box inside the image',
+  ),
   htmlAnchor: viaParser(
     parseHtmlElementAnchor,
     'expected { selector, tagName, text?, point? }',
@@ -748,6 +768,7 @@ const NON_CLEARABLE_FIELDS = new Set([
   "lineEnd",
   "diagramAnchor",
   "diagramAdditionalTargets",
+  "imageRegion",
   "htmlAnchor",
   "htmlAdditionalTargets",
   "elementContext",

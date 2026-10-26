@@ -402,7 +402,7 @@ function ActionRow({ action, state, agent, readOnly, open, onToggle, toggleRef, 
               {composing === 'cant' ? (
                 <button
                   type="button"
-                  className="ib-btn ib-pri"
+                  className="ib-btn ib-sm ib-pri"
                   data-action-cant-send=""
                   disabled={busy || text.trim() === ''}
                   onClick={() => void mark({ outcome: 'cant', note: text.trim() }, 'panel')}
@@ -410,26 +410,26 @@ function ActionRow({ action, state, agent, readOnly, open, onToggle, toggleRef, 
                   Send “Can't do it”
                 </button>
               ) : (
-                <button type="button" className="ib-btn ib-pri" data-action-done="" disabled={busy} onClick={() => void mark({ outcome: 'done', note: text.trim() || null }, 'panel')}>
+                <button type="button" className="ib-btn ib-sm ib-pri" data-action-done="" disabled={busy} onClick={() => void mark({ outcome: 'done', note: text.trim() || null }, 'panel')}>
                   <Icon name="check" />
                   Done
                 </button>
               )}
-              <button type="button" className="ib-btn ib-ghost" onClick={() => setComposing(null)}>
+              <button type="button" className="ib-btn ib-sm ib-ghost" onClick={() => setComposing(null)}>
                 Cancel
               </button>
             </div>
           </div>
         ) : (
           <div className="ib-chk-acts">
-            <button type="button" className="ib-btn ib-pri" data-action-done="" disabled={busy} onClick={() => void mark({ outcome: 'done' }, 'panel')}>
+            <button type="button" className="ib-btn ib-sm ib-pri" data-action-done="" disabled={busy} onClick={() => void mark({ outcome: 'done' }, 'panel')}>
               <Icon name="check" />
               Done
             </button>
-            <button type="button" className="ib-btn ib-ghost" data-action-cant="" disabled={busy} onClick={() => setComposing('cant')}>
+            <button type="button" className="ib-btn ib-sm ib-ghost" data-action-cant="" disabled={busy} onClick={() => setComposing('cant')}>
               Can't do it…
             </button>
-            <button type="button" className="ib-btn ib-ghost" data-action-note="" disabled={busy} onClick={() => setComposing('note')}>
+            <button type="button" className="ib-btn ib-sm ib-ghost" data-action-note="" disabled={busy} onClick={() => setComposing('note')}>
               Add note…
             </button>
           </div>

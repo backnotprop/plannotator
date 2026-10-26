@@ -176,3 +176,90 @@ export function wheelTravel(
 export function wheelZoomFactor(dy: number): number {
   return Math.exp(-clampNumber(dy, -WHEEL_ZOOM_DELTA_CAP, WHEEL_ZOOM_DELTA_CAP) * WHEEL_ZOOM_SENSITIVITY);
 }
+
+// ---------------------------------------------------------------------------
+// Region boxes (#2100): a box drawn on the image is kept in the image's own
+// (natural) pixels, so it is the same box at every zoom and pan, and the
+// agent can crop exactly that spot. These convert between the stage (CSS
+// pixels, relative to the stage's top-left) and the image.
+// ---------------------------------------------------------------------------
+
+/** A rectangle in the image's own pixels (integers once made by `naturalBoxFromPoints`). */
+export interface NaturalBox {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/** A rectangle in stage pixels. */
+export interface StageRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** A stage point (CSS pixels from the stage's top-left) in the image's own pixels. Not clamped. */
+export function stageToNatural(view: ZoomViewport, px: number, py: number): { x: number; y: number } {
+  return { x: (px - view.x) / view.scale, y: (py - view.y) / view.scale };
+}
+
+/**
+ * The box two stage points span (a drag's start and end, in either
+ * direction), in the image's own pixels: clamped to the image, widened to
+ * whole pixels (floor the near edges, ceil the far ones), so the box always
+ * covers what the reviewer drew. Null when nothing of it is on the image.
+ */
+export function naturalBoxFromPoints(
+  view: ZoomViewport,
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  image: ZoomSize,
+): NaturalBox | null {
+  const p = stageToNatural(view, a.x, a.y);
+  const q = stageToNatural(view, b.x, b.y);
+  const x0 = clampNumber(Math.floor(Math.min(p.x, q.x)), 0, image.width);
+  const y0 = clampNumber(Math.floor(Math.min(p.y, q.y)), 0, image.height);
+  const x1 = clampNumber(Math.ceil(Math.max(p.x, q.x)), 0, image.width);
+  const y1 = clampNumber(Math.ceil(Math.max(p.y, q.y)), 0, image.height);
+  if (x1 - x0 < 1 || y1 - y0 < 1) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** Where a natural-pixel box is on the stage at a viewport. */
+export function naturalBoxToStage(view: ZoomViewport, box: NaturalBox): StageRect {
+  return { left: view.x + box.x * view.scale, top: view.y + box.y * view.scale, width: box.w * view.scale, height: box.h * view.scale };
+}
+
+/**
+ * The part of the image the stage shows now, in the image's own pixels:
+ * what Enter comments on in Region mode (the keyboard's way to a box: frame
+ * the spot with Actual size and the scroll keys, then press Enter). Null when
+ * nothing of the image is on the stage.
+ */
+export function visibleNaturalBox(view: ZoomViewport, image: ZoomSize, stage: ZoomSize): NaturalBox | null {
+  return naturalBoxFromPoints(view, { x: 0, y: 0 }, { x: stage.width, y: stage.height }, image);
+}
+
+/** The share of the stage a box fills when the viewer zooms to it. */
+export const ZOOM_TO_BOX_SHARE = 0.5;
+
+/**
+ * The viewport that shows a box large and centred: it fills `share` of the
+ * stage on its tighter axis, within the zoom limits (a box larger than that
+ * share at Fit stays at Fit), then the usual clamp keeps the image covering
+ * the stage, so a box at an edge sits as near the centre as the image allows.
+ */
+export function viewportForBox(
+  box: NaturalBox,
+  image: ZoomSize,
+  stage: ZoomSize,
+  limits: ZoomLimits,
+  share = ZOOM_TO_BOX_SHARE,
+): ZoomViewport {
+  const scale = clampNumber(Math.min((stage.width * share) / Math.max(1, box.w), (stage.height * share) / Math.max(1, box.h)), limits.min, limits.max);
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  return clampViewport({ scale, x: stage.width / 2 - cx * scale, y: stage.height / 2 - cy * scale }, image, stage, limits);
+}

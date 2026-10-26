@@ -53,6 +53,36 @@ describe('busy counts the main loop only', () => {
   })
 })
 
+// The failure this guards: another plugin delivers its own messages as turns;
+// Send now (and the Inbox's auto-send) put our reply into such a turn, and that
+// plugin then read the agent's answer to our reply as the answer to its message.
+describe("Send now leaves another plugin's turn alone", () => {
+  function steerable(mod: PlannotatorMod): string | null {
+    return (mod.inbox as unknown as { options: { steerableTurn: () => string | null } }).options.steerableTurn()
+  }
+
+  test("a turn the person started takes it; a turn another plugin's prompt started does not, and the session reads busy", async () => {
+    const mod = new PlannotatorMod(fakeHost(), { ...SESSION, inboxTools: [] })
+    mod.onPromptEntered({ text: 'Fix the export.', fromUs: false, originKind: 'composer' })
+    await mod.onTurnStart('person', 'Fix the export.')
+    expect(steerable(mod)).toBe('person')
+    mod.onTurnComplete('person', 'Done.', false)
+
+    mod.onPromptEntered({ text: 'Review PR 12.', fromUs: false, originKind: 'plugin' })
+    await mod.onTurnStart('plugin-turn', 'The workspaces plugin sent a message: Review PR 12.')
+    expect(steerable(mod)).toBeNull()
+    expect(mod.turns.busy).toBe(true)
+    mod.onTurnComplete('plugin-turn', 'Reviewed.', false)
+    expect(mod.turns.busy).toBe(false)
+
+    // An engine-started turn (a background task's notification) is the session's own: as today.
+    mod.onPromptEntered({ text: 'Task done.', fromUs: false, originKind: 'task-notification' })
+    await mod.onTurnStart('note', 'Task done.')
+    expect(steerable(mod)).toBe('note')
+    mod.dispose()
+  })
+})
+
 describe('plan review', () => {
   test('ExitPlanMode is denied at once and the review starts detached with the plan on stdin', async () => {
     const host = fakeHost()
@@ -1557,5 +1587,41 @@ describe('a decision claimed but never delivered', () => {
 
     expect(other.logs.filter((line) => line.includes(UNDELIVERED))).toHaveLength(1)
     expect(other.submits).toEqual([])
+  })
+})
+
+// The owner closed the Inbox tab and had no easy way back: /plannotator-inbox
+// opens it again (starting a stopped one detached) and says where it is.
+describe('/plannotator-inbox', () => {
+  test('runs plannotator inbox --open with the data dir and answers with the address', async () => {
+    const host = fakeHost()
+    host.onRun = (call) =>
+      call.argv[1] === 'inbox' ? { exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: '' } : undefined
+    const mod = new PlannotatorMod(host, SESSION)
+    const text = await mod.openInbox()
+    const call = host.runs.find((run) => run.argv[1] === 'inbox')
+    expect(call?.argv).toEqual(['plannotator', 'inbox', '--open'])
+    expect(call?.env?.PLANNOTATOR_DATA_DIR).toBe('/data')
+    expect(text).toContain('http://localhost:59812/')
+    // Nothing is launched: no review, no decision to wait for.
+    expect(host.runs.filter(isLaunch)).toEqual([])
+  })
+
+  test('over SSH the CLI opens no browser and says how to reach the Inbox: the answer passes that on', async () => {
+    const host = fakeHost()
+    host.onRun = () => ({ exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: 'No browser opened: this is a remote session. Forward the port (ssh -L 59812:127.0.0.1:59812 <this host>) and open the URL, or run plannotator inbox --tailscale.\n' })
+    const text = await new PlannotatorMod(host, SESSION).openInbox()
+    expect(text).toContain('http://localhost:59812/')
+    expect(text).toContain('ssh -L 59812:127.0.0.1:59812')
+  })
+
+  test('an older CLI without --open is told to update; any other failure says why', async () => {
+    const host = fakeHost()
+    host.onRun = () => ({ exitCode: 1, stdout: '', stderr: "Unknown inbox option: --open\nRun 'plannotator inbox --help' for usage.\n" })
+    expect(await new PlannotatorMod(host, SESSION).openInbox()).toContain('plannotator update')
+
+    const failing = fakeHost()
+    failing.onRun = () => ({ exitCode: 1, stdout: '', stderr: 'The Plannotator Inbox did not start; see /data/inbox/inbox.log.\n' })
+    expect(await new PlannotatorMod(failing, SESSION).openInbox()).toContain('/data/inbox/inbox.log')
   })
 })

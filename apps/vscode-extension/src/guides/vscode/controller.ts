@@ -5,28 +5,61 @@
  */
 
 import * as vscode from "vscode";
-import { basename } from "node:path";
-import { mkdirSync } from "node:fs";
-import type { RequestPermissionRequest, RequestPermissionResponse } from "@agentclientprotocol/sdk";
+import { basename, join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
 import { createGuideHtml, guideExportFilename, resolveGuideViewerAssets } from "@plannotator/core/guide-format";
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/core/guide-viewer-manifest";
 import { findSavedGuideById } from "@plannotator/shared/guide-store";
 import { readGuideInstructions } from "@plannotator/shared/guide-instructions-store";
 import { AcpClient } from "../acp/client";
-import { CLAUDE_CODE, readAgentOptions, resolveAgentLaunch, type AgentOptionsCache, type LoginCommand } from "../acp/agents";
+import {
+  CLAUDE_CODE,
+  CUSTOM_AGENT_ID,
+  customAgent,
+  detectAgents,
+  engineLabel,
+  findAgent,
+  installCommandFor,
+  KNOWN_AGENTS,
+  readAgentOptions,
+  resolveAgentLaunch,
+  type AdapterResolution,
+  type AgentDescriptor,
+  type AgentOptionsCache,
+  type AgentStatus,
+  type CommandOverride,
+  type LoginCommand,
+} from "../acp/agents";
 import { planSpawn } from "../acp/spawn-plan";
+import { adaptersRoot, hasManagedCopy, installAdapter, managedLaunch, type InstallResult } from "../acp/adapters";
+import { ensureAgentLaunch, type ReadyLaunch } from "../acp/ensure-launch";
 import { parseGuideLink } from "../core/adapter";
 import { loadDashboard, type DashboardModel } from "../dashboard";
-import { GuideGeneration, type GenerationState } from "../generation";
+import { GuideGeneration, type GenerationState, type PendingPermission, type PermissionAnswer } from "../generation";
 import { startRelayHost, type RelayHost } from "../mcp/relay-host";
 import { ReaderModel, guideWorktreePath, resolveReaderSides, type ReaderSides } from "../reader-model";
 import { removeShareBeforeDelete } from "../share";
 import { buildLocalChangesPatch, changedFilesFromPatch, getRepoInfo, type LocalChangesMode } from "../sources/git";
-import { preparePullRequestWorktree, removePullRequestWorktree, viewPullRequest } from "../sources/github";
+import {
+  ensureRepoClone,
+  ghRepoArg,
+  isOpenRepository,
+  ghRepoOfKey,
+  parseGhRepoArg,
+  parsePullRequestUrl,
+  preparePullRequestWorktree,
+  pullRequestHead,
+  removePullRequestWorktree,
+  repoClonePath,
+  repoKeyForGhRepo,
+  viewPullRequest,
+} from "../sources/github";
 import { defaultRunner, findExecutable, type Runner } from "../sources/runner";
 import {
   deleteDraftRecord,
   deleteSavedGuide,
+  allRepoKeys,
+  guideForPullRequest,
   guideHistoryEnabled,
   loadDraftRecord,
   loadSavedGuide,
@@ -41,11 +74,14 @@ import {
 } from "../store";
 import type { ChapterViewState, GeneratingViewState, GuideViewState, HomeViewState } from "../webview-protocol";
 import { chapterColorCss, linkInfo, locateLink, resolveSymbolForBuilder } from "./intel";
-import { pickAgentAndEffort, pickPullRequest, pickSource, type SourceChoice } from "./new-review";
+import { autoApproveChoice, pickAgentAndEffort, pickPullRequest, pickPullRequestByLink, pickSource, type RememberedChoice, type SourceChoice } from "./new-review";
 import { ReaderUi } from "./reader-ui";
+import { GuideAsks } from "./asks";
+import { approveAlwaysTarget, isKnownPullRequestUrl } from "../trust";
 import { getChildren, getParent, getTreeItem, nodeId, relativeTime, type TreeData, type TreeNode } from "./tree";
-import { GuideContentProvider, GUIDE_SCHEME, baseUri, headPathOf, headUri } from "./uris";
-import { WebviewHost, webviewHtml, webviewOptions, type WebviewMode } from "./webview-host";
+import { ANSWER_VIEW_TYPE, diffColumnBesideAnswers } from "./tab-columns";
+import { GuideContentProvider, GUIDE_SCHEME, baseUri, guideSideOf, headPathOf, headUri } from "./uris";
+import { WebviewHost, webviewHtml, webviewOptions, type WebviewHandlers, type WebviewMode } from "./webview-host";
 import { pullRequestWorktreeInUse, removeDraftWorktree, type WorktreeUsers } from "../worktrees";
 
 interface Log {
@@ -71,8 +107,10 @@ interface RunEntry {
   running: Promise<void> | null;
 }
 
-const OPTIONS_KEY = "plannotator.guides.agentOptions.claude-code";
+/** The models and efforts an agent listed, cached per agent. */
+const optionsKey = (agentId: string) => `plannotator.guides.agentOptions.${agentId}`;
 const DEFAULTS_KEY = "plannotator.guides.defaults";
+const APPROVE_RUN_BUTTON = "Approve all for this run";
 const OPTIONS_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 
 export class GuidesController implements vscode.Disposable {
@@ -81,6 +119,11 @@ export class GuidesController implements vscode.Disposable {
     const ghPath = command === "gh" ? vscode.workspace.getConfiguration("plannotator.guides").get<string>("ghPath")?.trim() : "";
     return defaultRunner(ghPath || command, args, options);
   };
+  /** The absolute path of `gh` (the setting, else on PATH), for the credential helper a storage clone gets. */
+  private ghPath(): string | null {
+    const set = vscode.workspace.getConfiguration("plannotator.guides").get<string>("ghPath")?.trim();
+    return findExecutable(set || "gh");
+  }
   private readonly disposables: vscode.Disposable[] = [];
   private dashboard: DashboardModel | null = null;
   private loading: Promise<void> | null = null;
@@ -95,6 +138,7 @@ export class GuidesController implements vscode.Disposable {
   /** Guides made while guide history is off: kept in memory for this session only. */
   private readonly sessionGuides = new Map<string, LoadedGuide>();
   private readonly ui: ReaderUi;
+  private readonly asks: GuideAsks;
   private readonly version: string;
 
   constructor(
@@ -104,11 +148,42 @@ export class GuidesController implements vscode.Disposable {
   ) {
     this.version = String((context.extension?.packageJSON as { version?: string } | undefined)?.version ?? "dev");
     this.ui = new ReaderUi({ current: () => this.reader });
+    this.asks = new GuideAsks({
+      context,
+      version: this.version,
+      runner: this.runner,
+      log: (line) => this.log.info(line),
+      reader: () => this.reader,
+      openGuide: (id) => this.openGuide(id),
+      openLink: (href, column) => this.openLink(href, "open", column),
+      relayHost: () => this.relayHost(),
+      agentById: (id) => this.agentById(id),
+      defaultChoice: () => {
+        const d = this.context.globalState.get<RememberedChoice>(DEFAULTS_KEY);
+        const agent = this.agentById(d?.agent ?? CLAUDE_CODE.id) ?? CLAUDE_CODE;
+        return { id: agent.id, label: agent.label };
+      },
+      ensureLaunch: (agent) => this.ensureLaunch(agent),
+      pickModel: async (current) => {
+        const picked = await pickAgentAndEffort({ ...this.pickerInput({ agent: current.id, model: current.model?.id, effort: current.effort?.id }), standingInstructions: "", defaultsOnly: true, title: "Who answers questions about this guide", purpose: "answer" });
+        return picked?.agent ?? null;
+      },
+      notifyPermission: (pending, signal, label) => this.notifyPermission(pending, signal, label),
+      autoApprove: () => this.autoApproveSetting(),
+      approveAlways: () => void vscode.workspace.getConfiguration("plannotator.guides").update("autoApprove", "allow-all", vscode.ConfigurationTarget.Global),
+      signIn: (agentId, logins, label, cwd) => this.signIn(label, { agentId, logins, cwd }),
+      createPanel: (title, column, onLink, preserveFocus) => this.createPanel(ANSWER_VIEW_TYPE, title, "answer", column, preserveFocus ?? false, { onLink: (link) => onLink(link) }),
+      persists: (guide) => guideHistoryEnabled() && !this.sessionGuides.has(guide.id),
+      updateChapterView: () => this.updateChapterView(),
+      setAnswering: (text, answerId) => this.ui.setAnswering(text, answerId),
+    });
     this.disposables.push(
       this.ui,
+      this.asks,
       vscode.workspace.registerTextDocumentContentProvider(GUIDE_SCHEME, new GuideContentProvider(this.runner)),
       bridge.treeView.onDidChangeCheckboxState((e) => this.onCheckboxes(e)),
       vscode.window.onDidChangeActiveTextEditor((editor) => this.onActiveEditor(editor)),
+      vscode.window.onDidChangeActiveTextEditor((editor) => this.updateEditorContext(editor)),
       vscode.workspace.onDidChangeWorkspaceFolders(() => void this.refresh()),
     );
     void this.refresh();
@@ -177,15 +252,17 @@ export class GuidesController implements vscode.Disposable {
 
   private homeState(): HomeViewState {
     const d = this.dashboard;
-    const defaults = this.context.globalState.get<{ model?: string; effort?: string }>(DEFAULTS_KEY);
-    const options = this.agentOptions();
-    const modelName = options?.model?.options.find((o) => o.value === defaults?.model)?.name ?? (defaults?.model ? defaults.model : "Sonnet");
-    const effortName = options?.effort?.options.find((o) => o.value === defaults?.effort)?.name ?? (defaults?.effort ? defaults.effort : "low effort");
+    const defaults = this.context.globalState.get<RememberedChoice>(DEFAULTS_KEY);
+    const agent = this.agentById(defaults?.agent ?? CLAUDE_CODE.id) ?? CLAUDE_CODE;
+    const options = this.agentOptions(agent.id);
+    const isClaude = agent.id === CLAUDE_CODE.id;
+    const modelName = options?.model?.options.find((o) => o.value === defaults?.model)?.name ?? (defaults?.model ? defaults.model : isClaude ? "Sonnet" : "its default model");
+    const effortName = options?.effort?.options.find((o) => o.value === defaults?.effort)?.name ?? (defaults?.effort ? defaults.effort : isClaude ? "low effort" : "default effort");
     const ghNote = !d ? null : d.gh.state === "missing" ? "Install the GitHub CLI (gh) to see pull requests." : d.gh.state === "signed-out" ? "Run `gh auth login` to see pull requests." : d.gh.state === "error" ? "gh did not answer." : null;
     return {
       mode: "home",
       repo: d?.repo ? { name: d.repo.displayName, branch: d.repo.branch, host: d.repo.github ? "GitHub" : "local repository" } : null,
-      defaults: { agent: CLAUDE_CODE.label, model: modelName, effort: /effort/.test(effortName) ? effortName : `${effortName.toLowerCase()} effort` },
+      defaults: { agent: agent.label, model: modelName, effort: /effort/.test(effortName) ? effortName : `${effortName.toLowerCase()} effort` },
       ghNote,
       cards: {
         pr: d && d.gh.state === "ok" && d.repo?.github
@@ -197,7 +274,7 @@ export class GuidesController implements vscode.Disposable {
         kind: r.kind,
         id: r.id,
         title: r.title,
-        sub: [d?.repo?.displayName.split("/").pop(), r.label].filter(Boolean).join(" · "),
+        sub: [r.repoName ?? d?.repo?.displayName.split("/").pop(), r.label].filter(Boolean).join(" · "),
         progress: r.kind === "guide" && r.progress && !r.moved ? r.progress : null,
         note: r.sessionOnly ? "not saved: this session only" : r.moved ? "head moved since the guide" : r.kind === "draft" ? `Draft · ${r.draftInfo?.chapters ?? 0} chapters · ${r.draftInfo?.filesLeft ?? 0} files left` : null,
         warn: !!r.moved,
@@ -208,7 +285,10 @@ export class GuidesController implements vscode.Disposable {
         number: w.number,
         title: w.title,
         sub: `${w.repo} · @${w.author}`,
-        inThisRepo: !!d?.repo?.github && w.repo.toLowerCase() === d.repo.displayName.toLowerCase(),
+        inThisRepo: (() => {
+          const ref = parsePullRequestUrl(w.url);
+          return !!ref && isOpenRepository(d?.repo, ref);
+        })(),
       })),
       notes: d?.notes ?? [],
     };
@@ -218,7 +298,13 @@ export class GuidesController implements vscode.Disposable {
     this.home?.host.show(this.homeState());
   }
 
-  openHome(): void {
+  /**
+   * The Guided Reviews dashboard tab. `auto`: opened because the view was
+   * shown from the activity bar, so it stays away when a dashboard, guide or
+   * run tab is already open (the extension asks at most once per session).
+   */
+  openHome(auto = false): void {
+    if (auto && (this.home || this.guidePanels.size > 0 || this.draftPanels.size > 0 || this.run?.panel)) return;
     if (this.home) {
       this.home.panel.reveal();
       this.updateHome();
@@ -230,7 +316,7 @@ export class GuidesController implements vscode.Disposable {
     entry.host.show(this.homeState());
   }
 
-  private createPanel(viewType: string, title: string, mode: WebviewMode, column = vscode.ViewColumn.Active, preserveFocus = false): PanelEntry {
+  private createPanel(viewType: string, title: string, mode: WebviewMode, column: vscode.ViewColumn = vscode.ViewColumn.Active, preserveFocus = false, handlers: Partial<WebviewHandlers> = {}): PanelEntry {
     const panel = vscode.window.createWebviewPanel(viewType, title, { viewColumn: column, preserveFocus }, { ...webviewOptions(this.context.extensionUri), retainContextWhenHidden: true });
     panel.iconPath = vscode.Uri.joinPath(this.context.extensionUri, "images", "guides.svg");
     panel.webview.html = webviewHtml(panel.webview, this.context.extensionUri, mode);
@@ -238,6 +324,7 @@ export class GuidesController implements vscode.Disposable {
       onCommand: (command, args) => void this.webviewCommand(command, args),
       onLink: (link, action) => void this.openLink(link, action),
       onLinkInfo: (link) => this.linkInfo(link),
+      ...handlers,
     });
     panel.onDidDispose(() => host.dispose());
     return { panel, host };
@@ -254,7 +341,7 @@ export class GuidesController implements vscode.Disposable {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.log.error(`[guides] ${id}: ${err instanceof Error ? err.stack ?? err.message : err}`);
-      void vscode.window.showErrorMessage(`Guides: ${message}`);
+      void vscode.window.showErrorMessage(`Guided Reviews: ${message}`);
       return undefined;
     }
   }
@@ -278,9 +365,21 @@ export class GuidesController implements vscode.Disposable {
       openFile: "openFile",
       changeDefaults: "changeDefaults",
       openExternal: "openPullRequestOnGitHub",
+      openPullRequest: "openPullRequest",
+      openFolder: "openFolder",
       refresh: "refresh",
       exportGuide: "exportGuide",
       signIn: "signIn",
+      answerPermission: "answerPermission",
+      approveRun: "approveRun",
+      approveAlways: "approveAlways",
+      resumeWithApproval: "resumeWithApproval",
+      ask: "askChapter",
+      openAnswer: "openAnswer",
+      followUp: "followUp",
+      stopAnswer: "stopAnswer",
+      answerMenu: "answerMenu",
+      openAnswerExternal: "openAnswerExternal",
     };
     if (command === "guideCurrentPR" && this.dashboard?.currentBranchPR) args = [this.dashboard.currentBranchPR.number];
     const target = map[command];
@@ -294,19 +393,24 @@ export class GuidesController implements vscode.Disposable {
       case "refresh":
         return this.refresh();
       case "openHome":
-        return this.openHome();
+        return this.openHome(!!args[0] && typeof args[0] === "object" && (args[0] as { auto?: unknown }).auto === true);
       case "newReview":
         return this.newReview();
       case "guideLocal":
         return this.newReview({ kind: "local", mode: "since-base" });
       case "guidePullRequest": {
-        const node = args[0] && typeof args[0] === "object" ? (args[0] as TreeNode) : null;
-        const n = num(args[0]) ?? (node?.kind === "pr" ? node.pr.number : node?.kind === "waiting" ? node.row.number : undefined);
-        if (n !== undefined) return this.newReview({ kind: "pr", number: n });
+        const target = this.pullRequestTarget(args[0]);
+        if (target) return this.newReview(target);
         await this.ensureDashboard();
-        const choice = this.dashboard ? await pickPullRequest(this.dashboard) : undefined;
+        const choice = this.dashboard?.repo ? await pickPullRequest(this.dashboard) : await pickPullRequestByLink();
         return choice ? this.newReview(choice) : undefined;
       }
+      case "openPullRequest": {
+        const target = this.pullRequestTarget(args[0]);
+        return target ? this.openPullRequest(target) : this.dispatch("guidePullRequest", []);
+      }
+      case "openFolder":
+        return vscode.commands.executeCommand("workbench.action.files.openFolder");
       case "openGuide":
         return this.openGuide(str(args[0]));
       case "closeGuide":
@@ -343,17 +447,150 @@ export class GuidesController implements vscode.Disposable {
         return this.toggleFileReviewed(str(args[0]) ?? (args[0] && typeof args[0] === "object" && "path" in (args[0] as object) ? (args[0] as { path: string }).path : undefined));
       case "changeDefaults":
         return this.changeDefaults();
+      case "updateAdapters":
+        return this.updateAdapters();
       case "signIn":
         return this.signIn(str(args[0]));
+      case "answerPermission": {
+        // (run id, permission id, option id): a guide run, or a question being answered
+        const gen = this.run?.gen;
+        const id = num(args[1]);
+        const optionId = str(args[2]);
+        if (this.asks.answerPermission(str(args[0]), id, optionId)) return;
+        if (gen && gen.state.id === str(args[0]) && id !== undefined && optionId) gen.answerPermission(id, { optionId });
+        return;
+      }
+      case "approveRun":
+        if (this.asks.approveRun(str(args[0]))) return;
+        if (this.run && this.run.gen.state.id === str(args[0])) this.run.gen.approveAutomatically();
+        return;
+      case "approveAlways": {
+        // (run id, permission id). The setting is written only for a request that is really
+        // waiting on the user: a forged command (no such run or request) changes nothing.
+        const runId = str(args[0]);
+        const permissionId = num(args[1]);
+        const gen = this.run?.gen;
+        const target = approveAlwaysTarget(runId, permissionId, {
+          generation: gen ? { id: gen.state.id, live: isLive(gen.state), pending: gen.state.pendingPermissions.map((p) => p.id) } : null,
+          askPending: (run, id) => this.asks.hasPendingPermission(run, id),
+        });
+        if (!target) {
+          this.log.warn(`[guides] approveAlways ignored: no request ${permissionId ?? "?"} is waiting in run ${runId ?? "?"}`);
+          return;
+        }
+        await vscode.workspace.getConfiguration("plannotator.guides").update("autoApprove", "allow-all", vscode.ConfigurationTarget.Global);
+        if (target === "ask") this.asks.approveRun(runId);
+        else gen!.approveAutomatically();
+        return;
+      }
+      case "askAboutSelection":
+        return this.asks.askAboutSelection();
+      case "askAboutFile":
+        return this.asks.askAboutFile(str(args[0]) ?? (args[0] && typeof args[0] === "object" && "path" in (args[0] as object) ? (args[0] as { path: string }).path : undefined));
+      case "askThreadSubmit":
+        return this.asks.threads.submit(args[0]);
+      case "askThreadCancel":
+      case "askThreadClose":
+        return this.asks.threads.close(args[0]);
+      case "askThreadSettings":
+        return this.asks.threads.settings(args[0]);
+      case "askThreadPick":
+        return this.asks.threads.pick(args[0], args[1]);
+      case "askThreadAgain":
+        return this.asks.threads.again(args[0]);
+      case "askThreadStop":
+        return this.asks.threads.stop(args[0]);
+      case "askChapter":
+        return this.asks.askChapter(num(args[0]), str(args[1]));
+      case "openAnswer":
+        return this.asks.openAnswer(str(args[0]));
+      case "followUp":
+        return this.asks.followUp(str(args[0]), str(args[1]));
+      case "stopAnswer":
+        return this.asks.stop(str(args[0]));
+      case "answerMenu":
+        return this.asks.menu(str(args[0]), str(args[1]));
+      case "openAnswerExternal":
+        return this.asks.openExternal(str(args[1]));
+      case "resumeWithApproval":
+        return this.resumeDraft(str(args[0]) ?? treeArg(args[0]), true);
       case "openPullRequestOnGitHub": {
-        const target = str(args[0]) ?? (args[0] && typeof args[0] === "object" ? ((args[0] as { pr?: { url: string }; row?: { url: string } }).pr?.url ?? (args[0] as { row?: { url: string } }).row?.url) : undefined);
-        if (target && /^https:\/\//.test(target)) await vscode.env.openExternal(vscode.Uri.parse(target));
+        // A tree row passes its node (the extension's own data); a webview passes a string,
+        // which opens without asking only when it is a pull request the extension knows.
+        const fromNode = args[0] && typeof args[0] === "object" ? ((args[0] as { pr?: { url: string }; row?: { url: string } }).pr?.url ?? (args[0] as { row?: { url: string } }).row?.url) : undefined;
+        const target = fromNode ?? str(args[0]);
+        if (!target || !/^https:\/\//.test(target)) return;
+        if (!fromNode && !isKnownPullRequestUrl(target, this.knownPullRequestUrls())) {
+          const choice = await vscode.window.showInformationMessage(`Open ${target} in your browser?`, "Open");
+          if (choice !== "Open") return;
+        }
+        await vscode.env.openExternal(vscode.Uri.parse(target));
         return;
       }
       default:
         this.log.warn(`[guides] unknown command ${name}`);
         return undefined;
     }
+  }
+
+  /** Pull requests the extension itself knows: the dashboard's, the open guide's and the run's. */
+  private knownPullRequestUrls(): string[] {
+    const d = this.dashboard;
+    const env = this.reader?.model.loaded.envelope;
+    return [
+      ...(d?.prs.map((p) => p.url) ?? []),
+      ...(d?.waiting.map((w) => w.url) ?? []),
+      d?.currentBranchPR?.url,
+      env?.prUrl,
+      env?.review?.source.pr?.url,
+      this.reader?.model.loaded.sidecar.source?.pr?.url,
+      this.run?.gen.state.source.pr?.url,
+    ].filter((u): u is string => !!u);
+  }
+
+  /**
+   * A pull request named by a tree row, a dashboard row, a number (this
+   * repository) or a link: as a source choice, with `repo` when it belongs to
+   * another repository than the one open.
+   */
+  private pullRequestTarget(arg: unknown): Extract<SourceChoice, { kind: "pr" }> | null {
+    const open = this.dashboard?.repo ?? null;
+    const fromUrl = (url: string, number?: number): Extract<SourceChoice, { kind: "pr" }> | null => {
+      const ref = parsePullRequestUrl(url);
+      if (!ref) return number !== undefined && open ? { kind: "pr", number } : null;
+      const ghRepo = ghRepoArg(ref);
+      return isOpenRepository(open, ref) ? { kind: "pr", number: ref.number } : { kind: "pr", number: ref.number, repo: ghRepo };
+    };
+    if (typeof arg === "number") return open ? { kind: "pr", number: arg } : null;
+    if (typeof arg === "string") return /^\d+$/.test(arg) ? (open ? { kind: "pr", number: Number(arg) } : null) : fromUrl(arg);
+    if (!arg || typeof arg !== "object") return null;
+    const node = arg as TreeNode | { number?: unknown; url?: unknown };
+    if ("kind" in node && node.kind === "pr") return { kind: "pr", number: node.pr.number };
+    if ("kind" in node && node.kind === "waiting") return fromUrl(node.row.url, node.row.number);
+    const n = typeof (node as { number?: unknown }).number === "number" ? ((node as { number: number }).number) : undefined;
+    const url = typeof (node as { url?: unknown }).url === "string" ? ((node as { url: string }).url) : undefined;
+    return url ? fromUrl(url, n) : n !== undefined && open ? { kind: "pr", number: n } : null;
+  }
+
+  /**
+   * Clicking a pull request: open its guide when one was made at the PR's
+   * current head, show the run when one is building it, else start a new
+   * guided review of it. Never the browser ("Open on GitHub" does that).
+   */
+  private async openPullRequest(target: Extract<SourceChoice, { kind: "pr" }>): Promise<void> {
+    const open = this.dashboard?.repo ?? null;
+    const repoKey = target.repo ? repoKeyForGhRepo(target.repo) : open?.repoKey;
+
+    const live = this.run && isLive(this.run.gen.state) ? this.run.gen.state : null;
+    if (live && live.repoKey === repoKey && live.source.pr?.number === target.number) return this.showGeneration(live.id);
+    if (repoKey) {
+      const known = !target.repo ? this.dashboard?.prs.find((p) => p.number === target.number)?.headRefOid : undefined;
+      // The open repository's PR is asked in its own folder (gh reads its remotes, SSH host aliases included).
+      const head = known || (target.repo ? await pullRequestHead(this.runner, target.repo, target.number) : open ? await pullRequestHead(this.runner, null, target.number, open.root) : null);
+      const id = guideForPullRequest(repoKey, target.number, head);
+      if (id) return this.openGuide(id);
+    }
+    return this.newReview(target);
   }
 
   private async ensureDashboard(): Promise<void> {
@@ -364,64 +601,218 @@ export class GuidesController implements vscode.Disposable {
   // Agent options (models and efforts), cached per agent
   // -------------------------------------------------------------------------
 
-  private agentOptions(): AgentOptionsCache | null {
-    const cached = this.context.globalState.get<AgentOptionsCache>(OPTIONS_KEY);
+  private agentOptions(agentId: string): AgentOptionsCache | null {
+    const cached = this.context.globalState.get<AgentOptionsCache>(optionsKey(agentId));
     return cached && Date.now() - cached.fetchedAt < OPTIONS_MAX_AGE_MS ? cached : null;
   }
 
-  private agentSetting(): { command?: string; args?: string[] } {
-    const cfg = vscode.workspace.getConfiguration("plannotator.guides.claudeCode");
-    return { command: cfg.get<string>("command") ?? "", args: cfg.get<string[]>("args") ?? [] };
+  /**
+   * The command override for a known agent: `plannotator.guides.agentCommands`
+   * (`{ "<id>": { "command": "…", "args": [] } }`), else for Claude Code the
+   * older `plannotator.guides.claudeCode.command` / `.args`.
+   */
+  private agentOverride(agentId: string): CommandOverride {
+    const cfg = vscode.workspace.getConfiguration("plannotator.guides");
+    const map = cfg.get<Record<string, { command?: unknown; args?: unknown }>>("agentCommands") ?? {};
+    const entry = map[agentId];
+    if (entry && typeof entry.command === "string" && entry.command.trim()) {
+      return { command: entry.command, args: Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === "string") : undefined };
+    }
+    if (agentId === CLAUDE_CODE.id) {
+      const claude = vscode.workspace.getConfiguration("plannotator.guides.claudeCode");
+      return { command: claude.get<string>("command") ?? "", args: claude.get<string[]>("args") ?? [] };
+    }
+    return {};
   }
 
-  /** Start the adapter once, read its config options, stop it. Nothing is prompted. */
-  private async probeAgentOptions(): Promise<AgentOptionsCache | null> {
-    const launch = resolveAgentLaunch(CLAUDE_CODE, this.agentSetting());
-    if (!launch.ok) {
-      this.showAdapterMissing(launch.message);
-      return null;
+  /** The custom agent (`plannotator.guides.customAgent.*`), when a command is set. */
+  private customAgent(): AgentDescriptor | null {
+    const cfg = vscode.workspace.getConfiguration("plannotator.guides.customAgent");
+    return customAgent({ command: cfg.get<string>("command") ?? "", args: cfg.get<string[]>("args") ?? [], label: cfg.get<string>("label") ?? "" });
+  }
+
+  private agentById(agentId: string): AgentDescriptor | null {
+    return findAgent(agentId, this.customAgent());
+  }
+
+  private agentStatuses(): AgentStatus[] {
+    return detectAgents((id) => this.agentOverride(id), this.customAgent(), findExecutable, this.managedFor, this.installAdaptersSetting());
+  }
+
+  /** Resolution order: the command in settings, the agent on PATH, the adapter Guided Reviews installed. */
+  private launchFor(agent: AgentDescriptor): AdapterResolution {
+    return resolveAgentLaunch(agent, agent.id === CUSTOM_AGENT_ID ? {} : this.agentOverride(agent.id), findExecutable, this.managedFor);
+  }
+
+  private readonly managedFor = (agent: AgentDescriptor) => (agent.adapter ? managedLaunch(this.adaptersRoot(), agent.id, agent.adapter, agent.args) : null);
+
+  private adaptersRoot(): string {
+    return adaptersRoot(this.context.globalStorageUri.fsPath);
+  }
+
+  /** `plannotator.guides.installAdapters` (default on): install a missing npm ACP adapter into the extension's storage. */
+  private installAdaptersSetting(): boolean {
+    return vscode.workspace.getConfiguration("plannotator.guides").get<boolean>("installAdapters") ?? true;
+  }
+
+  private readonly adapterInstalls = new Map<string, Promise<InstallResult>>();
+
+  /** Install (or reinstall) the agent's pinned adapter, with a progress notification. One install per agent at a time. */
+  private installAdapterNow(agent: AgentDescriptor): Promise<InstallResult> {
+    const spec = agent.adapter;
+    if (!spec) return Promise.resolve({ ok: false, message: `${agent.label} has no ACP adapter to install.` });
+    const running = this.adapterInstalls.get(agent.id);
+    if (running) return running;
+    const job = Promise.resolve(
+      vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Installing ${agent.label}'s ACP adapter…` }, async (progress) => {
+        progress.report({ message: `${spec.package}@${spec.version}` });
+        const result = await installAdapter(this.adaptersRoot(), agent.id, agent.label, spec, { runner: this.runner });
+        this.log.info(result.ok ? `[guides] installed ${spec.package}@${spec.version} in ${result.dir}` : `[guides] ${result.message}`);
+        return result;
+      }),
+    ).finally(() => this.adapterInstalls.delete(agent.id));
+    this.adapterInstalls.set(agent.id, job);
+    return job;
+  }
+
+  /**
+   * The command to start the agent, installing its adapter first when it is
+   * missing and the setting allows. When the agent cannot be started, says
+   * why (with Retry for a failed install, or how to install the agent) and
+   * answers null.
+   */
+  private ensureLaunch(agent: AgentDescriptor): Promise<ReadyLaunch | null> {
+    return ensureAgentLaunch(agent, {
+      resolve: (a) => this.launchFor(a),
+      installAdapters: this.installAdaptersSetting(),
+      install: (a) => this.installAdapterNow(a),
+      installFailed: async (a, message) => {
+        const choice = await vscode.window.showErrorMessage(message, "Retry", "Copy command", "Open docs");
+        if (choice === "Copy command") void vscode.env.clipboard.writeText(a.installCommand);
+        if (choice === "Open docs") void vscode.env.openExternal(vscode.Uri.parse(a.docsUrl));
+        return choice === "Retry" ? "retry" : "stop";
+      },
+      missing: async (a, launch) => {
+        const now = await this.showMissing({ agent: a, launch });
+        return now?.launch.ok ? now.launch : null;
+      },
+    });
+  }
+
+  /** "Guided Reviews: Update Agent Adapters": reinstall every adapter Guided Reviews installed, at the pinned version. */
+  private async updateAdapters(): Promise<void> {
+    const root = this.adaptersRoot();
+    const agents = KNOWN_AGENTS.filter((a) => a.adapter && hasManagedCopy(root, a.id));
+    if (agents.length === 0) {
+      void vscode.window.showInformationMessage("Guided Reviews has not installed any agent adapter yet. It installs one when a guide starts with an agent that needs it.");
+      return;
     }
+    const done: string[] = [];
+    for (const agent of agents) {
+      const result = await this.installAdapterNow(agent);
+      if (!result.ok) {
+        const choice = await vscode.window.showErrorMessage(result.message, "Retry");
+        if (choice === "Retry") return this.updateAdapters();
+        continue;
+      }
+      done.push(`${agent.label} (${agent.adapter!.package}@${agent.adapter!.version})`);
+    }
+    if (done.length) void vscode.window.showInformationMessage(`Updated the ACP adapters for ${done.join(", ")}.`);
+  }
+
+  /** `plannotator.guides.autoApprove`: the user opted in to approving the agent's requests automatically during guides. */
+  private autoApproveSetting(): boolean {
+    return vscode.workspace.getConfiguration("plannotator.guides").get<string>("autoApprove") === "allow-all";
+  }
+
+  /** Start the agent once, read its config options, stop it. Nothing is prompted. */
+  private async probeAgentOptions(agent: AgentDescriptor): Promise<AgentOptionsCache | null> {
+    const launch = await this.ensureLaunch(agent);
+    if (!launch) return null;
     const cwd = this.dashboard?.repo?.root ?? this.cwd() ?? this.context.globalStorageUri.fsPath;
+    mkdirSync(cwd, { recursive: true });
     let client: AcpClient | null = null;
     try {
-      client = await AcpClient.start({ command: launch.command, args: launch.args, cwd }, {
+      client = await AcpClient.start({ command: launch.command, args: launch.args, cwd, ...(launch.env && { env: launch.env }) }, {
         onUpdate: () => {},
         requestPermission: async () => ({ outcome: { outcome: "cancelled" } }),
         onStderr: (t) => this.log.info(`[agent] ${t.trimEnd()}`),
       }, { name: "plannotator-vscode", title: "Plannotator", version: this.version });
       const session = await Promise.race([
         client.newSession(cwd, []),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Claude Code did not answer within 60 seconds.")), 60_000)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${agent.label} did not answer within 60 seconds.`)), 60_000)),
       ]);
-      const options = readAgentOptions(CLAUDE_CODE.id, session.configOptions);
-      await this.context.globalState.update(OPTIONS_KEY, options);
+      const options = readAgentOptions(agent.id, session.configOptions);
+      await this.context.globalState.update(optionsKey(agent.id), options);
       return options;
     } catch (err) {
-      void vscode.window.showErrorMessage(`Could not read Claude Code's models: ${err instanceof Error ? err.message : String(err)}`);
+      void vscode.window.showErrorMessage(`Could not read ${agent.label}'s models: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     } finally {
       client?.dispose();
     }
   }
 
-  private showAdapterMissing(message: string): void {
-    void vscode.window.showErrorMessage(message, "Copy install command", "Open settings").then((choice) => {
-      if (choice === "Copy install command") void vscode.env.clipboard.writeText(CLAUDE_CODE.installCommand);
-      if (choice === "Open settings") void vscode.commands.executeCommand("workbench.action.openSettings", "plannotator.guides.claudeCode");
-    });
+  /**
+   * Why the agent cannot start, with what fixes it: install its adapter now
+   * (when auto-install is off), "Install <agent>" (a terminal with the
+   * agent's official install command typed in, for the user to run), its
+   * docs, or settings. Answers the agent's new status when its adapter was
+   * installed here, else null.
+   */
+  private async showMissing(status: AgentStatus): Promise<AgentStatus | null> {
+    const { agent, launch } = status;
+    if (launch.ok) return status;
+    // The command for this platform (on Windows the documented PowerShell one); none: the docs instead.
+    const installCmd = launch.reason === "agent" ? installCommandFor(agent.installCommand, agent.installCommandWindows) : launch.reason === "requires" && agent.requires ? installCommandFor(agent.requires.installCommand, undefined) : null;
+    const installAgent = installCmd ? (launch.reason === "requires" && agent.requires ? `Install ${agent.requires.label}` : `Install ${agent.label}`) : null;
+    const buttons = [
+      ...(launch.reason === "adapter" ? ["Install adapter", "Copy command"] : []),
+      ...(installAgent ? [installAgent] : []),
+      "Open docs",
+      ...(launch.reason === "setting" || launch.reason === "adapter" ? ["Open settings"] : []),
+    ];
+    const choice = await vscode.window.showErrorMessage(launch.message, ...buttons);
+    if (choice === "Install adapter") {
+      const result = await this.installAdapterNow(agent);
+      if (!result.ok) {
+        const again = await vscode.window.showErrorMessage(result.message, "Retry");
+        return again === "Retry" ? this.showMissing({ agent, launch: this.launchFor(agent) }) : null;
+      }
+      const now = this.launchFor(agent);
+      return now.ok ? { agent, launch: now } : null;
+    }
+    if (choice === "Copy command") void vscode.env.clipboard.writeText(agent.installCommand);
+    if (choice && choice === installAgent) {
+      const terminal = vscode.window.createTerminal({ name: choice });
+      terminal.show();
+      // Typed in, not run: the user reads it and presses Enter.
+      terminal.sendText(installCmd!, false);
+    }
+    if (choice === "Open docs") void vscode.env.openExternal(vscode.Uri.parse(launch.reason === "requires" && agent.requires ? agent.requires.docsUrl : agent.docsUrl));
+    if (choice === "Open settings") {
+      const key = agent.id === CUSTOM_AGENT_ID ? "plannotator.guides.customAgent" : launch.reason === "adapter" ? "plannotator.guides.installAdapters" : "plannotator.guides.agentCommands";
+      void vscode.commands.executeCommand("workbench.action.openSettings", key);
+    }
+    return null;
+  }
+
+  private pickerInput(remembered: RememberedChoice | undefined) {
+    return {
+      agents: this.agentStatuses(),
+      optionsFor: (id: string) => this.agentOptions(id),
+      loadOptions: (agent: AgentDescriptor) => this.probeAgentOptions(agent),
+      onMissing: (status: AgentStatus) => this.showMissing(status),
+      installAdapters: this.installAdaptersSetting(),
+      remembered: remembered ? { agent: remembered.agent ?? CLAUDE_CODE.id, model: remembered.model, effort: remembered.effort } : undefined,
+    };
   }
 
   private async changeDefaults(): Promise<void> {
-    const defaults = this.context.globalState.get<{ model?: string; effort?: string }>(DEFAULTS_KEY);
-    const picked = await pickAgentAndEffort({
-      options: this.agentOptions(),
-      loadOptions: () => this.probeAgentOptions(),
-      remembered: defaults,
-      standingInstructions: "",
-      defaultsOnly: true,
-    });
+    const defaults = this.context.globalState.get<RememberedChoice>(DEFAULTS_KEY);
+    const picked = await pickAgentAndEffort({ ...this.pickerInput(defaults), standingInstructions: "", defaultsOnly: true });
     if (!picked) return;
-    await this.context.globalState.update(DEFAULTS_KEY, { model: picked.agent.model?.id, effort: picked.agent.effort?.id });
+    await this.context.globalState.update(DEFAULTS_KEY, { agent: picked.agent.id, model: picked.agent.model?.id, effort: picked.agent.effort?.id });
     this.updateHome();
   }
 
@@ -437,25 +828,24 @@ export class GuidesController implements vscode.Disposable {
     }
     await this.ensureDashboard();
     const model = this.dashboard;
-    if (!model?.repo) {
-      void vscode.window.showWarningMessage("Open a folder that is a git repository to start a guided review.");
+    // With no repository open, only a pull request (by link) can be guided: from a clone in the extension's storage.
+    const source = preset ?? (model ? await pickSource(model) : await pickPullRequestByLink());
+    if (!source) return;
+    if (!model?.repo && !(source.kind === "pr" && source.repo)) {
+      void vscode.window.showWarningMessage("Open a folder that is a git repository, or paste a pull request link, to start a guided review.");
       return;
     }
-    const source = preset ?? (await pickSource(model));
-    if (!source) return;
-    const remembered = this.context.workspaceState.get<{ model?: string; effort?: string }>(`plannotator.guides.choices:${model.repo.root}`) ?? this.context.globalState.get(DEFAULTS_KEY);
-    const picked = await pickAgentAndEffort({
-      options: this.agentOptions(),
-      loadOptions: () => this.probeAgentOptions(),
-      remembered,
-      standingInstructions: readGuideInstructions(),
-    });
+    const choicesKey = model?.repo ? `plannotator.guides.choices:${model.repo.root}` : null;
+    const remembered = (choicesKey && this.context.workspaceState.get<RememberedChoice>(choicesKey)) || this.context.globalState.get<RememberedChoice>(DEFAULTS_KEY);
+    const picked = await pickAgentAndEffort({ ...this.pickerInput(remembered), standingInstructions: readGuideInstructions(), autoApprove: this.autoApproveSetting() });
     if (!picked) return;
-    await this.context.workspaceState.update(`plannotator.guides.choices:${model.repo.root}`, { model: picked.agent.model?.id, effort: picked.agent.effort?.id });
-    await this.startRun(source, picked.agent, picked.instructions);
+    if (choicesKey) await this.context.workspaceState.update(choicesKey, { agent: picked.agent.id, model: picked.agent.model?.id, effort: picked.agent.effort?.id });
+    // The start flow's toggle (seeded from the setting) decides, for this run.
+    await this.startRun(source, picked.agent, picked.instructions, undefined, autoApproveChoice(picked));
   }
 
-  private async prepareSource(choice: SourceChoice): Promise<{ source: ReviewSourceRecord; rawPatch: string } | null> {
+  private async prepareSource(choice: SourceChoice): Promise<{ source: ReviewSourceRecord; rawPatch: string; repoKey: string } | null> {
+    if (choice.kind === "pr" && choice.repo) return this.prepareOtherRepoPullRequest(choice.number, choice.repo);
     const repo = this.dashboard?.repo ?? (this.cwd() ? await getRepoInfo(this.runner, this.cwd()!) : null);
     if (!repo) throw new Error("No git repository is open.");
     if (choice.kind === "local") {
@@ -466,6 +856,7 @@ export class GuidesController implements vscode.Disposable {
       }
       return {
         rawPatch: patch.rawPatch,
+        repoKey: repo.repoKey,
         source: {
           kind: "local",
           repoRoot: repo.root,
@@ -487,6 +878,7 @@ export class GuidesController implements vscode.Disposable {
       const wt = await preparePullRequestWorktree(this.runner, repo, pr, storage, (step) => progress.report({ message: step }));
       return {
         rawPatch: wt.rawPatch,
+        repoKey: repo.repoKey,
         source: {
           kind: "pr",
           repoRoot: repo.root,
@@ -503,6 +895,50 @@ export class GuidesController implements vscode.Disposable {
     });
   }
 
+  /**
+   * A pull request of a repository that is not open in VS Code: a blobless
+   * clone of it in the extension's storage (made once, reused), then the
+   * same per-PR worktree as any PR. When that cannot work (no gh, not signed
+   * in, no access), says why in one line and how to fix it.
+   */
+  private async prepareOtherRepoPullRequest(number: number, ghRepo: string): Promise<{ source: ReviewSourceRecord; rawPatch: string; repoKey: string } | null> {
+    const storage = this.context.globalStorageUri.fsPath;
+    mkdirSync(storage, { recursive: true });
+    try {
+      return await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Preparing ${ghRepo}#${number}` }, async (progress) => {
+        const step = (m: string) => progress.report({ message: m });
+        const repo = await ensureRepoClone(this.runner, ghRepo, storage, step, { ghPath: this.ghPath() });
+        const pr = await viewPullRequest(this.runner, repo.root, number, ghRepo);
+        const wt = await preparePullRequestWorktree(this.runner, repo, pr, storage, step);
+        return {
+          rawPatch: wt.rawPatch,
+          repoKey: repo.repoKey,
+          source: {
+            kind: "pr" as const,
+            repoRoot: repo.root,
+            headRoot: wt.path,
+            repoName: repo.displayName,
+            label: `PR #${pr.number}`,
+            headSha: wt.headSha,
+            baseSha: wt.mergeBase,
+            baseLabel: pr.baseRefName,
+            pr: { number: pr.number, url: pr.url, title: pr.title, author: pr.author },
+            worktreePath: wt.path,
+          },
+        };
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message.split("\n")[0] : String(err);
+      const choice = await vscode.window.showErrorMessage(`Could not guide ${ghRepo}#${number}: ${message} Open the repository in VS Code and guide it from there, or check \`gh auth status\`.`, "Open a folder…", "Open on GitHub");
+      if (choice === "Open a folder…") void vscode.commands.executeCommand("workbench.action.files.openFolder");
+      if (choice === "Open on GitHub") {
+        const ref = parseGhRepoArg(ghRepo);
+        if (ref) void vscode.env.openExternal(vscode.Uri.parse(`https://${ref.host}/${ref.owner}/${ref.repo}/pull/${number}`));
+      }
+      return null;
+    }
+  }
+
   private relayHost(): Promise<RelayHost> {
     if (!this.relay) {
       this.relay = startRelayHost({ serverVersion: this.version, log: (l) => this.log.warn(l) });
@@ -511,29 +947,37 @@ export class GuidesController implements vscode.Disposable {
     return this.relay;
   }
 
-  private async startRun(choice: SourceChoice, agent: AgentChoiceRecord, instructions?: string, resume?: DraftRecord): Promise<void> {
-    const launch = resolveAgentLaunch(CLAUDE_CODE, this.agentSetting());
-    if (!launch.ok) return this.showAdapterMissing(launch.message);
-    let prepared: { source: ReviewSourceRecord; rawPatch: string } | null;
-    if (resume) prepared = { source: resume.source, rawPatch: resume.draft.review.rawPatch };
+  private async startRun(choice: SourceChoice, agent: AgentChoiceRecord, instructions?: string, resume?: DraftRecord, autoApprove = this.autoApproveSetting()): Promise<void> {
+    const descriptor = this.agentById(agent.id);
+    if (!descriptor) {
+      void vscode.window.showErrorMessage(agent.id === CUSTOM_AGENT_ID ? "This guide was started with the custom agent, which is no longer set (plannotator.guides.customAgent.command)." : `Plannotator does not know the agent ${agent.label}.`);
+      return;
+    }
+    const available = await this.ensureLaunch(descriptor);
+    if (!available) return;
+    let prepared: { source: ReviewSourceRecord; rawPatch: string; repoKey?: string } | null;
+    if (resume) prepared = { source: resume.source, rawPatch: resume.draft.review.rawPatch, repoKey: resume.repoKey };
     else prepared = await this.prepareSource(choice);
     if (!prepared) return;
-    const repoKey = resume?.repoKey ?? this.dashboard?.repo?.repoKey;
+    const launch = available;
+    const repoKey = resume?.repoKey ?? prepared.repoKey ?? this.dashboard?.repo?.repoKey;
     if (!repoKey) throw new Error("No repository.");
     const relay = await this.relayHost();
     const files = changedFilesFromPatch(prepared.rawPatch);
     const gen = new GuideGeneration(
-      { repoKey, source: prepared.source, rawPatch: prepared.rawPatch, files, agent, ...(instructions && { instructions }), ...(resume && { resume }) },
+      { repoKey, source: prepared.source, rawPatch: prepared.rawPatch, files, agent, ...(instructions && { instructions }), ...(resume && { resume }), ...(autoApprove && { autoApprove: true }) },
       {
         relay,
-        agentLaunch: (cwd) => ({ command: launch.command, args: launch.args, cwd }),
+        agent: descriptor,
+        agentLaunch: (cwd) => ({ command: launch.command, args: launch.args, cwd, ...(launch.env && { env: launch.env }) }),
         mcpServer: {
           command: process.execPath,
           args: [vscode.Uri.joinPath(this.context.extensionUri, "dist", "guide-mcp.cjs").fsPath],
           env: { ELECTRON_RUN_AS_NODE: "1" },
         },
         clientInfo: { name: "plannotator-vscode", title: "Plannotator", version: this.version },
-        requestPermission: (req, signal) => this.askPermission(req, signal, agent.label),
+        requestPermission: (pending, signal) => this.notifyPermission(pending, signal, agent.label),
+        approveAlways: () => void vscode.workspace.getConfiguration("plannotator.guides").update("autoApprove", "allow-all", vscode.ConfigurationTarget.Global),
         resolveSymbol: (name, path, f, headRoot) => resolveSymbolForBuilder(name, path, headRoot, f.map((x) => x.path)),
         checkMermaid: (source) => this.checkMermaid(source),
         log: (line) => this.log.info(line),
@@ -646,59 +1090,43 @@ export class GuidesController implements vscode.Disposable {
       savedGuideId: s.savedGuideId ?? null,
       signIn: s.signIn ? (s.signIn.logins.length ? s.signIn.logins.map((l) => l.label) : ["Sign in"]) : null,
       memoryOnly: !!s.memoryOnly,
+      pendingPermissions: (s.pendingPermissions ?? []).map((p) => ({ id: p.id, title: p.title, kind: p.kind ?? null, target: p.target ?? null, options: p.options })),
+      approvals: { auto: !!s.autoApprove, mode: s.permissiveMode ?? null },
+      offerAutoApprove: !!s.offerAutoApprove && !s.autoApprove,
+      bottlenecks: (s.bottlenecks ?? []).map((b) => ({ key: b.key, title: b.title, detail: b.detail ?? null, action: b.action ?? null })),
     };
   }
 
   /**
-   * The agent's own permission options, as a Quick Pick that stays open until
-   * answered (a modal dialog cannot be closed when the run is cancelled; this
-   * one closes with the run). Closing it is a "no": the agent's reject option.
+   * A pending permission request, as a notification (it never blocks the
+   * editor) with every option the agent offers plus "Approve all for this run".
+   * The run view shows the same request with the same buttons; the first
+   * answer wins. Dismissing the notification leaves it waiting in the run view.
    */
-  private async askPermission(req: RequestPermissionRequest, signal: AbortSignal, agentLabel: string): Promise<RequestPermissionResponse> {
-    if (signal.aborted) return { outcome: { outcome: "cancelled" } };
-    const title = req.toolCall.title ?? "a tool";
-    const raw = req.toolCall.rawInput as Record<string, unknown> | undefined;
-    const detail = raw && typeof raw === "object"
-      ? Object.entries(raw).slice(0, 4).map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`.slice(0, 300)).join(" · ")
-      : undefined;
-    const qp = vscode.window.createQuickPick<vscode.QuickPickItem & { optionId: string }>();
-    qp.title = `${agentLabel} asks to run: ${title}`;
-    qp.placeholder = detail ?? "The guide's agent asks before running this tool, under your own settings.";
-    qp.ignoreFocusOut = true;
-    qp.items = req.options.map((o) => ({ label: o.name, optionId: o.optionId, ...(o.kind.startsWith("reject") && { description: "no" }) }));
-    const chosen = await new Promise<string | null | "aborted">((resolve) => {
-      let done = false;
-      const finish = (v: string | null | "aborted") => {
-        if (done) return;
-        done = true;
-        signal.removeEventListener("abort", onAbort);
-        resolve(v);
-        qp.dispose();
-      };
-      const onAbort = () => finish("aborted");
-      signal.addEventListener("abort", onAbort, { once: true });
-      qp.onDidAccept(() => finish(qp.selectedItems[0]?.optionId ?? null));
-      qp.onDidHide(() => finish(null));
-      qp.show();
-    });
-    if (chosen === "aborted" || signal.aborted) return { outcome: { outcome: "cancelled" } };
-    if (chosen) return { outcome: { outcome: "selected", optionId: chosen } };
-    const reject = req.options.find((o) => o.kind === "reject_once") ?? req.options.find((o) => o.kind.startsWith("reject"));
-    return reject ? { outcome: { outcome: "selected", optionId: reject.optionId } } : { outcome: { outcome: "cancelled" } };
+  private async notifyPermission(pending: PendingPermission, signal: AbortSignal, agentLabel: string): Promise<PermissionAnswer | null> {
+    if (signal.aborted) return null;
+    const message = `${agentLabel} asks to run: ${pending.title}${pending.target ? ` (${pending.target})` : ""}`;
+    const buttons = [...pending.options.map((o) => o.name), APPROVE_RUN_BUTTON];
+    const choice = await vscode.window.showInformationMessage(message, ...buttons);
+    if (!choice || signal.aborted) return null;
+    if (choice === APPROVE_RUN_BUTTON) return { approve: "run" };
+    const option = pending.options.find((o) => o.name === choice);
+    return option ? { optionId: option.optionId } : null;
   }
 
   /**
    * Sign in to the agent: a terminal running the agent's own login command
    * (the terminal sign-ins it listed in `initialize`), else `claude /login`.
    */
-  private async signIn(label?: string): Promise<void> {
+  private async signIn(label?: string, explicit?: { agentId: string; logins: LoginCommand[]; cwd: string }): Promise<void> {
     const state = this.run?.gen.state;
-    const logins: LoginCommand[] = state?.signIn?.logins ?? [];
-    const launch = resolveAgentLaunch(CLAUDE_CODE, this.agentSetting());
+    const logins: LoginCommand[] = explicit?.logins ?? state?.signIn?.logins ?? [];
+    const agent = (explicit ? this.agentById(explicit.agentId) : state && this.agentById(state.agent.id)) ?? CLAUDE_CODE;
+    const launch = this.launchFor(agent);
     let choice = label;
     if (!choice) {
       const buttons = logins.length ? logins.map((l) => l.label) : ["Sign in"];
-      choice = await vscode.window.showErrorMessage(`${CLAUDE_CODE.label} is not signed in. Sign in in a terminal, then resume the guide.`, ...buttons);
+      choice = await vscode.window.showErrorMessage(`${agent.label} is not signed in. Sign in in a terminal, then resume the guide.`, ...buttons);
       if (!choice) return;
     }
     const login = logins.find((l) => l.label === choice) ?? (logins.length === 1 ? logins[0] : undefined);
@@ -708,13 +1136,16 @@ export class GuidesController implements vscode.Disposable {
       command = launch.command;
       args = [...launch.args, ...login.args];
     } else {
-      const claude = findExecutable("claude");
-      if (!claude) {
-        void vscode.window.showErrorMessage(`Run \`claude\` in a terminal and sign in with /login, then resume the guide.`);
+      const fallback = agent.signIn;
+      // No command of its own: the agent's sign-in is a subcommand of the program that starts it (`cursor-agent login` or `agent login`).
+      const found = fallback ? (fallback.command ? findExecutable(fallback.command) : launch.ok ? launch.command : null) : null;
+      if (!fallback || !found) {
+        const shown = fallback ? [fallback.command ?? agent.command, ...fallback.args].join(" ") : "";
+        void vscode.window.showErrorMessage(fallback ? `Run \`${shown}\` in a terminal to sign in, then resume the guide.` : `Sign in to ${agent.label} in a terminal (see ${agent.docsUrl}), then resume the guide.`);
         return;
       }
-      command = claude;
-      args = ["/login"];
+      command = found;
+      args = [...fallback.args];
     }
     let plan;
     try {
@@ -724,11 +1155,11 @@ export class GuidesController implements vscode.Disposable {
       return;
     }
     const terminal = vscode.window.createTerminal({
-      name: `${CLAUDE_CODE.label} sign-in`,
+      name: `${agent.label} sign-in`,
       shellPath: plan.command,
       shellArgs: plan.args,
-      cwd: state?.source.repoRoot ?? this.cwd(),
-      env: { ...plan.env, ...login?.env },
+      cwd: explicit?.cwd ?? state?.source.repoRoot ?? this.cwd(),
+      env: { ...plan.env, ...(launch.ok && login ? launch.env : undefined), ...login?.env },
     });
     terminal.show();
   }
@@ -752,7 +1183,7 @@ export class GuidesController implements vscode.Disposable {
     if (!id) return null;
     // With guide history off the run's draft is only in memory.
     if (this.run?.gen.state.id === id && this.run.gen.state.memoryOnly) return this.run.gen.toDraftRecord();
-    const keys = new Set([this.dashboard?.repo?.repoKey, this.run?.gen.state.repoKey].filter((k): k is string => !!k));
+    const keys = new Set([this.dashboard?.repo?.repoKey, this.run?.gen.state.repoKey, ...allRepoKeys()].filter((k): k is string => !!k));
     for (const key of keys) {
       const r = loadDraftRecord(key, id);
       if (r) return r;
@@ -780,29 +1211,29 @@ export class GuidesController implements vscode.Disposable {
     p.panel.onDidDispose(() => this.draftPanels.delete(record.id));
     const gen = new GuideGeneration(
       { repoKey: record.repoKey, source: record.source, rawPatch: record.draft.review.rawPatch, files: changedFilesFromPatch(record.draft.review.rawPatch), agent: record.agent, ...(record.instructions && { instructions: record.instructions }), resume: record },
-      this.idleDeps(),
+      this.idleDeps(record.agent.id),
     );
     const state = { ...gen.state, status: record.status === "running" ? "stopped" : record.status, statusMessage: record.statusMessage ?? "The run stopped before the guide was finished.", startedAt: record.createdAt, endedAt: record.updatedAt } as GenerationState;
     p.host.show(this.generatingState(state));
   }
 
   /** Deps for a generation that is never run (Save as is). */
-  private idleDeps(): ConstructorParameters<typeof GuideGeneration>[1] {
+  private idleDeps(agentId: string): ConstructorParameters<typeof GuideGeneration>[1] {
     return {
       relay: null as unknown as RelayHost,
+      agent: this.agentById(agentId) ?? CLAUDE_CODE,
       agentLaunch: () => {
         throw new Error("not running");
       },
       mcpServer: { command: "", args: [] },
       clientInfo: { name: "plannotator-vscode", title: "Plannotator", version: this.version },
-      requestPermission: async () => ({ outcome: { outcome: "cancelled" } }),
       resolveSymbol: (name, path, f, headRoot) => resolveSymbolForBuilder(name, path, headRoot, f.map((x) => x.path)),
       checkMermaid: (source) => this.checkMermaid(source),
       history: guideHistoryEnabled(),
     };
   }
 
-  private async resumeDraft(id: string | undefined): Promise<void> {
+  private async resumeDraft(id: string | undefined, autoApprove?: boolean): Promise<void> {
     const record = this.findDraft(id ?? this.run?.gen.state.id);
     if (!record) {
       void vscode.window.showWarningMessage("That draft is gone.");
@@ -814,7 +1245,7 @@ export class GuidesController implements vscode.Disposable {
     }
     this.draftPanels.get(record.id)?.panel.dispose();
     if (this.run?.gen.state.id === record.id) this.run.panel?.panel.dispose();
-    await this.startRun({ kind: "local", mode: "since-base" }, record.agent, record.instructions, record);
+    await this.startRun({ kind: "local", mode: "since-base" }, record.agent, record.instructions, record, autoApprove ?? this.autoApproveSetting());
   }
 
   private async saveDraftAsIs(id: string | undefined): Promise<void> {
@@ -822,7 +1253,7 @@ export class GuidesController implements vscode.Disposable {
     if (!record) return;
     const gen = new GuideGeneration(
       { repoKey: record.repoKey, source: record.source, rawPatch: record.draft.review.rawPatch, files: changedFilesFromPatch(record.draft.review.rawPatch), agent: record.agent, ...(record.instructions && { instructions: record.instructions }), resume: record },
-      this.idleDeps(),
+      this.idleDeps(record.agent.id),
     );
     const result = await gen.saveAsIs();
     if (!result.ok) {
@@ -867,6 +1298,28 @@ export class GuidesController implements vscode.Disposable {
     return found ? { repoKey: found.repoKey } : null;
   }
 
+  /**
+   * The repository a guide is read from: the open one when it is the guide's
+   * own, else the extension's clone of it (made now for a GitHub repository
+   * when there is none, so a PR guide of another repository opens without
+   * that repository open). Null when there is no way to reach it.
+   */
+  private async readerRepoRoot(repoKey: string, onStep: (m: string) => void): Promise<string | null> {
+    const open = this.dashboard?.repo;
+    if (open && open.repoKey === repoKey) return open.root;
+    const storage = this.context.globalStorageUri.fsPath;
+    const clone = repoClonePath(storage, repoKey);
+    if (existsSync(join(clone, ".git"))) return clone;
+    const ghRepo = ghRepoOfKey(repoKey);
+    if (!ghRepo) return null;
+    try {
+      return (await ensureRepoClone(this.runner, ghRepo, storage, onStep, { ghPath: this.ghPath() })).root;
+    } catch (err) {
+      this.log.warn(`[guides] ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  }
+
   /** A saved guide, or one kept in memory because guide history is off. */
   private loadGuide(repoKey: string, id: string): LoadedGuide | null {
     return this.sessionGuides.get(id) ?? loadSavedGuide(repoKey, id);
@@ -888,7 +1341,9 @@ export class GuidesController implements vscode.Disposable {
         return;
       }
       const sides = await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: "Opening the guide" }, (progress) =>
-        resolveReaderSides(this.runner, loaded, { repoRoot: this.dashboard?.repo?.root ?? null, storageDir: this.context.globalStorageUri.fsPath, onStep: (m) => progress.report({ message: m }) }),
+        this.readerRepoRoot(where.repoKey, (m) => progress.report({ message: m })).then((repoRoot) =>
+          resolveReaderSides(this.runner, loaded, { repoRoot, storageDir: this.context.globalStorageUri.fsPath, onStep: (m) => progress.report({ message: m }) }),
+        ),
       );
       if ("error" in sides) {
         void vscode.window.showWarningMessage(sides.error);
@@ -898,6 +1353,7 @@ export class GuidesController implements vscode.Disposable {
       const firstOpen = model.reviewed.findIndex((r) => !r);
       model.currentChapter = firstOpen >= 0 ? firstOpen : 0;
       this.reader = { model, sides };
+      this.asks.onReaderChanged(model.id);
       this.currentFile = null;
       void vscode.commands.executeCommand("setContext", "plannotator.guides.readerOpen", true);
     }
@@ -934,6 +1390,7 @@ export class GuidesController implements vscode.Disposable {
     if (!this.reader) return;
     this.guidePanels.get(this.reader.model.id)?.panel.dispose();
     this.reader = null;
+    this.asks.onReaderChanged(null);
     this.currentFile = null;
     void vscode.commands.executeCommand("setContext", "plannotator.guides.readerOpen", false);
     this.updateReaderViews();
@@ -943,7 +1400,7 @@ export class GuidesController implements vscode.Disposable {
     if (!this.reader) return null;
     const { model, sides } = this.reader;
     const env = model.loaded.envelope;
-    const engine = env.engine === "claude" ? "Claude Code" : env.engine ?? "";
+    const engine = engineLabel(env.engine);
     const kicker = ["Guided review", env.label, engine, model.loaded.sidecar.agent?.model?.label ?? env.model, env.generatedAt ? relativeTime(env.generatedAt) : ""].filter(Boolean).join(" · ");
     return {
       mode: "guide",
@@ -995,7 +1452,15 @@ export class GuidesController implements vscode.Disposable {
       reviewed: model.reviewed[i],
       hasNext: i + 1 < model.chapters.length,
       ...(footer && { footer }),
+      ...this.chapterAsks(i),
     };
+  }
+
+  /** The chapter view's ask box and the answers about this chapter. */
+  private chapterAsks(chapter: number): Pick<ChapterViewState, "ask" | "answers" | "answersFooter"> {
+    if (!this.reader) return {};
+    const a = this.asks.chapterAnswers(this.reader.model.loaded, chapter);
+    return { ask: { agent: a.agent, busy: a.busy }, ...(a.items.length && { answers: a.items }), ...(a.footer && a.items.length && { answersFooter: a.footer }) };
   }
 
   resolveChapterView(view: vscode.WebviewView): void {
@@ -1014,7 +1479,7 @@ export class GuidesController implements vscode.Disposable {
     this.updateChapterView();
   }
 
-  private updateChapterView(): void {
+  updateChapterView(): void {
     if (!this.chapterView) return;
     const state = this.chapterState();
     this.chapterView.view.title = state.empty ? "Chapter" : `Chapter ${state.n} · why this changed`;
@@ -1028,6 +1493,7 @@ export class GuidesController implements vscode.Disposable {
     if (state && this.reader) this.guidePanels.get(this.reader.model.id)?.host.show(state);
     this.ui.refresh();
     this.ui.updateStatus(this.currentFile);
+    this.updateEditorContext(vscode.window.activeTextEditor);
   }
 
   private persistTicks(): void {
@@ -1041,7 +1507,7 @@ export class GuidesController implements vscode.Disposable {
     model.loaded.envelope.reviewed = [...model.reviewed];
   }
 
-  private async openChapter(n: number | undefined, options?: { openFile?: boolean }): Promise<void> {
+  private async openChapter(n: number | undefined, options?: { openFile?: boolean; column?: vscode.ViewColumn }): Promise<void> {
     if (!this.reader || n === undefined) return;
     const { model } = this.reader;
     const index = n - 1;
@@ -1056,7 +1522,7 @@ export class GuidesController implements vscode.Disposable {
     }
     if (options?.openFile !== false) {
       const first = model.chapters[index].files.find((f) => !model.fileTicks.has(f.path)) ?? model.chapters[index].files[0];
-      if (first) await this.openFile(first.path);
+      if (first) await this.openFile(first.path, undefined, options?.column);
     }
   }
 
@@ -1109,7 +1575,7 @@ export class GuidesController implements vscode.Disposable {
   }
 
   /** Open a guide file in the native diff editor, in preview so stepping reuses one tab. */
-  async openFile(path: string | undefined, line?: number): Promise<void> {
+  async openFile(path: string | undefined, line?: number, column?: vscode.ViewColumn): Promise<void> {
     if (!this.reader || !path) return;
     const { model, sides } = this.reader;
     const file = model.files.get(path) ?? { path, status: "modified" };
@@ -1120,7 +1586,8 @@ export class GuidesController implements vscode.Disposable {
     const target = line ?? focus?.start ?? model.files.get(path)?.hunks[0]?.start;
     const selection = target ? new vscode.Range(target - 1, 0, target - 1, 0) : undefined;
     const title = `${basename(path)}${chapter >= 0 ? ` · Chapter ${chapter + 1}` : ""}`;
-    await vscode.commands.executeCommand("vscode.diff", baseUri(sides, file), headUri(sides, file), title, { preview: true, ...(selection && { selection }) });
+    const where = column ?? diffColumnBesideAnswers(baseUri(sides, file), headUri(sides, file));
+    await vscode.commands.executeCommand("vscode.diff", baseUri(sides, file), headUri(sides, file), title, { preview: true, ...(selection && { selection }), ...(where && { viewColumn: where }) });
     this.updateReaderViews();
     void this.offerDiffCodeLens();
   }
@@ -1135,11 +1602,20 @@ export class GuidesController implements vscode.Disposable {
     if (this.context.globalState.get<boolean>("plannotator.guides.askedDiffCodeLens")) return;
     await this.context.globalState.update("plannotator.guides.askedDiffCodeLens", true);
     const choice = await vscode.window.showInformationMessage(
-      "Guides put a line at the top of each diff: its chapter, Mark reviewed and Next file. VS Code hides such lines in diffs unless CodeLens in the diff editor is on. Turn it on?",
+      "Guided reviews put a line at the top of each diff: its chapter, Mark reviewed and Next file. VS Code hides such lines in diffs unless CodeLens in the diff editor is on. Turn it on?",
       "Turn on",
       "Not now",
     );
     if (choice === "Turn on") await vscode.workspace.getConfiguration("diffEditor").update("codeLens", true, vscode.ConfigurationTarget.Global);
+  }
+
+  /** `plannotator.guides.editorInGuide`: the editor shows a file of the open guide (either side), for "Ask the Agent About This…". */
+  private updateEditorContext(editor: vscode.TextEditor | undefined): void {
+    const inGuide = !!editor && !!this.reader && (() => {
+      const side = guideSideOf(this.reader!.sides, editor.document.uri, this.reader!.model.files);
+      return !!side && this.reader!.model.chapterOf(side.path) >= 0;
+    })();
+    void vscode.commands.executeCommand("setContext", "plannotator.guides.editorInGuide", inGuide);
   }
 
   private onActiveEditor(editor: vscode.TextEditor | undefined): void {
@@ -1170,19 +1646,19 @@ export class GuidesController implements vscode.Disposable {
   }
 
   /** A click on an overview link: its diff when the file is in the change, the plain file otherwise. */
-  private async openLink(href: string, action: "open" | "definition" | "references"): Promise<void> {
+  private async openLink(href: string, action: "open" | "definition" | "references", column?: vscode.ViewColumn): Promise<void> {
     if (!this.reader) return;
     const parsed = parseGuideLink(href);
     if (!parsed?.ok) return;
     const link = parsed.link;
-    if (link.kind === "chapter") return this.openChapter(link.chapter);
+    if (link.kind === "chapter") return this.openChapter(link.chapter, column ? { column } : undefined);
     const target = await locateLink(link, this.reader.model, this.reader.sides);
     if ("error" in target) {
       void vscode.window.showWarningMessage(target.error);
       return;
     }
-    if (action === "open" && target.inChange) return this.openFile(target.path, target.range.start.line + 1);
-    const editor = await vscode.window.showTextDocument(target.uri, { preview: true, selection: target.range });
+    if (action === "open" && target.inChange) return this.openFile(target.path, target.range.start.line + 1, column);
+    const editor = await vscode.window.showTextDocument(target.uri, { preview: true, selection: target.range, ...(column && { viewColumn: column }) });
     if (action === "definition") await vscode.commands.executeCommand("editor.action.revealDefinition");
     if (action === "references") await vscode.commands.executeCommand("editor.action.goToReferences", editor.document.uri, target.range.start);
   }
@@ -1237,6 +1713,7 @@ export class GuidesController implements vscode.Disposable {
     if (this.reader?.model.id === id) this.closeGuide();
     if (memory) this.sessionGuides.delete(id);
     else deleteSavedGuide(where.repoKey, id);
+    this.asks.onGuideDeleted(where.repoKey, id);
     const storage = this.context.globalStorageUri.fsPath;
     const wt = guideWorktreePath(loaded, storage);
     const repoRoot = loaded.sidecar.source?.repoRoot ?? this.dashboard?.repo?.root;
@@ -1257,6 +1734,7 @@ export class GuidesController implements vscode.Disposable {
   dispose(): void {
     // VS Code is closing: no grace period for the agent or anything it started.
     this.run?.gen.kill();
+    this.asks.kill();
     for (const d of this.disposables) d.dispose();
   }
 }

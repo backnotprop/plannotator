@@ -22,6 +22,7 @@ import {
 	buildFileTree,
 	isFileBrowserExcludedPath,
 } from "../generated/reference-common.ts";
+import { explicitFileBrowserMaxFiles, listFileBrowserFiles } from "../generated/file-browser-files.ts";
 import {
 	filterWorkspaceStatusForDirectory,
 	getWorkspaceStatusForDirectory,
@@ -508,15 +509,19 @@ export async function handleFileBrowserRequest(res: Res, url: URL): Promise<void
 		return;
 	}
 	try {
-		const files = new Set<string>();
-		const diskFiles: string[] = [];
-		walkMarkdownFiles(resolvedDir, resolvedDir, diskFiles);
-		for (const file of diskFiles) files.add(file);
 		const workspaceStatus = filterWorkspaceStatusForDirectory(await getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
-		for (const file of getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile)) {
-			files.add(file);
-		}
-		json(res, { tree: buildFileTree([...files].sort()), workspaceStatus });
+		// Pi's file browser had no cap: it applies one only when
+		// PLANNOTATOR_FILE_BROWSER_MAX_FILES is set, and lists every file otherwise.
+		const listing = await listFileBrowserFiles(resolvedDir, {
+			seed: getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile),
+			limit: explicitFileBrowserMaxFiles(),
+		});
+		json(res, {
+			tree: buildFileTree(listing.files),
+			workspaceStatus,
+			truncated: listing.truncated,
+			...(Number.isFinite(listing.limit) ? { fileLimit: listing.limit } : {}),
+		});
 	} catch {
 		json(res, { error: "Failed to list directory files" }, 500);
 	}

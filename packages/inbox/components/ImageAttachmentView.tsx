@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ImageZoomStage, type FitAxis, type ImageZoomStageHandle, type ZoomMode } from '@plannotator/ui/components/ImageZoomStage';
+import { ImageZoomStage, type FitAxis, type ImageZoomStageHandle, type WheelHintGate, type ZoomMode } from '@plannotator/ui/components/ImageZoomStage';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
-import { InboxApiError, inboxApi } from '../api';
-import { attachmentImageUrl, imageCommentAnnotation, WIDE_IMAGE_RATIO } from '../attachments';
+import { InboxApiError } from '../api';
+import { imageCommentAnnotation, WIDE_IMAGE_RATIO } from '../attachments';
+import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { PHONE_QUERY } from '../phone';
 import { Tip } from './Tip';
@@ -60,6 +61,8 @@ export function ImageAttachmentView({
   initialFit,
   onFitChange,
   onSwipe,
+  wheelHint,
+  suggestion,
 }: {
   attachment: InboxAttachmentState;
   version: 'current' | 'sent';
@@ -73,6 +76,10 @@ export function ImageAttachmentView({
   onFitChange?: (fit: 'fit' | 'actual') => void;
   /** A swipe across the fitted image: 1 next file, -1 previous. */
   onSwipe?: (dir: 1 | -1) => void;
+  /** The pane's "⌘ + scroll to zoom" gate, so the hint shows once per viewer open, not once per file (#2127). */
+  wheelHint?: WheelHintGate;
+  /** A suggested comment the box opens with (the tour's): kept with one press, or written over. */
+  suggestion?: string;
 }) {
   const [mode, setMode] = useState<ZoomMode>(initialFit ?? 'fit');
   const [scale, setScale] = useState<number | null>(null);
@@ -89,13 +96,14 @@ export function ImageAttachmentView({
   }, [fit]);
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(suggestion ?? '');
   const [markup, setMarkup] = useState<ImageAttachment | null>(null);
   const [annotating, setAnnotating] = useState(false);
   const [saving, setSaving] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const zoomRef = useRef<ImageZoomStageHandle>(null);
-  const src = attachmentImageUrl(attachment, version);
+  const source = useInboxFileSource();
+  const src = source.imageUrl(attachment, version);
 
   // Another version of the same file: fitted again.
   const shownVersion = useRef(version);
@@ -277,6 +285,7 @@ export function ImageAttachmentView({
               className="ib-zoomstage"
               imageClassName="ib-zoomimg"
               stageAttributes={{ 'data-image-zoom-stage': mode }}
+              wheelHint={wheelHint}
               onImageLoad={setNatural}
               onImageError={() => setFailed(true)}
               overlay={
@@ -336,7 +345,7 @@ export function ImageAttachmentView({
           // Nothing drawn: nothing to keep; the comment box stays as it was.
           if (!hasDrawings) return;
           try {
-            const kept = await inboxApi.uploadMarkup(blob);
+            const kept = await source.keepMarkup(blob);
             setMarkup({ path: kept.path, name: `${stem(attachment.name)}, marked up` });
           } catch (cause) {
             onError(cause instanceof InboxApiError ? cause.message : 'The drawing was not kept.');

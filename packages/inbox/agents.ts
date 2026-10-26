@@ -17,7 +17,7 @@ import {
 export function noteCandidates(model: InboxAgentsModel): InboxAgentRow[] {
   const failed = new Set(model.last_report?.failed.map((f) => f.agent) ?? []);
   return model.agents.filter(
-    (row) => row.detected && row.note !== null && row.note.state === 'absent' && row.reach.on && !failed.has(row.id),
+    (row) => row.detected && row.note !== null && (row.note.state === 'absent' || row.note.state === 'manual') && row.reach.on && !failed.has(row.id),
   );
 }
 
@@ -119,8 +119,9 @@ export function defaultPicks(rows: readonly InboxAgentRow[]): Record<string, boo
 }
 
 /** What a note result shows in its row. */
-export function noteResultLabel(result: { ok: true; action: string } | { ok: false }): 'Created' | 'Added' | 'Not added' {
+export function noteResultLabel(result: { ok: true; action: string } | { ok: false }): 'Created' | 'Added' | 'Copy manually' | 'Not added' {
   if (!result.ok) return 'Not added';
+  if (result.action === 'manual') return 'Copy manually';
   return result.action === 'created' ? 'Created' : 'Added';
 }
 

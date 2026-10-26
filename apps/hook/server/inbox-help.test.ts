@@ -39,7 +39,20 @@ const help = formatInboxHelp({
   dataDir: DATA_DIR,
   platform: "linux",
   agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: NOTE_HOME, env: { HOME: NOTE_HOME, PATH: "" } }),
+  board: true,
 });
+/** The same guide with the Board off (the default): nothing of cards. */
+const helpBoardOff = formatInboxHelp({
+  command: COMMAND,
+  dataDir: DATA_DIR,
+  platform: "linux",
+  agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: NOTE_HOME, env: { HOME: NOTE_HOME, PATH: "" } }),
+});
+
+/** What a person without the Board must never read in a help: the card action, the CLI, the Board. */
+function cardText(text: string): string[] {
+  return [/^### card$/m, /plannotator card/, /\(card\)/, /\bBoard\b/].filter((pattern) => pattern.test(text)).map(String);
+}
 
 let root = "";
 let trapBin = "";
@@ -68,7 +81,7 @@ describe("the guide against what it describes", () => {
     const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
     process.env.PATH = `${trapBin}:${savedPath ?? ""}`;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
-    const server = await startInboxServer({ dataDir: join(root, "served-data") });
+    const server = await startInboxServer({ dataDir: join(root, "served-data"), board: true });
     const client = new Client({ name: "inbox-help-test", version: "1.0.0" });
     try {
       await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -177,6 +190,17 @@ describe("the guide against what it describes", () => {
     expect(question!.parsed.context ?? "").not.toContain("Replaces");
   });
 
+  // What regresses: a person who never turned the Board on reads about cards in a help.
+  test("with the Board off, neither help says anything of cards; on, both do", () => {
+    expect(cardText(helpBoardOff)).toEqual([]);
+    expect(cardText(formatTopLevelHelp())).toEqual([]);
+    expect(cardText(formatTopLevelHelp({ board: false }))).toEqual([]);
+    // The check bites: on, both name it.
+    expect(help).toContain("\n### card\n");
+    expect(cardText(help).length).toBeGreaterThan(0);
+    expect(formatTopLevelHelp({ board: true })).toContain("plannotator card ");
+  });
+
   // Deliberate: the top-level help is where an agent learns this guide exists.
   test("the top-level help points agents at it", () => {
     expect(formatTopLevelHelp()).toContain("plannotator inbox --help");
@@ -207,4 +231,31 @@ describe("plannotator inbox --help as a process", () => {
     }
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
   }, 30_000);
+
+  test("reads the Board switch from config.json: off, no card text in either help; on, both", async () => {
+    const dataDir = join(root, "cli-board-data");
+    const home = join(root, "home-board");
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(home, { recursive: true });
+    const run = async (argv: string[]) => {
+      const proc = Bun.spawn([process.execPath, entry, ...argv], {
+        cwd: root,
+        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_DATA_DIR: dataDir },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      expect(code, stderr).toBe(0);
+      return stdout;
+    };
+    // No config.json at all: off.
+    for (const argv of [["--help"], ["inbox", "--help"]]) expect(cardText(await run(argv))).toEqual([]);
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: false }));
+    for (const argv of [["--help"], ["inbox", "--help"]]) expect(cardText(await run(argv))).toEqual([]);
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
+    expect(await run(["--help"])).toContain("plannotator card ");
+    expect(await run(["inbox", "--help"])).toContain("\n### card\n");
+    expect(existsSync(join(dataDir, "inbox"))).toBe(false);
+  }, 60_000);
 });

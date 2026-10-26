@@ -117,6 +117,8 @@ Blank or whitespace-only values are treated as "not set" and fall through to the
 
 Valid runtime keys: `claude-code`, `amp`, `droid`, `opencode`, `copilot-cli`, `pi`, `codex`, `gemini-cli`.
 
+The Plannotator Inbox's reminder at session start has its own section, `prompts.inbox`, with the same rule (`prompts.inbox.runtimes.<agent>.reminder` wins over `prompts.inbox.reminder`). The Inbox's **Settings → Prompts** edits it and shows these prompts read-only. See [the Inbox reference](/docs/reference/inbox/#your-own-reminder).
+
 ## Full config example
 
 Here's a config that customizes several messages at once:

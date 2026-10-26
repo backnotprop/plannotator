@@ -427,6 +427,7 @@ function errorMessage(code: string, error: string): AIMessage {
 const GONE_TEXT = "This session is no longer available (it was closed, replaced, or resumed elsewhere).";
 const BLOCKED_TEXT = "This session is waiting on this Plannotator decision, so it cannot answer right now.";
 const BUSY_TEXT = "The session is busy with another turn.";
+const SUPERSEDED_QUERY = Symbol("superseded-session-ask");
 
 export class SessionBridgeSession extends BaseSession {
 	private readonly provider: SessionBridgeProvider;
@@ -436,6 +437,12 @@ export class SessionBridgeSession extends BaseSession {
 		super({ parentSessionId: null });
 		this.provider = provider;
 		this.context = context;
+	}
+
+	/** Close the old answer without stopping a host turn before the busy choice. */
+	supersede(): void {
+		this._currentAbort?.abort(SUPERSEDED_QUERY);
+		super.abort();
 	}
 
 	async *query(prompt: string, options?: AIQueryOptions): AsyncIterable<AIMessage> {
@@ -554,14 +561,15 @@ export class SessionBridgeSession extends BaseSession {
 			};
 			signal.addEventListener("abort", onAbort, { once: true });
 
-			// The host sees an abort only when the reviewer stopped THIS question.
-			// After the runtime detached (decision / shutdown) a running turn is
-			// left alone; only an undelivered question is dropped.
+			// Superseding leaves a host turn running until the reviewer chooses
+			// to interrupt. Transient answers have no agent turn to protect.
+			// Decisions / shutdown also leave a running turn alone.
 			const hostAbort = new AbortController();
 			signal.addEventListener(
 				"abort",
 				() => {
-					if (!provider.isClosing) hostAbort.abort();
+					const supersededTurn = mode === "turn" && signal.reason === SUPERSEDED_QUERY;
+					if (!provider.isClosing && !supersededTurn) hostAbort.abort();
 				},
 				{ once: true },
 			);

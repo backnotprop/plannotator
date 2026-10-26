@@ -19,6 +19,7 @@ import {
   inboxReaskInstruction,
   inboxReaskRedirectedLine,
   inboxRedirectedLine,
+  inboxWakeClosingLine,
   inboxWakeText,
   parseInboxBridgeCommands,
 } from "@plannotator/shared/inbox/connection";
@@ -134,7 +135,7 @@ describe("Re-ask reaches the agent", () => {
     const wake = inboxWakeText(command!);
     expect(wake.split("\n")[1]).toBe(INBOX_REASK_INSTRUCTION);
     expect(wake).not.toContain(INBOX_WAKE_INSTRUCTION);
-    expect(wake.endsWith(note.reply.body)).toBe(true);
+    expect(wake.endsWith(`${note.reply.body}\n\n${inboxWakeClosingLine(command!.thread_id)}`)).toBe(true);
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: note.reply.id })).status).toBe(200);
     // Delivered, and still Sent: the agent has not asked again yet.
     expect((await row(server, t.thread)).section).toBe("sent");
@@ -258,14 +259,55 @@ describe("Re-ask with action items to another session (#2059 review 3)", () => {
 
   test("a note listing only action items: the wake says action items, never questions", async () => {
     const { server, client, project } = await setup();
-    const first = await send(client, project, "ses-a", { body: ":::action\nTouch your YubiKey\n:::" });
+    const first = await send(client, project, "ses-a", { body: ":::action\nTouch your YubiKey\n:::\n\n:::action\nApprove the npm 2FA prompt\n:::" });
     const sent = await reask(server, first.message_id, { idempotency_key: "k1" });
     const note = ((await sent.json()) as { reply: { id: string } }).reply;
     const polled = await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-a", host: "claude-code", project_path: project, waitMs: 0 });
     const command = parseInboxBridgeCommands(await polled.text()).find((c) => c.id === note.id)!;
     expect(command).toMatchObject({ reask: true, reask_items: "actions" });
+    expect((command as { reask_one?: boolean }).reask_one).toBeUndefined();
     expect(inboxWakeText(command).split("\n")[1]).toBe(
       "The person asked, from the Plannotator Inbox, for the open action items in this thread to be asked again, together in one new message. The action items and what to do with each follow. Answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.",
+    );
+  });
+
+  test("one open action item: the wake says it in the singular", async () => {
+    const { server, client, project } = await setup();
+    const first = await send(client, project, "ses-a", { body: ":::action\nTouch your YubiKey\n:::" });
+    const note = ((await (await reask(server, first.message_id, { idempotency_key: "k1" })).json()) as { reply: { id: string; body: string } }).reply;
+    expect(note.body.split("\n")[0]).toBe("Please ask your open action item in this thread again, in one new message, so the person can answer it in one place.");
+    const polled = await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-a", host: "claude-code", project_path: project, waitMs: 0 });
+    const command = parseInboxBridgeCommands(await polled.text()).find((c) => c.id === note.id)!;
+    expect(command).toMatchObject({ reask: true, reask_items: "actions", reask_one: true });
+    expect(inboxWakeText(command).split("\n")[1]).toBe(
+      "The person asked, from the Plannotator Inbox, for the open action item in this thread to be asked again, in one new message. The action item and what to do with it follow. Answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.",
+    );
+  });
+
+  test("one open question (owner, 2026-10-23): the note and the wake say it in the singular", async () => {
+    const { server, client, project } = await setup();
+    const first = await send(client, project, "ses-a", { body: `One call.\n\n${block("Backfill ledger first?")}` });
+    const response = await reask(server, first.message_id, { idempotency_key: "k1" });
+    expect(response.status).toBe(200);
+    const note = ((await response.json()) as { reply: { id: string; body: string; reask: string[] } }).reply;
+    expect(note.reask).toHaveLength(1);
+    const lines = note.body.split("\n");
+    expect(lines[0]).toBe("Please ask your open question in this thread again, in one new message, so the person can answer it in one place.");
+    expect(note.body).toContain("Check it against where the work is now:");
+    expect(note.body).toContain("the old question stays open for the person.");
+    expect((await row(server, first.thread_id)).section).toBe("sent");
+    const polled = await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-a", host: "claude-code", project_path: project, waitMs: 0 });
+    const command = parseInboxBridgeCommands(await polled.text()).find((c) => c.id === note.id)!;
+    expect(command).toMatchObject({ reask: true, reask_one: true });
+    const wake = inboxWakeText(command).split("\n");
+    expect(wake[1]).toBe(
+      "The person asked, from the Plannotator Inbox, for the open question in this thread to be asked again, in one new message. The question and what to do with it follow. Answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.",
+    );
+    // An older connection ignores reask_one and keeps the plural line; a redirected one-question wake is singular too.
+    const { reask_one: _one, ...older } = command as typeof command & { reask_one?: boolean };
+    expect(inboxWakeText(older).split("\n")[1]).toBe(INBOX_REASK_INSTRUCTION);
+    expect(inboxWakeText({ ...command, redirected_from: "Claude Code" }).split("\n")[2]).toBe(
+      `This question was asked by another Claude Code session, which has ended; the person picked you to take it over. Read the thread first with read_thread (message_id ${note.id}), then ask it again as below if it is still needed.`,
     );
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadDashboard } from "./dashboard";
@@ -167,5 +167,195 @@ describe("pull request sources", () => {
     expect(calls.some((c) => / (checkout|reset|switch|branch) /.test(c))).toBe(false);
     expect(calls.some((c) => /worktree prune/.test(c))).toBe(false);
     expect(calls.filter((c) => / fetch /.test(c)).every((c) => c.includes("--refmap= --"))).toBe(true);
+  });
+});
+
+describe("with no folder open", () => {
+  it("lists the recent guides of every repository, and finds a PR's guide by its head", async () => {
+    const { mkdtempSync: mk, rmSync } = await import("node:fs");
+    const { listRecentEverywhere, guideForPullRequest, allRepoKeys } = await import("./store");
+    const before = process.env.PLANNOTATOR_DATA_DIR;
+    const dir = mk(join(tmpdir(), "pn-everywhere-"));
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+    try {
+      const save = (repoKey: string, number: number, head: string, title: string, now: number) => {
+        const review = { rawPatch: "diff --git a/a.ts b/a.ts\n", gitRef: `PR #${number}`, source: { kind: "pr" as const, headSha: head, pr: { number, url: `https://github.com/x/y/pull/${number}`, title } } };
+        saveFinishedGuide({
+          repoKey,
+          snapshot: buildGuideSnapshot({ guide: { title, intent: "i", sections: [{ title: "s", overview: "o", diffs: [{ file: "a.ts" }] }], unplacedFiles: [] }, reviewed: [], review }),
+          source: { kind: "pr", repoRoot: "/r", headRoot: "/w", repoName: repoKey, label: `PR #${number}`, headSha: head, baseSha: "b", baseLabel: "main", pr: { number, url: `https://github.com/x/y/pull/${number}`, title } },
+          agent: { id: "claude-code", label: "Claude Code" },
+          focus: {},
+          now,
+        });
+      };
+      save("github.com__northwind__ledger-ui", 212, "head-a", "Format currency", 1000);
+      save("github.com__northwind__checkout-service", 482, "head-b", "Retry webhooks", 2000);
+      expect(allRepoKeys().sort()).toEqual(["github.com__northwind__checkout-service", "github.com__northwind__ledger-ui"]);
+      expect(listRecentEverywhere().map((r) => [r.title, r.repoName])).toEqual([["Retry webhooks", "northwind/checkout-service"], ["Format currency", "northwind/ledger-ui"]]);
+      const runner = scripted([[/^gh api user/, ok("ramos")], [/^gh search prs/, ok(waiting)]]);
+      const model = await loadDashboard(runner, undefined);
+      expect(model.repo).toBeNull();
+      expect(model.recent.map((r) => r.repoName)).toEqual(["northwind/checkout-service", "northwind/ledger-ui"]);
+      expect(model.waiting.map((w) => w.repo)).toEqual(["northwind/ledger-ui", "northwind/ledger-ui"]);
+
+      expect(guideForPullRequest("github.com__northwind__ledger-ui", 212, "head-a")).not.toBeNull();
+      expect(guideForPullRequest("github.com__northwind__ledger-ui", 212, "head-moved")).toBeNull();
+      expect(guideForPullRequest("github.com__northwind__ledger-ui", 212, null)).not.toBeNull();
+      expect(guideForPullRequest("github.com__northwind__ledger-ui", 999, null)).toBeNull();
+    } finally {
+      if (before === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = before;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a pull request of a repository that is not open", () => {
+  /** The rules for a repository at `root` whose origin is `remote`. */
+  const repoRules = (root: string, remote: string): Rule[] => [
+    [/git .*rev-parse --show-toplevel/, ok(`${root}\n`)],
+    [/git .*rev-parse --abbrev-ref HEAD/, ok("main\n")],
+    [/git .*rev-parse HEAD$/, ok("abc\n")],
+    [/git .*remote get-url origin/, ok(`${remote}\n`)],
+    [/git .*symbolic-ref/, ok("refs/remotes/origin/main\n")],
+    [/git .*show-ref/, ok("")],
+  ];
+
+  it("treats the open repository's own PRs as its own, whatever shape its remote has", async () => {
+    const { getRepoInfo } = await import("./sources/git");
+    const { isOpenRepository, parsePullRequestUrl } = await import("./sources/github");
+    const { pullRequestChoice } = await import("./vscode/new-review");
+    const table: Array<[string, string, boolean]> = [
+      ["git@github-work:org/repo.git", "https://github.com/org/repo/pull/7", true],
+      ["https://github.com/Org/Repo.git", "https://github.com/org/repo/pull/7", true],
+      ["ssh://git@ssh.github.com:443/org/repo.git", "https://github.com/org/repo/pull/7", true],
+      ["git@github.com:org/repo.git", "https://github.com/ORG/REPO/pull/7", true],
+      ["git@github.com:org/repo.git", "https://github.com/org/other/pull/7", false],
+      ["git@github.com:org/repo.git", "https://github.corp.example/org/repo/pull/7", false],
+      ["https://github.corp.example/org/repo.git", "https://github.corp.example/Org/Repo/pull/7", true],
+    ];
+    for (const [remote, url, same] of table) {
+      const repo = await getRepoInfo(scripted(repoRules("/r", remote)), "/r");
+      const ref = parsePullRequestUrl(url)!;
+      expect([remote, url, isOpenRepository(repo, ref)]).toEqual([remote, url, same]);
+      expect([remote, url, pullRequestChoice(url, repo)]).toEqual([remote, url, same ? { kind: "pr", number: 7 } : { kind: "pr", number: 7, repo: ref.host === "github.com" ? `${ref.owner}/${ref.repo}` : `${ref.host}/${ref.owner}/${ref.repo}` }]);
+    }
+  });
+
+  it("is cloned once into the extension's storage (blobless, no checkout), with gh as the clone's own credential helper", async () => {
+    const { ensureRepoClone, ghRepoOfKey, repoClonePath, repoKeyForGhRepo } = await import("./sources/github");
+    const { mkdirSync: mkdir, rmSync } = await import("node:fs");
+    expect(repoKeyForGhRepo("northwind/ledger-ui")).toBe("github.com__northwind__ledger-ui");
+    expect(repoKeyForGhRepo("ghe.corp.example/team/svc")).toBe("ghe.corp.example__team__svc");
+    expect(ghRepoOfKey("github.com__northwind__ledger-ui")).toBe("northwind/ledger-ui");
+    expect(ghRepoOfKey("ghe.corp.example__team__svc")).toBe("ghe.corp.example/team/svc");
+    expect(ghRepoOfKey("my-folder-1a2b3c4d")).toBeNull();
+
+    const storage = mkdtempSync(join(tmpdir(), "pn-clone-"));
+    const path = repoClonePath(storage, "github.com__northwind__ledger-ui");
+    const calls: string[] = [];
+    const runner = scripted([
+      [/^gh repo clone /, (line) => { mkdir(join(line.split(" ")[4], ".git"), { recursive: true }); return ok(""); }],
+      [/^git --no-pager config --local /, ok("")],
+      ...repoRules(path, "https://github.com/northwind/ledger-ui.git"),
+    ], calls);
+    try {
+      const repo = await ensureRepoClone(runner, "northwind/ledger-ui", storage, () => {}, { ghPath: "/opt/gh bin/gh" });
+      expect(repo.repoKey).toBe("github.com__northwind__ledger-ui");
+      const clone = calls.filter((c) => c.startsWith("gh repo clone"));
+      expect(clone).toHaveLength(1);
+      expect(clone[0]).toMatch(new RegExp(`^gh repo clone northwind/ledger-ui ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.cloning-\\d+-\\d+ -- --filter=blob:none --no-checkout --quiet$`));
+      expect(calls.filter((c) => c.startsWith("git --no-pager config"))).toEqual([
+        "git --no-pager config --local credential.https://github.com.helper ",
+        "git --no-pager config --local --add credential.https://github.com.helper !'/opt/gh bin/gh' auth git-credential",
+      ]);
+      expect(readdirSync(storage, { recursive: true }).some((n) => String(n).includes(".cloning-"))).toBe(false);
+      await ensureRepoClone(runner, "northwind/ledger-ui", storage);
+      expect(calls.filter((c) => c.startsWith("gh repo clone"))).toHaveLength(1);
+    } finally {
+      rmSync(storage, { recursive: true, force: true });
+    }
+  });
+
+  it("quotes gh's path for git's sh -c so nothing in it expands, the same shape gh auth setup-git writes on Windows", async () => {
+    const { shellQuoteForGit } = await import("./sources/github");
+    expect(shellQuoteForGit("/opt/homebrew/bin/gh")).toBe("'/opt/homebrew/bin/gh'");
+    expect(shellQuoteForGit("C:\\Program Files\\GitHub CLI\\gh.exe")).toBe("'C:\\Program Files\\GitHub CLI\\gh.exe'");
+    expect(shellQuoteForGit("/tmp/it's/gh")).toBe("'/tmp/it'\\''s/gh'");
+    if (process.platform === "win32") return;
+    const { execFileSync } = await import("node:child_process");
+    for (const path of ["/opt/a b/gh", "/tmp/$HOME/`id`/gh", "/tmp/it's/$(echo x)/gh", "C:\\Program Files\\GitHub CLI\\gh.exe"]) {
+      // What git does with a `!` helper: sh -c "<helper> get". The first word must come back as the path, untouched.
+      const out = execFileSync("/bin/sh", ["-c", `printf '%s' ${shellQuoteForGit(path)}`], { encoding: "utf8" });
+      expect(out).toBe(path);
+    }
+  });
+
+  it("makes one clone for callers at the same time, and never deletes another window's clone", async () => {
+    const { ensureRepoClone, repoClonePath } = await import("./sources/github");
+    const { mkdirSync: mkdir, rmSync, existsSync: exists, writeFileSync: write } = await import("node:fs");
+    const storage = mkdtempSync(join(tmpdir(), "pn-clone-race-"));
+    const path = repoClonePath(storage, "github.com__northwind__ledger-ui");
+    const calls: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const runner: Runner = async (command, args) => {
+      const line = `${command} ${args.join(" ")}`;
+      calls.push(line);
+      if (line.startsWith("gh repo clone")) {
+        await gate;
+        mkdir(join(args[3], ".git"), { recursive: true });
+        return ok("");
+      }
+      for (const [re, res] of repoRules(path, "https://github.com/northwind/ledger-ui.git")) if (re.test(line)) return typeof res === "function" ? res(line) : res;
+      return ok("");
+    };
+    try {
+      const a = ensureRepoClone(runner, "northwind/ledger-ui", storage);
+      const b = ensureRepoClone(runner, "northwind/ledger-ui", storage);
+      // Another window finishes its clone first: its folder is moved in while ours is still cloning.
+      mkdir(join(path, ".git"), { recursive: true });
+      write(join(path, ".git", "theirs"), "");
+      release();
+      const [ra, rb] = await Promise.all([a, b]);
+      expect(ra.root).toBe(path);
+      expect(rb.root).toBe(path);
+      // One clone for both callers; it lost the race to the other window, so its own copy went and theirs stayed.
+      expect(calls.filter((c) => c.startsWith("gh repo clone"))).toHaveLength(1);
+      expect(exists(join(path, ".git", "theirs"))).toBe(true);
+      expect(readdirSync(storage, { recursive: true }).some((n) => String(n).includes(".cloning-"))).toBe(false);
+    } finally {
+      rmSync(storage, { recursive: true, force: true });
+    }
+  });
+
+  it("moves its clone in when it finishes first, and sweeps clones a closed window left behind", async () => {
+    const { ensureRepoClone, repoClonePath } = await import("./sources/github");
+    const { mkdirSync: mkdir, rmSync, existsSync: exists, utimesSync } = await import("node:fs");
+    const storage = mkdtempSync(join(tmpdir(), "pn-clone-stale-"));
+    const path = repoClonePath(storage, "github.com__northwind__ledger-ui");
+    const stale = `${path}.cloning-1-1`;
+    const fresh = `${path}.cloning-2-2`;
+    mkdir(stale, { recursive: true });
+    mkdir(fresh, { recursive: true });
+    utimesSync(stale, new Date(Date.now() - 2 * 3600_000), new Date(Date.now() - 2 * 3600_000));
+    const calls: string[] = [];
+    const runner = scripted([
+      [/^gh repo clone /, (line) => { mkdir(join(line.split(" ")[4], ".git"), { recursive: true }); return ok(""); }],
+      ...repoRules(path, "https://github.com/northwind/ledger-ui.git"),
+    ], calls);
+    try {
+      const [ra, rb] = await Promise.all([ensureRepoClone(runner, "northwind/ledger-ui", storage), ensureRepoClone(runner, "northwind/ledger-ui", storage)]);
+      expect(ra.root).toBe(path);
+      expect(rb.root).toBe(path);
+      expect(calls.filter((c) => c.startsWith("gh repo clone"))).toHaveLength(1);
+      expect(exists(join(path, ".git"))).toBe(true);
+      expect(exists(stale)).toBe(false);
+      // Still in progress in another window: left alone.
+      expect(exists(fresh)).toBe(true);
+    } finally {
+      rmSync(storage, { recursive: true, force: true });
+    }
   });
 });

@@ -65,6 +65,28 @@ describe("sharing — multi-target annotations", () => {
     expect(restored[0]!.originalText).toBe("Approve?");
   });
 
+  test("an image region follows the same rule: the comment shares, the box does not (#2100)", () => {
+    // The approved default: share links keep the comment and drop the box.
+    const REGION: Annotation = {
+      id: "ann-3",
+      blockId: "block-5",
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.COMMENT,
+      text: "grey, not orange",
+      originalText: "figures/status-colors.png",
+      createdA: 3,
+      author: "reviewer",
+      imageRegion: { v: 1, src: "figures/status-colors.png", sourceLine: 6, box: { x: 1820, y: 380, w: 420, h: 160 }, naturalWidth: 3664, naturalHeight: 1453 },
+    };
+    const shareable = toShareable([REGION]);
+    expect(shareable).toEqual([["C", "figures/status-colors.png", "grey, not orange", "reviewer", undefined]]);
+    expect(JSON.stringify(shareable)).not.toContain("1820");
+    const restored = fromShareable(shareable);
+    expect(restored[0]!.imageRegion).toBeUndefined();
+    expect(restored[0]!.text).toBe("grey, not orange");
+  });
+
   test("host mention ids follow the same rule: the comment shares, the ids do not", () => {
     // `mentions` names people in the HOST's directory. A share link is read
     // outside that host, so the ids are meaningless there and are dropped

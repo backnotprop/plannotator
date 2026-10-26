@@ -294,7 +294,7 @@ When an AI provider is available, the diff viewer includes inline AI chat. Selec
 
 ### Ask this session
 
-When the review was opened from Claude Code (with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod)), Pi, or OpenCode 2, Ask AI is answered by that agent session. It is the only option: there is no provider picker. Your question shows in the agent's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode, with `--tailscale`, from OpenCode 1, or with the Claude Code mod off, you pick a provider as described below. Review agents, Code Tour and Guided Review still run their own Claude or Codex models. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
+When the review was opened from Claude Code (with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod)), Pi, or OpenCode 2, Ask AI is answered by that agent session. It is the only option: there is no provider picker. Your question shows in the agent's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode, from another Tailscale login than the computer owner's on a `--tailscale` session, from OpenCode 1, or with the Claude Code mod off, you pick a provider as described below. Review agents, Code Tour and Guided Review still run their own Claude or Codex models. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
 
 ### Supported providers
 

@@ -142,7 +142,12 @@ export function isInteractiveNoArgInvocation(
   return args.length === 0 && stdinIsTTY === true;
 }
 
-export function formatTopLevelHelp(): string {
+/**
+ * `plannotator --help`. `board`: the person turned the Inbox's Board on
+ * (config.json `inboxBoard`, read by the caller); off (the default), the
+ * `card` line is left out, so a person without the Board sees nothing of it.
+ */
+export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
   return [
     "Usage:",
     "  plannotator --help",
@@ -160,8 +165,9 @@ export function formatTopLevelHelp(): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
-    "  plannotator inbox [--background | --no-open] [--tailscale]",
+    "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
     "  plannotator inbox mcp",
+    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
@@ -189,21 +195,50 @@ export function formatTopLevelHelp(): string {
  * `inbox` (the Plannotator Inbox) was the last one to launch. Today: the
  * opt-in T3 Code connection (`t3`, and `t3-hook`, its Claude hook), and
  * `card`, the Board's card call from a shell (approval "inbox-board", step 1),
- * hidden until the Board page ships.
+ * hidden until the Board page ships, and `telemetry`, usage counts for
+ * experimental features, hidden until the first counted feature ships.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook", "card"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook", "telemetry"]);
+
+/**
+ * `plannotator telemetry …` (telemetry-command.ts): usage counts for
+ * experimental features (approval "experimental-telemetry"). Unreleased
+ * (HIDDEN_SUBCOMMANDS) until the first counted feature ships with its notice.
+ */
+export const TELEMETRY_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator telemetry --show [--json]",
+  "  plannotator telemetry --off [--feature <id>]",
+  "  plannotator telemetry --on [--feature <id>]",
+  "  plannotator telemetry --send [--json]",
+  "",
+  "Usage counts for experimental features: whole numbers per UTC day for one",
+  "feature (no text, no paths, no id for you or this computer), one request per",
+  "feature per day of use, sent by this computer's Plannotator, never a browser.",
+  "Counting needs the feature on in config.json and its counts notice shown.",
+  "",
+  "Options:",
+  "  --show        Print what is counted and exactly what would be sent (no network)",
+  "  --off         Turn counts off and delete the counts not sent yet",
+  "  --on          Turn counts back on for features you have turned on",
+  "  --send        Send the counts waiting now, past the hourly window (for tests)",
+  "  --feature     One feature only (default: all)",
+  "  --json        Print --show or --send as JSON",
+  "",
+  "PLANNOTATOR_TELEMETRY=0 or DO_NOT_TRACK=1 turn counts off whatever config says.",
+].join("\n");
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
- * a thin client over the Inbox's `card` MCP tool. Unreleased (HIDDEN_SUBCOMMANDS).
+ * a thin client over the Inbox's `card` MCP tool.
  */
 export const CARD_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--key <key>]",
+  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>]",
   "  plannotator card create --thread <id> [...]      (the thread's subject is the title)",
-  "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--reason <text>]",
+  "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
   "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
-  "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--say <text>]",
+  "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
   "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]",
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
   "  plannotator card list [--anyone | --mine] [--all]",
@@ -212,7 +247,8 @@ export const CARD_COMMAND_USAGE = [
   `Columns: ${INBOX_CARD_COLUMNS.join(", ")} (icebox is the person's only).`,
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
-  "Run 'plannotator inbox --help' for the full guide (its card tool section).",
+  "Works only while the person has the Board on (Inbox Settings → General); off, it exits 1 with board_off.",
+  "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
 ].join("\n");
 
 /**
@@ -224,7 +260,7 @@ export const CARD_COMMAND_USAGE = [
  */
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator inbox [--background | --no-open] [--tailscale]",
+  "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
   "  plannotator inbox mcp",
   "  plannotator inbox --notes <ids>",
   "",
@@ -233,6 +269,10 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox --background  Start it detached without opening a browser,",
   "                                  print its URL and exit",
   "  plannotator inbox --no-open     Run it here without opening a browser",
+  "  plannotator inbox --open        Open it in the browser and print its URL, starting it",
+  "                                  detached first when it is not running. Never blocks:",
+  "                                  what the /plannotator-inbox commands run, and how to",
+  "                                  find the Inbox's address for the person.",
   "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
   "                                  run (tailscale serve, HTTPS, never funnel), for the",
   "                                  Tailscale login that owns this machine only. With",
@@ -440,9 +480,10 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Purge data is local-only: it is not stored on a Plannotator server and",
     "cannot be recovered after purge. Unrecognized custom files are preserved.",
   ].join("\n"),
-  // Unreleased (HIDDEN_SUBCOMMANDS): the opt-in T3 Code connection, and the Board's cards.
+  // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection and usage counts.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
+  telemetry: TELEMETRY_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",
     "  plannotator t3-hook install --settings <settings.json> --executable <plannotator>",

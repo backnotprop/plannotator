@@ -1,5 +1,5 @@
 /**
- * The Inbox's update control against a real Inbox server: the hourly check
+ * The Inbox's update control against a real Inbox server: the release check
  * (stubbed fetch, never GitHub), the button's states on health, Update now
  * (a recording launcher, never the install script), Remind me tomorrow, the
  * Settings switches (the dialog's "Install new versions automatically"
@@ -159,6 +159,91 @@ describe("the sidebar button", () => {
     expect(refused.status).toBe(409);
     expect((await refused.json()).code).toBe("update_unmanaged");
     expect(launches).toHaveLength(0);
+  });
+});
+
+describe("when the Inbox asks (the release page, minutes after a release)", () => {
+  const page = (versions: () => string): (() => Promise<FetchReleaseResult>) => async () => {
+    fetches++;
+    return { ok: true, release: { tag: versions() } };
+  };
+  const noApi = async (): Promise<FetchReleaseResult> => {
+    throw new Error("the API is never asked while the page answers");
+  };
+
+  test("every start asks, though the last answer is minutes old: a restart never waits out an old answer", async () => {
+    const minutesAgo = NOW - 5 * 60 * 1000;
+    writeUpdateState({ latestRelease: { tag: "0.28.10", fetchedAt: minutesAgo }, releaseCheck: { attemptedAt: minutesAgo } }, dataDir);
+    const server = await start({
+      updates: { fetchReleasePage: page(() => "0.28.12"), fetchRelease: noApi, fetchReleaseTag: tagged(), isManaged: () => true, listSessions: () => [] },
+    });
+    expect(await waitFor(() => health(server), (u) => u !== null)).toMatchObject({ state: "available", version: "0.28.12" });
+    await Bun.sleep(200);
+    expect(fetches).toBe(1);
+    expect(readUpdateState(dataDir).releaseCheck?.source).toBe("page");
+  });
+
+  test("a page load asks when the answer is over a minute old, never more often", async () => {
+    let clock = NOW;
+    let version = "0.28.10";
+    const server = await start({
+      updates: {
+        now: () => clock,
+        fetchReleasePage: page(() => version),
+        fetchRelease: noApi,
+        fetchReleaseTag: tagged(),
+        isManaged: () => true,
+        listSessions: () => [],
+      },
+    });
+    await waitFor(async () => fetches, (n) => n === 1);
+    expect(await health(server)).toBeNull();
+    version = "0.28.12";
+    // Reloads inside the minute: the cache answers.
+    for (let i = 0; i < 3; i++) await fetch(`http://127.0.0.1:${server.port}/`);
+    await Bun.sleep(150);
+    expect(fetches).toBe(1);
+    // A minute later a reload asks, and the button follows.
+    clock += 61_000;
+    await fetch(`http://127.0.0.1:${server.port}/`);
+    expect(await waitFor(() => health(server), (u) => u !== null)).toMatchObject({ state: "available", version: "0.28.12" });
+    expect(fetches).toBe(2);
+  });
+
+  test("the health tick asks every 10 minutes", async () => {
+    let clock = NOW;
+    let version = "0.28.10";
+    const server = await start({
+      updates: { now: () => clock, fetchReleasePage: page(() => version), fetchRelease: noApi, isManaged: () => true, listSessions: () => [] },
+    });
+    await waitFor(async () => fetches, (n) => n === 1);
+    version = "0.28.12";
+    clock += 9 * 60 * 1000;
+    await Bun.sleep(200);
+    expect(fetches).toBe(1);
+    clock += 60 * 1000;
+    expect(await waitFor(() => health(server), (u) => u !== null)).toMatchObject({ version: "0.28.12" });
+    expect(fetches).toBe(2);
+  });
+
+  test("the redirect carries no notes: the dialog's summary is fetched by the release's tag", async () => {
+    const server = await start({
+      updates: { fetchReleasePage: page(() => "0.28.12"), fetchRelease: noApi, fetchReleaseTag: tagged(), isManaged: () => true, listSessions: () => [] },
+    });
+    await waitFor(() => health(server), (u) => u !== null);
+    const details = await waitFor(
+      async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/update`)).json()) as { summary: string },
+      (d) => d.summary !== "",
+    );
+    expect(details.summary).toBe("Notes for 0.28.12.");
+  });
+
+  test("an API locked out by its rate limit never hides a release the page names", async () => {
+    writeUpdateState({ releaseCheck: { attemptedAt: NOW - 20 * 60 * 1000, apiAttemptedAt: NOW - 20 * 60 * 1000, apiRetryAt: NOW + 5 * 60 * 60 * 1000 } }, dataDir);
+    const server = await start({
+      updates: { fetchReleasePage: page(() => "0.28.12"), fetchRelease: noApi, isManaged: () => true, listSessions: () => [] },
+    });
+    expect(await waitFor(() => health(server), (u) => u !== null)).toMatchObject({ state: "available", version: "0.28.12" });
   });
 });
 
