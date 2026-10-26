@@ -14,8 +14,8 @@
  * (1.0.0-beta.6 measured); without it the column is skipped.
  *
  * Every number is the median of `--runs` fresh pages. Each change is timed two
- * ways, the same for every tree: wall time from the call to two frames later
- * (so ~33 ms is the frame floor), and main-thread work (the change in CDP's
+ * ways, the same for every tree: wall time from the call until the DOM has
+ * been quiet for two frames (so ~33 ms is the floor), and main-thread work (the change in CDP's
  * TaskDuration across it: script, style, layout and paint the change cost).
  * "Cold" is the first time in a page; "warm" repeats the folder's close-all /
  * open-all `--warm` times (default 3) in the same page. Long tasks come from a
@@ -103,7 +103,7 @@ async function bench() {
           (window as any).__long = [];
           return { longest: Math.max(0, ...lt.map((x) => x.d)), over50: lt.length };
         });
-      /** One change: wall time to two frames later, main-thread work (CDP TaskDuration), longest task. */
+      /** One change: wall time until the DOM is quiet, main-thread work (CDP TaskDuration), longest task. */
       const op = async (expr: string, arg?: unknown) => {
         await longTasks();
         const m0 = await metrics();
