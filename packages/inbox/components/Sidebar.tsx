@@ -19,7 +19,13 @@ import { UpdateButton } from './Updates';
 import { openSearchAriaKeys, openSearchHint } from '../search/searchShortcut';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board';
+  /**
+   * The Board (approval "inbox-board", step 2): the row under Inbox, always
+   * shown with `onBoard`. No count: the approval keeps the count in the
+   * Board's header ("N in flight · N on you").
+   */
+  onBoard?: () => void;
   projectId: string | null;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
@@ -260,6 +266,18 @@ export function Sidebar(props: SidebarProps) {
       <span id={refreshHintId} hidden>
         Refresh the list
       </span>
+      {props.onBoard && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'board' ? ' ib-on' : ''}`}
+          onClick={pick(props.onBoard)}
+          aria-current={props.page === 'board' ? 'page' : undefined}
+          data-board-nav=""
+        >
+          <Icon name="board" />
+          Board
+        </button>
+      )}
       {(props.decideCount ?? 0) > 0 && props.onDecide && (
         <button type="button" className="ib-nav" onClick={pick(props.onDecide)} aria-haspopup="dialog" data-decide-nav="">
           <Icon name="todo" />

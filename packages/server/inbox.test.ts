@@ -15,7 +15,7 @@ import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/regist
 import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
-import { INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
+import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -384,7 +384,8 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(client.getInstructions()).toBe(INBOX_MCP_INSTRUCTIONS);
     expect(INBOX_MCP_INSTRUCTIONS.length).toBeLessThan(2048);
     const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name).sort()).toEqual([...INBOX_SERVED_TOOLS].sort());
+    // The Board is off by default: no card tool.
+    expect(tools.tools.map((t) => t.name).sort()).toEqual([...INBOX_DEFAULT_SERVED_TOOLS].sort());
     // Claude Code hands a model an MCP description up to its first 2,048
     // characters ("… [truncated]" after). The question guide is longer than
     // that by itself, so what must survive the cut is pinned: the syntax, the

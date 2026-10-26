@@ -1,0 +1,21 @@
+The onboarding tour's content (v2). Curated by hand from the real threads of
+building Plannotator with its own Inbox (October 2026), condensed; never built
+from a live Inbox. The one addition is the warm-up question (11:48, step 2).
+Embedded in the binary by packages/server/inbox-tour-content.ts and served by
+packages/server/inbox-tour.ts; this README is neither embedded nor served.
+
+fixture.json          the three threads (tour-vscode, tour-film, tour-new)
+vs-*.webp             Claude Code's VS Code mockups (choices A, B, C) and d1-clean.png
+built-a1/a2.webp      the PR's two screenshots, shown in its message text
+vscode-mockups.html   prototype.html as Claude Code sent it, byte for byte
+evaluation.md         EVALUATION.md, minus one sentence naming a local path
+film-clip.mp4         12 s of the 52 s non-narrated launch cut (clip 0:07 = film 0:11)
+film-poster.webp      the clip's still
+
+The clip, reproducible from guides-vscode-nonarrated.mp4 (the 23 Oct cut):
+
+ffmpeg -ss 4 -t 12 -i guides-vscode-nonarrated.mp4 -an -vf "scale=960:-2,fps=24" \
+  -c:v libx264 -profile:v main -crf 30 -preset slow -pix_fmt yuv420p -movflags +faststart film-clip.mp4
+
+Privacy (checked by tour/model.test.ts): no paths, ids, local addresses or
+emails in any text file here; the film shows only the sample repo.

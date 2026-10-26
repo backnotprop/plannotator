@@ -31,6 +31,9 @@
  *   (`command.run`): the user's skills keep their names; the mod answers the
  *   command itself, starting the CLI detached with the same arguments, and
  *   returns the "Opened …" line. It registers a name only where no skill holds it.
+ * - `/plannotator-inbox` (`command.run`, the same rule): runs
+ *   `plannotator inbox --open` (the Inbox opens in the browser, started
+ *   detached when stopped) and answers with its address.
  * - The `plannotator` tool (`$.tool.register`, tool.ts): when Claude itself is
  *   asked to open something in Plannotator it calls this tool instead of the
  *   CLI; the call goes through the same detached launch and returns at once.
@@ -85,7 +88,7 @@ import {
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
-import { COMMANDS, dataDirOf, debugAppendArgv, isModCommand, waitArgv } from './launch'
+import { COMMANDS, dataDirOf, debugAppendArgv, INBOX_COMMAND, isModCommand, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
@@ -435,6 +438,9 @@ async function registerCommands($: Engine): Promise<void> {
       .register({ name, description: spec.description, ...(spec.argumentHint ? { argumentHint: spec.argumentHint } : {}), immediate: true })
       .catch(() => undefined)
   }
+  if (!taken.has(INBOX_COMMAND.name)) {
+    await $.command.register({ name: INBOX_COMMAND.name, description: INBOX_COMMAND.description, immediate: true }).catch(() => undefined)
+  }
 }
 
 /**
@@ -563,11 +569,13 @@ export function register(on: On) {
   })
 
   // Matched by name: an unmatched hook makes the engine credit Plannotator on every plugin's command answer.
-  on('command.run', { command: Object.keys(COMMANDS) }, async ($: Engine, e: any, next: Next) => {
+  on('command.run', { command: [...Object.keys(COMMANDS), INBOX_COMMAND.name] }, async ($: Engine, e: any, next: Next) => {
     const name: string = typeof e.command === 'string' ? e.command : ''
-    if (!allowed || !isModCommand(name)) return next(e)
+    if (!allowed || (!isModCommand(name) && name !== INBOX_COMMAND.name)) return next(e)
     const instance = await currentMod($)
     if (!instance) return next(e)
+    // `/plannotator-inbox`: open the Inbox and say where it is; no review opens.
+    if (!isModCommand(name)) return { text: await instance.openInbox() }
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }

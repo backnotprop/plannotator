@@ -16,3 +16,4 @@ pathIgnorePatterns = ["e2e/**"]
 ".webp" = "file"
 ".png" = "file"
 ".webm" = "file"
+".mp4" = "file"

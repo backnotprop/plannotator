@@ -69,7 +69,10 @@
  * replied to; the world adds `restart: { thread, session, installPath }`. A
  * stdin line `{ "poll": { session, body } }` is that session's connection
  * polling the bridge with `body`'s fields (`plugin`, `busy`, `send_now`...);
- * the server answers `{ "polled": true }`.
+ * the server answers `{ "polled": true, commands }` (what the poll handed it). A
+ * stdin line `{ "card": { project, session, title, say?, thread? } }` is that
+ * agent making a card (in Backlog, linked to its thread); the server answers
+ * `{ "carded": <card id> }`.
  *
  * With `guide` (approval "inbox-guide-diff-style"), each project also gets a
  * thread whose agent sent a guided review of two sections (two files each
@@ -120,6 +123,7 @@ import { startInboxServer } from "../../packages/server/inbox";
 import type { InboxOpenInLauncher } from "../../packages/server/inbox-open-in";
 import { recordInboxAttachments } from "../../packages/shared/inbox/attachments";
 import { writeUpdateState } from "../../packages/shared/update-check";
+import { parseInboxBridgeCommands } from "../../packages/shared/inbox/connection";
 import { createAgentEnvironmentFor } from "../../packages/server/inbox-agents";
 import { isScratchDataDir, refuseRealDataDir } from "./real-data-dir";
 import { seedTagWorld, TAG_SESSIONS } from "./inbox-tag-world";
@@ -663,6 +667,7 @@ void (async () => {
       wait?: { thread: string; session: string };
       poll?: { session: string; body: Record<string, unknown> };
       first?: { root: string; session: string; body: string };
+      card?: { project: string; session: string; title: string; say?: string; thread?: string };
     };
     if (command.first) {
       // An agent's first message: its folder becomes the Inbox's first project.
@@ -673,13 +678,26 @@ void (async () => {
       continue;
     }
     if (command.poll) {
-      // That session's connection polling now: it is live, with what it loaded.
-      await fetch(`http://127.0.0.1:${server.port}/api/inbox/bridge/poll`, {
+      // That session's connection polling now: it is live, with what it loaded. `commands` is what
+      // the poll handed it (its wake: replies and messages the person sent it), never delivered here.
+      const polled = await fetch(`http://127.0.0.1:${server.port}/api/inbox/bridge/poll`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
         body: JSON.stringify({ session: command.poll.session, host: "claude-code", waitMs: 0, ...command.poll.body }),
       });
-      process.stdout.write(`${JSON.stringify({ polled: true })}\n`);
+      process.stdout.write(`${JSON.stringify({ polled: true, commands: parseInboxBridgeCommands(await polled.text()) })}\n`);
+      continue;
+    }
+    if (command.card) {
+      // An agent making a card through the store (the card action's rules), linked to its thread.
+      const made = store.createCard({
+        project_id: command.card.project,
+        by: { kind: "agent", host: "claude-code", session: command.card.session, name: "Claude Code" },
+        title: command.card.title,
+        say: command.card.say,
+        threads: command.card.thread ? [command.card.thread] : [],
+      });
+      process.stdout.write(`${JSON.stringify({ carded: made.card.id })}\n`);
       continue;
     }
     if (command.wait) {

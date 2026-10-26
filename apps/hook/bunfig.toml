@@ -17,3 +17,4 @@ pathIgnorePatterns = ["tests/**"]
 ".webp" = "file"
 ".png" = "file"
 ".webm" = "file"
+".mp4" = "file"

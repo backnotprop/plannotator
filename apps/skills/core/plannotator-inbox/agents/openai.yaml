@@ -1,0 +1,5 @@
+interface:
+  display_name: "Plannotator Inbox"
+  short_description: "Open the Plannotator Inbox and show its address."
+policy:
+  allow_implicit_invocation: false

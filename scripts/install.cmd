@@ -1383,7 +1383,7 @@ if "!CLONE_OK!"=="1" (
     REM so the two are sourced separately. Replace rather than merge on each run.
     if exist "apps\skills\claude" (
         if not exist "!CLAUDE_SKILLS_DIR!" mkdir "!CLAUDE_SKILLS_DIR!"
-        for %%S in (plannotator-review plannotator-annotate plannotator-last) do (
+        for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-inbox) do (
             if exist "apps\skills\claude\%%S" (
                 if exist "!CLAUDE_SKILLS_DIR!\%%S" rmdir /s /q "!CLAUDE_SKILLS_DIR!\%%S" >nul 2>&1
                 xcopy /s /i /y /q "apps\skills\claude\%%S" "!CLAUDE_SKILLS_DIR!\%%S\" >nul 2>&1
@@ -1399,7 +1399,7 @@ if "!CLONE_OK!"=="1" (
     )
     if exist "apps\skills\core" (
         if not exist "!AGENTS_SKILLS_DIR!" mkdir "!AGENTS_SKILLS_DIR!"
-        for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator) do (
+        for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-inbox plannotator) do (
             if exist "apps\skills\core\%%S" (
                 REM Replace rather than merge so files removed upstream don't linger.
                 if exist "!AGENTS_SKILLS_DIR!\%%S" rmdir /s /q "!AGENTS_SKILLS_DIR!\%%S" >nul 2>&1
@@ -1437,6 +1437,11 @@ if "!CLONE_OK!"=="1" (
                 if exist "!KIRO_SKILLS_DIR!\%%S" rmdir /s /q "!KIRO_SKILLS_DIR!\%%S" >nul 2>&1
                 xcopy /s /i /y /q "apps\kiro-cli\skills\%%S" "!KIRO_SKILLS_DIR!\%%S\" >nul 2>&1
             )
+        )
+        REM /plannotator-inbox needs no origin label: the shell-neutral core copy.
+        if exist "apps\skills\core\plannotator-inbox" (
+            if exist "!KIRO_SKILLS_DIR!\plannotator-inbox" rmdir /s /q "!KIRO_SKILLS_DIR!\plannotator-inbox" >nul 2>&1
+            xcopy /s /i /y /q "apps\skills\core\plannotator-inbox" "!KIRO_SKILLS_DIR!\plannotator-inbox\" >nul 2>&1
         )
         REM The plannotator knowledge skill (CLI reference) has no Kiro-specific
         REM form, so Kiro receives the single-sourced core copy like every other scope.

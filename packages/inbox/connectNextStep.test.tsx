@@ -15,7 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { ComposeSessionsModel } from './api';
 import { SCENARIOS, agentsModel, missing, ready, toolOff } from './connectSteps.fixtures';
-import { MCP_WAKE_LINE, WAKE_LINE } from './connectSteps';
+import { MCP_WAKE_LINE, WAKE_LINE, mcpWakeLine, wakeLine } from './connectSteps';
 
 const hasDom = typeof document !== 'undefined';
 const { EmptyState } = (hasDom ? await import('./components/EmptyState') : {}) as typeof import('./components/EmptyState');
@@ -403,12 +403,13 @@ test.skipIf(!hasDom)('the screen says plainly which agents a reply wakes: once u
   const m = mount(SCENARIOS.typical(), { sessions: live });
   const notes = [...m.el.querySelectorAll('[data-wake-note]')];
   expect(notes).toHaveLength(1);
-  expect(text(notes[0]!)).toBe(WAKE_LINE);
+  // Codex is on this computer (typical): the line names it.
+  expect(text(notes[0]!)).toBe(wakeLine(['codex']));
   // It sits after the lists and before Try it.
   const order = [...m.el.querySelectorAll('.ib-cl, [data-wake-note], .ib-try')];
   expect(order.map((el) => el.className.split(' ')[0])).toEqual(['ib-cl', 'ib-note', 'ib-try']);
   await click(button(m.el, 'Another agent or editor')!);
-  expect(text(m.el.querySelector('[data-wake-note="mcp"]'))).toBe(MCP_WAKE_LINE);
+  expect(text(m.el.querySelector('[data-wake-note="mcp"]'))).toBe(mcpWakeLine(['codex']));
   // A component tooltip or plain text, never a native title.
   expect(m.el.querySelector('[data-wake-note] [title], [data-wake-note][title]')).toBeNull();
 });
@@ -417,5 +418,16 @@ test.skipIf(!hasDom)('nothing found: the card asks which agent; the line under i
   const m = mount(SCENARIOS.none());
   expect(text(card(m.el).querySelector('p'))).toBe('Which agent do you use?');
   expect(m.el.querySelectorAll('[data-wake-note=""]')).toHaveLength(1);
+  // No Codex here: the line is unchanged, it never names Codex.
   expect(text(m.el.querySelector('[data-wake-note]'))).toBe(WAKE_LINE);
+  expect(text(m.el.querySelector('[data-wake-note]'))).not.toContain('Codex');
+});
+
+test.skipIf(!hasDom)('without Codex on this computer, neither wake line names it', async () => {
+  const m = mount(agentsModel({ 'claude-code': ready() }));
+  expect(text(m.el.querySelector('[data-wake-note=""]'))).toBe(WAKE_LINE);
+  const other = button(m.el, 'Another agent or editor');
+  expect(other).toBeTruthy();
+  await click(other!);
+  expect(text(m.el.querySelector('[data-wake-note="mcp"]'))).toBe(MCP_WAKE_LINE);
 });

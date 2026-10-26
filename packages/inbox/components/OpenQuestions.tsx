@@ -17,7 +17,7 @@ import {
 } from '../openQuestions';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
-import { fitFootRow, footFitCandidates, laidOutChildren, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
+import { drawOpenQuestionsForm, fitFootRow, footFitCandidates, laidOutChildren, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** What "Skip…" says on hover (and as its description): it is not sent now. */
 const SKIP_MODE_TIP = 'Choose questions to skip. Skips ride your next Send.';
@@ -57,6 +57,12 @@ export interface OpenQuestionsButtonProps {
    * saved as skipped, which goes with the next Send). Absent: no "Skip…".
    */
   onSetSkipped?: (questions: readonly OpenQuestion[], skipped: boolean) => void;
+  /**
+   * The form the whole foot row chose so that the buttons and the draft
+   * status share one line (footFit.ts `fitWholeFootRow`): drawn as it is, no
+   * fitting of its own. Null or absent: the button fits itself among the buttons.
+   */
+  rowForm?: OpenQuestionsLabelForm | null;
 }
 
 /**
@@ -74,7 +80,7 @@ export interface OpenQuestionsButtonProps {
  * usual spacing and then a tighter one; a phone never takes the long form.
  * The name always holds the whole count.
  */
-export function OpenQuestionsButton({ questions, actions = 0, reask = null, triggerRef, phone, measure, onPick, onSetSkipped }: OpenQuestionsButtonProps) {
+export function OpenQuestionsButton({ questions, actions = 0, reask = null, triggerRef, phone, measure, onPick, onSetSkipped, rowForm = null }: OpenQuestionsButtonProps) {
   const [open, setOpen] = useState(false);
   /** Select mode (approval "oq-skip-select"): rows are checkboxes; ticks save nothing until the bar's button. */
   const [selecting, setSelecting] = useState(false);
@@ -111,10 +117,17 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, trig
   const fit = useCallback(
     (force = false) => {
       const button = trigger.current;
-      const text = words.current?.firstChild;
       const buttons = button?.parentElement;
       const row = buttons?.parentElement;
-      if (!button || !text || !buttons || !row) return;
+      if (!button || !words.current || !buttons || !row) return;
+      if (rowForm) {
+        // The row chose: draw it (the row's own fit already left the page this way).
+        fittedFor.current = `row:${rowForm}|${n}`;
+        const next = { form: rowForm, tight: false };
+        drawOpenQuestionsForm(button, next);
+        setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
+        return;
+      }
       const others = laidOutChildren(buttons)
         .filter((el) => el !== button)
         .map((el) => el.textContent ?? '')
@@ -122,17 +135,13 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, trig
       const key = `${row.getBoundingClientRect().width}|${n}|${max}|${others}`;
       if (!force && key === fittedFor.current) return;
       fittedFor.current = key;
-      const apply = ({ form, tight }: FootFit) => {
-        text.nodeValue = openQuestionsFormText(n, form, noun);
-        button.setAttribute('data-label-form', form);
-        button.toggleAttribute('data-fit-tight', tight);
-      };
+      const apply = (next: FootFit) => drawOpenQuestionsForm(button, next);
       const next = fitFootRow(buttons, footFitCandidates(max), apply) ?? { form: max, tight: false };
       // The page now shows `next` (or the longest form, where there is no layout): React draws the same.
       apply(next);
       setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
     },
-    [n, max, noun],
+    [n, max, noun, rowForm],
   );
   // Every render: a button beside it may have come or gone (Send, 👍) with no resize.
   useLayoutEffect(() => fit());
@@ -145,7 +154,8 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, trig
     void document.fonts?.ready.then(() => fit(true));
     return () => observer.disconnect();
   }, [fit]);
-  const form = fitted.form;
+  const form = rowForm ?? fitted.form;
+  const tight = rowForm ? false : fitted.tight;
   // The button can go while its list is open (the last open questions were answered elsewhere): focus would
   // fall to the page with the list, so it goes to the foot's Reply (or Edit draft) instead.
   const openRef = useRef(false);
@@ -280,10 +290,16 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, trig
         // A shorter form ("5 open", "5"): the name keeps the whole count.
         aria-label={form === 'full' ? undefined : label}
         data-label-form={form}
-        data-fit-tight={fitted.tight ? '' : undefined}
+        data-fit-tight={tight ? '' : undefined}
+        // What footFit.ts draws each form from.
+        data-oq-n={n}
+        data-oq-noun={noun}
+        data-oq-label={label}
       >
         <Icon name="question" size={15} />
-        <span ref={words}>{openQuestionsFormText(n, form, noun)}</span>
+        <span ref={words} data-oq-words="">
+          {openQuestionsFormText(n, form, noun)}
+        </span>
         <span className="ib-oq-chev" aria-hidden="true">
           <Icon name="chevU" size={13} />
         </span>

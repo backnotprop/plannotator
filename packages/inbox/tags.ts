@@ -14,7 +14,7 @@
 import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type InboxTag, type InboxThread } from '@plannotator/core/inbox-types';
 import type { MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TaggableModel, TaggableSession } from './api';
-import { deliveryLine, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
+import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
 
 /** The group heading of the agents that read the Inbox only (MCP): never woken. */
 export const TAG_READERS_GROUP = 'Reads the Inbox, not woken';
@@ -198,7 +198,8 @@ export function tagDeliveryLine(
   messageId?: string | null,
 ): DeliveryLine {
   if (!tag.wakes && !tag.delivery && tag.read_at) return { state: 'delivered', text: `${name} read this thread, ${time(tag.read_at)}` };
-  if (!tag.wakes && !tag.delivery) return { state: 'saved', text: `Saved for ${name}. It sees it the next time it reads this thread.` };
+  // Not woken, or a Codex `codex queue` that ran out of time (it may not have gone): saved for the next read.
+  if ((!tag.wakes || (messageId && uncertainItem(connection, messageId))) && !tag.delivery) return { state: 'saved', text: `Saved for ${name}. It sees it the next time it reads this thread.` };
   return deliveryLine({
     name,
     deliveredAt: tag.delivery?.at ?? null,

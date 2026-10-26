@@ -18,6 +18,7 @@ import {
 import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
+import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
 
 // --- Exported state types ---
 
@@ -25,6 +26,9 @@ export interface ToolbarState {
   element: HTMLElement;
   source: any;
   selectionText: string;
+  /** Builds the selection's rich-text copy when the toolbar button is pressed
+   *  (synchronous in the markdown Viewer, a bridge round trip on HTML surfaces). */
+  getRichCopy?: () => RichCopySource | Promise<RichCopySource>;
 }
 
 export interface CommentPopoverState {
@@ -1593,10 +1597,24 @@ export function useAnnotationHighlighter({
           } else {
             // Selection mode — show toolbar
             pendingSourceRef.current = source;
+            const marks = [...doms] as HTMLElement[];
+            const selectionText = source.text;
             setToolbarState({
               element: doms[0] as HTMLElement,
               source,
-              selectionText: source.text,
+              selectionText,
+              // Built only when Copy (rich text) is pressed: the pending
+              // highlight's marks still bound the selected words, and the
+              // sanitizer drops the marks themselves.
+              getRichCopy: () => {
+                const first = marks[0];
+                const last = marks[marks.length - 1];
+                if (!first?.isConnected || !last?.isConnected) return null;
+                const range = document.createRange();
+                range.setStartBefore(first);
+                range.setEndAfter(last);
+                return richCopySourceFromRange(range, selectionText);
+              },
             });
           }
         }

@@ -113,6 +113,25 @@ function main() {
       writeJson(file, config);
     }
   };
+  // codex queue (the Codex wake): a thread listed in FAKE_CODEX_UNKNOWN_FILE is one Codex does not have
+  // (exit 1, as 0.160 says it); FAKE_CODEX_QUEUE_FAIL_FILE holding "1" makes every queue fail another way.
+  if (name === "codex" && args[0] === "queue") {
+    const thread = (args.find((a) => a.startsWith("--thread=")) || "").slice("--thread=".length);
+    const read = (file) => (file && fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim() : "");
+    let code = 0;
+    if (read(process.env.FAKE_CODEX_QUEUE_FAIL_FILE) === "1") {
+      process.stderr.write("Error: database is locked\n");
+      code = 1;
+    } else if (list(read(process.env.FAKE_CODEX_UNKNOWN_FILE)).includes(thread)) {
+      process.stderr.write("Error: failed to queue session message: thread/queue/add failed: failed to read thread: invalid thread-store request: no rollout found for thread id " + thread + " (code -32603)\n");
+      code = 1;
+    }
+    // FAKE_CODEX_QUEUE_DELAY_MS: the call takes that long (a thread's turn can start before it returns).
+    const delay = Number(process.env.FAKE_CODEX_QUEUE_DELAY_MS || 0);
+    if (delay > 0) setTimeout(() => process.exit(code), delay);
+    else process.exit(code);
+    return;
+  }
   if (args[0] !== "mcp") process.exit(0);
   switch (name) {
     case "codex": {

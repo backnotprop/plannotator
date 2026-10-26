@@ -22,6 +22,9 @@ import {
   cliArgvFor,
   failedText,
   fileIn,
+  INBOX_OPEN_TIMEOUT_MS,
+  inboxOpenAnswer,
+  inboxOpenArgv,
   isSeveralFilePaths,
   launchArgv,
   launchDirOf,
@@ -821,6 +824,14 @@ export class PlannotatorMod {
   }
 
   // --- Commands ------------------------------------------------------------
+
+  /** `/plannotator-inbox`: open the person's Inbox (starting it detached when stopped) and say its address. */
+  async openInbox(): Promise<string> {
+    const result = await this.host
+      .run(inboxOpenArgv(), { env: { PLANNOTATOR_DATA_DIR: this.session.dataDir }, timeoutMs: INBOX_OPEN_TIMEOUT_MS })
+      .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
+    return inboxOpenAnswer(result)
+  }
 
   /** `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`: open and return at once. */
   async runCommand(kind: Exclude<SessionKind, 'plan'>, rawArgs: string): Promise<string> {

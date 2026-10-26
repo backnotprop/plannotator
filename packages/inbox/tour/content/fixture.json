@@ -1,16 +1,21 @@
 {
-  "v": 1,
+  "v": 2,
   "date": "2026-10-24",
-  "note": "The tour's content: two real threads from building Plannotator with its own Inbox (October 2026), condensed, never invented. Times are the real ones. Curated by hand; never built from a live Inbox. See AGENTS.md, The Inbox tour.",
+  "note": "The tour's content (v2): real threads from building Plannotator with its own Inbox (October 2026), condensed from the real threads; the opening plain question (11:48, the warm-up) is added by the tour, and nothing else is invented. Times are the real ones. Curated by hand; never built from a live Inbox. See AGENTS.md, The Inbox tour.",
   "project": "plannotator",
   "developer": "Plannotator’s developer",
-  "full": { "vs-a-thumb.webp": "vs-a.webp", "vs-b-thumb.webp": "vs-b.webp", "vs-c-thumb.webp": "vs-c.webp", "vs-d-thumb.webp": "vs-d.webp" },
+  "full": {
+    "vs-a-thumb.webp": "vs-a.webp",
+    "vs-b-thumb.webp": "vs-b.webp",
+    "vs-c-thumb.webp": "vs-c.webp",
+    "vs-d-thumb.webp": "vs-d.webp"
+  },
   "threads": [
     {
       "id": "tour-vscode",
       "subject": "Guided Reviews in VS Code: spec and prototype",
       "thread_name": "vscode guided reviews",
-      "slice": "This thread has 140 messages over two days. The tour shows the six around one decision.",
+      "slice": "This thread has 140 messages over two days. The tour shows a few of them.",
       "real_answer": "A · Our guide reader in one tab",
       "picture_label": "Mockup · VS Code",
       "picture_label_short": "Mockup",
@@ -25,7 +30,8 @@
           "id": "tour-vscode-2",
           "who": "agent",
           "time": "11:48",
-          "body": "Understood. An Opus agent is evaluating it now: your Plannotator guide reader against the VS Code split, using the real screenshots, and 3 to 4 mocked alternatives, each with a short honest note on cost and what VS Code allows."
+          "body": "Understood. An Opus agent can evaluate it now: your Plannotator guide reader against the VS Code split, using the real screenshots, with 3 to 4 mocked alternatives and a short honest note on each.\n\n:::question\nStart the evaluation with 3 to 4 mockups?\n- [ ] Yes, start it\n- [ ] Evaluate only, no mockups yet\nRecommended: Yes, start it\n:::",
+          "warmup": true
         },
         {
           "id": "tour-vscode-3",
@@ -34,12 +40,37 @@
           "asks": true,
           "body": "The evaluation is done. You were right: the native VS Code split is the problem. One guide is spread over six surfaces: three tabs, the sidebar tree, the chapter panel and the Comments panel. The chapter’s “why” sits in a 340 px side panel, away from the code it explains.\n\n**Recommended: A, our own guide reader in one VS Code tab.** Chapters with their prose beside the diffs, the whole chapter in one scroll, and hover and go to definition from VS Code’s real language server. Cost: medium, after a 2-day check that hover feels instant.\n\n:::question\nWhich direction for the VS Code guide interface?\n- [ ] A · Our guide reader in one tab — ![Direction A, mocked in VS Code: our guide reader in one tab](vs-a-thumb.webp) after a 2-day hover-speed check\n- [ ] B · Our reader beside a live native diff — ![Direction B, mocked in VS Code: our reader beside a live native diff](vs-b-thumb.webp) two half-width panes, one file at a time\n- [ ] C · VS Code’s multi-file diff per chapter — ![Direction C, mocked in VS Code: the multi-file diff per chapter](vs-c-thumb.webp) chapter prose only in a comment box\n- [ ] Ship 0.17.0 as is now — and do A as the next version\nRecommended: A · Our guide reader in one tab\n:::",
           "attachments": [
-            { "name": "prototype.html", "kind": "Clickable mockups of the directions", "size": "77 KB", "mock": "vscode-mockups.html" },
-            { "name": "EVALUATION.md", "kind": "Markdown", "size": "11 KB" }
+            {
+              "name": "prototype.html",
+              "kind": "html",
+              "size": 78523,
+              "asset": "vscode-mockups.html"
+            },
+            {
+              "name": "EVALUATION.md",
+              "kind": "markdown",
+              "size": 11593,
+              "asset": "evaluation.md",
+              "suggest": {
+                "phrase": "It is also the cheapest direction, because the reader and its hooks already exist.",
+                "comment": "Nice, reusing the reader’s hooks keeps this small."
+              }
+            },
+            {
+              "name": "d1-clean.png",
+              "kind": "image",
+              "size": 68514,
+              "asset": "vs-d.webp",
+              "media_type": "image/webp",
+              "width": 1440,
+              "height": 900
+            }
           ],
-          "gallery": [
-            { "asset": "vs-d-thumb.webp", "full": "vs-d.webp", "name": "d1-clean.png", "caption": "D: the guide as a notebook (not offered: large cost)", "alt": "Direction D: the guide as a notebook" }
-          ]
+          "suggest": {
+            "phrase": "a 2-day check that hover feels instant",
+            "comment": "Good. If hover isn’t instant, tell me before you build B."
+          },
+          "after_warmup": true
         },
         {
           "id": "tour-vscode-4",
@@ -53,50 +84,90 @@
           "who": "agent",
           "time": "13:25",
           "replay": 2,
-          "body": "Direction A is built as PR #2134, and a VS Code test window is opening on this repo with it running.\n\n- **The speed check passed easily:** hover in 7 ms typical, 9 ms at worst, against a 150 ms target.\n- **The guide tab:** one tab with our guide reader, each chapter’s text beside its files’ diffs, all in one scroll.\n- **Ask:** select lines in a diff and ask; the answer opens beside.",
-          "gallery": [
-            { "asset": "built-a1.webp", "name": "a1.png", "caption": "The guide tab, built", "alt": "The built guide tab in VS Code (PR #2134)" },
-            { "asset": "built-a2.webp", "name": "a2.png", "caption": "A chapter, built", "alt": "A chapter in the built guide tab (PR #2134)" }
+          "body": "Direction A is built as PR #2134, and a VS Code test window is opening on this repo with it running.\n\n- **The speed check passed easily:** hover in 7 ms typical, 9 ms at worst, against a 150 ms target.\n- **The guide tab:** one tab with our guide reader, each chapter’s text beside its files’ diffs, all in one scroll.\n- **Ask:** select lines in a diff and ask; the answer opens beside.\n\n![The guide tab, built](built-a1.webp)\n![A chapter, built](built-a2.webp)",
+          "inline_images": [
+            {
+              "ref": "built-a1.webp",
+              "name": "a1.png",
+              "size": 83826,
+              "media_type": "image/webp",
+              "width": 1440,
+              "height": 900,
+              "suggest": {
+                "comment": "Looks great. This screenshot should go on the site.",
+                "markup": "circle"
+              }
+            },
+            {
+              "ref": "built-a2.webp",
+              "name": "a2.png",
+              "size": 74768,
+              "media_type": "image/webp",
+              "width": 1440,
+              "height": 900
+            }
           ]
+        }
+      ],
+      "reply_time": "12:17",
+      "warmup_answer": "Yes, start it",
+      "warmup_reply_time": "11:49"
+    },
+    {
+      "id": "tour-film",
+      "subject": "Guided Reviews for VS Code: the launch film",
+      "thread_name": "vscode film",
+      "reply_time": "18:10",
+      "messages": [
+        {
+          "id": "tour-film-1",
+          "who": "agent",
+          "time": "15:37",
+          "body": "The film is redone: 50 seconds, five lines, with long quiet stretches. Watch it and tell me where it drags.",
+          "attachments": [
+            {
+              "name": "guides-vscode.mp4",
+              "kind": "video",
+              "size": 428975,
+              "media_type": "video/mp4",
+              "width": 960,
+              "height": 540,
+              "duration_ms": 12000,
+              "asset": "film-clip.mp4",
+              "poster": "film-poster.webp",
+              "note": "12 seconds of the 50-second cut",
+              "suggest": {
+                "at": 7.2,
+                "comment": "Make chapter one taller here. It’s the narrative guide, and it’s easy to miss."
+              }
+            }
+          ]
+        },
+        {
+          "id": "tour-film-2",
+          "who": "agent",
+          "time": "18:11",
+          "replay": 1,
+          "body": "On it. The chapter text becomes a main element: **at 0:11 the chapter view gets taller and wider**, then I re-cut the film and send it to you."
         }
       ]
     },
     {
-      "id": "tour-graphite",
-      "subject": "Plannotator Graphite: three dark palettes for daylight",
-      "thread_name": "graphite",
-      "picture_label": "Screenshot · Inbox",
-      "picture_label_short": "Screenshot",
+      "id": "tour-new",
+      "subject": "",
+      "thread_name": null,
+      "person": true,
+      "compose": {
+        "body": "We need a page and a short film for Guided Reviews in VS Code, like plannotator.ai/inbox.",
+        "time": "13:06"
+      },
       "messages": [
         {
-          "id": "tour-graphite-1",
+          "id": "tour-new-1",
           "who": "agent",
-          "time": "14:12",
-          "body": "Three “Plannotator Graphite” dark palettes are ready, each shown in the real Inbox next to today’s dark. Glare adds the same light to every pixel, so today’s background and cards merge by day. G2 Daylight is the only one that holds up in the glare test.\n\n:::question\nWhich Graphite should we ship as a new dark palette?\n- [ ] G2 Daylight — ![Screenshot of the Inbox in G2 Daylight](g2-thumb.webp) dark grey, clear surfaces, holds up in glare\n- [ ] G1 Deep — ![Screenshot of the Inbox in G1 Deep](g1-thumb.webp) closest to the mock, darker at night, weaker by day\n- [ ] G3 Stone — ![Screenshot of the Inbox in G3 Stone](g3-thumb.webp) in between, warm grey\nRecommended: G2 Daylight\n:::",
-          "answer": "G2 Daylight",
-          "sent_at": "14:19"
-        },
-        {
-          "id": "tour-graphite-2",
-          "who": "developer",
-          "time": "14:19",
-          "answers": "tour-graphite-1",
-          "delivered": "14:19"
-        },
-        {
-          "id": "tour-graphite-3",
-          "who": "agent",
-          "time": "14:25",
-          "body": "Graphite is PR #2137, and a reviewer is checking it now. Its dark half is G2 Daylight; its light half is today’s Plannotator light, byte for byte.",
-          "gallery": [
-            { "asset": "graphite-inbox.webp", "name": "graphite-inbox.png", "caption": "The Inbox in Graphite, dark", "alt": "The Inbox in Plannotator Graphite, dark" }
-          ]
-        },
-        {
-          "id": "tour-graphite-4",
-          "who": "agent",
-          "time": "14:37",
-          "body": "Graphite #2137 is merging. The Inbox palette picker is PR #2138: a Colors row in Settings → Appearance; a pick there holds in plan review too."
+          "time": "13:08",
+          "replay": 1,
+          "body": "On it, with two agents. The film is in the same style as the Inbox film, and the page lives at plannotator.ai/vscode. You’ll get screenshots and the first cut here."
         }
       ]
     }

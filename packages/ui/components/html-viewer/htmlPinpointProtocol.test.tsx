@@ -150,6 +150,29 @@ describe.if(hasDom)('parseBridgeMessage selection additions', () => {
     });
   });
 
+  test('rich copy: the selection only flags support; the answer carries bounded markup', () => {
+    const message = {
+      type: 'plannotator-bridge-selection',
+      text: 'Hello',
+      rect,
+    };
+    expect(hookModule!.parseBridgeMessage({ ...message, richCopy: true })).toMatchObject({ richCopy: true });
+    expect(hookModule!.parseBridgeMessage({ ...message, richCopy: 'yes' })).not.toHaveProperty('richCopy');
+    // Markup on the selection message is ignored: it is built on request only.
+    expect(hookModule!.parseBridgeMessage({ ...message, html: '<b>x</b>' })).not.toHaveProperty('html');
+
+    const answer = { type: 'plannotator-bridge-rich-copy' as const, id: 'rc-1', html: '<strong>Hello</strong>', text: 'Hello' };
+    expect(hookModule!.parseBridgeMessage(answer))
+      .toEqual({ ...answer, truncated: false, tooLarge: false });
+    expect(hookModule!.parseBridgeMessage({ ...answer, truncated: true })).toMatchObject({ truncated: true });
+    expect(hookModule!.parseBridgeMessage({ ...message, richCopy: true, textCut: true })).toMatchObject({ textCut: true });
+    expect(hookModule!.parseBridgeMessage({ ...answer, html: 'x'.repeat(256 * 1024 + 1), tooLarge: true }))
+      .toMatchObject({ html: '', tooLarge: true });
+    expect(hookModule!.parseBridgeMessage({ ...answer, html: 42 })).toMatchObject({ html: '' });
+    expect(hookModule!.parseBridgeMessage({ ...answer, id: '' })).toBeNull();
+    expect(hookModule!.parseBridgeMessage({ ...answer, id: 'x'.repeat(65) })).toBeNull();
+  });
+
   test('a malformed anchor is dropped without rejecting the selection', () => {
     const parsed = hookModule!.parseBridgeMessage({
       type: 'plannotator-bridge-selection',
@@ -378,6 +401,7 @@ describe.if(hasDom)('pinpoint click-to-pin flow', () => {
     expect(document.querySelector('.annotation-toolbar')).not.toBeNull();
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
   });
+
 
   test('the HTML selection toolbar is comment-only plus the restored thumbs-up: no Delete, no label picker', async () => {
     // The restricted restore: exactly ONE label affordance (the hardcoded

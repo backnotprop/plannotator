@@ -10,6 +10,7 @@ import { useFenceTheme } from '../hooks/useFenceTheme';
 import { computeListIndices, groupBlocks, selectionSourceLines, type Frontmatter, type FrontmatterValue } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
+import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
@@ -374,6 +375,12 @@ export interface ViewerProps {
    * without `answerOnly` and under `readOnly`. Absent → unchanged.
    */
   textComments?: boolean;
+  /**
+   * Opt-in: words a text-selection comment box opens with, for the selected
+   * text (a host's suggested comment, kept with one press or written over).
+   * Returning undefined opens an empty box. Absent → unchanged.
+   */
+  suggestComment?: (selectedText: string) => string | undefined;
   /** Opt-in Vim-style keyboard selection. Default false for compatibility. */
   vimModeEnabled?: boolean;
   /** Replace the compact Vim badge with the live video-style key HUD. */
@@ -804,6 +811,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   readOnly = false,
   answerOnly = false,
   textComments = false,
+  suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
   vimHudKeyPanelEnabled = true,
@@ -1946,6 +1954,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               selectionActionsIcon={selectionActionsIcon}
               quickLabels={quickLabels}
               copyText={toolbarState.selectionText}
+              getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}
               hideCopyButton={!isTouchDevice}
               closeOnScrollOut
             />
@@ -2077,7 +2086,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               anchorEl={hookCommentPopover.anchorEl}
               contextText={hookCommentPopover.contextText}
               isGlobal={false}
-              initialText={hookCommentPopover.initialText}
+              initialText={hookCommentPopover.initialText || suggestComment?.(hookCommentPopover.selectedText ?? hookCommentPopover.contextText) || undefined}
               draftKey={`plan:${commentDraftScope}:${hookCommentPopover.draftKey}`}
               onSubmit={hookCommentSubmit}
               onClose={hookCommentClose}

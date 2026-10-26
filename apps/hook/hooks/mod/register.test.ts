@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { COMMANDS } from './launch'
+import { COMMANDS, INBOX_COMMAND } from './launch'
 import { PLAN_TOOL } from './plan'
 import { register } from './register'
 
@@ -23,8 +23,9 @@ describe('command.run registration', () => {
     expect(hooks).toHaveLength(1)
     const matcher = hooks[0]?.matcher as { command?: unknown } | undefined
     expect(Array.isArray(matcher?.command)).toBe(true)
-    expect([...(matcher?.command as string[])].sort()).toEqual(Object.keys(COMMANDS).sort())
+    expect([...(matcher?.command as string[])].sort()).toEqual([...Object.keys(COMMANDS), INBOX_COMMAND.name].sort())
     expect(Object.keys(COMMANDS).sort()).toEqual(['plannotator-annotate', 'plannotator-last', 'plannotator-review'])
+    expect(INBOX_COMMAND.name).toBe('plannotator-inbox')
   })
 })
 

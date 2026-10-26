@@ -9,7 +9,7 @@
  * read back after a restart or a deletion.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isInboxCardDropUnseen, type InboxAuthor } from "@plannotator/core/inbox-types";
@@ -59,12 +59,12 @@ function refusal(run: () => unknown): string {
 }
 
 describe("cards: create", () => {
-  test("starts in Asked, belongs to the agent that made it, and is heard now", () => {
+  test("starts in Backlog, belongs to the agent that made it, and is heard now", () => {
     const { store, project } = world();
     const { card, replayed } = store.createCard({ project_id: project.id, by: AGENT, title: "  Hero   scene\ntimers ", say: "lane started" });
     expect(replayed).toBe(false);
     expect(card.id).toMatch(/^crd_[0-9A-HJKMNP-TV-Z]{26}$/);
-    expect(card).toMatchObject({ title: "Hero scene timers", column: "asked", said: "lane started", you: null, agent: AGENT, created_by: AGENT });
+    expect(card).toMatchObject({ title: "Hero scene timers", column: "backlog", said: "lane started", you: null, agent: AGENT, created_by: AGENT });
     expect(card.heard_at).toBe(card.created_at);
     expect(card.moved_at).toBe(card.created_at);
   });
@@ -137,7 +137,7 @@ describe("cards: create", () => {
 });
 
 describe("cards: who moves a card (COLUMNS.md, set d)", () => {
-  test("an agent moves its work through the live columns, ships it, and a re-report goes back to Asked", () => {
+  test("an agent moves its work through the live columns, ships it, and a re-report goes back to Backlog", () => {
     const { store, project, advance } = world();
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Delivery ticks" });
     advance(60_000);
@@ -149,7 +149,7 @@ describe("cards: who moves a card (COLUMNS.md, set d)", () => {
     const shipped = store.updateCard(card.id, { by: AGENT, column: "shipped" });
     // Leaving the person's columns drops their line: it never follows the card back.
     expect(shipped.you).toBeNull();
-    expect(store.updateCard(card.id, { by: OTHER, column: "asked", say: "reported broken again" }).column).toBe("asked");
+    expect(store.updateCard(card.id, { by: OTHER, column: "backlog", say: "reported broken again" }).column).toBe("backlog");
   });
 
   test("moving into the person's columns needs `you`, each time it enters them", () => {
@@ -195,8 +195,8 @@ describe("cards: who moves a card (COLUMNS.md, set d)", () => {
     const theirs = store.createCard({ project_id: project.id, by: AGENT, title: "Polylane" }).card;
     const personDrop = store.updateCard(theirs.id, { by: PERSON, column: "dropped" });
     expect(personDrop.dropped).toMatchObject({ by: PERSON, reason: null });
-    expect(refusal(() => store.updateCard(theirs.id, { by: AGENT, column: "asked" }))).toBe("card_dropped_by_person");
-    expect(store.updateCard(theirs.id, { by: PERSON, restore: true })).toMatchObject({ column: "asked", dropped: null });
+    expect(refusal(() => store.updateCard(theirs.id, { by: AGENT, column: "backlog" }))).toBe("card_dropped_by_person");
+    expect(store.updateCard(theirs.id, { by: PERSON, restore: true })).toMatchObject({ column: "backlog", dropped: null });
     expect(refusal(() => store.updateCard(theirs.id, { by: PERSON, restore: true }))).toBe("validation_error");
     expect(refusal(() => store.updateCard(theirs.id, { by: AGENT, say: "x", reason: "why" }))).toBe("validation_error");
   });
@@ -230,7 +230,8 @@ describe("cards: last heard, and an agent's drop reaching the person", () => {
     advance(3 * 24 * 60 * 60 * 1000);
     const wire = store.cardWire(store.card(card.id)!);
     expect(wire.heard_at).toBe(card.heard_at);
-    expect(Object.keys(wire).sort()).toEqual(Object.keys(card).sort());
+    // Only `heard_seq` is added on the wire (a store seq, for the Board's unread rule): no amber, no stall flag.
+    expect(Object.keys(wire).sort()).toEqual([...Object.keys(card), "heard_seq"].sort());
     expect(readFileSync(join(dir, "inbox", "projects", project.key, "cards.jsonl"), "utf8")).not.toMatch(/amber|stale/);
     const said = store.updateCard(card.id, { by: OTHER, say: "still on it" });
     expect(said.heard_at).not.toBe(card.heard_at);
@@ -266,7 +267,7 @@ describe("cards: last heard, and an agent's drop reaching the person", () => {
     expect(store.markCardDropsSeen(new Set([project.id]))).toEqual([]);
     expect(store.markCardDropsSeen().map((card) => card.id)).toEqual([c.id]);
     // A drop the agent makes again after a restore waits again.
-    store.updateCard(a.id, { by: AGENT, column: "asked" });
+    store.updateCard(a.id, { by: AGENT, column: "backlog" });
     expect(isInboxCardDropUnseen(store.updateCard(a.id, { by: AGENT, column: "dropped", reason: "again" }))).toBe(true);
   });
 });
@@ -298,6 +299,23 @@ describe("cards: on disk", () => {
     expect(store.diskUsage().projects[0]!.bytes).toBeGreaterThan(0);
   });
 
+  test("Asked was renamed Backlog (2026-10-26): a card stored as asked reads as backlog, and restores there; a caller saying asked lands in backlog", () => {
+    const { store, project, dir } = world();
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Old ask" });
+    store.updateCard(card.id, { by: PERSON, column: "icebox" });
+    // Rewrite the lines as an Inbox from before the rename wrote them.
+    const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
+    const old = readFileSync(file, "utf8").replaceAll('"backlog"', '"asked"');
+    expect(old).toContain('"asked"');
+    writeFileSync(file, old);
+    const reopened = InboxStore.open(dir);
+    expect(reopened.card(card.id)).toMatchObject({ column: "icebox", aside_from: "backlog" });
+    expect(reopened.updateCard(card.id, { by: PERSON, restore: true }).column).toBe("backlog");
+    expect(reopened.updateCard(card.id, { by: AGENT, column: "designing" }).column).toBe("designing");
+    expect(reopened.updateCard(card.id, { by: AGENT, column: "asked" }).column).toBe("backlog");
+    expect(reopened.listCards({ columns: new Set(["backlog"]) }).map((c) => c.id)).toEqual([card.id]);
+  });
+
   test("listCards: the Board's column order, the latest move first, and its filters", () => {
     const { store, project, advance } = world();
     const other = store.ensureProject({ name: "web", root: "/work/web" });
@@ -319,5 +337,113 @@ describe("parseInboxCardPr", () => {
     expect(parseInboxCardPr("https://bitbucket.org/ws/r/pull-requests/7")).toEqual({ ref: "ws/r#7", url: "https://bitbucket.org/ws/r/pull-requests/7" });
     expect(parseInboxCardPr("https://ghe.corp/o/r/pull/5")).toEqual({ ref: "ghe.corp/o/r#5", url: "https://ghe.corp/o/r/pull/5" });
     for (const bad of ["#12", "PR 12", "https://github.com/o/r/issues/1", "", 12, null]) expect(parseInboxCardPr(bad)).toBeNull();
+  });
+});
+
+describe("cards: the Board page's fields (step 2)", () => {
+  test("notes: the person's, line breaks kept, capped; cleared with an empty value", () => {
+    const { store, project } = world();
+    const { card } = store.createCard({ project_id: project.id, by: PERSON, title: "Roadmap page", notes: "  One page.\n\nWhat is next.  " });
+    expect(card.notes).toBe("One page.\n\nWhat is next.");
+    expect(store.updateCard(card.id, { by: PERSON, notes: "" }).notes).toBeNull();
+    expect(refusal(() => store.updateCard(card.id, { by: PERSON, notes: "x".repeat(4001) }))).toBe("validation_error");
+  });
+
+  test("links: an issue and a PR as refs, the PRs still written as prs for an older Inbox; a stored prs-only card reads its refs", () => {
+    const { dir, store, project } = world();
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Forge", prs: ["acme/widgets#12"], refs: ["acme/widgets#11", "https://github.com/acme/widgets/pull/12"] });
+    expect(card.refs.map((ref) => [ref.kind, ref.ref])).toEqual([
+      ["pr", "acme/widgets#12"],
+      ["issue", "acme/widgets#11"],
+    ]);
+    expect(card.prs).toEqual([{ ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12" }]);
+    expect(refusal(() => store.updateCard(card.id, { by: AGENT, refs: ["https://evil.example/o/r/issues/1"] }))).toBe("validation_error");
+    // A record from step 1 (prs, no refs) reads its PRs as refs.
+    const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
+    const lines = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    delete lines.at(-1).record.refs;
+    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    expect(InboxStore.open(dir).card(card.id)!.refs).toEqual([{ kind: "pr", source: "github", ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12" }]);
+  });
+
+  test("history: every write the card saw, newest first, with who wrote it", () => {
+    const { store, project, advance } = world();
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Ticks", column: "building" });
+    advance(1000);
+    store.updateCard(card.id, { by: AGENT, column: "your_review", you: "Merge #14" });
+    advance(1000);
+    store.updateCard(card.id, { by: PERSON, column: "shipped" });
+    const history = store.cardHistory(card.id);
+    expect(history[0]).toMatchObject({ kind: "moved", by: PERSON });
+    expect(history.at(-1)!.kind).toBe("created");
+    expect(store.cardHistory("crd_nope")).toEqual([]);
+    // Two writes in one millisecond are two entries; the person seeing a drop is none.
+    const quick = store.createCard({ project_id: project.id, by: AGENT, title: "Quick" }).card;
+    store.updateCard(quick.id, { by: AGENT, column: "designing" });
+    store.updateCard(quick.id, { by: AGENT, column: "dropped", reason: "superseded" });
+    expect(store.cardHistory(quick.id).map((entry) => entry.kind)).toEqual(["dropped", "moved", "created"]);
+    store.markCardDropsSeen();
+    expect(store.cardHistory(quick.id).map((entry) => entry.kind)).toEqual(["dropped", "moved", "created"]);
+  });
+
+  test("sent: the person's card goes to an agent through a thread they started; it is that agent's, and says so until it moves", () => {
+    const { store, project, advance } = world();
+    const to = { host: "codex", session: "ses_x" };
+    const { card } = store.createCard({ project_id: project.id, by: PERSON, title: "Retry budget" });
+    const { message } = store.startPersonThread({ project_id: project.id, body: "Retry budget", to, idempotency_key: "k1" });
+    advance(1000);
+    const sent = store.sendCard(card.id, { thread_id: message.id });
+    expect(sent.agent).toMatchObject({ kind: "agent", host: "codex", session: "ses_x", name: "Codex" });
+    expect(sent.sent).toMatchObject({ to: { host: "codex", session: "ses_x" }, thread_id: message.thread_id });
+    expect(sent.threads).toEqual([message.thread_id]);
+    expect(sent.heard_by).toEqual(PERSON);
+    expect(sent.column).toBe("backlog");
+    // Only through the person's addressed message, and only a Backlog card.
+    const agents = store.sendMessage({ project_id: project.id, author: AGENT, body: "hi" });
+    expect(refusal(() => store.sendCard(card.id, { thread_id: agents.message.id }))).toBe("validation_error");
+    // The same send again (a retry after a lost answer) writes nothing.
+    const lines = store.cardHistory(card.id).length;
+    expect(store.sendCard(card.id, { thread_id: message.id })).toEqual(sent);
+    expect(store.cardHistory(card.id)).toHaveLength(lines);
+    store.updateCard(card.id, { by: OTHER, column: "building" });
+    expect(refusal(() => store.sendCard(card.id, { thread_id: message.id }))).toBe("validation_error");
+  });
+
+  test("create and send in one op: a thread that is not the person's leaves no card; a key replays, sending a card it made unsent", () => {
+    const { store, project } = world();
+    const agents = store.sendMessage({ project_id: project.id, author: AGENT, body: "mine" });
+    const before = store.listCards().length;
+    expect(refusal(() => store.createCard({ project_id: project.id, by: PERSON, title: "Wrong", send_thread_id: agents.message.id, idempotency_key: "k" }))).toBe("validation_error");
+    expect(store.listCards()).toHaveLength(before);
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "Agent", send_thread_id: agents.message.id }))).toBe("validation_error");
+    const { message } = store.startPersonThread({ project_id: project.id, body: "Go", to: { host: "pi", session: "ses_p" }, idempotency_key: "m" });
+    const made = store.createCard({ project_id: project.id, by: PERSON, title: "Go", send_thread_id: message.id, idempotency_key: "k" });
+    expect(made.card).toMatchObject({ column: "backlog", agent: { host: "pi", session: "ses_p" }, threads: [message.thread_id] });
+    expect(made.card.sent).toMatchObject({ thread_id: message.thread_id });
+    expect(store.cardHistory(made.card.id).map((h) => h.kind)).toEqual(["sent", "created"]);
+    const again = store.createCard({ project_id: project.id, by: PERSON, title: "Go", send_thread_id: message.id, idempotency_key: "k" });
+    expect(again).toMatchObject({ replayed: true, card: { id: made.card.id } });
+    // A card a key made unsent (the window's card-first Send, interrupted) is sent by the retry.
+    const first = store.createCard({ project_id: project.id, by: PERSON, title: "Later", idempotency_key: "k2" }).card;
+    const second = store.startPersonThread({ project_id: project.id, body: "Later", to: { host: "pi", session: "ses_p" }, idempotency_key: "m2" });
+    const sentNow = store.createCard({ project_id: project.id, by: PERSON, title: "Later", send_thread_id: second.message.id, idempotency_key: "k2" });
+    expect(sentNow).toMatchObject({ replayed: true, card: { id: first.id, sent: { thread_id: second.message.thread_id } } });
+  });
+
+  test("heard_seq: the line of the last write; a seen mark is not one; two writes in one millisecond differ", () => {
+    const { store, project } = world();
+    const a = store.createCard({ project_id: project.id, by: AGENT, title: "A" }).card;
+    const b = store.createCard({ project_id: project.id, by: AGENT, title: "B" }).card;
+    const seqA = store.cardWire(store.card(a.id)!).heard_seq!;
+    const seqB = store.cardWire(store.card(b.id)!).heard_seq!;
+    expect(seqB).toBeGreaterThan(seqA);
+    expect(store.card(a.id)!.heard_at).toBe(store.card(b.id)!.heard_at);
+    store.updateCard(a.id, { by: AGENT, column: "dropped", reason: "gone" });
+    const dropped = store.cardWire(store.card(a.id)!).heard_seq!;
+    expect(dropped).toBeGreaterThan(seqB);
+    store.markCardDropsSeen();
+    expect(store.cardWire(store.card(a.id)!).heard_seq).toBe(dropped);
+    // The same after a reload from disk.
+    expect(InboxStore.open(store.dir.replace(/\/inbox$/, "")).cardWire(store.card(a.id)!).heard_seq).toBe(dropped);
   });
 });

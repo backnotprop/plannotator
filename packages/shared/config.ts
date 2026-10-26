@@ -400,6 +400,20 @@ export interface PlannotatorConfig {
    * `{ experimental: { decision_mode } }`.
    */
   experimental?: { decisionMode?: boolean };
+  /**
+   * The Board's one-time first-visit dialog (approval "inbox-board", intro
+   * amendment): `shownAt` once a page on this computer claimed it
+   * (`POST /api/inbox/board/intro`, a compare-and-set), once per machine.
+   */
+  inboxBoardIntro?: { shownAt?: string };
+  /**
+   * The Board (approval "inbox-board", 2026-10-26 amendment): something the
+   * person turns on, off by default. On: the sidebar's Board row and page,
+   * and the Inbox serves the agents' `card` tool. Off: neither, every card
+   * kept. Written by the Inbox's Settings → General (`POST
+   * /api/inbox/settings` `{ board: { on } }`), read on every request.
+   */
+  inboxBoard?: boolean;
   inboxSound?: {
     enabled?: boolean;
     volume?: number;

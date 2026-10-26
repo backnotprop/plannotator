@@ -139,6 +139,10 @@ Opens any markdown file in the annotation UI. See the [annotate docs](/docs/comm
 
 Annotates the agent's most recent message. See the [annotate last docs](/docs/commands/annotate-last/) for details.
 
+### `/plannotator-inbox`
+
+Opens your [Plannotator Inbox](/docs/reference/inbox/) in the browser, starting it if needed, and shows its address. Use it when you closed the Inbox tab.
+
 Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
 
 ```bash

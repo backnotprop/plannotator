@@ -6,8 +6,12 @@
  * `<dir>/gh-N.err` on stderr (exit 1), else GitHub's not-found error.
  * `glab api graphql … -f iid=N` prints `<dir>/glab-mr-N.json` for the merge
  * request query and `<dir>/glab-issue-N.json` for the issue one. `gh auth
- * status` reports one signed-in account. Every call is one line in
- * `<dir>/calls` (`gh number=12`, `glab mr iid=7`), never the query text.
+ * status` reports one signed-in account. The Board's batch of lane-card
+ * marks (`query CardMarks`, one `n<N>: issueOrPullRequest(number: N)` alias
+ * a link) answers each alias from the item `github()` was given (its state,
+ * draft flag, state reason and title), or null. Every call is one line in
+ * `<dir>/calls` (`gh number=12`, `gh marks 11,12,14`, `glab mr iid=7`), never
+ * the query text.
  */
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +36,20 @@ export function fakeForge(dir: string): FakeForge {
     `dir='${dir}'`,
     'if [ "$1" = auth ] && [ "$2" = status ]; then',
     '  echo \'{"hosts":{"github.com":[{"login":"e2e","active":true,"state":"success","tokenSource":"keyring"}]}}\'',
+    '  exit 0',
+    'fi',
+    'q=""',
+    'for a; do case "$a" in query=*CardMarks*) q="$a";; esac; done',
+    'if [ -n "$q" ]; then',
+    '  nums=$(printf "%s" "$q" | grep -o "issueOrPullRequest(number: [0-9]*)" | grep -o "[0-9][0-9]*" | sort -n)',
+    '  echo "gh marks $(echo $nums | tr " " ",")" >> "$dir/calls"',
+    '  printf \'{"data":{"repository":{\'',
+    '  sep=""',
+    '  for n in $nums; do',
+    '    printf \'%s"n%s":\' "$sep" "$n"; sep=","',
+    '    if [ -f "$dir/gh-mark-$n.json" ]; then cat "$dir/gh-mark-$n.json"; else printf null; fi',
+    '  done',
+    '  printf \'}}}\\n\'',
     '  exit 0',
     'fi',
     'n=""',
@@ -61,8 +79,12 @@ export function fakeForge(dir: string): FakeForge {
   return {
     dir,
     calls: () => readFileSync(calls, 'utf8').split('\n').filter(Boolean),
-    github: (number, answer) =>
-      typeof answer === 'string' ? writeFileSync(join(dir, `gh-${number}.err`), answer) : writeFileSync(join(dir, `gh-${number}.json`), JSON.stringify(answer)),
+    github: (number, answer) => {
+      if (typeof answer === 'string') return writeFileSync(join(dir, `gh-${number}.err`), answer);
+      writeFileSync(join(dir, `gh-${number}.json`), JSON.stringify(answer));
+      const item = (answer as { data?: { repository?: { issueOrPullRequest?: Record<string, unknown> } } }).data?.repository?.issueOrPullRequest;
+      if (item) writeFileSync(join(dir, `gh-mark-${number}.json`), JSON.stringify({ __typename: item.__typename, state: item.state, isDraft: item.isDraft ?? false, stateReason: item.stateReason ?? null, title: item.title }));
+    },
     gitlab: (kind, iid, answer) => writeFileSync(join(dir, `glab-${kind}-${iid}.json`), JSON.stringify(answer)),
   };
 }

@@ -270,7 +270,7 @@ test.skipIf(!hasDom)('Cancel keeps the words: the foot says "Draft · Your reply
   act(() => button(el, 'Cancel').click());
   await until(async () => (await serverDraft(world.waiting))?.body === 'Pagefind.', 'the draft saved on Cancel');
   await until(() => el.querySelector('[data-draft-foot]') !== null, 'the foot says Draft');
-  expect(el.querySelector('[data-draft-foot]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Draft Your reply');
+  expect(el.querySelector('[data-draft-foot]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Draft, Your reply');
   expect(el.querySelector('.ib-pfoot')?.textContent).not.toContain('Not sent');
   button(el, 'Send');
   act(() => button(el, 'Edit draft').click());
@@ -392,7 +392,7 @@ test.skipIf(!hasDom)('the list says "Draft · Your reply" and "Draft · 1 pick";
 test.skipIf(!hasDom)('a pick not sent: the card says "Draft", its footer "in your draft", the foot "Draft · 1 pick"', async () => {
   const el = await renderApp(`#thread=${world.picked}`);
   await until(() => el.querySelector('[data-draft-foot]') !== null, 'the foot');
-  expect(el.querySelector('[data-draft-foot]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Draft 1 pick');
+  expect(el.querySelector('[data-draft-foot]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Draft, 1 pick');
   expect(el.textContent).toMatch(/Picked \d{1,2}:\d{2} [AP]M · in your draft/);
   expect(el.textContent).not.toContain('Not sent');
 });

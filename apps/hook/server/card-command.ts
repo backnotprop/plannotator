@@ -39,6 +39,7 @@ const VALUE_FLAGS: Record<string, string> = {
   "--you": "you",
   "--thread": "thread_id",
   "--pr": "pr",
+  "--ref": "ref",
   "--key": "idempotency_key",
   "--reason": "reason",
   "--title": "title",

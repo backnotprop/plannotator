@@ -9,9 +9,10 @@ import {
   OPENCODE_PLUGIN_LINES,
   PI_EXTENSION_INSTALL,
   PLUGIN_HOSTS,
-  MCP_WAKE_LINE,
+  mcpWakeLine,
+  mcpWakingHostsHere,
   TRY_PROMPT,
-  WAKE_LINE,
+  wakeLine,
   blockedText,
   connectPlan,
   doneNote,
@@ -496,7 +497,7 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
           {!loading && (
             <p className="ib-note ib-cn-wake" data-wake-note="">
               <Icon name="info" />
-              <span>{WAKE_LINE}</span>
+              <span>{wakeLine(mcpWakingHostsHere(agents))}</span>
             </p>
           )}
           {!loading && (
@@ -536,7 +537,7 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
             <Fold label="Another agent or editor" sub="VS Code, Zed, JetBrains, Goose, any MCP client" id={pickerId}>
               <p className="ib-note ib-cn-wake" data-wake-note="mcp">
                 <Icon name="info" />
-                <span>{MCP_WAKE_LINE}</span>
+                <span>{mcpWakeLine(mcpWakingHostsHere(agents))}</span>
               </p>
               <ConnectPicker harnesses={OTHER_HARNESSES} initial="vscode" context={context} icons />
             </Fold>

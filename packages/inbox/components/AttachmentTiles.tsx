@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { inboxAttachmentKindLabel, inboxVideoMeta, isInboxAnnotatableKind, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { attachmentDownloadUrl, attachmentImageUrl, imageFitsWithin, readableVersion, WIDE_IMAGE_RATIO } from '../attachments';
+import { imageFitsWithin, readableVersion, WIDE_IMAGE_RATIO } from '../attachments';
+import { useInboxFileSource } from '../fileSource';
 import { formatBytes, plural, shortTime, whenTime } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from './FileName';
@@ -95,7 +96,8 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
   const shown = Math.min(Math.max(ratio, TALL_RATIO), WIDE_IMAGE_RATIO);
   const tall = ratio < TALL_RATIO;
   const wide = ratio > WIDE_IMAGE_RATIO;
-  const src = attachmentImageUrl(image, readableVersion(image));
+  const source = useInboxFileSource();
+  const src = source.imageUrl(image, readableVersion(image));
   const changed = changedLine(image, true);
   // A changed image keeps its comment count beside the changed line.
   const detail = `${changed ?? sizeLine(image)}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
@@ -172,6 +174,7 @@ export function AttachmentTiles({
   /** The tile ⋯'s "Open side by side" / "Open full screen": this file in that view, the remembered choice unchanged. Absent on a phone or a stacked window. */
   onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
 }) {
+  const source = useInboxFileSource();
   if (attachments.length === 0) return null;
   const header = placement === 'header';
   const images = header ? [] : attachments.filter((a) => readInboxAttachmentKind(a.kind) === 'image');
@@ -202,7 +205,7 @@ export function AttachmentTiles({
           const detailId = `ib-${header ? 'hatt' : 'att'}-detail-${attachment.id}`;
           const icon = isImage ? (
             <span className="ib-fi ib-thumb">
-              <img src={attachmentImageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />
+              <img src={source.imageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />
             </span>
           ) : (
             <span className="ib-fi">
@@ -244,7 +247,7 @@ export function AttachmentTiles({
               <a
                 className="ib-att-t ib-dl"
                 key={attachment.id}
-                href={attachmentDownloadUrl(attachment, readableVersion(attachment))}
+                href={source.downloadUrl(attachment, readableVersion(attachment))}
                 download={attachment.name}
                 aria-label={`Download ${attachment.name}`}
                 aria-describedby={detailId}

@@ -4,9 +4,10 @@
  * about each agent on this computer, as the one most useful thing to do next
  * and the short lists of what is done and what is left. Plannotator's own
  * connections come first (Claude Code, Pi, OpenCode: replies wake the
- * session), agents reached through MCP after. Pure.
+ * session), agents reached through MCP after (Codex's replies wake it too:
+ * the Inbox runs `codex queue`). Pure.
  */
-import { INBOX_AGENT_IDS, inboxToolCostText, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_IDS, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_HOST_NAMES, INBOX_MCP_WAKING_HOSTS, INBOX_WAKING_HOSTS, inboxToolCostText, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { HarnessId } from './harnesses';
 
 /** Plannotator's own connections, in the order the screen offers them. */
@@ -45,6 +46,8 @@ export interface ConnectRow {
   offNote?: string;
   /** OpenCode: the version on PATH, for the plugin line that version reads. */
   generation?: '1' | '2';
+  /** An agent MCP alone wakes (Codex), connected: whether this Inbox can wake it now (the server's `wakes`). */
+  wakes?: boolean;
   reason: string | null;
 }
 
@@ -56,7 +59,7 @@ export interface ConnectRow {
  * `.claude/settings.json`, `claude --plugin-dir`).
  */
 export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | null {
-  const base: Omit<ConnectRow, 'state'> = { id: row.id, label: row.label, locked: false, chosenOff: false, reason: row.reach.reason, ...(row.plugin?.generation ? { generation: row.plugin.generation } : {}) };
+  const base: Omit<ConnectRow, 'state'> = { id: row.id, label: row.label, locked: false, chosenOff: false, reason: row.reach.reason, ...(row.plugin?.generation ? { generation: row.plugin.generation } : {}), ...(typeof row.wakes === 'boolean' ? { wakes: row.wakes } : {}) };
   if (isPluginHost(row.id)) {
     if (live) return { ...base, state: 'ready' };
     if (!row.detected) return { ...base, state: 'absent' };
@@ -190,6 +193,10 @@ export function stepText(row: ConnectRow): { text: string; cost?: string } {
       if (row.id === 'opencode') return { text: "Plannotator's plugin connects it: on OpenCode 2 your replies arrive as a new turn on their own." };
       return { text: `Plannotator's ${word} connects it.` };
     case 'connect':
+      // Codex: the Inbox wakes it itself through `codex queue` (INBOX_MCP_WAKING_HOSTS), from the version that has it.
+      if (INBOX_MCP_WAKING_HOSTS.includes(row.id)) {
+        return { text: `Adds the Inbox's MCP server to ${row.label}. ${mcpWakeName(row.id)}: your replies arrive as a new turn on their own.` };
+      }
       return { text: `Adds the Inbox's MCP server to ${row.label}. ${row.label} sees your replies when it checks the Inbox; it can't be woken.` };
     case 'manual':
       return { text: row.reason ? `Only you can add it here: ${row.reason}.` : 'Only you can add it here.' };
@@ -230,14 +237,48 @@ export function blockedText(plan: ConnectPlan, opts: { skipped: readonly string[
  * the session as a new turn; an agent reached through MCP reads it when it
  * next checks. OpenCode 1 has the tool but no wake, hence "OpenCode 2".
  */
-export const WAKE_LINE =
-  "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi and OpenCode 2. Other agents see your reply the next time they check the Inbox.";
+/** "Claude Code, Pi and OpenCode 2". */
+const andList = (names: readonly string[]) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+/** A waking host as the wake line names it: OpenCode 2 (OpenCode 1 has no wake). */
+const wakeName = (host: string) => (host === 'opencode' ? 'OpenCode 2' : (INBOX_HOST_NAMES[host] ?? host));
+/** An agent MCP alone wakes, from the version that can be: "Codex 0.149 or later". */
+export function mcpWakeName(host: string): string {
+  return `${INBOX_HOST_NAMES[host] ?? host} ${INBOX_CODEX_QUEUE_MIN_VERSION.replace(/\.0$/, '')} or later`;
+}
+const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host));
 
-/** Over the "Another agent or editor" picker: every agent there reaches the Inbox through MCP. */
-export const MCP_WAKE_LINE = "These reach the Inbox through MCP: they see your reply the next time they check it, and can't be woken.";
+/**
+ * Which agents a reply wakes, built from the one list (INBOX_WAKING_HOSTS).
+ * `mcpHosts`: the agents MCP alone wakes that are on this computer (Codex,
+ * when its row is present); none, the line names Plannotator's hosts only.
+ */
+export function wakeLine(mcpHosts: readonly string[] = []): string {
+  const mcp = INBOX_MCP_WAKING_HOSTS.filter((host) => mcpHosts.includes(host));
+  const through = mcp.length > 0 ? `, and in ${andList(mcp.map(mcpWakeName))} through MCP` : '';
+  return `With Plannotator's connection, your replies arrive as a new turn on their own in ${andList(BRIDGE_HOSTS.map(wakeName))}${through}. Other agents see your reply the next time they check the Inbox.`;
+}
+
+/** Over the "Another agent or editor" picker: every agent there reaches the Inbox through MCP; only an MCP-waking agent present (Codex) is woken. */
+export function mcpWakeLine(mcpHosts: readonly string[] = []): string {
+  const mcp = INBOX_MCP_WAKING_HOSTS.filter((host) => mcpHosts.includes(host));
+  if (mcp.length === 0) return "These reach the Inbox through MCP: they see your reply the next time they check it, and can't be woken.";
+  return `These reach the Inbox through MCP: ${andList(mcp.map(mcpWakeName))} gets your reply as a new turn on its own; the others see it the next time they check the Inbox, and can't be woken.`;
+}
+
+/** The agents MCP alone wakes whose row is on this computer (detected): the wake lines name only those. */
+export function mcpWakingHostsHere(model: InboxAgentsModel | null | undefined): string[] {
+  return (model?.agents ?? []).filter((row) => row.detected && INBOX_MCP_WAKING_HOSTS.includes(row.id)).map((row) => row.id);
+}
+
+/** The wake line on a computer without an agent MCP alone wakes (no Codex): Plannotator's hosts only. */
+export const WAKE_LINE = wakeLine();
+/** The picker's line on a computer without Codex. */
+export const MCP_WAKE_LINE = mcpWakeLine();
 
 /** "Already connected" for an agent reached through MCP. */
 export const MCP_DONE_NOTE = 'MCP · sees replies when it checks';
+/** "Already connected" for an agent reached through MCP that the Inbox wakes (Codex 0.149+). */
+export const MCP_WAKES_DONE_NOTE = 'MCP · replies arrive as a new turn';
 
 /** The MCP fold under a Plannotator host's install step. */
 export function mcpFoldHint(label: string): string {
@@ -251,6 +292,8 @@ export function doneNote(row: ConnectRow, opts: { live: boolean; turnedOn: boole
     const word = isPluginHost(row.id) ? PLUGIN_WORD[row.id] : 'plugin';
     return opts.live ? `${word} · running now` : word;
   }
+  // Codex over MCP, with a Codex the Inbox can wake: the reply arrives as a turn.
+  if (row.state === 'mcp' && row.wakes === true) return MCP_WAKES_DONE_NOTE;
   // MCP-only, Plannotator's host or not: nothing wakes it, it reads replies when it checks.
   return MCP_DONE_NOTE;
 }

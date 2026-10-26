@@ -571,7 +571,8 @@ export const BRIDGE_SCRIPT = `(function() {
     }
     skipNextClear = false; // a real text selection happened
     var range = sel.getRangeAt(0);
-    var text = capSelectionText(sel.toString().trim());
+    var fullText = sel.toString().trim();
+    var text = capSelectionText(fullText);
     if (!text) return false;
 
     // A draft now owns the surface: kill the click-to-select hover
@@ -597,6 +598,13 @@ export const BRIDGE_SCRIPT = `(function() {
       targetKey: (extras && extras.targetKey) || undefined,
       targetLabel: (extras && extras.targetLabel) || undefined,
       context: (extras && extras.context) || undefined,
+      // This bridge answers rich-copy-request for a text selection (the
+      // toolbar's rich-text Copy). Optional and additive: an older bridge
+      // omits it and Copy stays plain text, so no protocol version bump.
+      richCopy: (extras && extras.pinpoint) ? undefined : true,
+      // The quote above was cut to MAX_SELECTION_TEXT: a plain-text copy made
+      // from it alone (no answer to rich-copy-request) says so.
+      textCut: text.length < fullText.length ? true : undefined,
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
     });
     renderAnnotationOverlay(); // draft selection highlight (overlay-projected)
@@ -644,6 +652,46 @@ export const BRIDGE_SCRIPT = `(function() {
     if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data || !e.data.type) return;
     var type = e.data.type;
+
+    // Copy (rich text) was pressed in the parent: build the pending text
+    // range's markup now (never on selection). A throw or an oversized range
+    // answers without markup, so the parent copies plain text.
+    if (type === PREFIX + 'rich-copy-request') {
+      // Text and markup are each capped at 256 KiB: past it the text is cut
+      // (never at half a surrogate pair) and marked, and the markup is not
+      // built at all (too large for rich text).
+      var copyHtml = '';
+      var copyText = '';
+      var copyTruncated = false;
+      var copyTooLarge = false;
+      try {
+        if (pendingRange && pendingSelection && pendingSelection.startContainerPath) {
+          copyText = pendingRange.toString();
+          if (copyText.length > 262144) {
+            var copyCut = 262144;
+            var copyLast = copyText.charCodeAt(copyCut - 1);
+            if (copyLast >= 0xd800 && copyLast <= 0xdbff) copyCut -= 1;
+            copyText = copyText.slice(0, copyCut);
+            copyTruncated = true;
+            copyTooLarge = true;
+          } else {
+            copyHtml = htmlForRange(pendingRange);
+            if (copyHtml.length > 262144) copyTooLarge = true;
+          }
+        }
+      } catch (err) {
+        copyHtml = '';
+      }
+      postToParent({
+        type: PREFIX + 'rich-copy',
+        id: typeof e.data.id === 'string' ? e.data.id : '',
+        html: copyTooLarge ? '' : copyHtml,
+        text: copyText,
+        truncated: copyTruncated,
+        tooLarge: copyTooLarge
+      });
+      return;
+    }
 
     if (type === PREFIX + 'create-mark') {
       var id = e.data.id;
@@ -5406,6 +5454,29 @@ export const BRIDGE_SCRIPT = `(function() {
       vimAddedBodyTabIndex = false;
     }
     if (document.body) document.body.removeAttribute('data-plannotator-vim-focus-owner');
+  }
+
+  // Selected markup for the parent's rich-text Copy button, built only when
+  // the button is pressed (rich-copy-request). Keeps the enclosing formatting
+  // that cloneContents omits for text endpoints (the same semantic ancestors
+  // selectionRangeToHtml keeps) and absolutizes links.
+  function htmlForRange(range) {
+    var holder = document.createElement('div');
+    var fragment = range.cloneContents();
+    var ancestor = range.commonAncestorContainer.nodeType === 1
+      ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+    while (ancestor && ancestor !== document.body) {
+      if (ancestor.matches('a,b,blockquote,code,del,em,h1,h2,h3,h4,h5,h6,i,li,ol,p,pre,s,strong,sub,sup,table,tbody,td,tfoot,th,thead,tr,u,ul')) {
+        var wrapper = ancestor.cloneNode(false);
+        while (fragment.firstChild) wrapper.appendChild(fragment.firstChild);
+        fragment.appendChild(wrapper);
+      }
+      ancestor = ancestor.parentElement;
+    }
+    holder.appendChild(fragment);
+    var links = holder.querySelectorAll('a[href]');
+    for (var i = 0; i < links.length; i++) links[i].setAttribute('href', links[i].href);
+    return holder.innerHTML;
   }
 
   function copyVimText(text) {

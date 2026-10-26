@@ -546,7 +546,8 @@ Do NOT proceed with implementation until your plan is approved.`;
       if (
         cmd !== "plannotator-last" &&
         cmd !== "plannotator-annotate" &&
-        cmd !== "plannotator-review"
+        cmd !== "plannotator-review" &&
+        cmd !== "plannotator-inbox"
       ) return;
 
       output.parts.length = 0;
@@ -596,10 +597,15 @@ Do NOT proceed with implementation until your plan is approved.`;
   };
 
   async function runPlannotatorCommand(
-    cmd: "plannotator-last" | "plannotator-annotate" | "plannotator-review",
+    cmd: "plannotator-last" | "plannotator-annotate" | "plannotator-review" | "plannotator-inbox",
     input: { sessionID: string; arguments?: string },
     client: any,
   ): Promise<void> {
+    // The Inbox is the CLI's own server: the embedded runtime cannot host it.
+    if (cmd === "plannotator-inbox") {
+      await handleCliCommand({ command: cmd, client, sessionId: input.sessionID, rawArgs: "", commandTurn: true });
+      return;
+    }
     // input.arguments is the raw tail string from OpenCode's command dispatcher —
     // needed so --gate / --json reach the handlers' parseAnnotateArgs.
     const event = {

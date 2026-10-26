@@ -61,6 +61,13 @@ const KNOWLEDGE_SKILLS = [
   "plannotator",
 ] as const;
 
+// /plannotator-inbox (apps/skills/{claude,core}/plannotator-inbox): installed
+// to the Claude and shared-agent scopes, ~/.kiro/skills and $VIBE_HOME/skills,
+// plus an OpenCode command stub and a Gemini command. Kept out of
+// CORE_SKILLS for the same reason as the knowledge skill: it never had a
+// legacy ~/.claude/commands file or a Codex-home era.
+const INBOX_SKILL = "plannotator-inbox";
+
 const EXTRA_SKILLS = [
   "plannotator-compound",
   "plannotator-setup-goal",
@@ -75,6 +82,7 @@ const LEGACY_COMMAND_NAMES = [
 const KIRO_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
+  INBOX_SKILL,
   // The knowledge skill installs into ~/.kiro/skills like the action skills.
   // Safe to name here: this list only ever removes ~/.kiro/skills/<name>
   // directories, never a command file a user may own.
@@ -91,6 +99,7 @@ const VIBE_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
   "plannotator-last",
+  INBOX_SKILL,
   "plannotator",
 ] as const;
 
@@ -831,7 +840,7 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
-  for (const skill of [...CORE_SKILLS, ...KNOWLEDGE_SKILLS]) {
+  for (const skill of [...CORE_SKILLS, INBOX_SKILL, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),
       request,
@@ -900,6 +909,10 @@ function removeInstalledFiles(
       );
     }
   }
+  // The /plannotator-inbox OpenCode stub the installer writes (never a Claude command).
+  for (const configDir of paths.configDirs) {
+    removePath(join(configDir, "opencode", "commands", `${INBOX_SKILL}.md`), request, state);
+  }
 
   // @plannotator/opencode's postinstall writes the knowledge skill here so
   // OpenCode's `{skill,skills}/**/SKILL.md` scan under its config dir finds it.
@@ -920,6 +933,7 @@ function removeInstalledFiles(
     "plannotator-review",
     "plannotator-annotate",
     "plannotator-last",
+    INBOX_SKILL,
   ]) {
     removePath(
       join(environment.homeDir, ".gemini", "commands", `${command}.toml`),

@@ -5,10 +5,9 @@ import { join } from 'node:path'
 import { startInboxServer, type InboxServer } from '@plannotator/server/inbox'
 import { INBOX_TOOL_ACTIONS, mcpAnswerOf, parseInboxToolList } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
-import { INBOX_CARD_ACTION_ON } from '@plannotator/core/inbox-types'
 
-/** Every action, except `card` while the Board's card action is held back (INBOX_CARD_ACTION_ON). */
-const SERVED_ACTIONS = INBOX_TOOL_ACTIONS.filter((name) => name !== 'card' || INBOX_CARD_ACTION_ON)
+/** Every action a default Inbox serves: not `card`, listed only while the person has the Board on (config.json `inboxBoard`, off by default). */
+const SERVED_ACTIONS = INBOX_TOOL_ACTIONS.filter((name) => name !== 'card')
 
 // The failure this guards: a Claude Code session that starts before the Inbox
 // ever ran registers plannotator_inbox from the bundled list, and that list

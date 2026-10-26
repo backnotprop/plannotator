@@ -209,6 +209,8 @@ async function click(el: Element | null | undefined) {
 
 const $ = (el: ParentNode, s: string) => el.querySelector<HTMLElement>(s);
 const radios = (el: ParentNode) => el.querySelectorAll<HTMLInputElement>('[data-tour-message="ask"] input[type="radio"]');
+/** The warm-up's plain choices (step 2, crawl). */
+const warmRadios = (el: ParentNode) => el.querySelectorAll<HTMLInputElement>('[data-tour-message="warm"] input[type="radio"]');
 const coachKey = (el: ParentNode) => $(el, '[data-tour-coach]')?.getAttribute('data-tour-coach') ?? null;
 const config = () => JSON.parse(readFileSync(join(dir!, 'data', 'config.json'), 'utf8')) as Record<string, any>;
 /** What the tour may write: the `tour` setting, and nothing else (no picks, reply, annotation or MCP route). */
@@ -226,13 +228,17 @@ function recordOf(id: string) {
   return { seq: 1, kind: 'message', id, first: true, message: { id, thread_id: id, project_id: 'p', reply_to: null, subject: null, body: '', created_at: new Date().toISOString(), resolved_at: null, idempotency_key: null, author: { kind: 'agent', host: 'claude-code', session: 'ses_first', name: null } } };
 }
 
-/** A tour started from a screen opens on its first card ("a fresh reminder"); Show me goes to step 1. */
+/** A tour started from a screen opens on its first card ("a fresh reminder"); Show me, then "How it's organised", then step 1. */
 async function pastIntro(el: HTMLElement) {
   await until(() => $(el, '[data-tour-intro-go]') !== null, 'the tour’s first card');
   await until(() => document.activeElement === $(el, '[data-tour-intro] h2'), 'focus on the first card');
   expect($(el, '[data-tour-intro] h2')!.textContent).toBe('The Inbox works beside your agents');
   expect($(el, '[data-tour-exit]')).not.toBeNull();
   await click($(el, '[data-tour-intro-go]'));
+  // How it's organised: a picture of the tour's own list and thread, then Next.
+  await until(() => coachKey(el) === '1-orient', 'how it is organised');
+  expect($(el, '[data-tour-orient]')!.textContent).toContain('EVALUATION.md');
+  await click($(el, '[data-tour-next]'));
   await until(() => coachKey(el) === '1', 'step 1');
 }
 
@@ -242,23 +248,133 @@ async function openOnEntry(): Promise<HTMLElement> {
   return el;
 }
 
-/** Start the tour (the entry screen's button, else the first-run screen's quiet link) and walk to `step`. */
-async function walkTo(el: HTMLElement, step: number) {
+const PHRASE = 'a 2-day check that hover feels instant';
+const EV_LINE = 'It is also the cheapest direction, because the reader and its hooks already exist.';
+
+/** Select `phrase` inside `scope` the way a drag does, and let the viewer hear the pointer go up. */
+async function select(scope: HTMLElement, phrase: string) {
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let all = '';
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    nodes.push(n as Text);
+    all += (n as Text).data;
+  }
+  const at = all.indexOf(phrase);
+  if (at < 0) throw new Error(`"${phrase}" is not there`);
+  const range = document.createRange();
+  let off = 0;
+  for (const node of nodes) {
+    const end = off + node.data.length;
+    if (at >= off && at < end) range.setStart(node, at - off);
+    if (at + phrase.length > off && at + phrase.length <= end) {
+      range.setEnd(node, at + phrase.length - off);
+      break;
+    }
+    off = end;
+  }
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  const target = (range.startContainer.parentElement!.closest('article') as HTMLElement | null) ?? range.startContainer.parentElement!;
+  await act(async () => {
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+  });
+  await wait(100);
+}
+
+const popoverBox = () => document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea');
+
+/** Select words, press the toolbar's Comment, keep the suggestion the box opens with, Save. Returns the suggestion. */
+async function commentOn(scope: HTMLElement, phrase: string): Promise<string> {
+  await select(scope, phrase);
+  await until(() => document.querySelector('.annotation-toolbar button[aria-label="Comment"], [data-pn-annotation-toolbar-row] button[aria-label="Comment"]') !== null, 'the selection toolbar');
+  await click(document.querySelector('.annotation-toolbar button[aria-label="Comment"], [data-pn-annotation-toolbar-row] button[aria-label="Comment"]'));
+  await until(() => popoverBox() !== null, 'the composer');
+  const suggested = popoverBox()!.value;
+  const save = [...document.querySelectorAll<HTMLButtonElement>('[data-comment-popover] button')].find((x) => x.textContent?.trim() === 'Save');
+  await click(save);
+  return suggested;
+}
+
+/** Start the tour (the entry screen's button, else the first-run screen's quiet link) and walk to `step`, keeping every suggestion. */
+async function walkTo(el: HTMLElement, step: number, record: { suggestions?: string[] } = {}) {
+  const keep = (text: string) => record.suggestions?.push(text);
   await click($(el, '[data-tour-start]') ?? $(el, '[data-tour-again] button'));
   await pastIntro(el);
   if (step === 1) return;
   await click($(el, '[data-thread-id="tour-vscode"]'));
-  // happy-dom loads no picture, so the card draws its text rows (the e2e spec proves the tiles).
-  await until(() => coachKey(el) === '2' && radios(el).length === 4, 'step 2 and its choices');
+  // Crawl: a plain question first, the card saying it is the person's turn.
+  await until(() => coachKey(el) === '2' && warmRadios(el).length === 2, 'step 2 and its plain choices');
+  expect($(el, '[data-tour-coach] [data-tour-your-turn]')).not.toBeNull();
+  expect(radios(el).length).toBe(0);
   if (step === 2) return;
-  await click(radios(el)[0]);
-  await until(() => coachKey(el) === '3', 'step 3');
+  await click(warmRadios(el)[0]);
+  await until(() => coachKey(el) === '2-send', 'Send it back');
+  await click($(el, '[data-tour-warm-send]'));
+  // happy-dom loads no picture, so the card draws its text rows (the e2e spec proves the tiles).
+  await until(() => coachKey(el) === '3' && radios(el).length === 4, 'step 3 and its choices', 160);
   if (step === 3) return;
-  await click($(el, '[data-tour-send]'));
-  await until(() => coachKey(el) === '4-works', 'the replay', 160);
+  await click(radios(el)[0]);
+  await until(() => coachKey(el) === '4', 'step 4');
   if (step === 4) return;
-  await click($(el, '[data-tour-next]'));
+  keep(await commentOn($(el, '[data-tour-message="ask"] .ib-body')!, PHRASE));
   await until(() => coachKey(el) === '5', 'step 5');
+  if (step === 5) return;
+  await click($(el, '[data-tour-thread] .ib-attachments:not(.ib-hatts-tiles) [data-attachment-name="EVALUATION.md"]'));
+  await until(() => coachKey(el) === '5-file' && (el.querySelector('[data-attachment-pane] .ib-docscroll')?.textContent ?? '').includes(EV_LINE), 'EVALUATION.md open');
+  keep(await commentOn($(el, '[data-attachment-pane] .ib-docscroll')!, EV_LINE));
+  await until(() => coachKey(el) === '6', 'step 6');
+  if (step === 6) return;
+  await click($(el, '[data-tour-reply]'));
+  await until(() => coachKey(el) === '6-box', 'the recap');
+  await click($(el, '[data-tour-send]'));
+  await until(() => coachKey(el) === '7', 'the replay', 160);
+  if (step === 7) return;
+  await click($(el, '[data-tour-thread] img[data-inline-image="tour-img-built-a1"]') ?? [...el.querySelectorAll<HTMLImageElement>('[data-tour-arrival="2"] img')][0]);
+  await until(() => coachKey(el) === '7-file' && $(el, '[data-image-composer] textarea') !== null, 'a1.png open');
+  keep(($(el, '[data-image-composer] textarea') as HTMLTextAreaElement).value);
+  await click($(el, '[data-image-comment-save]'));
+  await until(() => coachKey(el) === '7-drawn', 'the screenshot’s comment');
+  await click($(el, '[data-tour-next]'));
+  await until(() => coachKey(el) === '7-art', 'Artifacts');
+  await click($(el, '[data-tour-thread] [data-artifacts-button]'));
+  await until(() => coachKey(el) === '7-art-grid', 'the grid');
+  expect(el.querySelectorAll('[data-artifacts-view] [data-artifact-kind]').length).toBe(5);
+  await click($(el, '[data-artifacts-view] [data-artifact-kind="markdown"]'));
+  await until(() => coachKey(el) === '7-art-open', 'a tile open');
+  await click($(el, '[data-tour-next]'));
+  await until(() => coachKey(el) === '8-open', 'step 8');
+  if (step === 8) return;
+  await click($(el, '[data-thread-id="tour-film"]'));
+  await until(() => coachKey(el) === '8', 'the film thread');
+  await click($(el, '[data-tour-thread] .ib-attachments:not(.ib-hatts-tiles) [data-attachment-name="guides-vscode.mp4"]'));
+  await until(() => $(el, '[data-video-player]') !== null, 'the film');
+  // A pause near the chapter text: the box fills with the suggestion and the moment pins.
+  await act(async () => {
+    $(el, '[data-video-player]')!.dispatchEvent(new Event('pause', { bubbles: false }));
+  });
+  await until(() => coachKey(el) === '8-pinned', 'the moment pinned');
+  keep(($(el, '[data-video-composer] textarea') as HTMLTextAreaElement).value);
+  await click($(el, '[data-video-comment-save]'));
+  await until(() => coachKey(el) === '8-send', 'Send it back');
+  await click($(el, '[data-tour-film-send]'));
+  await until(() => coachKey(el) === '8-done', 'the film’s answer', 160);
+  await click($(el, '[data-tour-next]'));
+  await until(() => coachKey(el) === '9', 'step 9');
+  if (step === 9) return;
+  await click([...el.querySelectorAll<HTMLElement>('[data-open-compose]')][0]);
+  await until(() => coachKey(document) === '9-open' && document.querySelector('[data-compose] [data-compose-to]') !== null, 'compose');
+  keep((document.querySelector('[data-compose] textarea') as HTMLTextAreaElement).value);
+  await click(document.querySelector('[data-compose] [data-compose-to]'));
+  await until(() => document.querySelector('[data-compose] [role="option"]') !== null, 'the picker');
+  await click(document.querySelector('[data-compose] [role="option"]'));
+  await until(() => coachKey(document) === '9-to', 'To chosen');
+  await click(document.querySelector('[data-compose] [data-compose-send]'));
+  await until(() => coachKey(el) === '9-loop', 'the loop', 160);
+  await click($(el, '[data-tour-next]'));
+  await until(() => coachKey(el) === '9-also', 'Also in your Inbox');
+  await click($(el, '[data-tour-next]'));
+  await until(() => window.location.hash === '#tour=10', 'step 10');
 }
 
 test.skipIf(!hasDom)('Two paths: two equal cards; Connect my agents opens the real first-run screen and is remembered', async () => {
@@ -282,66 +398,171 @@ test.skipIf(!hasDom)('Two paths: two equal cards; Connect my agents opens the re
   expect($(again, '[data-tour-entry]')).toBeNull();
 }, 90_000);
 
-test.skipIf(!hasDom)('the walk: a replay that writes nothing but the tour setting, step 6 real, Finish', async () => {
+/**
+ * What the tour may ask of the server: the tour's own read-only routes, the window's own reads, and the
+ * `tour` setting. Never a route that writes anything else: no annotations, markups, picks, replies,
+ * messages (compose), uploads or drafts, and never the person's attachments.
+ */
+const FORBIDDEN = /\/api\/inbox\/(annotations|markups|uploads|drafts|messages|attachments)|\/picks|\/reply|\/send-now|\/ack/;
+
+test.skipIf(!hasDom)('the walk writes nothing: a plain question, comments, a screenshot, the film, compose, all in the tour; step 10 real, Finish', async () => {
   const el = await openOnEntry();
-  await walkTo(el, 4);
-  // The replay: the person's reply, delivered, then the two messages the real thread got next.
-  expect($(el, '[data-tour-delivered]')!.textContent).toContain('Delivered to Claude Code');
-  expect($(el, '[data-tour-arrival="1"]')!.textContent).toContain('A it is');
-  expect($(el, '[data-tour-arrival="2"]')!.textContent).toContain('PR #2134');
-  expect(el.querySelectorAll('.ib-tour-realtime').length).toBeGreaterThanOrEqual(3);
-  expect($(el, '[data-tour-differs]')).toBeNull();
-  // The card now reads as sent, locked.
-  expect($(el, '[data-tour-message="ask"] .ib-qfoot-st')!.textContent).toContain('Sent');
-  expect(window.location.hash).toBe('#tour=4');
-  await click($(el, '[data-tour-next]'));
-  await until(() => coachKey(el) === '5', 'step 5');
-  await click($(el, '[data-tour-mock-tile]'));
-  await until(() => coachKey(el) === '5-mock', 'the mock open');
-  const frame = $(el, '[data-tour-file] iframe') as HTMLIFrameElement;
-  expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
-  // Drawn from the copy the tour loaded when it started.
-  expect(frame.getAttribute('srcdoc')).toContain('<');
-  await click($(el, '[data-tour-next]'));
-  await until(() => window.location.hash === '#tour=6', 'step 6');
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 6’s screen');
+  const before = (await loopback('/api/inbox/threads')).text.replace(/"cursor":\d+,?/, '');
+  const record = { suggestions: [] as string[] };
+  const seen: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return realFetch(input, init);
+  }) as typeof fetch;
+  await walkTo(el, 10, record);
+  globalThis.fetch = realFetch;
+  // Every comment box opened with the developer's real comment, condensed; the compose words are the real request.
+  expect(record.suggestions).toEqual([
+    'Good. If hover isn’t instant, tell me before you build B.',
+    'Nice, reusing the reader’s hooks keeps this small.',
+    'Looks great. This screenshot should go on the site.',
+    'Make chapter one taller here. It’s the narrative guide, and it’s easy to miss.',
+    'We need a page and a short film for Guided Reviews in VS Code, like plannotator.ai/inbox.',
+  ]);
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 9’s screen');
   expect($(el, '[data-tour-bar]')!.textContent).toContain('Your own Inbox');
-  expect($(el, '.ib-tour-lead')!.textContent).toContain('Nothing from the tour was kept');
-  // Nothing of the tour reached a route that writes.
+  // Nothing of the tour reached a route that writes, or the person's files.
   expect(writes()).toEqual([]);
+  expect(seen.filter((r) => FORBIDDEN.test(r))).toEqual([]);
+  expect(seen.filter((r) => !r.startsWith('GET ') && !r.includes('/api/inbox/settings') && !r.includes('/api/inbox/window'))).toEqual([]);
   await click($(el, '[data-tour-exit="finish"]'));
   await until(() => $(el, '[data-tour-bar]') === null, 'the tour ended');
   await until(() => !!config().inboxTour?.finished_at, 'finished remembered');
-  // Finished without notifications on: the first real thread asks once more.
   expect(config().inboxTour.notify_again).toBe(true);
-  expect($(el, '[data-tour-again]')).not.toBeNull();
-  const list = JSON.parse((await loopback('/api/inbox/threads')).text) as { sections: { threads: unknown[] }[] };
-  expect(list.sections.flatMap((s) => s.threads)).toEqual([]);
+  // The person's own list is exactly as it was.
+  expect((await loopback('/api/inbox/threads')).text.replace(/"cursor":\d+,?/, '')).toBe(before);
+  expect(existsSync(join(dir!, 'data', 'inbox', 'markups'))).toBe(false);
+}, 180_000);
+
+test.skipIf(!hasDom)('Fast-forward through every step writes nothing and ends each step as the walk would; a click the tour cannot use is answered', async () => {
+  const el = await openOnEntry();
+  const before = (await loopback('/api/inbox/threads')).text.replace(/"cursor":\d+,?/, '');
+  const seen: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return realFetch(input, init);
+  }) as typeof fetch;
+  await click($(el, '[data-tour-start]'));
+  await pastIntro(el);
+  // The first card that asks for an action says it is the person's turn.
+  expect($(el, '[data-tour-coach] [data-tour-your-turn]')!.textContent).toBe('Your turn');
+  // New message is answered before its step, never ignored.
+  await click([...el.querySelectorAll<HTMLElement>('[data-open-compose]')][0]);
+  await until(() => $(el, '[data-tour-nudge]') !== null, 'the answer to New message');
+  expect($(el, '[data-tour-nudge]')!.textContent).toContain('step 9');
+  expect(document.querySelector('[data-compose]')).toBeNull();
+  const ends = ['2', '3', '4', '5', '6', '7', '8-open', '9'];
+  for (const [i, key] of ends.entries()) {
+    await click($(el, '[data-tour-forward]'));
+    await until(() => coachKey(el) === key, `step ${i + 1} fast-forwarded`);
+    expect(activeIsPage()).toBe(false);
+  }
+  await click($(el, '[data-tour-forward]'));
+  await until(() => coachKey(el) === '9-loop', 'step 9 fast-forwarded to the loop');
+  expect($(el, '[data-tour-forward]')).toBeNull();
+  await click($(el, '[data-tour-next]'));
+  await click($(el, '[data-tour-next]'));
+  await until(() => window.location.hash === '#tour=10', 'step 10');
+  globalThis.fetch = realFetch;
+  expect(writes()).toEqual([]);
+  expect(seen.filter((r) => FORBIDDEN.test(r))).toEqual([]);
+  expect((await loopback('/api/inbox/threads')).text.replace(/"cursor":\d+,?/, '')).toBe(before);
+}, 120_000);
+
+test.skipIf(!hasDom)('a sent question card, Mark read, Archive and an early Send answer a click; the card itself points again', async () => {
+  const el = await openOnEntry();
+  await walkTo(el, 3);
+  // The warm-up was sent: a click on its card says so.
+  await click($(el, '[data-tour-message="warm"] .question-block label'));
+  await until(() => ($(el, '[data-tour-nudge]')?.textContent ?? '').includes('sent already'), 'the sent card answers');
+  // Mark read and Archive are the person's own Inbox's.
+  const markRead = [...el.querySelectorAll<HTMLButtonElement>('[data-tour-thread] .ib-phead button[aria-disabled="true"]')][0];
+  await click(markRead);
+  await until(() => ($(el, '[data-tour-nudge]')?.textContent ?? '').includes('after the tour'), 'Mark read answers');
+  // A click on the card's words shows its target again.
+  await click($(el, '[data-tour-coach] h2'));
+  await until(() => document.querySelector('.ib-tour-again') !== null, 'the target pointed at again');
+  expect(writes()).toEqual([]);
 }, 90_000);
 
-test.skipIf(!hasDom)('Exit at any step gives the Inbox back; a pick other than the real answer is replayed with a note', async () => {
+test.skipIf(!hasDom)('Fast-forward mid-replay leaves nothing stale; a second Send and New message after its Send are answered as they are', async () => {
   const el = await openOnEntry();
-  for (const step of [1, 2, 3, 4, 5]) {
+  await walkTo(el, 6);
+  // Everything the live region says from here on.
+  const said: string[] = [];
+  const live = document.querySelector('[data-inbox-live]')!;
+  const watch = new MutationObserver(() => said.push(live.textContent ?? ''));
+  watch.observe(live, { childList: true, characterData: true, subtree: true });
+  await click($(el, '[data-tour-reply]'));
+  await click($(el, '[data-tour-send]'));
+  await until(() => coachKey(el) === '7-sending', 'the replay running');
+  // A second press on Send lands on the foot's Reply: it is answered with where the reply is, not "not part of the tour".
+  await click($(el, '[data-tour-thread] .ib-pfoot button[aria-disabled="true"]'));
+  await until(() => ($(el, '[data-tour-nudge]')?.textContent ?? '').includes('on its way'), 'the reply on its way');
+  await click($(el, '[data-tour-forward]'));
+  await until(() => coachKey(el) === '8-open', 'step 7 fast-forwarded');
+  const from = said.length;
+  // Past the replay's own timings (5.6 s): its timers said and did nothing more.
+  await wait(6200);
+  watch.disconnect();
+  expect(said.slice(from).filter((s) => /Delivered|New message from/.test(s))).toEqual([]);
+  // The Fast-forward was said with the card it landed on, in one announcement.
+  expect(said.some((s) => s.startsWith('Fast-forwarded. Step 8 of 10.'))).toBe(true);
+  expect(coachKey(el)).toBe('8-open');
+  // Step 9 after its Send: New message says where the thread is.
+  await click($(el, '[data-tour-forward]'));
+  await until(() => coachKey(el) === '9', 'step 9');
+  await click($(el, '[data-tour-forward]'));
+  await until(() => coachKey(el) === '9-loop', 'the loop');
+  await click([...el.querySelectorAll<HTMLElement>('[data-open-compose]')][0]);
+  await until(() => ($(el, '[data-tour-nudge]')?.textContent ?? '').includes('Your thread is started'), 'New message after its Send');
+  expect(document.querySelector('[data-compose]')).toBeNull();
+  expect(writes()).toEqual([]);
+}, 120_000);
+
+test.skipIf(!hasDom)('Exit at every step, 1 to 10, gives the Inbox back; a pick other than the real answer is replayed as a fact', async () => {
+  const el = await openOnEntry();
+  for (const step of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
     await walkTo(el, step);
-    await click($(el, '[data-tour-exit="exit"]'));
+    await click($(el, step === 10 ? '[data-tour-exit="finish"]' : '[data-tour-exit="exit"]'));
     await until(() => $(el, '[data-tour-bar]') === null && $(el, '[data-inbox-empty]') !== null, `the Inbox after Exit at step ${step}`);
     expect(window.location.hash).toBe('');
-    // The entry screen is gone for good; the quiet link starts the tour again.
     expect($(el, '[data-tour-entry]')).toBeNull();
     expect($(el, '[data-tour-again] button')).not.toBeNull();
   }
-  expect(config().inboxTour.skipped_at).toBeTruthy();
-  // B, not the real answer: the replay says so.
+  expect(writes()).toEqual([]);
+  // B, not the real answer: the replay says so, as a fact.
   await click($(el, '[data-tour-again] button'));
   await pastIntro(el);
   await click($(el, '[data-thread-id="tour-vscode"]'));
+  // The warm-up's other answer: the agent's next message says so, as a fact.
+  await until(() => warmRadios(el).length === 2, 'the plain choices');
+  await click(warmRadios(el)[1]);
+  await click($(el, '[data-tour-warm-send]'));
+  await until(() => $(el, '[data-tour-differs="warm"]') !== null, 'the warm-up’s note', 160);
+  // The warm-up is the tour's own question (the real thread asked nothing then): its note never claims a real answer.
+  expect($(el, '[data-tour-differs="warm"]')!.textContent).toBe('You picked Evaluate only, no mockups yet. The tour goes on with the mockups, so you can see the pictures.');
   await until(() => radios(el).length === 4, 'the choices');
   await click(radios(el)[1]);
-  await until(() => coachKey(el) === '3', 'step 3');
+  await until(() => coachKey(el) === '4', 'step 4');
+  await commentOn($(el, '[data-tour-message="ask"] .ib-body')!, PHRASE);
+  await until(() => coachKey(el) === '5', 'step 5');
+  await click($(el, '[data-tour-thread] .ib-attachments:not(.ib-hatts-tiles) [data-attachment-name="EVALUATION.md"]'));
+  await until(() => (el.querySelector('[data-attachment-pane] .ib-docscroll')?.textContent ?? '').includes(EV_LINE), 'EVALUATION.md');
+  await commentOn($(el, '[data-attachment-pane] .ib-docscroll')!, EV_LINE);
+  await until(() => coachKey(el) === '6', 'step 6');
+  await click($(el, '[data-tour-reply]'));
   await click($(el, '[data-tour-send]'));
-  await until(() => $(el, '[data-tour-differs]') !== null, 'the note', 160);
-  expect($(el, '[data-tour-differs]')!.textContent).toBe('You picked B · Our reader beside a live native diff. In the real thread the answer was A, so this is what Claude Code built.');
-}, 90_000);
+  await until(() => $(el, '[data-tour-differs=""]') !== null, 'the note', 160);
+  expect($(el, '[data-tour-differs=""]')!.textContent).toBe('You picked B · Our reader beside a live native diff. In the real thread the answer was A, so this is what Claude Code built.');
+}, 400_000);
 
 test.skipIf(!hasDom)('a real message mid-tour is a chip in the bar; the tour goes on; the chip leaves the tour to it', async () => {
   const el = await openOnEntry();
@@ -375,9 +596,9 @@ test.skipIf(!hasDom)('returning users: Settings → General → Take the tour; o
   await pastIntro(el);
   // Steps 1 to 5 play in full over the tailnet; step 6 cannot read the agents there.
   await act(async () => {
-    window.location.hash = '#tour=6';
+    window.location.hash = '#tour=10';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 6');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
   await until(() => (el.textContent ?? '').includes('Open the Inbox on the computer to connect agents with one click.'), 'the tailnet line');
 }, 90_000);
 
@@ -399,9 +620,9 @@ test.skipIf(!hasDom)('notifications: quiet over the replay in front (the chip sa
   document.hasFocus = () => true;
   // Step 6 (where the person gets their first question): notifications as always, in front too.
   await act(async () => {
-    window.location.hash = '#tour=6';
+    window.location.hash = '#tour=10';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 6');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
   const third = await firstMessage('The question you asked for.', 'Step six one');
   await act(async () => pushRecord!(recordOf(third)));
   await until(() => notices.length === 2, 'the step 6 notification');
@@ -460,9 +681,9 @@ test.skipIf(!hasDom)('⌘K does not open search over the replay (it shows the pe
   expect(document.querySelector('[data-search-palette]')).toBeNull();
   expect(window.location.hash).toBe('#tour=2');
   await act(async () => {
-    window.location.hash = '#tour=6';
+    window.location.hash = '#tour=10';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 6');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
   await chord();
   await until(() => document.querySelector('[data-search-palette]') !== null, 'search');
 }, 90_000);
@@ -507,7 +728,7 @@ test.skipIf(!hasDom)('Forward after Exit, and a reload of that entry, never reop
   await until(() => $(again, '[data-inbox-empty]') !== null, 'the Inbox after the reload');
   expect(window.location.hash).toBe('');
   expect($(again, '[data-tour-bar]')).toBeNull();
-  for (const [odd, step] of [['abc', 1], ['0', 1], ['', 1], ['99', 6], ['2.5', 2], ['-3', 1]] as const) {
+  for (const [odd, step] of [['abc', 1], ['0', 1], ['', 1], ['99', 10], ['2.5', 2], ['-3', 1]] as const) {
     await act(async () => {
       window.location.hash = `#tour=${odd}`;
     });
@@ -560,9 +781,9 @@ test.skipIf(!hasDom)('the step-6 chip ends the tour as finished, not skipped', a
   const el = await openOnEntry();
   await walkTo(el, 1);
   await act(async () => {
-    window.location.hash = '#tour=6';
+    window.location.hash = '#tour=10';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 6');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
   await act(async () => pushRecord!(recordOf('msg_01REALMESSAGE000000000000')));
   await until(() => $(el, '[data-tour-arrivals]') !== null, 'the chip');
   await click($(el, '[data-tour-arrivals]'));
@@ -627,15 +848,15 @@ test.skipIf(!hasDom)('focus never drops to the page: the loading screen, a hash 
   await until(() => coachKey(el) === '2', 'the tour loaded');
   await until(() => !activeIsPage(), 'focus kept once the tour shows');
   // A hash change mid-tour that takes the focused control away.
-  await until(() => radios(el).length === 4, 'the choices');
-  radios(el)[0]!.focus();
+  await until(() => warmRadios(el).length === 2, 'the plain choices');
+  warmRadios(el)[0]!.focus();
   await act(async () => {
-    window.location.hash = '#tour=5';
+    window.location.hash = '#tour=4';
   });
-  await until(() => coachKey(el) === '5', 'step 5');
+  await until(() => coachKey(el) === '4', 'step 4');
   await until(() => !activeIsPage(), 'focus after the hash change');
   // Out of the tour as the browser's Back would (no Exit): focus lands on the Inbox.
-  $(el, '[data-tour-mock-tile]')?.focus();
+  $(el, '[data-tour-thread] [data-attachment-name="EVALUATION.md"]')?.focus();
   await act(async () => {
     window.location.hash = '';
   });
@@ -643,9 +864,9 @@ test.skipIf(!hasDom)('focus never drops to the page: the loading screen, a hash 
   await until(() => !activeIsPage(), 'focus on the Inbox after Back');
 }, 90_000);
 
-test.skipIf(!hasDom)('the replay takes Other as an answer: kept on the card, and Send replays it honestly', async () => {
+test.skipIf(!hasDom)('the replay takes Other as an answer: kept on the card, and the walk goes on', async () => {
   const el = await openOnEntry();
-  await walkTo(el, 2);
+  await walkTo(el, 3);
   const field = () => $(el, '[data-tour-message="ask"] input[placeholder="Other…"], [data-tour-message="ask"] textarea[placeholder="Other…"]') as HTMLInputElement | null;
   expect(field()).not.toBeNull();
   const proto = field() instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -653,69 +874,34 @@ test.skipIf(!hasDom)('the replay takes Other as an answer: kept on the card, and
     Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(field(), 'Something else entirely');
     field()!.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await until(() => coachKey(el) === '3', 'step 3 after Other');
+  await until(() => coachKey(el) === '4', 'step 4 after Other');
   expect(field()!.value).toBe('Something else entirely');
-  await click($(el, '[data-tour-send]'));
-  await until(() => $(el, '[data-tour-differs]') !== null, 'the note', 160);
-  expect($(el, '[data-tour-differs]')!.textContent).toBe('You answered “Something else entirely”. In the real thread the answer was A, so this is what Claude Code built.');
   expect(writes()).toEqual([]);
 }, 90_000);
 
-test.skipIf(!hasDom)('everything loads when the tour starts: a server that stops mid-tour changes nothing, and the mock runs from memory', async () => {
+test.skipIf(!hasDom)('everything loads when the tour starts: a server that stops mid-tour changes nothing; the files read from memory', async () => {
   const el = await openOnEntry();
-  await walkTo(el, 2);
-  // From here on the server answers nothing.
+  await walkTo(el, 5);
+  // From here on the tour's routes answer nothing.
   intercept = (path) => (path.startsWith('/api/inbox/tour/') ? 'network' : null);
-  await walkToFrom2(el);
-  await click($(el, '[data-tour-mock-tile]'));
-  await until(() => coachKey(el) === '5-mock', 'the mock open');
-  const frame = $(el, '[data-tour-file] iframe') as HTMLIFrameElement;
-  expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
-  expect(frame.getAttribute('srcdoc')).toContain('Content-Security-Policy');
-  expect($(el, '[data-tour-coach] h2')!.textContent).toBe('It runs right here');
-  expect($(el, '[data-tour-coach] p')!.textContent).not.toContain('bottom');
+  await click($(el, '[data-tour-thread] .ib-attachments:not(.ib-hatts-tiles) [data-attachment-name="EVALUATION.md"]'));
+  await until(() => (el.querySelector('[data-attachment-pane] .ib-docscroll')?.textContent ?? '').includes('Guided Reviews in VS Code: an honest look'), 'EVALUATION.md from memory');
+  await click($(el, '[data-tour-thread] .ib-attachments:not(.ib-hatts-tiles) [data-attachment-name="prototype.html"]'));
+  await until(() => $(el, '[data-attachment-pane] iframe') !== null, 'the mock from memory');
+  expect((($(el, '[data-attachment-pane] iframe') as HTMLIFrameElement).getAttribute('srcdoc') ?? '').length).toBeGreaterThan(1000);
   expect(el.textContent ?? '').not.toMatch(NEVER_IN_THE_TOUR);
-  // A file named but not carried by the tour says so, and is not a control.
-  const chip = el.querySelector('.ib-tour-filechip');
-  expect(chip?.tagName).toBe('SPAN');
-  expect(chip?.textContent).toContain('Not in the tour');
+  // Nothing leaves the window: no Download, no Open in.
+  expect($(el, '[data-attachment-pane] [data-attachment-download]')).toBeNull();
 }, 90_000);
 
-test.skipIf(!hasDom)('a piece that is not here degrades quietly: the pictures named on the card, the mock as a still, else described', async () => {
-  for (const missing of ['mock', 'mock and still'] as const) {
-    __forgetTourFixtureForTests();
-    __forgetTourAssetsForTests();
-    intercept = (path) =>
-      path.includes('vscode-mockups.html') || path.includes('-thumb.webp') || (missing === 'mock and still' && path.endsWith('/vs-a.webp'))
-        ? Response.json({ error: 'Not found' }, { status: 404 })
-        : null;
-    act(() => root?.unmount());
-    host?.remove();
-    await act(async () => {
-      window.location.hash = '#tour=2';
-    });
-    const el = await renderApp();
-    // happy-dom draws no picture, so the card names its choices as rows, and the coach says so calmly.
-    await until(() => $(el, '[data-tour-coach] h2')?.textContent === 'Pick a direction', 'the step-2 card without pictures');
-    await act(async () => {
-      window.location.hash = '#tour=5';
-    });
-    await until(() => coachKey(el) === '5', 'step 5');
-    await click($(el, '[data-tour-mock-tile]'));
-    await until(() => coachKey(el) === '5-mock', 'the mock’s place');
-    expect($(el, '[data-tour-coach] h2')!.textContent).toBe('The mock behind the pictures');
-    expect($(el, missing === 'mock' ? '[data-tour-file-still]' : '[data-tour-file-card]')).not.toBeNull();
-    expect($(el, '[data-tour-file] iframe')).toBeNull();
-    expect(el.textContent ?? '').not.toMatch(NEVER_IN_THE_TOUR);
-  }
+test.skipIf(!hasDom)('pictures that are not here degrade quietly: the card names its choices, the coach says so calmly', async () => {
+  __forgetTourFixtureForTests();
+  __forgetTourAssetsForTests();
+  intercept = (path) => (path.includes('-thumb.webp') ? Response.json({ error: 'Not found' }, { status: 404 }) : null);
+  await act(async () => {
+    window.location.hash = '#tour=3';
+  });
+  const el = await renderApp();
+  await until(() => $(el, '[data-tour-coach] h2')?.textContent === 'Pick a direction', 'the step-3 card without pictures');
+  expect(el.textContent ?? '').not.toMatch(NEVER_IN_THE_TOUR);
 }, 90_000);
-
-/** From step 2: pick, Send, the replay, Next to step 5. */
-async function walkToFrom2(el: HTMLElement) {
-  await click(radios(el)[0]);
-  await until(() => coachKey(el) === '3', 'step 3');
-  await click($(el, '[data-tour-send]'));
-  await until(() => coachKey(el) === '4-works', 'the replay', 160);
-  await click($(el, '[data-tour-next]'));
-  await until(() => coachKey(el) === '5', 'step 5');
-}

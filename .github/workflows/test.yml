@@ -97,6 +97,9 @@ jobs:
           packages/ui/markdownEditorFidelity.test.tsx
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
+          packages/ui/utils/richClipboard.test.ts
+          packages/ui/components/Viewer.richCopy.test.tsx
+          packages/ui/components/html-viewer/htmlRichCopy.test.tsx
           packages/ui/components/html-viewer/srcdoc.test.ts
           packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
           packages/ui/components/html-viewer/htmlLiveProtocol.test.tsx
@@ -165,6 +168,9 @@ jobs:
           packages/inbox/sidebarQuiet.test.tsx
           packages/inbox/leakedSubject.test.tsx
           packages/inbox/connectPromptRow.test.tsx
+          packages/inbox/boardPage.test.tsx
+          packages/inbox/boardSend.test.tsx
+          packages/inbox/boardOff.test.tsx
           packages/inbox/soundIntro.test.tsx
           packages/inbox/soundSettings.test.tsx
           packages/inbox/notifyHook.test.tsx

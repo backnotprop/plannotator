@@ -8,6 +8,7 @@ import { InboxApiError, inboxApi } from '../api';
 import { Icon } from '../icons';
 import { newTabUrl, openInMenu, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { attachmentDownloadUrl } from '../attachments';
+import { useInboxFileSource } from '../fileSource';
 import { Tip } from './Tip';
 
 /**
@@ -306,9 +307,11 @@ function FullScreenMoreApps(props: FullScreenMoreProps) {
 
 function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNode }) {
   const { attachment, version } = props;
+  // A source that writes nothing (the tour): no Open in, no Download; the menu says so.
+  const { writes } = useInboxFileSource();
   // Through the tailnet or on a phone (or a server without the app list): a new tab, for HTML and images.
-  const tab = props.openIn === null && props.surface !== undefined ? newTabUrl(attachment, version) : null;
-  const named = [props.openIn || tab ? 'open in' : null, 'download', props.versionAction ? 'versions' : null].filter(Boolean).join(', ');
+  const tab = writes && props.openIn === null && props.surface !== undefined ? newTabUrl(attachment, version) : null;
+  const named = [props.openIn || tab ? 'open in' : null, writes ? 'download' : null, props.versionAction ? 'versions' : null].filter(Boolean).join(', ') || 'not in the tour';
   return (
     <DropdownMenu open={props.open} onOpenChange={props.onOpenChange}>
       <DropdownMenuTrigger
@@ -324,11 +327,18 @@ function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNo
             <span className="flex-1">Open in new tab</span>
           </DropdownMenuItem>
         )}
-        {(props.openIn || tab) && <DropdownMenuSeparator />}
-        <DropdownMenuItem className="text-xs" render={<a href={attachmentDownloadUrl(attachment, version)} download={attachment.name} />} data-attachment-download="">
-          <Icon name="download" size={15} className="ib-appi ib-glyph" />
-          <span className="flex-1">{version === 'sent' ? 'Download the sent version' : 'Download'}</span>
-        </DropdownMenuItem>
+        {writes && (props.openIn || tab) && <DropdownMenuSeparator />}
+        {writes ? (
+          <DropdownMenuItem className="text-xs" render={<a href={attachmentDownloadUrl(attachment, version)} download={attachment.name} />} data-attachment-download="">
+            <Icon name="download" size={15} className="ib-appi ib-glyph" />
+            <span className="flex-1">{version === 'sent' ? 'Download the sent version' : 'Download'}</span>
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem className="text-xs" disabled data-full-view-not-in-tour="">
+            <Icon name="download" size={15} className="ib-appi ib-glyph" />
+            <span className="flex-1">Open in, Download: not in the tour</span>
+          </DropdownMenuItem>
+        )}
         {props.versionAction && (
           <>
             <DropdownMenuSeparator />

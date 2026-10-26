@@ -19,6 +19,7 @@ import {
   INBOX_CARD_COLUMNS,
   INBOX_CARD_LIVE_COLUMNS,
   inboxAgentName,
+  inboxCardRefsOf,
   isInboxCardDropUnseen,
   type InboxAuthor,
   type InboxCardColumn,
@@ -40,7 +41,11 @@ export const CARD_DESCRIPTION =
 
 /** Short on purpose: Pi and OpenCode send it with every request (INBOX_TOOL_COST). */
 export const CARD_COLUMN_DESCRIPTION =
-  "asked · designing (not code) · your_look (a non-code thing waits on the person; give `you`) · building (code, an open PR) · your_review (code or a release waits on the person; give `you`) · shipped (merged or live) · dropped (give `reason`). Waiting on the person wins. icebox: the person's only.";
+  "backlog (not started yet) · designing (not code) · your_look (a non-code thing waits on the person; give `you`) · building (code, an open PR) · your_review (code or a release waits on the person; give `you`) · shipped (merged or live) · dropped (give `reason`). Waiting on the person wins. icebox: the person's only. asked: the old name of backlog.";
+
+/** What a `card` call gets while the Board is off (approval "inbox-board", 2026-10-26): nothing is written. */
+export const INBOX_BOARD_OFF_TEXT =
+  "board_off: The person's Board is off, so cards are not kept and nothing was written. They turn it on in the Plannotator Inbox's Settings → General; agents get the card action in their next session.";
 
 const AGENT_SESSION_DESCRIPTION = "Your session id; the `plannotator inbox mcp` shim fills it. The cards you make are yours: list shows them.";
 
@@ -54,7 +59,9 @@ export function cardLineText(card: InboxCardWire): string {
     parts.push(`dropped${card.dropped.reason ? `: ${JSON.stringify(card.dropped.reason)}` : ""}${isInboxCardDropUnseen(card) ? " (the person has not seen it yet)" : ""}`);
   }
   if (card.threads.length > 0) parts.push(`threads ${card.threads.join(", ")}`);
-  if (card.prs.length > 0) parts.push(`PRs ${card.prs.map((pr) => pr.ref).join(", ")}`);
+  const refs = inboxCardRefsOf(card);
+  if (refs.length > 0) parts.push(`links ${refs.map((ref) => (ref.kind === "pr" ? ref.ref : `${ref.ref} (${ref.kind})`)).join(", ")}`);
+  if (card.notes) parts.push(`notes ${JSON.stringify(card.notes.length > 300 ? `${card.notes.slice(0, 300)}…` : card.notes)}`);
   if (card.agent?.kind === "agent") parts.push(`agent ${inboxAgentName(card.agent)}${card.agent.session ? ` (${card.agent.session})` : ""}`);
   return parts.join(" · ");
 }
@@ -69,6 +76,7 @@ export interface CardCallInput {
   you?: string;
   thread_id?: string;
   pr?: string;
+  ref?: string;
   reason?: string;
   idempotency_key?: string;
   asked_by?: "me" | "anyone";
@@ -95,12 +103,12 @@ function cardInScope(store: InboxStore, id: string | undefined, projectIds: Read
 }
 
 /** Fields each op takes; any other is refused by name (a column on a say would otherwise be dropped silently). */
-const OP_FIELDS: Record<InboxCardOp, readonly (keyof CardCallInput)[]> = {
-  create: ["title", "column", "say", "you", "thread_id", "pr", "idempotency_key"],
-  move: ["card_id", "column", "say", "you", "thread_id", "pr", "reason"],
+export const INBOX_CARD_OP_FIELDS: Record<InboxCardOp, readonly (keyof CardCallInput)[]> = {
+  create: ["title", "column", "say", "you", "thread_id", "pr", "ref", "idempotency_key"],
+  move: ["card_id", "column", "say", "you", "thread_id", "pr", "ref", "reason"],
   say: ["card_id", "say", "you", "title"],
-  link: ["card_id", "thread_id", "pr", "say"],
-  ship: ["card_id", "say", "pr", "thread_id"],
+  link: ["card_id", "thread_id", "pr", "ref", "say"],
+  ship: ["card_id", "say", "pr", "ref", "thread_id"],
   drop: ["card_id", "reason", "say"],
   list: ["asked_by", "include_resolved"],
 };
@@ -123,10 +131,12 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   for (const [field, value] of Object.entries(input) as [keyof CardCallInput, unknown][]) {
     // `false` is a default (include_resolved: false), not a field the agent meant to set: tolerated, as the plannotator tool contract does.
     if (value === undefined || value === false || OP_COMMON.has(field)) continue;
-    if (!OP_FIELDS[input.op].includes(field)) {
-      throw new InboxError("validation_error", `${field}: op ${input.op} does not take it (it takes ${OP_FIELDS[input.op].join(", ")}).`, { field });
+    if (!INBOX_CARD_OP_FIELDS[input.op].includes(field)) {
+      throw new InboxError("validation_error", `${field}: op ${input.op} does not take it (it takes ${INBOX_CARD_OP_FIELDS[input.op].join(", ")}).`, { field });
     }
   }
+  // The Board turned off after this session listed the tool: refused, nothing written (checked before anything else is read).
+  if (context.boardOn && !context.boardOn()) throw new InboxError("board_off", INBOX_BOARD_OFF_TEXT.replace(/^board_off: /, ""));
   if (!input.project_path) throw new InboxError("validation_error", "project_path: required (the connection fills it).", { field: "project_path" });
   const { project, projectIds, unresolved } = await cardScope(context, input.project_path);
   if (unresolved) {
@@ -185,6 +195,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       you: input.you,
       threads: input.thread_id ? [input.thread_id] : [],
       prs: input.pr ? [input.pr] : [],
+      refs: input.ref ? [input.ref] : [],
       idempotency_key: input.idempotency_key,
     });
     return answer(replayed ? "Already made (the same idempotency_key)" : "Made a card on the person's Board; keep it current with move or say as the work moves", store.cardWire(card), { replayed });
@@ -193,7 +204,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   const card = cardInScope(store, input.card_id, projectIds);
   if (input.op === "move" && !input.column) throw new InboxError("validation_error", "column: where the card goes (move).", { field: "column" });
   if (input.op === "say" && !input.say && !input.you && !input.title) throw new InboxError("validation_error", "say: your last word (or `you`, what the person owes; or `title`).", { field: "say" });
-  if (input.op === "link" && !input.thread_id && !input.pr) throw new InboxError("validation_error", "thread_id or pr: what to link.", { field: "thread_id" });
+  if (input.op === "link" && !input.thread_id && !input.pr && !input.ref) throw new InboxError("validation_error", "thread_id, pr or ref: what to link.", { field: "thread_id" });
   const column = input.op === "ship" ? "shipped" : input.op === "drop" ? "dropped" : input.column;
   const next = store.updateCard(card.id, {
     by,
@@ -203,6 +214,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     title: input.title,
     threads: input.thread_id ? [input.thread_id] : [],
     prs: input.pr ? [input.pr] : [],
+    refs: input.ref ? [input.ref] : [],
     reason: input.reason,
   });
   const verb = next.column !== card.column ? `Moved to ${INBOX_CARD_COLUMN_LABELS[next.column]}` : "Updated";
@@ -220,10 +232,11 @@ export function registerInboxCardTool(server: McpServer, context: InboxMcpContex
           op: z.enum(INBOX_CARD_OPS),
           card_id: z.string().optional().describe("The card (crd_…); not for create or list."),
           title: z.string().optional().describe("One line."),
-          column: z.enum(INBOX_CARD_COLUMNS).optional().describe(CARD_COLUMN_DESCRIPTION),
+          column: z.enum([...INBOX_CARD_COLUMNS, "asked"]).optional().describe(CARD_COLUMN_DESCRIPTION),
           say: z.string().optional().describe("Your last word: where the work is, one line."),
           you: z.string().optional().describe("What the person owes, one line."),
           pr: z.string().optional().describe("owner/repo#123 or a PR URL."),
+          ref: z.string().optional().describe("An issue or PR: owner/repo#123 or its URL."),
           reason: z.string().optional().describe("Why it is dropped."),
           thread_id: z.string().optional().describe("A thread or message id to link; create takes its subject."),
           idempotency_key: z.string().optional().describe("Create: the same key answers the first card."),

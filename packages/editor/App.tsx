@@ -355,6 +355,11 @@ import {
 } from './sourceDocumentPaths';
 import { pickRestoredSingleFileDraftToDisplay } from './draftRestoreSelection';
 import { scrollableEditSurface } from './editScroll';
+import { configurePlannotatorUI } from '@plannotator/ui/configure';
+
+// Plannotator's own plan review and annotate: the selection toolbar's Copy
+// copies rich text; @plannotator/ui hosts keep plain Copy unless they opt in.
+configurePlannotatorUI({ richCopy: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;

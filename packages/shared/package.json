@@ -128,6 +128,8 @@
     "./live-proxy-node": "./live-proxy-node.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/store": "./inbox/store.ts",
+    "./inbox/board-seen": "./inbox/board-seen.ts",
+    "./inbox/card-refs": "./inbox/card-refs.ts",
     "./inbox/list": "./inbox/list.ts",
     "./inbox/project-batch": "./inbox/project-batch.ts",
     "./inbox/search": "./inbox/search.ts",

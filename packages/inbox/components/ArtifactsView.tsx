@@ -22,9 +22,9 @@ import {
   type InboxAttachmentKind,
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
 import { artifactKey, artifactMessageCount, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
-import { attachmentDownloadUrl, attachmentImageUrl, attachmentVideoUrl, readableVersion } from '../attachments';
+import { readableVersion } from '../attachments';
+import { useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { formatBytes, formatCount, fullTime, plural } from '../format';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ArtifactDiagramFace } from './ArtifactDiagramFace';
@@ -132,7 +132,7 @@ const PREVIEW_CACHE_MAX = 48;
 /** Reads kept by file version: the grid opens, closes and scrolls back without reading again. */
 const previewCache = new Map<string, Promise<{ text: string; html: string | null }>>();
 
-function previewOf(attachment: InboxAttachmentState): Promise<{ text: string; html: string | null }> {
+function previewOf(source: InboxFileSource, attachment: InboxAttachmentState): Promise<{ text: string; html: string | null }> {
   const version = readableVersion(attachment);
   const key = `${attachment.id}:${version}:${version === 'current' ? (attachment.current?.sha256 ?? '') : attachment.sent_sha256}`;
   let cached = previewCache.get(key);
@@ -142,7 +142,7 @@ function previewOf(attachment: InboxAttachmentState): Promise<{ text: string; ht
     previewCache.set(key, cached);
     return cached;
   }
-  cached = inboxApi.view(attachment.id, version).then((view) => ({ text: view.text, html: view.html ?? null }));
+  cached = source.view(attachment, version).then((view) => ({ text: view.text, html: view.html ?? null }));
   // A failed read is not kept: the next time the grid shows it, it reads again.
   cached.catch(() => previewCache.delete(key));
   previewCache.set(key, cached);
@@ -212,6 +212,7 @@ const PAGE_WIDTH = 1024;
 /** The face of a file: what it is, at a glance. */
 function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean }) {
   const { attachment } = artifact;
+  const source = useInboxFileSource();
   const kind = readInboxAttachmentKind(attachment.kind);
   const version = readableVersion(attachment);
   const [preview, setPreview] = useState<{ text: string; html: string | null } | null>(null);
@@ -226,7 +227,7 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
     }
     if (!wantsText || !small || attachment.unavailable?.code === 'attachment_changed_type') return;
     let cancelled = false;
-    previewOf(attachment).then(
+    previewOf(source, attachment).then(
       (next) => !cancelled && setPreview(next),
       () => !cancelled && setFailed(true),
     );
@@ -243,7 +244,7 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
   if (kind === 'image') {
     return (
       <span className="ib-art-prev ib-art-f-img" data-face="image">
-        {near && !failed ? <img src={attachmentImageUrl(attachment, version)} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} /> : typed}
+        {near && !failed ? <img src={source.imageUrl(attachment, version)} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} /> : typed}
       </span>
     );
   }
@@ -251,7 +252,7 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
     return (
       <span className="ib-art-prev ib-art-f-img" data-face="video">
         {near && !failed ? (
-          <video src={`${attachmentVideoUrl(attachment, version)}#t=0.001`} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true" onError={() => setFailed(true)} />
+          <video src={`${source.videoUrl(attachment, version)}#t=0.001`} preload="metadata" muted playsInline tabIndex={-1} aria-hidden="true" onError={() => setFailed(true)} />
         ) : (
           typed
         )}
@@ -332,6 +333,7 @@ function Tile({
   onOpenAs?: (artifact: FileArtifact, view: 'full' | 'side') => void;
 }) {
   const [ref, near] = useNear<HTMLLIElement>();
+  const source = useInboxFileSource();
   const key = artifactKey(artifact);
   const label = artifactLabel(artifact, comments);
   const changed = artifact.type === 'file' ? artifactChanged(artifact.attachment) : null;
@@ -401,7 +403,7 @@ function Tile({
     );
   } else if (downloads) {
     tile = (
-      <a {...common} href={attachmentDownloadUrl(artifact.attachment, readableVersion(artifact.attachment))} download={artifact.attachment.name} data-artifact-kind={readInboxAttachmentKind(artifact.attachment.kind)}>
+      <a {...common} href={source.downloadUrl(artifact.attachment, readableVersion(artifact.attachment))} download={artifact.attachment.name} data-artifact-kind={readInboxAttachmentKind(artifact.attachment.kind)}>
         {body}
       </a>
     );

@@ -201,6 +201,8 @@ export function repliesOf(row: InboxAgentRow, platform?: ConnectContext['platfor
     if (row.id === 'opencode' && row.plugin?.generation === '1') return { text: "seen when it checks the Inbox; OpenCode 1 can't be woken", wakes: false };
     return { text: 'arrive as a new turn', wakes: true };
   }
+  // Codex: the Inbox wakes it itself (`codex queue`) when it found a Codex that can (the server's `wakes`).
+  if (row.reach.kind === 'mcp' && row.wakes === true) return { text: 'arrive as a new turn', wakes: true };
   if (row.reach.kind === 'mcp') return { text: "seen when it checks the Inbox; it can't be woken", wakes: false };
   return null;
 }

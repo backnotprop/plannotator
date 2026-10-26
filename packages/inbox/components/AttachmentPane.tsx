@@ -20,14 +20,15 @@ import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
-import { InboxApiError, inboxApi, type AttachmentView, type LinkedPageView } from '../api';
+import { InboxApiError, type AttachmentView, type LinkedPageView } from '../api';
+import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import {
   annotationOf,
   attachmentBlocks,
-  attachmentDownloadUrl,
+
   CODE_HIGHLIGHT_MAX_CHARS,
   CODE_WRAP_LINE_CHARS,
   hasLineLongerThan,
@@ -262,6 +263,14 @@ function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
   return pane.querySelector<HTMLElement>('.ib-imgstage');
 }
 
+/**
+ * A comment box's suggestion (the tour's, FileSuggestion) for words selected in a text file: offered when
+ * the selection is on its phrase (selectionOnPhrase); a stray selection, a single word of it included, opens an empty box.
+ */
+export function suggestionFor(_text: string, suggestion: { phrase?: string; comment: string }, selected: string): string | undefined {
+  return suggestion.phrase && selectionOnPhrase(suggestion.phrase, selected) ? suggestion.comment : undefined;
+}
+
 /** What the pane keeps per file until it closes: the version chosen, where it was read to, and the image's size. */
 interface FileMemory {
   version?: 'current' | 'sent';
@@ -292,6 +301,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [armed, setArmed] = useState(true);
   const [scope, setScope] = useState<AnnotationScope>('all');
   const viewerRef = useRef<ViewerHandle>(null);
+  const source = useInboxFileSource();
+  const suggestion = source.suggestion?.(attachment) ?? null;
 
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
@@ -308,8 +319,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setError(null);
     setUnanchored(new Set());
     if (!readsText) return;
-    inboxApi
-      .view(attachment.id, effectiveVersion)
+    source
+      .view(attachment, effectiveVersion)
       .then((next) => {
         if (!cancelled) setView(next);
       })
@@ -322,7 +333,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       cancelled = true;
     };
     // A changed file on disk (a new hash) reads again.
-  }, [attachment.id, effectiveVersion, attachment.current?.sha256, readsText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachment.id, effectiveVersion, attachment.current?.sha256, readsText, source]);
 
   useEffect(() => setSelectedId(props.focusId), [props.focusId, attachment.id]);
 
@@ -969,8 +981,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       return;
     }
     let cancelled = false;
-    inboxApi
-      .linkedPage(attachment.id, relative)
+    source
+      .linkedPage(attachment, relative)
       .then((page) => {
         if (cancelled) return;
         setLinkedStack((stack) => [...stack.filter((p) => p.attachmentId === attachment.id), { ...page, relative, hash, attachmentId: attachment.id }]);
@@ -1135,8 +1147,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     (annotation: Annotation): Promise<boolean> => {
       const answer = (async () => {
         try {
-          const result = await inboxApi.saveAnnotation(attachment.id, annotationVersion, annotation);
-          props.onSaved(result.annotation);
+          const record = await source.saveAnnotation(attachment, annotationVersion, annotation);
+          props.onSaved(record);
           return true;
         } catch (cause) {
           setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
@@ -1146,13 +1158,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       saves.current = { count: saves.current.count + 1, last: answer };
       return answer;
     },
-    [attachment.id, annotationVersion, props.onSaved],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attachment.id, annotationVersion, props.onSaved, source],
   );
 
   const remove = async (id: string) => {
     viewerRef.current?.removeHighlight(id);
     try {
-      await inboxApi.removeAnnotation(id);
+      await source.removeAnnotation(id);
       props.onRemoved(id);
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
@@ -1384,17 +1397,20 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           <span className="ib-sp" />
           {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
           {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
-          <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
-            <a
-              className="ib-btn ib-sm ib-ghost"
-              href={attachmentDownloadUrl(attachment, effectiveVersion)}
-              download={attachment.name}
-              data-attachment-download=""
-            >
-              <Icon name="download" size={14} />
-              Download
-            </a>
-          </Tip>
+          {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
+          {source.writes && (
+            <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
+              <a
+                className="ib-btn ib-sm ib-ghost"
+                href={source.downloadUrl(attachment, effectiveVersion)}
+                download={attachment.name}
+                data-attachment-download=""
+              >
+                <Icon name="download" size={14} />
+                Download
+              </a>
+            </Tip>
+          )}
           {folded && hasPanel && (
             <button
               type="button"
@@ -1584,6 +1600,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onFitChange={(fit) => remember(attachment.id, { fit })}
               onSwipe={multi ? (dir) => step(dir, 'key') : undefined}
               wheelHint={wheelHint}
+              suggestion={suggestion?.comment}
             />
           )}
           {isVideo && (
@@ -1600,6 +1617,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onSave={save}
               onError={setError}
               phone={phone}
+              poster={source.posterUrl?.(attachment) ?? undefined}
+              suggestion={suggestion ?? undefined}
             />
           )}
           {isDownload && (
@@ -1614,10 +1633,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                     {inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}, {formatBytes(attachment.current?.size ?? attachment.size)}. {tooLarge ? 'It is too large to show here; download it to open it.' : 'Plannotator does not show this kind of file; download it to open it.'}
                   </span>
                 </span>
-                <a className="ib-btn ib-pri" href={attachmentDownloadUrl(attachment, effectiveVersion)} download={attachment.name}>
-                  <Icon name="download" size={14} />
-                  Download
-                </a>
+                {source.writes && (
+                  <a className="ib-btn ib-pri" href={source.downloadUrl(attachment, effectiveVersion)} download={attachment.name}>
+                    <Icon name="download" size={14} />
+                    Download
+                  </a>
+                )}
               </div>
             </div>
           )}
@@ -1680,6 +1701,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
+                suggestComment={suggestion?.phrase ? (selected) => suggestionFor(view.text, suggestion, selected) : undefined}
               />
             </div>
           )}

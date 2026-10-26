@@ -7,6 +7,7 @@
 
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import type {
+  InboxCardMark,
   InboxDecisionsModel,
   InboxGuideRef,
   InboxHealth,
@@ -30,12 +31,16 @@ import type {
   InboxPromptsSettings,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import type { RecipientConnection } from './deliveryLine';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
   InboxAgentsModel,
   InboxAnnotationRecord,
+  InboxCardColumn,
+  InboxCardHistoryEntry,
+  InboxCardRef,
   InboxCardWire,
   InboxAttachmentState,
   InboxMessageWire,
@@ -74,6 +79,17 @@ export interface ProjectBatchAnswer<B> {
   replayed: boolean;
   /** The batch stopped partway: `batch` names what it changed (Undo covers those); the rest did not change. */
   error?: { code: string; message: string };
+}
+
+/** `GET /api/inbox/cards`: the Board. `seen_seq` (the person's last look, a store seq) is absent from an Inbox before step 2. */
+export interface CardsModel {
+  serverSession: string;
+  cursor: number;
+  cards: InboxCardWire[];
+  dropped_unseen: number;
+  seen_seq?: number | null;
+  /** Each linked thread's list row (archived ones too), for the opened card. Absent from an older Inbox. */
+  threads?: Record<string, InboxListRow | null>;
 }
 
 export interface ListModel {
@@ -230,6 +246,8 @@ export interface SettingsModel {
   diff_style?: InboxDiffStyle | null;
   /** Experimental features, each off unless switched on (`env`: PLANNOTATOR_EXPERIMENTAL decides). Absent from an older Inbox. */
   experimental?: InboxExperimentalSettings;
+  /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
+  board?: { on: boolean };
   /** The onboarding tour (config.json `inboxTour`): started, finished, skipped. Absent from an Inbox that predates it. */
   tour?: InboxTourState;
   /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
@@ -601,6 +619,8 @@ export const inboxApi = {
   decisions: () => get<InboxDecisionsModel>('/api/inbox/decisions'),
   saveExperimental: (change: { decision_mode: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>('/api/inbox/settings', { experimental: change }),
+  /** The Board on or off (Settings → General): agents get the card action from their next session. */
+  saveBoard: (on: boolean) => post<{ board: { on: boolean } }>('/api/inbox/settings', { board: { on } }),
   /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed
@@ -790,6 +810,32 @@ export const inboxApi = {
     }),
   // Pins (approval "inbox-pinned-threads"): the sidebar's pinned threads.
   /** Pin a thread (at the bottom of Pinned) or unpin it. */
+  /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
+  cards: () => get<CardsModel>('/api/inbox/cards'),
+  /**
+   * The person's New card: a title, notes and links, in Backlog or the Icebox; or sent: `thread_id` is
+   * the thread compose's Send just started for it (the card lands in that thread's project).
+   */
+  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'icebox'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
+    post<{ card: InboxCardWire; replayed: boolean }>('/api/inbox/cards', { ...input }),
+  /** The person's move: `move` to a column, `icebox`, `drop` (reason optional), `restore`. */
+  moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'icebox' } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
+    post<{ card: InboxCardWire }>(`/api/inbox/cards/${encodeURIComponent(id)}`, change),
+  /** The opened card's edits: title, notes; a link (a thread, an issue or PR); sent to an agent (the thread just started). */
+  editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'send'; thread_id: string }) =>
+    post<{ card: InboxCardWire }>(`/api/inbox/cards/${encodeURIComponent(id)}`, change),
+  /** The opened card: the card and its history, newest first. */
+  card: (id: string) => get<{ card: InboxCardWire; history: InboxCardHistoryEntry[] }>(`/api/inbox/cards/${encodeURIComponent(id)}`),
+  /** The opened card's links, resolved now (read only). */
+  cardRefs: (id: string) => get<{ refs: { ref: InboxCardRef; result: ForgeRefCardResult }[] }>(`/api/inbox/cards/${encodeURIComponent(id)}/refs`),
+  /** The person opened the Board: the look runs through the cursor of the read it showed (the server clamps it). */
+  /** The lane cards' marks (their one linked PR or issue's state), for the cards on screen; `refresh` when the window got its focus back. */
+  cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>('/api/inbox/cards/marks', { cards: [...ids], refresh }),
+  seeBoard: (throughSeq: number) => post<{ seen_seq: number }>('/api/inbox/cards/seen', { through_seq: throughSeq }),
+  /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
+  claimBoardIntro: () => post<{ show: boolean }>('/api/inbox/board/intro', {}),
+  /** The person looked at Dropped: an agent's drops there are seen. */
+  seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>('/api/inbox/cards/dropped/seen', { cards: [...ids] }),
   pin: (threadId: string, pinned: boolean) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/pin`, { pinned }),
   /** Put the pins in this order (Move up, Move down): pins it does not name keep their place after them; a named thread not pinned now is skipped. */

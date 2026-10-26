@@ -17,13 +17,14 @@
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
-import { INBOX_CARD_ACTION_ON, type InboxCard } from "./inbox-cards";
+import type { InboxCard } from "./inbox-cards";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
 export * from "./inbox-attachments";
 export * from "./inbox-open-in";
 export * from "./inbox-delivery";
+export * from "./inbox-codex";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
@@ -260,6 +261,19 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   codex: "Codex",
   cursor: "Cursor",
 };
+
+/**
+ * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
+ * Pi and OpenCode 2 through Plannotator's own connection (OpenCode 1 has the
+ * tool but no wake), and Codex through MCP alone, where the Inbox puts the
+ * reply into the Codex thread with `codex queue` (Codex CLI
+ * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts).
+ * The one list: wording that names which agents a reply wakes reads it.
+ */
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "codex"] as const;
+
+/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex. */
+export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex"];
 
 /** How the person sees an agent: the name it gave, else its host's name, else "An agent". */
 export function inboxAgentName(author: { kind: string; host?: string | null; name?: string | null } | null | undefined): string {
@@ -1396,7 +1410,7 @@ export interface InboxTourChange {
 }
 
 /** The tour's content version: the fixture's `v`, recorded with each stamp. */
-export const INBOX_TOUR_VERSION = 1;
+export const INBOX_TOUR_VERSION = 2;
 
 /**
  * The Inbox window's text size (config.json `inboxTextSize`, through GET and
@@ -1557,6 +1571,13 @@ export interface InboxAgentRow {
    * alone: 1), for the plugin line that version reads.
    */
   plugin?: { installed: boolean; disabled?: boolean; managed?: boolean; generation?: "1" | "2" } | null;
+  /**
+   * An agent its MCP connection alone wakes (INBOX_MCP_WAKING_HOSTS: Codex),
+   * connected through MCP: whether this Inbox can wake it now (Codex: a Codex
+   * CLI INBOX_CODEX_QUEUE_MIN_VERSION or later it can run). Absent for every
+   * other row and from an older Inbox.
+   */
+  wakes?: boolean;
 }
 
 export interface InboxAgentsModel {
@@ -1674,8 +1695,21 @@ export type InboxToolCostHost = "pi" | "opencode";
  * the cost test: 8,701 → 8,841 bytes (+140; about +30 tokens, so the rounded
  * token figure stands). So 8,841 without the card action and 9,957 with it
  * (9,817 + 140, estimated).
+ * The Board's step 2 switched the card action on (INBOX_CARD_ACTION_ON), with
+ * its `ref` argument and the Backlog wording: measured on Pi with the cost
+ * test, 10,131 bytes; tokens scaled from the last o200k_base count (2,086 for
+ * 8,701 bytes, so about 2,430) and stated high, as always. The review then let
+ * `column` take `asked` (the old name of backlog, listed in the schema and
+ * its description): measured again, 10,171 bytes (+40).
+ * Then the Board became something the person turns on (config.json
+ * `inboxBoard`, off by default; approval "inbox-board" 2026-10-26): an Inbox
+ * lists `card` only while it is on, so what a user gets by default is the
+ * entry WITHOUT `card`, and that is the stated cost. With the Board on it is
+ * the 10,171 bytes above.
  */
-const INBOX_TOOL_COST_NOW = INBOX_CARD_ACTION_ON ? { bytes: 9957, tokens: 2800 } : { bytes: 8841, tokens: 2500 };
+const INBOX_TOOL_COST_NOW = { bytes: 8841, tokens: 2500 };
+/** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 10171, tokens: 2900 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

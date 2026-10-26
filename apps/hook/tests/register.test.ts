@@ -246,7 +246,7 @@ describe('register', () => {
   // the user a plannotator-review skill) and the two the mod registers alike;
   // a name the matcher missed would run the user's blocking skill instead.
   test('all three commands are answered by the mod, skill-held and registered; another plugin\'s command is not touched', async ($: any, on: any) => {
-    const w = world(on)
+    const w = world(on, { run: (argv) => (argv[1] === 'inbox' ? { exitCode: 0, stdout: 'http://localhost:5555/\n', stderr: '' } : undefined) })
     on('session.messages', () => ({ value: [{ role: 'assistant', text: 'Here is the plan I wrote.' }] }))
     const reachedBeneath: string[] = []
     on('command.run', ($: any, e: any) => {
@@ -255,7 +255,7 @@ describe('register', () => {
     })
     await $.session.start(SESSION)
 
-    expect(w.registered.sort()).toEqual(['plannotator-annotate', 'plannotator-last'])
+    expect(w.registered.sort()).toEqual(['plannotator-annotate', 'plannotator-inbox', 'plannotator-last'])
     for (const [command, args, subcommand] of [
       ['plannotator-review', '', 'review'],
       ['plannotator-annotate', 'notes.md', 'annotate'],
@@ -265,6 +265,10 @@ describe('register', () => {
       expect(text).toContain('http://localhost:4321')
       expect(w.runs.some((argv) => argv[3] === 'plannotator-launch' && argv[6] === subcommand)).toBe(true)
     }
+    // /plannotator-inbox opens the Inbox (plannotator inbox --open) and answers with its address.
+    const inboxAnswer = await $.command.run({ command: 'plannotator-inbox', args: '', origin: { kind: 'composer' } })
+    expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open')).toBe(true)
+    expect(inboxAnswer.text).toContain('http://localhost:5555/')
     const other = await $.command.run({ command: 'frontend-status', args: '', origin: { kind: 'composer' } })
 
     expect(other.text).toBe('frontend-status ran beneath')

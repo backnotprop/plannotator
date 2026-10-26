@@ -226,6 +226,7 @@ import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } 
 import { runCardCommand } from "./card-command";
 import { runTelemetryCommand } from "./telemetry-command";
 import { formatInboxHelp } from "./inbox-help";
+import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isAgentSdkEntrypoint } from "@plannotator/shared/t3-hook-command";
 import {
@@ -605,8 +606,11 @@ if (isVersionInvocation(args)) {
   process.exit(0);
 }
 
+/** The person turned the Inbox's Board on (config.json `inboxBoard`): only then does either help mention cards. */
+const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
+
 if (isTopLevelHelpInvocation(args)) {
-  console.log(formatTopLevelHelp());
+  console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
   process.exit(0);
 }
 
@@ -619,7 +623,7 @@ if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   console.log(
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir() })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp() })
       : formatSubcommandHelp(helpSubcommand),
   );
   process.exit(0);

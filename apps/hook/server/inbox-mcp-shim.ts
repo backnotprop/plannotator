@@ -16,14 +16,18 @@
  * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`), so a script or
  * command the session runs sends as that session, exactly as its
  * `plannotator_inbox` tool does: the same author, the same default thread, and
- * the person's reply wakes it. Otherwise it is one `ses_` id per shim process,
+ * the person's reply wakes it. A Codex session is its thread: Codex names it
+ * on every tool call (`params._meta.threadId`, from the `codex-mcp-client`)
+ * and in the commands its shell runs (`CODEX_THREAD_ID`), and the shim sends
+ * as `agent_host: "codex"` with that id, so the Inbox can queue the person's
+ * reply into that thread (packages/server/inbox-codex-wake.ts). Otherwise it is one `ses_` id per shim process,
  * and an MCP client that wants its threads across restarts passes
  * `agent_session` itself.
  *
  * stdout carries JSON-RPC only; anything else goes to stderr.
  */
 
-import { inboxId } from "@plannotator/core/inbox-types";
+import { INBOX_CODEX_HOST, INBOX_CODEX_NAME, INBOX_HOST_NAMES, INBOX_WAKING_HOSTS, codexThreadOfCall, inboxId, isCodexThreadId } from "@plannotator/core/inbox-types";
 import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 
@@ -34,11 +38,12 @@ const PROJECT_ONLY_TOOLS = new Set(["search"]);
 const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card"]);
 
 /**
- * The hosts whose connections wake a session, with the name each one's
+ * The hosts whose sessions a reply wakes, with the name each one's
  * `plannotator_inbox` tool sends (`INBOX_AGENT_NAME` in the Claude Code mod,
- * `PI_INBOX_AGENT_NAME`, `OPENCODE_INBOX_AGENT_NAME`).
+ * `PI_INBOX_AGENT_NAME`, `OPENCODE_INBOX_AGENT_NAME`), and Codex, which the
+ * Inbox wakes itself through `codex queue`.
  */
-export const INBOX_SESSION_HOST_NAMES: Readonly<Record<string, string>> = { "claude-code": "Claude Code", pi: "Pi", opencode: "OpenCode" };
+export const INBOX_SESSION_HOST_NAMES: Readonly<Record<string, string>> = Object.fromEntries(INBOX_WAKING_HOSTS.map((host) => [host, INBOX_HOST_NAMES[host]!]));
 
 /** A host session id: what Claude Code, Pi and OpenCode use (UUIDs, `ses_` ids), and nothing that could carry anything else. */
 const HOST_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -54,8 +59,10 @@ export interface InboxHostSession {
  * The agent session this process belongs to, from the environment it
  * inherited, or null. `PLANNOTATOR_SESSION_TAG` (`<host>:<session id>`, set by
  * the Claude Code mod in every process its session starts) comes first; then
- * `PI_SESSION_ID`, which Pi sets on each bash tool call. Anything malformed or
- * naming another host is ignored, never guessed at.
+ * `PI_SESSION_ID`, which Pi sets on each bash tool call; then
+ * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs. Anything
+ * malformed or naming another host is ignored, never guessed at (a Codex
+ * session is a thread id, a UUID).
  */
 export function inboxHostSessionFromEnv(env: Record<string, string | undefined>): InboxHostSession | null {
   const tag = env.PLANNOTATOR_SESSION_TAG;
@@ -63,12 +70,14 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
     const colon = tag.indexOf(":");
     const host = colon > 0 ? tag.slice(0, colon) : "";
     const session = tag.slice(colon + 1);
-    if (Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) && HOST_SESSION_ID.test(session)) {
+    if (Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) && HOST_SESSION_ID.test(session) && (host !== INBOX_CODEX_HOST || isCodexThreadId(session))) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }
   }
   const pi = env.PI_SESSION_ID;
   if (typeof pi === "string" && HOST_SESSION_ID.test(pi)) return { host: "pi", session: pi, name: INBOX_SESSION_HOST_NAMES.pi! };
+  const codex = env.CODEX_THREAD_ID;
+  if (isCodexThreadId(codex)) return { host: INBOX_CODEX_HOST, session: codex, name: INBOX_CODEX_NAME };
   return null;
 }
 /** The 2026-07-28 per-request envelope's protocol-version key. */
@@ -98,9 +107,15 @@ function rpcError(id: string | number | null | undefined, message: string, code 
  * named no host or that same host (an agent that says it is another host is
  * not that session, and a reply to it must not wake the session), and then its
  * host and name are filled too on the tools that record an author.
+ *
+ * A call from Codex (`clientName` is `codex-mcp-client`, or the call carries
+ * Codex's turn metadata) that names its thread (`params._meta.threadId`) is
+ * that thread's: the host session is the thread, whatever the environment says.
  */
-export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: string, hostSession?: InboxHostSession | null): JsonRpc {
+export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: string, hostSession?: InboxHostSession | null, clientName?: string | null): JsonRpc {
   if (message.method !== "tools/call" || !message.params) return message;
+  const codexThread = codexThreadOfCall(message.params._meta, clientName);
+  if (codexThread) hostSession = { host: INBOX_CODEX_HOST, session: codexThread, name: INBOX_CODEX_NAME };
   const name = message.params.name;
   if (typeof name !== "string") return message;
   if (PROJECT_ONLY_TOOLS.has(name)) {
@@ -144,6 +159,8 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
   const hostSession = options.hostSession ?? null;
   const write = options.write ?? ((line: string) => void process.stdout.write(`${line}\n`));
   let negotiatedVersion: string | null = null;
+  /** The MCP client's name, from its `initialize` (Codex: `codex-mcp-client`). */
+  let clientName: string | null = null;
 
   const entry = async (): Promise<InboxRegistryEntry> => {
     const status = await inboxStatus(options.dataDir, 1500);
@@ -160,7 +177,11 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       return;
     }
     const isRequest = message && typeof message === "object" && "id" in message && typeof message.method === "string";
-    const outgoing = fillInboxToolArguments(message, options.cwd, own, hostSession);
+    if (message?.method === "initialize") {
+      const name = (message.params?.clientInfo as { name?: unknown } | undefined)?.name;
+      if (typeof name === "string") clientName = name;
+    }
+    const outgoing = fillInboxToolArguments(message, options.cwd, own, hostSession, clientName);
     let target: InboxRegistryEntry;
     try {
       target = await entry();

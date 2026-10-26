@@ -147,7 +147,7 @@ const cardOpArb: fc.Arbitrary<CardOp> = fc.oneof(
   fc.record({
     kind: fc.constant("move" as const),
     n: fc.nat(),
-    column: fc.constantFrom("asked", "designing", "your_look", "building", "your_review", "shipped", "icebox", "dropped"),
+    column: fc.constantFrom("backlog", "designing", "your_look", "building", "your_review", "shipped", "icebox", "dropped"),
     person: fc.boolean(),
     you: fc.boolean(),
     reason: fc.boolean(),

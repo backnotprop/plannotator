@@ -1612,6 +1612,27 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		},
 	});
 
+	// The person closed the Inbox's tab, or asks where it is: open it again
+	// (`plannotator inbox --open` starts a stopped one detached, so the session
+	// never waits on it) and show its address. The Inbox is the CLI's, never
+	// this extension's: Pi is its client.
+	pi.registerCommand("plannotator-inbox", {
+		description: "Open the Plannotator Inbox in the browser and show its address",
+		handler: async (_args, ctx) => {
+			try {
+				const [{ inboxOpenedText, openInboxInBrowser }, { getPlannotatorDataDir }] = await importFresh(() =>
+					Promise.all([import("./generated/inbox/agent-link.ts"), import("./generated/data-dir.ts")]),
+				);
+				const opened = await openInboxInBrowser({ dataDir: getPlannotatorDataDir() });
+				if ("url" in opened) ctx.ui.notify(inboxOpenedText(opened.url), "info");
+				else ctx.ui.notify(opened.error, "error");
+			} catch (err) {
+				if (!isPlannotatorUpdatedError(err)) throw err;
+				ctx.ui.notify(err.message, "error");
+			}
+		},
+	});
+
 	// ── The `plannotator` agent tool ─────────────────────────────────────
 	//
 	// The shared contract (packages/shared/plannotator-tool.ts): name,

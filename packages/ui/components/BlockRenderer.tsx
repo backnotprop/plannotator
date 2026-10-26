@@ -141,6 +141,10 @@ export const BlockRenderer: React.FC<{
         <div
           className="flex items-start gap-3 my-1.5"
           data-block-id={block.id}
+          data-rich-list-level={block.level || 0}
+          data-rich-list-kind={block.ordered ? 'ol' : 'ul'}
+          data-rich-list-index={orderedIndex ?? undefined}
+          data-rich-list-checked={isCheckbox ? String(isChecked) : undefined}
           style={{ marginLeft: `${indent}rem` }}
         >
           <ListItemBody

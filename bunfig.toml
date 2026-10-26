@@ -24,3 +24,4 @@ pathIgnorePatterns = ["apps/hook/tests/**", "tests/e2e/**", "apps/relay/**", "ap
 ".webp" = "file"
 ".png" = "file"
 ".webm" = "file"
+".mp4" = "file"

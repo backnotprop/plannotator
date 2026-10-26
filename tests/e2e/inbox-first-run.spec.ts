@@ -67,6 +67,11 @@ const codexMcp: Setup = ({ home, bin, binary: self }) => {
   mkdirSync(join(home, '.codex'), { recursive: true });
   writeFileSync(join(home, '.codex', 'config.toml'), `[mcp_servers.plannotator-inbox]\ncommand = ${JSON.stringify(self)}\nargs = ["inbox", "mcp"]\n`);
 };
+/** A Codex the Inbox can wake: it answers --version as Codex 0.160 (the Inbox then runs `codex queue`; never here: no thread asks). */
+const codexQueueMcp: Setup = (computer) => {
+  codexMcp(computer);
+  writeFileSync(join(computer.bin, 'codex'), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "codex-cli 0.160.0"; exit 0; fi\necho "this stub never queues" >&2\nexit 1\n', { mode: 0o755 });
+};
 const cursorMcp: Setup = ({ home, binary: self }) => json(join(home, '.cursor', 'mcp.json'), { mcpServers: { 'plannotator-inbox': { command: self, args: ['inbox', 'mcp'] } } });
 
 const SETUPS: Record<string, { setup: Setup[]; env?: Record<string, string>; live?: boolean }> = {
@@ -83,6 +88,7 @@ const SETUPS: Record<string, { setup: Setup[]; env?: Record<string, string>; liv
   },
   none: { setup: [] },
   wake: { setup: [claudePlugin, codexMcp] },
+  codexWakes: { setup: [claudePlugin, codexQueueMcp] },
   locked: { setup: [claudePlugin, piExtension, ({ bin }) => stub(bin, 'opencode'), codexMcp, cursorMcp], env: { PLANNOTATOR_INBOX_TOOL: '0' } },
 };
 
@@ -286,7 +292,7 @@ test('which agents a reply wakes: said once on the first-run screen, and per age
   const page = await openWindow(browser, c, errors);
   await expect(listItems(page, 'Already connected')).toHaveText(['Claude Code plugin', 'Codex MCP · sees replies when it checks']);
   await expect(page.locator('[data-wake-note]')).toHaveText(
-    "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi and OpenCode 2. Other agents see your reply the next time they check the Inbox.",
+    "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi and OpenCode 2, and in Codex 0.149 or later through MCP. Other agents see your reply the next time they check the Inbox.",
   );
   const out = resolve(process.env.PLANNOTATOR_WAKE_SHOTS ?? shots);
   mkdirSync(out, { recursive: true });
@@ -312,6 +318,17 @@ test('which agents a reply wakes: said once on the first-run screen, and per age
   await expect(page.locator('[data-wake-note] [title], [data-agent-replies] [title]')).toHaveCount(0);
   await both('settings-agents', false);
   await both('settings-agents', true);
+  await page.context().close();
+  expect(errors).toEqual([]);
+});
+
+test('a Codex the Inbox can wake (0.149 or later) reads as woken: Already connected and Settings → Agents', async ({ browser }) => {
+  const c = start('codexWakes');
+  const errors: string[] = [];
+  const page = await openWindow(browser, c, errors);
+  await expect(listItems(page, 'Already connected')).toHaveText(['Claude Code plugin', 'Codex MCP · replies arrive as a new turn']);
+  await page.goto(`${c.url}#settings/agents`);
+  await expect(page.locator('[data-agent="codex"] [data-agent-replies]')).toHaveText(/Your replies\s*arrive as a new turn/);
   await page.context().close();
   expect(errors).toEqual([]);
 });

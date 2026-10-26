@@ -28,12 +28,13 @@ function readScript(name: string): string {
   return readFileSync(join(scriptsDir, name), "utf-8").replace(/\r\n?/g, "\n");
 }
 
-// The three always-installed core skills (apps/skills/core/*). Single list so
+// The always-installed core skills (apps/skills/core/*). Single list so
 // the copy assertions, sidecar checks, and frontmatter checks can't drift.
 const CORE_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
   "plannotator-last",
+  "plannotator-inbox",
 ];
 
 describe("install.sh", () => {
@@ -211,6 +212,8 @@ describe("install.sh", () => {
     }
     // The knowledge skill is agent-agnostic and single-sourced in apps/skills/core.
     expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator "$VIBE_SKILLS_DIR"');
+    // So is /plannotator-inbox, which needs no origin label.
+    expect(script).toContain('copy_skill_if_present apps/skills/core/plannotator-inbox "$VIBE_SKILLS_DIR"');
     // sparse-checkout fetches apps/vibe (skills + hook templates).
     expect(script).toContain("git sparse-checkout set apps/skills apps/kiro-cli apps/vibe");
     // Managed marker block so the hook coexists with the user's own hooks.toml.
@@ -620,6 +623,7 @@ describe("install.ps1", () => {
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\plannotator" $claudeSkillsDir');
     expect(script).toContain('Copy-SkillIfPresent "apps\\skills\\core\\plannotator" $agentsSkillsDir');
     expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last"');
+    expect(script).toContain('foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-inbox"))');
     // Copy-SkillIfPresent pre-removes the destination to avoid nesting on upgrade.
     expect(script).toContain("if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }");
     // No Codex skills install.
@@ -886,9 +890,9 @@ describe("install.cmd", () => {
     // agent (Codex) scope reads the prose skills (apps\skills\core).
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\claude\\%%S" "!CLAUDE_SKILLS_DIR!\\%%S\\"');
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!AGENTS_SKILLS_DIR!\\%%S\\"');
-    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last) do");
+    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-inbox) do");
     // Knowledge skill: single-sourced from core into both scopes.
-    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator) do");
+    expect(script).toContain("for %%S in (plannotator-review plannotator-annotate plannotator-last plannotator-inbox plannotator) do");
     expect(script).toContain('xcopy /s /i /y /q "apps\\skills\\core\\plannotator" "!CLAUDE_SKILLS_DIR!\\plannotator\\"');
     // No Codex skills install — only the cleanup loop references CODEX skills.
     expect(script).not.toContain('xcopy /s /i /y /q "apps\\skills\\core\\%%S" "!CODEX_SKILLS_DIR!\\%%S\\"');
@@ -2227,7 +2231,7 @@ if [ "$1" = "clone" ]; then
   for a in "$@"; do dest="$a"; done
   dest="\${dest//\\\\//}"
   mkdir -p "$dest"
-  for skill in plannotator-review plannotator-annotate plannotator-last; do
+  for skill in plannotator-review plannotator-annotate plannotator-last plannotator-inbox; do
     mkdir -p "$dest/apps/skills/claude/$skill" "$dest/apps/skills/core/$skill"
     printf 'name: %s\\n' "$skill" > "$dest/apps/skills/claude/$skill/SKILL.md"
     printf 'name: %s\\n' "$skill" > "$dest/apps/skills/core/$skill/SKILL.md"

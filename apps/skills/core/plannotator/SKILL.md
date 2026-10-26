@@ -173,7 +173,7 @@ Lists active Plannotator server sessions, each with its full target (absolute pa
 ## plannotator inbox
 
 ```bash
-plannotator inbox [--background | --no-open] [--tailscale]
+plannotator inbox [--background | --no-open | --open] [--tailscale]
 plannotator inbox mcp
 ```
 
@@ -183,6 +183,15 @@ The Plannotator Inbox is one local window per machine where you leave the person
 - If you have a `plannotator_inbox` tool, use it; otherwise use the stdio MCP server `plannotator inbox mcp`. With the tool, the person's reply arrives in your session by itself, so end your turn instead of waiting.
 - Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
 - Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it.
+- When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
+
+## plannotator card
+
+```bash
+plannotator card <create|move|say|link|ship|drop|list> ...
+```
+
+Only while the person has turned the Inbox's Board on (Settings → General); it is off by default, and then every call answers `board_off` and writes nothing, so use it only when your inbox tool lists `card` or the person asks. The Board holds one card per piece of work that outlasts a reply, in the column of its stage (backlog, designing, your_look, building, your_review, shipped). Use the `card` action of a `plannotator_inbox` tool when you have one; this CLI is the same call from a shell. `plannotator card --help` gives the arguments, and `plannotator inbox --help` its card section while the Board is on. The icebox is the person's only.
 
 ## Other subcommands
 

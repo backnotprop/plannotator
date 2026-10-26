@@ -32,7 +32,7 @@ export { isNoOpBrowserSentinel };
  * Try opening URL via VS Code extension IPC registry.
  * Falls back when env vars (PLANNOTATOR_BROWSER) aren't available to the process.
  */
-export async function tryVscodeIpc(url: string): Promise<boolean> {
+export async function tryVscodeIpc(url: string, options: { timeoutMs?: number } = {}): Promise<boolean> {
   try {
     const registry: Record<string, number> = JSON.parse(
       fs.readFileSync(ipcRegistryPath(), "utf-8"),
@@ -50,7 +50,10 @@ export async function tryVscodeIpc(url: string): Promise<boolean> {
     if (!bestPort) return false;
     const ipcUrl = new URL("/open", `http://127.0.0.1:${bestPort}`);
     ipcUrl.searchParams.set("url", url);
-    const resp = await fetch(ipcUrl.toString());
+    const resp = await fetch(
+      ipcUrl.toString(),
+      options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : undefined,
+    );
     return resp.ok;
   } catch {
     return false;
@@ -235,6 +238,102 @@ async function openGlimpse(url: string): Promise<boolean> {
  * `PLANNOTATOR_BROWSER=none` (any "none" value, see browser-intent) opens
  * nothing at all and says so in one stderr line.
  */
+/**
+ * The command that opens `url`: the configured browser (`browser`, and
+ * `plannotatorBrowser` when it came from PLANNOTATOR_BROWSER), else the
+ * system opener. Shared by openBrowser and openBrowserDetached.
+ */
+async function browserLaunchArgv(
+  url: string,
+  browser: string | undefined,
+  plannotatorBrowser: string | undefined,
+): Promise<string[]> {
+  const platform = process.platform;
+  const wsl = await isWSL();
+  // Under WSL a Linux executable must run directly; cmd.exe only wins for
+  // Windows targets (a .exe, a C:\ path, a /mnt/<drive> path). Spawning the
+  // RESOLVED absolute path also sidesteps Bun 1.3's shell, which resolves
+  // bare command names against the PATH captured at startup (#1472).
+  const posixTarget = wsl && plannotatorBrowser
+    ? resolvePosixBrowserTarget(plannotatorBrowser)
+    : null;
+  const viaCmdExe =
+    (platform === "win32" || wsl) &&
+    !!plannotatorBrowser &&
+    posixTarget === null;
+
+  if (browser) {
+    if (plannotatorBrowser && platform === "darwin") {
+      return plannotatorBrowser.includes("/") && !plannotatorBrowser.endsWith(".app")
+        ? [plannotatorBrowser, url]
+        : ["open", "-a", plannotatorBrowser, url];
+    }
+    if (viaCmdExe) return ["cmd.exe", "/c", "start", "", plannotatorBrowser!, url];
+    return [posixTarget ?? browser, url];
+  }
+  // Default system browser
+  if (platform === "win32" || wsl) return ["cmd.exe", "/c", "start", url];
+  if (platform === "darwin") return ["open", url];
+  return ["xdg-open", url];
+}
+
+/** How long openBrowserDetached waits on the VS Code extension's IPC. */
+const DETACHED_IPC_TIMEOUT_MS = 2_000;
+
+/**
+ * Open `url` and return at once, for a command that must not wait on the
+ * browser (`plannotator inbox --open`). openBrowser waits for the opener and
+ * every process that keeps its output open, which can be the whole browser
+ * (xdg-open starting a fresh Firefox, PLANNOTATOR_BROWSER naming an
+ * executable). Here the opener runs in its own process group with no stdio
+ * and is not waited for.
+ *
+ * In a remote session with no browser configured, only the VS Code extension
+ * is asked: the system opener would open a browser on the remote host.
+ * Answers `opened`, `none` (a "none" PLANNOTATOR_BROWSER), `remote` (remote,
+ * nothing could open it here) or `failed`.
+ */
+export async function openBrowserDetached(
+  url: string,
+  options: { isRemote?: boolean } = {},
+): Promise<"opened" | "none" | "remote" | "failed"> {
+  const intent = resolveBrowserIntent(process.env);
+  if (intent.kind === "none") {
+    process.stderr.write(`  ${browserNoneReason(intent)}\n`);
+    return "none";
+  }
+  if (shouldTryRemoteBrowserFallback(options.isRemote ?? false)) {
+    return (await tryVscodeIpc(url, { timeoutMs: DETACHED_IPC_TIMEOUT_MS })) ? "opened" : "remote";
+  }
+  const browser = intent.kind === "explicit" ? intent.browser : undefined;
+  const plannotatorBrowser = intent.kind === "explicit" && intent.source === "PLANNOTATOR_BROWSER"
+    ? intent.browser
+    : undefined;
+  const argv = await browserLaunchArgv(url, browser, plannotatorBrowser);
+  const started = await new Promise<string | null>((resolve) => {
+    try {
+      const child = spawn(argv[0]!, argv.slice(1), {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+        env: { ...process.env, PATH: childPath() },
+      });
+      child.once("spawn", () => {
+        child.unref();
+        resolve(null);
+      });
+      child.once("error", (error) => resolve(error.message));
+    } catch (error) {
+      resolve(error instanceof Error ? error.message : String(error));
+    }
+  });
+  if (started === null) return "opened";
+  if (plannotatorBrowser) {
+    process.stderr.write(`Plannotator: could not launch PLANNOTATOR_BROWSER="${plannotatorBrowser}": ${started}\n`);
+  }
+  return (await tryVscodeIpc(url, { timeoutMs: DETACHED_IPC_TIMEOUT_MS })) ? "opened" : "failed";
+}
+
 export async function openBrowser(
   url: string,
   options?: { isRemote?: boolean; useGlimpse?: boolean }
@@ -264,42 +363,7 @@ export async function openBrowser(
       }
     }
 
-    const platform = process.platform;
-    const wsl = await isWSL();
-    // Under WSL a Linux executable must run directly; cmd.exe only wins for
-    // Windows targets (a .exe, a C:\ path, a /mnt/<drive> path). Spawning the
-    // RESOLVED absolute path also sidesteps Bun 1.3's shell, which resolves
-    // bare command names against the PATH captured at startup (#1472).
-    const posixTarget = wsl && plannotatorBrowser
-      ? resolvePosixBrowserTarget(plannotatorBrowser)
-      : null;
-    const viaCmdExe =
-      (platform === "win32" || wsl) &&
-      !!plannotatorBrowser &&
-      posixTarget === null;
-
-    if (browser) {
-      if (plannotatorBrowser && platform === "darwin") {
-        if (plannotatorBrowser.includes("/") && !plannotatorBrowser.endsWith(".app")) {
-          await $`${plannotatorBrowser} ${url}`.quiet();
-        } else {
-          await $`open -a ${plannotatorBrowser} ${url}`.quiet();
-        }
-      } else if (viaCmdExe) {
-        await $`cmd.exe /c start "" ${plannotatorBrowser} ${url}`.quiet();
-      } else {
-        await $`${posixTarget ?? browser} ${url}`.quiet();
-      }
-    } else {
-      // Default system browser
-      if (platform === "win32" || wsl) {
-        await $`cmd.exe /c start ${url}`.quiet();
-      } else if (platform === "darwin") {
-        await $`open ${url}`.quiet();
-      } else {
-        await $`xdg-open ${url}`.quiet();
-      }
-    }
+    await $`${await browserLaunchArgv(url, browser, plannotatorBrowser)}`.quiet();
     return true;
   } catch (error) {
     // An explicitly configured browser that fails is otherwise invisible:

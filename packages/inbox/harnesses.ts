@@ -162,7 +162,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
     case 'codex':
       return {
         artefacts: [{ kind: 'code', text: `codex mcp add ${SERVER} -- ${cmd}` }],
-        note: 'Also adds it to the Codex app and the IDE extension. Restart them after.',
+        note: 'Also adds it to the Codex app and the IDE extension. Restart them after. With Codex 0.149 or later, your replies come back into the Codex thread by themselves.',
         another: { summary: 'in the Codex app: Settings > MCP servers > Add server > STDIO then Restart' },
       };
     case 'cursor':

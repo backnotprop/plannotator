@@ -18,6 +18,7 @@ import {
 import type { Annotation, EditorMode, HostDraft, ImageAttachment, InputMethod } from "../../types";
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
+import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
@@ -1351,6 +1352,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               positionMode="center-above"
               element={hook.toolbarState.element}
               copyText={hook.toolbarState.selectionText}
+              getRichCopy={getRichCopyEnabled() ? hook.toolbarState.getRichCopy : undefined}
               // HTML/live surfaces are comment-only: no Delete, no label
               // picker, no Alt+digit labels (commentOnly). Exactly ONE label
               // affordance is restored: the hardcoded 👍 "Looks good". The

@@ -44,6 +44,17 @@ export interface RecipientConnection {
    * itself (null: not yet). Absent from an older Inbox.
    */
   waits?: Record<string, { since: string; auto_since: string | null }>;
+  /**
+   * Items that may not have reached this session (a Codex thread whose
+   * `codex queue` call ran out of time): their line says saved, not queued.
+   * Absent from an older Inbox and when none.
+   */
+  uncertain?: string[];
+}
+
+/** Whether an item may not have reached the session it was handed to (`connection.uncertain`). */
+export function uncertainItem(connection: RecipientConnection | null | undefined, itemId: string): boolean {
+  return connection?.uncertain?.includes(itemId) === true;
 }
 
 /** The wait inputs of `deliveryLine` for one item: the server's clock while it waits, its own record after the mark. */

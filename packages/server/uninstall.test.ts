@@ -390,6 +390,7 @@ describe("default uninstall", () => {
       "plannotator-review",
       "plannotator-annotate",
       "plannotator-last",
+      "plannotator-inbox",
       // The knowledge-layer CLI reference skill, installed to the same scopes.
       "plannotator",
     ]) {
@@ -590,6 +591,14 @@ describe("default uninstall", () => {
     writeText(
       join(homeDir, ".gemini", "commands", "plannotator-review.toml"),
     );
+    // /plannotator-inbox: Gemini command, OpenCode stub, Kiro and Vibe skills.
+    writeText(join(homeDir, ".gemini", "commands", "plannotator-inbox.toml"));
+    writeText(join(alternateConfig, "opencode", "commands", "plannotator-inbox.md"));
+    writeText(join(homeDir, ".kiro", "skills", "plannotator-inbox", "SKILL.md"));
+    writeText(join(homeDir, ".vibe", "skills", "plannotator-inbox", "SKILL.md"));
+    // The installer never wrote a Claude command of that name: one there is the person's.
+    const ownInboxCommand = join(homeDir, ".claude", "commands", "plannotator-inbox.md");
+    writeText(ownInboxCommand, "my own command");
 
     const conventionalOpenCode = join(
       homeDir,
@@ -646,6 +655,17 @@ describe("default uninstall", () => {
     expect(existsSync(join(homeDir, ".kiro", "skills", "plannotator-setup-goal"))).toBe(false);
     expect(existsSync(join(homeDir, ".vibe", "skills", "plannotator-review"))).toBe(false);
     expect(existsSync(join(homeDir, ".vibe", "skills", "my-custom-skill"))).toBe(true);
+    for (const installed of [
+      join(homeDir, ".claude", "skills", "plannotator-inbox"),
+      join(homeDir, ".agents", "skills", "plannotator-inbox"),
+      join(homeDir, ".kiro", "skills", "plannotator-inbox"),
+      join(homeDir, ".vibe", "skills", "plannotator-inbox"),
+      join(homeDir, ".gemini", "commands", "plannotator-inbox.toml"),
+      join(alternateConfig, "opencode", "commands", "plannotator-inbox.md"),
+    ]) {
+      expect(existsSync(installed)).toBe(false);
+    }
+    expect(readFileSync(ownInboxCommand, "utf8")).toBe("my own command");
     const vibeHooksAfter = readFileSync(vibeHooks, "utf8");
     expect(vibeHooksAfter).toContain("my-own-hook");
     expect(vibeHooksAfter).not.toContain("plannotator-managed-vibe-hooks");

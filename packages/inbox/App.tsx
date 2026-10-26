@@ -20,7 +20,7 @@ import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
-import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import {
@@ -65,10 +65,10 @@ import { inboxThreadShortcuts } from './shortcuts/thread.shortcuts';
 import { isComposingKey, isEditableTarget, isRepeatKey } from './shortcuts/guards';
 import { EmptyState } from './components/EmptyState';
 import { Icon } from './icons';
-import { TourBar, TourCoach, TourLoading, TourMain, TourNavigation, loadTour, tourView, useReducedMotion, useTourFixture, useTourReplay } from './tour/Tour';
+import { TourBar, TourCoach, TourLoading, TourMain, TourNavigation, loadTour, tourComposeBody, tourComposeTransport, tourView, useReducedMotion, useTourFixture, useTourReplay } from './tour/Tour';
 import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
-import { TOUR_FIRST_QUESTION_PROMPT, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCoach, tourCoachSpeech, tourReducer, tourStepOf, type TourAction, type TourDegraded } from './tour/model';
+import { TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, tourStepOf, type TourAction, type TourDegraded, type TourUi } from './tour/model';
 import { ThreadWait } from './components/ThreadWait';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { cardReport, noteQuestionRows } from './agents';
@@ -103,9 +103,13 @@ import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
+import { BoardPage, type BoardMove } from './board/BoardPage';
+import { BoardOff } from './board/BoardOff';
+import { CardChip } from './board/CardChip';
+import { boardViewOf, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
-import type { DraftView } from './api';
+import type { CardsModel, DraftView } from './api';
 import { inboxTabCount, useTabCount } from './tabCount';
 import { sidebarUpdateNotice, updateForPage } from './updateNotice';
 
@@ -125,6 +129,8 @@ configurePlannotatorUI({
   componentTooltips: true,
   // A digit-only #186379 in a message is a PR or issue of the project's repo, not a colour (#1932).
   digitHexIssueRefs: true,
+  // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
+  richCopy: true,
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
   refCardTransport: async (href, _ref, signal) => {
     const res = await fetch(`/api/inbox/ref?url=${encodeURIComponent(href)}`, { signal, headers: { accept: 'application/json' } });
@@ -157,6 +163,8 @@ const SIDEBAR_OPEN_COOKIE = 'plannotator-inbox-sidebar-open';
 const COMPOSE_LAST_COOKIE = 'plannotator-inbox-compose-last';
 /** How often the Drafts page reads its drafts again, so each chip follows its session. */
 const DRAFTS_REFRESH_MS = 10_000;
+/** No cards handled yet (the Board before its first read of a visit). */
+const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
@@ -187,7 +195,11 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board';
+  /** The Board's list (`#board`, `#board=shipped`, `#board=icebox`; approval "inbox-board", step 2). */
+  board?: BoardView;
+  /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
+  card?: string | null;
   /** The onboarding tour's step (`#tour=3`, approval "inbox-onboarding-tour"): 1 to 6. */
   step?: number;
   /** The release whose notes the What's new page shows (`#whats-new=0.28.12`). */
@@ -231,6 +243,7 @@ function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  if (params.has('board')) return { page: 'board', project: null, thread: null, board: boardViewOf(params.get('board')), card: params.get('card') };
   const thread = params.get('thread');
   const fileId = thread ? params.get('file') : null;
   return {
@@ -241,6 +254,9 @@ function routeOf(fullHash: string): Route {
     guide: thread ? params.get('guide') : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
+    card: thread ? params.get('card') : null,
+    // The Board list the card was opened from (Shipped, Icebox): the way back goes there.
+    board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
   };
 }
 
@@ -250,6 +266,7 @@ function hashOf(route: Route): string {
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
+  else if (route.page === 'board') hash = (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') + (route.card ? `&card=${encodeURIComponent(route.card)}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
     const params = new URLSearchParams();
@@ -266,6 +283,9 @@ function hashOf(route: Route): string {
       if (route.file.view) params.set('view', route.file.view);
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
+    // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
+    if (route.thread && route.card) params.set('card', route.card);
+    if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     // `&artifacts`, a flag: written without its empty `=`.
     hash = params.toString().replace(/(^|&)artifacts=(?=&|$)/, '$1artifacts');
   }
@@ -933,6 +953,97 @@ function Inbox() {
   useEffect(() => {
     void refreshDrafts();
   }, [refreshDrafts]);
+  /**
+   * The Board's cards (approval "inbox-board", step 2): read only while the
+   * person has the Board on, once it is known to be on and again when a card
+   * line arrives on the event stream, so the Board updates in place. With the
+   * Board off nothing reads them (a card line on the stream is skipped too).
+   */
+  const [cards, setCards] = useState<CardsModel | null>(null);
+  const [cardsError, setCardsError] = useState<string | null>(null);
+  const cardsSeq = useRef(0);
+  /** Whether the Board is on (`boardEnabled` below), for the reads that run outside a render. */
+  const boardOnRef = useRef(false);
+  const refreshCards = useCallback(async (): Promise<CardsModel | null> => {
+    if (!boardOnRef.current) return null;
+    const mine = ++cardsSeq.current;
+    try {
+      const next = await inboxApi.cards();
+      // An older read never replaces a newer one that landed first.
+      if (mine === cardsSeq.current) {
+        setCards(next);
+        setCardsError(null);
+      }
+      return next;
+    } catch (cause) {
+      if (mine === cardsSeq.current) setCardsError(cause instanceof Error ? cause.message : String(cause));
+      return null;
+    }
+  }, []);
+  /**
+   * A visit to the Board: the person's look as it stood when the visit began
+   * (cards an agent wrote to after it are bold for the whole visit, as a
+   * thread keeps "New since you looked"), and the cards they opened or moved
+   * since (no longer bold). Opening the Board records a new look through the
+   * newest card it read, so the next visit is bold only for what came after.
+   */
+  const [boardVisit, setBoardVisit] = useState<{ look: number | null; handled: ReadonlySet<string> } | null>(null);
+  /**
+   * The Board is something the person turns on (config.json `inboxBoard`,
+   * approval "inbox-board" 2026-10-26): null until the settings are read; an
+   * Inbox that predates the switch always has it.
+   */
+  const boardEnabled = settings ? (settings.board ? settings.board.on : true) : null;
+  boardOnRef.current = boardEnabled === true;
+  useEffect(() => {
+    if (boardEnabled !== true) {
+      // Off (or not known yet): no card is read, and none kept from before it was turned off.
+      cardsSeq.current++;
+      setCards(null);
+      return;
+    }
+    void refreshCards();
+  }, [boardEnabled, refreshCards]);
+  const onBoard = route.page === 'board' && boardEnabled === true;
+  useEffect(() => {
+    if (!onBoard) {
+      setBoardVisit(null);
+      return;
+    }
+    let live = true;
+    void refreshCards().then((model) => {
+      if (!live || !model) return;
+      setBoardVisit({ look: model.seen_seq ?? null, handled: new Set() });
+      // The look runs through this read's cursor: every line up to it was on the page. An Inbox before
+      // step 2 has no look to record (no `seen_seq`): nothing is bold beyond this visit there.
+      if (model.seen_seq !== undefined) void inboxApi.seeBoard(model.cursor).catch(() => {});
+    });
+    return () => {
+      live = false;
+    };
+  }, [onBoard, refreshCards]);
+  const handleCard = (id: string) =>
+    setBoardVisit((visit) => (visit && !visit.handled.has(id) ? { ...visit, handled: new Set([...visit.handled, id]) } : visit));
+  const moveCard = async (card: InboxCardWire, change: BoardMove): Promise<InboxCardWire | null> => {
+    handleCard(card.id);
+    try {
+      const { card: moved } = await inboxApi.moveCard(card.id, change);
+      setCards((model) => (model ? { ...model, cards: model.cards.map((c) => (c.id === moved.id ? moved : c)) } : model));
+      void refreshCards();
+      return moved;
+    } catch {
+      void refreshCards();
+      return null;
+    }
+  };
+  const seeDrops = useCallback((ids: readonly string[]) => {
+    if (ids.length === 0) return;
+    void inboxApi
+      .seeDrops(ids)
+      .then(() => refreshCards())
+      .catch(() => {});
+  }, [refreshCards]);
+
   // The Drafts page follows each draft's session (live, ended) while it is open.
   useEffect(() => {
     if (route.page !== 'drafts') return;
@@ -996,6 +1107,7 @@ function Inbox() {
     let deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
     let draftsTimer: ReturnType<typeof setTimeout> | null = null;
     let pinsTimer: ReturnType<typeof setTimeout> | null = null;
+    let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
@@ -1011,12 +1123,18 @@ function Inbox() {
       flushNotifications(first);
       unsubscribe = subscribeInboxEvents(first.cursor, {
         onRecord: (event) => {
+          // A Board card (approval "inbox-board"): only the Board reads it; it never changes the list or a thread.
+          if (event?.kind === 'card') {
+            if (cardsTimer) clearTimeout(cardsTimer);
+            cardsTimer = setTimeout(() => void refreshCards(), 60);
+            return;
+          }
           const now = routeRef.current;
           if (now.page === 'tour' && event?.kind === 'message' && event.first && event.message.author.kind === 'agent') {
             const threadId = event.message.thread_id;
             setTourArrivals((current) => ({ count: current.count + 1, thread: threadId }));
           }
-          // The replay (steps 1 to 5) in front: the chip says it, nothing rings. Everywhere else, step 6
+          // The replay (steps 1 to 9) in front: the chip says it, nothing rings. Everywhere else, step 10
           // included (it sends the person to get their first question), and with the tab in the background,
           // notifications and the sound work as always, so nothing is ever passed over unseen.
           if (!(now.page === 'tour' && (now.step ?? 1) < TOUR_STEPS && tourPageInFront())) observeEvent(event);
@@ -1072,9 +1190,10 @@ function Inbox() {
       if (timer) clearTimeout(timer);
       if (deliveriesTimer) clearTimeout(deliveriesTimer);
       if (draftsTimer) clearTimeout(draftsTimer);
+      if (cardsTimer) clearTimeout(cardsTimer);
       if (pinsTimer) clearTimeout(pinsTimer);
     };
-  }, [refreshList, refreshSettings, refreshThread, refreshDrafts, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
+  }, [refreshList, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
 
   // Opening a thread: read it, record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
@@ -1330,7 +1449,7 @@ function Inbox() {
   const close = (next: Route) => closeTo(next);
 
   const openSearch = (opener?: HTMLElement | null) => {
-    // Not over the tour's replay (steps 1 to 5): search shows the person's own threads, which the tour keeps out of sight.
+    // Not over the tour’s replay (steps 1 to 9): search shows the person's own threads, which the tour keeps out of sight.
     if (routeRef.current.page === 'tour' && (routeRef.current.step ?? 1) < TOUR_STEPS) return;
     searchOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setSearchMounted(true);
@@ -2231,6 +2350,19 @@ function Inbox() {
   };
 
   // Settings → General → Experimental: decision mode, saved to config.json and applied at once.
+  // The Board's switch: saved to config.json; the page and the sidebar row follow at once, agents at their next session.
+  const toggleBoard = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, board: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveBoard(next);
+      setSettings((current) => (current ? { ...current, board: saved.board } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleExperimental = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, experimental: { decision_mode: { on: next, env: current.experimental?.decision_mode.env ?? null } } } : current));
@@ -2363,7 +2495,7 @@ function Inbox() {
   // ── The onboarding tour (approval "inbox-onboarding-tour") ──────────────
   // A replay of a real thread from building Plannotator, drawn with the
   // window's own list, thread and question card over the tour's fixture
-  // (tour/model.ts). Steps 1 to 5 never touch the person's store; step 6 is
+  // (tour/model.ts). Steps 1 to 9 never touch the person's store; step 10 is
   // their own first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
@@ -2458,7 +2590,7 @@ function Inbox() {
     const want = route.step ?? 1;
     if (want !== tourSynced.current) {
       tourSynced.current = want;
-      if (want !== tourState.step) dispatchTourRaw({ type: 'goto', step: want, realAnswer: tourReal });
+      if (want !== tourState.step) dispatchTourRaw({ type: 'goto', step: want, realAnswer: tourReal, fixture: tourFixture });
       return;
     }
     if (tourState.step !== want) {
@@ -2488,7 +2620,7 @@ function Inbox() {
     tourReturn.current = '';
     tourStartedHere.current = false;
     // Left by the browser's Back (or anything else not through endTour): the same as Exit there, finished on
-    // step 6 (the entry screen does not come back).
+    // step 10 (the entry screen does not come back).
     if (!tourEnding.current) {
       saveTour(tourEndRecord(tourState.step === TOUR_STEPS));
       // The browser's Back took the tour's screen with the focus in it: focus lands on the Inbox, never the page.
@@ -2516,14 +2648,14 @@ function Inbox() {
     saveTour({ seen: true });
     go({ page: 'tour', project: null, thread: null, step: 1 });
   };
-  /** What ending the tour records: finished once the person reached step 6, skipped before. */
+  /** What ending the tour records: finished once the person reached step 10, skipped before. */
   const tourEndRecord = (finished: boolean): InboxTourChange =>
     finished
       ? { finished: true, notify_again: !(notifications.permission === 'granted' && settings?.notifications.enabled === true) }
       : { skipped: true };
   /**
    * Ends the tour: `kind` is what it records, `to` where it goes. A place named (the chip's thread, Settings, a
-   * sidebar row on step 6) takes the tour's own entry. Without one it goes back to where the tour was started, as
+   * sidebar row on step 10) takes the tour's own entry. Without one it goes back to where the tour was started, as
    * the browser's Back when that is the entry under the tour's own; else (a link or a reload) to that place, again
    * in the tour's entry. Either way a later Back never reopens #tour=N.
    */
@@ -2574,7 +2706,7 @@ function Inbox() {
     requestAnimationFrame(land);
   }
   // During the tour, focus that a control took with it (a screen redrawn by a step, a hash change, Try again)
-  // lands on the tour's own place: the coach card, the loading screen, step 6's heading, else Exit. Only focus
+  // lands on the tour's own place: the coach card, the loading screen, step 10's heading, else Exit. Only focus
   // that was LOST (the last focused element left the page): a click on empty space is left alone.
   useEffect(() => {
     if (!tourOn) return;
@@ -2600,6 +2732,8 @@ function Inbox() {
   }, [tourOn]);
   /** What did not load in the tour (pictures, the mock): the coach says only what is on screen. */
   const [tourDegraded, setTourDegraded] = useState<TourDegraded>({});
+  /** What is on screen in the tour that its state does not hold (a comment box open, a drawing, a moment pinned): the coach follows it. */
+  const [tourUi, setTourUi] = useState<TourUi>({});
   const degradeTour = useCallback((change: TourDegraded) => setTourDegraded((current) => ({ ...current, ...change })), []);
   const tourIntroShown = tourOn && !!tourFixture && tourIntro && tourState.step === 1;
   useEffect(() => {
@@ -2611,19 +2745,65 @@ function Inbox() {
     requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-tour-intro] h2')?.focus({ preventScroll: true }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tourIntroShown]);
+  /** Step 8's compose, opened from the tour's sidebar or list header: the real dialog over the tour's transport. */
+  const tourComposeOpener = useRef<HTMLElement | null>(null);
+  const openTourCompose = useCallback((opener: HTMLElement) => {
+    tourComposeOpener.current = opener;
+    dispatchTourRaw({ type: 'compose', open: true });
+  }, []);
+  const tourTransport = useMemo(() => (tourFixture ? tourComposeTransport(tourFixture, () => {}) : null), [tourFixture]);
+  /**
+   * The tour's answer to a click it cannot use (the owner, 2026-10-25: a card or button is never dead): one short
+   * line on the coach card for a few seconds, said in the live region.
+   */
+  const [tourNudge, setTourNudge] = useState<string | null>(null);
+  const tourNudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nudgeTour = useCallback(
+    (text: string) => {
+      setTourNudge(text);
+      say(text);
+      if (tourNudgeTimer.current) clearTimeout(tourNudgeTimer.current);
+      tourNudgeTimer.current = setTimeout(() => setTourNudge(null), 4500);
+    },
+    [say],
+  );
+  useEffect(() => () => void (tourNudgeTimer.current && clearTimeout(tourNudgeTimer.current)), []);
+  /** A Fast-forward just happened: the next card's announcement starts with it. */
+  const tourForwarded = useRef(false);
+  /** Fast-forward (the owner, 2026-10-25): the end of this step, said once. */
+  const forwardTour = useCallback(() => {
+    if (!tourFixture) return;
+    setTourNudge(null);
+    // Said with the card it lands on (the next announcement), never apart from it, which the card would cut off.
+    tourForwarded.current = true;
+    dispatchTour({ type: 'forward', realAnswer: tourReal, fixture: tourFixture }, { focusCoach: true });
+  }, [tourFixture, tourReal, dispatchTour]);
+  /** New message in the tour's sidebar: live on step 9 until its Send; before it the coach says when, after it where the thread is. */
+  const openTourComposeOrNudge = useCallback(
+    (opener: HTMLElement) => {
+      if (tourState.step === TOUR_STEPS - 1 && tourState.compose === 'sent') nudgeTour('Your thread is started; it’s in the list.');
+      else if (tourState.step === TOUR_STEPS - 1) openTourCompose(opener);
+      else nudgeTour('New message comes later in the tour, at step 9.');
+    },
+    [tourState.step, tourState.compose, openTourCompose, nudgeTour],
+  );
   const tourCoachCard =
     tourOn && tourFixture && tourState.step < TOUR_STEPS && !tourIntroShown
-      ? tourCoach(tourState, { developer: tourFixture.developer, agent: 'Claude Code' }, tourDegraded)
+      ? tourCoach(tourState, { developer: tourFixture.developer, agent: 'Claude Code' }, tourDegraded, tourUi)
       : null;
   const tourCoachKey = tourCoachCard ? `${tourState.step}:${tourCoachCard.key}:${tourCoachCard.title}` : null;
   const lastTourCoach = useRef<string | null>(null);
   useEffect(() => {
     if (tourCoachKey === lastTourCoach.current) return;
     lastTourCoach.current = tourCoachKey;
+    // A new card: the last one's answer to a click goes with it.
+    setTourNudge(null);
     if (!tourCoachCard) return;
     // Each change is said once. The replay's own lines say Sending and Delivered; the second arrival leads the next card.
-    if (tourCoachCard.key === '4-works') say(`New message from Claude Code: the pull request, with screenshots. ${tourCoachSpeech(tourCoachCard, tourState.step)}`);
-    else if (!tourCoachCard.wait) say(tourCoachSpeech(tourCoachCard, tourState.step));
+    const forwarded = tourForwarded.current ? 'Fast-forwarded. ' : '';
+    tourForwarded.current = false;
+    if (!tourCoachCard.wait) say(`${forwarded}${tourCoachSpeech(tourCoachCard, tourState.step)}`);
+    else if (forwarded) say(forwarded.trim());
     // Focus never drops to the page: a card that changed under a control that went away takes it.
     requestAnimationFrame(() => {
       const active = document.activeElement as HTMLElement | null;
@@ -2631,23 +2811,25 @@ function Inbox() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tourCoachKey]);
-  // Step 6 is real: Back in the tour bar has no step to go to, and Finish ends it.
-  const tourStep6 = tourOn && tourState.step === TOUR_STEPS;
-  /** A sidebar row: on step 6 (the real sidebar shows there) it ends the tour, finished, in the tour's own entry. */
-  const leave = (to: Route) => (tourStep6 ? endTour('finish', to) : go(to));
-  /** Step 6's notifications line: asked on the click only; hidden for the step by Not now (the first real thread asks once more). */
+  // The last step (10) is real: Back in the tour bar has no step to go to, and Finish ends it.
+  const tourRealStep = tourOn && tourState.step === TOUR_STEPS;
+  /** A sidebar row: on step 10 (the real sidebar shows there) it ends the tour, finished, in the tour's own entry. */
+  const leave = (to: Route) => (tourRealStep ? endTour('finish', to) : go(to));
+  /** The last step’s notifications line: asked on the click only; hidden for the step by Not now (the first real thread asks once more). */
   const [tourAskHidden, setTourAskHidden] = useState(false);
-  // Step 6 is the person's own screen: its heading takes focus (the coach card is gone) and the change is said.
-  const wasStep6 = useRef(false);
+  // The last step is the person’s own screen: its heading takes focus (the coach card is gone) and the change is said.
+  const wasRealStep = useRef(false);
   useEffect(() => {
-    if (tourStep6 && !wasStep6.current) {
-      say('Step 6 of 6: connect your agents. This is your own Inbox; what you connect here stays connected.');
+    if (tourRealStep && !wasRealStep.current) {
+      // The tour's own toast (Sent to Claude Code) belongs to the replay: the person's own screen starts clean.
+      dismissToast();
+      say(`Step ${TOUR_STEPS} of ${TOUR_STEPS}: connect your agents. This is your own Inbox; what you connect here stays connected.`);
       requestAnimationFrame(() => requestAnimationFrame(() => focusFirst(['.ib-main .ib-empty h2'])));
     }
-    if (!tourStep6) setTourAskHidden(false);
-    wasStep6.current = tourStep6;
+    if (!tourRealStep) setTourAskHidden(false);
+    wasRealStep.current = tourRealStep;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tourStep6]);
+  }, [tourRealStep]);
   // The first real thread offers notifications once more, inline, when the tour ended without them (choice 6).
   // Like the ask above the list (askKind): never when notifications are off or the ask was dismissed.
   const notifyAgain = !tourOn && settings?.tour?.notify_again === true && notifications.ask !== null;
@@ -2716,6 +2898,10 @@ function Inbox() {
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
+  // "‹ Board" and a chip naming the card; both go back to the opened card.
+  const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
+  const backToCard = () => close({ page: 'board', project: null, thread: null, board: route.board ?? 'lanes', card: fromCard });
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
   // The screen on top, which a phone shows alone (inbox.css): the list, a thread, a file.
@@ -2865,8 +3051,8 @@ function Inbox() {
     return folder ? { id: folder.id, root: folder.root, name: folder.name } : thread && route.thread ? { id: thread.project.id, root: thread.project.root, name: thread.project.name } : null;
   })();
 
-  // Step 6's notifications line (choice 6): asked on the click, in the screen's "Try it".
-  const tourAskKind = tourStep6 && !tourAskHidden && !overTailnet && notifications.permission !== 'unsupported'
+  // The last step’s notifications line (choice 6): asked on the click, in the screen's "Try it".
+  const tourAskKind = tourRealStep && !tourAskHidden && !overTailnet && notifications.permission !== 'unsupported'
     ? notifications.permission === 'denied'
       ? 'blocked'
       : notifications.permission === 'granted' && settings?.notifications.enabled
@@ -2928,7 +3114,21 @@ function Inbox() {
   if (tourOn && !tourFixture) {
     main = <TourLoading />;
   } else if (tourOn && tourFixture && tourState.step < TOUR_STEPS) {
-    main = <TourMain fixture={tourFixture} state={tourState} dispatch={dispatchTour} phone={phone} stacked={stack} reduced={reducedMotion} say={say} onDegraded={degradeTour} />;
+    main = (
+      <TourMain
+        fixture={tourFixture}
+        state={tourState}
+        dispatch={dispatchTour}
+        phone={phone}
+        stacked={stack}
+        reduced={reducedMotion}
+        say={say}
+        onDegraded={degradeTour}
+        onUi={setTourUi}
+        onCompose={openTourComposeOrNudge}
+        onNudge={nudgeTour}
+      />
+    );
   } else if (tourOn) {
     main = firstRunScreen({ tour: true });
   } else if (route.page === 'settings') {
@@ -2940,6 +3140,7 @@ function Inbox() {
         error={settingsError}
         onToggleTool={toggleTool}
         onToggleExperimental={(next) => void toggleExperimental(next)}
+        onToggleBoard={(next) => void toggleBoard(next)}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -3008,6 +3209,57 @@ function Inbox() {
         }
       />
     );
+  } else if (route.page === 'board' && boardEnabled === false) {
+    // The Board is off: a #board link says so, with the one way to turn it on (nothing else of it shows).
+    main = <BoardOff via={settings?.via ?? 'local'} onTurnOn={() => void toggleBoard(true)} error={settingsError} />;
+  } else if (route.page === 'board' && boardEnabled === null) {
+    main = <section className="ib-bpage" aria-busy="true" data-board-page="" />;
+  } else if (route.page === 'board') {
+    // The opened card's threads and a sent card's ticks read the list's rows (pins included).
+    const rowById = new Map<string, InboxListRow>();
+    for (const section of latestSections) for (const row of section.threads) rowById.set(row.thread_id, row);
+    for (const row of latest?.pins ?? []) if (!rowById.has(row.thread_id)) rowById.set(row.thread_id, row);
+    // The cards' own answer names threads the list leaves out (archived): the opened card still names them.
+    for (const [id, row] of Object.entries(cards?.threads ?? {})) if (row && !rowById.has(id)) rowById.set(id, row);
+    // A New card goes in the project of the card heard from last, else the first project.
+    const recent = [...(cards?.cards ?? [])].sort((a, b) => b.heard_at.localeCompare(a.heard_at)).find((card) => projects.some((p) => p.id === card.project_id));
+    main = (
+      <BoardPage
+        view={route.board ?? 'lanes'}
+        model={cards}
+        error={cardsError}
+        visitLook={boardVisit ? boardVisit.look : (cards?.seen_seq ?? null)}
+        handled={boardVisit?.handled ?? EMPTY_SET}
+        projects={projects}
+        defaultProject={recent?.project_id ?? projects[0]?.id ?? null}
+        home={settings?.home ?? null}
+        mcpCommand={settings?.mcp_command ?? null}
+        phone={phone}
+        openCard={route.card ?? null}
+        onOpenCard={(id) => {
+          if (id) handleCard(id);
+          const next: Route = { page: 'board', project: null, thread: null, board: route.board ?? 'lanes', card: id };
+          // Another card replaces the open one's entry; opening the first and closing are entries of their own (a phone's Back closes it).
+          if (id === null && route.card) close(next);
+          else writeRoute(next, { replace: !!route.card && id !== null });
+        }}
+        rowOf={(threadId) => rowById.get(threadId) ?? null}
+        onView={(next) => go({ page: 'board', project: null, thread: null, board: next })}
+        onMove={moveCard}
+        onChanged={(card) => {
+          if (card) {
+            handleCard(card.id);
+            setCards((model) => (model ? { ...model, cards: [card, ...model.cards.filter((c) => c.id !== card.id)] } : model));
+          }
+          void refreshCards();
+          void refreshList(false);
+        }}
+        onSeeDrops={seeDrops}
+        onOpenThread={(card, threadId) => go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes' })}
+        // The lane marks run this computer's gh / glab: never asked from a page opened over the tailnet.
+        marks={settings !== null && settings.via !== 'tailnet'}
+      />
+    );
   } else if (route.page === 'drafts') {
     main = (
       <DraftsPage
@@ -3044,7 +3296,7 @@ function Inbox() {
   } else {
     main = (
       <>
-        {!fileOpen && (
+        {!fileOpen && !fromCard && (
         <InboxList
           scope={route.project}
           title={filterProject?.name ?? 'Inbox'}
@@ -3114,7 +3366,7 @@ function Inbox() {
               focusThreadSubject.current = true;
             }}
             onRetry={() => setThreadRetry((n) => n + 1)}
-            onClose={() => close({ ...route, thread: null, file: null })}
+            onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
           />
         )}
         {route.thread && thread && thread.thread_id === route.thread && (
@@ -3150,7 +3402,7 @@ function Inbox() {
             onReplyOpened={() => setReplyFor(null)}
             onQuestions={patchQuestions}
             onChanged={afterWrite}
-            onClose={() => close({ ...route, thread: null, file: null })}
+            onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
             file={route.file ?? null}
             onOpenFile={(file, options) => {
               if (!file) return closeTo({ ...routeRef.current, file });
@@ -3202,9 +3454,10 @@ function Inbox() {
             onScreenChange={(state) => {
               threadOnScreenRef.current = state;
             }}
-            backLabel={filterProject?.name ?? 'Inbox'}
+            backLabel={fromCard ? 'Board' : (filterProject?.name ?? 'Inbox')}
+            cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}
             phone={phone}
-            stacked={stack.thread}
+            stacked={stack.thread || !!fromCard}
             fileStacked={stack.file}
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             onToast={(t) => showToast(t)}
@@ -3243,8 +3496,8 @@ function Inbox() {
           step={tourFixture ? tourState.step : (route.step ?? 1)}
           phone={phone}
           arrivals={tourArrivals.count}
-          onArrivals={() => endTour(tourStep6 ? 'finish' : 'exit', { page: 'inbox', project: null, thread: tourArrivals.thread })}
-          onExit={() => endTour(tourStep6 ? 'finish' : 'exit')}
+          onArrivals={() => endTour(tourRealStep ? 'finish' : 'exit', { page: 'inbox', project: null, thread: tourArrivals.thread })}
+          onExit={() => endTour(tourRealStep ? 'finish' : 'exit')}
         />
       )}
       {/* A file beside the thread takes the sidebar's room (record 2.2): it closes on the same spring, and the person's choice stays as it was. */}
@@ -3261,16 +3514,18 @@ function Inbox() {
           changeSidebar(next);
         }}
         navigation={
-          tourOn && !tourStep6 ? (
+          tourOn && !tourRealStep ? (
             <TourNavigation
               fixture={tourFixture}
               state={tourState}
               dispatch={dispatchTour}
+              say={nudgeTour}
+              onCompose={openTourComposeOrNudge}
               onSettings={() => endTour('exit', { page: 'settings', project: null, thread: null })}
             />
           ) : (
           <Sidebar
-            page={route.page === 'tour' ? 'inbox' : route.page}
+            page={route.page === 'tour' ? 'inbox' : fromCard ? 'board' : route.page}
             projectId={route.project}
             inboxCount={waitingCount(latestSections)}
             projects={projects}
@@ -3287,10 +3542,12 @@ function Inbox() {
             onDecide={() => openDecide()}
             pins={pinRows}
             openThreadId={route.thread}
-            onOpenPin={(row) => (tourStep6 ? endTour('finish', { page: 'inbox', project: null, thread: row.thread_id }) : openPinned(row))}
+            onOpenPin={(row) => (tourRealStep ? endTour('finish', { page: 'inbox', project: null, thread: row.thread_id }) : openPinned(row))}
             onPinAction={(row, action) => void pinAction(row, action)}
             draftsCount={(drafts?.length ?? 0) + replyDrafts.length}
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
+            // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
+            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
             onProject={(projectId) =>
@@ -3300,7 +3557,7 @@ function Inbox() {
             refreshSpin={refreshSpin}
             onSettings={() => leave({ page: 'settings', project: null, thread: null })}
             onUpdate={pressUpdate}
-            onWhatsNew={(version) => (tourStep6 ? endTour('finish', { page: 'whats-new', project: null, thread: null, version }) : openWhatsNew(version))}
+            onWhatsNew={(version) => (tourRealStep ? endTour('finish', { page: 'whats-new', project: null, thread: null, version }) : openWhatsNew(version))}
             // Not on a page opened over the tailnet: Settings → Agents is local only there.
             restartClaudeCode={settings && settings.via !== 'tailnet' ? restartClaudeCode : 0}
             onRestartSessions={() => leave({ page: 'settings', project: null, thread: null, section: 'agents' })}
@@ -3377,9 +3634,77 @@ function Inbox() {
           />
         </div>
       )}
-      {tourCoachCard && (
+      {tourOn && tourFixture && tourTransport && tourState.compose === 'open' && (
+        <ComposeDialog
+          request={{ body: tourComposeBody(tourFixture) }}
+          phone={phone}
+          current={{ id: TOUR_PROJECT_ID, root: '', name: tourFixture.project }}
+          lastSent={null}
+          home={null}
+          transport={tourTransport}
+          onSent={(sent) => {
+            dispatchTour({ type: 'composeSend' }, { focusCoach: true });
+            showToast(
+              {
+                icon: 'check',
+                lead: `Sent to ${hostLabel(sent.host)}`,
+                detail: `in ${sent.projectName}`,
+                speech: `Sent to ${hostLabel(sent.host)} in ${sent.projectName}. It takes it as its next turn.`,
+                action: {
+                  label: 'Open',
+                  onPress: () => {
+                    dismissToast();
+                    dispatchTour({ type: 'open', thread: sent.threadId }, { focusCoach: true });
+                  },
+                },
+              },
+              7000,
+            );
+          }}
+          onSaved={() => {}}
+          onDeleted={() => {}}
+          onClose={() => {
+            dispatchTourRaw({ type: 'compose', open: false });
+            const opener = tourComposeOpener.current;
+            requestAnimationFrame(() => (opener?.isConnected ? opener.focus() : setCoachFocus((n) => n + 1)));
+          }}
+          aside={
+            <>
+              {/* Compose is a modal dialog: the page under it, the tour bar included, is inert. Its own copy keeps Exit in reach. */}
+              <TourBar
+                over
+                step={tourState.step}
+                phone={phone}
+                arrivals={tourArrivals.count}
+                onArrivals={() => endTour('exit', { page: 'inbox', project: null, thread: tourArrivals.thread })}
+                onExit={() => endTour('exit')}
+              />
+              {tourCoachCard ? (
+                <div className="ib-tour-layer ib-tour-in-dialog">
+                  <TourCoach
+                    fixture={tourFixture}
+                    coach={tourCoachCard}
+                    step={tourState.step}
+                    canBack={false}
+                    phone={phone}
+                    reduced={reducedMotion}
+                    focusTick={0}
+                    onBack={() => {}}
+                    onNext={() => dispatchTour({ type: 'next' }, { focusCoach: true })}
+                    canForward={tourCanForward(tourState, tourCoachCard)}
+                    onForward={forwardTour}
+                    nudge={tourNudge}
+                  />
+                </div>
+              ) : null}
+            </>
+          }
+        />
+      )}
+      {tourCoachCard && !(tourOn && tourState.compose === 'open') && (
         <div className="ib-tour-layer">
           <TourCoach
+            fixture={tourFixture}
             coach={tourCoachCard}
             step={tourState.step}
             canBack={tourCanBack(tourState)}
@@ -3388,6 +3713,9 @@ function Inbox() {
             focusTick={coachFocus}
             onBack={() => dispatchTour({ type: 'back' }, { focusCoach: true })}
             onNext={() => dispatchTour({ type: 'next' }, { focusCoach: true })}
+            canForward={tourCanForward(tourState, tourCoachCard)}
+            onForward={forwardTour}
+            nudge={tourNudge}
           />
         </div>
       )}

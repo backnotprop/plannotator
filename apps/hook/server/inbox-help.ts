@@ -21,13 +21,13 @@
  * the platform.
  */
 
-import { INBOX_CARD_ACTION_ON, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_ACTION_ON, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
-import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_SERVED_TOOLS, INBOX_WAIT_DEFAULT_MS, INBOX_WAIT_MAX_SECONDS } from "@plannotator/server/inbox-mcp";
+import { INBOX_CONTRACT_EXAMPLE, INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_TOOLS, INBOX_SERVED_TOOLS, INBOX_WAIT_DEFAULT_MS, INBOX_WAIT_MAX_SECONDS } from "@plannotator/server/inbox-mcp";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
@@ -155,17 +155,17 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     ],
   },
   card: {
-    args: ["op", "card_id", "title", "column", "say", "you", "thread_id", "pr", "reason", "idempotency_key", "asked_by", "include_resolved"],
+    args: ["op", "card_id", "title", "column", "say", "you", "thread_id", "pr", "ref", "reason", "idempotency_key", "asked_by", "include_resolved"],
     lines: [
-      "Keep a card on the person's Board for work that outlasts the reply it was asked in: a lane or background task started, a PR opened, \"I'll send you X\". Not for a quick answer. Make it when you take such an ask, then keep it current with one short call at the moments you already note: work started, a PR opened, something sent to the person, waiting on them, shipped. The person reads the Board instead of asking each terminal where things are; each card shows how long ago anyone last wrote to it. A card is its own record: it never changes a thread or the person's list.",
+      "Keep a card on the person's Board for work that outlasts the reply it was asked in: a lane or background task started, a PR opened, \"I'll send you X\". Not for a quick answer. Make it when you take such an ask, then keep it current with one short call at the moments you already note: work started, a PR opened, something sent to the person, waiting on them, shipped. The person reads the Board instead of asking each terminal where things are; each card shows how long ago anyone last wrote to it. A card is its own record: it never changes a thread or the person's list. The Board is something the person turns on (Settings → General in the Inbox); while it is off the Inbox does not list `card`, and a call answers `board_off` and writes nothing. Turned on, agents get `card` in their next session.",
       "- `op`: `create`, `move`, `say`, `link`, `ship`, `drop` or `list`. Every op but create and list takes `card_id` (`crd_…`, from create or list); an op refuses a field it does not take.",
-      "- `column`: `asked` (nobody has started), `designing` (research, a plan, mocks, a sheet, options: anything that is not code), `your_look` (a non-code thing waits on the person: a sheet, options, questions, a triage call), `building` (code, or a PR not ready for them), `your_review` (code waits on the person: screenshots before a merge, a green PR to merge, a release go), `shipped` (merged or live, staging included), `dropped`. The stage is the kind of thing the next move makes: code, a PR or a release is building, anything else designing. Waiting on the person wins over work you keep doing beside it. Work you hold back yourself stays in its column, with the reason in `say`.",
+      "- `column`: `backlog` (not started: work you were asked to do and have not begun goes here, beside the person's own ideas; a backlog card is never a signal to start, the person tells you when), `designing` (research, a plan, mocks, a sheet, options: anything that is not code), `your_look` (a non-code thing waits on the person: a sheet, options, questions, a triage call), `building` (code, or a PR not ready for them), `your_review` (code waits on the person: screenshots before a merge, a green PR to merge, a release go), `shipped` (merged or live, staging included), `dropped`. The stage is the kind of thing the next move makes: code, a PR or a release is building, anything else designing. Waiting on the person wins over work you keep doing beside it. Work you hold back yourself stays in its column, with the reason in `say`.",
       "- `you`: what the person owes, one line, shown as \"You: …\" in your_look and your_review. Moving a card into either needs it; it is dropped when the card leaves them, and refused elsewhere. `say`: your last word, one line (\"lane running, sheet in ~1 h\"), shown in the other columns.",
-      "- create: `title`, or `thread_id` (a thread or message id of this project) to link it and take its subject as the title; `column` (default asked; a live column or shipped), `say`, `you`, `pr`, `idempotency_key` (the same key answers the first card). The card is your session's: list shows it as yours.",
-      "- move: `column`, with any of `say`, `you`, `pr` and `thread_id`; to dropped it needs `reason`. say: `say` and/or `you`, or `title` to rename. link: `thread_id` and/or `pr` (`owner/repo#123`, or a GitHub, GitLab or Bitbucket PR URL). Every write counts as hearing from the card.",
-      "- ship: when it is merged or live. A merged PR never moves a card by itself: ship it. Reported broken again: move it back to asked. drop: `reason` (required from you, one line); the Board shows the person your drop and its reason until they look, and they can restore it.",
+      "- create: `title`, or `thread_id` (a thread or message id of this project) to link it and take its subject as the title; `column` (default backlog; a live column or shipped), `say`, `you`, `pr`, `idempotency_key` (the same key answers the first card). The card is your session's: list shows it as yours.",
+      "- move: `column`, with any of `say`, `you`, `pr` and `thread_id`; to dropped it needs `reason`. say: `say` and/or `you`, or `title` to rename. link: `thread_id`, `pr` (`owner/repo#123`, or a GitHub, GitLab or Bitbucket PR URL) and/or `ref` (an issue or PR: `owner/repo#123`, or its GitHub or GitLab URL; move, create and ship take it too). The person sees each link's live state when they open the card; it never moves the card. Every write counts as hearing from the card.",
+      "- ship: when it is merged or live. A merged PR never moves a card by itself: ship it. Reported broken again: move it back to backlog. drop: `reason` (required from you, one line); the Board shows the person your drop and its reason until they look, and they can restore it.",
       "- list: your cards in this project (`asked_by: \"anyone\"` for every card here) in the live columns and the icebox; `include_resolved` adds shipped and dropped. One line each: id, title, column, `You:` or said, when it was last heard, dropped reason (and whether the person has seen your drop yet), threads, PRs, the agent it belongs to. Read it after a compaction or in a new session to pick your work back up.",
-      "- The icebox is the person's pause: you cannot put a card there or move one out of it (`card_icebox_person_only`, `card_iceboxed`), and only the person restores a card they dropped (`card_dropped_by_person`); you can still `say` and `link` on such a card. Leave an iceboxed card's work alone. A card or thread of another project is refused (`card_other_project`): pass that project's `project_path`.",
+      "- The icebox is the person's pause: you cannot put a card there or move one out of it (`card_icebox_person_only`, `card_iceboxed`), and only the person restores a card they dropped (`card_dropped_by_person`); you can still `say` and `link` on such a card. Leave an iceboxed card's work alone: nothing is sent to you about it and nothing moves it. A card or thread of another project is refused (`card_other_project`): pass that project's `project_path`.",
     ],
   },
 };
@@ -228,6 +228,12 @@ export interface InboxHelpOptions {
   platform?: ConnectContext["platform"];
   /** Where the agents' instructions files are (for the note section). Default: this process's home and environment. */
   agentEnvironment?: AgentEnvironment;
+  /**
+   * The person turned the Board on (config.json `inboxBoard`, read by the
+   * caller). Off (the default), the guide says nothing about cards: no `card`
+   * section and no Board bullet, as the Inbox serves no `card` action then.
+   */
+  board?: boolean;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
@@ -241,6 +247,7 @@ function toolBlock(name: InboxMcpToolName): string[] {
 }
 
 export function formatInboxHelp(options: InboxHelpOptions): string {
+  const board = INBOX_CARD_ACTION_ON && options.board === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
   const self = shellLine(options.command);
@@ -280,7 +287,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- Long work you finished while the person was away: one short summary, with the files to look at in `attachments`.",
     "- A plan, document, HTML prototype or diagram the person should read and annotate (`attachments`).",
     "- A guided review of a finished code change (get_guide_brief, then submit_guide).",
-    ...(INBOX_CARD_ACTION_ON ? ["- Work that outlasts your reply (a lane, a PR, something you promised to send): a card on the person's Board (card), kept current as it moves."] : []),
+    ...(board ? ["- Work that outlasts your reply (a lane, a PR, something you promised to send): a card on the person's Board (card), kept current as it moves. Only while the person has the Board on."] : []),
     "",
     "Do not use it for:",
     "",
@@ -295,9 +302,13 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `2. Otherwise use the stdio MCP server: ${code(mcp)}. "Connecting other agents" below shows how to register it.`,
     `3. Only as a fallback: Streamable HTTP at ${code(INBOX_HELP_MCP_URL)}. The port can change when the Inbox restarts; ${code(`${self} inbox --background`)} prints the current URL. A request that carries an \`Origin\` header is refused.`,
     "",
-    `The \`${INBOX_TOOL_NAME}\` tool fills ${INBOX_FILLED_ARGUMENTS.map(code).join(", ")} for you. Pass \`project_path\` to it yourself only when the message is about another repository or folder than your working folder (absolute, or relative to your working folder; it must be an existing folder): it then lands in that project, and relative \`attachments\` resolve against it. The stdio server fills \`project_path\` (its working folder, or \`PLANNOTATOR_CWD\`) and \`agent_session\`: the session's own id when a Claude Code or Pi session started it (a command your session runs), else one id per process, so pass \`agent_session\` yourself to keep your threads across restarts. Over HTTP, pass \`project_path\` (the absolute path of the repository or folder you work in) and \`agent_session\` yourself.`,
+    `The \`${INBOX_TOOL_NAME}\` tool fills ${INBOX_FILLED_ARGUMENTS.map(code).join(", ")} for you. Pass \`project_path\` to it yourself only when the message is about another repository or folder than your working folder (absolute, or relative to your working folder; it must be an existing folder): it then lands in that project, and relative \`attachments\` resolve against it. The stdio server fills \`project_path\` (its working folder, or \`PLANNOTATOR_CWD\`) and \`agent_session\`: the session's own id when a Claude Code or Pi session started it (a command your session runs); in Codex, your thread (Codex names it on every tool call, and in \`CODEX_THREAD_ID\` for the commands its shell runs), so the person's reply comes back into that thread; else one id per process, so pass \`agent_session\` yourself to keep your threads across restarts. Over HTTP, pass \`project_path\` (the absolute path of the repository or folder you work in) and \`agent_session\` yourself.`,
     "",
     "Every call starts a stopped Inbox in the background, without a browser tab, so never run `plannotator inbox` just to send. Bare `plannotator inbox` is for the person: it opens the window.",
+    "",
+    "## When the person asks where their Inbox is",
+    "",
+    `When the person asks where the Inbox is, or wants it back after closing its tab, run ${code(`${self} inbox --open`)}. It opens the window in their browser (starting the Inbox in the background when it is not running), prints the address on stdout and returns at once, so it never blocks your session. Tell them the address. They can also use their agent's \`/plannotator-inbox\` command (\`$plannotator-inbox\` in Codex), which runs the same thing. In a remote session (SSH) with no browser set, it opens no browser on the remote host: it prints the address and says how to reach it (\`ssh -L\` or \`--tailscale\`). To read the address without opening a tab, run ${code(`${self} inbox --background`)}: it prints the same URL. The address can change when the Inbox restarts, so read it again instead of reusing an old one.`,
     "",
     "## Connecting yourself",
     "",
@@ -315,8 +326,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "Agents ask, the person decides: no tool answers a question, approves or sends anything for the person. A refusal comes back as an error whose text starts with a code, `<code>: <message>`.",
     "",
-    // Every tool this Inbox serves (`card` only while INBOX_CARD_ACTION_ON lets it ship).
-    ...INBOX_SERVED_TOOLS.flatMap(toolBlock),
+    // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
+    ...(board ? INBOX_SERVED_TOOLS : INBOX_DEFAULT_SERVED_TOOLS).flatMap(toolBlock),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",
@@ -332,7 +343,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `- With the \`${INBOX_TOOL_NAME}\` tool in Claude Code, Pi or OpenCode 2, the person's reply arrives in your session by itself as a new message once the session is idle, starting with the line \`Plannotator Inbox: <subject> (<reply id>)\`. End your turn instead of waiting. When the person presses Send now while you work, it arrives in the turn you are in, at your next step: answer it before you go on. To answer, send_message with \`reply_to\` set to that id. The person can also write to a live session first; it arrives the same way. Every such message ends with one closing line, \`[thread <thread id> · more: <tool> read_thread · how it works: plannotator inbox --help]\` (a 👍 Looks good ends with \`[thread <thread id>]\` alone): read_thread with that \`thread_id\` shows the whole thread.`,
     "- The person can start a new thread with your session from the Inbox: an idea or a request of their own, not an answer to anything you asked, and it may have nothing to do with your current work. It arrives the same way, and its second line says so. Say how you will handle it before you start, and answer with `reply_to` set to the id on its first line, so your answer lands in that thread; name this thread on that reply with `thread` (a few words). Files they attached are listed under their words as `Attached: <name> (<path>)`; open them by path.",
     `- Replies come back to the session that sent the message: send with your \`${INBOX_TOOL_NAME}\` tool; inside Claude Code or Pi, a command your session runs also carries the session's identity.`,
-    "- OpenCode 1 has the tool but no wake, and nothing wakes an MCP client: call wait_for_reply, or read_thread later.",
+    `- In Codex ${INBOX_CODEX_QUEUE_MIN_VERSION.replace(/\.0$/, "")} or later (the TUI, the Codex app, the IDE extension), through the stdio server, the person's reply arrives in your thread by itself too: the Inbox puts it into your thread with \`codex queue\`, and it starts a new turn once the turn you are in ends (at once when the thread is idle; a closed thread gets it when it is resumed). It starts with the same \`Plannotator Inbox: <subject> (<reply id>)\` line and names your tools as you see them (send_message, read_thread). When send_message says the reply arrives by itself, end your turn instead of waiting, and do not call wait_for_reply. It never arrives in the middle of a turn (no Send now). A \`codex exec\` run is not woken (it ends after its turn): there, call wait_for_reply.`,
+    "- OpenCode 1 has the tool but no wake, and nothing wakes another MCP client (or `codex exec`): call wait_for_reply, or read_thread later.",
     `- The person can tag you with \`@\` in a reply to another session's thread, in this project or another. With a connection that wakes you it arrives as a new message: \`Plannotator Inbox: <subject> (<reply id>)\`, then \`${INBOX_TAGGED_INSTRUCTION}\`, then the line saying whose thread it is. Read the thread first with read_thread (\`message_id\` the reply's id), answer only what is addressed to you, with \`reply_to\` that id, so your answer lands in that thread; your own thread is unchanged. The session that owns the thread gets the same reply, with a line naming who else was tagged: leave what is addressed to them to them. Without a wake (MCP), wait_for_reply and read_thread show it (\`tagged_you: true\`). Agents do not tag each other.`,
     "- The reply is the person's answer to you: their words, then an \"Answers to your questions\" section, then their comments on the text of your messages (\"Feedback on your message from <time> (<message id>)\": the exact words they selected, quoted, then their comment), then their annotations on any attached files. Files they pasted into the reply (screenshots, for example) are listed last as `Attached: <name> (<path>)`; open them by path.",
     "- The person answers in one reply per session, even when the answers are on several of your messages: then \"Answers to your questions\" has a `### Your message <id>` heading per message. Questions they did not answer stay open, and the reply says how many after their words: `You have N other questions open in this thread. They stay open; the person will answer them in the Inbox. Don't re-ask them.` Do not ask them again.",

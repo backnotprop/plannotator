@@ -14,3 +14,4 @@ preload = ["../tests/setup/gh-tripwire.ts", "../tests/setup/feedback-archive-off
 ".webp" = "file"
 ".png" = "file"
 ".webm" = "file"
+".mp4" = "file"

@@ -22,7 +22,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi, type DraftView } from '../api';
+import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { ComposeFileTiles, attachedAnnouncement, useComposeFiles } from './ComposeFiles';
@@ -57,6 +57,8 @@ const PHONE_SKILL_LIST_HEIGHT = 198;
 export interface ComposeRequest {
   /** A draft to reopen (the Drafts page). */
   draft?: DraftView | null;
+  /** Words the message starts with (the tour's suggested request). */
+  body?: string;
   /** A session to put in To (the palette's "Message <host> in <project>"). */
   session?: string | null;
 }
@@ -68,6 +70,20 @@ export interface ComposeSent {
   projectName: string;
   /** The draft it was sent from (it is deleted with the Send), or null. */
   draftId: string | null;
+}
+
+/**
+ * Where compose reads and sends (tour v2): the live sessions and the new
+ * thread, and whether it keeps drafts and takes files. Absent: the Inbox's own
+ * routes, drafts and uploads, exactly as always. The onboarding tour passes
+ * one that writes nothing (`drafts: false`: closing asks nothing and Save
+ * draft is gone; `uploads: false`: no paperclip, drop or paste).
+ */
+export interface ComposeTransport {
+  sessions: () => Promise<ComposeSessionsModel>;
+  startThread: (input: StartThreadInput) => Promise<{ thread_id: string; project?: { id: string; name: string; root: string } }>;
+  drafts: boolean;
+  uploads: boolean;
 }
 
 export interface ComposeDialogProps {
@@ -82,12 +98,21 @@ export interface ComposeDialogProps {
   onSaved: (draft: DraftView) => void;
   onDeleted: (draft: DraftView) => void;
   onClose: () => void;
+  transport?: ComposeTransport;
+  /**
+   * Drawn inside the dialog, after its own content (the tour's coach card): a
+   * modal dialog is the top layer, so anything meant to show over it lives in
+   * it. Absent: nothing.
+   */
+  aside?: React.ReactNode;
 }
 
 const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 export function ComposeDialog(props: ComposeDialogProps) {
-  const { request, phone, current, lastSent, home } = props;
+  const { request, phone, current, lastSent, home, transport } = props;
+  const keepsDrafts = transport?.drafts ?? true;
+  const takesFiles = transport?.uploads ?? true;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLButtonElement>(null);
@@ -97,7 +122,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const statusId = `ib-cp-status-${uid}`;
 
   const [draft, setDraft] = useState<DraftView | null>(request.draft ?? null);
-  const [body, setBody] = useState(request.draft?.body ?? '');
+  const [body, setBody] = useState(request.draft?.body ?? request.body ?? '');
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
   const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft));
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
@@ -109,7 +134,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setTimeout(() => setPasteSaid(attachedAnnouncement(names)), 30);
     },
   });
-  const { model, load } = useComposeSessions(true);
+  const { model, load } = useComposeSessions(true, transport?.sessions);
   const projects = model?.projects ?? [];
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
@@ -202,8 +227,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       return;
     }
     // Something written that was not saved: ask. An empty compose (a draft emptied too) is never kept, so it
-    // closes asking nothing; a reopened draft emptied this way stays saved as it was.
-    if (dirty && !empty) {
+    // closes asking nothing; a reopened draft emptied this way stays saved as it was. No drafts (the tour): nothing to ask.
+    if (keepsDrafts && dirty && !empty) {
       setQuestion(true);
       return;
     }
@@ -238,10 +263,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setBusy('send');
     try {
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
-      const skills = await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
-      const result = await inboxApi.startThread({
+      const skills = transport ? null : await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
+      const result = await (transport ? transport.startThread : inboxApi.startThread)({
         to: { host: target.host, session: target.session },
-        body: withSkillsBlock(body, skills),
+        body: skills ? withSkillsBlock(body, skills) : body,
         idempotency_key: sendKey.current,
         uploads: uploadIds,
         ...named,
@@ -360,7 +385,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
   const loading = !model;
   // Save draft only for something written: an empty compose offers none (a phone shows the disabled Send instead).
-  const saveOffered = !sendable && !loading && !empty;
+  const saveOffered = keepsDrafts && !sendable && !loading && !empty;
   const title = draft ? 'Draft' : 'New message';
   const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
@@ -449,7 +474,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) requestClose();
       }}
       onDragOver={(event) => {
-        if (![...event.dataTransfer.types].includes('Files')) return;
+        if (!takesFiles || ![...event.dataTransfer.types].includes('Files')) return;
         event.preventDefault();
         setDropping(true);
       }}
@@ -459,10 +484,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
       }}
       // A paste anywhere in the dialog that carries files attaches them; text pastes as text.
       onPaste={(event) => {
-        if (files.paste(event)) setError(null);
+        if (takesFiles && files.paste(event)) setError(null);
       }}
       onDrop={(event) => {
-        if (event.dataTransfer.files.length === 0) return;
+        if (!takesFiles || event.dataTransfer.files.length === 0) return;
         event.preventDefault();
         setDropping(false);
         files.add(event.dataTransfer.files);
@@ -638,21 +663,29 @@ export function ComposeDialog(props: ComposeDialogProps) {
         </div>
       ) : (
         <div className="ib-cp-foot">
-          <Tip content="Attach files">
-            <label className="ib-cp-clip" aria-label="Attach files">
-              <Icon name="clip" size={17} />
-              <input
-                type="file"
-                multiple
-                className="ib-sr"
-                data-compose-attach=""
-                onChange={(event) => {
-                  if (event.target.files) files.add(event.target.files);
-                  event.target.value = '';
-                }}
-              />
-            </label>
-          </Tip>
+          {takesFiles ? (
+            <Tip content="Attach files">
+              <label className="ib-cp-clip" aria-label="Attach files">
+                <Icon name="clip" size={17} />
+                <input
+                  type="file"
+                  multiple
+                  className="ib-sr"
+                  data-compose-attach=""
+                  onChange={(event) => {
+                    if (event.target.files) files.add(event.target.files);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
+            </Tip>
+          ) : (
+            <Tip content="Files: not in the tour">
+              <span className="ib-cp-clip" role="img" aria-label="Files: not in the tour" aria-disabled="true" data-compose-attach-off="">
+                <Icon name="clip" size={17} />
+              </span>
+            </Tip>
+          )}
           {/* On a desktop the To line already says "Draft · saved". */}
           {draft && !dirty && phone && (
             <span className="ib-cp-savedline" data-compose-saved="">
@@ -696,6 +729,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">
         {pasteSaid}
       </div>
+      {props.aside}
       {dropping && (
         <div className="ib-cp-drop" aria-hidden="true">
           <Icon name="clip" size={20} />

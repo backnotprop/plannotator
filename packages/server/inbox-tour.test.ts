@@ -42,7 +42,7 @@ test("the fixture and every listed asset are served read only; nothing else is",
   const fixture = await at("/api/inbox/tour/fixture.json");
   expect(fixture.status).toBe(200);
   expect(fixture.headers.get("content-type")).toBe("application/json; charset=utf-8");
-  expect(((await fixture.json()) as { threads: unknown[] }).threads.length).toBe(2);
+  expect(((await fixture.json()) as { threads: unknown[] }).threads.length).toBe(3);
   for (const name of Object.keys(INBOX_TOUR_ASSET_PATHS)) {
     const res = await at(`/api/inbox/tour/assets/${name}`);
     expect(res.status, name).toBe(200);
@@ -65,7 +65,7 @@ test("the fixture and every listed asset are served read only; nothing else is",
 test("the tour setting: each true stamps now, notify_again is a flag, anything else refused and nothing written", async () => {
   const { dataDir, at, settings } = await setup();
   const read = async () => ((await (await at("/api/inbox/settings")).json()) as { tour: Record<string, unknown> }).tour;
-  expect(await read()).toEqual({ version: 1, seen_at: null, finished_at: null, skipped_at: null, notify_again: false });
+  expect(await read()).toEqual({ version: 2, seen_at: null, finished_at: null, skipped_at: null, notify_again: false });
   const seen = await settings({ tour: { seen: true } });
   expect(seen.status).toBe(200);
   const after = ((await seen.json()) as { tour: Record<string, string | null> }).tour;
@@ -83,4 +83,36 @@ test("the tour setting: each true stamps now, notify_again is a flag, anything e
   }
   // The refused requests wrote nothing (the last one's tour part was valid).
   expect((await read()).skipped_at).toBeNull();
+});
+
+test("the film clip answers HTTP Range (206, 416, If-Range); EVALUATION.md is sandboxed plain text", async () => {
+  const { at } = await setup();
+  const whole = await at("/api/inbox/tour/assets/film-clip.mp4");
+  expect(whole.status).toBe(200);
+  expect(whole.headers.get("content-type")).toBe("video/mp4");
+  expect(whole.headers.get("accept-ranges")).toBe("bytes");
+  const size = (await whole.arrayBuffer()).byteLength;
+  expect(size).toBeGreaterThan(100_000);
+  const etag = whole.headers.get("etag")!;
+  const part = await at("/api/inbox/tour/assets/film-clip.mp4", { headers: { Range: "bytes=0-1" } });
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-range")).toBe(`bytes 0-1/${size}`);
+  expect((await part.arrayBuffer()).byteLength).toBe(2);
+  const tail = await at("/api/inbox/tour/assets/film-clip.mp4", { headers: { Range: "bytes=-10" } });
+  expect(tail.headers.get("content-range")).toBe(`bytes ${size - 10}-${size - 1}/${size}`);
+  const past = await at("/api/inbox/tour/assets/film-clip.mp4", { headers: { Range: `bytes=${size}-` } });
+  expect(past.status).toBe(416);
+  expect(past.headers.get("content-range")).toBe(`bytes */${size}`);
+  // If-Range: this version's ETag keeps the range; anything else is the whole film.
+  expect((await at("/api/inbox/tour/assets/film-clip.mp4", { headers: { Range: "bytes=4-9", "If-Range": etag } })).status).toBe(206);
+  expect((await at("/api/inbox/tour/assets/film-clip.mp4", { headers: { Range: "bytes=4-9", "If-Range": '"other"' } })).status).toBe(200);
+  const head = await at("/api/inbox/tour/assets/film-clip.mp4", { method: "HEAD", headers: { Range: "bytes=0-99" } });
+  expect(head.status).toBe(206);
+  expect(head.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(head.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+  const md = await at("/api/inbox/tour/assets/evaluation.md");
+  expect(md.status).toBe(200);
+  expect(md.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+  expect(md.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+  expect(await md.text()).toContain("Most of it exists");
 });

@@ -51,6 +51,8 @@ export interface SettingsPageProps {
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
   /** Settings → General → Experimental: decision mode's switch. Absent: no Experimental group. */
   onToggleExperimental?: (next: boolean) => void;
+  /** Settings → General → Board: the Board's switch. Absent (or an Inbox without the switch): no Board group. */
+  onToggleBoard?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -190,9 +192,11 @@ function GeneralSection({
   onTestNotification,
   sound,
   onToggleExperimental,
+  onToggleBoard,
   onTakeTour,
 }: {
   onToggleExperimental?: (next: boolean) => void;
+  onToggleBoard?: (next: boolean) => void;
   onTakeTour?: () => void;
   settings: SettingsModel;
   permission: NotificationPermission | 'unsupported';
@@ -362,6 +366,26 @@ function GeneralSection({
           Notifications are allowed per address, so a browser on another device asks once there.
         </div>
       </section>
+      {settings.board && onToggleBoard && (
+        <section className="ib-sgroup" data-settings-board="" aria-labelledby="ib-g-board">
+          <h2 id="ib-g-board">Board</h2>
+          <div className="ib-card">
+            <div className="ib-prow">
+              <span className="ib-txt">
+                <span className="ib-l" id="ib-board-label">
+                  Board
+                </span>
+                <span className="ib-desc">
+                  A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.
+                </span>
+              </span>
+              <span className="ib-ctl">
+                <Switch on={settings.board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!settings.board!.on)} />
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
       {settings.experimental && onToggleExperimental && (
         <section className="ib-sgroup" data-settings-experimental="" aria-labelledby="ib-g-experimental">
           <h2 id="ib-g-experimental">Experimental</h2>
@@ -691,6 +715,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onTestNotification={onTestNotification}
             sound={sound}
             onToggleExperimental={props.onToggleExperimental}
+            onToggleBoard={props.onToggleBoard}
             onTakeTour={props.onTakeTour}
           />
         );

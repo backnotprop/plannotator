@@ -7,6 +7,7 @@
  */
 import type { InboxRowUnsent } from '@plannotator/core/inbox-types';
 import { shortTime } from '../format';
+import { Icon } from '../icons';
 
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`;
 
@@ -103,11 +104,35 @@ export function DraftHead({
   );
 }
 
-/** The thread's foot while the box is closed and something waits: "Draft · 2 picks". */
+/**
+ * The thread's foot while the box is closed and something waits: "Draft · 2 picks, 3 comments".
+ * The words before the comments ("Your reply, 2 picks") and the comment count are spans of their own: short of room
+ * the foot's row drops the pick words (footFit.ts step `draft`) and shows the count in the pill instead ("Draft 💬3").
+ * That glyph and number are hidden from screen readers; the words stay as hidden text ("Draft, 2 picks, 3 comments").
+ */
 export function DraftFootNote({ unsent, id }: { unsent: { reply: boolean; picks: number; comments: number }; id?: string }) {
+  const lead = unsentWords({ ...unsent, comments: 0 });
+  const comments = unsent.comments > 0 ? unsentWords({ reply: false, picks: 0, comments: unsent.comments }, lead === '') : '';
   return (
     <span className="ib-draft-foot" data-draft-foot="" id={id}>
-      <span className="ib-draft-pill">Draft</span> <span className="ib-st">{unsentWords(unsent)}</span>
+      <span className="ib-draft-pill">
+        {/* The comma is for the ear ("Draft, 1 pick, 3 comments"): inline and sized to nothing, so no space comes before it. */}
+        <span>
+          Draft
+          {(lead || comments) && <span className="ib-draft-comma">,</span>}
+        </span>
+        {unsent.comments > 0 && (
+          <span className="ib-draft-pc" data-draft-pill-count="" aria-hidden="true">
+            <Icon name="comment" size={12} />
+            {unsent.comments}
+          </span>
+        )}
+      </span>{' '}
+      <span className="ib-st">
+        {lead && <span data-draft-words="">{lead}</span>}
+        {lead && comments && <span data-draft-sep="">{', '}</span>}
+        {comments && <span data-draft-comments="">{comments}</span>}
+      </span>
     </span>
   );
 }

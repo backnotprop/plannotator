@@ -1544,7 +1544,7 @@ try {
             # existing target dir) so re-runs replace rather than nest.
             if ((Test-Path "apps\skills\claude") -and (Get-ChildItem "apps\skills\claude" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-inbox")) {
                     Copy-SkillIfPresent "apps\skills\claude\$skill" $claudeSkillsDir
                 }
                 # The plannotator knowledge skill (CLI reference) has no
@@ -1557,7 +1557,7 @@ try {
             }
             if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-inbox")) {
                     Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
                 }
                 Copy-SkillIfPresent "apps\skills\core\plannotator" $agentsSkillsDir
@@ -1574,6 +1574,8 @@ try {
                 # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
+                # /plannotator-inbox needs no origin label: the shell-neutral core copy.
+                Copy-SkillIfPresent "apps\skills\core\plannotator-inbox" $kiroSkillsDir
                 # The plannotator knowledge skill (CLI reference) has no Kiro-specific
                 # form, so Kiro receives the single-sourced core copy like every other scope.
                 Copy-SkillIfPresent "apps\skills\core\plannotator" $kiroSkillsDir

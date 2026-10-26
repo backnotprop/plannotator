@@ -660,10 +660,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* main list */
 .ib-main { background: var(--ib-main-bg); display: flex; flex: 1; min-width: 0; height: 100%; padding: var(--ib-gutter); gap: var(--ib-gutter); }
 /* Each pane is a card on the ground: the list, a thread, a file beside its thread, Settings, Drafts, What's new. */
-.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
+.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
 /* Each takes the card's colour under the panes switch. Off, today's: the thread pane its own card, a file the
    window's background, and the rest none of their own (an opaque scroller draws its text differently). */
-.ib-main > :is(.ib-listcol, .ib-spage, .ib-dpage, .ib-wn) { background: var(--ib-pane-bg-s, transparent); }
+.ib-main > :is(.ib-listcol, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { background: var(--ib-pane-bg-s, transparent); }
 .ib-main > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
 /* The list keeps its resize edge in the gutter beside it (never clipped); its scroll box follows the card's corners instead.
    Settings, Drafts and What's new scroll themselves, which clips them to their corners already. */
@@ -945,6 +945,32 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-footstatus { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
 .ib-footstatus > * { flex: none; max-width: 100%; }
 .ib-footstatus .ib-draft-foot { margin-right: 0; }
+/* Short of room, the row shortens before the status wraps above the buttons (footFit.ts `fitWholeFootRow`,
+   one step per token of `data-fit`). The words it drops (.ib-fl) leave only the eye, so names, descriptions
+   and the text itself keep them. */
+.ib-footrow[data-fit~="skip"] .ib-skipchip .ib-fl,
+.ib-footrow[data-fit~="edit"] [data-edit-draft] .ib-fl,
+.ib-footrow[data-fit~="draft"] .ib-draft-foot .ib-st { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+/* Step 4 drops the pick words; the comment count stays, as a glyph and the number inside the Draft pill
+   ("Draft 💬3"; aria-hidden, the words "3 comments" stay as hidden text). No comments: "Draft" alone. */
+.ib-draft-comma { font-size: 0; }
+.ib-draft-pc { display: none; align-items: center; gap: 3px; margin-left: 5px; font-variant-numeric: tabular-nums; }
+.ib-draft-pc .ib-ic { width: 12px; height: 12px; }
+.ib-footrow[data-fit~="draft"] .ib-draft-pc { display: inline-flex; }
+.pn-inbox .ib-footrow[data-fit~="draft"] .ib-draft-foot .ib-draft-pill { padding-left: 7px; padding-right: 7px; }
+.pn-inbox .ib-footrow[data-fit~="tight"] { column-gap: 6px; }
+.pn-inbox .ib-footrow[data-fit~="tight"] .ib-footbtns,
+.pn-inbox .ib-footrow[data-fit~="tight"] .ib-footstatus { gap: 6px; }
+.pn-inbox .ib-footrow[data-fit~="tight"] .ib-draft-pc { margin-left: 4px; }
+.pn-inbox .ib-footrow[data-fit~="tight"] .ib-footbtns .ib-btn { padding-left: 10px; padding-right: 10px; gap: 5px; }
+.pn-inbox .ib-footrow[data-fit~="tight"] .ib-oq-btn .ib-oq-chev { display: none; }
+/* A phone only, after tight: Edit draft as its pencil (its words stay as hidden text, so the name is still
+   "Edit draft"), and the gaps 4 px. */
+.pn-inbox .ib-footrow[data-fit~="icon"] { column-gap: 4px; }
+.pn-inbox .ib-footrow[data-fit~="icon"] .ib-footbtns,
+.pn-inbox .ib-footrow[data-fit~="icon"] .ib-footstatus { gap: 4px; }
+.pn-inbox .ib-footrow[data-fit~="icon"] .ib-footbtns .ib-btn[data-edit-draft] { width: 44px; padding-left: 0; padding-right: 0; justify-content: center; }
+.ib-footrow[data-fit~="icon"] [data-edit-draft] > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
 .ib-error[data-foot-error="above"] { margin: 0 0 8px; }
 .ib-reply-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin-bottom: 6px; }
 .ib-rbox { border: 1px solid color-mix(in oklch, var(--primary) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); border-radius: 8px; background: var(--card); margin-bottom: 10px; }
@@ -2260,7 +2286,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox { height: var(--ib-vvh, 100%); background: var(--card); -webkit-tap-highlight-color: transparent; }
   .ib-main { padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); gap: 0; position: relative; overflow: hidden; }
   /* One screen at a time: the pane is the screen, edge to edge, with no card around it. */
-  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn) { border-radius: 0; box-shadow: none; }
+  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: 0; box-shadow: none; }
   .ib-main > .ib-listcol > .ib-lbody { border-radius: 0; }
   body:has(.pn-inbox) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) { font-size: 16px !important; }
   .ib-lbody, .ib-pbody, .ib-spage, .ib-dpage, .ib-docscroll, .ib-gbody, .ib-wn { overscroll-behavior: contain; }
@@ -4439,6 +4465,17 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-tc-back { height: 30px; padding: 0 8px; border-radius: 7px; color: var(--muted-foreground); font-weight: 500; }
 .pn-inbox .ib-tc-back:hover { color: var(--foreground); background: var(--muted); }
 .pn-inbox .ib-tc-next { height: 30px; padding: 0 12px; border-radius: 8px; background: var(--primary); color: var(--primary-foreground); font-weight: 600; }
+/* "Your turn" (the owner, 2026-10-25): a card that asks the person to act says so at its top, in the primary colour. */
+.ib-tour-coach .ib-tc-eb { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ib-tc-turn { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 8px 0 6px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-11-5, 11.5px); font-weight: 650; letter-spacing: 0; white-space: nowrap; }
+.ib-tour-coach[data-your-turn] { box-shadow: 0 0 0 2px var(--primary), var(--ib-float-shadow, 0 16px 40px -12px rgb(0 0 0 / 0.45)); }
+/* Fast-forward: quiet, at the card's foot, always there when the card asks or waits. */
+.pn-inbox .ib-tc-ff { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border-radius: 8px; color: var(--muted-foreground); font-weight: 550; font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-tc-ff:hover { color: var(--foreground); background: var(--muted); }
+/* The tour's answer to a click it cannot use: one short line on the card. */
+.ib-tour-coach .ib-tc-nudge { margin: 8px 0 0; padding: 6px 9px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 10%, var(--popover)); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; }
+/* A click on the card shows its target again. */
+.pn-inbox .ib-tour-again { outline: 3px solid var(--primary) !important; outline-offset: 3px; }
 .ib-tc-do { font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 600; display: inline-flex; gap: 5px; align-items: center; }
 .ib-tc-wait { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-tc-wait::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--primary) 30%, transparent); border-top-color: var(--primary); }
@@ -4449,6 +4486,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   @keyframes ib-tour-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
   .ib-tour-coach { animation: ib-pm-in 160ms ease-out; }
   .ib-tc-wait::before { animation: ib-spin 0.9s linear infinite; }
+  .pn-inbox .ib-tour-again { animation: ib-tour-pulse 0.8s ease-out 2; }
 }
 
 /* The replay's marks: what is a replay of the real thread says so. */
@@ -4613,6 +4651,400 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The tour thread's controls that do nothing in the tour (Mark read, Archive, Reply): drawn quiet, still focusable, their tooltip says why. */
 .pn-inbox [data-tour-thread] button[aria-disabled="true"] { opacity: 0.45; cursor: default; }
 .pn-inbox [data-tour-thread] button[aria-disabled="true"]:hover { background: none; }
+
+/* ─────────────── The Board (approval "inbox-board", step 2; Soft + Lanes, cards variant C "Lean") ─────────────── */
+.ib-bpage {
+  --ib-lane-bg: color-mix(in oklch, var(--background) 60%, var(--card));
+  --ib-bcard-bg: var(--card);
+  --ib-bcard-edge: 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent), 0 1px 2px oklch(0 0 0 / 0.05);
+  --ib-onyou-fg: color-mix(in oklab, var(--warning, oklch(0.75 0.15 85)) 55%, var(--foreground));
+  flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+:root:not(.light) .ib-bpage { --ib-bcard-edge: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); --ib-onyou-fg: color-mix(in oklab, var(--warning, oklch(0.75 0.15 85)) 80%, var(--foreground)); }
+.ib-bhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; min-width: 0; }
+.ib-bhead h1 { font-size: var(--ib-fs-20, 20px); font-weight: 650; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
+.ib-bsum { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-variant-numeric: tabular-nums; }
+.ib-bsum b { color: var(--ib-onyou-fg); font-weight: 600; }
+.ib-bsp { flex: 1; }
+.ib-blinks { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; }
+.ib-blinks a { color: var(--muted-foreground); text-decoration: none; border-radius: 6px; padding: 4px 6px; font-variant-numeric: tabular-nums; }
+.ib-blinks a:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-bback { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px 0 4px; border: 0; border-radius: 7px; background: none; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); cursor: pointer; }
+.ib-bback:hover { color: var(--foreground); background: var(--ib-hover); }
+.pn-inbox .ib-bnew { gap: 5px; }
+.ib-bload { flex: 1; }
+.ib-bfail { margin: 0 22px 8px; }
+
+/* The lanes: five live columns, side by side, each scrolling its own cards. */
+.ib-blanes { flex: 1; min-height: 0; display: flex; gap: 10px; padding: 0 12px 12px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+.ib-lane { flex: 1 1 0; min-width: 188px; min-height: 0; display: flex; flex-direction: column; border-radius: var(--ib-lr-lg, 10px); background: var(--ib-lane-bg); transition: background-color 120ms ease-out, box-shadow 120ms ease-out; }
+/* A card open: the lanes are as wide as the whole lanes that fit (BoardPage measures), and stop at a lane, never a sliver of one. */
+.ib-blanes[data-fit] { scroll-snap-type: x mandatory; padding-left: 0; margin-left: 12px; }
+.ib-blanes[data-fit] > .ib-lane { flex: 0 0 calc((100% - (var(--ib-lanes-fit) - 1) * 10px) / var(--ib-lanes-fit)); scroll-snap-align: start; }
+.ib-lane[data-drop] { box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--primary) 45%, transparent); }
+.ib-lane[data-over] { background: color-mix(in oklab, var(--primary) 9%, var(--ib-lane-bg)); box-shadow: inset 0 0 0 2px var(--primary); }
+.ib-lane-h { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px 0 14px; margin: 0; flex: none; font-size: var(--ib-fs-14, 14px); font-weight: 600; min-width: 0; outline: none; }
+.ib-lane-h:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); border-radius: var(--ib-lr-lg, 10px); }
+.ib-lane-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-lane-n { font-weight: 450; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-lane-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted-foreground); }
+.ib-lane-dot[data-col="backlog"] { background: none; box-shadow: inset 0 0 0 1.75px var(--muted-foreground); }
+.ib-lane-dot[data-col="designing"] { background: var(--primary); }
+.ib-lane-dot[data-col="your_look"] { background: var(--warning, oklch(0.75 0.15 85)); }
+.ib-lane-dot[data-col="building"] { background: color-mix(in oklab, var(--primary) 60%, var(--card)); }
+.ib-lane-dot[data-col="your_review"] { background: var(--success, oklch(0.6 0.15 150)); }
+.ib-lane-dot[data-col="shipped"] { background: var(--success, oklch(0.6 0.15 150)); opacity: 0.55; }
+.ib-lane-dot[data-col="icebox"] { background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
+.ib-lane-cards { list-style: none; margin: 0; padding: 2px 8px 10px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.ib-lane-empty { margin: 0; padding: 4px 14px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
+
+/* A card (variant C "Lean"): two lines, the time on the right, bold while unread. */
+.ib-bcard { position: relative; border-radius: var(--ib-lr-sm, 8px); background: var(--ib-bcard-bg); box-shadow: var(--ib-bcard-edge); transition: box-shadow 120ms ease-out; }
+.ib-bcard:hover { box-shadow: var(--ib-bcard-edge), 0 0 0 1px color-mix(in oklch, var(--foreground) 14%, transparent); }
+.ib-bcard[draggable="true"] { cursor: grab; }
+.ib-bcard[data-dragging] { opacity: 0.45; }
+.ib-bc-main { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; color: var(--foreground); text-decoration: none; border-radius: inherit; min-width: 0; }
+a.ib-bc-main { cursor: pointer; }
+.ib-bcard[draggable="true"] a.ib-bc-main { cursor: inherit; }
+.ib-bc-main:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-bc-top { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 22px; }
+.ib-bc-t { min-width: 0; flex: 0 1000000 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); font-weight: 500; color: color-mix(in oklab, var(--foreground) 72%, var(--card)); }
+.ib-bcard[data-unread] .ib-bc-t { font-weight: 650; color: var(--foreground); }
+.ib-bc-agetop { flex: none; margin-left: auto; margin-right: -22px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-bc-you { color: var(--muted-foreground); }
+.ib-bc-bot { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding-left: calc(var(--ib-mark-16) + 8px); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-bc-line { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-bc-youw { color: var(--ib-onyou-fg); font-weight: 600; }
+.ib-bc-age { flex: none; font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* A linked PR's or issue's state (inbox-card-marks): GitHub's Octicon shapes and colours, the dark
+   values first and the light ones below; unknown is the same shape, quiet. */
+.pn-inbox {
+  --ib-ref-open: #3fb950;
+  --ib-ref-merged: #a371f7;
+  --ib-ref-closed: #f85149;
+  --ib-ref-neutral: #9198a1;
+}
+:root.light .pn-inbox {
+  --ib-ref-open: #1a7f37;
+  --ib-ref-merged: #8250df;
+  --ib-ref-closed: #cf222e;
+  --ib-ref-neutral: #59636e;
+}
+.ib-bc-mark { flex: none; display: inline-flex; align-self: center; }
+.ib-refmark { flex: none; display: block; color: var(--ib-ref-neutral); }
+.ib-refmark[data-ref-state="open"] { color: var(--ib-ref-open); }
+.ib-refmark[data-ref-state="merged"], .ib-refmark[data-ref-state="completed"] { color: var(--ib-ref-merged); }
+.ib-refmark[data-ref-state="closed"][data-ref-kind="pr"] { color: var(--ib-ref-closed); }
+.ib-refmark[data-ref-state="unknown"] { color: var(--muted-foreground); opacity: 0.7; }
+@media (forced-colors: active) { .ib-refmark { color: CanvasText; } }
+.ib-pmi .ib-lane-dot { margin: 0 2px; }
+
+/* The agents' drops the person has not seen. */
+.ib-bdrops { margin: 0 12px 10px; padding: 10px 14px; border-radius: var(--ib-lr-lg, 10px); background: color-mix(in oklab, var(--warning, oklch(0.75 0.15 85)) 10%, var(--card)); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--warning, oklch(0.75 0.15 85)) 30%, transparent); flex: none; }
+.ib-bdrops-h { display: flex; align-items: center; gap: 8px; }
+.ib-bdrops-h svg { color: var(--ib-onyou-fg); }
+.ib-bdrops-h h2 { margin: 0; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-bdrops-h .ib-lnk { margin-top: 0; }
+.ib-bdrops ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ib-bdrops li { display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-13-5, 13.5px); min-width: 0; }
+.ib-bdrops-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* Shipped and the Icebox (with Dropped): lists on their own page. */
+.ib-blists { display: flex; flex-direction: column; gap: 18px; }
+.ib-bmain > .ib-blist, .ib-bmain > .ib-blists { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 22px 24px; }
+.ib-blist { max-width: 760px; }
+.ib-blist .ib-lane-cards { padding: 0; overflow: visible; }
+.ib-blist-h { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; font-size: var(--ib-fs-15, 15px); font-weight: 600; outline: none; }
+.ib-drops { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ib-drop { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--ib-lr-sm, 8px); background: var(--ib-bcard-bg); box-shadow: var(--ib-bcard-edge); }
+.ib-drop-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ib-drop-title { font-size: var(--ib-fs-14, 14px); font-weight: 500; overflow-wrap: anywhere; }
+.ib-drop-meta { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+
+/* New card and Drop: the dialogs' fields. */
+.ib-bfield { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; font-size: var(--ib-fs-13, 13px); font-weight: 550; }
+.ib-bfield :is(input, textarea) { font: inherit; font-weight: 400; font-size: var(--ib-fs-14, 14px); padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); resize: vertical; }
+.ib-bfield :is(input, textarea):focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+.ib-bprojects { border: 0; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 200px; overflow-y: auto; }
+.ib-bprojects legend { font-size: var(--ib-fs-13, 13px); font-weight: 550; margin-bottom: 6px; padding: 0; }
+.ib-bproject { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: var(--ib-fs-14, 14px); }
+.ib-bfield-err { margin: 10px 0 0; }
+
+/* A phone: the stacked list in column order, Shipped and Icebox folded at the end. */
+.ib-bstack { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 calc(24px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
+/* The approved phone mock: each lane a rounded pill (still the fold's button), its cards flat rows under it. */
+.ib-bgroup-h { margin: 12px 10px 2px; }
+.ib-bgroup-h button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--ib-lane-bg); color: var(--foreground); font: inherit; font-size: var(--ib-fs-15, 15px); font-weight: 600; text-align: left; cursor: pointer; }
+.ib-bgroup-h button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-bgroup .ib-lane-cards { padding: 2px 0 6px; gap: 0; overflow: visible; }
+.ib-bgroup .ib-blist { padding: 0 0 8px; }
+.ib-bgroup .ib-blist-h { padding: 8px 16px 0; }
+.ib-bgroup .ib-bcard { background: transparent; box-shadow: none; border-radius: 0; }
+.ib-bgroup .ib-bcard:hover { box-shadow: none; }
+.ib-bgroup .ib-bc-main { padding: 12px 16px; }
+.ib-bgroup .ib-bc-main:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 10px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-bhead { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 8px; border-bottom: 1px solid var(--ib-hair); }
+  .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
+  /* A bare "+" (the mock), its hit area still 44 px. */
+  .pn-inbox .ib-bnew { width: 44px; height: 44px; padding: 0; justify-content: center; border-color: transparent; background: transparent; box-shadow: none; color: var(--foreground); }
+  .ib-bc-main { padding: 12px; }
+  .ib-bc-top { padding-right: 0; }
+  .ib-bc-agetop { margin-right: 0; }
+  .ib-bc-t { white-space: normal; overflow-wrap: anywhere; font-size: var(--ib-fs-15, 15px); }
+  .ib-bdrops { margin: 10px 12px; }
+  .ib-bdrops li { flex-wrap: wrap; }
+  .pn-inbox .ib-bdrops .ib-btn, .pn-inbox .ib-drop .ib-btn { min-height: 44px; }
+  .ib-bfield :is(input, textarea) { font-size: var(--ib-fs-16-in, 16px); }
+}
+@media (prefers-reduced-motion: reduce) { .ib-lane, .ib-bcard { transition: none; } }
+
+/* The Board's body: the lanes (or a list), and the opened card's panel beside them; the lanes narrow and scroll. */
+.ib-bmain { position: relative; flex: 1; min-height: 0; display: flex; gap: 10px; padding: 0 12px 12px 0; }
+.ib-bmain > .ib-blanes { padding-right: 0; }
+.ib-bpage .ib-bc-main { width: 100%; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.ib-bcard[data-open] { box-shadow: 0 0 0 2px var(--primary); }
+.ib-bc-sent { display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; }
+/* The text sets the line's baseline (beside the age); the tick or clock sits centred on it. */
+.ib-bc-sent > :not(.ib-bc-sentt) { flex: none; align-self: center; display: inline-flex; }
+.ib-bc-sentt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-lane-dot.ib-bc-yourdot { width: 13px; height: 13px; box-shadow: none; border: 0; border-radius: 0; background: var(--muted-foreground); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 13'%3E%3Ccircle cx='6.5' cy='6.5' r='5.4' fill='none' stroke='black' stroke-width='1.4' stroke-dasharray='2.1 2.14'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 13'%3E%3Ccircle cx='6.5' cy='6.5' r='5.4' fill='none' stroke='black' stroke-width='1.4' stroke-dasharray='2.1 2.14'/%3E%3C/svg%3E") center / contain no-repeat; }
+.ib-babout { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.ib-babout:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-bempty { position: absolute; left: 0; right: 0; top: 42%; display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); pointer-events: none; }
+.ib-bempty .ib-btn { pointer-events: auto; }
+/* The Board off (a #board link): what it is, and Turn it on. */
+.ib-boff { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px 24px 15vh; text-align: center; }
+.ib-boff-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: var(--ib-lr-md, 9px); background: var(--ib-lane-bg); color: var(--muted-foreground); }
+.ib-boff h2 { margin: 0; font-size: var(--ib-fs-18, 18px); font-weight: 600; }
+.ib-boff p { margin: 0; max-width: 460px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); line-height: 1.55; }
+.ib-boff .ib-btn { margin-top: 4px; }
+
+/* The opened card: a panel beside the Board (a full screen on a phone). */
+.ib-crdp { flex: 0 0 min(560px, 44%); min-width: 0; display: flex; flex-direction: column; border-radius: var(--ib-lr-lg, 10px); background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent); overflow: hidden; }
+.ib-crdp-top { display: flex; align-items: center; gap: 8px; padding: 12px 14px 0; flex: none; }
+.ib-crdp-col { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--ib-lane-bg); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); cursor: pointer; }
+.ib-crdp-col:hover, .ib-crdp-col[data-popup-open] { background: color-mix(in oklch, var(--muted) 80%, var(--card)); }
+.ib-crdp-colsent { color: var(--muted-foreground); }
+.ib-crdp-x { margin-left: auto; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.ib-crdp-x:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-crdp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px 18px; display: flex; flex-direction: column; gap: 14px; }
+.ib-crdp-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; }
+.ib-crdp-who { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.ib-crdp-who b { color: var(--foreground); font-weight: 600; }
+.ib-crdp-state { display: inline-flex; align-items: center; gap: 5px; }
+.ib-crdp-sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+.ib-crdp-state[data-agent-state="working"] .ib-crdp-sdot { background: var(--success, oklch(0.6 0.15 150)); }
+.ib-crdp-state[data-agent-state="ended"] .ib-crdp-sdot { background: none; box-shadow: inset 0 0 0 1.5px var(--muted-foreground); }
+.ib-crdp-ask { margin-left: auto; border: 0; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-14, 14px); padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.ib-crdp-ask:hover:not(:disabled) { color: var(--foreground); background: var(--ib-hover); }
+.ib-crdp-ask:disabled { opacity: 0.55; cursor: default; }
+.ib-crdp-asknote { flex-basis: 100%; text-align: right; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+.ib-crdp-you { margin: 0; padding: 12px 16px; border-radius: var(--ib-lr-md, 9px); background: color-mix(in oklab, var(--warning, oklch(0.75 0.15 85)) 15%, var(--card)); font-size: var(--ib-fs-15, 15px); overflow-wrap: anywhere; }
+.ib-crdp-you b { color: var(--ib-onyou-fg); }
+.ib-crdp-dropped { margin: 0; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-crdp-notes p { margin: 0 0 8px; font-size: var(--ib-fs-15, 15px); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ib-crdp-notes .ib-crdp-nonotes { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-crdp-notesform { display: flex; flex-direction: column; gap: 8px; }
+.ib-crdp-notesform textarea, .ib-crdp-link input, .ib-crdp-drop input { font: inherit; font-size: var(--ib-fs-14, 14px); padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); resize: vertical; }
+.ib-crdp-notesacts { display: flex; justify-content: flex-end; gap: 8px; }
+.ib-crdp-sec h3 { margin: 0 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; color: var(--muted-foreground); }
+.ib-crdp-threads, .ib-crdp-refs, .ib-crdp-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ib-crdp-thread { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; width: 100%; padding: 6px 8px; margin: 0 -8px; border: 0; border-radius: 8px; background: none; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
+.ib-crdp-thread:hover { background: var(--ib-hover); }
+.ib-crdp-tt { font-size: var(--ib-fs-14-5, 14.5px); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-crdp-tm { grid-row: 2; display: flex; align-items: center; gap: 6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); min-width: 0; }
+.ib-crdp-wait { color: var(--ib-onyou-fg); font-weight: 600; }
+.ib-crdp-tat { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-crdp-ref { display: flex; align-items: center; gap: 10px; min-height: 34px; font-size: var(--ib-fs-14, 14px); min-width: 0; }
+.ib-crdp-rn { font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); text-decoration: none; flex: none; }
+.ib-crdp-rn:hover { color: var(--foreground); text-decoration: underline; }
+.ib-crdp-rt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-crdp-rref { color: var(--muted-foreground); }
+.ib-crdp-rs { flex: none; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.ib-crdp-rs[data-tone="open"] { color: var(--success, oklch(0.6 0.15 150)); }
+.ib-crdp-rs[data-tone="merged"] { color: var(--primary); }
+.ib-crdp-rs[data-tone="closed"] { color: var(--destructive); }
+.ib-crdp-link { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.ib-crdp-hist li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); padding: 4px 0; }
+.ib-crdp-hist li b { color: var(--foreground); font-weight: 600; }
+.ib-crdp-hdot { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in oklch, var(--muted-foreground) 60%, transparent); margin: 7px 0 0 4px; }
+.ib-crdp-hq { display: block; overflow-wrap: anywhere; }
+.ib-crdp-hat { font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+.ib-crdp-foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--ib-hair); }
+.ib-crdp-drop { flex-direction: column; align-items: stretch; }
+.ib-crdp-drop label { font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.ib-crdp-dropacts { display: flex; justify-content: flex-end; gap: 8px; }
+.pn-inbox .ib-btn.ib-soft { border-color: transparent; background: var(--ib-lane-bg); }
+.pn-inbox .ib-btn.ib-danger { border-color: transparent; background: color-mix(in oklab, var(--destructive) 14%, var(--card)); color: var(--destructive); }
+.ib-pmi .ib-pmi-check { margin-left: auto; color: var(--primary); }
+
+/* The chip a thread opened from a card carries: back to the card. */
+.ib-cardchip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--ib-band); color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); cursor: pointer; }
+.ib-cardchip b { color: var(--foreground); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ib-cardchip:hover { background: color-mix(in oklch, var(--muted) 85%, var(--card)); }
+
+/* New card (and Send to an agent from the opened card). */
+dialog.ib-dlg.ib-ncd { width: min(760px, calc(100vw - 32px)); overflow: visible; }
+.ib-ncd .ib-dlg-in { padding: 0; }
+.ib-ncd-form { position: relative; display: flex; flex-direction: column; }
+.ib-ncd-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 12px 22px; border-bottom: 1px solid var(--ib-hair); }
+.ib-ncd-head h2 { flex: 1; margin: 0; font-size: var(--ib-fs-15, 15px); font-weight: 600; }
+.ib-ncd-x { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.ib-ncd-x:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-ncd-body { display: flex; flex-direction: column; gap: 8px; padding: 20px 22px 14px; min-height: 260px; }
+.ib-ncd-title { border: 0; outline: none; background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-20, 20px); font-weight: 650; padding: 0; }
+.ib-ncd-notes { flex: 1; min-height: 140px; border: 0; outline: none; background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-15, 15px); line-height: 1.6; padding: 0; resize: none; }
+.ib-ncd-title:focus-visible, .ib-ncd-notes:focus-visible { box-shadow: inset 0 -2px 0 color-mix(in oklch, var(--ring) 60%, transparent); }
+.ib-ncd-links { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+.ib-ncd-links input { flex: 1; min-width: 0; border: 0; border-bottom: 1px dashed color-mix(in oklch, var(--border) 90%, transparent); background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); padding: 4px 0; outline: none; }
+.ib-ncd-row { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 16px 6px 22px; border-top: 1px solid var(--ib-hair); }
+.ib-ncd-l { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); min-width: 34px; }
+.ib-ncd-none, .ib-ncd-proj { display: inline-flex; align-items: center; gap: 7px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-ncd-proj b { color: var(--foreground); }
+.ib-ncd-pick { position: relative; }
+.ib-ncd-pick .ib-cp-picker { top: auto; bottom: 54px; left: 72px; }
+.ib-ncd-err { margin: 0 22px 8px; }
+.ib-ncd-foot { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--ib-hair); }
+.ib-ncd-modes { display: flex; gap: 4px; }
+.ib-ncd-mode { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-14, 14px); cursor: pointer; }
+.ib-ncd-mode input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ib-ncd-mode:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-ncd-mode:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-ncd-mode[data-on] { color: var(--foreground); font-weight: 600; background: var(--ib-lane-bg); }
+.ib-ncd-bar { border: 0; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-16, 16px); min-height: 44px; padding: 0 6px; cursor: pointer; }
+.ib-ncd-bar.ib-strong { color: var(--primary); font-weight: 650; }
+.ib-ncd { --ib-lane-bg: color-mix(in oklch, var(--background) 60%, var(--card)); }
+
+/* The first-visit dialog: a small animated board (a card walks through the stages), then the words. */
+dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
+.ib-bi .ib-dlg-in { padding: 0; }
+.ib-bi {
+  --bi-dur: 11s;
+  --bi-well: color-mix(in oklch, var(--background) 70%, var(--card));
+  --bi-lane: color-mix(in oklch, var(--background) 30%, var(--card));
+  --bi-bar: color-mix(in oklch, var(--foreground) 34%, transparent);
+  --bi-bar2: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+  --bi-amber: color-mix(in oklch, var(--warning, oklch(0.75 0.15 85)) 80%, transparent);
+}
+:root.light .ib-bi { --bi-well: color-mix(in oklch, var(--muted) 48%, var(--card)); --bi-lane: color-mix(in oklch, var(--muted) 30%, var(--card)); --bi-bar: color-mix(in oklch, var(--foreground) 26%, transparent); --bi-bar2: color-mix(in oklch, var(--muted-foreground) 24%, transparent); }
+.ib-bi-art { background: var(--bi-well); padding: 18px 18px 16px; }
+.ib-bi-stage { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; --g: 6px; --p: 5px; --ch: 30px; --cg: 5px; --hh: 24px; }
+.ib-bi-lane { background: var(--bi-lane); border-radius: 8px; padding: 0 var(--p) var(--p); min-height: calc(var(--hh) + 3 * (var(--ch) + var(--cg)) + 2px); display: flex; flex-direction: column; gap: var(--cg); }
+.ib-bi-lh { height: var(--hh); display: flex; align-items: center; gap: 5px; padding: 0 2px; margin-bottom: calc(-1 * var(--cg)); min-width: 0; }
+.ib-bi-lh .ib-lane-dot { width: 6px; height: 6px; }
+.ib-bi-lh span:last-child { font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-bi-c { height: var(--ch); flex: none; border-radius: 6px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent); display: flex; align-items: center; gap: 6px; padding: 0 7px; }
+.ib-bi-c .ib-bi-none { width: 10px; height: 10px; }
+.ib-bi-bars { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ib-bi-bars b { display: block; height: 4px; border-radius: 2px; background: var(--bi-bar); }
+.ib-bi-bars b + b { height: 3px; background: var(--bi-bar2); position: relative; }
+.ib-bi-c.ib-bi-you .ib-bi-bars b + b { background: var(--bi-amber); }
+.ib-bi-amb { position: absolute; inset: 0; border-radius: inherit; background: var(--bi-amber); opacity: 0; }
+.ib-bi-walk { position: absolute; left: var(--p); top: 0; width: calc((100% - 4 * var(--g)) / 5 - 2 * var(--p)); z-index: 2; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent), 0 6px 14px -6px oklch(0 0 0 / 0.45); animation: ib-bi-walk var(--bi-dur) infinite both; will-change: transform, opacity; }
+.ib-bi-walk .ib-bi-amb { animation: ib-bi-amb var(--bi-dur) infinite both; }
+@keyframes ib-bi-walk {
+  0% { opacity: 0; transform: translate(0, calc(var(--hh) + 1 * (var(--ch) + var(--cg)) + 6px)) scale(0.97); animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+  5% { opacity: 1; transform: translate(0, calc(var(--hh) + 1 * (var(--ch) + var(--cg)))) scale(1); }
+  14% { opacity: 1; transform: translate(0, calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1); }
+  21% { opacity: 1; transform: translate(calc(1 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); }
+  32% { opacity: 1; transform: translate(calc(1 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1); }
+  39% { opacity: 1; transform: translate(calc(2 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); }
+  52% { opacity: 1; transform: translate(calc(2 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1); }
+  59% { opacity: 1; transform: translate(calc(3 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 2 * (var(--ch) + var(--cg)))); }
+  70% { opacity: 1; transform: translate(calc(3 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 2 * (var(--ch) + var(--cg)))); animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1); }
+  77% { opacity: 1; transform: translate(calc(4 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); }
+  88% { opacity: 1; transform: translate(calc(4 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); animation-timing-function: ease-in; }
+  95%, 100% { opacity: 0; transform: translate(calc(4 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)) - 6px)); }
+}
+@keyframes ib-bi-amb { 0%, 37% { opacity: 0; } 41%, 50% { opacity: 1; } 55%, 75% { opacity: 0; } 79%, 100% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-bi-walk, .ib-bi-walk .ib-bi-amb { animation: none; }
+  .ib-bi-walk { transform: translate(calc(2 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); }
+  .ib-bi-walk .ib-bi-amb { opacity: 1; }
+}
+.ib-bi-text { padding: 20px 22px 0; }
+.ib-bi-text h2 { margin: 0; font-size: var(--ib-fs-16, 16px); font-weight: 650; }
+.ib-bi-text p { margin: 6px 0 0; font-size: var(--ib-fs-14, 14px); line-height: 1.55; }
+.ib-bi-text .ib-bi-q { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); margin-top: 10px; }
+.ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
+.pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
+
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-bmain { padding: 0; }
+  .ib-bpage-card { display: flex; flex-direction: column; }
+  .ib-crdp.ib-crdp-phone { flex: 1; border-radius: 0; box-shadow: none; }
+  .ib-crdp-phone .ib-crdp-top { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; border-bottom: 1px solid var(--ib-hair); justify-content: space-between; }
+  .ib-crdp-phone .ib-crdp-col { height: 40px; }
+  .ib-crdp-phone .ib-crdp-ask { margin-left: 0; min-height: 44px; }
+  .ib-crdp-phone .ib-crdp-foot { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-crdp-phone .ib-crdp-foot .ib-btn { min-height: 44px; }
+  .ib-crdp-notesform textarea, .ib-crdp-link input, .ib-crdp-drop input, .ib-ncd-title, .ib-ncd-notes, .ib-ncd-links input { font-size: var(--ib-fs-16-in, 16px); }
+  dialog.ib-dlg.ib-ncd.ib-ncd-phone { width: 100vw; height: 100dvh; max-height: none; border-radius: 0; margin: 0; }
+  .ib-ncd-phone .ib-ncd-form { height: 100dvh; }
+  .ib-ncd-phone .ib-ncd-body { flex: 1; }
+  .ib-ncd-phone .ib-ncd-modes { flex: 1; justify-content: space-around; }
+  .ib-ncd-phone .ib-ncd-mode { min-height: 44px; flex: 1; justify-content: center; }
+  .ib-ncd-phone .ib-ncd-head { padding: env(safe-area-inset-top) 12px 0; min-height: 56px; }
+  .ib-ncd-phone .ib-ncd-head h2 { text-align: center; }
+  .ib-ncd-pick .ib-cp-picker { left: 8px; right: 8px; width: auto; }
+  dialog.ib-dlg.ib-bi.ib-bi-phone { margin: auto auto 12px; }
+  .ib-bi-phone .ib-bi-stage { --g: 4px; --p: 4px; --ch: 26px; --cg: 4px; --hh: 20px; }
+  .ib-bi-phone .ib-bi-lh span:last-child { display: none; }
+  .ib-bi-phone .ib-bi-lh { justify-content: center; }
+  .ib-bi-phone .ib-bi-acts { flex-direction: column-reverse; align-items: stretch; }
+  .pn-inbox .ib-bi-phone .ib-bi-acts .ib-btn, dialog .ib-bi-acts .ib-btn { min-height: 44px; justify-content: center; }
+  .ib-babout { width: 44px; height: 44px; }
+  .ib-bback { height: 44px; padding: 0 12px 0 6px; }
+  .ib-crdp-x { width: 44px; height: 44px; }
+}
+
+/* ── Tour v2: the opener's picture, the closing card's list, the phrase it points at, replies' lines ── */
+.ib-tour-coach.ib-tc-wide { width: 380px; }
+.ib-tour-orient { display: grid; grid-template-columns: 92px minmax(0, 1fr); grid-template-rows: auto auto; gap: 6px; margin-top: 10px; padding: 8px; border-radius: 10px; background: var(--muted); font-size: var(--ib-fs-11-5, 11.5px); line-height: 1.3; }
+.ib-tour-orient .ib-to-side { grid-row: span 2; display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 7px; background: var(--card); }
+.ib-tour-orient .ib-to-lbl { color: var(--muted-foreground); font-weight: 600; }
+.ib-tour-orient .ib-to-proj { display: flex; align-items: center; gap: 4px; padding: 3px 5px; border-radius: 5px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--foreground); font-weight: 550; }
+.ib-tour-orient .ib-to-list { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 5px; border-radius: 7px; background: var(--card); }
+.ib-tour-orient .ib-to-row { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 3px 5px; border-radius: 5px; }
+.ib-tour-orient .ib-to-row[data-on] { background: color-mix(in oklch, var(--primary) 10%, transparent); }
+.ib-tour-orient .ib-to-chip { flex: none; padding: 0 5px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); }
+.ib-tour-orient .ib-to-subj { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-weight: 550; }
+.ib-tour-orient .ib-to-mail { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 7px; background: var(--card); }
+.ib-tour-orient .ib-to-from { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ib-tour-orient .ib-to-from .ib-mut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-tour-orient .ib-to-line { height: 5px; border-radius: 3px; background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
+.ib-tour-orient .ib-to-line.ib-short { width: 62%; }
+.ib-tour-orient .ib-to-tiles { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.ib-tour-orient .ib-to-tile { max-width: 100%; box-sizing: border-box; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px; border-radius: 5px; border: 1px solid var(--border); color: var(--foreground); }
+.ib-tour-also { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 7px; }
+.ib-tour-also li { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.4; }
+.ib-tour-also li b { color: var(--foreground); font-weight: 600; }
+.ib-tour-also li > span:first-child { grid-row: span 2; text-align: center; font-size: var(--ib-fs-14, 14px); }
+::highlight(ib-tour-phrase) { background-color: color-mix(in oklch, var(--primary) 22%, transparent); }
+.pn-inbox [data-tour-phrase-host] { scroll-margin: 80px; }
+.ib-tour-filenote { margin: 4px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-tour-sentcomments { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-tour-moment { padding: 0 7px; border-radius: 999px; background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-tour-rbox .ib-rtext { width: 100%; box-sizing: border-box; border: 0; background: transparent; resize: none; padding: 10px 12px; color: var(--foreground); font: inherit; }
+.pn-inbox .ib-tour-rbox .ib-rtext:focus { outline: none; }
+.ib-tour-in-dialog { z-index: 5; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-tour-coach.ib-tc-wide { width: auto; }
+  .pn-inbox .ib-tour-coach .ib-tc-next { min-height: 44px; padding: 0 16px; }
+  .pn-inbox .ib-tour-coach .ib-tc-ff { min-height: 44px; padding: 0 12px; }
+}
+/* Full screen in the tour starts under the tour bar, so Exit tour and the file's own toolbar both stay in reach. */
+.pn-inbox[data-tour] .ib-view.ib-full { top: var(--ib-tour-bar-h, 45px); }
+
+/* Compose in the tour: the dialog is modal (the page under it is inert), so it carries its own copy of the tour bar
+   at the top of the window, and on a phone the sheet starts under it (the tour bar stays in view, Exit in reach). */
+.ib-tour-bar.ib-tour-bar-over { position: fixed; top: 0; left: 0; right: 0; z-index: 3; margin: 0; }
+/* The dialog's entrance moves it with a transform, which would carry the fixed bar (and the coach) with it: none in the tour. */
+.pn-inbox[data-tour] dialog.ib-cp[open] { animation: none; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox[data-tour] dialog.ib-cp[data-phone] { top: var(--ib-tour-bar-h, 52px); height: calc(var(--ib-vvh, 100%) - var(--ib-tour-bar-h, 52px)); padding-top: 0; }
+}
 
 /* Settings → Prompts (design of record .product/approved/inbox-prompts-page/, #2194): the Inbox reminder, shared and per agent, then the plan, review and annotate prompts folded, read-only. */
 .pm-shared { padding: 14px 16px; }

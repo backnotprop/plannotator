@@ -2,8 +2,10 @@
  * The Inbox tour's fixture routes (approval "inbox-onboarding-tour", choice 4):
  *
  * - `GET /api/inbox/tour/fixture.json`: the curated threads the tour replays;
- * - `GET /api/inbox/tour/assets/<name>`: one of its pictures (WebP) or the
- *   VS Code mockups page Claude Code sent (HTML, opened in a sandboxed frame).
+ * - `GET /api/inbox/tour/assets/<name>`: one of its pictures (WebP), the
+ *   VS Code mockups page Claude Code sent (HTML, opened in a sandboxed frame),
+ *   the film clip (MP4, by HTTP Range: Safari plays no video without it) or
+ *   EVALUATION.md (Markdown, served as sandboxed plain text).
  *
  * Read only, GET and HEAD, the same for the owner's tailnet page as for this
  * computer. Only names listed in inbox-tour-content.ts are served, so a name
@@ -12,6 +14,7 @@
  * mock page runs its own scripts at an opaque origin (`sandbox allow-scripts`,
  * no `allow-same-origin`) and can load nothing from anywhere.
  */
+import { decideByteRange } from "./inbox-byte-range";
 import { INBOX_TOUR_ASSET_PATHS, INBOX_TOUR_FIXTURE_PATH } from "./inbox-tour-content";
 
 export const INBOX_TOUR_PREFIX = "/api/inbox/tour/";
@@ -42,6 +45,8 @@ async function etagOf(path: string, bytes: ArrayBuffer): Promise<string> {
 function typeOf(name: string): string | null {
   if (name.endsWith(".webp")) return "image/webp";
   if (name.endsWith(".html")) return "text/html; charset=utf-8";
+  if (name.endsWith(".mp4")) return "video/mp4";
+  if (name.endsWith(".md")) return "text/plain; charset=utf-8";
   if (name.endsWith(".json")) return "application/json; charset=utf-8";
   return null;
 }
@@ -90,7 +95,21 @@ export async function handleInboxTourRequest(req: Request, path: string): Promis
   };
   if (name.endsWith(".webp")) headers["Content-Security-Policy"] = IMAGE_CSP;
   if (name.endsWith(".html")) headers["Content-Security-Policy"] = INBOX_TOUR_MOCK_CSP;
-  if (name.endsWith(".json")) headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+  if (name.endsWith(".json") || name.endsWith(".md")) headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+  if (name.endsWith(".mp4")) {
+    // The film: the pictures' policy, and HTTP Range over the bytes already in memory (a 429 KB clip).
+    headers["Content-Security-Policy"] = IMAGE_CSP;
+    headers["Accept-Ranges"] = "bytes";
+    const decided = decideByteRange(req.headers.get("range"), bytes.byteLength, { ifRange: req.headers.get("if-range"), etag });
+    if (decided.kind === "unsatisfiable") return new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${bytes.byteLength}` } });
+    if (decided.kind === "partial") {
+      const part = bytes.slice(decided.start, decided.end + 1);
+      return new Response(req.method === "HEAD" ? null : part, {
+        status: 206,
+        headers: { ...headers, "Content-Range": `bytes ${decided.start}-${decided.end}/${bytes.byteLength}`, "Content-Length": String(part.byteLength) },
+      });
+    }
+  }
   if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
   return new Response(req.method === "HEAD" ? null : bytes, { status: 200, headers });
 }

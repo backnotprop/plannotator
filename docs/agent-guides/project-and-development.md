@@ -17,7 +17,7 @@ plannotator/
 │   │   ├── server/index.ts       # Entry point (plan + review + annotate + archive subcommands)
 │   │   └── dist/                 # Built single-file apps (index.html, review.html)
 │   ├── opencode-plugin/          # OpenCode plugin
-│   │   ├── commands/             # Slash command stubs (review, annotate, last — plugin intercepts execution)
+│   │   ├── commands/             # Slash command stubs (review, annotate, last, inbox — plugin intercepts execution)
 │   │   ├── index.ts              # OpenCode 1 entry with submit_plan tool + review/annotate event handlers
 │   │   ├── server.ts             # OpenCode 2 adapter (stable @opencode/plugin types; older-host capability fallbacks)
 │   │   ├── plannotator-tool.ts   # OpenCode 2 `plannotator` tool + per-session launch record (list/close); see "OpenCode 2: the plannotator tool"
@@ -62,7 +62,8 @@ plannotator/
 │       │   ├── plannotator/           # Knowledge layer: model-invocable CLI reference (subcommands, flags, exit codes) an agent loads on generic "use Plannotator" intent; freshness-guarded against apps/hook/server/cli.ts by plannotator-skill-reference.test.ts. Unreleased subcommands (`HIDDEN_SUBCOMMANDS` in cli.ts: today `t3` and `t3-hook`, the opt-in T3 Code connection, and `card`, the Board's card call from a shell; `inbox` was the last to launch) still run and keep `<sub> --help`, but stay out of `plannotator --help`, "Did you mean" suggestions and this skill (the test requires their absence); un-hide by deleting from that set, adding the top-level usage lines and documenting it here
 │       │   ├── plannotator-review/    # Lightweight: opens review UI
 │       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
-│       │   └── plannotator-last/      # Lightweight: annotates last message
+│       │   ├── plannotator-last/      # Lightweight: annotates last message
+│       │   └── plannotator-inbox/     # Lightweight: opens the Inbox (plannotator inbox --open) and says its address; also the Kiro and Vibe copy
 │       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra --global`
 │           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
 │           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows
