@@ -1,0 +1,33 @@
+@import "tailwindcss";
+/* The tree and the ui parts it draws (HostTitle's tooltip, the count pill). */
+@source "../../packages/ui/components/file-tree/*.tsx";
+@source "../../packages/ui/components/HostTitle.tsx";
+@source "../../packages/ui/components/Tooltip.tsx";
+@source "../../packages/ui/components/sidebar/CountBadge.tsx";
+@source "./src/*.tsx";
+@import "../../packages/ui/theme.css";
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/*
+ * Indent guides. The tree draws them the way VS Code's default does (on hover,
+ * on keyboard focus, always on a screen without hover). The tree has no prop
+ * for "always" or "never", so the demo sets them from outside, through the
+ * tree's own data attributes.
+ */
+[data-guides-mode="always"] [data-guides],
+[data-guides-mode="always"] [data-guide-strong] {
+  opacity: 1 !important;
+}
+[data-guides-mode="never"] [data-guides],
+[data-guides-mode="never"] [data-guide-strong] {
+  display: none;
+}
