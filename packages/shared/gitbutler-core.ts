@@ -6,8 +6,7 @@
  * and authoritative Git object-to-object diffs.
  */
 
-import { lstat, readlink } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename } from "node:path";
 
 import {
   type DiffResult,
@@ -29,6 +28,7 @@ import {
   runBoundedTrackedDiff,
   validateFilePath,
 } from "./review-core";
+import { readRepoWorkingTreeEntry } from "./repo-file";
 
 /** Oldest GitButler CLI release whose status contract this integration supports. */
 export const GITBUTLER_MIN_VERSION = "0.21.0";
@@ -768,15 +768,16 @@ async function readWorkingTreeFile(
   root: string,
   path: string,
 ): Promise<string | null> {
-  const fullPath = resolve(root, path);
-  try {
-    const fileStat = await lstat(fullPath);
-    if (fileStat.isSymbolicLink()) return await readlink(fullPath);
-    if (!fileStat.isFile() || fileStat.size > MAX_REVIEW_FILE_CONTENT_BYTES) return null;
-  } catch {
-    return null;
-  }
-  return runtime.readTextFile(fullPath);
+  // Same guard as Git diff expansion (repo-file.ts): containment by realpath,
+  // a final symlink read as its target string, regular files under 5 MB read
+  // from the checked descriptor. The runtime's own reader keeps its decoder
+  // (Bun strips a BOM, Node keeps it); every server runtime has one.
+  const options = { maxBytes: MAX_REVIEW_FILE_CONTENT_BYTES };
+  const entry = runtime.readWorkingTreeEntry
+    ? await runtime.readWorkingTreeEntry(root, path, options)
+    : await readRepoWorkingTreeEntry(root, path, options);
+  if (!entry.ok) return null;
+  return entry.kind === "symlink" ? entry.linkTarget : entry.content;
 }
 
 /**

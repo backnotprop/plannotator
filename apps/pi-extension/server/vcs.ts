@@ -1,6 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
 import { lstatSync, readFileSync, readlinkSync } from "node:fs";
-import { open, realpath } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import {
 	type DiffResult,
@@ -16,6 +15,7 @@ import {
 	prepareGitCommand,
 	runGitDiff as runGitDiffCore,
 } from "../generated/review-core.ts";
+import { checkRepoRoot, readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "../generated/repo-file.ts";
 import {
 	JJ_COLOR_FREE_ARGS,
 	type ReviewJjRuntime,
@@ -213,6 +213,21 @@ export const reviewRuntime: ReviewGitRuntime = {
 		return runCommand("git", command.args, "git not found", options, command);
 	},
 
+	// The default decoder is Node's readFileSync(path, "utf-8") (a BOM stays),
+	// which is what readTextFile below returns.
+	async readWorkingTreeEntry(root, path, options) {
+		return readRepoWorkingTreeEntry(root, path, options);
+	},
+
+	async readWorkingTreeBytes(root, path, maxBytes) {
+		return readRepoWorkingTreeBytes(root, path, { maxBytes });
+	},
+
+	async checkRepoRoot(path) {
+		const checked = checkRepoRoot(path);
+		return checked.ok ? checked.realRoot : null;
+	},
+
 	runGitBytes(
 		args: string[],
 		options?: GitCommandOptions,
@@ -224,34 +239,6 @@ export const reviewRuntime: ReviewGitRuntime = {
 	async readTextFile(path: string): Promise<string | null> {
 		try {
 			return readFileSync(path, "utf-8");
-		} catch {
-			return null;
-		}
-	},
-
-	async readFileBytes(path: string, maxBytes: number): Promise<Uint8Array | null> {
-		let handle: Awaited<ReturnType<typeof open>> | undefined;
-		try {
-			handle = await open(path, "r");
-			const { size } = await handle.stat();
-			const buffer = new Uint8Array(Math.min(size, maxBytes) + 1);
-			let offset = 0;
-			while (offset < buffer.byteLength) {
-				const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, null);
-				if (bytesRead === 0) break;
-				offset += bytesRead;
-			}
-			return buffer.subarray(0, offset);
-		} catch {
-			return null;
-		} finally {
-			await handle?.close().catch(() => {});
-		}
-	},
-
-	async realPath(path: string): Promise<string | null> {
-		try {
-			return await realpath(path);
 		} catch {
 			return null;
 		}

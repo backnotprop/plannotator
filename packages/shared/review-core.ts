@@ -16,6 +16,12 @@ import {
   OVERSIZED_REVIEW_STUB_MARKER,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import type {
+  RepoFileFailure,
+  RepoWorkingTreeBytes,
+  RepoWorkingTreeEntry,
+  RepoWorkingTreeReadOptions,
+} from "./repo-file";
 
 import {
   BARE_HEX_SHA_RE,
@@ -271,10 +277,41 @@ export interface ReviewGitRuntime {
     args: string[],
     options?: GitCommandOptions,
   ) => Promise<GitBytesCommandResult>;
-  /** Read at most `maxBytes + 1` bytes of a regular file (null on any error). */
-  readFileBytes?: (path: string, maxBytes: number) => Promise<Uint8Array | null>;
-  /** Canonical path with every symlink resolved (null on any error). */
-  realPath?: (path: string) => Promise<string | null>;
+  /**
+   * Read one working-tree path as bytes for the image preview, behind the
+   * same guard as `readWorkingTreeEntry` (`readRepoWorkingTreeBytes` in
+   * repo-file.ts) with the caller's cap. Optional: a runtime without it
+   * cannot serve working-tree image sides, and the preview reports itself
+   * unavailable.
+   */
+  readWorkingTreeBytes?: (
+    root: string,
+    path: string,
+    maxBytes: number,
+  ) => Promise<RepoWorkingTreeBytes | RepoFileFailure>;
+  /**
+   * The real path of a review root, held to the session's root pin
+   * (`checkRepoRoot` in repo-file.ts): `null` when the directory was replaced
+   * since the session pinned it. Working-tree reads check their `cwd` with it
+   * before running git there. Optional for the same reason as above.
+   */
+  checkRepoRoot?: (path: string) => Promise<string | null>;
+  /**
+   * Read one working-tree path for diff context expansion: every directory
+   * on the way resolves inside `root`, a final symlink comes back as its
+   * target string, and anything else must be a regular file under the 5 MB
+   * cap, read from the checked descriptor. Every server runtime (Bun, Pi,
+   * VS Code) implements it with `readRepoWorkingTreeEntry` from repo-file.ts
+   * and its own decoder, so its text output (BOM handling) is unchanged; it is
+   * optional only because this module also reaches the browser bundle, which
+   * cannot import node:fs. Without it, expansion falls back to the
+   * `getFileInfo` checks. `options` carries only test hooks and a cap.
+   */
+  readWorkingTreeEntry?: (
+    root: string,
+    path: string,
+    options?: RepoWorkingTreeReadOptions,
+  ) => Promise<RepoWorkingTreeEntry | RepoFileFailure>;
 }
 
 /** `GitCommandResult` with undecoded stdout, for binary blobs. */
@@ -921,6 +958,35 @@ async function resolveRepoToplevel(
   const top = await runtime.runGit(["rev-parse", "--show-toplevel"], { cwd });
   const trimmed = top.exitCode === 0 ? top.stdout.trim() : "";
   return trimmed || cwd;
+}
+
+/** Path form for comparing a git toplevel with a real path (case folds on macOS and Windows). */
+function comparablePath(path: string): string {
+  const platform = typeof process === "undefined" ? "" : process.platform;
+  const slashed = path.replace(/\\/g, "/").replace(/\/+$/, "").normalize("NFC");
+  return platform === "darwin" || platform === "win32" ? slashed.toLowerCase() : slashed;
+}
+
+/**
+ * The toplevel for a working-tree read, held to the session's root pin
+ * (`checkRepoRoot`, repo-file.ts) where the runtime has one: `cwd` must still
+ * be the directory the session pinned (so a repo replaced by a symlink to
+ * another repo is refused before git runs in it), and the toplevel git
+ * reports must contain it. `null`: refused. The read then holds the toplevel
+ * to its own pin.
+ */
+async function pinnedRepoToplevel(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+): Promise<string | undefined | null> {
+  if (!runtime.checkRepoRoot || !cwd) return resolveRepoToplevel(runtime, cwd);
+  const pinnedCwd = await runtime.checkRepoRoot(cwd);
+  if (pinnedCwd === null) return null;
+  const top = await resolveRepoToplevel(runtime, cwd);
+  if (!top) return top;
+  const topPath = comparablePath(top);
+  const cwdPath = comparablePath(pinnedCwd);
+  return cwdPath === topPath || cwdPath.startsWith(`${topPath}/`) ? top : null;
 }
 
 interface RawDiffEntry {
@@ -2359,8 +2425,17 @@ export async function readDiffSideText(
   // cwd — from a subdirectory launch, cwd-resolution double-prefixes the
   // path and hunk expansion silently returns null. (The `git show ref:path`
   // sibling is immune: ref paths are root-relative regardless of cwd.)
-  const baseDir = await resolveRepoToplevel(runtime, cwd);
+  const baseDir = await pinnedRepoToplevel(runtime, cwd);
+  if (baseDir === null) return null;
   try {
+    if (runtime.readWorkingTreeEntry) {
+      // Shared guard (repo-file.ts): a path through a symlinked directory
+      // that points out of the repository reads as null, and the bytes come
+      // from the checked descriptor, never from reopening the path.
+      const entry = await runtime.readWorkingTreeEntry(baseDir ?? ".", source.path);
+      if (!entry.ok) return null;
+      return entry.kind === "symlink" ? entry.linkTarget : entry.content;
+    }
     const fileInfo = await runtime.getFileInfo(baseDir, source.path);
     if (!fileInfo) return null;
     // Git stores the link destination as the blob contents. Reading the link
@@ -2390,13 +2465,6 @@ export async function getFileContentsForDiff(
   };
 }
 
-function isPathInside(root: string, child: string): boolean {
-  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "");
-  const r = normalize(root);
-  const c = normalize(child);
-  return c === r || c.startsWith(`${r}/`);
-}
-
 /**
  * Read one side as raw bytes for the image preview, capped at `maxBytes`.
  *
@@ -2405,10 +2473,12 @@ function isPathInside(root: string, child: string): boolean {
  * streams it undecoded. The spec is built by the caller from session state and
  * is passed on stdin, never argv, so it can never be taken for an option.
  *
- * Worktree: the final component must be a regular file (never a symlink, which
- * git would store as its target text), and its canonical path must stay inside
- * the canonical repository toplevel, which blocks an intermediate directory
- * swapped for a symlink after the diff was taken.
+ * Worktree: read by the shared guard (`readRepoWorkingTreeBytes` in
+ * repo-file.ts, through the runtime). The final component must be a regular
+ * file (never a symlink, which git would store as its target text), every
+ * directory on the way must resolve inside the repository toplevel, and the
+ * bytes come from a descriptor checked to be inside it, so a directory
+ * swapped for a symlink after the diff was taken is refused, even mid-read.
  */
 export async function readDiffSideBytes(
   runtime: ReviewGitRuntime,
@@ -2438,21 +2508,18 @@ export async function readDiffSideBytes(
     return { kind: "ok", bytes: blob.stdout, etag: `"${match[1]}"` };
   }
 
-  if (!runtime.readFileBytes || !runtime.realPath) return { kind: "unavailable" };
-  const root = await resolveRepoToplevel(runtime, cwd);
+  if (!runtime.readWorkingTreeBytes) return { kind: "unavailable" };
+  const root = await pinnedRepoToplevel(runtime, cwd);
+  if (root === null) return { kind: "missing" };
   if (!root) return { kind: "unavailable" };
-  const info = await runtime.getFileInfo(root, source.path);
-  if (!info || info.isSymbolicLink || !info.isFile) return { kind: "missing" };
-  if (info.size > maxBytes) return { kind: "too-large", size: info.size };
-  const [realRoot, realFile] = await Promise.all([
-    runtime.realPath(root),
-    runtime.realPath(info.path),
-  ]);
-  if (!realRoot || !realFile || !isPathInside(realRoot, realFile)) return { kind: "missing" };
-  const bytes = await runtime.readFileBytes(realFile, maxBytes);
-  if (!bytes) return { kind: "missing" };
-  if (bytes.byteLength > maxBytes) return { kind: "too-large", size: bytes.byteLength };
-  return { kind: "ok", bytes, etag: `W/"${info.size}-${Math.trunc(info.mtimeMs)}"` };
+  const entry = await runtime.readWorkingTreeBytes(root, source.path, maxBytes);
+  if (!entry.ok) {
+    return entry.reason === "too-large" && entry.size !== undefined
+      ? { kind: "too-large", size: entry.size }
+      : { kind: "missing" };
+  }
+  if (entry.kind !== "file") return { kind: "missing" };
+  return { kind: "ok", bytes: entry.bytes, etag: `W/"${entry.size}-${Math.trunc(entry.mtimeMs)}"` };
 }
 
 /** Resolve and read one side of a git diff as bytes (see `readDiffSideBytes`). */

@@ -85,6 +85,7 @@
     "./annotate-target": "./annotate-target.ts",
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
+    "./repo-file": "./repo-file.ts",
     "./token-hover": "./token-hover.ts",
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",
