@@ -285,6 +285,101 @@ describe("an agent attaches a live site", () => {
   });
 });
 
+describe("checks at every step", () => {
+  test("a port that becomes Plannotator's after the site was recorded is refused when the site opens", async () => {
+    const { project, dataDir } = world();
+    const server = await start(dataDir);
+    const client = await agent(server);
+    const app = devApp();
+    const sent = await send(client, project, { live_sites: [app.url] });
+    // A Plannotator session takes the site's port in the registry afterwards (this process: alive).
+    mkdirSync(join(dataDir, "sessions"), { recursive: true });
+    writeFileSync(join(dataDir, "sessions", `${process.pid}.json`), JSON.stringify({ pid: process.pid, port: app.port }));
+    const opened = await fetch(`${base(server)}/api/inbox/threads/${sent.structured.thread_id}/live/${inboxLiveSiteId(app.url)}`);
+    expect(opened.status).toBe(422);
+    expect(((await opened.json()) as { error: string }).error).toContain("Plannotator's own");
+    expect(server.liveSites.running()).toEqual([]);
+  });
+
+  test("the probe follows a redirect only on the site's own origin, and never sends a request elsewhere; one refusal for every kind of no", async () => {
+    const { project, dataDir } = world();
+    const server = await start(dataDir);
+    const client = await agent(server);
+    const elsewhere: string[] = [];
+    const other = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (req) => (elsewhere.push(new URL(req.url).pathname), new Response("<p>admin</p>", { headers: { "Content-Type": "text/html" } })) });
+    apps.push(other);
+    const redirecting = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path === "/away") return Response.redirect(`http://127.0.0.1:${other.port}/admin/delete?id=1`, 302);
+        if (path === "/home") return Response.redirect("/login", 302);
+        if (path === "/login") return new Response("<p>Sign in</p>", { headers: { "Content-Type": "text/html" } });
+        if (path === "/json") return Response.json({ ok: true });
+        return new Response("not found", { status: 404, headers: { "Content-Type": "text/html" } });
+      },
+    });
+    apps.push(redirecting);
+    const at = (path: string) => `http://localhost:${redirecting.port}${path}`;
+
+    const away = await send(client, project, { live_sites: [at("/away")] });
+    expect(away.isError).toBe(true);
+    expect(elsewhere).toEqual([]);
+    const json = await send(client, project, { live_sites: [at("/json")] });
+    const dead = `http://localhost:${closedPort()}/`;
+    const nothing = await send(client, project, { live_sites: [dead] });
+    // The same words whatever the reason, so a refusal maps no ports.
+    const reason = (text: string, url: string) => text.slice(text.lastIndexOf(url) + url.length);
+    expect(reason(away.text, at("/away"))).toBe(reason(json.text, at("/json")));
+    expect(reason(json.text, at("/json"))).toBe(reason(nothing.text, dead));
+
+    const followed = await send(client, project, { live_sites: [at("/home")] });
+    expect(followed.isError).toBeFalsy();
+  });
+
+  test("a retry with the same idempotency key is not probed again; other sites under the key are refused as reused", async () => {
+    const { project, dataDir } = world();
+    const server = await start(dataDir);
+    const client = await agent(server);
+    const app = devApp();
+    const first = await send(client, project, { live_sites: [app.url], idempotency_key: "k1" });
+    expect(first.isError).toBeFalsy();
+    // The dev server stops; the agent retries after a timeout.
+    apps.pop()!.stop(true);
+    const retry = await send(client, project, { live_sites: [app.url], idempotency_key: "k1" });
+    expect(retry.isError).toBeFalsy();
+    expect(retry.structured.message_id).toBe(first.structured.message_id);
+    for (const changed of [{ live_sites: [`${app.url}other`] }, {}]) {
+      const reused = await send(client, project, { ...changed, idempotency_key: "k1" });
+      expect(reused.isError).toBe(true);
+      expect(reused.text).toContain("idempotency_key");
+    }
+    expect(server.store.listRows()).toHaveLength(1);
+  });
+
+  test("PLANNOTATOR_LIVE_PORT (annotate's one port) never pins the Inbox's proxies: two sites run at once", async () => {
+    const saved = process.env.PLANNOTATOR_LIVE_PORT;
+    const pinned = closedPort();
+    process.env.PLANNOTATOR_LIVE_PORT = String(pinned);
+    try {
+      const { project, dataDir } = world();
+      const server = await start(dataDir);
+      const client = await agent(server);
+      const a = devApp();
+      const b = devApp();
+      const sent = await send(client, project, { live_sites: [a.url, b.url] });
+      const one = await openSite(server, sent.structured.thread_id, inboxLiveSiteId(a.url));
+      const two = await openSite(server, sent.structured.thread_id, inboxLiveSiteId(b.url));
+      expect(one.proxy_origin).not.toBe(two.proxy_origin);
+      expect([one.proxy_origin, two.proxy_origin]).not.toContain(`http://localhost:${pinned}`);
+    } finally {
+      if (saved === undefined) delete process.env.PLANNOTATOR_LIVE_PORT;
+      else process.env.PLANNOTATOR_LIVE_PORT = saved;
+    }
+  });
+});
+
 describe("the doors", () => {
   test("another site's page is refused, reads included: the proxied app (same-site) and a cross-site page", async () => {
     const { project, dataDir } = world();
@@ -402,6 +497,13 @@ describe("the person opens a site and comments on it", () => {
     }
     expect((await save({ ...pin("ann-d", "x", "/", "#pay"), type: "DELETION" })).status).toBe(422);
     expect((await save(pin("ann-e", "", "/", "#pay"))).status).toBe(422);
+    // What the page supplies is capped: the quoted text, the element's context and anchor, the whole object.
+    const huge = "x".repeat(200 * 1024);
+    expect((await save(pin("ann-q", "x", "/", "#pay", "q".repeat(10_001)))).status).toBe(422);
+    expect((await save({ ...pin("ann-c", "x", "/", "#pay"), elementContext: { tag: "div", text: huge } })).status).toBe(422);
+    expect((await save({ ...pin("ann-a", "x", "/", "#pay"), htmlAnchor: { selector: huge } })).status).toBe(422);
+    expect((await save({ ...pin("ann-x", "x", "/", "#pay"), extra: huge })).status).toBe(422);
+    expect(await pending(server, threadId)).toEqual([]);
     expect((await post(server, `/api/inbox/threads/${threadId}/live/${inboxLiveSiteId("http://localhost:9/")}/annotations`, { annotation: pin("ann-n", "x", "/", "#pay") })).status).toBe(404);
 
     const saved = await save(pin("ann-ok", "Price should say per month", "/", "#price"));

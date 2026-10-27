@@ -228,7 +228,7 @@ export interface InboxMcpContext {
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
   /** send_message's `live_sites`: checked (http, loopback, not Plannotator's own port) and probed before anything is written (inbox-live.ts). Absent: live sites are refused. */
-  recordLiveSites?: (urls: readonly string[]) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
+  recordLiveSites?: (urls: readonly string[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** wait_for_reply's default hold in ms (tests pass a shorter one only through timeout_seconds). */
   waitDefaultMs?: number;
   /**
@@ -715,10 +715,14 @@ export async function sendAgentMessage(
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
   // Live sites first: checked and probed, nothing written, so a refusal leaves no attachment blob behind.
+  // A replay (this project already has a message under the key) is never probed again: a dev server
+  // stopped since the first send must not make a retry read as "not sent". The store still compares
+  // the sites, so the same key with other sites is refused as reused.
   let liveSites: Omit<InboxLiveSiteRef, "opened_at">[] | undefined;
   if (input.live_sites && input.live_sites.length > 0) {
     if (!context.recordLiveSites) throw new InboxError("validation_error", "live_sites: not taken by this Inbox.", { field: "live_sites" });
-    liveSites = await context.recordLiveSites(input.live_sites);
+    const replay = input.idempotency_key ? store.agentMessageByKey(project.id, input.idempotency_key) : null;
+    liveSites = await context.recordLiveSites(input.live_sites, replay === null);
   }
   let attachments: InboxAttachment[] | undefined;
   if (input.attachments && input.attachments.length > 0) {

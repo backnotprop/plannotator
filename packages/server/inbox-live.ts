@@ -49,7 +49,7 @@ import {
   liveTargetPort,
 } from "@plannotator/shared/live-proxy-core";
 import { LiveProxyPortError } from "@plannotator/shared/live-proxy-port";
-import { buildForceAppFailureMessage, probeLiveAppTarget } from "@plannotator/shared/live-probe";
+import { probeLiveAppTarget } from "@plannotator/shared/live-probe";
 import { listPlannotatorServerPorts } from "@plannotator/shared/plannotator-ports";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -154,8 +154,11 @@ export interface InboxLiveSitesOptions {
 export interface InboxLiveSites {
   /** Answers a live route, or null when the path is not one. */
   route: (req: Request, path: string, via: "local" | "tailnet") => Promise<Response | null>;
-  /** send_message's `live_sites`: checked and probed before anything is written; refusals are `validation_error` on `live_sites`. */
-  recordLiveSites: (urls: readonly string[]) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
+  /**
+   * send_message's `live_sites`: checked and probed before anything is written; refusals are `validation_error` on `live_sites`.
+   * `probing: false` (a replay of a message already sent): the shape checks only, no request to any site.
+   */
+  recordLiveSites: (urls: readonly string[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** Stop every proxy; none starts after. Called when the Inbox stops. */
   stop: () => void;
   /** The proxies running now (tests, and the reserved ports). */
@@ -206,6 +209,8 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
         targetUrl: `${url.origin}/`,
         editorOrigins,
         bridgeJs: composeLiveBridgeJs({ token, editorOrigins, ...options.bridge }),
+        // Never PLANNOTATOR_LIVE_PORT (annotate's one port): several sites run at once.
+        anyFreePort: true,
       });
     } catch (error) {
       if (error instanceof LiveProxyPortError) throw new InboxError("live_unavailable", error.message);
@@ -232,23 +237,30 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
     };
   };
 
-  /** The probe annotate runs (3 s, HTML, status < 500, the final response on the same origin), refusing Plannotator. */
+  /**
+   * The probe annotate runs (3 s, HTML, status < 500, redirects followed only
+   * on the same loopback origin and judged before each request), refusing
+   * Plannotator. One answer for "nothing there", "not HTML" and "redirected
+   * elsewhere", so the refusal does not tell an agent what else listens on
+   * this computer's ports.
+   */
   const probe = async (url: URL): Promise<void> => {
     const result = await probeLiveAppTarget(url.href, url, options.fetchImpl, { plannotatorPorts: reservedPorts() });
+    if (result.plannotator) refuse(`port ${liveTargetPort(url)} is Plannotator's own; it is never shown live.`);
     if (!result.liveEligible) {
-      throw new InboxError("live_not_answering", buildForceAppFailureMessage(url.href, result).replace(/^--app: /, ""), { field: "url" });
+      throw new InboxError("live_not_answering", `${url.href} did not answer with a web page from that address; start the dev server and try again.`, { field: "url" });
     }
   };
 
-  const recordLiveSites = async (urls: readonly string[]): Promise<Omit<InboxLiveSiteRef, "opened_at">[]> => {
+  const recordLiveSites = async (urls: readonly string[], probing = true): Promise<Omit<InboxLiveSiteRef, "opened_at">[]> => {
     if (urls.length > INBOX_LIVE_SITES_MAX) {
       throw new InboxError("validation_error", `live_sites: at most ${INBOX_LIVE_SITES_MAX} sites in one message.`, { field: "live_sites" });
     }
     const out: Omit<InboxLiveSiteRef, "opened_at">[] = [];
     for (const raw of urls) {
       try {
-        const url = checkInboxLiveUrl(raw, reservedPorts());
-        await probe(url);
+        const url = checkInboxLiveUrl(raw, probing ? reservedPorts() : []);
+        if (probing) await probe(url);
         const id = inboxLiveSiteId(url.href);
         if (!out.some((site) => site.id === id)) out.push({ id, url: url.href, opened_by: "agent" });
       } catch (error) {

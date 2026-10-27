@@ -72,6 +72,12 @@ export interface LiveAppProxyOptions {
   editorOrigins: string[];
   /** Fully composed bridge body (config prelude + bootstrap + bridge). */
   bridgeJs: string;
+  /**
+   * Bind any free loopback port, ignoring PLANNOTATOR_LIVE_PORT. The Inbox
+   * sets it (Bun proxy only): it runs one proxy per site at once, and that
+   * variable names annotate's one port. Absent: annotate's behavior.
+   */
+  anyFreePort?: boolean;
 }
 
 export interface LiveAppProxy {

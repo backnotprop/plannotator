@@ -105,6 +105,9 @@ import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { sanitizeTag } from "@plannotator/core/project";
 import {
   INBOX_ANNOTATION_CURRENT,
+  INBOX_LIVE_ANNOTATION_MAX,
+  INBOX_LIVE_ELEMENT_MAX,
+  INBOX_LIVE_QUOTE_MAX,
   INBOX_LIVE_URL_MAX,
   INBOX_MESSAGE_COMMENT_QUOTE_MAX,
   INBOX_MESSAGE_COMMENT_TEXT_MAX,
@@ -2545,7 +2548,9 @@ export class InboxStore {
         const sameGuide = (message.guide?.input_sha256 ?? null) === (input.guide?.input_sha256 ?? null);
         const sameSupersedes = [...(message.supersedes ?? [])].sort().join("\n") === [...supersedes].sort().join("\n");
         const sameDone = [...(message.done ?? [])].sort().join("\n") === [...done].sort().join("\n");
-        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide || !sameSupersedes || !sameDone) {
+        const liveIds = (sites: readonly { id: string }[] | undefined) => [...new Set((sites ?? []).map((site) => site.id))].sort().join("\n");
+        const sameLive = liveIds(message.live_sites) === liveIds(input.live_sites);
+        if (message.body !== body || message.reply_to !== replyTo || !sameName || !sameGuide || !sameSupersedes || !sameDone || !sameLive) {
           throw new InboxError(
             "idempotency_key_reused",
             "This idempotency_key was already used for a different message.",
@@ -3153,6 +3158,21 @@ export class InboxStore {
    * written as ONE reply in the thread. Replaying the same idempotency key on
    * the same message answers the reply it wrote, and writes nothing.
    */
+  /**
+   * The agent message a project already has under this idempotency key (what
+   * `sendMessage` would replay), so a caller can skip work a replay never
+   * uses: probing its live sites again, for one, which could refuse a retry
+   * after the first send landed.
+   */
+  agentMessageByKey(projectId: string, key: string): InboxMessage | null {
+    const trimmed = key.trim();
+    if (!trimmed) return null;
+    for (const message of this.messages.values()) {
+      if (message.project_id === projectId && message.idempotency_key === trimmed && message.author.kind === "agent") return message;
+    }
+    return null;
+  }
+
   /** The person's reply to this message written under this idempotency key, for a replayed Send. */
   replyByKey(messageId: string, key: string): InboxMessage | null {
     if (!this.messages.has(messageId) || !key) return null;
@@ -3895,6 +3915,20 @@ export class InboxStore {
     const text = fields.text;
     if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
+    }
+    // What the page itself supplies (the words or element text, the element's context and anchor) is
+    // capped, since it rides into the agent's feedback: a page cannot fill a reply or the store.
+    const quoted = fields.originalText;
+    if (quoted !== undefined && (typeof quoted !== "string" || quoted.length > INBOX_LIVE_QUOTE_MAX)) {
+      throw new InboxError("validation_error", `annotation.originalText: at most ${INBOX_LIVE_QUOTE_MAX} characters.`, { field: "annotation.originalText" });
+    }
+    for (const key of ["elementContext", "htmlAnchor"] as const) {
+      if (fields[key] !== undefined && JSON.stringify(fields[key]).length > INBOX_LIVE_ELEMENT_MAX) {
+        throw new InboxError("validation_error", `annotation.${key}: at most ${INBOX_LIVE_ELEMENT_MAX} characters as JSON.`, { field: `annotation.${key}` });
+      }
+    }
+    if (JSON.stringify(fields).length > INBOX_LIVE_ANNOTATION_MAX) {
+      throw new InboxError("validation_error", `annotation: at most ${INBOX_LIVE_ANNOTATION_MAX} characters as JSON.`, { field: "annotation" });
     }
     // The page: a path the site serves (`/settings?tab=billing`), never another origin's address.
     const page = fields.pageUrl;
