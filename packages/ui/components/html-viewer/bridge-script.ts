@@ -286,7 +286,11 @@ export const BRIDGE_SCRIPT = `(function() {
   // nested same-origin subframes: only the frame whose parent IS the editor
   // may run.
   var LIVE = window.__plannotatorLiveConfig || null;
-  if (LIVE && (window === window.parent || window.parent !== window.top)) return;
+  // The editor's window. A host whose window frames the app through a
+  // same-origin wrapper page (LIVE.nested: the Inbox, whose own policy names
+  // no proxy port) is the grandparent; everywhere else it is the parent.
+  var EDITOR = LIVE && LIVE.nested ? parent.parent : parent;
+  if (LIVE && (window === window.parent || (LIVE.nested ? window.parent.parent : window.parent) !== window.top || (LIVE.nested && window.parent === window.top))) return;
   // The server cannot know which origin form (localhost or 127.0.0.1) the
   // editor tab was opened on, so live outbound messages are posted once per
   // listed editor origin: the browser delivers only the post whose
@@ -303,7 +307,7 @@ export const BRIDGE_SCRIPT = `(function() {
     if (LIVE) {
       msg.token = LIVE.token;
       var origins = LIVE.editorOrigins || [];
-      for (var o = 0; o < origins.length; o++) parent.postMessage(msg, origins[o]);
+      for (var o = 0; o < origins.length; o++) EDITOR.postMessage(msg, origins[o]);
       return;
     }
     parent.postMessage(msg, '*');
@@ -346,7 +350,7 @@ export const BRIDGE_SCRIPT = `(function() {
   // (hostTheme), only viewer-namespaced --pn-* properties may be written to its
   // root, and its class list is never touched.
   window.addEventListener('message', function(e) {
-    if (e.source !== parent) return;
+    if (e.source !== EDITOR) return;
     if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data) return;
     if (e.data.type === PREFIX + 'set-vim-help') {
@@ -653,7 +657,7 @@ export const BRIDGE_SCRIPT = `(function() {
 
   // --- Mark Creation ---
   window.addEventListener('message', function(e) {
-    if (e.source !== parent) return;
+    if (e.source !== EDITOR) return;
     if (LIVE && (!isEditorOrigin(e.origin) || !e.data || e.data.token !== LIVE.token)) return;
     if (!e.data || !e.data.type) return;
     var type = e.data.type;
@@ -5813,7 +5817,7 @@ export const BRIDGE_SCRIPT = `(function() {
     // document keeps focus — so the iframe must relinquish it. parent.focus() is
     // allowed cross-origin (like postMessage); also drop the active element.
     try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (ex) {}
-    try { parent.focus(); } catch (ex) {}
+    try { EDITOR.focus(); } catch (ex) {}
   });
 
   // --- Helpers ---

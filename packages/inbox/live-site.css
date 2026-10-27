@@ -1,0 +1,32 @@
+/* PROVISIONAL UI (live sites): a running local site beside the thread; the approved Files design replaces it. Imported after inbox.css. */
+.pn-inbox .ib-live { position: relative; z-index: 1; flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px minmax(0, 1fr) auto; background: var(--background); border-left: 1px solid var(--border); }
+.pn-inbox .ib-live-head { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--border); min-width: 0; }
+.pn-inbox .ib-live-badge { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--success, #16a34a); background: color-mix(in oklch, var(--success, #16a34a) 13%, transparent); }
+.pn-inbox .ib-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success, #16a34a); box-shadow: 0 0 0 3px color-mix(in oklch, var(--success, #16a34a) 22%, transparent); flex: none; }
+.pn-inbox .ib-live-host { font-weight: 600; font-size: 13px; white-space: nowrap; }
+.pn-inbox .ib-live-route { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; padding: 2px 7px; border-radius: 6px; background: var(--muted); color: var(--muted-foreground); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-live-sp { flex: 1; }
+.pn-inbox .ib-live-body { position: relative; min-height: 0; display: flex; }
+.pn-inbox .ib-live-body > * { flex: 1; min-width: 0; }
+.pn-inbox .ib-live-foot { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 8px 14px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted-foreground); }
+.pn-inbox .ib-live-wait, .pn-inbox .ib-live-err { margin: 24px; color: var(--muted-foreground); }
+.pn-inbox .ib-live-err { color: var(--destructive); }
+.pn-inbox .ib-live-away { margin: auto; max-width: 380px; padding: 32px; text-align: center; color: var(--muted-foreground); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.pn-inbox .ib-live-away h3 { margin: 4px 0 0; font-size: 16px; color: var(--foreground); }
+.pn-inbox .ib-live-tile { display: flex; align-items: center; gap: 12px; width: 100%; max-width: 520px; margin: 10px 0 2px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.pn-inbox .ib-live-tile:hover { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
+.pn-inbox .ib-live-tile[aria-current] { border-color: color-mix(in oklch, var(--primary) 50%, transparent); }
+.pn-inbox .ib-live-tile-ic { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in oklch, var(--success, #16a34a) 12%, var(--muted)); color: var(--success, #16a34a); flex: none; }
+.pn-inbox .ib-live-tile-t { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
+.pn-inbox .ib-live-tile-n { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pn-inbox .ib-live-tile-p { font-weight: 400; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; margin-left: 2px; }
+.pn-inbox .ib-live-tile-m { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted-foreground); }
+.pn-inbox .ib-live-tile-o { font-size: 12.5px; color: var(--primary); font-weight: 550; flex: none; }
+.pn-inbox .ib-live-open { position: relative; }
+.pn-inbox .ib-live-pop { position: absolute; right: 0; top: 36px; z-index: 30; width: 340px; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--popover); color: var(--popover-foreground); box-shadow: var(--float-shadow, 0 10px 30px rgba(0, 0, 0, 0.2)); display: flex; flex-direction: column; gap: 8px; }
+.pn-inbox .ib-live-pop label { font-size: 12.5px; font-weight: 600; }
+.pn-inbox .ib-live-pop input { height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; }
+.pn-inbox .ib-live-pop p { margin: 0; font-size: 12px; color: var(--muted-foreground); }
+.pn-inbox .ib-live-pop .ib-live-poperr { color: var(--destructive); }
+.pn-inbox .ib-live-pop-row { display: flex; justify-content: flex-end; gap: 8px; }
+.pn-inbox .ib-live-opened { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }

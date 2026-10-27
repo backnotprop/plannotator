@@ -15,7 +15,7 @@
  */
 
 import type { QuestionAnswer, QuestionKind } from "./question-block";
-import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
+import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 
@@ -376,6 +376,15 @@ export interface InboxMessage {
    * on a message whose body shows no local image, and on older records.
    */
   inline_images?: InboxInlineImage[];
+  /** On an agent's message: the running local sites it attached (`send_message` `live_sites`), checked and probed when it was sent. */
+  live_sites?: InboxLiveSiteRef[];
+  /**
+   * On a thread's root: the running local sites the person opened from the
+   * thread (`POST /api/inbox/threads/:id/live`), oldest first. Kept on the
+   * root's line so it outlives a restart; a site an agent attached in the
+   * thread is not repeated here.
+   */
+  opened_live_sites?: InboxLiveSiteRef[];
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
@@ -1785,10 +1794,16 @@ export type InboxToolCostHost = "pi" | "opencode";
  * "with a blocking question tool (AskUserQuestion or similar)"): 9,298 bytes
  * (+15). With the Board on 10,760 (the Board title rule's 10,303 + this
  * branch's 457, estimated).
+ * Live sites (`send_message` `live_sites`, one short field description,
+ * `LIVE_SITES_DESCRIPTION` in packages/server/inbox-mcp.ts): measured on Pi
+ * with the cost test, 8,841 → 9,134 bytes on their own branch; merged with
+ * the rules above, measured on Pi, 9,591 bytes (+293 over 9,298; about +80
+ * tokens, not counted, so the rounded token figures stand). With the Board
+ * on 11,053 (10,760 + 293, estimated).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 9298, tokens: 2600 };
+const INBOX_TOOL_COST_NOW = { bytes: 9591, tokens: 2600 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 10760, tokens: 3000 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11053, tokens: 3000 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

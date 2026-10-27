@@ -163,6 +163,20 @@ type BridgeMessage =
 export interface HtmlLiveSession {
   origin: string;
   token: string;
+  /**
+   * Optional: the frame loads a same-origin wrapper page whose only frame is
+   * the proxied app (a host whose own page policy names no proxy port; its
+   * proxy composes the bridge with `nested`), so the bridge's window is the
+   * wrapper's `frames[0]`. Absent: the frame's own window, as always.
+   */
+  nested?: boolean;
+}
+
+/** The bridge's window behind `iframe`: the frame's own, or a nested live session's wrapper's only frame. */
+export function bridgeWindowOf(iframe: HTMLIFrameElement | null | undefined, live?: HtmlLiveSession | null): Window | null {
+  const win = iframe?.contentWindow ?? null;
+  if (!win || !live?.nested) return win;
+  return win.frames[0] ?? null;
 }
 
 /** Cap for a link href relayed out of the framed document. */
@@ -249,7 +263,7 @@ function postToIframe(
     // receiving window (mid-navigation frames); some DOM environments throw
     // instead, so align with the browser semantics explicitly.
     try {
-      iframe?.contentWindow?.postMessage({ ...msg, token: live.token }, live.origin);
+      bridgeWindowOf(iframe, live)?.postMessage({ ...msg, token: live.token }, live.origin);
     } catch {
       // Dropped, matching browser behavior for unmatched target origins.
     }
@@ -708,7 +722,7 @@ export function useHtmlAnnotation({
   // commit that inserts the iframe, before its document can post anything.
   useLayoutEffect(() => {
     function handler(e: MessageEvent<unknown>) {
-      if (e.source !== iframeRef.current?.contentWindow) return;
+      if (!e.source || e.source !== bridgeWindowOf(iframeRef.current, liveRef.current)) return;
       // Live sessions verify origin + session token BEFORE parsing. The
       // existing caps stay exactly as they are: live content is friendlier
       // but the trust boundary does not relax.

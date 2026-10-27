@@ -477,7 +477,43 @@ export function isMessageComment(record: InboxAnnotationRecord): boolean {
 
 /** A comment on a file (not a guided review's diff, not a message's text): what the file viewers list. */
 export function isFileComment(record: InboxAnnotationRecord): boolean {
-  return !record.guide && !record.message;
+  return !record.guide && !record.message && !record.live;
+}
+
+/** The heading of comments on running local sites (live sites), and what each section is ("this site"). */
+export const LIVE_SITE_FEEDBACK_HEADING = {
+  title: 'Feedback on your running app',
+  intro:
+    "The following feedback is on the running local site you showed, made on the live pages through Plannotator's local proxy, one section per site. Each comment names the page it was made on and the element it is on.",
+  subject: 'site',
+};
+
+/**
+ * Comments on running local sites as the feedback text a Send carries: one
+ * section per site (`## http://localhost:5173/ (live site)`), the entries
+ * grouped by page (`### Page: /settings`) by the shared renderer in the order
+ * they were made, each with the element's context block (selector, path,
+ * role, name, text, a collapsed outline) as annotate's live export prints
+ * it. The page is the one the store kept (`live.page_url`); a comment on the
+ * whole site has none.
+ */
+export function liveSiteFeedback(records: readonly InboxAnnotationRecord[]): string {
+  const live = records
+    .filter((record) => record.live)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  if (live.length === 0) return '';
+  const groups = new Map<string, { annotations: Annotation[]; globalAttachments: []; blocks: Block[] }>();
+  for (const record of live) {
+    const label = `${record.live!.url} (live site)`;
+    const group = groups.get(label) ?? { annotations: [], globalAttachments: [], blocks: [] };
+    // Never a client's `exportLocation` or page: the page is the store's.
+    const { exportLocation: _stored, pageUrl: _page, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
+    // Comments keep the order they were made in (the exporter orders a section by offset).
+    const index = group.annotations.length;
+    group.annotations.push({ ...annotation, startOffset: index, endOffset: index, ...(record.live!.page_url ? { pageUrl: record.live!.page_url } : {}) } as Annotation);
+    groups.set(label, group);
+  }
+  return exportLinkedDocAnnotations(groups, LIVE_SITE_FEEDBACK_HEADING).trim();
 }
 
 export const MESSAGE_FEEDBACK_HEADING = {
@@ -587,7 +623,7 @@ export function attachmentFeedback(
   const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[]; video?: { durationMs?: number } }>();
   for (const record of records) {
     // Comments on a guided review's diff go in their own section, after the files'; a message's text has its own, before them.
-    if (record.guide || record.message) continue;
+    if (record.guide || record.message || record.live) continue;
     const attachment = attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path);
     const sent = record.version !== 'current';
     if (!attachment) {
@@ -648,5 +684,5 @@ export function attachmentFeedback(
   }
   const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
   const files = records.some(isFileComment) ? exportLinkedDocAnnotations(entries, inlineImages ? ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING : ATTACHMENT_FEEDBACK_HEADING).trim() : '';
-  return [messages, files, guideFeedback(records)].filter(Boolean).join('\n\n');
+  return [messages, files, liveSiteFeedback(records), guideFeedback(records)].filter(Boolean).join('\n\n');
 }

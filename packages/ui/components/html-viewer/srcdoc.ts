@@ -203,6 +203,26 @@ export function neutralizeMetaCsp(rawHtml: string): string {
   return rawHtml.replace(META_CSP_RE, "<!-- plannotator: meta CSP removed for annotation -->");
 }
 
+/** A leading doctype (after any whitespace and comments): the policy goes after it, so the page keeps standards mode. */
+const LEADING_DOCTYPE_RE = /^(?:\s|<!--[\s\S]*?-->)*<!doctype[^>]*>/i;
+
+/**
+ * Add a host's Content-Security-Policy to the srcdoc document, as the first
+ * element it parses (after a leading doctype), so it covers every script and
+ * frame the page has. It adds to whatever the srcdoc frame inherits from the
+ * host page, never loosens it (policies intersect), and the page cannot
+ * remove it: its own CSP `<meta>` tags were already neutralized, and a tag
+ * the page writes later can only add restrictions. Hosts that pass nothing
+ * get the document unchanged.
+ */
+export function prependSrcdocPolicy(html: string, policy: string | undefined): string {
+  if (!policy) return html;
+  const value = policy.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${value}">`;
+  const doctype = LEADING_DOCTYPE_RE.exec(html);
+  return doctype ? html.slice(0, doctype[0].length) + meta + html.slice(doctype[0].length) : meta + html;
+}
+
 /** Splice the injection just before `</head>`, or prepend when there is none. */
 export function injectIntoHead(rawHtml: string, injection: string): string {
   const html = neutralizeMetaCsp(rawHtml);

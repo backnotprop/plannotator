@@ -691,6 +691,45 @@ describe("Inbox over your tailnet", () => {
   });
 });
 
+describe("live sites never answer through the tailnet", () => {
+  test("the live routes are local only, even for a site the thread shows; nothing opens or is written; the tailnet page frames no local proxy", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const inbox = await start(dataDir, ts.run, {
+      htmlContent: "<!doctype html><title>Inbox</title>",
+      liveBridge: { bridgeScript: "", bridgeBootstrap: "", annotationCss: "" },
+    });
+    const project = inbox.store.ensureProject({ name: "shop", root: join(dataDir, "shop") });
+    const author = { kind: "agent" as const, host: "claude-code", session: "ses_shop", name: "Claude Code" };
+    const site = { id: "liv_0123456789abcdef", url: "http://localhost:5173/", opened_by: "agent" as const };
+    const sent = inbox.store.sendMessage({ project_id: project.id, author, body: "Try the checkout.", live_sites: [site] }).message;
+    const live = `/api/inbox/threads/${sent.thread_id}/live`;
+    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+    const calls: [string, string, Json | undefined][] = [
+      ["GET", live, undefined],
+      ["POST", live, { serverSession: inbox.serverSession, url: "http://localhost:5174/" }],
+      ["GET", `${live}/${site.id}`, undefined],
+      ["GET", `${live}/${site.id}/frame`, undefined],
+      ["POST", `${live}/${site.id}/ping`, {}],
+      ["POST", `${live}/${site.id}/annotations`, { serverSession: inbox.serverSession, annotation: { id: "ann-1", type: "COMMENT", text: "x", pageUrl: "/" } }],
+    ];
+    for (const [method, path, body] of calls) {
+      const response = await throughServe(inbox, path, { method, headers: own, ...(body ? { body: JSON.stringify(body) } : {}) });
+      expect([method, path, ...(await codeOf(response))]).toEqual([method, path, 403, "local_only"]);
+    }
+    expect(inbox.liveSites.running()).toEqual([]);
+    expect(inbox.store.liveSites(sent.thread_id).map((s) => s.id)).toEqual([site.id]);
+    expect(inbox.store.pendingAnnotations(sent.thread_id)).toEqual([]);
+
+    // Neither page's policy names a local port (the live pane frames its proxy through the wrapper page).
+    const tailnetPage = await throughServe(inbox, "/");
+    expect(tailnetPage.status).toBe(200);
+    expect(tailnetPage.headers.get("content-security-policy")).not.toContain("localhost");
+    const localPage = await fetch(`http://127.0.0.1:${inbox.port}/`);
+    expect(localPage.headers.get("content-security-policy")).not.toContain("localhost");
+  });
+});
+
 describe("the update control never answers through the tailnet", () => {
   test("Update now, snooze, Check now, the facts, What's new and the update switches are local only; nothing is launched or written", async () => {
     const dataDir = world({ inboxTailscale: true });

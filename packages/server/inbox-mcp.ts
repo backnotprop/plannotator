@@ -26,7 +26,7 @@ import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
-import type { InboxAttachment, InboxListRow, InboxQuestion } from "@plannotator/core/inbox-types";
+import type { InboxAttachment, InboxListRow, InboxLiveSiteRef, InboxQuestion } from "@plannotator/core/inbox-types";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, clip, questionWords, shortTime, sizeText, windowedThread, windowedThreadText } from "./inbox-mcp-read";
@@ -86,6 +86,14 @@ export const SEND_MESSAGE_DESCRIPTION = [
   "",
   QUESTION_AUTHORING_GUIDE,
 ].join("\n");
+
+/**
+ * `live_sites`, as an agent reads it (raw MCP clients and the agent tool
+ * alike; Pi and OpenCode send it with every request, so it stays short and
+ * `plannotator inbox --help` keeps the rest).
+ */
+export const LIVE_SITES_DESCRIPTION =
+  "Running local web apps to show, e.g. [\"http://localhost:5173/\"]: http on localhost, 127.x or [::1], answering now. The person opens one and pins comments; they come back in the reply by page and element.";
 
 /**
  * `supersedes`, as an agent reads it (a field description reaches the model
@@ -220,6 +228,8 @@ export interface InboxMcpContext {
    * attachments are refused.
    */
   recordAttachments?: (paths: readonly string[], project: InboxProject, base: string) => Promise<InboxAttachment[]>;
+  /** send_message's `live_sites`: checked (http, loopback, not Plannotator's own port) and probed before anything is written (inbox-live.ts). Absent: live sites are refused. */
+  recordLiveSites?: (urls: readonly string[], probing?: boolean) => Promise<Omit<InboxLiveSiteRef, "opened_at">[]>;
   /** wait_for_reply's default hold in ms (tests pass a shorter one only through timeout_seconds). */
   waitDefaultMs?: number;
   /** The clock (epoch ms) send_message's "not read since" line compares with (inbox-session-reads.ts). Default: Date.now. Tests inject. */
@@ -515,6 +525,8 @@ export type AgentSendInput = {
   idempotency_key?: string;
   /** Files to attach (send_message only): absolute, or relative to project_path. */
   attachments?: string[];
+  /** Running local sites to show live (send_message only): http URLs on a loopback host. */
+  live_sites?: string[];
   /** Earlier questions of the thread this message supersedes (`<message id>` or `<message id>/<key>`). */
   supersedes?: string[];
   /** Its own action items of the thread the agent saw done (`<message id>/<key>`, or `<message id>`). */
@@ -721,10 +733,20 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; liveSites: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
+  // Live sites first: checked and probed, nothing written, so a refusal leaves no attachment blob behind.
+  // A replay (this project already has a message under the key) is never probed again: a dev server
+  // stopped since the first send must not make a retry read as "not sent". The store still compares
+  // the sites, so the same key with other sites is refused as reused.
+  let liveSites: Omit<InboxLiveSiteRef, "opened_at">[] | undefined;
+  if (input.live_sites && input.live_sites.length > 0) {
+    if (!context.recordLiveSites) throw new InboxError("validation_error", "live_sites: not taken by this Inbox.", { field: "live_sites" });
+    const replay = input.idempotency_key ? store.agentMessageByKey(project.id, input.idempotency_key) : null;
+    liveSites = await context.recordLiveSites(input.live_sites, replay === null);
+  }
   let attachments: InboxAttachment[] | undefined;
   if (input.attachments && input.attachments.length > 0) {
     if (!context.recordAttachments) throw new InboxError("validation_error", "attachments: not taken by this Inbox.");
@@ -761,6 +783,7 @@ export async function sendAgentMessage(
       idempotency_key: input.idempotency_key ?? null,
       thread: input.thread ?? null,
       attachments,
+      live_sites: liveSites,
       inline_images: captured?.images,
       guide: guide ?? null,
       base_path: basePath,
@@ -802,6 +825,7 @@ export async function sendAgentMessage(
     naming: result.naming ?? null,
     questions: questions.length,
     attachments: message.attachments?.length ?? 0,
+    liveSites: message.live_sites?.length ?? 0,
     structured: {
       message_id: message.id,
       thread_id: message.thread_id,
@@ -812,6 +836,8 @@ export async function sendAgentMessage(
       questions,
       ...(actions.length > 0 ? { actions } : {}),
       attachments: (message.attachments ?? []).map((a) => ({ id: a.id, name: a.name, kind: a.kind, path: a.path })),
+      /** The running local sites attached (`live_sites`), as checked: each one's id and URL. */
+      ...(message.live_sites && message.live_sites.length > 0 ? { live_sites: message.live_sites.map((site) => ({ id: site.id, url: site.url })) } : {}),
       /** The earlier questions this message superseded (`<message id>/<key>`). */
       superseded,
       /** The action items this message marked done (`done`). */
@@ -991,6 +1017,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .describe(
               "Files to show the person beside your message, e.g. [\"docs/plan.md\", \"/tmp/checkout.png\", \"src/retry.mjs\"]: absolute (anywhere you can read) or relative to project_path. For something visual, a screenshot or image usually reads fastest; attach the HTML or source too when they should open or click through it. Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.",
             ),
+          live_sites: z.array(z.string()).optional().describe(LIVE_SITES_DESCRIPTION),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -1008,6 +1035,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const asked =
           (sent.questions > 0 ? ` asking ${sent.questions} question${sent.questions === 1 ? "" : "s"}` : "") +
           (sent.attachments > 0 ? ` with ${sent.attachments} attachment${sent.attachments === 1 ? "" : "s"}` : "") +
+          (sent.liveSites > 0 ? `${sent.attachments > 0 ? " and" : " with"} ${sent.liveSites} live site${sent.liveSites === 1 ? "" : "s"}` : "") +
           (sent.actions > 0 ? `${sent.questions > 0 ? " and" : " with"} ${sent.actions} action item${sent.actions === 1 ? "" : "s"}` : "") +
           supersededWords(sent.structured.superseded as string[]) +
           (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");

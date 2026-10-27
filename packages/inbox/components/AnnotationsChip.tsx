@@ -97,7 +97,9 @@ export function AnnotationsChip({ records, attachments, onEdit, onRemove, onOpen
   const name = (record: InboxAnnotationRecord) =>
     record.message
       ? (messageName?.(record) ?? 'Message')
-      : record.guide
+      : record.live
+        ? `${record.live.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}${record.live.page_url ?? ''} (live)`
+        : record.guide
         ? record.path
         : (attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path))?.name ?? record.path;
 

@@ -174,6 +174,47 @@ export interface InboxMessageCommentTarget {
 }
 
 /**
+ * A running local site a thread shows through the Inbox's loopback live
+ * proxy ("live sites", `packages/server/inbox-live.ts`). `id` is `liv_` + 16
+ * hex of the URL's normalized identity, the same in every thread, so an
+ * agent's tile and the person's own open of that URL are one site.
+ */
+export interface InboxLiveSiteRef {
+  id: string;
+  /** The URL as checked: http, a loopback host, path and query kept, no fragment. */
+  url: string;
+  /** Who named it: an agent's `send_message` `live_sites`, or the person from the thread. */
+  opened_by: "agent" | "person";
+  opened_at: string;
+}
+
+/**
+ * Where a comment on a live site sits: the site and the page it was made on.
+ * Then `attachment_id` is empty, `path` is the site's URL and `version`
+ * "current", so an older reader exports it under the URL.
+ */
+export interface InboxLiveCommentTarget {
+  site_id: string;
+  /** The site's URL as recorded. */
+  url: string;
+  /** The page it was made on (path and query, the bridge's report), or null for a comment on the whole site. */
+  page_url: string | null;
+}
+
+/** At most this many live sites in one message. */
+export const INBOX_LIVE_SITES_MAX = 4;
+
+/** A live site's URL, and a comment's page, are at most this long. */
+export const INBOX_LIVE_URL_MAX = 2048;
+
+/** A live comment's quoted words or element text (`originalText`), in characters: what the page supplies is capped. */
+export const INBOX_LIVE_QUOTE_MAX = 10_000;
+/** A live comment's `elementContext` and `htmlAnchor`, each, as JSON (the bridge's own are a few KB at most). */
+export const INBOX_LIVE_ELEMENT_MAX = 32 * 1024;
+/** A live comment's whole annotation object, as JSON. */
+export const INBOX_LIVE_ANNOTATION_MAX = 128 * 1024;
+
+/**
  * One annotation of the person's, stored until it rides a Send: on an
  * attachment, (with `guide`) on the diff of the guided review a message
  * carries, or (with `message`) on the text of an agent's message.
@@ -199,6 +240,8 @@ export interface InboxAnnotationRecord {
    * find and exports it under the message id.
    */
   message?: InboxMessageCommentTarget;
+  /** Set on a comment on a running local site the thread shows (additive; see `InboxLiveCommentTarget`). */
+  live?: InboxLiveCommentTarget;
   /** Plannotator's `Annotation` (attachments) or the review app's `CodeAnnotation` (guided reviews), as the viewer made it (opaque to the store beyond the checks). */
   annotation: Record<string, unknown>;
   created_at: string;
