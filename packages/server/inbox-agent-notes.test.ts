@@ -5,7 +5,7 @@
  * person's edit), removal, and the uninstall scan.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_AGENT_LABELS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
@@ -45,7 +45,7 @@ const read = (path: string) => readFileSync(path, "utf8");
 test("the block: markers on their own lines around the note", () => {
   expect(INBOX_NOTE_BLOCK.startsWith(`${INBOX_NOTE_START}\n## Plannotator Inbox\n`)).toBe(true);
   expect(INBOX_NOTE_BLOCK.endsWith(`\n${INBOX_NOTE_END}`)).toBe(true);
-  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
+  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v3 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
 });
 
 describe("where each agent's note goes", () => {
@@ -251,6 +251,79 @@ describe("the marked section", () => {
     writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify(notes));
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
     expect(read(path)).toBe(`Mine.\n\n${INBOX_NOTE_BLOCK}\nAfter.\n`);
+  });
+
+  // The v1 block exactly as 0.28.x wrote it, frozen on purpose: these are the bytes on users' disks today.
+  const V1_BLOCK = [
+    "<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->",
+    "## Plannotator Inbox",
+    "",
+    "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+    "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` when the person isn't here to answer in this chat: to ask a decision only they can make (as a `:::question` block), or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+    "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`. When they are here, ask in this chat instead.",
+    "<!-- plannotator-inbox:end -->",
+  ].join("\n");
+  const sha = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+  /** agent-notes.json as 0.28.x left it: one v1 record for `agent`, naming the file's resolved path. */
+  const v1Record = (agent: string, path: string) => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    const record = { path: realpathSync(path), created: true, version: 1, block_sha256: sha(V1_BLOCK), at: "2026-10-01T00:00:00.000Z" };
+    writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes: { [agent]: record } }));
+  };
+
+  test("updating from v1: an untouched v1 note (with its record) is still on, and re-adding it writes v3 in place, every other byte kept", () => {
+    const path = file(".claude", "rules", "plannotator-inbox.md");
+    write(path, `${V1_BLOCK}\n`);
+    v1Record("claude-code", path);
+    expect(noteStatus("claude-code", dataDir, e).state).toBe("added");
+    expect(addInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
+    expect(read(path)).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    expect(readInboxAgentNotes(dataDir).notes["claude-code"]).toMatchObject({ version: 3, block_sha256: sha(INBOX_NOTE_BLOCK), created: true });
+    // Switching it off afterwards still deletes the file the note was all of.
+    expect(removeInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "deleted" });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test("updating from v1 with agent-notes.json lost: the v1 block still reads as Plannotator's, is updated in place, and uninstall does not call it edited", () => {
+    const path = file(".codex", "AGENTS.md");
+    write(path, `# Mine\n\n${V1_BLOCK}\nAfter.\n`);
+    expect(noteStatus("codex", dataDir, e).state).toBe("added");
+    const plan = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
+    expect(plan.items.map((item) => item.describe).join("\n")).not.toContain("you edited it");
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
+    expect(read(path)).toBe(`# Mine\n\n${INBOX_NOTE_BLOCK}\nAfter.\n`);
+  });
+
+  test("updating a v1 note in a file two agents share (Pi's AGENTS.md a link to Codex's): the other agent's note stays on, not 'edited'", () => {
+    const path = file(".codex", "AGENTS.md");
+    write(path, `Shared.\n\n${V1_BLOCK}\n`);
+    mkdirSync(file(".pi", "agent"), { recursive: true });
+    symlinkSync(path, file(".pi", "agent", "AGENTS.md"));
+    const record = { path: realpathSync(path), created: false, version: 1, block_sha256: sha(V1_BLOCK), at: "2026-10-01T00:00:00.000Z" };
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes: { codex: record, pi: record } }));
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
+    expect(read(path)).toBe(`Shared.\n\n${INBOX_NOTE_BLOCK}\n`);
+    expect(noteStatus("pi", dataDir, e).state).toBe("added");
+    expect(readInboxAgentNotes(dataDir).notes.pi).toMatchObject({ version: 3, block_sha256: sha(INBOX_NOTE_BLOCK) });
+    // And Off for both gives the file back as the person had it.
+    expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-shared" });
+    expect(removeInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+    expect(read(path)).toBe("Shared.\n");
+  });
+
+  test("a v1 note the person edited stays theirs after the update: never rewritten", () => {
+    const path = file(".codex", "AGENTS.md");
+    const edited = V1_BLOCK.replace("Then keep working.", "Then keep working. Never at night.");
+    write(path, `${edited}\n`);
+    v1Record("codex", path);
+    expect(noteStatus("codex", dataDir, e).state).toBe("edited");
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-edited" });
+    expect(read(path)).toBe(`${edited}\n`);
+    // With the record lost too.
+    rmSync(join(dataDir, "inbox", "agent-notes.json"));
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-edited" });
+    expect(read(path)).toBe(`${edited}\n`);
   });
 
   test("a file Plannotator created is deleted when the note was all it held", () => {

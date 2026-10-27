@@ -19,8 +19,8 @@ import { tooltipOf } from './testing/tooltip';
 const hasDom = typeof document !== 'undefined';
 const { PromptsSection, promptsSummary } = (hasDom ? await import('./components/PromptsSettings') : {}) as typeof import('./components/PromptsSettings');
 
-const WAKE =
-  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works.";
+/** The built-in line as the Inbox serves it (a fixture: the settings page shows whatever it is given). */
+const WAKE = 'Plannotator Inbox is on: … Their reply comes back here.';
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;

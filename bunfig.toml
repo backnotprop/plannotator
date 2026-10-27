@@ -10,9 +10,8 @@ preload = ["./tests/setup/gh-tripwire.ts", "./tests/setup/feedback-archive-off.t
 # The Inbox's browser proofs run under Playwright (`bun run test:e2e:inbox`),
 # against a compiled binary, not under bun test.
 # The relay's proof (apps/relay/test) runs `wrangler dev`: it runs from its own
-# folder in the relay workflow, not in the root run. The usage-counts Worker's
-# proof (apps/telemetry/test) runs `wrangler dev` too, from its own folder.
-pathIgnorePatterns = ["apps/hook/tests/**", "tests/e2e/**", "apps/relay/**", "apps/telemetry/**"]
+# folder in the relay workflow, not in the root run.
+pathIgnorePatterns = ["apps/hook/tests/**", "tests/e2e/**", "apps/relay/**"]
 
 # Load image and video assets as files, never as JavaScript. Bun 1.3 loses the
 # file treatment of an extension it has no loader for once the file importing it

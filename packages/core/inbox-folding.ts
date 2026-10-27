@@ -10,6 +10,7 @@ import { isInboxActionReport, isInboxNote, type InboxMessageWire, type InboxQues
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from './question-block';
 import { INBOX_STILL_OPEN_LINE, sliceText } from './inbox-questions';
 import { withoutInboxSkillsBlock } from './skill-reference-block';
+import { stripInlineMarkup } from './inline-markdown';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -240,11 +241,7 @@ export function cleanInline(text: string): string {
     code.push(inner.trim());
     return `\u0000${code.length - 1}\u0000`;
   });
-  out = out
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_m, target: string, label?: string) => label ?? target)
-    .replace(/<\/?[A-Za-z][^>]*>/g, '');
+  out = stripInlineMarkup(out);
   // A closing mark ends a word: whitespace, the end, or punctuation that does
   // not run into another word (`__init__.py` is a name, not emphasis).
   const close = `(?=$|\\s|[,;:!?)\\]"'’]|\\.(?!\\w))`;

@@ -31,6 +31,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { forgetFileViewChoice } from './file-view';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -159,8 +160,8 @@ async function leave(p: Page, how: Return, narrow: boolean): Promise<void> {
     return leave(p, narrow ? 'back-to-thread' : 'close', narrow);
   }
   if (how === 'escape') {
-    // Escape's ladder: on a desktop its last rung puts the file beside the thread, and the × closes it;
-    // where the file can only be full screen, the last rung goes back to the thread.
+    // Escape's ladder: its last rung goes back where full screen was opened from (fullScreenOrigin.ts), here the
+    // thread alone, as where the file can only be full screen; a file beside the thread closes with its ×.
     for (let i = 0; i < 6 && (await pane(p).count()) > 0 && (narrow || (await isFull(p))); i++) {
       await p.keyboard.press('Escape');
       await p.waitForTimeout(150);
@@ -172,9 +173,16 @@ async function leave(p: Page, how: Return, narrow: boolean): Promise<void> {
     await p.locator('[data-full-view-exit="back"]').click();
     return;
   }
-  for (let i = 0; i < 5 && (await isFull(p)); i++) {
-    await p.keyboard.press('Escape');
-    await p.waitForTimeout(120);
+  if (await isFull(p)) {
+    if (how === 'close') {
+      // Opened full screen from the thread: its × goes back to the thread as it was (fullScreenOrigin.ts).
+      await p.locator('[data-full-view-close]').click();
+      return;
+    }
+    // ‹ Inbox leads only beside the thread: Side by side first (a pick, forgotten again).
+    await p.locator('[data-full-view-bar]').getByRole('button', { name: 'Side by side' }).click();
+    await expect(pane(p)).not.toHaveClass(/ib-full/);
+    await forgetFileViewChoice(p);
   }
   if (how === 'inbox') await p.locator('[data-file-back]').click();
   else await pane(p).getByRole('button', { name: /^Close / }).first().click();
@@ -245,13 +253,17 @@ test('desktop 1440: opened by keyboard, focus comes back to the tile or the imag
     await p.keyboard.press('Enter');
     await expect(pane(p)).toBeVisible();
     await p.waitForTimeout(300);
-    // Out by the keyboard: Escape to beside the thread, then the file's × pressed with Enter.
-    for (let i = 0; i < 5 && (await isFull(p)); i++) {
-      await p.keyboard.press('Escape');
-      await p.waitForTimeout(120);
+    // Out by the keyboard: beside the thread, the file's × pressed with Enter; opened full screen from the
+    // thread, Escape goes straight back to it (fullScreenOrigin.ts).
+    if (await isFull(p)) {
+      for (let i = 0; i < 5 && (await pane(p).count()) > 0; i++) {
+        await p.keyboard.press('Escape');
+        await p.waitForTimeout(120);
+      }
+    } else {
+      await pane(p).getByRole('button', { name: /^Close / }).first().focus();
+      await p.keyboard.press('Enter');
     }
-    await pane(p).getByRole('button', { name: /^Close / }).first().focus();
-    await p.keyboard.press('Enter');
     await expect(pane(p)).toHaveCount(0);
     await p.waitForTimeout(800);
     const after = await where(p, selector);

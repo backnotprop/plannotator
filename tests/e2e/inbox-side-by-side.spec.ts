@@ -80,14 +80,17 @@ const choiceOf = async (context = world.context) => (await context.cookies()).fi
 const addressView = (p = world.page) => p.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('view'));
 const openTile = (name: string, p = world.page) => p.getByRole('button', { name: `Open ${name}` }).first().click();
 
-/** Escape until the file is beside the thread (an HTML page goes to Interact first): Escape's way out saves nothing. */
+/**
+ * Escape until full screen ends (an HTML page goes to Interact first): opened from the thread alone, the file
+ * closes and the thread is as it was (fullScreenOrigin.ts). Escape's way out saves nothing.
+ */
 async function escapeOut(p = world.page) {
   for (let i = 0; i < 5; i++) {
-    if (!(await pane(p).getAttribute('class'))?.includes('ib-full')) return;
+    if ((await pane(p).count()) === 0) return;
     await p.keyboard.press('Escape');
     await p.waitForTimeout(150);
   }
-  await expect(pane(p)).not.toHaveClass(/ib-full/);
+  await expect(pane(p)).toHaveCount(0);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -245,7 +248,6 @@ test("a tile's ⋯ opens one file full screen and leaves the choice alone; so do
   await expect(toast()).toHaveCount(0);
 
   // The plan, opened from its tile: by the choice, side by side.
-  await pane().getByRole('button', { name: /^Close / }).click();
   await openTile('rollout.md');
   await expect(pane()).toHaveAttribute('data-attachment-pane', world.ids['rollout.md']!);
   await expect(pane()).not.toHaveClass(/ib-full/);

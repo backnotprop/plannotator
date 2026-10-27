@@ -55,6 +55,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { isAbsolute, join } from "node:path";
 import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
 import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { AgentEnvironment } from "./inbox-agents";
 
@@ -142,10 +143,14 @@ export function codexWakeText(command: InboxReplyCommand): string {
 /** The wake text, cut to INBOX_CODEX_MESSAGE_MAX_BYTES with a pointer to the thread when the reply is longer. */
 export function codexQueueMessage(command: InboxReplyCommand): string {
   const clean = (text: string) => text.replace(/\u0000/g, "");
-  const body = clean(command.body);
-  const full = codexWakeText({ ...command, body });
+  const whole = clean(command.body);
+  const full = codexWakeText({ ...command, body: whole });
   if (Buffer.byteLength(full) <= INBOX_CODEX_MESSAGE_MAX_BYTES) return full;
-  const note = `\n\n[Cut here: the rest is in the Inbox. read_thread with message_id ${command.id} shows it whole.]`;
+  // The Board request (compose's chip) ends the body: only the words before it are cut, and it stays whole after the note.
+  const at = whole.lastIndexOf(`\n\n${INBOX_BOARD_REQUEST_OPEN}\n`);
+  const tail = at >= 0 && whole.endsWith(INBOX_BOARD_REQUEST_CLOSE) ? whole.slice(at) : "";
+  const body = tail ? whole.slice(0, at) : whole;
+  const note = `\n\n[Cut here: the rest is in the Inbox. read_thread with message_id ${command.id} shows it whole.]${tail}`;
   const overhead = Buffer.byteLength(codexWakeText({ ...command, body: note }));
   const room = Math.max(0, INBOX_CODEX_MESSAGE_MAX_BYTES - overhead - 16);
   // Cut on a character, never inside one.

@@ -12,7 +12,7 @@
  *   GET  /api/inbox/sessions                 every live session, grouped by project;
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
- *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto? }`:
+ *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request? }`:
  *                                            a new thread (409 `session_not_live`, nothing written)
  *   POST /api/inbox/messages/:id/to          `{ to }`: "Send to another session" for a message
  *                                            no session took yet (a live session of its project)
@@ -64,8 +64,11 @@ export function createInboxCompose(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   now?: () => Date;
+  /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
+  boardOn?: () => boolean;
 }) {
   const { store, serverSession, live, json } = options;
+  const boardOn = options.boardOn ?? (() => false);
   const now = options.now ?? (() => new Date());
   const staleTab = (body: Record<string, unknown>) =>
     checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null;
@@ -146,6 +149,9 @@ export function createInboxCompose(options: {
         attachments,
         thread_name: body.thread_name,
         thread_name_auto: body.thread_name_auto,
+        // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
+        // never asked for cards the Board would refuse (`board_off`).
+        board_request: body.board_request === true && boardOn(),
       });
     } catch (error) {
       removeInboxAttachmentFiles(store.dir, attachments);

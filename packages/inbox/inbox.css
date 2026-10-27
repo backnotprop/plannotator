@@ -3264,6 +3264,17 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-rattach:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 .pn-inbox .ib-cp-clip { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; position: relative; }
 .pn-inbox .ib-cp-clip:hover, .pn-inbox .ib-cp-clip:focus-within { background: var(--muted); color: var(--foreground); }
+/* The Board chip (approval "inbox-compose-board-chip", v3): at the right of the Thread row; on = the primary colour, never a caption. */
+.pn-inbox .ib-cp-board { position: relative; display: inline-flex; align-items: center; gap: 6px; flex: none; align-self: flex-start; margin: 0 0 0 auto; height: 26px; padding: 0 10px 0 7px; border: 0; border-radius: 999px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; box-shadow: inset 0 0 0 1px var(--ib-line); }
+.pn-inbox .ib-cp-board:hover { color: var(--foreground); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 22%, transparent); }
+.pn-inbox .ib-cp-board:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-cp-board[aria-pressed="true"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 45%, transparent); }
+.ib-cp-board-box { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px currentColor; }
+.ib-cp-board[aria-pressed="true"] .ib-cp-board-box { background: var(--primary); color: var(--primary-foreground); box-shadow: none; }
+@media (pointer: coarse) { .pn-inbox .ib-cp-board::after { content: ''; position: absolute; inset: -9px -4px; } }
+/* The person's message sent with the Board chip on: a quiet mark after whom it went to. */
+.ib-m-board { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; color: var(--muted-foreground); }
+.ib-m-board svg { width: 12px; height: 12px; }
 .ib-cp-savedline { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-cp-savedline svg { color: var(--success, oklch(0.72 0.17 150)); }
 .pn-inbox .ib-cp-del { border: 0; background: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); padding: 4px 6px; border-radius: 6px; }
@@ -3328,6 +3339,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   /* The thread row: 44 px to touch, 16 px so iOS does not zoom into the name. */
   .ib-cp-thread { min-height: 52px; padding-top: 9px; padding-bottom: 9px; }
   .ib-cp-thread .ib-cp-tol { line-height: 34px; }
+  .pn-inbox .ib-cp-board { margin-top: 4px; }
   .ib-cp-tname-err, .ib-cp-tname-note { padding-top: 0; flex-basis: 100%; }
   .ib-cp-tname-auto { font-size: var(--ib-fs-11, 11px); line-height: 17px; }
   .ib-key.ib-cp-tname { position: relative; height: 34px; padding: 0 9px; }

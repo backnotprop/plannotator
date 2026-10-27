@@ -32,7 +32,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "reply_to": {
-          "description": "A message id: post this as a reply in that message's thread.",
+          "description": "A message id: post this as a reply in that message's thread. Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
           "type": "string"
         },
         "supersedes": {
@@ -88,7 +88,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
   },
   {
     "name": "read_thread",
-    "description": "Read one Inbox thread (thread_id, or message_id to show that message in full) as a transcript: the questions still waiting on the person (key, state, prompt, choices), the newest messages in full (`limit`, default 6), the person's earlier messages in full (up to 12.0 KB), and every other earlier message as one line with its questions' states and answers; a body over 16.0 KB is cut. `expand` shows messages in full, `before` reads further back, `after` (the result's cursor, or a message id) returns only what is new; `format: \"full\"` returns every full record. A message the person marked 👍 Looks good carries `ack` (they read it and need nothing more; no reply is needed). Without an id, list this project's threads, newest activity first, one short row each (subject, name, section in the person's list, open questions, last author and time, the person's last message, `unread`: the person wrote something you have not read): only the ones you sent in unless asked_by is \"anyone\", and only open ones unless include_resolved.",
+    "description": "Read one Inbox thread (thread_id, or message_id to show that message in full) as a transcript: the questions still waiting on the person (key, state, prompt, choices), the newest messages in full (`limit`, default 6), the person's earlier messages in full (up to 12.0 KB), and every other earlier message as one line with its questions' states and answers; a body over 16.0 KB is cut. `expand` shows messages in full, `before` reads further back, `after` (the result's cursor, or a message id) returns only what is new; `format: \"full\"` returns every full record. A message the person marked 👍 Looks good carries `ack` (they read it and need nothing more; no reply is needed). Without an id, list this project's threads, newest activity first, one short row each (subject, name, section in the person's list, open questions, last author and time, the person's last message, `unread`: the person wrote something you have not read): only the ones you sent in unless asked_by is \"anyone\", and only open ones unless include_resolved. Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
     "inputSchema": {
       "type": "object",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -104,7 +104,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "asked_by": {
-          "description": "Default \"me\" when your session is known.",
+          "description": "Default \"me\" (threads you sent in) when your session is known; \"anyone\" lists every thread.",
           "type": "string",
           "enum": [
             "me",
@@ -112,6 +112,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           ]
         },
         "include_resolved": {
+          "description": "List archived threads too.",
           "type": "boolean"
         },
         "limit": {
@@ -316,7 +317,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "type": "string"
         },
         "reply_to": {
-          "description": "A message id: post this as a reply in that message's thread.",
+          "description": "A message id: post this as a reply in that message's thread. Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
           "type": "string"
         },
         "supersedes": {

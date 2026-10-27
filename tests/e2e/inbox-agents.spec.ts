@@ -25,6 +25,7 @@
  * (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 import { markTourDecided } from '../helpers/tour-decided';
+import { INBOX_NOTE_START } from '../../packages/server/inbox-agent-notes';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -143,7 +144,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await expect(primary).toBeFocused();
     await shot(page, 'checklist-01-several', ['desktop', 'narrow']);
     await dialog.getByRole('button', { name: 'Show the note' }).click();
-    await expect(dialog.locator('.ib-anote-note pre')).toContainText('<!-- plannotator-inbox:start v1');
+    await expect(dialog.locator('.ib-anote-note pre')).toContainText(INBOX_NOTE_START);
     await shot(page, 'checklist-05-show-note');
     await dialog.getByRole('button', { name: 'Hide the note' }).click();
 
@@ -180,7 +181,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await shot(page, 'checklist-07-added', ['desktop', 'narrow']);
     await dialog.getByRole('button', { name: 'Done' }).click();
     await expect(dialog).toHaveCount(0);
-    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8')).toMatch(/^# My rules\n\nBe brief\.\n\n<!-- plannotator-inbox:start v1 /);
+    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8').startsWith(`# My rules\n\nBe brief.\n\n${INBOX_NOTE_START}\n`)).toBe(true);
     expect(readFileSync(join(fake.home, '.gemini', 'GEMINI.md'), 'utf8')).toContain('## Plannotator Inbox');
     // Claude Code was unticked: no file, and it is answered (asked once).
     expect(existsSync(join(fake.home, '.claude', 'rules', 'plannotator-inbox.md'))).toBe(false);

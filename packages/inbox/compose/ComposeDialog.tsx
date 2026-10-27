@@ -43,6 +43,8 @@ import {
   hostLabel,
   isDirty,
   composeOpening,
+  composeBoardChoice,
+  rememberComposeBoardChoice,
   statusLine,
   sendThreadName,
   suggestThreadName,
@@ -115,6 +117,27 @@ export interface ComposeDialogProps {
    * it. Absent: nothing.
    */
   aside?: React.ReactNode;
+  /** The Board is on (Settings): compose offers the Board chip. Absent: off, no chip. */
+  board?: boolean;
+}
+
+/**
+ * The Board chip (approval "inbox-compose-board-chip", v3): at the right of
+ * the Thread row, a plain toggle (`aria-pressed`) named "Track on Board",
+ * with a component tooltip. On, the Send asks the agent to track the work on
+ * the Board (`board_request`); the agent makes the card(s). No shortcut.
+ */
+function BoardChip(props: { on: boolean; onToggle: () => void }) {
+  return (
+    <Tip content={props.on ? 'On your Board when sent' : 'Track on your Board'}>
+      <button type="button" className="ib-cp-board" aria-pressed={props.on} aria-label="Track on Board" data-compose-board="" onClick={props.onToggle}>
+        <span className="ib-cp-board-box" aria-hidden="true">
+          {props.on && <Icon name="check" size={11} />}
+        </span>
+        Board
+      </button>
+    </Tip>
+  );
 }
 
 const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -135,6 +158,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : ''));
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
+  // The Board chip: a draft's own choice, else this browser's last one. Never in Create thread (the card is the Board's
+  // already), and shown only while the Board is on; a draft keeps its choice while the Board is off.
+  const [boardOn, setBoardOn] = useState(() => (request.draft ? request.draft.board_request === true : composeBoardChoice()));
+  const boardChip = props.board === true && !card;
+  const boardRequest = !card && boardOn;
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
   const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft));
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
@@ -196,7 +224,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const threadName = draftThreadName(nameState);
   useEffect(() => {
     sendKey.current = crypto.randomUUID();
-  }, [body, chosen, threadName, nameState.edited ? '' : suggested, uploadIds.join(',')]);
+  }, [body, chosen, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
 
   // Nothing written: no words, no files, no typed thread name. An empty compose is never kept as a draft.
@@ -205,7 +233,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const untouched = cardStart !== null && body === cardStart && files.files.length === 0 && threadName.trim() === '';
   const empty = untouched || (body.trim() === '' && files.files.length === 0 && threadName.trim() === '');
   const saved = draftSnapshot(draft);
-  const dirty = !untouched && (isDirty({ body, session: chosen, files: uploadIds, threadName }, saved, draft !== null) || files.uploading);
+  const dirty = !untouched && (isDirty({ body, session: chosen, files: uploadIds, threadName, board: boardRequest }, saved, draft !== null) || files.uploading);
   const projectName = current?.name ?? null;
 
   // ── the dialog ──
@@ -286,6 +314,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         uploads: uploadIds,
         ...named,
         ...(draft ? { draft_id: draft.id } : {}),
+        ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       });
       props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null, cardId: card?.id ?? null });
     } catch (cause) {
@@ -317,7 +346,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}) });
+      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
       setDraft(result.draft);
       setConflict(null);
       return result.draft;
@@ -587,6 +616,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }}
           idBase={`ib-cp-tname-${uid}`}
         />
+        {boardChip && (
+          <BoardChip
+            on={boardOn}
+            onToggle={() => {
+              setBoardOn(!boardOn);
+              rememberComposeBoardChoice(!boardOn);
+            }}
+          />
+        )}
       </div>
       {model && !anyLive && !endedNote && (
         <div className="ib-cp-note" data-compose-note="none">

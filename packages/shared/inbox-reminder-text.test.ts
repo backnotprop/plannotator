@@ -23,11 +23,9 @@ import {
   inboxReminderText,
 } from "./inbox/connection";
 
-/** The lines as they shipped before #2194. */
-const MAIN_WAKE =
-  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works.";
-const MAIN_NO_WAKE =
-  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer. Run `plannotator inbox --help` for how it works.";
+/** The built-in lines (the constants: what they say is pinned by what they must carry, below). */
+const MAIN_WAKE = INBOX_REMINDER_TEXT;
+const MAIN_NO_WAKE = INBOX_REMINDER_TEXT_NO_WAKE;
 const MOD_TOOL = "mcp__plugin_plannotator_plannotator__plannotator_inbox";
 
 /** Every config.json that sets no usable `prompts.inbox`. */
@@ -45,10 +43,18 @@ const UNSET: PlannotatorConfig[] = [
   { prompts: { inbox: "a string" } } as unknown as PlannotatorConfig,
 ];
 
-describe("no prompts.inbox: every host's reminder is today's, byte for byte", () => {
-  test("the built-in lines are the ones that shipped", () => {
-    expect(INBOX_REMINDER_TEXT).toBe(MAIN_WAKE);
-    expect(INBOX_REMINDER_TEXT_NO_WAKE).toBe(MAIN_NO_WAKE);
+describe("no prompts.inbox: every host gets the built-in line, byte for byte", () => {
+  test("the built-in lines carry the rules a session needs with no setup", () => {
+    for (const line of [INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE]) {
+      expect(line).toContain(`${INBOX_TOOL_NAME} send_message`);
+      expect(line).toContain("plannotator inbox --help");
+      // The chat-or-Inbox rule (the owner, 2026-10-27): never a blocking chat question for an Inbox decision.
+      expect(line).toContain("never also ask it in the chat with a blocking question tool");
+      expect(line).not.toContain("isn't here");
+    }
+    // Only the line for a host without the wake sends the agent to wait_for_reply.
+    expect(INBOX_REMINDER_TEXT).not.toContain("wait_for_reply");
+    expect(INBOX_REMINDER_TEXT_NO_WAKE).toContain("wait_for_reply");
   });
 
   for (const [index, config] of UNSET.entries()) {

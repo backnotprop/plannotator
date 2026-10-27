@@ -59,6 +59,9 @@ import {
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   inboxSentNowFollowUpText,
+  inboxHealthPeeks,
+  inboxSessionThreadsParams,
+  inboxSessionThreadsText,
   inboxWakeText,
   mcpAnswerOfResponse,
   parseInboxBridgeCommands,
@@ -138,7 +141,8 @@ export const STORE_INBOX_REMINDER_CONTEXT_WORKS = 'inboxReminderContextWorks'
  * registered name) at session start, for the plugin's `SessionStart` command
  * hook matched on `compact` (hooks.json): after a compaction that hook prints
  * it, and the engine adds the line to the conversation. Unset when the
- * reminder is off. `$.env.set` needs the name spelled as a literal in
+ * reminder is off. Set again before each compaction installs, to the reminder
+ * plus the session's open threads (`inboxReminderWithThreads`). `$.env.set` needs the name spelled as a literal in
  * register.ts; register.test.ts keeps that spelling equal to this constant.
  */
 export const INBOX_REMINDER_ENV = 'PLANNOTATOR_INBOX_REMINDER'
@@ -213,6 +217,57 @@ export function reminderSessionResumed(startedAt: unknown, processStartedAt: num
 export function inboxReminderEnvValue(on: boolean, toolName: string | null, custom: string | null = null): string | undefined {
   if (!on || !toolName) return undefined
   return inboxReminderFor(custom, toolName)
+}
+
+/**
+ * The longest the session's thread list may take (the registry, the health
+ * check and one read_thread list on a running Inbox; a local Inbox answers in
+ * milliseconds). Past it there is no list, never an error.
+ */
+export const INBOX_SESSION_THREADS_TIMEOUT_MS = 1_500
+
+/**
+ * The session's open Inbox threads as a few short lines
+ * (`inboxSessionThreadsText`), or null: no Inbox has run here, it is not
+ * running (it is never started for this), it did not answer within
+ * INBOX_SESSION_THREADS_TIMEOUT_MS, the session has no open thread, or the
+ * Inbox is older than the peek mark (its health has no `peek: true`: it would
+ * make a project for the folder). Read with the peek mark, so the Inbox makes
+ * no project and the rows do not count as the session having read the
+ * threads. Never throws.
+ */
+export async function readSessionThreads(host: Host, dataDir: string, sessionId: string, cwd: string, toolName: string): Promise<string | null> {
+  if (!sessionId || !cwd.startsWith('/')) return null
+  const work = (async () => {
+    const path = inboxRegistryPathOf(dataDir)
+    if (!(await host.exists(path))) return null
+    const registry = parseInboxRegistry(await host.readFile(path).catch(() => null))
+    if (!registry) return null
+    // Only the Inbox the registry names (its serverSession), never whatever else holds the port now,
+    // and only one that honours the peek mark.
+    const health = await host.fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, { method: 'GET', headers: {} }).catch(() => null)
+    if (!health || health.status !== 200) return null
+    try {
+      if (!inboxHealthPeeks(JSON.parse(health.text), registry.serverSession)) return null
+    } catch {
+      return null
+    }
+    const answer = await mcpCall(host, registry.port, 'tools/call', inboxSessionThreadsParams(cwd, sessionId)).catch(() => null)
+    if (!answer || !('result' in answer)) return null
+    const result = answer.result as { isError?: unknown } | undefined
+    return result?.isError === true ? null : inboxSessionThreadsText(result, toolName)
+  })().catch(() => null)
+  return (await within(host, INBOX_SESSION_THREADS_TIMEOUT_MS, work).catch(() => null)) ?? null
+}
+
+/**
+ * What the plugin's SessionStart `compact` command hook prints after a
+ * compaction: the reminder, then the session's open threads when it has any
+ * (a blank line between), so the thread ids the conversation needs come from
+ * the Inbox, not from the summary the model wrote for itself.
+ */
+export function inboxReminderWithThreads(reminder: string, threads: string | null): string {
+  return threads ? `${reminder}\n\n${threads}` : reminder
 }
 
 /** `$.store` key: the Inbox tool list last read live, used when the Inbox is stopped at session start. */

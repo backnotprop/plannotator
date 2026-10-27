@@ -18,9 +18,11 @@
  *  5. `annotate`  an HTML file in Annotate goes to Interact (the pinpoint
  *                 hover goes with it), as it always has.
  *  6. `question`  the question about an unsaved comment goes away: keep writing.
- *  7. `leave`     full screen ends: the file goes back beside the thread, or,
- *                 where it can only be full screen (a phone, a narrow window),
- *                 back to the thread, through the same unsaved-comment question.
+ *  7. `leave`     full screen ends, back where it was opened from
+ *                 (fullScreenOrigin.ts): beside the thread when the file was
+ *                 beside it, else back to the thread (the file closes, through
+ *                 the same unsaved-comment question), as always where it can
+ *                 only be full screen (a phone, a narrow window).
  *
  * Beside the thread (not full screen) there is no ladder: each control keeps
  * its own Escape, as before.

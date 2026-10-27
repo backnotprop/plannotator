@@ -974,4 +974,20 @@ describe("experimental features", () => {
       expect(loadConfig().experimental).toEqual({ decisionMode: true });
     }
   });
+
+  // The usage counts were removed (approval "remove-usage-counts"); v0.28.33's
+  // hidden `plannotator telemetry --off` could write `usageCounts`. Such a file
+  // still loads quietly, its flags still work, and a save leaves the old keys be.
+  test("a config.json with the removed usage-count keys loads with no warning and keeps them on save", () => {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ experimental: { decisionMode: true }, usageCounts: false, usageCountsNotice: { decisionMode: 1 } }));
+    const warn = spyOn(process.stderr, "write");
+    try {
+      expect(resolveExperimental(loadConfig(), "decision-mode", {})).toBe(true);
+      saveConfig({ inboxTextSize: 13 });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+    expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"))).toMatchObject({ usageCounts: false, usageCountsNotice: { decisionMode: 1 }, inboxTextSize: 13 });
+  });
 });

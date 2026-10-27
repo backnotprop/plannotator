@@ -195,38 +195,9 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  * `inbox` (the Plannotator Inbox) was the last one to launch. Today: the
  * opt-in T3 Code connection (`t3`, and `t3-hook`, its Claude hook), and
  * `card`, the Board's card call from a shell (approval "inbox-board", step 1),
- * hidden until the Board page ships, and `telemetry`, usage counts for
- * experimental features, hidden until the first counted feature ships.
+ * hidden until the Board page ships.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook", "telemetry"]);
-
-/**
- * `plannotator telemetry …` (telemetry-command.ts): usage counts for
- * experimental features (approval "experimental-telemetry"). Unreleased
- * (HIDDEN_SUBCOMMANDS) until the first counted feature ships with its notice.
- */
-export const TELEMETRY_COMMAND_USAGE = [
-  "Usage:",
-  "  plannotator telemetry --show [--json]",
-  "  plannotator telemetry --off [--feature <id>]",
-  "  plannotator telemetry --on [--feature <id>]",
-  "  plannotator telemetry --send [--json]",
-  "",
-  "Usage counts for experimental features: whole numbers per UTC day for one",
-  "feature (no text, no paths, no id for you or this computer), one request per",
-  "feature per day of use, sent by this computer's Plannotator, never a browser.",
-  "Counting needs the feature on in config.json and its counts notice shown.",
-  "",
-  "Options:",
-  "  --show        Print what is counted and exactly what would be sent (no network)",
-  "  --off         Turn counts off and delete the counts not sent yet",
-  "  --on          Turn counts back on for features you have turned on",
-  "  --send        Send the counts waiting now, past the hourly window (for tests)",
-  "  --feature     One feature only (default: all)",
-  "  --json        Print --show or --send as JSON",
-  "",
-  "PLANNOTATOR_TELEMETRY=0 or DO_NOT_TRACK=1 turn counts off whatever config says.",
-].join("\n");
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -482,10 +453,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Purge data is local-only: it is not stored on a Plannotator server and",
     "cannot be recovered after purge. Unrecognized custom files are preserved.",
   ].join("\n"),
-  // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection and usage counts.
+  // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
-  telemetry: TELEMETRY_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",
     "  plannotator t3-hook install --settings <settings.json> --executable <plannotator>",

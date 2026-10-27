@@ -80,10 +80,13 @@ export interface FullViewBarProps {
   /**
    * × Exit full screen, just before » (the corner stays »'s: a pointer that
    * reveals the toolbar there lands on the pin, never on ×). What Escape's
-   * last step does: the file goes back beside the thread, not a pick. Only
-   * where Side by side is the way out (`leave.kind` `exit`, not a phone).
+   * last step does, not a pick: back where full screen was opened from
+   * (fullScreenOrigin.ts). Only where Side by side is the way out
+   * (`leave.kind` `exit`, not a phone).
    */
   onExitFull?: () => void;
+  /** × closes the file (a full screen opened from the thread alone): it is named Back to the thread, as a phone's way out is. */
+  exitCloses?: boolean;
   /** The Hide / Show tools chord (`Mod+Shift+X`, HTML only), shown in the tooltips. */
   chord: string | null;
   /** The comments drawer is open beside the page (desktop): the dock sits left of it. */
@@ -422,12 +425,12 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
         {props.leave.kind === 'exit' && leaveButton}
         {props.onExitFull && props.leave.kind === 'exit' && !phone && (
           // Its tooltip says Esc, so one Esc on it leaves (the tooltip does not keep that press).
-          <Tip text="Exit full screen" binding="Escape" phone={phone} passEscape>
+          <Tip text={props.exitCloses ? 'Back to the thread' : 'Exit full screen'} binding="Escape" phone={phone} passEscape>
             <button
               type="button"
               className="ib-fvb"
               onClick={props.onExitFull}
-              aria-label="Exit full screen"
+              aria-label={props.exitCloses ? 'Back to the thread' : 'Exit full screen'}
               aria-keyshortcuts="Escape"
               data-full-view-close=""
             >

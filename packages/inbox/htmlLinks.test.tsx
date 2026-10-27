@@ -204,19 +204,26 @@ test.skipIf(!hasDom)("Back from a linked page after a view switch goes back to t
   const params = () => new URLSearchParams(window.location.hash.slice(1));
   expect(params().get('view')).toBe('side');
   const entries = window.history.length;
-  // Full screen, pressed on the linked page: the entry on screen is replaced; the page's entry still names side by side.
+  // Full screen, pressed on the linked page: a new entry over the linked page beside the thread (fullScreenOrigin.ts).
   await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
   await until(() => el.querySelector('.ib-view')?.hasAttribute('data-full-view') === true, 'full screen');
   expect(params().get('view')).toBe('full');
-  expect(window.history.length).toBe(entries);
-  // Back: the browser's Back to the page's entry (no new entry), then that entry takes the view now on screen.
+  expect(window.history.length).toBe(entries + 1);
+  // Back: the browser's Back past the switch and the linked page to the page's entry, then full screen again with the switch.
   await act(async () => el.querySelector<HTMLButtonElement>('[data-linked-back]')!.click());
   await until(() => el.querySelector('[data-linked-page]') === null, 'back on the attached page');
   await until(() => params().get('view') === 'full', 'the page in full screen');
   expect(params().get('linked')).toBeNull();
-  // No new entry (happy-dom drops the entry left by a Back; a browser keeps it for Forward).
+  // No entry left over: back two, one new (happy-dom drops the entries left by a Back; a browser keeps them for Forward).
   expect(window.history.length).toBeLessThanOrEqual(entries);
   expect(el.querySelector('.ib-view')!.hasAttribute('data-full-view')).toBe(true);
+  // × still knows full screen came from beside the thread: the page goes back beside it.
+  const exit = el.querySelector<HTMLButtonElement>('[data-full-view-close]')!;
+  expect(exit.getAttribute('aria-label')).toBe('Exit full screen');
+  await act(async () => exit.click());
+  await until(() => el.querySelector('.ib-view') !== null && !el.querySelector('.ib-view')!.hasAttribute('data-full-view'), 'the page beside the thread');
+  expect(params().get('linked')).toBeNull();
+  expect(params().get('view')).toBe('side');
 });
 
 test.skipIf(!hasDom)('Back takes focus once it is drawn, even when the next frame comes before React draws it', async () => {

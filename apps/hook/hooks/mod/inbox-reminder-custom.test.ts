@@ -12,9 +12,8 @@ import { INBOX_REMINDER_BLOCK, inboxReminderEnvValue, withInboxReminder } from '
 import { inboxReminderFor, inboxReminderText } from './inbox-contract'
 
 const TOOL = 'mcp__plugin_plannotator_tools__plannotator_inbox'
-/** The block as it shipped before #2194, with the engine's tool name. */
-const MAIN_BLOCK =
-  `Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with ${TOOL} send_message and keep going. Their reply comes back here. Run \`plannotator inbox --help\` for how it works.`
+/** The built-in block, with the engine's tool name. */
+const MAIN_BLOCK = inboxReminderText(TOOL)
 
 const UNSET_TEXTS: Array<string | null | undefined> = [
   undefined,

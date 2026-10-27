@@ -29,7 +29,7 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 - [`code-review.md`](docs/agent-guides/code-review.md): code review flow and UI, Ask AI provider defaults, "Ask this session" (the session bridge and pull bridge).
 - [`annotate.md`](docs/agent-guides/annotate.md): annotate flow, bundles, drafts, strict gates, live app annotation.
 - [`inbox.md`](docs/agent-guides/inbox.md): index to the Plannotator Inbox guides (`inbox-*.md`).
-- [`server-and-storage.md`](docs/agent-guides/server-and-storage.md): archive, Server API tables and guards, plan history, feedback archive, usage counts, plan diff.
+- [`server-and-storage.md`](docs/agent-guides/server-and-storage.md): archive, Server API tables and guards, plan history, feedback archive, plan diff.
 - [`guides-and-shared-ui.md`](docs/agent-guides/guides-and-shared-ui.md): portable Guided Reviews, data types, parser, annotation system, question blocks, WebMCP, shortcuts, sharing, settings, syntax highlighting.
 
 ## Where new docs go

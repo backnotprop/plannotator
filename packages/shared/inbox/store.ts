@@ -4691,6 +4691,13 @@ export class InboxStore {
      * the thread replaces it.
      */
     thread_name_auto?: unknown;
+    /**
+     * Compose's Board chip was on (approval "inbox-compose-board-chip"): the
+     * root carries `board_request`, and what the agent receives for it asks it
+     * to track the work on the Board. Only `true` sets it; a replay keeps the
+     * first Send's.
+     */
+    board_request?: unknown;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -4739,6 +4746,7 @@ export class InboxStore {
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
       started_by_person: true,
+      ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };
