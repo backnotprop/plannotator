@@ -1797,13 +1797,13 @@ export type InboxToolCostHost = "pi" | "opencode";
  * Live sites (`send_message` `live_sites`, one short field description,
  * `LIVE_SITES_DESCRIPTION` in packages/server/inbox-mcp.ts): measured on Pi
  * with the cost test, 8,841 → 9,134 bytes on their own branch; merged with
- * the rules above, measured on Pi, 9,337 bytes (+39 over 9,298; not
- * counted, so the rounded token figures stand). With the Board on 10,799
- * (10,760 + 39, estimated).
+ * the rules above, measured on Pi, 9,591 bytes (+293 over 9,298; about +80
+ * tokens, not counted, so the rounded token figures stand). With the Board
+ * on 11,053 (10,760 + 293, estimated).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 9337, tokens: 2600 };
+const INBOX_TOOL_COST_NOW = { bytes: 9591, tokens: 2600 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 10799, tokens: 3000 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11053, tokens: 3000 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
