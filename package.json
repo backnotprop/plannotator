@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.28.31",
+  "version": "0.28.33",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -40,11 +40,12 @@
     "test": "bun test",
     "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/guide-viewer/tsconfig.json && tsc --noEmit -p apps/guides-show/tsconfig.json && tsc --noEmit -p apps/relay/tsconfig.json && tsc --noEmit -p apps/telemetry/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.strict-consumer.json && tsc --noEmit -p apps/pi-extension/tsconfig.json && tsc --noEmit -p apps/hook/hooks/mod/tsconfig.json && tsc --noEmit -p apps/hook/tsconfig.server.json && tsc --noEmit -p packages/inbox/tsconfig.json && tsc --noEmit -p apps/inbox/tsconfig.json && tsc --noEmit -p packages/t3-code/tsconfig.json",
     "build:ui-css": "bun run --cwd packages/ui build:css",
-    "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts"
+    "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
+    "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.303",
-    "@opencode-ai/sdk": "^1.19.3",
+    "@opencode-ai/sdk": "1.19.3",
     "@pierre/diffs": "1.5.2",
     "diff": "^8.0.4",
     "dockview-react": "^5.2.0",
@@ -65,5 +66,8 @@
     "sharp": "0.35.5",
     "source-map-js": "1.2.2",
     "proxy-addr": "2.0.8"
+  },
+  "patchedDependencies": {
+    "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch"
   }
 }

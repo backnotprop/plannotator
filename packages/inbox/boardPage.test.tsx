@@ -18,6 +18,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxCardWire, InboxListRow } from '@plannotator/core/inbox-types';
 import type { BoardMove, BoardPageProps } from './board/BoardPage';
+import { sized, tooltipOf, unhover } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
 const { BoardPage } = (hasDom ? await import('./board/BoardPage') : {}) as typeof import('./board/BoardPage');
@@ -68,6 +69,21 @@ const CARDS: InboxCardWire[] = [
   card('crd_sqlite', { title: 'Spike: SQLite for the store', column: 'dropped', aside_from: 'building', dropped: { at: NEW, by: CODEX, reason: 'Superseded by the JSONL store', seen_at: null } }),
 ];
 
+/** Cards waiting on the person, for the "You: …" way in: sent in a thread, linked to two threads, linked to none. */
+const YOU_CARDS: InboxCardWire[] = [
+  card('crd_sent', { title: 'Fixed address', column: 'your_look', you: 'Pick a dialog', threads: ['msg_new', 'msg_sent'], sent: { at: OLD, to: CLAUDE, thread_id: 'msg_sent' } }),
+  card('crd_two', { title: 'Caret anywhere', column: 'your_review', you: 'Merge #15', threads: ['msg_new', 'msg_old'] }),
+  card('crd_none', { title: 'Settings search', column: 'your_look', you: 'Choose fuzzy or prefix' }),
+];
+// The lane card's second line (approval board-lane-card, r1): only "You: …" or a pending "Sent to …", never the agent's last word.
+const LINE_CARDS: InboxCardWire[] = [
+  card('crd_said', { title: 'Hero scene timers', column: 'building', said: 'Option 3 of 6 rendered' }),
+  card('crd_owe', { title: 'Pricing page', column: 'your_look', you: 'Read the copy, then say go', said: 'Copy drafted' }),
+  card('crd_wait', { title: 'Auto-update', column: 'backlog', agent: null, said: 'Not started', sent: { at: NEW, to: CODEX, thread_id: 'msg_wait' } }),
+];
+const YOU_LAST: Record<string, string> = { msg_new: '2026-10-21T09:00:00.000Z', msg_old: '2026-10-20T09:00:00.000Z', msg_sent: '2026-10-19T09:00:00.000Z' };
+const youRow = (id: string) => (YOU_LAST[id] ? ({ thread_id: id, subject: id, project: { id: 'prj_1', name: 'web' }, last_at: YOU_LAST[id] } as unknown as InboxListRow) : null);
+
 let root: Root | null = null;
 let calls: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
 const restorers: Array<() => void> = [];
@@ -102,8 +118,12 @@ function scriptFetch(sessions: unknown[] = []) {
     const refs = url.pathname.match(/^\/api\/inbox\/cards\/([^/]+)\/refs$/);
     if (refs) return json({ refs: [] });
     const one = url.pathname.match(/^\/api\/inbox\/cards\/([^/]+)$/);
-    if (one && method === 'GET') return json({ card: CARDS.find((c) => c.id === one[1]), history: [{ kind: 'created', at: OLD, by: CLAUDE }] });
-    if (one && method === 'POST') return json({ card: { ...CARDS.find((c) => c.id === one[1])!, sent: body?.op === 'send' ? { at: NEW, to: CLAUDE, thread_id: body.thread_id } : null } });
+    if (one && method === 'GET') {
+      const found = [...CARDS, ...YOU_CARDS, ...LINE_CARDS].find((c) => c.id === one[1]);
+      // The agent's last word is in the opened card's history.
+      return json({ card: found, history: [...(found?.said ? [{ kind: 'said', at: NEW, by: CLAUDE, text: found.said }] : []), { kind: 'created', at: OLD, by: CLAUDE }] });
+    }
+    if (one && method === 'POST') return json({ card: { ...[...CARDS, ...YOU_CARDS].find((c) => c.id === one[1])!, sent: body?.op === 'send' ? { at: NEW, to: CLAUDE, thread_id: body.thread_id } : null } });
     if (url.pathname === '/api/inbox/cards') return json({ card: card('crd_new', { title: String(body?.title), agent: null, notes: (body?.notes as string) ?? null }) });
     if (/^\/api\/inbox\/threads\/[^/]+\/message$/.test(url.pathname)) return json({ message: { id: 'msg_start' }, replayed: false });
     return json({ error: 'not scripted' }, 404);
@@ -154,6 +174,7 @@ function draw(over: Partial<BoardPageProps> = {}): Drawn {
       drawn.seen += 1;
     },
     onOpenThread: () => {},
+    onCreateThread: () => {},
     ...over,
   };
   const render = () => act(() => root!.render(<SidebarProvider><BoardPage {...props} /></SidebarProvider>));
@@ -175,7 +196,7 @@ const $ = (selector: string) => document.querySelector<HTMLElement>(selector);
 const $$ = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)];
 const cardEl = (id: string) => $(`.ib-bcard[data-card-id="${id}"]`);
 
-test.if(hasDom)('the lanes in order, a card’s two lines, bold while unread, no "on you" pill', async () => {
+test.if(hasDom)('the lanes in order, the title row, bold while unread, no "on you" pill', async () => {
   scriptFetch();
   draw();
   await settle();
@@ -184,7 +205,9 @@ test.if(hasDom)('the lanes in order, a card’s two lines, bold while unread, no
   expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 1');
   expect($('[data-board-link="icebox"]')!.textContent).toBe('Icebox 1');
   expect(cardEl('crd_price')!.querySelector('.ib-bc-line')!.textContent).toBe('You: Read the copy, then say go');
-  expect(cardEl('crd_hero')!.querySelector('.ib-bc-line')!.textContent).toBe('Option 3 of 6 rendered');
+  // The marks and the age sit in the title row, in this order; a card with nothing owed or pending is that row alone.
+  expect([...cardEl('crd_vite')!.querySelectorAll('.ib-bc-top .ib-bc-meta > *')].map((el) => el.className.split(' ')[0])).toEqual(['ib-bc-mark', 'ib-bc-who', 'ib-bc-age']);
+  expect(cardEl('crd_vite')!.querySelector('.ib-bc-bot')).toBeNull();
   // Heard after the look: bold. Before it: not.
   expect(cardEl('crd_auto')!.hasAttribute('data-unread')).toBe(true);
   expect(cardEl('crd_hero')!.hasAttribute('data-unread')).toBe(false);
@@ -195,6 +218,107 @@ test.if(hasDom)('the lanes in order, a card’s two lines, bold while unread, no
   expect(open.getAttribute('aria-label')).toContain('Auto-update for users');
   act(() => open.click());
   expect(calls.some((c) => c.path.startsWith('/api/inbox/cards/'))).toBe(false);
+});
+
+test.if(hasDom)('a second line only when the person owes something or a send is pending; the agent’s last word only in the opened card', async () => {
+  scriptFetch();
+  draw({ model: { serverSession: 's', cursor: 1, cards: LINE_CARDS, dropped_unseen: 0, seen_seq: LOOK }, openCard: 'crd_said' });
+  await settle();
+  const second = (id: string) => cardEl(id)!.querySelector('.ib-bc-bot .ib-bc-line')?.textContent ?? null;
+  expect(second('crd_owe')).toBe('You: Read the copy, then say go');
+  expect(second('crd_wait')).toBe('Sent to Codex');
+  expect(second('crd_said')).toBeNull();
+  // Never the agent's word on a lane card, whether or not it has a second line.
+  for (const c of LINE_CARDS) expect(cardEl(c.id)!.textContent).not.toContain(c.said!);
+  // The opened card has it.
+  await settle();
+  expect($('[data-card-panel="crd_said"]')!.textContent).toContain('Option 3 of 6 rendered');
+});
+
+// Review of #2248: the title is inline, so its own box never reads as cut; the clamp is on the title button.
+// What regresses: a title cut at three lines (or a long word cut at the edge) with no way to read it whole.
+test.if(hasDom)('a lane card title cut by its clamp opens the full title in a tooltip; one that fits opens none', async () => {
+  scriptFetch();
+  draw({ model: { serverSession: 's', cursor: 1, cards: LINE_CARDS, dropped_unseen: 0, seen_seq: LOOK } });
+  await settle();
+  const title = (id: string) => cardEl(id)!.querySelector<HTMLElement>('.ib-bc-t')!;
+  const main = (id: string) => cardEl(id)!.querySelector<HTMLElement>('.ib-bc-main')!;
+  // Clamped: the button's content is taller than the button.
+  Object.defineProperty(main('crd_said'), 'scrollHeight', { configurable: true, get: () => 66 });
+  Object.defineProperty(main('crd_said'), 'clientHeight', { configurable: true, get: () => 59 });
+  expect(await tooltipOf(title('crd_said'))).toBe('Hero scene timers');
+  unhover(title('crd_said'));
+  await settle();
+  sized(main('crd_owe'), 180, 180);
+  expect(await tooltipOf(title('crd_owe'))).toBeNull();
+});
+
+test.if(hasDom)('"You: …" opens the thread where the person makes the call, a target apart from opening the card', async () => {
+  scriptFetch();
+  const threads: { card: string; thread: string }[] = [];
+  const drawn = draw({
+    model: { serverSession: 's', cursor: 1, cards: YOU_CARDS, dropped_unseen: 0, seen_seq: LOOK },
+    rowOf: youRow,
+    onOpenThread: (target, thread) => threads.push({ card: target.id, thread }),
+  });
+  await settle();
+  const link = (id: string) => cardEl(id)!.querySelector<HTMLButtonElement>('[data-card-you-link]')!;
+  // Two buttons on each card: the title opens the card, "You: …" its thread.
+  expect(cardEl('crd_two')!.querySelectorAll('button').length).toBe(2);
+  // Its name holds the words it shows (WCAG 2.5.3), so a voice user can say what they see.
+  for (const id of ['crd_two', 'crd_sent']) expect(link(id).getAttribute('aria-label')!.startsWith(link(id).textContent!)).toBe(true);
+  // The sent thread first; else the linked thread that spoke last.
+  act(() => link('crd_sent').click());
+  act(() => link('crd_two').click());
+  expect(threads).toEqual([
+    { card: 'crd_sent', thread: 'msg_sent' },
+    { card: 'crd_two', thread: 'msg_new' },
+  ]);
+  expect(drawn.opened).toEqual([]);
+  // No thread linked: "You: …" is plain words, no second tab stop; a click on them opens the card.
+  expect(cardEl('crd_none')!.querySelector('[data-card-you-link]')).toBeNull();
+  expect(cardEl('crd_none')!.querySelectorAll('button').length).toBe(1);
+  act(() => cardEl('crd_none')!.querySelector<HTMLElement>('.ib-bc-youw')!.click());
+  expect(drawn.opened).toEqual(['crd_none']);
+  // The title, and anywhere else on the card, open the card, never a thread.
+  act(() => cardEl('crd_two')!.querySelector<HTMLButtonElement>('[data-card-open]')!.click());
+  act(() => cardEl('crd_sent')!.querySelector<HTMLElement>('.ib-bc-age')!.click());
+  expect(drawn.opened).toEqual(['crd_none', 'crd_two', 'crd_sent']);
+  expect(threads.length).toBe(2);
+});
+
+test.if(hasDom)('the opened card: Open thread at the top to the same thread; with no thread, Create thread to the card’s live agent', async () => {
+  scriptFetch([{ project: { id: 'prj_1', name: 'web', root: '/Users/ada/src/web' }, sessions: [{ session: 'ses_claude', host: 'claude-code', started_at: OLD, last_seen_at: NEW, busy: false, idle_since: NEW, last_thread: null }] }]);
+  const threads: { card: string; thread: string }[] = [];
+  const created: { card: string; session: string | null }[] = [];
+  const drawn = draw({
+    model: { serverSession: 's', cursor: 1, cards: YOU_CARDS, dropped_unseen: 0, seen_seq: LOOK },
+    rowOf: youRow,
+    openCard: 'crd_two',
+    onOpenThread: (target, thread) => threads.push({ card: target.id, thread }),
+    onCreateThread: (target, session) => created.push({ card: target.id, session }),
+  });
+  await settle();
+  const open = $('[data-card-panel] .ib-crdp-top [data-card-open-thread]') as HTMLButtonElement;
+  // Named by its own words (no aria-label to drift from them), described by what the person owes.
+  expect(open.hasAttribute('aria-label')).toBe(false);
+  expect(document.getElementById(open.getAttribute('aria-describedby')!)!.textContent).toContain('Merge #15');
+  expect($('[data-card-create-thread]')).toBeNull();
+  act(() => open.click());
+  expect(threads).toEqual([{ card: 'crd_two', thread: 'msg_new' }]);
+  // Ask for an update: by History, never beside the agent.
+  expect($('[data-card-panel] .ib-crdp-hhead [data-card-ask]')!.textContent).toBe('Ask for an update');
+  expect($('[data-card-panel] .ib-crdp-who [data-card-ask]')).toBeNull();
+  // No thread linked: no Open thread; Create thread goes to the card’s live agent.
+  drawn.rerender({ openCard: 'crd_none' });
+  await settle();
+  expect($('[data-card-open-thread]')).toBeNull();
+  const create = $('[data-card-panel] .ib-crdp-top [data-card-create-thread]') as HTMLButtonElement;
+  expect(create.textContent).toBe('Create thread');
+  expect(create.disabled).toBe(false);
+  act(() => create.click());
+  expect(created).toEqual([{ card: 'crd_none', session: 'ses_claude' }]);
+  expect(threads.length).toBe(1);
 });
 
 test.if(hasDom)('the agents’ drops show above the lanes with their reason; Got it says the person looked', async () => {
@@ -318,9 +442,15 @@ test.if(hasDom)('a phone: one stacked list, Shipped and Icebox folded at the end
     ['shipped', 'false'],
     ['icebox', 'false'],
   ]);
-  expect(cardEl('crd_tab')).toBeNull();
+  // A folded group keeps its body (aria-controls names it), hidden. Booleans, so a failure
+  // prints one word, never the React node.
+  const shown = () => {
+    const el = cardEl('crd_tab');
+    return el === null ? 'absent' : el.closest('[hidden]') ? 'hidden' : 'shown';
+  };
+  expect(shown()).toBe('hidden');
   act(() => $('[data-board-fold="shipped"]')!.click());
-  expect(cardEl('crd_tab')).not.toBeNull();
+  expect(shown()).toBe('shown');
 });
 
 /** An IntersectionObserver that sees every card it is given (happy-dom never scrolls). */

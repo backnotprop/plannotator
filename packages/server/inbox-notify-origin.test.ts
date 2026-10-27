@@ -142,7 +142,7 @@ test("windows report what they may do: open streams are counted, a report change
 
   // A second tab at the old spelling, without permission: open, not allowed.
   const other = new AbortController();
-  await fetch(`${base}/api/inbox/events?cursor=0&window=w-tab-two-000&permission=default&origin=${encodeURIComponent("http://127.0.0.1:1234")}`, { signal: other.signal });
+  const otherStream = await fetch(`${base}/api/inbox/events?cursor=0&window=w-tab-two-000&permission=default&origin=${encodeURIComponent("http://127.0.0.1:1234")}`, { signal: other.signal });
   await Bun.sleep(20);
   expect(await health(server)).toEqual({ enabled: true, windows: 2, allowed: 1, allowed_origins: ["http://localhost:1234"] });
 
@@ -163,8 +163,12 @@ test("windows report what they may do: open streams are counted, a report change
   });
   expect((await health(server)).enabled).toBe(false);
 
+  // Both responses stay referenced until here: Bun 1.4 closes the connection
+  // of a streamed response that is garbage-collected unread, and the tab
+  // would leave early.
   controller.abort();
   other.abort();
+  await Promise.all([stream, otherStream].map((res) => res.body?.cancel().catch(() => {})));
   await Bun.sleep(30);
   // Within the grace the records are kept but no longer open.
   expect((await health(server)).windows).toBe(0);

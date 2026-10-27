@@ -35,12 +35,15 @@ import {
   installerFlagArgs,
   isNewerStableVersion,
   isNotesFetchDue,
+  isSnoozed,
   knownLatestRelease,
   normalizeStableVersion,
   patchUpdateState,
+  plainCheckError,
   readInstallFlags,
   readReleaseNotes,
   readUpdateState,
+  releaseCheckFailing,
   releaseSummary,
   RELEASE_CHECK_ON_START_MS,
   releaseUrlFor,
@@ -55,6 +58,7 @@ import {
   isUpdateLockHeld,
   launchInstaller as defaultLaunchInstaller,
   readAutoUpdateResult,
+  reapDeadUpdateLock,
   startManualUpdate,
   type InstallerLaunch,
   type ManualUpdateOutcome,
@@ -78,7 +82,20 @@ export interface InboxUpdateDetails {
    */
   updated: string | null;
   latest: { version: string; fetched_at: string; published_at: string | null } | null;
-  check: { on: boolean; env: boolean | null; last_attempt_at: string | null; error: string | null };
+  check: {
+    on: boolean;
+    env: boolean | null;
+    last_attempt_at: string | null;
+    error: string | null;
+    /**
+     * Checking has failed for hours (RELEASE_CHECK_FAILING_AFTER_MS) with no
+     * success: since when and why. Settings → About says so with `command`.
+     * Additive; null otherwise.
+     */
+    failing: { since: string; error: string } | null;
+    /** When the latest attempt failed (null: it did not, or none was made). Additive. */
+    last_failed_at: string | null;
+  };
   auto_update: { on: boolean; env: boolean | null; supported: boolean };
   /** The first paragraph of the release notes. */
   summary: string;
@@ -225,8 +242,7 @@ export function deriveInboxUpdate(input: {
     return base(pendingVersion, "failed");
   }
   if (!input.checksOn || !latest || !isNewerStableVersion(latest.version, current)) return null;
-  const snooze = input.state.snooze;
-  if (snooze && normalizeStableVersion(snooze.version) === latest.version && snooze.until > input.now) return null;
+  if (isSnoozed(input.state, latest.version, input.now)) return null;
   return base(latest.version, "available");
 }
 
@@ -354,7 +370,34 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
   };
   let updatedLink: string | null = null;
 
+  /**
+   * Checking has failed for hours with no success (update-state.json, or this
+   * process's memory of it when the file cannot be written): the sidebar's
+   * quiet "Can't check for updates" and Settings → General and About. Null in
+   * a development build and while update checks are off.
+   */
+  const failing = (): { since: number; error: string } | null => {
+    if (!release || !checksOn()) return null;
+    try {
+      return releaseCheckFailing(readUpdateState(options.dataDir), now());
+    } catch {
+      return null;
+    }
+  };
+  let failingModel: string | null = null;
+  const failingWire = () => {
+    const f = failing();
+    return f ? { since: new Date(f.since).toISOString(), error: f.error } : null;
+  };
+
   const compute = (): InboxUpdate | null => {
+    if (release) {
+      // A wrapper killed outright (or a restart mid-install) left update.lock:
+      // record it as failed and release it, so "Updating…" never spins on.
+      try {
+        reapDeadUpdateLock(options.dataDir);
+      } catch {}
+    }
     if (!release) {
       // A source run keeps only the old signal: a different binary on disk.
       return onDisk && onDisk !== options.version
@@ -376,9 +419,11 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
   const refresh = () => {
     const next = compute();
     const link = computeUpdatedLink();
-    if (JSON.stringify(next) !== JSON.stringify(model) || link !== updatedLink) {
+    const failingNext = JSON.stringify(failingWire());
+    if (JSON.stringify(next) !== JSON.stringify(model) || link !== updatedLink || failingNext !== failingModel) {
       model = next;
       updatedLink = link;
+      failingModel = failingNext;
       options.onChange();
     }
     // While an install runs, look at the binary every 2 s.
@@ -468,6 +513,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       sessions = listSessions();
     } catch {}
     const snooze = state.snooze;
+    const failingNow = failing();
     return {
       update: current,
       current: options.version,
@@ -479,7 +525,13 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
         on: resolveUpdateCheck(config),
         env: parseUpdateCheckEnv() ?? null,
         last_attempt_at: state.releaseCheck?.attemptedAt ? new Date(state.releaseCheck.attemptedAt).toISOString() : null,
-        error: state.releaseCheck?.failedAt ? state.releaseCheck.error ?? "the check failed" : null,
+        error: state.releaseCheck?.failedAt ? plainCheckError(state.releaseCheck.error ?? "the check failed") : null,
+        failing: failingNow ? { since: new Date(failingNow.since).toISOString(), error: failingNow.error } : null,
+        // The latest attempt failed (its time), for "Last check failed <time>". Additive.
+        last_failed_at:
+          typeof state.releaseCheck?.failedAt === "number" && state.releaseCheck.failedAt >= state.releaseCheck.attemptedAt
+            ? new Date(state.releaseCheck.failedAt).toISOString()
+            : null,
       },
       auto_update: { on: resolveAutoUpdate(config), env: parseAutoUpdateEnv() ?? null, supported: release && isManaged() },
       summary: notes ? releaseSummary(notes.notes) : "",
@@ -489,7 +541,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       sessions: sessions.map((s) => ({ mode: s.mode, project: s.project, label: s.label, started_at: s.startedAt })),
       failure: current?.state === "failed" && result ? { exit_code: result.exitCode, log: paths.log } : null,
       log: paths.log,
-      snoozed_until: snooze && snooze.until > now() ? new Date(snooze.until).toISOString() : null,
+      snoozed_until: snooze && isSnoozed(state, snooze.version, now()) ? new Date(snooze.until).toISOString() : null,
     };
   };
 
@@ -498,6 +550,8 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     current: () => model,
     /** The "What's new in X" link (null: none, or its notes are neither saved nor fetchable). */
     updated: () => updatedLink,
+    /** Checking has failed for hours (null: it has not, or checks are off): the sidebar's quiet row. */
+    checkFailing: failingWire,
     /** Work the state out again now (a setting changed). */
     refresh,
     details,
@@ -505,6 +559,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       if (!release && !options.binaryPath) return;
       model = compute();
       updatedLink = computeUpdatedLink();
+      failingModel = JSON.stringify(failingWire());
       // Every start asks (unless someone asked in the last minute): a restart
       // never waits out an old answer.
       void tick(RELEASE_CHECK_ON_START_MS);
@@ -555,7 +610,9 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
         ...sources,
       });
       refresh();
-      return outcome.outcome === "failed" ? { ok: false, error: outcome.error } : { ok: true };
+      // In plain words, from both sources' answers as stored ("release page didn't answer as expected; GitHub API rate-limited").
+      if (outcome.outcome !== "failed") return { ok: true };
+      return { ok: false, error: plainCheckError(readUpdateState(options.dataDir).releaseCheck?.error ?? outcome.error) };
     },
     /**
      * The What's new page's notes. Notes that are missing, or saved without a

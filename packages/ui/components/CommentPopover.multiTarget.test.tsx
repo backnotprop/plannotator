@@ -35,6 +35,34 @@ afterEach(async () => {
 
 type PopoverProps = Partial<React.ComponentProps<typeof CommentPopover>>;
 
+/**
+ * Who holds focus, as a name: a failed focus assertion then prints one word.
+ * Comparing elements printed the whole happy-dom tree and React fibers on a
+ * failure (millions of lines, over a minute), which read as a timeout.
+ */
+function focusOwner(named: Record<string, Element | null>): string {
+  const active = document.activeElement;
+  for (const [name, el] of Object.entries(named)) if (el && active === el) return name;
+  return active ? `<${active.tagName.toLowerCase()}>` : 'nothing';
+}
+
+/**
+ * The composer focuses its textarea from a 0 ms timer after mount. happy-dom
+ * runs requestAnimationFrame as setImmediate, ahead of a timer that is not yet
+ * due, so on a loaded machine that timer could land in the middle of a test
+ * (after a blur, or after the thumbs-up's focus restore) and move focus and
+ * the caret. Wait for it to land, so each test starts from the opened state.
+ */
+async function settleAutoFocus() {
+  const deadline = Date.now() + 4000;
+  while (document.activeElement !== document.querySelector('[data-comment-popover] textarea')) {
+    if (Date.now() > deadline) throw new Error(`the composer never focused its textarea (focus: ${focusOwner({})})`);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+  }
+}
+
 async function mountPopover(props: PopoverProps = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -51,6 +79,7 @@ async function mountPopover(props: PopoverProps = {}) {
       />,
     );
   });
+  await settleAutoFocus();
 }
 
 async function remount(props: PopoverProps) {
@@ -131,9 +160,9 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
     await mountPopover({ targetChips: CHIPS, refocusToken: 0 });
     textarea().blur();
     document.body.focus();
-    expect(document.activeElement).not.toBe(textarea());
+    expect(focusOwner({ textarea: textarea() })).not.toBe('textarea');
     await remount({ targetChips: CHIPS, refocusToken: 1 });
-    expect(document.activeElement).toBe(textarea());
+    expect(focusOwner({ textarea: textarea() })).toBe('textarea');
   });
 
   test('captureStrayKeys routes a body-targeted printable keydown into the textarea', async () => {
@@ -150,7 +179,7 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
     });
     expect(stray.defaultPrevented).toBe(true);
     expect(el.value).toBe('h');
-    expect(document.activeElement).toBe(el);
+    expect(focusOwner({ textarea: el })).toBe('textarea');
 
     // A keydown already headed somewhere useful is left alone.
     const focused = new KeyboardEvent('keydown', {
@@ -215,7 +244,7 @@ describe.if(hasDom)('CommentPopover multi-target seams', () => {
     await act(async () => {
       await new Promise((r) => requestAnimationFrame(() => r(null)));
     });
-    expect(document.activeElement).toBe(opener);
+    expect(focusOwner({ opener, textarea: textarea() })).toBe('opener');
   });
 
   test('yieldState drives fade and click-through classes with a reduced-motion-aware style', async () => {

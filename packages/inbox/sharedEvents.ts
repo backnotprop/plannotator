@@ -577,6 +577,12 @@ export function subscribeSharedInboxEvents(
     }
   };
   trace({ type: 'subscribe', cursor, window: win.id });
+  // Live before the backlog: a frame that reached the early channel names the
+  // leader, and the report that follows (`onConnect`) reads `served_by` from
+  // here. Set after it, that report named no leader, the leader's own answer
+  // then changed nothing, and the server never counted this tab.
+  const self = { servedBy: () => (leading ? null : leader) };
+  active = self;
   channel.onmessage = (event) => onMessage(event.data);
   for (const data of backlog) onMessage(data);
   backlog = [];
@@ -645,9 +651,6 @@ export function subscribeSharedInboxEvents(
   env.lifecycle?.window.addEventListener('pageshow', onPageShow);
   env.lifecycle?.window.addEventListener('focus', onVisible);
   pingTimer = setInterval(checkLeader, pingEveryMs);
-
-  const self = { servedBy: () => (leading ? null : leader) };
-  active = self;
 
   return () => {
     if (stopped) return;

@@ -15,6 +15,8 @@ import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 're
 import type { InboxQuestion } from '@plannotator/core/inbox-types';
 import { INBOX_ACTION_NOTE_MAX } from '@plannotator/core/inbox-actions';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
+import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
+import { ContextMarkdown } from './ContextMarkdown';
 import { actionCardState, type ActionCardState } from '../actions';
 import { clockTime } from '../format';
 import { Icon } from '../icons';
@@ -50,6 +52,19 @@ const CHIP: Record<ActionCardState, { label: string; className: string } | null>
 function isDoneState(action: InboxQuestion, state: ActionCardState): boolean {
   if (state === 'done' || state === 'seen') return true;
   return state === 'pending' && action.action_result?.outcome === 'done';
+}
+
+/**
+ * The task, for its row's toggle (a button): inline markdown as a question's
+ * prompt draws it (bold, `code`), but never a link, which cannot sit inside a
+ * button: `[label](url)` keeps its label, and a bare or `<…>` URL reads as
+ * code. The row's Open button carries a `Where:` link.
+ */
+export function taskMarkdown(prompt: string): string {
+  return prompt
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<(https?:\/\/[^>\s]+)>/g, '`$1`')
+    .replace(/(^|[^`\w])(https?:\/\/[^\s`]+)/g, '$1`$2`');
 }
 
 /** A sentence's end, kept: "…appear" gets a period, "…appear." keeps its own. */
@@ -319,7 +334,9 @@ function ActionRow({ action, state, agent, readOnly, open, onToggle, toggleRef, 
           aria-controls={panelId}
           data-action-toggle=""
         >
-          <span className="ib-chk-do">{action.prompt}</span>
+          <span className="ib-chk-do">
+            <InlineMarkdown text={taskMarkdown(action.prompt)} />
+          </span>
           {chip && <span className={chip.className}>{chip.label}</span>}
           <Icon name={open ? 'chevD' : 'chevR'} />
         </button>
@@ -330,7 +347,7 @@ function ActionRow({ action, state, agent, readOnly, open, onToggle, toggleRef, 
         </p>
       )}
       <div className="ib-chk-panel" id={panelId} hidden={!open} data-action-panel="">
-        {action.context && <p className="ib-chk-why">{action.context}</p>}
+        {action.context && <ContextMarkdown className="ib-body ib-chk-why" data-action-why="" markdown={action.context} messageId={action.message_id} />}
         {live && action.stopped !== null && (
           <p className="ib-chk-holds" data-action-stopped="">
             <b>Stopped</b>

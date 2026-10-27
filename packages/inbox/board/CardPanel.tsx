@@ -7,7 +7,6 @@ import {
   INBOX_SECTIONS,
   inboxAgentName,
   inboxCardRefsOf,
-  isInboxCardPersonColumn,
   type InboxCardColumn,
   type InboxCardHistoryEntry,
   type InboxCardRef,
@@ -21,7 +20,7 @@ import { AuthorMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
-import { cardAge, cardFoot, columnChoices, historyWords, refState, sentTo } from './model';
+import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
 
 export interface CardPanelProps {
   card: InboxCardWire;
@@ -31,9 +30,9 @@ export interface CardPanelProps {
   projectName: string;
   /** The agent's session now: working, idle, ended (not live), or unknown (null: no agent, or not read yet). */
   state: 'working' | 'idle' | 'ended' | null;
-  /** Whether "Ask where this is" has a live session to go to (the card's agent, else one in its project). */
+  /** Whether "Ask for an update" and "Create thread" have a live session to go to (the card's agent, else one in its project). */
   canAsk: boolean;
-  /** Said under "Ask where this is" when it goes to another session (the card's own agent ended). */
+  /** Said with "Ask for an update" when it goes to another session (the card's own agent ended). */
   askNote?: string | null;
   rowOf: (threadId: string) => InboxListRow | null;
   phone: boolean;
@@ -51,17 +50,23 @@ export interface CardPanelProps {
   onNotes: (notes: string | null) => Promise<boolean>;
   onLink: (ref: string) => Promise<string | null>;
   onOpenThread: (threadId: string) => void;
+  /** Create thread (a card with no thread): compose to the card's agent (or a live session in its project); the Send links the thread. */
+  onCreateThread: (opener: HTMLElement) => void;
 }
 
 /**
- * The opened card (approval "inbox-board", step 2, as mocked): a panel beside
- * the Board (a full screen with "‹ Board" on a phone). The column is its Move
- * menu; then the agent, the project and whether the agent is working, with
- * "Ask where this is"; the "You: …" band; notes; threads (a click opens the
+ * The opened card (approval "inbox-board", step 2, as mocked; amended
+ * 2026-10-27): a panel beside the Board (a full screen with "‹ Board" on a
+ * phone). Its top: the column as its Move menu, then **Open thread** (the
+ * thread where the person makes the call, `youThread`; primary while they owe
+ * something) or, with no thread linked, **Create thread** (owner: "create,
+ * create, create is the idea"). Then the agent, the project and whether the
+ * agent is working; the "You: …" band; notes; threads (a click opens the
  * thread in the Inbox, with a way back); links (PRs, issues), their live
- * state read when the card opens and never acted on; history; and at the
- * foot Ship · Icebox · Drop… (with a reason), Send to an agent for a Backlog
- * card nobody was asked about, Restore in the Icebox or Dropped.
+ * state read when the card opens and never acted on; history, with a quiet
+ * "Ask for an update"; and at the foot Ship · Icebox · Drop… (with a reason),
+ * Send to an agent for a Backlog card nobody was asked about, Restore in the
+ * Icebox or Dropped.
  */
 export function CardPanel(props: CardPanelProps) {
   const { card, phone } = props;
@@ -77,6 +82,13 @@ export function CardPanel(props: CardPanelProps) {
   const refs = inboxCardRefsOf(card);
   const agent = card.agent?.kind === 'agent' ? card.agent : null;
   const notSent = card.column === 'backlog' && !agent && !card.sent;
+  // What the person owes, and the thread where they make that call (the lane card's "You: …" goes there too).
+  const you = cardYou(card);
+  const threadAt = youThread(card, props.rowOf);
+  const live = card.column !== 'dropped' && card.column !== 'icebox' && card.column !== 'shipped';
+  const askable = (agent !== null || props.canAsk) && live;
+  // Create thread: a card that links no thread, unless it is dropped (nothing is said about a dropped card).
+  const creatable = threadAt === null && card.column !== 'dropped' && (agent !== null || props.canAsk);
   return (
     <aside
       className={`ib-crdp${phone ? ' ib-crdp-phone' : ''}`}
@@ -97,6 +109,23 @@ export function CardPanel(props: CardPanelProps) {
           </button>
         )}
         <ColumnMenu card={card} sent={sent !== null} onColumn={props.onColumn} onRestore={props.onRestore} />
+        {threadAt ? (
+          <Tip content={props.rowOf(threadAt)?.subject ?? 'The card’s thread'}>
+            <button
+              type="button"
+              className={`ib-btn ib-sm ib-crdp-open${you ? ' ib-pri' : ''}`}
+              data-card-open-thread={threadAt}
+              // Named by its words, "Open thread" (WCAG 2.5.3); what the person owes describes it.
+              aria-describedby={you ? `${headingId}-you` : undefined}
+              onClick={() => props.onOpenThread(threadAt)}
+            >
+              Open thread
+              <Icon name="arrowUpRight" size={14} />
+            </button>
+          </Tip>
+        ) : creatable ? (
+          <CreateThreadButton primary={you !== null} disabled={!props.canAsk} onCreate={props.onCreateThread} />
+        ) : null}
         {!phone && (
           <Tip content="Close">
             <button type="button" className="ib-crdp-x" aria-label="Close the card" onClick={props.onClose} data-card-close="">
@@ -138,24 +167,10 @@ export function CardPanel(props: CardPanelProps) {
               )}
             </>
           )}
-          {(agent || props.canAsk) && card.column !== 'dropped' && card.column !== 'icebox' && card.column !== 'shipped' && (
-            <AskButton
-              disabled={!props.canAsk}
-              onAsk={async () => {
-                const failed = await props.onAsk();
-                setSaid(failed ?? `Asked ${agent ? inboxAgentName(agent) : 'an agent'} where “${card.title}” is.`);
-              }}
-            />
-          )}
-          {props.askNote && props.canAsk && card.column !== 'dropped' && card.column !== 'icebox' && card.column !== 'shipped' && (
-            <span className="ib-crdp-asknote" data-card-ask-other="">
-              {props.askNote}
-            </span>
-          )}
         </div>
-        {isInboxCardPersonColumn(card.column) && card.you && (
-          <p className="ib-crdp-you" data-card-you="">
-            <b>You:</b> {card.you}
+        {you && (
+          <p className="ib-crdp-you" data-card-you="" id={`${headingId}-you`}>
+            <b>You:</b> {you}
           </p>
         )}
         {card.column === 'dropped' && card.dropped && (
@@ -191,7 +206,20 @@ export function CardPanel(props: CardPanelProps) {
           <LinkField onLink={props.onLink} />
         </section>
         <section className="ib-crdp-sec" aria-label="History">
-          <h3>History</h3>
+          <h3 className="ib-crdp-hhead">
+            History
+            {askable && (
+              <AskButton
+                disabled={!props.canAsk}
+                note={props.canAsk ? (props.askNote ?? null) : null}
+                agentName={agent ? inboxAgentName(agent) : 'an agent'}
+                onAsk={async () => {
+                  const failed = await props.onAsk();
+                  setSaid(failed ?? `Asked ${agent ? inboxAgentName(agent) : 'an agent'} for an update on “${card.title}”.`);
+                }}
+              />
+            )}
+          </h3>
           {props.history === null ? (
             <p className="ib-lane-empty">Reading…</p>
           ) : (
@@ -386,24 +414,49 @@ function StartButton({ disabled, onStart }: { disabled: boolean; onStart: () => 
   return disabled ? <Tip content="No agent is running in this project.">{button}</Tip> : button;
 }
 
-function AskButton({ disabled, onAsk }: { disabled: boolean; onAsk: () => Promise<void> }) {
+/**
+ * "Ask for an update" (approved 2026-10-27, mock opened-B; was "Ask where
+ * this is"): a quiet link by History, where the answer shows. Its tooltip
+ * says who it asks (another session when the card's own agent ended).
+ */
+function AskButton({ disabled, note, agentName, onAsk }: { disabled: boolean; note: string | null; agentName: string; onAsk: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
-  const button = (
-    <button
-      type="button"
-      className="ib-crdp-ask"
-      disabled={disabled || busy}
-      data-card-ask=""
-      onClick={async () => {
-        setBusy(true);
-        await onAsk();
-        setBusy(false);
-      }}
-    >
-      Ask where this is
-    </button>
+  return (
+    <Tip content={disabled ? 'No agent is running in this project.' : (note ?? `Asks ${agentName} to move the card or say where it stands`)}>
+      <button
+        type="button"
+        className="ib-crdp-ask"
+        disabled={disabled || busy}
+        data-card-ask=""
+        data-card-ask-other={note ? '' : undefined}
+        onClick={async () => {
+          setBusy(true);
+          await onAsk();
+          setBusy(false);
+        }}
+      >
+        Ask for an update
+      </button>
+    </Tip>
   );
-  return disabled ? <Tip content="No agent is running in this project.">{button}</Tip> : button;
+}
+
+/** Create thread: a card that links no thread starts one, in compose, to its agent; the Send links it to the card. */
+function CreateThreadButton({ primary, disabled, onCreate }: { primary: boolean; disabled: boolean; onCreate: (opener: HTMLElement) => void }) {
+  return (
+    <Tip content={disabled ? 'No agent is running in this project.' : 'A new thread to the card’s agent, linked to this card'}>
+      <button
+        type="button"
+        className={`ib-btn ib-sm ib-crdp-open${primary ? ' ib-pri' : ''}`}
+        disabled={disabled}
+        data-card-create-thread=""
+        onClick={(event) => onCreate(event.currentTarget)}
+      >
+        <Icon name="plus" size={14} />
+        Create thread
+      </button>
+    </Tip>
+  );
 }
 
 /** The person's notes: shown, and edited in place (Save keeps them; empty clears them). */

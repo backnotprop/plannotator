@@ -15,18 +15,17 @@
  * thread card's own tiles (ui's `QuestionPictureTiles`): the picture picks and
  * the zoom button opens the viewer, never both.
  */
-import { useEffect, useId, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { Viewer } from '@plannotator/ui/components/Viewer';
+import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { QuestionPictureTiles } from '@plannotator/ui/components/blocks/QuestionBlock';
-import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxDecision, InboxQuestion } from '@plannotator/core/inbox-types';
 import { readInboxQuestionKind } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { agentName, formatCount, shortTime } from '../format';
 import { HostMark, Icon } from '../icons';
-import { inboxMessageImageBase, inboxMessageImageUrl } from '../images';
+import { inboxMessageImageUrl } from '../images';
 import { Tip } from '../components/Tip';
+import { ContextMarkdown } from '../components/ContextMarkdown';
 import { answerNeedsConfirm, answerWords, choiceAnswer, confirmLabel, otherAnswer, skipAnswer, swipeChoices, textAnswer } from './model';
 
 /**
@@ -143,36 +142,6 @@ function contextWithout(context: string, refs: readonly string[]): string {
   return out.trim();
 }
 
-const noop = () => {};
-const NO_ANNOTATIONS: never[] = [];
-
-/** The context drawn as markdown, read only, with the message's images. */
-function Context({ markdown, messageId, onImage }: { markdown: string; messageId: string; onImage: (src: string, alt: string) => void }) {
-  const blocks = useMemo(() => parseMarkdownToBlocks(markdown, { frontmatter: false }), [markdown]);
-  if (!markdown) return null;
-  return (
-    <div className="ib-body ib-dm-ctx" data-decision-context="">
-      <Viewer
-        blocks={blocks}
-        markdown={markdown}
-        annotations={NO_ANNOTATIONS}
-        onAddAnnotation={noop}
-        onSelectAnnotation={noop}
-        selectedAnnotationId={null}
-        mode="selection"
-        taterMode={false}
-        maxWidth={null}
-        stickyActions={false}
-        disableCodePathValidation
-        imageBaseDir={inboxMessageImageBase(messageId)}
-        onImageClick={onImage}
-        questionDecisionLines={false}
-        answerOnly
-        readOnly
-      />
-    </div>
-  );
-}
 
 export interface DecisionCardProps {
   decision: InboxDecision;
@@ -497,7 +466,13 @@ export function DecisionCard(props: DecisionCardProps) {
           </p>
         )}
         {decision.message.excerpt && <p className="ib-dm-excerpt">{decision.message.excerpt}</p>}
-        <Context markdown={context} messageId={decision.message.id} onImage={(src, alt) => props.onImage([{ attachmentId: '', name: alt || 'image', ref: null, src }], 0)} />
+        <ContextMarkdown
+          className="ib-body ib-dm-ctx"
+          data-decision-context=""
+          markdown={context}
+          messageId={decision.message.id}
+          onImage={(src, alt) => props.onImage([{ attachmentId: '', name: alt || 'image', ref: null, src }], 0)}
+        />
         <div className="ib-dm-refs">
           {facts.shows?.kind === 'link' &&
             (shownFile ? (

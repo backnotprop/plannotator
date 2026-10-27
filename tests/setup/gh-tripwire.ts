@@ -30,18 +30,18 @@
  * `bun test` loads its own preloads and checks itself.
  *
  * Why the spawn functions are wrapped: Bun resolves `Bun.spawn` and
- * `Bun.spawnSync` (and node's spawnSync / execFileSync / execSync, built on
- * it) called WITHOUT `env` against the PATH, and hands the child the
- * environment, the process STARTED with. Measured on bun 1.3.14: changing
- * process.env.PATH, even in this preload, changes neither, so the tripwire on
- * PATH would be skipped and the child would get the real GH_CONFIG_DIR and
- * tokens. A preload cannot change the startup environment (re-running bun
+ * `Bun.spawnSync` called WITHOUT `env` against the PATH, and hands the child
+ * the environment, the process STARTED with (on bun 1.3.14, node's spawnSync
+ * / execFileSync / execSync did too; from 1.4.4 they use the current one).
+ * Measured on bun 1.3.14 and 1.4.4: changing process.env.PATH, even in this
+ * preload, changes neither, so the tripwire on PATH would be skipped and the
+ * child would get the real GH_CONFIG_DIR and tokens. A preload cannot change the startup environment (re-running bun
  * test is not possible: a preload's process.argv lists the test files, not
  * the command line), so `Bun.spawn`, `Bun.spawnSync` and `Bun.which` default
  * to the current process.env here, as their documentation says they do.
  * node's async spawn / exec / execFile already use the current environment.
- * Not covered: Bun Shell (`$` from "bun") still looks commands up on the
- * startup PATH; no source runs gh through it.
+ * Not covered on bun 1.3.14: Bun Shell (`$` from "bun") looks commands up on
+ * the startup PATH (1.4.4 uses the current one); no source runs gh through it.
  *
  * Windows: the tripwire is `gh.cmd`. A spawn that does not go through a
  * shell may skip a .cmd file (node's own spawn does since CVE-2024-27980) and

@@ -4,6 +4,7 @@ import { AllFilesCodeView } from '../../components/AllFilesCodeView';
 import { CommitDescriptionHeader } from '../../components/CommitDescriptionHeader';
 import { ImageDiffPreview } from '../../components/ImageDiffPreview';
 import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
+import { PackageChangesCard } from '../../components/PackageChangesCard';
 // Lazy: loaded the first time a Markdown file is previewed.
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
 import type { DiffFile } from '../../types';
@@ -61,6 +62,26 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
           )
         : undefined,
     [state.imagePreviewAvailable, snapshotId, compact],
+  );
+
+  // Package changes under each package.json and lockfile header, wherever
+  // the server can read the files behind the diff (never a static patch).
+  const packageReviewBase = state.reviewBase;
+  const renderPackageChanges = useMemo(
+    () =>
+      state.contextExpansionAvailable !== false
+        ? ({ file, onHeightChange }: { file: DiffFile; onHeightChange: () => void }) => (
+            <PackageChangesCard
+              key={`${snapshotId ?? ''}:${file.path}`}
+              filePath={file.path}
+              reviewBase={packageReviewBase}
+              reviewSnapshotId={snapshotId}
+              onHeightChange={onHeightChange}
+              compactTouchLayout={compact}
+            />
+          )
+        : undefined,
+    [state.contextExpansionAvailable, packageReviewBase, snapshotId, compact],
   );
 
   // Rendered Markdown views (one Source / Changes / Read menu per Markdown
@@ -132,6 +153,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
       contextExpansionAvailable={state.contextExpansionAvailable}
       renderImagePreview={renderImagePreview}
+      renderPackageChanges={renderPackageChanges}
       markdownPreview={markdownPreview}
       compactTouchLayout={state.isCompactTouchLayout}
       onLineSelection={state.onLineSelection}

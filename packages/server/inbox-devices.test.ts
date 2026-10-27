@@ -340,7 +340,7 @@ describe("the device door, on the binary", () => {
 
   test("7.5 to 7.9: the list, projects, a thread, seen (key required), the event stream", async () => {
     const list = (await (await door("threads")).json()) as Json;
-    expect(Object.keys(list).sort()).toEqual(["cursor", "notice", "pins", "project", "projects", "restart_claude_code", "sections", "serverSession", "update", "updated", "version"]);
+    expect(Object.keys(list).sort()).toEqual(["cursor", "notice", "pins", "project", "projects", "restart_agents", "restart_claude_code", "sections", "serverSession", "update", "update_check_failing", "updated", "version"]);
     expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
     const row = list.sections.flatMap((s: Json) => s.threads).find((t: Json) => t.thread_id === threadId);
     expect(row).toMatchObject({ section: "waiting", unread: true, questions: { open: 2 } });

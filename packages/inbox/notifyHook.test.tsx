@@ -53,8 +53,14 @@ function installStubs() {
 }
 
 function restoreStubs() {
-  (window as unknown as { Notification: unknown }).Notification = saved.notification;
-  (globalThis as unknown as { Notification: unknown }).Notification = saved.notification;
+  // Put back "none" as none: a property set to undefined reads as support (see tour.test.tsx).
+  if (saved.notification === undefined) {
+    delete (window as unknown as { Notification?: unknown }).Notification;
+    delete (globalThis as unknown as { Notification?: unknown }).Notification;
+  } else {
+    (window as unknown as { Notification: unknown }).Notification = saved.notification;
+    (globalThis as unknown as { Notification: unknown }).Notification = saved.notification;
+  }
   document.hasFocus = saved.hasFocus!;
   if (saved.visibility) Object.defineProperty(document, 'visibilityState', saved.visibility);
   else delete (document as unknown as Record<string, unknown>).visibilityState;

@@ -166,7 +166,11 @@ afterEach(async () => {
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
   window.matchMedia = savedMatchMedia;
-  (window as unknown as Record<string, unknown>).Notification = savedNotification;
+  // happy-dom has no Notification: put back "none", not a property set to undefined, which
+  // `'Notification' in window` reads as support (a read still in flight after the unmount
+  // then reached Notification.permission: an unhandled error between tests on Bun 1.4.4).
+  if (savedNotification === undefined) delete (window as unknown as Record<string, unknown>).Notification;
+  else (window as unknown as Record<string, unknown>).Notification = savedNotification;
   document.hasFocus = savedHasFocus;
   resetStorageBackend();
   window.location.hash = '';

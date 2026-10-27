@@ -39,6 +39,14 @@ test('the columns it lists are the store’s, Backlog takes work not started, an
   expect(prompt).toMatch(/Icebox[^\n]*is mine\. Never put a card there/);
 });
 
+// Approved 2026-10-27: agents wrote sentence titles and linked no thread to decide in.
+test('it asks for 2–5 word titles with status in `say`, and the thread where the person decides linked with `thread_id`', () => {
+  const prompt = boardPrompt(BIN);
+  expect(prompt).toContain('2–5 words naming the work');
+  expect(prompt).toContain('never a sentence; where it stands goes in `say`');
+  expect(prompt).toMatch(/link the Inbox thread where I make the call \(`thread_id`\)/);
+});
+
 test('it names this computer’s plannotator for the CLI, and a plain one before the settings load', () => {
   expect(boardPrompt(BIN)).toContain('`/Users/ada/.local/bin/plannotator card --help`');
   expect(boardPrompt(null)).toContain('`plannotator card --help`');

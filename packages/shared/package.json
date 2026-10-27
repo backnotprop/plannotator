@@ -20,6 +20,8 @@
     "./review-core": "./review-core.ts",
     "./review-image": "./review-image.ts",
     "./review-markdown-image": "./review-markdown-image.ts",
+    "./package-metadata": "./package-metadata.ts",
+    "./package-changes-service": "./package-changes-service.ts",
     "./review-progress": "./review-progress.ts",
     "./commit-history": "./commit-history.ts",
     "./review-workspace": "./review-workspace.ts",

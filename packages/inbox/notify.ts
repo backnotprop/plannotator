@@ -233,7 +233,8 @@ function sameHost(a: string, b: string): boolean {
 }
 
 function supported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window;
+  // The constructor itself, not the name: a Notification property left undefined is no support.
+  return typeof window !== 'undefined' && typeof (window as { Notification?: unknown }).Notification === 'function';
 }
 
 function currentPermission(): NotificationPermission | 'unsupported' {
@@ -497,7 +498,7 @@ export function useInboxNotifications(options: {
         section: row?.section ?? null,
         asks: burst.current.get(item.threadId)?.asks ?? item.asks,
       });
-      // The question it notified about (`<message id>/<key>`), so decision mode can open on its card.
+      // The question it notified about (`<message id>/<key>`). Unused since decision mode went thread only (2026-10-27).
       const question = item.keys.filter((key) => !key.startsWith('thread:')).at(-1);
       open = () => openRef.current.thread(item.threadId, question);
     } else {

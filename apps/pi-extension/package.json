@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/pi-extension",
-  "version": "0.28.31",
+  "version": "0.28.33",
   "type": "module",
   "description": "Plannotator Pi extension - interactive plan review with annotations, annotate agent messages, and review code/PRs",
   "author": "backnotprop",
@@ -44,6 +44,7 @@
     "plannotator-tool-host.ts",
     "session-opened.ts",
     "pi-host.ts",
+    "runtime-tls.ts",
     "package-version.ts",
     "inbox.ts",
     "server.ts",
@@ -75,6 +76,7 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.79.1"
   },
+  "//engines": "No engines field on purpose (#902): for a bare or range install npm passes over a release whose engines the running Node misses, so Pi on an older Node silently stayed on an old Plannotator. runtime-tls.ts warns once per start instead. package-engines.test.ts fails if a node engines field comes back.",
   "devDependencies": {
     "glimpseui": "^0.8.0",
     "@earendil-works/pi-coding-agent": ">=0.79.1",

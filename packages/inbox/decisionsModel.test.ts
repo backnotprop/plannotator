@@ -32,6 +32,7 @@ import {
   swipeChoices,
   answerNeedsConfirm,
   confirmLabel,
+  sessionChips,
 } from './decisions/model';
 
 function question(key: string, extra: Partial<InboxQuestion> = {}): InboxQuestion {
@@ -120,6 +121,14 @@ describe('the queue', () => {
     expect(groupReady(q, groupKeyOf(B1))).toBe(true);
     expect(previousId(q, A1.id)).toBe(B1.id);
     expect(headLine({ ...q, current: A1.id })).toBe('3 of 3 · 1 agent waiting');
+  });
+
+  test('two sessions of one agent get chips that read apart: the later ones say "another session"', () => {
+    const C1 = decision('msg_c/q-4', 'ses_c');
+    const q = mergeDecisions(emptyQueue(), [A1, B1, C1]);
+    expect(sessionChips(q).map((c) => c.name)).toEqual(['Claude Code', 'Claude Code (another session)', 'Claude Code (another session 3)']);
+    // One session of each agent: the names as they are.
+    expect(sessionChips(mergeDecisions(emptyQueue(), [A1, A2])).map((c) => c.name)).toEqual(['Claude Code']);
   });
 
   test('a group of action items alone sends nothing (the actions route sends those)', () => {

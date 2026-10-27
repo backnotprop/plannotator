@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { getItem, setItem } from '../utils/storage';
-import type { UpdateAction, UpdateAdvert } from '../utils/updateNotice';
+import type { UpdateAction, UpdateAdvert, UpdateCheckFailingAdvert } from '../utils/updateNotice';
 
 declare const __APP_VERSION__: string;
 
@@ -21,6 +21,11 @@ export interface UpdateInfo {
   action?: UpdateAction;
   /** The command for this host, with the remembered install flags. */
   command?: string;
+  /**
+   * Checking for updates has failed for hours (no update known): the Options
+   * menu says so with `command`. `updateAvailable` is false then.
+   */
+  checkFailing?: { since: string; error: string };
   dismiss: () => void;
 }
 
@@ -41,7 +46,7 @@ function isDismissedVersion(latestVersion: string): boolean {
  *
  * `?preview-update=0.29.0` still simulates an update, for screenshots.
  */
-export function useUpdateCheck(advert?: UpdateAdvert | null): UpdateInfo | null {
+export function useUpdateCheck(advert?: UpdateAdvert | null, failing?: UpdateCheckFailingAdvert | null): UpdateInfo | null {
   const preview = useMemo(() => {
     if (typeof window === 'undefined') return null;
     const version = new URLSearchParams(window.location.search).get('preview-update');
@@ -56,7 +61,20 @@ export function useUpdateCheck(advert?: UpdateAdvert | null): UpdateInfo | null 
     setDismissedVersion(latestVersion);
   }, [latestVersion]);
 
-  if (!latestVersion) return null;
+  if (!latestVersion) {
+    if (!failing) return null;
+    const current = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
+    return {
+      currentVersion: current,
+      latestVersion: current,
+      updateAvailable: false,
+      dismissed: true,
+      releaseUrl: 'https://github.com/backnotprop/plannotator/releases',
+      command: failing.command,
+      checkFailing: { since: failing.since, error: failing.error },
+      dismiss,
+    };
+  }
   const currentVersion = advert?.current ?? (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0');
   return {
     currentVersion,

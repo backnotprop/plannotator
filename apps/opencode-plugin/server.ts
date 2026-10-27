@@ -85,6 +85,13 @@ type EmbeddedRuntimeModule = {
 const serverPlugin = {
   id: "plannotator",
   setup: async (ctx) => {
+    // Ends what this plugin generation started that would outlive it: OpenCode 2 unloads a generation
+    // (on `opencode2 reload`, a plugin update, a config change, an hour idle) and calls the cleanup
+    // setup returns. Without it the old generation's Inbox wakes kept polling with a dead context.
+    const lifetime = new AbortController();
+    const cleanup = () => {
+      lifetime.abort();
+    };
     const workflowOptions = normalizeWorkflowOptions(ctx.options as PlannotatorOpenCodeOptions);
     let cachedAgents: OpenCodeBridgeAgent[] | undefined;
 
@@ -199,7 +206,9 @@ const serverPlugin = {
         const inbox = await findInboxConnection();
         if (inbox) {
           inboxFound = true;
-          await registerInboxOpenCode2(ctx.tool as unknown as InboxToolDomainLike, v2, inbox, (sessionID) => resolveRootSession(v2, sessionID));
+          await registerInboxOpenCode2(ctx.tool as unknown as InboxToolDomainLike, v2, inbox, (sessionID) => resolveRootSession(v2, sessionID), {
+            signal: lifetime.signal,
+          });
         }
       } catch (error) {
         console.error(`[Plannotator] Could not register the plannotator_inbox tool: ${error instanceof Error ? error.message : String(error)}`);
@@ -286,7 +295,9 @@ const serverPlugin = {
       });
     }
 
-    if (!hasToolTransform || !shouldRegisterSubmitPlan(workflowOptions)) return;
+    // No tool domain (OpenCode 1.18 runs this setup too): no Inbox wake was started, so nothing to clean up.
+    if (!hasToolTransform) return;
+    if (!shouldRegisterSubmitPlan(workflowOptions)) return cleanup;
 
     await ctx.tool.transform((tools) => {
       tools.add({
@@ -397,6 +408,7 @@ const serverPlugin = {
         },
       });
     });
+    return cleanup;
   },
 } satisfies Plugin.Plugin;
 

@@ -5,8 +5,8 @@ import { SidebarTrigger } from '../shell/sidebar';
 /**
  * A `#board` link while the Board is off (approval "inbox-board", 2026-10-26:
  * the Board is something the person turns on). It says so, what turning it on
- * does, and offers the one way: Turn it on (Settings → General has the same
- * switch). Nothing of the Board shows while it is off; its cards are kept.
+ * does, and offers the one way: Turn it on (Settings → Capabilities has the
+ * same switch, and the page links there). Nothing of the Board shows while it is off; its cards are kept.
  * Turning it on changes what agents on this computer are offered, so a page
  * that came through the tailnet says to do it on this computer.
  */
@@ -32,9 +32,14 @@ export function BoardOff({ via, onTurnOn, error }: { via: 'local' | 'tailnet'; o
         {via === 'tailnet' ? (
           <p className="ib-boff-note">Turn it on from this computer’s own screen: it changes what agents here are offered.</p>
         ) : (
-          <button type="button" className="ib-btn ib-pri" onClick={onTurnOn} data-board-turn-on="">
-            Turn it on
-          </button>
+          <>
+            <button type="button" className="ib-btn ib-pri" onClick={onTurnOn} data-board-turn-on="">
+              Turn it on
+            </button>
+            <p className="ib-boff-note" data-board-settings-link="">
+              The same switch is in <a href="#settings/capabilities">Settings → Capabilities</a>.
+            </p>
+          </>
         )}
         {error && (
           <p className="ib-error" role="alert">

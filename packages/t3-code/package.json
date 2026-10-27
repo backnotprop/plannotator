@@ -9,7 +9,7 @@
     "./usage": "./usage.ts"
   },
   "scripts": {
-    "build": "bun build ../../apps/hook/server/index.ts --target bun --compile --outfile dist/plannotator",
+    "build": "bun ../../scripts/require-bun.ts && bun build ../../apps/hook/server/index.ts --target bun --compile --outfile dist/plannotator",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

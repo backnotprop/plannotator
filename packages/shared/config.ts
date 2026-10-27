@@ -396,7 +396,7 @@ export interface PlannotatorConfig {
    * "inbox-decision-mode": experimental features ship off by default behind a
    * flag the person turns on). Read through `resolveExperimental`;
    * PLANNOTATOR_EXPERIMENTAL wins over this key. Written by the Inbox's
-   * Settings → General → Experimental through POST /api/inbox/settings
+   * Settings → Capabilities → Experimental through POST /api/inbox/settings
    * `{ experimental: { decision_mode } }`.
    */
   experimental?: { decisionMode?: boolean };
@@ -410,7 +410,7 @@ export interface PlannotatorConfig {
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on, off by default. On: the sidebar's Board row and page,
    * and the Inbox serves the agents' `card` tool. Off: neither, every card
-   * kept. Written by the Inbox's Settings → General (`POST
+   * kept. Written by the Inbox's Settings → Capabilities (`POST
    * /api/inbox/settings` `{ board: { on } }`), read on every request.
    */
   inboxBoard?: boolean;
@@ -544,6 +544,16 @@ export interface PlannotatorConfig {
    */
   gitRemoteCheck?: boolean;
   /**
+   * Package changes in code review (the table under a changed package.json or
+   * lockfile). `card: false` hides it everywhere, leaving the plain diff
+   * (default true). `lookup: true` lets the review server ask npm for
+   * downloads, license and release dates, sending the names of the changed
+   * public packages to registry.npmjs.org and api.npmjs.org (default false;
+   * the card's "Look up on npm" sets it). PLANNOTATOR_PACKAGE_LOOKUP=0 keeps
+   * the lookup off whatever this says.
+   */
+  packageChanges?: { card?: boolean; lookup?: boolean };
+  /**
    * Display-only hostname for advertised session URLs (issue #657). Lets a
    * remote-mode user hand out a reachable link (e.g. a Tailscale MagicDNS
    * name or tailnet IP) instead of localhost. Host only — the port is chosen
@@ -603,6 +613,31 @@ export function parseReviewAnalysisConfig(value: unknown): PlannotatorConfig["re
     result.callFlow = input.callFlow;
   }
   return result;
+}
+
+/** Parse the server-writable package changes switches: booleans only, or undefined (the route answers 400). */
+export function parsePackageChangesConfig(value: unknown): PlannotatorConfig["packageChanges"] | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const result: NonNullable<PlannotatorConfig["packageChanges"]> = {};
+  for (const key of ["card", "lookup"] as const) {
+    if (input[key] === undefined) continue;
+    if (typeof input[key] !== "boolean") return undefined;
+    result[key] = input[key] as boolean;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/** PLANNOTATOR_PACKAGE_LOOKUP: `0` / `false` / `off` / `disabled` is a hard off; anything else decides nothing. */
+export function parsePackageLookupEnv(env: NodeJS.ProcessEnv = process.env): false | undefined {
+  const v = env.PLANNOTATOR_PACKAGE_LOOKUP?.trim().toLowerCase();
+  return v === "0" || v === "false" || v === "off" || v === "disabled" ? false : undefined;
+}
+
+/** Whether the review server may ask npm about package changes: only after the reviewer said yes. */
+export function resolvePackageLookup(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (parsePackageLookupEnv(env) === false) return false;
+  return coerceConfigBoolean(config.packageChanges?.lookup, false);
 }
 
 // Resolved per call, not at module scope: tests sandbox the data dir by
@@ -859,7 +894,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
     const plain = (value: unknown): value is Record<string, unknown> =>
       !!value && typeof value === "object" && !Array.isArray(value);
     const merged: Record<string, unknown> = { ...current, ...partial };
-    const nested = (key: "experimental" | "diffOptions" | "theme" | "reviewAnalysis" | "prompts") => {
+    const nested = (key: "experimental" | "diffOptions" | "theme" | "reviewAnalysis" | "prompts" | "packageChanges") => {
       const cur = (current as Record<string, unknown>)[key];
       const par = (partial as Record<string, unknown>)[key];
       if (par === undefined) {
@@ -872,7 +907,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       }
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
-    for (const key of ["experimental", "diffOptions", "theme", "reviewAnalysis", "prompts"] as const) nested(key);
+    for (const key of ["experimental", "diffOptions", "theme", "reviewAnalysis", "prompts", "packageChanges"] as const) nested(key);
     writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
     saved = true;
   } catch (e) {
@@ -921,8 +956,10 @@ export function getServerConfig(gitUser: string | null, agentToolIntegration?: s
   agentToolEnv?: boolean;
   agentToolHost?: AgentToolHost;
   agentToolEnabled?: boolean;
+  packageChanges: { card: boolean; lookup: boolean; lookupEnv?: false };
 } {
   const cfg = loadConfig();
+  const packageLookupEnv = parsePackageLookupEnv();
   const autoUpdateEnv = parseAutoUpdateEnv();
   const updateCheckEnv = parseUpdateCheckEnv();
   const agentToolEnv = parseAgentToolEnv();
@@ -958,6 +995,13 @@ export function getServerConfig(gitUser: string | null, agentToolIntegration?: s
     updateCheck: coerceConfigBoolean(cfg.updateCheck, true),
     ...(updateCheckEnv !== undefined && { updateCheckEnv }),
     ...agentToolAdvert(cfg, agentToolEnv, agentToolHost),
+    // Always explicit: the lookup is server-enforced, so the page must never
+    // show it on from a stale value. lookupEnv carries the env hard off.
+    packageChanges: {
+      card: coerceConfigBoolean(cfg.packageChanges?.card, true),
+      lookup: resolvePackageLookup(cfg),
+      ...(packageLookupEnv === false && { lookupEnv: false as const }),
+    },
   };
 }
 

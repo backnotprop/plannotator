@@ -1575,17 +1575,9 @@ if "!SKIP_SKILLS!"=="0" if defined INVOCABLE_CHOICE if not "!INVOCABLE_CHOICE!"=
 
 REM Update Pi extension if pi is installed. Pi keeps its 6 extension commands
 REM and the plannotator_submit_plan tool; it no longer bundles skills, so there
-REM is no settings.json package-skills filter to configure.
+REM is no settings.json package-skills filter to configure. See :UpdatePiExtension.
 where pi >nul 2>&1
-if !ERRORLEVEL! equ 0 (
-    echo Updating Pi extension...
-    pi install npm:@plannotator/pi-extension
-    if !ERRORLEVEL! equ 0 (
-        echo Pi extension updated.
-    ) else (
-        echo Skipping Pi update ^(pi install failed^)
-    )
-)
+if !ERRORLEVEL! equ 0 call :UpdatePiExtension
 
 REM --- Gemini CLI support (only if Gemini is installed) ---
 REM HONEST three-state reporting (#1178): detected-but-skipped is its own
@@ -1884,6 +1876,33 @@ set "PLN_CP_RC="
 set "PLN_CP_REGISTRY="
 set "PLN_CP_SKIP="
 set "PLN_CP_PINNED="
+goto :eof
+
+REM ======================================================================
+REM Pi extension (#902), the same logic as install.sh / install.ps1.
+REM `pi install npm:@plannotator/pi-extension` runs a bare `npm install` that
+REM may settle on an older version and still exit 0 (npm passes over a release
+REM whose engines the running Node does not meet; a registry mirror can lag).
+REM So an install Pi's settings already list is updated with Pi's own `pi
+REM update <source>`, which installs <name>@latest by name (falling back to
+REM `pi install` when it fails); a first install that landed on an older
+REM version gets the same `pi update`. The version on disk is read back where
+REM Pi loads it from (<agent dir>\npm\node_modules, else the global npm root),
+REM and installed/updated is said only when it reached this release; otherwise
+REM one line names the cause it can see (the release not on the npm registry
+REM yet) and the command to run. The step never pins a version in Pi's
+REM settings; a version the person pinned is left alone with the command that
+REM moves it. Nothing is removed first, so a failed step leaves the install as
+REM it was.
+REM The release travels in PLN_PI_TARGET, never interpolated; the command
+REM carries no double quote, percent sign, exclamation mark or caret for
+REM cmd.exe to parse (quote, caret and apostrophe come from [char]). Called
+REM outside any parenthesized block. Best effort: never fails the install.
+REM ======================================================================
+:UpdatePiExtension
+set "PLN_PI_TARGET=!TAG!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Continue'; $q = [char]34; $src = 'npm:@plannotator/pi-extension'; $t = ([string]$env:PLN_PI_TARGET).TrimStart('v'); $d = $env:PI_CODING_AGENT_DIR; if (-not $d) { $d = Join-Path (Join-Path $env:USERPROFILE '.pi') 'agent' } elseif ($d -eq '~') { $d = $env:USERPROFILE } elseif ($d.StartsWith('~/') -or $d.StartsWith('~\')) { $d = Join-Path $env:USERPROFILE $d.Substring(2) }; function Ver { $p = Join-Path (Join-Path (Join-Path (Join-Path $d 'npm') 'node_modules') '@plannotator') 'pi-extension'; if (-not (Test-Path -LiteralPath $p -PathType Container)) { $p = $null; if (Get-Command npm -ErrorAction SilentlyContinue) { $r = $null; try { $r = & npm root -g 2>$null | Select-Object -First 1 } catch { }; if ($r) { $p = Join-Path (Join-Path ([string]$r).Trim() '@plannotator') 'pi-extension' } } }; if (-not $p) { return '' }; $j = Join-Path $p 'package.json'; if (-not (Test-Path -LiteralPath $j -PathType Leaf)) { return '' }; try { return [string](Get-Content -LiteralPath $j -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop).version } catch { return '' } }; function AtLeast($a, $b) { $x = @(((([string]$a).TrimStart('v') -split '[-+]')[0]).Split('.')); $y = @(((([string]$b).TrimStart('v') -split '[-+]')[0]).Split('.')); for ($i = 0; $i -lt 3; $i++) { $m = 0; $n = 0; if ($i -lt $x.Count) { [void][int]::TryParse($x[$i], [ref]$m) }; if ($i -lt $y.Count) { [void][int]::TryParse($y[$i], [ref]$n) }; if ($m -gt $n) { return $true }; if ($m -lt $n) { return $false } }; return $true }; $s = Join-Path $d 'settings.json'; $txt = ''; if (Test-Path -LiteralPath $s -PathType Leaf) { try { $txt = [string](Get-Content -LiteralPath $s -Raw -ErrorAction Stop) } catch { } }; if ($txt -match ($q + 'npm:@plannotator/pi-extension@v?([0-9]+\.[0-9]+\.[0-9][0-9A-Za-z.+-]*)' + $q)) { Write-Output ('Pi extension: pinned to ' + $Matches[1] + ' in Pi' + [char]39 + 's settings, left as is. To move it: pi install ' + $src + '@' + $t); exit 0 }; $fresh = $false; $b = ''; if (-not ($txt -match ($q + 'npm:@plannotator/pi-extension(@[' + [char]94 + $q + ']*)?' + $q))) { $fresh = $true; Write-Output 'Installing Pi extension...'; & pi install $src; if ($LASTEXITCODE -ne 0) { Write-Output 'Skipping Pi extension install (pi install failed)'; exit 0 }; $b = Ver; if ((-not $b) -or (-not (AtLeast $b $t))) { & pi update $src } } else { Write-Output 'Updating Pi extension...'; $b = Ver; & pi update $src; if ($LASTEXITCODE -ne 0) { & pi install $src } }; $a = Ver; if (-not $a) { Write-Output ('Pi extension: could not read its installed version. To update it: pi update ' + $src) } elseif (-not (AtLeast $a $t)) { $v = ''; if (Get-Command npm -ErrorAction SilentlyContinue) { try { $v = (& npm view ('@plannotator/pi-extension@' + $t) version --fetch-timeout=10000 --fetch-retries=0 2>&1 | Out-String) } catch { $v = '' } }; if ($v -match 'E404') { Write-Output ('Pi extension: still ' + $a + ' (' + $t + ' is not on your npm registry yet). Run this later: pi update ' + $src) } else { Write-Output ('Pi extension: still ' + $a + ' (this release is ' + $t + '). To update it: pi update ' + $src) } } elseif ($fresh) { Write-Output ('Pi extension installed (' + $a + ').') } elseif ($b -eq $a) { Write-Output ('Pi extension already up to date (' + $a + ').') } else { Write-Output ('Pi extension updated to ' + $a + '.') }; exit 0"
+set "PLN_PI_TARGET="
 goto :eof
 
 :AddInstallFlag

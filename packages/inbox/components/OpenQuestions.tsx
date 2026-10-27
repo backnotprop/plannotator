@@ -17,6 +17,7 @@ import {
 } from '../openQuestions';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
+import { decideThreadLabel } from '../decisions/entry';
 import { drawOpenQuestionsForm, fitFootRow, footFitCandidates, laidOutChildren, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** What "Skip…" says on hover (and as its description): it is not sent now. */
@@ -33,6 +34,18 @@ export interface OpenQuestionsReask {
   onReask: () => void;
 }
 
+/**
+ * Decision mode's one way in (experimental, approval "inbox-decision-mode",
+ * thread only since the owner's 2026-10-27 call): "Decide these N", the
+ * list's first row. The caller passes it only while decision mode is on and
+ * two or more of this thread's decisions wait (`decideEntryShown`).
+ */
+export interface OpenQuestionsDecide {
+  /** The thread's decisions in the queue (the projection's, for this thread). */
+  count: number;
+  onDecide: () => void;
+}
+
 export interface OpenQuestionsButtonProps {
   questions: readonly OpenQuestion[];
   /**
@@ -42,6 +55,8 @@ export interface OpenQuestionsButtonProps {
   actions?: number;
   /** Re-ask, when it is offered: one item at the list's foot. */
   reask?: OpenQuestionsReask | null;
+  /** "Decide these N" (decision mode), when it is offered: the list's first row. */
+  decide?: OpenQuestionsDecide | null;
   /** The button itself, for whoever puts focus back on it (the Re-ask route choice's Cancel). */
   triggerRef?: Ref<HTMLButtonElement>;
   /** A phone: the button reads "5 open" at most, the list is a bottom sheet with 44 px targets. */
@@ -80,7 +95,7 @@ export interface OpenQuestionsButtonProps {
  * usual spacing and then a tighter one; a phone never takes the long form.
  * The name always holds the whole count.
  */
-export function OpenQuestionsButton({ questions, actions = 0, reask = null, triggerRef, phone, measure, onPick, onSetSkipped, rowForm = null }: OpenQuestionsButtonProps) {
+export function OpenQuestionsButton({ questions, actions = 0, reask = null, decide = null, triggerRef, phone, measure, onPick, onSetSkipped, rowForm = null }: OpenQuestionsButtonProps) {
   const [open, setOpen] = useState(false);
   /** Select mode (approval "oq-skip-select"): rows are checkboxes; ticks save nothing until the bar's button. */
   const [selecting, setSelecting] = useState(false);
@@ -339,6 +354,28 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, trig
                 <span aria-hidden="true">{ticks.size > 0 ? `${formatCount(ticks.size)} selected` : 'Select questions to skip'}</span>
                 {phone && skipAllButton}
               </div>
+            )}
+            {/* Decision mode's way in: the same dialog, scoped to this thread. Not while choosing what to skip. */}
+            {decide && !selecting && (
+              <>
+                <Menu.Item
+                  className="ib-oq-decide"
+                  data-thread-decide=""
+                  label={decideThreadLabel(decide.count, questions.length)}
+                  aria-haspopup="dialog"
+                  onClick={() => {
+                    // Focus goes into the dialog, not back to the button (the dialog puts it back when it closes).
+                    picked.current = true;
+                    close();
+                    decide.onDecide();
+                  }}
+                >
+                  <Icon name="todo" size={15} />
+                  <span>{decideThreadLabel(decide.count, questions.length)}</span>
+                  <Icon name="chevR" size={15} />
+                </Menu.Item>
+                <Menu.Separator className="ib-oq-sep" />
+              </>
             )}
             <div className="ib-oq-list">
               {questions.map((q, i) => {

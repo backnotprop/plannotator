@@ -1,4 +1,5 @@
 import type { UpdateCheckSetting } from '../hooks/useUpdateCheckSetting';
+import type { PackageChangesSetting } from '../hooks/usePackageChangesSetting';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal';
@@ -89,7 +90,7 @@ import {
 import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
 import { AnalysisLayerToggle } from './AnalysisLayerToggle';
 
-type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks';
+type SettingsTab = 'general' | 'theme' | 'git' | 'display' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'comments' | 'hooks' | 'experimental';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -137,6 +138,8 @@ interface SettingsProps {
    *  useUpdateCheckSetting); `env` is PLANNOTATOR_UPDATE_CHECK when it overrides the
    *  config file. Hosts that omit it get no row. */
   updateCheckSetting?: UpdateCheckSetting;
+  /** Code review's package changes switches (usePackageChangesSetting). Hosts that omit it get no rows. */
+  packageChangesSetting?: PackageChangesSetting;
   /** The `plannotator` agent tool switch, as the server reports it
    *  (parseAgentToolSetting of serverConfig: present only when the session's
    *  host registers the tool). Shown only together with onAgentToolChange;
@@ -437,7 +440,7 @@ function VimSettingsTab({
   );
 }
 
-function ReviewAnalysisTab() {
+function ReviewAnalysisTab({ packageChangesSetting }: { packageChangesSetting?: PackageChangesSetting }) {
   const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const callFlowEnabled = useConfigValue('callFlowEnabled');
   return (
@@ -463,6 +466,27 @@ function ReviewAnalysisTab() {
           label="Call flow"
           description="Diffs for function call stacks across git commits. 22 languages supported (AST-based, built using Tree-sitter)."
         />
+        {packageChangesSetting && (
+          <>
+            <div className="border-t border-border" />
+            <AnalysisLayerToggle
+              checked={packageChangesSetting.card}
+              onChange={(on) => packageChangesSetting.setCard(on)}
+              label="Package changes"
+              description="Added, removed and changed dependencies above package.json and lockfile diffs."
+            />
+            <div className="border-t border-border" />
+            <AnalysisLayerToggle
+              checked={packageChangesSetting.lookup}
+              onChange={(on) => void packageChangesSetting.setLookup(on)}
+              disabled={packageChangesSetting.lookupEnv === false}
+              label="Look up packages on npm"
+              description={packageChangesSetting.lookupEnv === false
+                ? 'Off: PLANNOTATOR_PACKAGE_LOOKUP=0.'
+                : 'License, release date and weekly downloads. Sends the names of changed public packages to registry.npmjs.org and api.npmjs.org.'}
+            />
+          </>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -592,6 +616,29 @@ function fontPreviewStyle(family: string): React.CSSProperties | undefined {
   return stack ? { fontFamily: stack } : undefined;
 }
 
+/**
+ * Experimental (the owner, 2026-10-27: "its own page on settings", the last
+ * tab): each experimental setting, off by default. Today one, code review's
+ * Edit Code to Suggest (`editSuggestions`, the
+ * `plannotator-experimental-edit-suggestions` cookie, unchanged).
+ */
+const ExperimentalTab: React.FC = () => {
+  const editSuggestions = useConfigValue('editSuggestions');
+  return (
+    <div className="space-y-3" data-settings-experimental="">
+      <div className="text-xs text-muted-foreground">
+        Features still being tried. Each stays off until you turn it on.
+      </div>
+      <ToggleSwitch
+        checked={editSuggestions}
+        onChange={(v) => configStore.set('editSuggestions', v)}
+        label="Edit Code to Suggest"
+        description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
+      />
+    </div>
+  );
+};
+
 const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isCompactTouchLayout = false }) => {
   const diffStyle = useConfigValue('diffStyle');
   const diffOverflow = useConfigValue('diffOverflow');
@@ -601,7 +648,6 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
   const diffShowBackground = useConfigValue('diffShowBackground');
   const diffLineBgIntensity = useConfigValue('diffLineBgIntensity');
   const diffHideWhitespace = useConfigValue('diffHideWhitespace');
-  const editSuggestions = useConfigValue('editSuggestions');
   const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
@@ -673,21 +719,6 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
 
   return (
     <>
-      {/* Experimental: edit code to author suggestions */}
-      <div className="space-y-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Experimental
-        </div>
-        <ToggleSwitch
-          checked={editSuggestions}
-          onChange={(v) => configStore.set('editSuggestions', v)}
-          label="Edit Code to Suggest"
-          description="Edit a file in place in the all-files view; your net change becomes a suggestion comment. Files are never written from the browser. Uses an experimental upstream editor."
-        />
-      </div>
-
-      <div className="border-t border-border" />
-
       {/* Hover cards (internally tokenHover*; the label is what changed, not
           the ids). One trigger select rather than a toggle plus a mode: `Off`
           is a value of the same question, so there is no unreachable
@@ -1135,7 +1166,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, showDocumentTextSize = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, showDocumentTextSize = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1243,6 +1274,9 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
       ? [{ id: 'obsidian' as SettingsTab, label: 'Obsidian' }, { id: 'bear' as SettingsTab, label: 'Bear' }, { id: 'octarine' as SettingsTab, label: 'Octarine' }]
       : []),
   ];
+  // Experimental is the last tab, on its own below the integrations (the owner,
+  // 2026-10-27). Only where it has a setting: code review's Edit Code to Suggest.
+  const experimentalTabs: { id: SettingsTab; label: string }[] = mode === 'review' ? [{ id: 'experimental', label: 'Experimental' }] : [];
   const obsidianDefaultSaveAvailable = obsidian.enabled && getEffectiveVaultPath(obsidian).trim().length > 0;
   const bearDefaultSaveAvailable = bear.enabled;
   const octarineDefaultSaveAvailable = octarine.enabled && octarine.workspace.trim().length > 0;
@@ -1462,7 +1496,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
             <div className="flex flex-col md:flex-row md:min-h-[420px] flex-1 min-h-0 overflow-hidden">
               {/* Mobile: horizontal tab bar */}
               <nav className="md:hidden flex overflow-x-auto border-b border-border px-2 py-1.5 gap-1 flex-shrink-0">
-                {[...mainTabs, ...integrationTabs].map(tab => (
+                {[...mainTabs, ...integrationTabs, ...experimentalTabs].map(tab => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
@@ -1502,6 +1536,26 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                     </div>
                     <div className="space-y-0.5">
                       {integrationTabs.map(tab => (
+                        <button
+                          key={tab.id}
+                          onClick={() => setActiveTab(tab.id)}
+                          className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
+                            activeTab === tab.id
+                              ? 'bg-primary/10 text-primary font-medium'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {experimentalTabs.length > 0 && (
+                  <>
+                    <div className="mx-2 my-2 border-t border-border/50" />
+                    <div className="space-y-0.5">
+                      {experimentalTabs.map(tab => (
                         <button
                           key={tab.id}
                           onClick={() => setActiveTab(tab.id)}
@@ -1866,8 +1920,10 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                   <ReviewDisplayTab isCompactTouchLayout={isCompactTouchLayout} />
                 )}
 
+                {activeTab === 'experimental' && mode === 'review' && <ExperimentalTab />}
+
                 {activeTab === 'analysis' && mode === 'review' && (
-                  <ReviewAnalysisTab />
+                  <ReviewAnalysisTab packageChangesSetting={packageChangesSetting} />
                 )}
 
                 {activeTab === 'display' && mode !== 'review' && (

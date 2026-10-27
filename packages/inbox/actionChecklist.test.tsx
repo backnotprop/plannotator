@@ -210,6 +210,43 @@ test.skipIf(!hasDom)('the header: how many, how many done, one badge (Holds up s
   expect(el.textContent).toContain('1 thing only you can do');
 });
 
+test.skipIf(!hasDom)("the why is markdown, as a question's context: bold, code, a list and a link (opened safely), never the raw marks", () => {
+  // The owner's report (0.28.31): `**App Manifest**` and `slack-app.yaml` in backticks came through literally.
+  const context = [
+    "Steps: api.slack.com/apps → **App Manifest** → replace it with the contents of `slack-app.yaml` → **Save**.",
+    '',
+    '- Run `pbpaste > /tmp/sfharness/slack-bot` on your Mac',
+    '- Then reinstall: see [the Slack docs](https://api.slack.com/authentication/basics)',
+  ].join('\n');
+  const el = mount(<ActionChecklist actions={[record(0, { context })]} agent="Claude Code" onMark={async () => true} />);
+  const why = panelOf(rowOf(el, 0)).querySelector<HTMLElement>('[data-action-why]')!;
+  expect(why).not.toBeNull();
+  expect(why.textContent).not.toContain('**');
+  expect(why.textContent).not.toContain('`');
+  expect([...why.querySelectorAll('strong')].map((b) => b.textContent)).toEqual(['App Manifest', 'Save']);
+  expect([...why.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['slack-app.yaml', 'pbpaste > /tmp/sfharness/slack-bot']);
+  expect(why.querySelectorAll('[data-rich-list-kind="ul"]')).toHaveLength(2);
+  const link = why.querySelector<HTMLAnchorElement>('a[href="https://api.slack.com/authentication/basics"]')!;
+  expect(link.textContent).toBe('the Slack docs');
+  expect(link.target).toBe('_blank');
+  expect(link.rel).toBe('noopener noreferrer');
+});
+
+test.skipIf(!hasDom)('the task line draws inline markdown, but never a link inside its toggle button', () => {
+  const el = mount(
+    <ActionChecklist
+      actions={[record(0, { prompt: 'Run `npm login` on **this machine**, see [the guide](https://docs.npmjs.com/) or https://npmjs.com/login' })]}
+      agent="Claude Code"
+      onMark={async () => true}
+    />,
+  );
+  const task = rowOf(el, 0).querySelector<HTMLElement>('.ib-chk-do')!;
+  expect(task.querySelector('code')!.textContent).toBe('npm login');
+  expect(task.querySelector('strong')!.textContent).toBe('this machine');
+  expect(task.querySelector('a')).toBeNull();
+  expect(task.textContent).toBe('Run npm login on this machine, see the guide or https://npmjs.com/login');
+});
+
 test.skipIf(!hasDom)('rows are disclosures, one open at a time; the first open item starts open', () => {
   const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={async () => true} />);
   const a = rowOf(el, 0);

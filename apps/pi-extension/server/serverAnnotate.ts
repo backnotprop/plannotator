@@ -379,7 +379,7 @@ export async function startAnnotateServer(options: {
 	// with 409 session_mismatch before anything settles. Missing is accepted.
 	const serverSession = createServerSessionNonce();
 	const sendAlreadyDecided = (res: import("node:http").ServerResponse): void => {
-		json(res, { error: "This review session has already been decided." }, 409);
+		json(res, { error: "This review session has already been decided.", code: "already_decided" }, 409);
 	};
 
 	// Last-client abandonment lease: once the tab's client-lease stream
@@ -1568,6 +1568,8 @@ export async function startAnnotateServer(options: {
 					}
 				}
 			} finally {
+				// Before closeAllConnections, or a session-closed just sent is lost.
+				externalAnnotations.endStreams();
 				server.close();
 				// close() only stops the listener; drain browser keep-alive sockets so a
 				// stopped session's connections die immediately instead of at the

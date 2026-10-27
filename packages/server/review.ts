@@ -10,6 +10,9 @@
  */
 
 import { childPath } from "@plannotator/shared/child-env";
+import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, PACKAGE_CHECKOUT_WAIT_MS, prSettingsSource, REMOTE_PACKAGE_READS, waitAtMost } from "@plannotator/shared/package-changes-service";
+import { parseDiffToFiles } from "@plannotator/core/diff-files";
+import { homedir } from "node:os";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import {
@@ -24,8 +27,8 @@ import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
 import type { Origin } from "@plannotator/shared/agents";
 import { type DiffType, type GitContext, runVcsDiff, getVcsFileContentsForDiff, getVcsFileBytesForDiff, getVcsDiffFingerprint, canStageFiles, stageFile, unstageFile, resolveVcsCwd, validateFilePath, getVcsContext, detectRemoteDefaultCompareTarget, resolveAvailableDiffType, vcsOwnsDiffType, vcsSupportsSnapshot, materializeVcsSnapshot, gitRuntime } from "./vcs";
-import { basename } from "node:path";
-import { existsSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { SingleFlight } from "@plannotator/shared/single-flight";
 import {
   commitFamilyId,
@@ -150,7 +153,7 @@ import {
   extractMarkerNonce,
   type MarkerEngineId,
 } from "./marker-review";
-import { agentSwitchConfigToSave, agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGitRemoteCheck, resolveReviewProgress } from "./config";
+import { agentSwitchConfigToSave, agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, parsePackageChangesConfig, parseReviewAnalysisConfig, resolveAIEnabled, resolvePackageLookup, resolveClaudeSandbox, resolveCursorSandbox, resolveFeedbackHistory, resolveGuideHistory, resolveGitRemoteCheck, resolveReviewProgress } from "./config";
 import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
 import { appendFeedbackRecord, countChangedFiles, deriveFeedbackProject, type FeedbackDecision, type FeedbackReviewTarget } from "@plannotator/shared/feedback-archive";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
@@ -175,7 +178,7 @@ import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type Ses
 import { isWSL } from "./browser";
 import { getExtraMarkdownExtensions } from "@plannotator/shared/resolve-file";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
-import type { LocalWorkspaceReview, WorkspaceDiffType } from "./review-workspace";
+import { resolveWorkspaceFilePath, type LocalWorkspaceReview, type WorkspaceDiffType } from "./review-workspace";
 import { handleCodeNavResolve, handleCodeNavHover, extractChangedFiles } from "./code-nav";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "./review-skill-loader";
 import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shared/guide-instructions-store";
@@ -2017,7 +2020,7 @@ export async function startReviewServer(
   });
 
   const reviewAlreadyDecided = () =>
-    Response.json({ error: "This review session has already been decided." }, { status: 409 });
+    Response.json({ error: "This review session has already been decided.", code: "already_decided" }, { status: 409 });
 
   // Host-only session control (packages/shared/host-control.ts). Closing is
   // the reviewer's Close, marked closedBy "agent", WITHOUT settling the draft
@@ -2042,6 +2045,214 @@ export async function startReviewServer(
       return { closed: true, unsentAnnotations };
     },
   };
+
+  /**
+   * Both sides of one path for the current diff, read the way the diff was
+   * made (workspace, full-stack PR checkout, local VCS, or the PR platform).
+   * Shared by /api/file-content and the package changes route.
+   */
+  const readDiffFileContents = async (
+    filePath: string,
+    oldPath: string | undefined,
+    requestedBase: string | undefined,
+  ): Promise<{ oldContent: string | null; newContent: string | null } | { error: string }> => {
+    if (isBinaryPatchFile(currentPatch, filePath)) {
+      return { oldContent: null, newContent: null };
+    }
+
+    if (workspace) {
+      try {
+        return await workspace.getFileContents(filePath, oldPath);
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : "No file access available" };
+      }
+    }
+
+    // Full-stack PR mode uses local git for file expansion because
+    // the patch is no longer the platform's layer diff.
+    const fileContentCwd = resolvePRLocalCwd();
+    if (
+      isPRMode &&
+      currentPRDiffScope === "full-stack" &&
+      fileContentCwd &&
+      prMetadata?.defaultBranch
+    ) {
+      const baseRef = await resolvePRFullStackBaseRef(
+        gitRuntime,
+        prMetadata!.defaultBranch,
+        fileContentCwd,
+      );
+      if (!baseRef) return { oldContent: null, newContent: null };
+      return getVcsFileContentsForDiff(
+        "merge-base",
+        baseRef,
+        filePath,
+        oldPath,
+        fileContentCwd,
+      );
+    }
+
+    // Local review: read file contents from local git
+    if (hasLocalAccess) {
+      const base = resolveReviewBase(requestedBase);
+      const defaultCwd = gitContext?.cwd;
+      return getVcsFileContentsForDiff(
+        currentDiffType as DiffType,
+        base,
+        filePath,
+        oldPath,
+        defaultCwd,
+      );
+    }
+
+    // PR mode: fetch from platform API using merge-base/head SHAs.
+    // The diff is computed against the merge-base (common ancestor), not the
+    // base branch tip. File contents must match the diff for hunk expansion.
+    if (isPRMode && prMetadata) {
+      const oldSha = prMetadata.mergeBaseSha ?? prMetadata.baseSha;
+      const [oldContent, newContent] = await Promise.all([
+        fetchPRFileContent(prRef!, oldSha, oldPath || filePath),
+        fetchPRFileContent(prRef!, prMetadata.headSha, filePath),
+      ]);
+      return { oldContent, newContent };
+    }
+
+    return { error: "No file access available" };
+  };
+
+  // Where the current mode reads one side of a repository path, as
+  // bytes: shared by /api/review-image (#1598) and the Markdown
+  // preview's /api/review-markdown-image, in the same priority order
+  // as /api/file-content below.
+  const readReviewSide = async (
+    side: DiffSide,
+    filePath: string,
+    oldPath: string | undefined,
+    maxBytes: number,
+    signal?: AbortSignal,
+    requestedBase?: string,
+  ): Promise<FileBytesRead> => {
+    if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
+    const prCwd = resolvePRLocalCwd();
+    if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMetadata?.defaultBranch) {
+      const baseRef = await resolvePRFullStackBaseRef(gitRuntime, prMetadata.defaultBranch, prCwd);
+      if (!baseRef) return { kind: "missing" };
+      return getFileBytesForDiff(gitRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
+    }
+    if (hasLocalAccess) {
+      return getVcsFileBytesForDiff(
+        currentDiffType as DiffType,
+        requestedBase !== undefined ? resolveReviewBase(requestedBase) : currentBase,
+        filePath,
+        oldPath,
+        side,
+        maxBytes,
+        gitContext?.cwd,
+      );
+    }
+    if (isPRMode && prMetadata && prRef) {
+      const ref = prRef;
+      return readPRImageSide({
+        gitRuntime,
+        poolCwd: prCwd,
+        oldSha: prMetadata.mergeBaseSha ?? prMetadata.baseSha,
+        headSha: prMetadata.headSha,
+        side,
+        filePath,
+        oldPath,
+        maxBytes,
+        fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+        signal,
+      });
+    }
+    return { kind: "unavailable" };
+  };
+
+  // Package changes under package.json and lockfile diffs. The server reads
+  // the files and works out every name a lookup would send; the lookup itself
+  // runs only when config.json allows it (see package-changes-service.ts).
+  let packageRepoRoot: { cwd: string | undefined; root: Promise<string | null> } | null = null;
+  const packageChanges = createPackageChangesService({
+    snapshotId: () => currentSnapshotId(),
+    diffFiles: () => parseDiffToFiles(currentPatch),
+    readSide: async (side, path, oldPath, base) => {
+      try { validateFilePath(path); if (oldPath) validateFilePath(oldPath); } catch { return { kind: "unreadable", reason: "invalid path" }; }
+      const read = await readReviewSide(side, path, oldPath, MAX_PACKAGE_FILE_BYTES, undefined, base);
+      if (read.kind === "ok") return { kind: "ok", text: new TextDecoder().decode(read.bytes) };
+      if (read.kind === "missing") return { kind: "missing" };
+      if (read.kind === "too-large") return { kind: "unreadable", reason: "too large" };
+      // No byte reader for this mode: the text reader, whose null cannot tell
+      // absent from unreadable, so it counts as unreadable.
+      const text = await readDiffFileContents(path, oldPath, base);
+      const value = "error" in text ? null : side === "old" ? text.oldContent : text.newContent;
+      return value == null ? { kind: "unreadable", reason: "could not be read" } : { kind: "ok", text: value };
+    },
+    settings: () => {
+      if (workspace) {
+        const session = workspace;
+        return {
+          kind: "local",
+          dirOf: async (path) => {
+            const target = resolveWorkspaceFilePath(session.repos, path);
+            return target ? dirname(join(target.repo.cwd, target.repoRelativePath)) : null;
+          },
+        };
+      }
+      if (isPRMode) {
+        if (!prMetadata || !prRef) return { kind: "none" };
+        const ref = prRef;
+        return prSettingsSource({
+          git: gitRuntime,
+          checkout: resolvePRLocalCwd(),
+          headSha: prMetadata.headSha,
+          fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
+        });
+      }
+      if (!hasLocalAccess || isStaticPatchMode) return { kind: "none" };
+      return {
+        kind: "local",
+        dirOf: async (path) => {
+          // Patch paths are relative to the repository top level of the
+          // directory the diff ran in (a worktree mode runs elsewhere).
+          const cwd = resolveVcsCwd(currentDiffType as DiffType, gitContext?.cwd) ?? gitContext?.cwd;
+          if (!packageRepoRoot || packageRepoRoot.cwd !== cwd) {
+            const known = cwd === gitContext?.cwd ? gitContext?.root : undefined;
+            packageRepoRoot = {
+              cwd,
+              root: known
+                ? Promise.resolve(known)
+                : gitRuntime.runGit(["rev-parse", "--show-toplevel"], { cwd })
+                  .then((r) => (r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : null))
+                  .catch(() => null),
+            };
+          }
+          const root = await packageRepoRoot.root;
+          return root ? dirname(join(root, path)) : null;
+        },
+      };
+    },
+    homeDir: () => {
+      try { return homedir(); } catch { return null; }
+    },
+    // A PR review reads from its checkout: wait for it (it is usually still
+    // being prepared on first load), and use the platform API only when no
+    // checkout can exist, or for now after a timeout (that result is not kept).
+    prepare: async () => {
+      if (!isPRMode || !prMetadata) return { final: true };
+      const meta = prMetadata;
+      let checkout = resolvePRLocalCwd(meta);
+      let final = true;
+      if (!checkout && options.worktreePool) {
+        const waited = await waitAtMost(ensurePRLocalCwd(meta), PACKAGE_CHECKOUT_WAIT_MS);
+        if (waited.timedOut) final = false;
+        else checkout = waited.value;
+      }
+      if (checkout) return { final };
+      return { final, remote: { key: `${meta.mergeBaseSha ?? meta.baseSha}:${meta.headSha}`, budget: REMOTE_PACKAGE_READS } };
+    },
+    lookupEnabled: () => resolvePackageLookup(loadConfig()),
+    env: process.env,
+  });
 
   const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
@@ -3405,52 +3616,6 @@ export async function startReviewServer(
             }
           }
 
-          // Where the current mode reads one side of a repository path, as
-          // bytes: shared by /api/review-image (#1598) and the Markdown
-          // preview's /api/review-markdown-image, in the same priority order
-          // as /api/file-content below.
-          const readReviewSide = async (
-            side: DiffSide,
-            filePath: string,
-            oldPath: string | undefined,
-            maxBytes: number,
-            signal?: AbortSignal,
-          ): Promise<FileBytesRead> => {
-            if (workspace) return workspace.getFileBytes(filePath, oldPath, side, maxBytes);
-            const prCwd = resolvePRLocalCwd();
-            if (isPRMode && currentPRDiffScope === "full-stack" && prCwd && prMetadata?.defaultBranch) {
-              const baseRef = await resolvePRFullStackBaseRef(gitRuntime, prMetadata.defaultBranch, prCwd);
-              if (!baseRef) return { kind: "missing" };
-              return getFileBytesForDiff(gitRuntime, "merge-base", baseRef, filePath, oldPath, side, maxBytes, prCwd);
-            }
-            if (hasLocalAccess) {
-              return getVcsFileBytesForDiff(
-                currentDiffType as DiffType,
-                currentBase,
-                filePath,
-                oldPath,
-                side,
-                maxBytes,
-                gitContext?.cwd,
-              );
-            }
-            if (isPRMode && prMetadata && prRef) {
-              const ref = prRef;
-              return readPRImageSide({
-                gitRuntime,
-                poolCwd: prCwd,
-                oldSha: prMetadata.mergeBaseSha ?? prMetadata.baseSha,
-                headSha: prMetadata.headSha,
-                side,
-                filePath,
-                oldPath,
-                maxBytes,
-                fetchBytes: (sha, path, max) => fetchPRFileBytes(ref, sha, path, max),
-                signal,
-              });
-            }
-            return { kind: "unavailable" };
-          };
 
           // API: An image a reviewed Markdown file shows, read at that side's
           // revision. Every decision is in the shared handler.
@@ -3551,79 +3716,35 @@ export async function startReviewServer(
               }
             }
 
-            if (isBinaryPatchFile(currentPatch, filePath)) {
-              return Response.json({ oldContent: null, newContent: null });
-            }
+            const result = await readDiffFileContents(filePath, oldPath, url.searchParams.get("base") ?? undefined);
+            if ("error" in result) return Response.json(result, { status: 400 });
+            return Response.json(result);
+          }
 
-            if (workspace) {
-              try {
-                const result = await workspace.getFileContents(filePath, oldPath);
-                return Response.json(result);
-              } catch (error) {
-                return Response.json(
-                  { error: error instanceof Error ? error.message : "No file access available" },
-                  { status: 400 },
-                );
-              }
+          // API: Package changes under package.json and lockfile diffs. Read
+          // only: the lookup below is the one route that reaches npm.
+          if (url.pathname === "/api/package-changes" && req.method === "GET") {
+            if (isStaticPatchMode) {
+              return Response.json({ error: "Package changes need the files behind the diff" }, { status: 400 });
             }
+            const out = await packageChanges.get({
+              snapshot: url.searchParams.get("snapshot"),
+              base: url.searchParams.get("base") ?? undefined,
+            });
+            return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
+          }
 
-            // Full-stack PR mode uses local git for file expansion because
-            // the patch is no longer the platform's layer diff.
-            const fileContentCwd = resolvePRLocalCwd();
-            if (
-              isPRMode &&
-              currentPRDiffScope === "full-stack" &&
-              fileContentCwd &&
-              prMetadata?.defaultBranch
-            ) {
-              const baseRef = await resolvePRFullStackBaseRef(
-                gitRuntime,
-                prMetadata!.defaultBranch,
-                fileContentCwd,
-              );
-              if (!baseRef) {
-                return Response.json(
-                  { oldContent: null, newContent: null },
-                );
-              }
-              const result = await getVcsFileContentsForDiff(
-                "merge-base",
-                baseRef,
-                filePath,
-                oldPath,
-                fileContentCwd,
-              );
-              return Response.json(result);
+          // API: npm details for one package card. POST, so the cross-origin
+          // write guard refuses another site's request; 403 until the
+          // reviewer turned the lookup on.
+          if (url.pathname === "/api/package-changes/lookup" && req.method === "POST") {
+            if (isStaticPatchMode) {
+              return Response.json({ error: "Package changes need the files behind the diff" }, { status: 400 });
             }
-
-            // Local review: read file contents from local git
-            if (hasLocalAccess) {
-              const requestedBase = url.searchParams.get("base") ?? undefined;
-              const base = resolveReviewBase(requestedBase);
-              const defaultCwd = gitContext?.cwd;
-              const result = await getVcsFileContentsForDiff(
-                currentDiffType as DiffType,
-                base,
-                filePath,
-                oldPath,
-                defaultCwd,
-              );
-              return Response.json(result);
-            }
-
-            // PR mode: fetch from platform API using merge-base/head SHAs.
-            // The diff is computed against the merge-base (common ancestor), not the
-            // base branch tip. File contents must match the diff for hunk expansion.
-            if (isPRMode && prMetadata) {
-              const oldSha = prMetadata.mergeBaseSha ?? prMetadata.baseSha;
-              const [oldContent, newContent] = await Promise.all([
-                fetchPRFileContent(prRef!, oldSha, oldPath || filePath),
-                fetchPRFileContent(prRef!, prMetadata.headSha, filePath),
-              ]);
-              return Response.json({ oldContent, newContent });
-            }
-
-            return Response.json({ error: "No file access available" }, { status: 400 });
+            let body: unknown;
+            try { body = await req.json(); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
+            const out = await packageChanges.lookup(body);
+            return Response.json(out.body, { status: out.status, headers: { "Cache-Control": "no-store" } });
           }
 
           // API: Code navigation (search-based symbol resolution)
@@ -3781,7 +3902,7 @@ export async function startReviewServer(
               return Response.json({ error: "Cross-origin config writes are not allowed" }, { status: 403 });
             }
             try {
-              const body = (await req.json()) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
+              const body = (await req.json()) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean; conventionalLabels?: unknown[] | null };
               const toSave: Record<string, unknown> = {};
               // OpenCode's agent switch (#1390): a known shape or nothing is saved.
               const agentSwitch = agentSwitchConfigToSave(body);
@@ -3802,6 +3923,12 @@ export async function startReviewServer(
                 }
                 toSave.reviewAnalysis = reviewAnalysis;
                 if (reviewAnalysis.callFlow === false) callFlowService.cancelAll();
+              }
+              // Package changes: the card switch and the npm lookup consent, booleans only.
+              if (body.packageChanges !== undefined) {
+                const packageChangesConfig = parsePackageChangesConfig(body.packageChanges);
+                if (!packageChangesConfig) return Response.json({ error: "Invalid packageChanges" }, { status: 400 });
+                toSave.packageChanges = packageChangesConfig;
               }
               if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;

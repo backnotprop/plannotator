@@ -69,7 +69,7 @@ describe('EditModeAnnouncementDialog', () => {
     expect(dialog?.textContent).toContain('off by default');
     expect(dialog?.textContent).toContain('never writes to your files on disk');
     expect(dialog?.textContent).toContain('One file at a time');
-    expect(dialog?.textContent).toContain('Settings → Editor → Edit Code to Suggest');
+    expect(dialog?.textContent).toContain('Settings → Experimental → Edit Code to Suggest');
     const enableSwitch = document.querySelector('[role="switch"]');
     expect(enableSwitch).not.toBeNull();
     expect(enableSwitch?.getAttribute('aria-checked')).toBe('false');

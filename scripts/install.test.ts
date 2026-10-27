@@ -304,12 +304,12 @@ describe("install.sh", () => {
   test("Pi extension update keeps no settings.json package-skills filter", () => {
     // The extension resolves its skill overlap with ~/.agents/skills itself
     // (apps/pi-extension/bundled-skill.ts, #1642), so the installer never
-    // edits Pi's settings.json.
+    // edits Pi's settings.json (it only reads it to tell an update from a
+    // first install: see the fake-pi tests below).
     expect(script).toContain("update_pi_extension_if_present");
     expect(script).toContain("npm:@plannotator/pi-extension");
     expect(script).not.toContain("configure_pi_plannotator_package_filter");
     expect(script).not.toContain("plannotator_shared_agent_skills_available");
-    expect(script).not.toContain("PI_CODING_AGENT_DIR");
     expect(script).not.toContain("return { source: entry, skills: [] };");
 
     // Pi update still runs after the git-gated skills/commands install.
@@ -693,7 +693,6 @@ describe("install.ps1", () => {
     expect(script).toContain("npm:@plannotator/pi-extension");
     expect(script).not.toContain("Configure-PiPlannotatorPackageFilter");
     expect(script).not.toContain("Test-PlannotatorSharedAgentSkillsAvailable");
-    expect(script).not.toContain("PI_CODING_AGENT_DIR");
     expect(script).not.toContain("skills = @()");
 
     const skillsInstallIndex = script.indexOf("# Install skills and command stubs (requires git)");
@@ -965,7 +964,6 @@ describe("install.cmd", () => {
   test("Pi extension update keeps no settings.json package-skills filter", () => {
     expect(script).toContain("npm:@plannotator/pi-extension");
     // The settings.json package-skills filter machinery is fully removed.
-    expect(script).not.toContain("PI_CODING_AGENT_DIR");
     expect(script).not.toContain("PI_SETTINGS_PATH");
     expect(script).not.toContain("skills=@()");
     expect(script).not.toContain("PI_SHARED_SKILLS_AVAILABLE");
@@ -3292,6 +3290,9 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
       const { code, out } = runPs1ClosingSummary({ pi: true, kiro: true });
       expect(code).toBe(0);
       expect(out).toContain("  PI USERS");
+      // Install and update are different Pi commands (#902).
+      expect(out).toContain("  pi install npm:@plannotator/pi-extension\n");
+      expect(out).toContain("  pi update npm:@plannotator/pi-extension\n");
       expect(out).toContain("  KIRO CLI USERS");
       expect(out).toContain("Launch it: kiro-cli chat --agent plannotator");
     }, PWSH_SCANNER_TIMEOUT_MS);
@@ -4328,3 +4329,345 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Pi extension update (#902). On an existing install, current Pi's
+// `pi install npm:@plannotator/pi-extension` runs a bare npm install that
+// keeps the saved version ("up to date") and exits 0, so the installers run
+// `pi update <source>` and read the version back before saying "updated".
+// The fake pi below behaves that way: its `install` leaves an existing
+// package as it is (unless FAKE_PI_INSTALL_MOVES=1, older Pi's global
+// `npm install -g`), and its `update` installs FAKE_PI_LATEST, the version the
+// registry offers. A fake npm answers only `npm root -g` (older Pi's global
+// install root). No real pi, npm or agent CLI is reachable, and HOME, the Pi
+// agent dir and PLANNOTATOR_DATA_DIR all live in a temp sandbox.
+// ---------------------------------------------------------------------------
+
+const PI_SOURCE = "npm:@plannotator/pi-extension";
+const FAKE_PI = [
+  "#!/bin/bash",
+  'printf \'%s\\n\' "$*" >> "$FAKE_PI_LOG"',
+  'pkg="$FAKE_PI_PKG"',
+  'write() { mkdir -p "$pkg"; printf \'{\\n  "name": "@plannotator/pi-extension",\\n  "version": "%s"\\n}\\n\' "$1" > "$pkg/package.json"; }',
+  'case "$1" in',
+  "  install)",
+  '    picks="$FAKE_PI_INSTALL_PICKS"; [ -n "$picks" ] || picks="$FAKE_PI_LATEST"',
+  '    if [ "$FAKE_PI_INSTALL_MOVES" = 1 ] || [ ! -f "$pkg/package.json" ]; then write "$picks"; echo "added 1 package"; else echo "up to date in 573ms"; fi',
+  '    if ! grep -q "npm:@plannotator/pi-extension" "$FAKE_PI_SETTINGS" 2>/dev/null; then mkdir -p "$(dirname "$FAKE_PI_SETTINGS")"; printf \'{"packages":["%s"]}\\n\' "$2" > "$FAKE_PI_SETTINGS"; fi',
+  '    echo "Installed $2"',
+  "    exit 0 ;;",
+  "  update)",
+  '    if [ "$FAKE_PI_UPDATE" = missing ]; then echo "Unknown command: update" >&2; exit 1; fi',
+  '    if [ "$FAKE_PI_UPDATE" = fail ]; then echo "npm error code ETIMEDOUT" >&2; exit 1; fi',
+  '    write "$FAKE_PI_LATEST"',
+  '    echo "Updated $2"',
+  "    exit 0 ;;",
+  "esac",
+  "exit 1",
+  "",
+].join("\n");
+const FAKE_NPM = [
+  "#!/bin/bash",
+  'if [ "$1" = "root" ] && [ "$2" = "-g" ]; then printf \'%s\\n\' "$FAKE_NPM_ROOT"; exit 0; fi',
+  'if [ "$1" = "view" ]; then',
+  '  printf \'%s\\n\' "$*" >> "$FAKE_NPM_LOG"',
+  '  if [ "$FAKE_NPM_VIEW" = e404 ]; then echo "npm error code E404" >&2; echo "npm error 404 No match found for version" >&2; exit 1; fi',
+  '  if [ "$FAKE_NPM_VIEW" = offline ]; then echo "npm error code ENOTFOUND" >&2; exit 1; fi',
+  '  v="$2"; printf \'%s\\n\' "${v##*@}"; exit 0',
+  "fi",
+  "exit 1",
+  "",
+].join("\n");
+
+/** The release every runner installs here: the stub curl's latest tag. */
+const PI_RELEASE = "99.9.9";
+const PI_OLDER = "99.9.8";
+const PI_INSTALL_ARGS = ["--non-interactive", "--no-extras", "--skip-skills", "--skip-claude-plugin"];
+
+interface PiScenario {
+  /** Pi's settings.json entry for the extension; null: not listed (first install). */
+  source: string | null;
+  /** package.json version on disk before the run; null: none; "garbled": unreadable. */
+  installed: string | null;
+  /** Where the package lives: Pi's managed npm dir, or older Pi's global npm root. */
+  where?: "managed" | "global";
+  latest: string;
+  update?: "ok" | "missing" | "fail";
+  installMoves?: boolean;
+  /** The version a bare-name `pi install` lands on (npm passing over a release whose engines Node misses). */
+  installPicks?: string;
+  /** `npm view <name>@<release> version`: found, E404 (not on the registry), or a network error. */
+  npmView?: "published" | "e404" | "offline";
+  /** PI_CODING_AGENT_DIR as the person set it ("~/..." is expanded as Pi does). */
+  agentDirEnv?: string;
+}
+
+function setupPiSandbox(sc: PiScenario) {
+  const sandbox = setupInstallSandbox({ gh: "pass-all" });
+  const agentDir = sc.agentDirEnv
+    ? join(sandbox.home, sc.agentDirEnv.replace(/^~\//, ""))
+    : join(sandbox.home, ".pi", "agent");
+  const settings = join(agentDir, "settings.json");
+  const npmRoot = join(sandbox.home, "global-npm", "lib", "node_modules");
+  const pkg =
+    sc.where === "global"
+      ? join(npmRoot, "@plannotator", "pi-extension")
+      : join(agentDir, "npm", "node_modules", "@plannotator", "pi-extension");
+  if (sc.source !== null) {
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(settings, JSON.stringify({ defaultProvider: "anthropic", packages: [sc.source] }, null, 2) + "\n");
+  }
+  if (sc.installed !== null) {
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      sc.installed === "garbled"
+        ? "{ not json"
+        : JSON.stringify({ name: "@plannotator/pi-extension", version: sc.installed }, null, 2),
+    );
+  }
+  writeFileSync(join(sandbox.stub, "pi"), FAKE_PI, { mode: 0o755 });
+  writeFileSync(join(sandbox.stub, "npm"), FAKE_NPM, { mode: 0o755 });
+  const log = join(sandbox.home, "pi-calls.log");
+  const env: Record<string, string> = {
+    FAKE_PI_LOG: log,
+    FAKE_PI_PKG: pkg,
+    FAKE_PI_SETTINGS: settings,
+    FAKE_PI_LATEST: sc.latest,
+    FAKE_PI_UPDATE: sc.update ?? "ok",
+    FAKE_PI_INSTALL_MOVES: sc.installMoves ? "1" : "0",
+    FAKE_PI_INSTALL_PICKS: sc.installPicks ?? "",
+    FAKE_NPM_ROOT: npmRoot,
+    FAKE_NPM_VIEW: sc.npmView ?? "published",
+    FAKE_NPM_LOG: join(sandbox.home, "npm-calls.log"),
+    PLANNOTATOR_DATA_DIR: join(sandbox.home, "plannotator-data"),
+    ...(sc.agentDirEnv ? { PI_CODING_AGENT_DIR: sc.agentDirEnv } : {}),
+  };
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf-8").split("\n").filter(Boolean) : []);
+  const version = () => {
+    try {
+      return JSON.parse(readFileSync(join(pkg, "package.json"), "utf-8")).version as string;
+    } catch {
+      return null;
+    }
+  };
+  const settingsText = () => (existsSync(settings) ? readFileSync(settings, "utf-8") : null);
+  const npmLog = env.FAKE_NPM_LOG!;
+  const npmViews = () => (existsSync(npmLog) ? readFileSync(npmLog, "utf-8").split("\n").filter(Boolean) : []);
+  return { sandbox, env, calls, version, settingsText, pkg, npmViews };
+}
+
+type PiRunner = "install.sh" | "install.ps1" | "install.cmd";
+
+/** install.ps1's Pi region: from $piExtensionSource through Update-PiExtensionIfPresent. */
+function extractPs1PiRegion(): string {
+  const ps = readScript("install.ps1");
+  const start = ps.indexOf('$piExtensionSource = "npm:@plannotator/pi-extension"');
+  const fn = ps.indexOf("function Update-PiExtensionIfPresent {");
+  const end = ps.indexOf("\n}\n", fn);
+  if (start < 0 || fn < start || end < 0) throw new Error("could not locate the Pi region in install.ps1");
+  return ps.slice(start, end + 2);
+}
+
+/** The PowerShell install.cmd runs inside :UpdatePiExtension. */
+function extractCmdPiCommand(): string {
+  const cmd = readScript("install.cmd");
+  const sub = cmd.slice(cmd.indexOf("\n:UpdatePiExtension\n"));
+  const m = /^powershell -NoProfile -ExecutionPolicy Bypass -Command "(.*)"$/m.exec(sub);
+  if (!m) throw new Error("could not locate the :UpdatePiExtension PowerShell in install.cmd");
+  return m[1];
+}
+
+/**
+ * Run one installer's Pi step: the whole install.sh (its stub curl serves
+ * v99.9.9), install.ps1's Pi region with $latestTag = v99.9.9, or the exact
+ * PowerShell command install.cmd hands to `powershell -Command`.
+ */
+function runPiStep(runner: PiRunner, s: ReturnType<typeof setupPiSandbox>) {
+  if (runner === "install.sh") return runInstallSh(s.sandbox, PI_INSTALL_ARGS, s.env);
+  const root = mkdtempSync(join(tmpdir(), "plannotator-ps-pi-test-"));
+  const driverPath = join(root, "driver.ps1");
+  const body =
+    runner === "install.ps1"
+      ? [
+          `$ErrorActionPreference = "Stop"`,
+          `$latestTag = "v${PI_RELEASE}"`,
+          extractPs1PiRegion(),
+          "Update-PiExtensionIfPresent",
+          "exit 0",
+        ]
+      : [extractCmdPiCommand()];
+  writeFileSync(driverPath, body.join("\n"));
+  const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+    env: {
+      PATH: `${s.sandbox.stub}:/usr/bin:/bin`,
+      HOME: s.sandbox.home,
+      USERPROFILE: s.sandbox.home,
+      TMPDIR: join(s.sandbox.home, "tmp"),
+      PLN_PI_TARGET: `v${PI_RELEASE}`,
+      ...s.env,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+const UPDATE_LATER = `To update it: pi update ${PI_SOURCE}`;
+
+function piStepTests(runner: PiRunner) {
+  const timeout = runner === "install.sh" ? undefined : PWSH_SCANNER_TIMEOUT_MS;
+
+  test(`${runner}: an existing install that pi install would leave stale is moved by pi update`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_RELEASE });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain(`Updating Pi extension...\nUpdated ${PI_SOURCE}\nPi extension updated to ${PI_RELEASE}.\n`);
+    expect(r.out).not.toContain("still");
+  }, timeout);
+
+  test(`${runner}: a Pi without a working pi update falls back to pi install and reads the global copy`, () => {
+    const s = setupPiSandbox({
+      source: PI_SOURCE,
+      installed: PI_OLDER,
+      where: "global",
+      latest: PI_RELEASE,
+      update: "missing",
+      installMoves: true,
+    });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`, `install ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain(`Pi extension updated to ${PI_RELEASE}.`);
+  }, timeout);
+
+  test(`${runner}: a first install runs pi install, as before`, () => {
+    const s = setupPiSandbox({ source: null, installed: null, latest: PI_RELEASE });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`install ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain("Installing Pi extension...");
+    expect(r.out).toContain(`Pi extension installed (${PI_RELEASE}).`);
+    expect(r.out).not.toContain("Updating Pi extension");
+  }, timeout);
+
+  test(`${runner}: a first install that npm settles on an older version is moved by pi update`, () => {
+    const s = setupPiSandbox({ source: null, installed: null, latest: PI_RELEASE, installPicks: PI_OLDER });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`install ${PI_SOURCE}`, `update ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_RELEASE);
+    expect(r.out).toContain(`Pi extension installed (${PI_RELEASE}).`);
+  }, timeout);
+
+  test(`${runner}: still behind because the registry lacks the release: says so, never "updated"`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_OLDER, npmView: "e404" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.version()).toBe(PI_OLDER);
+    expect(r.out).toContain(
+      `Pi extension: still ${PI_OLDER} (${PI_RELEASE} is not on your npm registry yet). Run this later: pi update ${PI_SOURCE}\n`,
+    );
+    // A registry that never answers must not hold the install for minutes: one try, 10 s.
+    expect(s.npmViews()).toEqual([
+      `view @plannotator/pi-extension@${PI_RELEASE} version --fetch-timeout=10000 --fetch-retries=0`,
+    ]);
+    expect(r.out).not.toContain("Pi extension updated");
+    expect(r.out).not.toContain("already up to date");
+  }, timeout);
+
+  test(`${runner}: still behind for a reason it can't see: the release and the command`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_RELEASE, update: "fail", npmView: "offline" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`, `install ${PI_SOURCE}`]);
+    expect(s.version()).toBe(PI_OLDER);
+    expect(r.out).toContain(`Pi extension: still ${PI_OLDER} (this release is ${PI_RELEASE}). ${UPDATE_LATER}\n`);
+    expect(r.out).not.toContain("Pi extension updated");
+  }, timeout);
+
+  test(`${runner}: a version that can't be read is not called updated, and nothing is removed`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: "garbled", latest: PI_RELEASE, update: "fail" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`, `install ${PI_SOURCE}`]);
+    expect(existsSync(join(s.pkg, "package.json"))).toBe(true);
+    expect(r.out).toContain(`Pi extension: could not read its installed version. ${UPDATE_LATER}\n`);
+    expect(r.out).not.toContain("Pi extension updated");
+  }, timeout);
+
+  test(`${runner}: a version pinned in Pi's settings is left alone, with the command that moves it`, () => {
+    const s = setupPiSandbox({ source: `${PI_SOURCE}@${PI_OLDER}`, installed: PI_OLDER, latest: PI_RELEASE });
+    const before = s.settingsText();
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([]);
+    expect(s.settingsText()).toBe(before);
+    expect(s.version()).toBe(PI_OLDER);
+    expect(r.out).toContain(
+      `Pi extension: pinned to ${PI_OLDER} in Pi's settings, left as is. To move it: pi install ${PI_SOURCE}@${PI_RELEASE}\n`,
+    );
+  }, timeout);
+
+  test(`${runner}: already on the release: says so, with the version`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_RELEASE, latest: PI_RELEASE });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Pi extension already up to date (${PI_RELEASE}).`);
+    expect(r.out).not.toContain("Pi extension updated");
+  }, timeout);
+
+  test(`${runner}: honors PI_CODING_AGENT_DIR with ~ expanded, as Pi does`, () => {
+    const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_OLDER, latest: PI_RELEASE, agentDirEnv: "~/custom-pi" });
+    const r = runPiStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`update ${PI_SOURCE}`]);
+    expect(r.out).toContain(`Pi extension updated to ${PI_RELEASE}.`);
+  }, timeout);
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh updates the Pi extension to the release (fake pi, sandbox HOME, #902)",
+  () => {
+    piStepTests("install.sh");
+
+    test("the closing PI USERS section tells install and update apart", () => {
+      const s = setupPiSandbox({ source: PI_SOURCE, installed: PI_RELEASE, latest: PI_RELEASE });
+      const r = runInstallSh(s.sandbox, PI_INSTALL_ARGS, s.env);
+      expect(r.code).toBe(0);
+      const section = r.out.slice(r.out.indexOf("  PI USERS"));
+      expect(section).toContain(`  pi install ${PI_SOURCE}\n`);
+      expect(section).toContain(`  pi update ${PI_SOURCE}\n`);
+    });
+
+    test("no pi on PATH: no Pi step and no PI USERS section", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all" });
+      const r = runInstallSh(sandbox, PI_INSTALL_ARGS, { PLANNOTATOR_DATA_DIR: join(sandbox.home, "plannotator-data") });
+      expect(r.code).toBe(0);
+      expect(r.out).not.toContain("Pi extension");
+      expect(r.out).not.toContain("PI USERS");
+    });
+  },
+);
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "Windows installers update the Pi extension to the release (PowerShell, fake pi, #902)",
+  () => {
+    piStepTests("install.ps1");
+    piStepTests("install.cmd");
+  },
+);
+
+describe("install.cmd's Pi step", () => {
+  test("runs as a subroutine called outside any parenthesized block", () => {
+    expect(readScript("install.cmd")).toContain("where pi >nul 2>&1\nif !ERRORLEVEL! equ 0 call :UpdatePiExtension\n");
+  });
+
+  test("its PowerShell carries nothing cmd.exe would reinterpret", () => {
+    expect(extractCmdPiCommand()).not.toMatch(/["%!^]/);
+  });
+});

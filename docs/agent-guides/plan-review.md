@@ -269,6 +269,18 @@ byte-identical while reviews open, close and outlive `/reload`, and identical
 again with a bus that throws; the pair per entry point and outcome) and the
 session-event cases in `plannotator-events.test.ts`.
 
+**An update while a review is open keeps the decision.** The extension's lazy
+imports go through `importFresh`, which refuses an import once the package on
+disk is a different version than the one Pi loaded. The prompts a decision is
+written with (`generated/prompts.ts`) therefore load when a review opens
+(`preloadDecisionPrompts()` in `trackReview` and the plan review path), not
+when the decision arrives: loaded late, an update under an open review lost
+the reviewer's feedback ("could not be sent: Plannotator was updated…", 5 of 5
+times on a real Pi 0.84.4 with `pi update --extensions`). A new lazy import on
+a decision path needs the same preload. Proof:
+`apps/pi-extension/review-survives-update.test.ts` (annotate and code review
+over a copy of the extension whose `package.json` changes mid-review).
+
 **The checklist widget scrolls (#1412).** Pi draws at most 10 lines of a
 widget (`InteractiveMode.MAX_WIDGET_LINES`), so `updateWidget` sends
 `checklistWindow(checklistItems)` (`apps/pi-extension/checklist-window.ts`):

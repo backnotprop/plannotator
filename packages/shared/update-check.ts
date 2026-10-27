@@ -26,7 +26,7 @@
  * Node-only (node:fs + global fetch), vendored to Pi.
  */
 
-import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "./data-dir";
 
@@ -50,6 +50,27 @@ export const RELEASE_CHECK_RATE_LIMITED_RETRY_MS = 6 * 60 * 60 * 1000;
  * names, kept between RELEASE_CHECK_RETRY_MS and this; this when it names none.
  */
 export const RELEASE_PAGE_RATE_LIMITED_RETRY_MS = 60 * 60 * 1000;
+/**
+ * After the check has failed this long without one success (both sources
+ * refused, offline, a proxy, a state file that cannot be written), the
+ * surfaces say so plainly, with the install command that always works:
+ * Settings → About and the sidebar in the Inbox, the Options menu of a review
+ * window, the terminal hint. Shorter failures stay quiet (a laptop waking up,
+ * a train, a brief outage).
+ */
+export const RELEASE_CHECK_FAILING_AFTER_MS = 3 * 60 * 60 * 1000;
+/**
+ * "Can't check" shows only while the latest failure is this recent: a check
+ * retries 10 minutes after a failure (at most an hour after the page's rate
+ * limit), so an older one means nothing has checked since (the machine
+ * slept, checks were off). The run itself (`failingSince`) is kept across
+ * such gaps until a check succeeds, each gap counting as at most this much
+ * (`failingFor`): a machine that checks only every couple of hours (a review
+ * window now and then, a laptop that sleeps a lot) still reaches
+ * RELEASE_CHECK_FAILING_AFTER_MS within three failed checks, and one failure
+ * right after a week asleep does not.
+ */
+export const RELEASE_CHECK_FAILURE_RECENT_MS = 90 * 60 * 1000;
 /** update.log is moved to update.log.1 (one generation kept) once it passes this. */
 export const UPDATE_LOG_MAX_BYTES = 1024 * 1024;
 /** Each request gives up after this. */
@@ -157,6 +178,18 @@ export interface UpdateState {
      * whatever triggers it. Cleared by a success.
      */
     pageRetryAt?: number;
+    /**
+     * When the current run of failed checks began (cleared by a success, kept
+     * across the claim of the next attempt): what "can't check since" names.
+     */
+    failingSince?: number;
+    /**
+     * How long the run has been failing as of its latest failure (`failedAt`),
+     * each gap between two failures counted as at most
+     * RELEASE_CHECK_FAILURE_RECENT_MS: checks hours apart still add up to
+     * RELEASE_CHECK_FAILING_AFTER_MS, a sleep counts as no more than that.
+     */
+    failingFor?: number;
     /** Failed checks in a row; update.log gets a line only when the error changes. */
     failures?: number;
     /** The errors the last logged failure named, whichever source: what "changes" compares. */
@@ -204,22 +237,80 @@ export function updateCheckPaths(dataDir: string = getPlannotatorDataDir()) {
   };
 }
 
-export function readUpdateState(dataDir?: string): UpdateState {
+/**
+ * This process's own changes that update-state.json could not take (a
+ * read-only data dir, a root-owned file, a folder in its place): `base` is the
+ * file as it read when the write failed, `mine` the state this process meant
+ * to write. Only the fields that differ between them are this process's, so
+ * the throttle, the cache and the run of failures live in memory (the machine
+ * still checks, every 10 minutes at most per process, and still shows what it
+ * learns) while every other field is read from the file as other processes
+ * keep it. Every later write tries the file again; the first that lands
+ * clears this.
+ */
+const unwrittenStates = new Map<string, { base: UpdateState; mine: UpdateState }>();
+/** The paths whose failed write update.log already named (once per run of failures). */
+const unwrittenLogged = new Set<string>();
+
+function readUpdateStateFile(path: string): UpdateState {
   try {
-    const raw = JSON.parse(readFileSync(updateCheckPaths(dataDir).state, "utf-8"));
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
     return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as UpdateState) : {};
   } catch {
     return {};
   }
 }
 
-/** Atomic write (temp + rename). */
+export function readUpdateState(dataDir?: string): UpdateState {
+  const path = updateCheckPaths(dataDir).state;
+  const disk = readUpdateStateFile(path);
+  const unwritten = unwrittenStates.get(path);
+  if (!unwritten) return disk;
+  // The file as it is now, with this process's unwritten changes over it.
+  const merged: Record<string, unknown> = { ...disk };
+  const base = unwritten.base as Record<string, unknown>;
+  const mine = unwritten.mine as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(base), ...Object.keys(mine)])) {
+    if (JSON.stringify(base[key]) === JSON.stringify(mine[key])) continue;
+    if (mine[key] === undefined) delete merged[key];
+    else merged[key] = structuredClone(mine[key]);
+  }
+  return merged as UpdateState;
+}
+
+/**
+ * Atomic write (temp + rename). Never throws: when the file cannot be written
+ * this process's changes are kept in memory (see unwrittenStates) and
+ * update.log says so once; the next write tries the file again. A caller
+ * writes what it read with readUpdateState (patchUpdateState), so a write
+ * that lands carries the file's other fields as they are now.
+ */
 export function writeUpdateState(state: UpdateState, dataDir?: string): void {
   const { state: path } = updateCheckPaths(dataDir);
-  mkdirSync(join(path, ".."), { recursive: true });
   const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf-8");
-  renameSync(tmp, path);
+  try {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(state, null, 2) + "\n", "utf-8");
+    renameSync(tmp, path);
+    unwrittenStates.delete(path);
+    unwrittenLogged.delete(path);
+  } catch (err) {
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    if (!unwrittenLogged.has(path)) {
+      unwrittenLogged.add(path);
+      updateLog(`could not write update-state.json (${err instanceof Error ? err.message : String(err)}); keeping this process's changes in memory and trying again on the next write`, dataDir);
+    }
+    unwrittenStates.set(path, { base: readUpdateStateFile(path), mine: structuredClone(state) });
+  }
+}
+
+/** Tests only: forget what an unwritable state file kept in memory. */
+export function forgetUnwrittenUpdateStateForTests(dataDir?: string): void {
+  const path = updateCheckPaths(dataDir).state;
+  unwrittenStates.delete(path);
+  unwrittenLogged.delete(path);
 }
 
 /** Read, change, write: the change sees the file as it is now, not as a caller read it earlier. */
@@ -264,6 +355,86 @@ export function knownLatestRelease(state: UpdateState): { version: string; fetch
     fetchedAt: cached.fetchedAt,
     ...(typeof cached.publishedAt === "string" && { publishedAt: cached.publishedAt }),
   };
+}
+
+/**
+ * Whether a "Remind me tomorrow" still hides `version`: only until its time,
+ * and never longer than a day from now, so one written while the clock was
+ * ahead cannot hide the update until the clock catches up.
+ */
+export function isSnoozed(state: UpdateState, version: string, now: number): boolean {
+  const snooze = state.snooze;
+  if (!snooze || typeof snooze.until !== "number" || !Number.isFinite(snooze.until)) return false;
+  if (normalizeStableVersion(snooze.version) !== normalizeStableVersion(version)) return false;
+  return snooze.until > now && snooze.until - now <= UPDATE_SNOOZE_MS;
+}
+
+/** The check has been failing for a while: since when and why. */
+export interface ReleaseCheckFailing {
+  since: number;
+  error: string;
+}
+
+/**
+ * The check has failed for at least RELEASE_CHECK_FAILING_AFTER_MS with no
+ * success in between (`failingSince`, cleared by any success), or null. A
+ * stamp in the future (a clock that moved back) is no failure.
+ */
+export function releaseCheckFailing(state: UpdateState, now: number): ReleaseCheckFailing | null {
+  const check = state.releaseCheck;
+  const since = check?.failingSince;
+  if (typeof since !== "number" || !Number.isFinite(since) || since > now) return null;
+  // Only a run that is still going: the latest attempt failed (or is in
+  // flight right after a failure), recently. A laptop that slept since its
+  // last failure, or checks turned back on after weeks, has not failed yet:
+  // the next check decides, never an old run.
+  // An attempt claimed since (in flight, or its process gone mid-request)
+  // changes nothing until it answers: a success clears `failingSince`.
+  const failedAt = check?.failedAt;
+  if (typeof failedAt !== "number" || !Number.isFinite(failedAt) || failedAt > now) return null;
+  if (now - failedAt > RELEASE_CHECK_FAILURE_RECENT_MS) return null;
+  // How long it has failed: up to its latest failure (gaps capped), then the
+  // time since (under RELEASE_CHECK_FAILURE_RECENT_MS here). A state without
+  // `failingFor` counts from `failingSince`.
+  const upToFailure =
+    typeof check?.failingFor === "number" && Number.isFinite(check.failingFor) && check.failingFor >= 0
+      ? check.failingFor
+      : Math.max(0, failedAt - since);
+  if (upToFailure + (now - failedAt) < RELEASE_CHECK_FAILING_AFTER_MS) return null;
+  // Another process (one that predates failingSince) may have succeeded since.
+  const fetchedAt = state.latestRelease?.fetchedAt;
+  if (typeof fetchedAt === "number" && fetchedAt >= since && fetchedAt <= now) return null;
+  return { since, error: plainCheckError(typeof check?.error === "string" && check.error ? check.error : "the check failed") };
+}
+
+/**
+ * The stored reason a check failed (update.log's words: "page: HTTP 200; api:
+ * HTTP 403, rate limited"), in words a person reads: "release page didn't
+ * answer as expected; GitHub API rate-limited". Any reason it does not know
+ * (an older version's) still reads as a reason, never as a status code.
+ */
+export function plainCheckError(raw: string): string {
+  const words = raw
+    .split(/;\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const tagged = /^(page|api):\s*([\s\S]*)$/.exec(part);
+      const source = tagged?.[1];
+      let error = tagged ? tagged[2] : part;
+      const limited = /,\s*rate limited$/.test(error);
+      error = error.replace(/,\s*rate limited$/, "");
+      const who = source === "api" ? "GitHub API" : source === "page" ? "release page" : "GitHub";
+      if (error === "no release page source") return "";
+      if (error === "the check failed") return error;
+      if (limited || error === "HTTP 429") return `${who} rate-limited`;
+      if (/^not a stable version|not a stable release/.test(error)) return `${who} named no stable release`;
+      if (/^HTTP \d+$|^redirect to|^no tag_name/.test(error)) return `${who} didn't answer as expected`;
+      if (/tim(?:ed|e)\s*out|timeout|aborted/i.test(error)) return `${who} took too long to answer`;
+      return `couldn't reach ${source ? `the ${who}` : who}`;
+    })
+    .filter(Boolean);
+  return [...new Set(words)].join("; ") || "the check failed";
 }
 
 /**
@@ -501,7 +672,10 @@ export function versionFromLatestRedirect(requestUrl: string, location: string |
     const base = from.pathname.replace(/\/+$/, "");
     if (!base.endsWith("/latest")) return null;
     const prefix = `${base.slice(0, -"latest".length)}tag/`;
-    if (!to.pathname.startsWith(prefix)) return null;
+    // GitHub may spell the owner or repository in another case; a mirror
+    // (PLANNOTATOR_UPDATE_LATEST_URL) is read exactly as it answers.
+    const caseless = from.hostname === "github.com";
+    if (!(caseless ? to.pathname.toLowerCase().startsWith(prefix.toLowerCase()) : to.pathname.startsWith(prefix))) return null;
     const tag = decodeURIComponent(to.pathname.slice(prefix.length)).replace(/\/+$/, "");
     if (!/^v?\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(tag)) return null;
     return normalizeStableVersion(tag);
@@ -655,7 +829,7 @@ export async function runReleaseCheck(deps: ReleaseCheckDeps): Promise<ReleaseCh
     }
     // Claim the attempt before the network call so concurrent starts ask once.
     // The API's own back-off is kept: it is separate from the page's cadence.
-    state = patchUpdateState((s) => ({ ...s, releaseCheck: { ...apiBackoff(s), attemptedAt: now } }), dataDir);
+    state = patchUpdateState((s) => ({ ...s, releaseCheck: { ...apiBackoff(s), ...failingStreak(s), attemptedAt: now } }), dataDir);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     updateLog(`could not write update-state.json: ${error}`, dataDir);
@@ -673,12 +847,28 @@ export async function runReleaseCheck(deps: ReleaseCheckDeps): Promise<ReleaseCh
     if (deps.force || isApiFallbackDue(state, now)) {
       source = "api";
       try {
-        patchUpdateState((s) => ({ ...s, releaseCheck: { ...apiBackoff(s), attemptedAt: now, apiAttemptedAt: now } }), dataDir);
+        patchUpdateState((s) => ({ ...s, releaseCheck: { ...apiBackoff(s), ...failingStreak(s), attemptedAt: now, apiAttemptedAt: now } }), dataDir);
       } catch {}
       result = await (deps.fetchRelease ?? (() => fetchLatestRelease()))();
     } else if (page.skipped) {
       // Only the API may be asked (a mirror or a test fake) and it is not due:
-      // nothing was asked, so nothing failed.
+      // nothing was asked, so nothing failed. A run of failures waiting out
+      // the API's back-off is still failing, though: say so (failedAt), so it
+      // is not taken for a check that went quiet.
+      if (typeof previous?.failingSince === "number") {
+        patchUpdateState(
+          (s) => ({
+            ...s,
+            releaseCheck: {
+              ...(s.releaseCheck ?? { attemptedAt: now }),
+              ...failingRunOf(s, previous, true, now),
+              failedAt: now,
+              ...(previous.error && { error: previous.error }),
+            },
+          }),
+          dataDir,
+        );
+      }
       return { outcome: "fresh", version: knownLatestRelease(state)?.version ?? null };
     }
   }
@@ -728,6 +918,8 @@ export async function runReleaseCheck(deps: ReleaseCheckDeps): Promise<ReleaseCh
             attemptedAt: now,
             failedAt: now,
             error: summary,
+            // The run of failures began at the first one (kept across claims; a success clears it).
+            ...failingRunOf(s, previous, failedBefore, now),
             failures,
             logged,
             ...(rateLimited && { apiRetryAt: now + apiWait }),
@@ -770,6 +962,48 @@ export async function runReleaseCheck(deps: ReleaseCheckDeps): Promise<ReleaseCh
     );
   } catch {}
   return { outcome: "checked", version };
+}
+
+/** The current run of failures (and its error), carried across the claim of the next attempt. */
+function failingStreak(state: UpdateState): Pick<NonNullable<UpdateState["releaseCheck"]>, "failingSince" | "failingFor" | "error" | "failedAt"> {
+  const check = state.releaseCheck;
+  if (typeof check?.failingSince !== "number") return {};
+  return {
+    failingSince: check.failingSince,
+    ...(typeof check.failingFor === "number" && { failingFor: check.failingFor }),
+    ...(typeof check.error === "string" && { error: check.error }),
+    // When the run's last failure was (earlier than the new attempt, so the
+    // back-off rules read the attempt as in flight, not failed).
+    ...(typeof check.failedAt === "number" && { failedAt: check.failedAt }),
+  };
+}
+
+/**
+ * The run of failures that this one continues: when it began (kept across
+ * any gap between checks, hours apart or a sleep, until a check succeeds,
+ * which clears it) and how long it has failed as of now, each gap since the
+ * previous failure counted as at most RELEASE_CHECK_FAILURE_RECENT_MS.
+ * Whether it shows is releaseCheckFailing's call. A state written by a
+ * version without `failingSince` (or another process's claim in between)
+ * counts from the earlier failure it records.
+ */
+function failingRunOf(
+  state: UpdateState,
+  previous: UpdateState["releaseCheck"],
+  failedBefore: boolean,
+  now: number,
+): { failingSince: number; failingFor: number } {
+  const check = state.releaseCheck;
+  const recorded = check?.failingSince ?? previous?.failingSince;
+  let since: number | null = null;
+  if (typeof recorded === "number" && Number.isFinite(recorded) && recorded <= now) since = recorded;
+  else if (failedBefore && typeof previous?.failedAt === "number" && previous.failedAt <= now) since = previous.failedAt;
+  if (since === null) return { failingSince: now, failingFor: 0 };
+  const lastFailure = check?.failedAt ?? previous?.failedAt;
+  const last = typeof lastFailure === "number" && Number.isFinite(lastFailure) && lastFailure >= since && lastFailure <= now ? lastFailure : since;
+  const before = check?.failingFor ?? previous?.failingFor;
+  const upToLast = typeof before === "number" && Number.isFinite(before) && before >= 0 ? before : last - since;
+  return { failingSince: since, failingFor: upToLast + Math.min(now - last, RELEASE_CHECK_FAILURE_RECENT_MS) };
 }
 
 /** The API fallback's own back-off, carried across every write of `releaseCheck`. */
@@ -1014,8 +1248,8 @@ export function installCommandFor(platform: NodeJS.Platform, flags: readonly Ins
  * What updating means for the host that launched this server:
  *  - `script`: the binary the install script manages; one click runs it.
  *  - `copy`: a binary the script does not manage; the page offers the command.
- *  - `pi`: the Pi extension (npm): `pi update --extensions`, then restart Pi.
- *  - `opencode`: the install script again (it clears OpenCode's plugin cache), then restart OpenCode.
+ *  - `pi`: the Pi extension (npm): `pi update --extensions`, then `/reload` in Pi.
+ *  - `opencode`: the install script again (it clears OpenCode's plugin cache), then `opencode2 reload` (OpenCode 1: restart it).
  */
 export type UpdateAction = "script" | "copy" | "pi" | "opencode";
 
@@ -1051,6 +1285,22 @@ export function buildUpdateAdvert(input: {
 }
 
 /**
+ * What a server tells its page when checking has failed for hours
+ * (`updateCheckFailing`, beside `updateAvailable`, never with it): when it
+ * began, why, and the command that updates without the check.
+ */
+export interface UpdateCheckFailingAdvert {
+  since: string;
+  error: string;
+  command: string;
+}
+
+export function buildUpdateCheckFailing(state: UpdateState, now: number, command: string): UpdateCheckFailingAdvert | null {
+  const failing = releaseCheckFailing(state, now);
+  return failing ? { since: new Date(failing.since).toISOString(), error: failing.error.slice(0, 200), command } : null;
+}
+
+/**
  * The terminal hint (stderr, TTY only, at most once a day), read from the
  * cache. Returns the line to print and records that it printed, or null.
  */
@@ -1059,6 +1309,9 @@ export function takeUpdateHint(input: {
   enabled: boolean;
   now: number;
   dataDir?: string;
+  platform?: NodeJS.Platform;
+  /** The running binary is the install script's. False (brew, nix, a copy): it updates the way it was installed. Default true. */
+  managed?: boolean;
 }): string | null {
   if (!input.enabled) return null;
   const current = normalizeStableVersion(input.current);
@@ -1066,11 +1319,22 @@ export function takeUpdateHint(input: {
   try {
     const state = readUpdateState(input.dataDir);
     const latest = knownLatestRelease(state);
-    if (!latest || !isNewerStableVersion(latest.version, current)) return null;
+    const newer = !!latest && isNewerStableVersion(latest.version, current);
+    // Checking has failed for hours: say so, with the command that always works.
+    const failing = newer ? null : releaseCheckFailing(state, input.now);
+    if (!newer && !failing) return null;
     const last = state.hintShownAt;
     if (typeof last === "number" && last <= input.now && input.now - last < UPDATE_HINT_INTERVAL_MS) return null;
     patchUpdateState((s) => ({ ...s, hintShownAt: input.now }), input.dataDir);
-    return `Plannotator ${latest.version} is available (you have ${current}). Update: plannotator update`;
+    if (failing) {
+      const since = `${new Date(failing.since).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+      if (input.managed === false) {
+        return `Plannotator can't check for updates since ${since} (${failing.error}). This copy was not installed by the install script: update it the way you installed it.`;
+      }
+      const command = installCommandFor(input.platform ?? process.platform, readInstallFlags(input.dataDir).flags);
+      return `Plannotator can't check for updates since ${since} (${failing.error}). To update: ${command}`;
+    }
+    return `Plannotator ${latest!.version} is available (you have ${current}). Update: plannotator update`;
   } catch {
     return null;
   }

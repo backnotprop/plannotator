@@ -11,7 +11,7 @@ import { Viewer } from '@plannotator/ui/components/Viewer';
 import { ImageResolverContext, type ImageResolution } from '@plannotator/ui/components/ImageResolverContext';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxHealth } from '@plannotator/core/inbox-types';
-import { whatsNewImageUrl, type UpdateDetails, type UpdateSwitches, type WhatsNewModel } from '../api';
+import { whatsNewImageUrl, type UpdateCheckFailing, type UpdateDetails, type UpdateSwitches, type WhatsNewModel } from '../api';
 import { clockTime, dayWords, formatCount, tildePath, whenTime } from '../format';
 import { Icon } from '../icons';
 import { CopyButton } from './ConnectPicker';
@@ -315,8 +315,8 @@ export function UpdateDialog({ details, update, error, busy, onUpdateNow, onRemi
       ) : (
         managed && (
           <p className="ib-sum ib-quietline">
-            It also updates the Claude Code plugin when it is installed, and OpenCode&apos;s cached plugin: restart those agents
-            afterwards. Pi: run <code>pi update --extensions</code>.
+            It also updates the Claude Code plugin when it is installed, and OpenCode&apos;s cached plugin: reload those agents
+            afterwards (Settings, Agents says which). Pi: run <code>pi update --extensions</code>, then <code>/reload</code>.
           </p>
         )
       )}
@@ -662,6 +662,181 @@ function SkippedReleases({ since, skipped }: { since: string; skipped: WhatsNewM
   );
 }
 
+// ──────────────────────── Checking for updates is failing ────────────────────────
+
+/** "can't check for updates since 9:14 AM (GitHub API rate-limited)", from the server's failing record. */
+export function checkFailingWords(failing: UpdateCheckFailing): string {
+  const day = dayWords(failing.since);
+  const when = day === 'today' ? clockTime(failing.since) : day === 'yesterday' ? `yesterday ${clockTime(failing.since)}` : day;
+  return `can't check for updates since ${when} (${failing.error})`;
+}
+
+/**
+ * The command that updates without the check (the install script finds the
+ * newest release by itself), shown wherever checking is failing.
+ */
+export function CheckFailingCommand({ command }: { command: string }) {
+  return (
+    <div className="ib-chkfail" data-update-check-failing="">
+      <span>The install script finds the newest release by itself. To update now, run:</span>
+      <CommandRow text={command} />
+    </div>
+  );
+}
+
+/**
+ * The sidebar's quiet row while checking for updates has failed for hours
+ * and no Update button shows: "Can't check for updates", opening Settings →
+ * About, which says why and gives the command. Never the error colour.
+ */
+export function CheckFailingRow({ failing, onOpen }: { failing: UpdateCheckFailing; onOpen: () => void }) {
+  return (
+    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-update-check-failing-row="" onClick={onOpen}>
+      <Icon name="info" />
+      <span className="ib-rw-label">Can&apos;t check for updates</span>
+      <span className="ib-sr">. {checkFailingWords(failing).replace(/^./, (c) => c.toUpperCase())}. Opens Settings, About.</span>
+    </button>
+  );
+}
+
+/** "today 2:57 PM", "yesterday 2:57 PM", "Oct 3": when something happened. */
+function whenWords(iso: string): string {
+  const day = dayWords(iso);
+  return day === 'today' || day === 'yesterday' ? `${day} ${clockTime(iso)}` : day;
+}
+
+/**
+ * "Can't check for updates since 9:14 AM (…) · last tried 2:50 PM": the
+ * failing line as Settings → General and About both show it.
+ */
+function checkFailingStatus(failing: UpdateCheckFailing, details: UpdateDetails | null): string {
+  const tried = details?.check.last_attempt_at ? ` · last tried ${whenWords(details.check.last_attempt_at)}` : '';
+  return `${checkFailingWords(failing).replace(/^./, (c) => c.toUpperCase())}${tried}`;
+}
+
+/** A successful check this recent backs "Up to date". */
+export const UP_TO_DATE_FRESH_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * What the last checks say, in words that claim nothing they cannot back:
+ * "Up to date" only after a recent successful check with checks on; else
+ * checks off, failing for hours (with when it last tried), the last check
+ * failed, when it last checked, or not checked yet. `news`: an update is
+ * known or in progress, so never "Up to date".
+ */
+export function checkStatusWords(details: UpdateDetails | null, news: boolean, now: number = Date.now()): string {
+  if (!details) return '';
+  const check = details.check;
+  if (!check.on) return 'Update checks are off';
+  if (check.failing) return checkFailingStatus(check.failing, details);
+  if (check.last_failed_at) return `Last check failed ${whenWords(check.last_failed_at)}${check.error ? ` (${check.error})` : ''}`;
+  const ok = details.latest?.fetched_at ?? null;
+  const okAt = ok ? Date.parse(ok) : NaN;
+  if (ok && Number.isFinite(okAt) && now - okAt < UP_TO_DATE_FRESH_MS && okAt - now < 60_000) {
+    return news ? `Checked ${whenWords(ok)}` : `Up to date · checked ${whenWords(ok)}`;
+  }
+  if (ok) return `Last checked ${whenWords(ok)}`;
+  return 'Not checked yet';
+}
+
+// ───────────────────────────── Settings → General ─────────────────────────────
+
+/**
+ * The first row of Settings → General (the owner, 2026-10-26: "the update
+ * button to also show up in the general part of settings"): the version this
+ * Inbox runs and the same action the sidebar's Update button offers, plus
+ * Check now; the failing-check line with the install command when checking
+ * fails. The page never renders it when opened over the tailnet.
+ */
+export function GeneralUpdateRow({
+  version,
+  details,
+  update,
+  restarting,
+  checking,
+  failing,
+  onCheckNow,
+  onUpdate,
+  onWhatsNew,
+}: {
+  version: string;
+  details: UpdateDetails | null;
+  update: InboxHealth['update'];
+  restarting: boolean;
+  checking: boolean;
+  failing: UpdateCheckFailing | null;
+  onCheckNow: () => void;
+  onUpdate: () => void;
+  onWhatsNew: (version: string) => void;
+}) {
+  const known = details?.latest && newerThan(details.latest.version, version) ? details.latest.version : null;
+  const busy = restarting || update?.state === 'updating';
+  let status: ReactNode;
+  if (version === 'dev') status = 'A development build';
+  else if (restarting && update) status = `Restarting into ${update.version}…`;
+  else if (update?.state === 'updating') status = `Installing ${update.version}…`;
+  else if (update?.state === 'ready') status = `${update.version} is installed · restart to use it`;
+  else if (update?.state === 'failed') status = `${update.version} didn't install`;
+  else if (update?.state === 'available')
+    status = (
+      <>
+        {update.version} is available ·{' '}
+        <button type="button" className="ib-lnk" onClick={() => onWhatsNew(update.version)}>
+          What&apos;s new
+        </button>
+      </>
+    );
+  else if (failing) status = checkFailingStatus(failing, details);
+  // A newer release known but not offered (checks off, or Remind me tomorrow): never "Up to date".
+  else status = [checkStatusWords(details, !!known), known && `${known} is available`].filter(Boolean).join(' · ');
+  const label = restarting
+    ? 'Restarting…'
+    : update?.state === 'updating'
+      ? 'Updating…'
+      : update?.state === 'failed'
+        ? 'Update failed…'
+        : update
+          ? `Update to ${update.version}`
+          : null;
+  return (
+    <section className="ib-sgroup ib-sgroup-first" data-settings-update="" data-update-state={restarting ? 'restarting' : (update?.state ?? (failing ? 'check-failing' : 'none'))} aria-label="Plannotator version">
+      <div className="ib-card">
+        <div className="ib-prow">
+          <span className="ib-tile">
+            <Icon name="inbox" />
+          </span>
+          <span className="ib-txt">
+            <span className="ib-l">Plannotator {version}</span>
+            <span className="ib-desc" data-general-update-status="">
+              {status}
+            </span>
+          </span>
+          <span className="ib-ctl">
+            {label && (
+              <button
+                type="button"
+                className={`ib-btn ib-sm${update?.state === 'failed' ? '' : ' ib-pri'}`}
+                onClick={onUpdate}
+                disabled={busy}
+                data-general-update=""
+              >
+                {busy && <span className="ib-spin" aria-hidden="true" />}
+                {label}
+              </button>
+            )}
+            {!busy && (
+              <button type="button" className="ib-btn ib-sm" onClick={onCheckNow} disabled={checking || version === 'dev'} data-general-check="">
+                {checking ? 'Checking…' : 'Check now'}
+              </button>
+            )}
+          </span>
+        </div>
+      </div>
+      {failing && !update && details && <CheckFailingCommand command={details.command} />}
+    </section>
+  );
+}
+
 // ───────────────────────────── Settings → About ─────────────────────────────
 
 /**
@@ -697,16 +872,14 @@ export function AboutBlock({
   where?: { data: string; mcpUrl: string; mcpCommand: string } | null;
 }) {
   const latest = details?.latest;
-  const last = details?.check.last_attempt_at;
+  const failing = details?.check.failing ?? null;
+  // What is happening with the version, beside what the checks say (checkStatusWords).
   let status = '';
   if (version === 'dev') status = 'a development build';
-  else if (details?.check.error) status = `the last check failed: ${details.check.error}`;
   else if (details?.update?.state === 'updating') status = `installing ${details.update.version}`;
   else if (details?.update?.state === 'ready') status = `${details.update.version} is installed; restart to use it`;
   else if (latest && newerThan(latest.version, version)) status = `${latest.version} is available`;
-  else if (last) status = 'up to date';
-  const day = last ? dayWords(last) : '';
-  const checked = !last ? 'not checked yet' : day === 'today' || day === 'yesterday' ? `checked ${day} ${clockTime(last)}` : `checked ${day}`;
+  const checked = version === 'dev' ? 'not checked' : checkStatusWords(details, status !== '');
   const checks = switches?.update_check;
   const auto = switches?.auto_update;
   const autoSupported = details?.auto_update.supported ?? false;
@@ -801,6 +974,7 @@ export function AboutBlock({
               : `PLANNOTATOR_AUTO_UPDATE is set in this Inbox's environment, so automatic updates are ${auto?.env ? 'on' : 'off'}.`
             : 'Off makes no request to GitHub at all. Check now always asks.'}
         </div>
+        {failing && details && <CheckFailingCommand command={details.command} />}
         {error && <div className="ib-error">{error}</div>}
       </section>
       {where && (

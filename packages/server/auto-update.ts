@@ -33,15 +33,18 @@ import { spawn } from "node:child_process";
 import {
   closeSync,
   existsSync,
+  linkSync,
   openSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
   appendFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { loadConfig, resolveAutoUpdate, resolveUpdateCheck } from "@plannotator/shared/config";
@@ -55,9 +58,13 @@ import {
   installerFlagArgs,
   isAllowedOverrideUrl,
   isNewerStableVersion,
+  installCommandFor,
+  PI_UPDATE_COMMAND,
   knownLatestRelease,
+  normalizeStableVersion,
   parseStableVersion,
   patchUpdateState,
+  releaseCheckFailing,
   readInstallFlags,
   readUpdateState,
   releaseUrlFor,
@@ -65,8 +72,10 @@ import {
   updateLog,
   type FetchReleaseResult,
   type InstallFlagId,
+  buildUpdateCheckFailing,
   type UpdateAction,
   type UpdateAdvert,
+  type UpdateCheckFailingAdvert,
   type UpdateState,
 } from "@plannotator/shared/update-check";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -225,14 +234,154 @@ function log(message: string, dataDir?: string): void {
   updateLog(message, dataDir, "auto-update");
 }
 
-/** Take update.lock, clearing a stale one. False when another run holds it. */
+/**
+ * A grace after the wrapper wrote the lock before its holder may be judged
+ * gone (it is a fresh process group; nothing should race it, but a lock is
+ * never reaped in the instant it was written).
+ */
+export const UPDATE_LOCK_HANDOFF_MS = 5_000;
+
+/**
+ * Whether a lock with this mtime is past its life: older than an hour, or
+ * more than an hour in the FUTURE (the clock moved back after it was taken),
+ * so a lock can never hold "Updating…" until a wrong clock catches up.
+ */
+function lockExpired(mtimeMs: number, now: number = Date.now()): boolean {
+  const age = now - mtimeMs;
+  return age >= AUTO_UPDATE_LOCK_STALE_MS || age <= -AUTO_UPDATE_LOCK_STALE_MS;
+}
+
+/**
+ * Who holds a lock, as the detached POSIX wrapper writes it first thing
+ * (POSIX_WRAPPER): its pid, its process group (it is the group's leader, so
+ * the installer it runs and that installer's children are in it too), and
+ * the machine it runs on. A lock in any other form (the bare pid the taker
+ * writes, a wrapper from before this, the foreground `plannotator update`,
+ * Windows) keeps the hour's rule only.
+ */
+export interface UpdateLockHolder {
+  pid: number;
+  group: number;
+  host: string;
+  boot: string;
+  pidns: string;
+}
+
+export function parseUpdateLockHolder(content: string): UpdateLockHolder | null {
+  const m = /^pid=(\d+) group=(\d+) host=(\S*) boot=(\S*) pidns=(\S*)\s*$/.exec(content);
+  if (!m) return null;
+  const pid = Number(m[1]);
+  const group = Number(m[2]);
+  if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(group) || group <= 1) return null;
+  return { pid, group, host: m[3]!, boot: m[4]!, pidns: m[5]! };
+}
+
+function readTrimmed(path: string): string {
+  try {
+    return readFileSync(path, "utf-8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** This machine as the wrapper names it (uname -n, Linux's boot id and pid namespace). */
+export function thisLockMachine(): { host: string; boot: string; pidns: string } {
+  let pidns = "";
+  try {
+    pidns = readlinkSync("/proc/self/ns/pid");
+  } catch {}
+  return { host: hostname(), boot: readTrimmed("/proc/sys/kernel/random/boot_id"), pidns };
+}
+
+/**
+ * The holder is certainly gone: written by a wrapper on this machine (same
+ * host, boot and pid namespace; anything else, or anything unreadable, is
+ * unknown and keeps the hour's rule), and no process is left in its group.
+ * A wrapper killed alone leaves its installer in the group: still held.
+ */
+function lockHolderGone(content: string, mtimeMs: number, now: number = Date.now(), machine = thisLockMachine()): boolean {
+  if (process.platform === "win32") return false;
+  if (now - mtimeMs < UPDATE_LOCK_HANDOFF_MS) return false;
+  const holder = parseUpdateLockHolder(content);
+  if (!holder || !holder.host) return false;
+  if (holder.host.toLowerCase() !== machine.host.toLowerCase()) return false;
+  if (holder.boot !== machine.boot || holder.pidns !== machine.pidns) return false;
+  try {
+    process.kill(-holder.group, 0);
+    return false;
+  } catch (err) {
+    // EPERM: the group exists, under another user.
+    return (err as NodeJS.ErrnoException)?.code === "ESRCH";
+  }
+}
+
+/**
+ * Remove the lock only if it is still the one judged (same inode and content):
+ * renamed aside first, so a lock another process took in between is never
+ * deleted; if it was not ours, it is put back (link, never over a newer one).
+ */
+export function removeJudgedLock(lockPath: string, judged: { ino: number; content: string }): boolean {
+  const aside = `${lockPath}.reaped.${process.pid}.${Math.random().toString(36).slice(2)}`;
+  try {
+    renameSync(lockPath, aside);
+  } catch {
+    return false;
+  }
+  let same = false;
+  try {
+    same = statSync(aside).ino === judged.ino && readFileSync(aside, "utf-8") === judged.content;
+  } catch {}
+  if (!same) {
+    try {
+      linkSync(aside, lockPath);
+    } catch {}
+  }
+  try {
+    unlinkSync(aside);
+  } catch {}
+  return same;
+}
+
+/** The lock as it is now, or null when there is none. */
+function readLock(lockPath: string): { ino: number; mtimeMs: number; content: string } | null {
+  try {
+    const stat = statSync(lockPath);
+    return { ino: stat.ino, mtimeMs: stat.mtimeMs, content: readFileSync(lockPath, "utf-8") };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A lock whose holder is gone (lockHolderGone): record the install it was
+ * running as failed (exit -1, unless the wrapper recorded a result for it)
+ * and release it, so the Inbox shows Failed with the log and Try again at once
+ * instead of "Updating…" for the rest of the hour. True when it reaped one.
+ */
+export function reapDeadUpdateLock(dataDir?: string): boolean {
+  const paths = autoUpdatePaths(dataDir);
+  const lock = readLock(paths.lock);
+  if (!lock || !lockHolderGone(lock.content, lock.mtimeMs)) return false;
+  if (!removeJudgedLock(paths.lock, lock)) return false;
+  const pending = normalizeStableVersion(readAutoUpdateState(dataDir).pending?.version);
+  const result = readAutoUpdateResult(dataDir);
+  if (pending && normalizeStableVersion(result?.version) !== pending) {
+    try {
+      writeFileSync(paths.result, JSON.stringify({ version: pending, exitCode: -1 }) + "\n");
+    } catch {}
+  }
+  log("the update stopped without finishing (its process group is gone); the lock is released", dataDir);
+  return true;
+}
+
+/** Take update.lock, clearing an expired one or one whose holder is gone. False when another run holds it. */
 export function acquireUpdateLock(lockPath: string): boolean {
   try {
-    if (existsSync(lockPath)) {
+    const lock = readLock(lockPath);
+    if (lock) {
       // Wall clock, not the injected clock: this compares against a file mtime.
-      const age = Date.now() - statSync(lockPath).mtimeMs;
-      if (age < AUTO_UPDATE_LOCK_STALE_MS) return false;
-      unlinkSync(lockPath);
+      if (!lockExpired(lock.mtimeMs) && !lockHolderGone(lock.content, lock.mtimeMs)) return false;
+      if (!removeJudgedLock(lockPath, lock)) return false;
     }
     const fd = openSync(lockPath, "wx");
     writeFileSync(fd, String(process.pid));
@@ -243,14 +392,13 @@ export function acquireUpdateLock(lockPath: string): boolean {
   }
 }
 
-/** True while an install holds update.lock (a lock older than an hour is a dead run's). */
+/**
+ * True while an install holds update.lock: not past its hour (either way, see
+ * lockExpired), and its holder not certainly gone.
+ */
 export function isUpdateLockHeld(dataDir?: string): boolean {
-  try {
-    const { lock } = autoUpdatePaths(dataDir);
-    return Date.now() - statSync(lock).mtimeMs < AUTO_UPDATE_LOCK_STALE_MS;
-  } catch {
-    return false;
-  }
+  const lock = readLock(autoUpdatePaths(dataDir).lock);
+  return !!lock && !lockExpired(lock.mtimeMs) && !lockHolderGone(lock.content, lock.mtimeMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -351,8 +499,18 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
     });
     latest = checked.outcome === "checked" ? checked.version : null;
     if (!latest) {
-      restoreWindow();
-      return "no-release";
+      // The check failed (or waits out its back-off), but an earlier one
+      // already named a newer release: install that one. Without this, a
+      // check that keeps failing would leave auto-update "active" (the
+      // review toast steps aside for it) while it never installs.
+      const known = knownLatestRelease(readAutoUpdateState(deps.dataDir));
+      if (known && isNewerStableVersion(known.version, current)) {
+        latest = known.version;
+        log(`could not check for a newer release; installing ${latest}, the newest one known`, deps.dataDir);
+      } else {
+        restoreWindow();
+        return "no-release";
+      }
     }
   }
   if (!isNewerStableVersion(latest, current)) return "up-to-date";
@@ -519,6 +677,15 @@ export function startManualUpdateForThisBinary(currentVersion: string | undefine
  * (`"$@"`).
  */
 const POSIX_WRAPPER = `
+# Detached (auto-update, Update now): the lock names this wrapper's process
+# group (it leads it, so the installer and its children are in it) and this
+# machine, so an install that is gone shows as failed at once instead of
+# "Updating…" for the lock's hour. The foreground \`plannotator update\` keeps
+# the lock its own process wrote.
+if [ "\${PLANNOTATOR_UPDATE_DETACHED:-}" = 1 ]; then
+  printf 'pid=%s group=%s host=%s boot=%s pidns=%s\\n' "$$" "$$" "$(uname -n 2>/dev/null)" \
+    "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "$(readlink /proc/$$/ns/pid 2>/dev/null)" > "$PLANNOTATOR_UPDATE_LOCK"
+fi
 tmp=$(mktemp "\${TMPDIR:-/tmp}/plannotator-install.XXXXXX") || exit 1
 code=1
 # Interrupted (Ctrl-C on plannotator update, a TERM): record 130 and release
@@ -532,7 +699,7 @@ on_signal() {
   exit 130
 }
 trap on_signal INT TERM HUP
-if curl -fsSL "$PLANNOTATOR_UPDATE_SCRIPT_URL" -o "$tmp"; then
+if curl -fsSL --connect-timeout 30 --speed-limit 1 --speed-time 60 "$PLANNOTATOR_UPDATE_SCRIPT_URL" -o "$tmp"; then
   bash "$tmp" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
   code=$?
 else
@@ -568,7 +735,7 @@ if ($env:PLANNOTATOR_UPDATE_FLAGS) {
 }
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("plannotator-install-" + [guid]::NewGuid().ToString('N') + ".ps1")
 try {
-  Invoke-WebRequest -UseBasicParsing -Uri $env:PLANNOTATOR_UPDATE_SCRIPT_URL -OutFile $tmp
+  Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri $env:PLANNOTATOR_UPDATE_SCRIPT_URL -OutFile $tmp
   & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tmp -Version $env:PLANNOTATOR_UPDATE_VERSION -NonInteractive @installFlags
   $code = $LASTEXITCODE
 } catch {
@@ -643,8 +810,9 @@ export function launchInstaller(launch: InstallerLaunch): void {
     const { file, args, env } = installerEnv(launch);
     const child = spawn(file, args, {
       detached: true,
+      // Its own process group: the wrapper writes it into update.lock (POSIX_WRAPPER).
       stdio: ["ignore", logFd, logFd],
-      env,
+      env: { ...env, PLANNOTATOR_UPDATE_DETACHED: "1" },
       windowsHide: true,
     });
     child.on("error", () => {});
@@ -876,19 +1044,21 @@ export function updateActionFor(origin: string | null | undefined, managed: bool
  * `updateAvailable` when the machine knows of a newer stable release and
  * update checks are on. Read from the cache only: never a network call.
  */
-export function getUpdateAdvert(origin?: string | null, options: { exposed?: boolean } = {}): { updateAvailable?: UpdateAdvert } {
+export function getUpdateAdvert(
+  origin?: string | null,
+  options: { exposed?: boolean } = {},
+): { updateAvailable?: UpdateAdvert; updateCheckFailing?: UpdateCheckFailingAdvert } {
   if (!noticeVersion) return {};
   try {
     if (!resolveUpdateCheck(loadConfig())) return {};
     const dataDir = getPlannotatorDataDir();
-    const advert = buildUpdateAdvert({
-      state: readAutoUpdateState(dataDir),
-      current: noticeVersion,
-      action: updateActionFor(origin, isManagedBinary(process.execPath), options.exposed === true),
-      platform: process.platform,
-      flags: readInstallFlags(dataDir).flags,
-    });
-    return advert ? { updateAvailable: advert } : {};
+    const state = readAutoUpdateState(dataDir);
+    const flags = readInstallFlags(dataDir).flags;
+    const action = updateActionFor(origin, isManagedBinary(process.execPath), options.exposed === true);
+    const advert = buildUpdateAdvert({ state, current: noticeVersion, action, platform: process.platform, flags });
+    if (advert) return { updateAvailable: advert };
+    const failing = buildUpdateCheckFailing(state, Date.now(), action === "pi" ? PI_UPDATE_COMMAND : installCommandFor(process.platform, flags));
+    return failing ? { updateCheckFailing: failing } : {};
   } catch {
     return {};
   }

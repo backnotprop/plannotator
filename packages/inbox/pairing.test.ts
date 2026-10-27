@@ -72,6 +72,8 @@ describe("Settings' addresses", () => {
     expect(parseSettingsHash('settings/devices/pair')).toEqual({ section: 'devices', pair: true });
     expect(parseSettingsHash('settings/general/pair')).toEqual({ section: 'general', pair: false });
     expect(parseSettingsHash('settings/nope')).toEqual({ section: null, pair: false });
+    // Experimental's old page is Capabilities now, landing on its Experimental group.
+    expect(parseSettingsHash('settings/experimental')).toEqual({ section: 'capabilities', pair: false, experimental: true });
     expect(parseSettingsHash('thread=msg_1')).toBeNull();
     expect(parseSettingsHash('settingsx')).toBeNull();
     expect(settingsHash({ section: 'devices', pair: true })).toBe('settings/devices/pair');

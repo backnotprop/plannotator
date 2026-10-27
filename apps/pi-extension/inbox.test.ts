@@ -219,7 +219,9 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		await ask(silent, "hello");
 		expect(m.requests.at(-1)?.tools).not.toContain("plannotator_inbox");
 		expect(existsSync(join(w.dataDir, "inbox"))).toBe(false);
-		expect(silent.events.filter((event) => event.type === "extension_ui_request" && event.method === "notify")).toEqual([]);
+		// The Inbox says nothing; the runtime TLS warning (runtime-tls.ts) is not the Inbox's and depends on the Node running the test.
+		const isRuntimeWarning = (event: { message?: unknown }) => typeof event.message === "string" && event.message.includes("TLS fixes");
+		expect(silent.events.filter((event) => event.type === "extension_ui_request" && event.method === "notify" && !isRuntimeWarning(event))).toEqual([]);
 		w.proof(`switch on, no inbox/inbox.json: tools sent to the model = ${JSON.stringify(m.requests.at(-1)?.tools)}; no inbox folder, no notice`);
 		await silent.client.stop();
 

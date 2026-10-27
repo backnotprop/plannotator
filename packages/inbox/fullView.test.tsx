@@ -1,9 +1,9 @@
 /**
  * Full screen for files (approval "inbox-one-fullscreen", Drawer): one mode.
  * The pane's Full screen button takes the file to the whole window with one
- * floating toolbar (pen on HTML, the comment count, `N/M ⌄`, ⋯, Exit full
- * screen, » Hide tools); the header, the changed line and the bar under the
- * file are gone, and there is no eye. Hide tucks the toolbar into a corner
+ * floating toolbar (pen on HTML, the comment count, `N/M ⌄`, ⋯, Side by
+ * side, × Exit full screen, » Hide tools); the header, the changed line and
+ * the bar under the file are gone, and there is no eye. Hide tucks the toolbar into a corner
  * handle; the corner reveals it; a pin keeps it out. The count opens the
  * comments drawer beside the page, remembered and never opened by itself.
  *
@@ -245,7 +245,7 @@ const chord = () => (getShortcutPlatform() === 'mac' ? { key: 'X', code: 'KeyX',
 /** The toolbar's controls in order, by their data attribute. */
 const controls = () =>
   [...bar()!.querySelectorAll('button')].map((b) =>
-    b.hasAttribute('data-full-view-exit') ? `leave:${b.getAttribute('data-full-view-exit')}` : b.hasAttribute('data-full-view-pen') ? 'pen' : b.hasAttribute('data-full-view-comments') ? 'count' : b.hasAttribute('data-full-view-position') ? 'position' : b.hasAttribute('data-full-view-more') ? 'more' : b.hasAttribute('data-full-view-hide') ? `hide:${b.getAttribute('data-full-view-hide')}` : '?',
+    b.hasAttribute('data-full-view-exit') ? `leave:${b.getAttribute('data-full-view-exit')}` : b.hasAttribute('data-full-view-pen') ? 'pen' : b.hasAttribute('data-full-view-comments') ? 'count' : b.hasAttribute('data-full-view-position') ? 'position' : b.hasAttribute('data-full-view-more') ? 'more' : b.hasAttribute('data-full-view-hide') ? `hide:${b.getAttribute('data-full-view-hide')}` : b.hasAttribute('data-full-view-close') ? 'close' : '?',
   );
 
 test.skipIf(!hasDom)('Full screen is one mode: the header, the changed line and the bar under the file go, one toolbar is left; Exit puts the file back beside the thread', async () => {
@@ -276,7 +276,7 @@ test.skipIf(!hasDom)('Full screen is one mode: the header, the changed line and 
   expect(bar()!.getAttribute('role')).toBe('toolbar');
   expect(pane().firstElementChild).toBe(dock());
   expect(barState()).toBe('pinned');
-  expect(controls()).toEqual(['count', 'position', 'more', 'leave:exit', 'hide:hide']);
+  expect(controls()).toEqual(['count', 'position', 'more', 'leave:exit', 'close', 'hide:hide']);
   expect(document.activeElement).toBe(bar()!.querySelector('button'));
   expect(live()).toBe('Full screen. Side by side is in the toolbar.');
   // The way back is named for where it goes.
@@ -298,7 +298,7 @@ test.skipIf(!hasDom)('Full screen is one mode: the header, the changed line and 
 test.skipIf(!hasDom)('an HTML file: the pen leads the toolbar and flips Annotate / Interact', async () => {
   stubViews();
   await render(<Pane start={page} harness={harnessOf()} />);
-  expect(controls()).toEqual(['pen', 'count', 'position', 'more', 'leave:exit', 'hide:hide']);
+  expect(controls()).toEqual(['pen', 'count', 'position', 'more', 'leave:exit', 'close', 'hide:hide']);
   const pen = host!.querySelector<HTMLButtonElement>('[data-full-view-pen]')!;
   expect(pen.getAttribute('aria-pressed')).toBe('true');
   await click(pen);
@@ -624,6 +624,64 @@ const escapeOn = async (target: EventTarget) => {
   await settle();
   return event;
 };
+
+/** Where leaving full screen left things: the pane, focus, what was said, and whether it was a pick. */
+const afterLeaving = (harness: Harness) => ({
+  full: bar() !== null,
+  toggles: harness.toggles,
+  picks: harness.picks,
+  focusOnSwitch: document.activeElement === host!.querySelector('.ib-vhead [data-view-side]'),
+  said: live(),
+});
+
+for (const [kind, start] of [['markdown', notes], ['HTML', page], ['image', shot]] as const) {
+  test.skipIf(!hasDom)(`${kind}: × Exit full screen, just before », leaves full screen as Escape's last step does (not a pick; focus back on the view switch)`, async () => {
+    stubViews();
+    // Escape's last step, from the pane with nothing else open.
+    const byEscape = harnessOf();
+    await render(<Pane start={start} harness={byEscape} />);
+    pane().focus();
+    await escapeOn(pane());
+    // HTML starts in Annotate: Escape's first press takes it to Interact.
+    if (byEscape.toggles === 0) await escapeOn(pane());
+    const escaped = afterLeaving(byEscape);
+    expect(escaped).toEqual({ full: false, toggles: 1, picks: [false], focusOnSwitch: true, said: 'Side by side: the file is beside the thread.' });
+
+    // The button, entered the way a person does: the header's Full screen.
+    const byButton = harnessOf();
+    await rerender(<Pane start={start} harness={byButton} startFull={false} />);
+    await click(host!.querySelector('.ib-vhead [data-full-screen-toggle]'));
+    // » keeps the corner; × sits just before it.
+    expect(controls().slice(-2)).toEqual(['close', 'hide:hide']);
+    const close = host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!;
+    expect(close.getAttribute('aria-label')).toBe('Exit full screen');
+    expect(close.getAttribute('aria-keyshortcuts')).toBe('Escape');
+    // An icon button: no words beside the ×; the component tooltip names it and shows Esc as a keycap.
+    expect(close.textContent).toBe('');
+    expect(close.hasAttribute('title')).toBe(false);
+    expect(await tooltipOf(close)).toBe('Exit full screenEsc');
+    expect([...document.querySelectorAll('kbd')].map((k) => k.textContent)).toContain('Esc');
+
+    await click(close);
+    // The entry was a pick (the header's Full screen); the way out is not, as with Escape.
+    expect({ ...afterLeaving(byButton), picks: byButton.picks.slice(1), toggles: byButton.toggles - 1 }).toEqual(escaped);
+    expect(host!.querySelector('[data-full-view-close]')).toBeNull();
+  });
+}
+
+test.skipIf(!hasDom)('one Escape with focus on × leaves full screen: its tooltip, opened by that focus, does not keep the press', async () => {
+  stubViews();
+  const harness = harnessOf();
+  await render(<Pane start={notes} harness={harness} />);
+  const close = host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!;
+  await act(async () => close.focus());
+  // Its tooltip is open, as a pointer resting there leaves it.
+  expect(await tooltipOf(close)).toBe('Exit full screenEsc');
+  await escapeOn(close);
+  expect(harness.toggles).toBe(1);
+  expect(harness.picks).toEqual([false]);
+  expect(bar()).toBeNull();
+});
 
 test.skipIf(!hasDom)('Escape closes one thing per press, innermost first, then leaves full screen (markdown): the file list, the drawer, then the file goes back beside the thread', async () => {
   stubViews();

@@ -65,6 +65,19 @@ export const INBOX_CARD_COLUMN_LABELS: Readonly<Record<InboxCardColumn, string>>
 
 /** The longest title, in characters. */
 export const INBOX_CARD_TITLE_MAX = 120;
+/**
+ * Over this many characters a title gets a hint in the card call's answer
+ * (approval "inbox-board-amendments-2026-10-27": "2–5 words naming the work,
+ * never a sentence"; a gentle hint, never refused). 40 holds five long words.
+ */
+export const INBOX_CARD_TITLE_HINT_AT = 40;
+
+/** The hint for a title that reads like a sentence, or null for one short enough. */
+export function inboxCardTitleHint(title: string): string | null {
+  if ([...title.trim()].length <= INBOX_CARD_TITLE_HINT_AT) return null;
+  return `The title is ${[...title.trim()].length} characters. A title is 2–5 words naming the work ("Pi update fix"), never a sentence; where it stands goes in \`say\`. Shorten it with op say and \`title\`.`;
+}
+
 /** The longest one-line `say` or `you`, in characters. */
 export const INBOX_CARD_LINE_MAX = 280;
 /** The longest drop reason, in characters. */

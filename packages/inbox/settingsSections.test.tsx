@@ -197,18 +197,24 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   const el = await renderApp('#settings');
   await until(() => heading(el) === 'General', 'General');
   expect(navLink(el, 'general').getAttribute('aria-current')).toBe('page');
+  // Capabilities' row comes with the settings read (it shows only while the Inbox has a capability to switch).
+  await until(() => navLink(el, 'capabilities') !== null, 'the Capabilities row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Prompts', 'Devices', 'Archived', 'Storage', 'About']);
+  // Capabilities right after Devices (the owner, 2026-10-27); Experimental is a group inside it, not a row of its own.
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Prompts', 'Devices', 'Capabilities', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
     '#settings/agents',
     '#settings/prompts',
     '#settings/devices',
+    '#settings/capabilities',
     '#settings/archived',
     '#settings/storage',
     '#settings/about',
   ]);
-  for (const section of ['agents', 'prompts', 'devices', 'archived', 'storage', 'about', 'general'] as const) {
+  // No line in the nav any more: nothing sits apart.
+  expect(el.querySelectorAll('.ib-snav li[class]').length).toBe(0);
+  for (const section of ['agents', 'prompts', 'devices', 'capabilities', 'archived', 'storage', 'about', 'general'] as const) {
     act(() => navLink(el, section).click());
     await until(() => window.location.hash === `#settings/${section}`, `#settings/${section}`);
     await until(() => navLink(el, section).getAttribute('aria-current') === 'page', `${section} marked current`);
@@ -258,6 +264,11 @@ test.skipIf(!hasDom)('every control lands in the section the design puts it in',
   expect(switchNamed(el, 'Play a sound')).not.toBeNull();
   expect(el.querySelector('[data-settings-sound] input[type="range"]')).not.toBeNull();
   expect(el.querySelector('[data-settings-tailscale]')).toBeNull();
+  // General no longer holds Experimental or the Board.
+  expect(el.querySelector('[data-settings-experimental]')).toBeNull();
+  expect(switchNamed(el, 'Decision mode')).toBeNull();
+  expect(el.querySelector('[data-settings-board]')).toBeNull();
+  expect(switchNamed(el, 'Board')).toBeNull();
 
   act(() => navLink(el, 'agents').click());
   // Settings → Agents (components/AgentsSettings.tsx; agentsSettings.test.tsx covers its rows).
@@ -285,6 +296,139 @@ test.skipIf(!hasDom)('every control lands in the section the design puts it in',
   expect(switchNamed(el, 'Keep Plannotator up to date')).not.toBeNull();
   expect(el.textContent).toContain('Where things are');
   expect(el.textContent).toContain(`http://127.0.0.1:${current!.port}/mcp`);
+  act(() => navLink(el, 'capabilities').click());
+  await until(() => el.querySelector('[data-settings-board]') !== null && el.querySelector('[data-settings-experimental]') !== null, 'Capabilities');
+  expect(switchNamed(el, 'Board')).not.toBeNull();
+  // The main capabilities first, then the Experimental group under them, with its heading and the same warning.
+  const board = el.querySelector('[data-settings-board]')!;
+  const experimental = el.querySelector('[data-settings-experimental]')!;
+  expect(board.compareDocumentPosition(experimental) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(experimental.querySelector('h2')?.textContent).toBe('Experimental');
+  expect(experimental.textContent).toContain('Features still being tried. Each stays off until you turn it on.');
+  expect(experimental.contains(switchNamed(el, 'Decision mode'))).toBe(true);
+  expect(board.contains(switchNamed(el, 'Decision mode'))).toBe(false);
+});
+
+test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switch saves inboxBoard to config.json, both ways', async () => {
+  const config = () => {
+    try {
+      return (JSON.parse(readFileSync(join(current!.dataDir, 'config.json'), 'utf8')) as { inboxBoard?: boolean }).inboxBoard;
+    } catch {
+      return undefined;
+    }
+  };
+  const el = await renderApp('#settings/capabilities');
+  await until(() => heading(el) === 'Capabilities', 'Capabilities');
+  await until(() => navLink(el, 'capabilities') !== null, 'the Capabilities row');
+  expect(navLink(el, 'capabilities').getAttribute('aria-current')).toBe('page');
+  await until(() => switchNamed(el, 'Board') !== null, 'the switch');
+  expect(el.querySelector('[data-settings-board]')?.textContent).toContain('Agents pick this up in their next session.');
+  expect(switchNamed(el, 'Board')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Board')!.click());
+    await until(() => config() === true, 'config.json inboxBoard true');
+    await until(() => switchNamed(el, 'Board')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Board')!.click());
+    await until(() => config() === false, 'config.json inboxBoard false');
+    await until(() => switchNamed(el, 'Board')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ board: { on: false } }));
+  }
+});
+
+test.skipIf(!hasDom)('#settings/experimental (an old link) becomes Capabilities, focused on its Experimental group; decision mode saves to config.json, both ways', async () => {
+  const config = () => {
+    try {
+      return (JSON.parse(readFileSync(join(current!.dataDir, 'config.json'), 'utf8')) as { experimental?: { decisionMode?: boolean } }).experimental;
+    } catch {
+      return undefined;
+    }
+  };
+  const el = await renderApp('#settings/experimental');
+  await until(() => heading(el) === 'Capabilities', 'Capabilities');
+  // The address is Capabilities' now, in place: Back does not return to the old one.
+  expect(window.location.hash).toBe('#settings/capabilities');
+  await until(() => navLink(el, 'capabilities') !== null, 'the Capabilities row');
+  expect(navLink(el, 'capabilities').getAttribute('aria-current')).toBe('page');
+  await until(() => document.activeElement === el.querySelector('[data-settings-experimental] h2'), 'focus on the Experimental group');
+  await until(() => switchNamed(el, 'Decision mode') !== null, 'the switch');
+  expect(switchNamed(el, 'Decision mode')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Decision mode')!.click());
+    await until(() => config()?.decisionMode === true, 'config.json experimental.decisionMode true');
+    await until(() => switchNamed(el, 'Decision mode')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Decision mode')!.click());
+    await until(() => config()?.decisionMode === false, 'config.json experimental.decisionMode false');
+    await until(() => switchNamed(el, 'Decision mode')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ experimental: { decision_mode: false } }));
+  }
+});
+
+test.skipIf(!hasDom)('Capabilities: no row for an Inbox with nothing to switch (its address says so), and the phone row names what is on', async () => {
+  const { SettingsPage } = await import('./components/Settings');
+  const { SidebarProvider } = await import('./shell/sidebar');
+  // An older Inbox's settings: no `experimental`, phones off. Rendered on its own, no server.
+  const model = {
+    serverSession: 's',
+    version: '0.28.0',
+    port: 1,
+    url: 'http://localhost:1/',
+    mcp_url: 'http://127.0.0.1:1/mcp',
+    mcp_command: ['plannotator', 'inbox', 'mcp'],
+    home: '/home/u',
+    data_dir: '/home/u/.plannotator',
+    inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
+    notifications: { enabled: true, dismissed: false, allowed_origin: null },
+    phones: false,
+    store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+  };
+  const noop = () => {};
+  const page = (section: 'general' | 'capabilities' | null, phoneList = false, settings: object = model) => (
+    <SidebarProvider>
+      <SettingsPage
+        settings={settings as never}
+        context={null}
+        error={null}
+        onToggleTool={noop}
+        onToggleExperimental={noop}
+        onToggleBoard={noop}
+        onToggleTailscale={noop}
+        tailscaleBusy={false}
+        permission="granted"
+        onToggleNotifications={noop}
+        onDeleteThread={async () => {}}
+        onDeleteProject={async () => {}}
+        section={section}
+        phone={phoneList}
+      />
+    </SidebarProvider>
+  );
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(page('general'));
+  });
+  expect(navLink(host, 'about')).not.toBeNull();
+  expect(navLink(host, 'capabilities')).toBeNull();
+  act(() => root!.render(page(null, true)));
+  expect(host.querySelector('[data-settings-list] [data-settings-link="about"]')).not.toBeNull();
+  expect(host.querySelector('[data-settings-list] [data-settings-link="capabilities"]')).toBeNull();
+  act(() => root!.render(page('capabilities')));
+  expect(heading(host)).toBe('Capabilities');
+  expect(host.querySelector('[data-settings-capabilities-none]')?.textContent).toContain('older than Settings → Capabilities');
+  expect(host.querySelector('[role="switch"]')).toBeNull();
+  // The phone row's value: what is on, by name.
+  const value = (settings: object) => {
+    act(() => root!.render(page(null, true, settings)));
+    return host!.querySelector('[data-settings-list] [data-settings-link="capabilities"] .ib-v')?.textContent;
+  };
+  const off = { ...model, board: { on: false }, experimental: { decision_mode: { on: false, env: null } } };
+  expect(value(off)).toBe('Off');
+  expect(value({ ...off, board: { on: true } })).toBe('Board');
+  expect(value({ ...off, experimental: { decision_mode: { on: true, env: null } } })).toBe('Decision mode');
+  expect(value({ ...off, board: { on: true }, experimental: { decision_mode: { on: true, env: null } } })).toBe('2 on');
 });
 
 test.skipIf(!hasDom)('Pair a phone: step 1 first; no code until a way is on; the code with its address; what reached the door; Paired; Done back to Devices with the phone', async () => {
@@ -426,9 +570,25 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   const el = await renderApp('#settings');
   await until(() => el.querySelector('[data-settings-list]') !== null, 'the list of sections');
   expect(el.querySelector('.ib-snav')).toBeNull();
+  await until(() => el.querySelector('[data-settings-list] [data-settings-link="capabilities"]') !== null, 'the Capabilities row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
-  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'archived', 'storage', 'about']);
-  act(() => links.find((a) => a.getAttribute('data-settings-link') === 'devices')!.click());
+  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'capabilities', 'archived', 'storage', 'about']);
+  // Capabilities is the last row of the first group, above Archived, Storage and About; no Experimental row or group.
+  const groups = [...el.querySelectorAll<HTMLUListElement>('[data-settings-list] ul')];
+  expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Settings', 'Your data and Plannotator']);
+  expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'capabilities']);
+  expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['archived', 'storage', 'about']);
+  const capabilitiesRow = groups[0]!.querySelector<HTMLAnchorElement>('[data-settings-link="capabilities"]')!;
+  expect(capabilitiesRow.querySelector('.ib-v')?.textContent).toBe('Off');
+  act(() => capabilitiesRow.click());
+  await until(() => heading(el) === 'Capabilities', 'Capabilities on a phone');
+  expect(window.location.hash).toBe('#settings/capabilities');
+  expect(switchNamed(el, 'Board')).not.toBeNull();
+  // The Experimental group is on the same page, under the Board.
+  expect(el.querySelector('[data-settings-experimental]')?.contains(switchNamed(el, 'Decision mode'))).toBe(true);
+  act(() => (el.querySelector('.ib-sphead .ib-pback') as HTMLAnchorElement).click());
+  await until(() => document.activeElement === el.querySelector('[data-settings-list] [data-settings-link="capabilities"]'), 'focus on the Capabilities row');
+  act(() => el.querySelector<HTMLAnchorElement>('[data-settings-list] [data-settings-link="devices"]')!.click());
   await until(() => heading(el) === 'Devices', 'Devices');
   expect(window.location.hash).toBe('#settings/devices');
   const back = el.querySelector('.ib-sphead .ib-pback') as HTMLAnchorElement;

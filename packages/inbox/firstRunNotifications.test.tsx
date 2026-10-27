@@ -191,7 +191,9 @@ afterEach(async () => {
   pokeStream = null;
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
-  (window as unknown as Record<string, unknown>).Notification = savedNotification;
+  // Put back "none" as none: a property set to undefined reads as support (see tour.test.tsx).
+  if (savedNotification === undefined) delete (window as unknown as Record<string, unknown>).Notification;
+  else (window as unknown as Record<string, unknown>).Notification = savedNotification;
   setUrl('about:blank');
   childOut?.releaseLock();
   child?.kill();

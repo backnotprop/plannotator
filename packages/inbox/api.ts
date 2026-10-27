@@ -33,6 +33,8 @@ import type {
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import type { RecipientConnection } from './deliveryLine';
+import { parseRestartAgents } from './restartAgents';
+import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -101,6 +103,10 @@ export interface ListModel {
   updated?: string | null;
   /** Claude Code sessions a /reload-plugins would bring up to date: the sidebar's "Reload Claude Code N". Absent from an older Inbox. */
   restart_claude_code?: number;
+  /** Every runtime's sessions a reload brings up to date: the sidebar's "Reload agents N". Absent from an older Inbox. */
+  restart_agents?: InboxRestartAgents;
+  /** Checking for updates has failed for hours: the sidebar's quiet "Can't check for updates". Absent from an older Inbox. */
+  update_check_failing?: UpdateCheckFailing | null;
   notice: string | null;
   projects: ProjectFolder[];
   project: string | null;
@@ -147,13 +153,28 @@ export interface UpdateSwitches {
   auto_update: { on: boolean; env: boolean | null };
 }
 
+/** Checking for updates has failed for hours with no success (packages/shared/update-check.ts releaseCheckFailing). */
+export interface UpdateCheckFailing {
+  since: string;
+  error: string;
+}
+
 /** GET /api/inbox/update: what the update dialogs and Settings → About read (packages/server/inbox-updates.ts). */
 export interface UpdateDetails {
   update: InboxHealth['update'];
   current: string;
   updated: string | null;
   latest: { version: string; fetched_at: string; published_at: string | null } | null;
-  check: { on: boolean; env: boolean | null; last_attempt_at: string | null; error: string | null };
+  check: {
+    on: boolean;
+    env: boolean | null;
+    last_attempt_at: string | null;
+    error: string | null;
+    /** Checking has failed for hours with no success. Absent from an older Inbox. */
+    failing?: UpdateCheckFailing | null;
+    /** When the latest attempt failed (null: it did not). Absent from an older Inbox. */
+    last_failed_at?: string | null;
+  };
   auto_update: { on: boolean; env: boolean | null; supported: boolean };
   summary: string;
   flags: string[];
@@ -265,7 +286,7 @@ export interface SettingsModel {
   };
 }
 
-/** Settings → General → Experimental: each feature's switch, and whether the env var decides it. */
+/** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
 export interface InboxExperimentalSettings {
   decision_mode: { on: boolean; env: boolean | null };
 }
@@ -619,7 +640,7 @@ export const inboxApi = {
   decisions: () => get<InboxDecisionsModel>('/api/inbox/decisions'),
   saveExperimental: (change: { decision_mode: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>('/api/inbox/settings', { experimental: change }),
-  /** The Board on or off (Settings → General): agents get the card action from their next session. */
+  /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>('/api/inbox/settings', { board: { on } }),
   /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
@@ -844,7 +865,7 @@ export const inboxApi = {
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>('/api/inbox/pins', { restore }),
   discardReplyDraft: (threadId: string) => post<{ ok: true; deleted: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/draft/delete`, {}),
-  saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: string[]; base: string | null; thread_name?: string }) =>
+  saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: string[]; base: string | null; thread_name?: string; card?: InboxDraft['card'] }) =>
     post<{ draft: DraftView }>(`/api/inbox/drafts/${encodeURIComponent(id)}`, { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(`/api/inbox/drafts/${encodeURIComponent(id)}/delete`, {}),
   sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = []) => {
@@ -935,9 +956,10 @@ export interface InboxEventHandlers {
   onRecord: (event: InboxEvent | null) => void;
   /**
    * `updated` is undefined from an Inbox older than the field (the "What's new in X" link stays as the list said);
-   * `restartClaudeCode` too (the sidebar's "Reload Claude Code N" stays as the list said).
+   * `restartClaudeCode` too (the sidebar's "Reload Claude Code N" stays as the list said), and
+   * `restartAgents` (every runtime's count, "Reload agents N").
    */
-  onStatus: (update: InboxHealth['update'], updated?: string | null, restartClaudeCode?: number) => void;
+  onStatus: (update: InboxHealth['update'], updated?: string | null, restartClaudeCode?: number, restartAgents?: InboxRestartAgents, checkFailing?: UpdateCheckFailing | null) => void;
   /** Whether a notification can reach the person now (inbox-windows.ts); never called by an older Inbox. */
   onReach?: (reach: InboxNotifyReach) => void;
   /**
@@ -1039,11 +1061,19 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     }
     case 'status':
       try {
-        const data = JSON.parse(frame.data) as { update: InboxHealth['update']; updated?: string | null; restart_claude_code?: unknown };
+        const data = JSON.parse(frame.data) as {
+          update: InboxHealth['update'];
+          updated?: string | null;
+          restart_claude_code?: unknown;
+          restart_agents?: unknown;
+          update_check_failing?: UpdateCheckFailing | null;
+        };
         handlers.onStatus(
           data.update,
           'updated' in data ? (data.updated ?? null) : undefined,
           typeof data.restart_claude_code === 'number' ? data.restart_claude_code : undefined,
+          parseRestartAgents(data.restart_agents) ?? undefined,
+          'update_check_failing' in data ? (data.update_check_failing ?? null) : undefined,
         );
       } catch {
         // A malformed frame changes nothing.

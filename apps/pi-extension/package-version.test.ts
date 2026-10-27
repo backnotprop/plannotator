@@ -34,10 +34,10 @@ describe("checkPackageVersion", () => {
 	// gets when an upgrade under a running host breaks a launch (#2085).
 	test("a different version names both versions and the host", () => {
 		expect(checkPackageVersion("0.28.25", "0.28.26", "oh-my-pi")).toBe(
-			"Plannotator was updated from 0.28.25 to 0.28.26 while Oh My Pi was running. Restart Oh My Pi to load the new version.",
+			"Plannotator was updated from 0.28.25 to 0.28.26 while Oh My Pi was running. Type /restart to load the new version.",
 		);
 		expect(checkPackageVersion("0.28.25", "0.28.26", "pi")).toBe(
-			"Plannotator was updated from 0.28.25 to 0.28.26 while Pi was running. Restart Pi to load the new version.",
+			"Plannotator was updated from 0.28.25 to 0.28.26 while Pi was running. Type /reload to load the new version.",
 		);
 	});
 });
@@ -79,7 +79,7 @@ describe("importFresh", () => {
 			{ loaded: "0.28.25", readOnDisk: () => "0.28.26", host: "oh-my-pi" },
 		);
 		await expect(result).rejects.toBeInstanceOf(PlannotatorUpdatedError);
-		await expect(result).rejects.toThrow("Restart Oh My Pi to load the new version.");
+		await expect(result).rejects.toThrow("Type /restart to load the new version.");
 		expect(ran).toBe(false);
 	});
 
@@ -92,11 +92,11 @@ describe("importFresh", () => {
 			{ loaded: "0.28.25", readOnDisk: () => reads.shift() ?? "0.28.26", host: "oh-my-pi" },
 		);
 		await expect(result).rejects.toThrow(
-			"Plannotator was updated from 0.28.25 to 0.28.26 while Oh My Pi was running. Restart Oh My Pi to load the new version.",
+			"Plannotator was updated from 0.28.25 to 0.28.26 while Oh My Pi was running. Type /restart to load the new version.",
 		);
 	});
 
-	test("a link error with no version change still says to restart", async () => {
+	test("a link error with no version change still says to reload", async () => {
 		const result = importFresh(
 			async () => {
 				throw new SyntaxError(LINK_ERROR);
@@ -111,7 +111,7 @@ describe("importFresh", () => {
 		}
 		expect(isPlannotatorUpdatedError(caught)).toBe(true);
 		// Restart is still the advice, and Bun's own error is kept: it may be a packaging bug.
-		expect((caught as Error).message).toContain("Restart Pi");
+		expect((caught as Error).message).toContain("Type /reload");
 		expect((caught as Error).message).toContain(LINK_ERROR);
 		expect((caught as Error).cause).toBeInstanceOf(SyntaxError);
 	});
@@ -155,7 +155,7 @@ describe("importFresh", () => {
 			}
 			expect(isPlannotatorUpdatedError(caught)).toBe(true);
 			expect((caught as Error).message).toBe(
-				"Plannotator was updated from 0.28.25 to 0.28.26 while Oh My Pi was running. Restart Oh My Pi to load the new version.",
+				"Plannotator was updated from 0.28.25 to 0.28.26 while Oh My Pi was running. Type /restart to load the new version.",
 			);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });

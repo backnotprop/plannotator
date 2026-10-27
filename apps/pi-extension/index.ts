@@ -35,6 +35,7 @@ import {
 } from "./generated/checklist.ts";
 import { loadConfig, resolveAgentTool, resolveUseJina } from "./generated/config.ts";
 import { detectPiHost, setPiHost } from "./pi-host.ts";
+import { warnRuntimeTlsOnce } from "./runtime-tls.ts";
 import { importFresh, isPlannotatorUpdatedError, launchFailureText } from "./package-version.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
@@ -139,6 +140,18 @@ function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
 		});
 	}
 	return promptsModulePromise;
+}
+
+/**
+ * Load the prompts a decision is written with while the review is open, not
+ * when the decision arrives: an update that lands while the reviewer works
+ * would otherwise stop that lazy import (importFresh, #2085) and the
+ * feedback would never reach the session (5 of 5 times on a real Pi 0.84.4,
+ * `pi update --extensions` under an open annotate review). A failed preload
+ * is dropped: the decision tries again, as before.
+ */
+function preloadDecisionPrompts(): void {
+	void loadPlannotatorPrompts().catch(() => {});
 }
 
 async function loadAnnotateCommandModules() {
@@ -969,6 +982,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		deliver: (result: T, review: PiOpenReview) => Promise<void>,
 	): PiOpenReview {
 		const review = openReviews.add({ kind, ...names, url: session.url, owner: ownerOf(ctx), hostControl: session.hostControl });
+		preloadDecisionPrompts();
 		const events = announceSessionOpened(review);
 		void session
 			.waitForDecision()
@@ -2052,6 +2066,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			// A previous review that is somehow still tracked loses to the new one.
 			if (pendingPlanReview && pendingPlanReview !== review) stopPendingPlanReview();
 			pendingPlanReview = review;
+			preloadDecisionPrompts();
 			// The history version the server saved this plan as: pushing the SAME
 			// text is a no-op that reports it (updatePlan's unchanged branch).
 			let planVersion: number | undefined;
@@ -2631,6 +2646,9 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		for (const warning of loadedConfig.warnings) {
 			ctx.ui.notify(`Plannotator config: ${warning}`, "warning");
 		}
+		// A runtime without the Oct 2026 TLS fixes: one line per Pi start. It
+		// replaces the package's engines floor, which kept updates from installing (#902).
+		warnRuntimeTlsOnce((message) => ctx.ui.notify(message, "warning"));
 
 		// Check --plan flag
 		if (pi.getFlag("plan") === true) {

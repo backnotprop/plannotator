@@ -13,7 +13,8 @@ import { Tip as HoverTip } from './Tip';
  * window), the pen (HTML that takes comments), the comment count (opens the
  * comments drawer), the position `N/M ⌄` (opens the file peek; on a phone a
  * pill that opens the peek's bottom sheet in one tap), ⋯ (Open in, Download,
- * the other version), Side by side, and » Hide tools.
+ * the other version), Side by side, × Exit full screen (desktop only: what
+ * Escape's last step does, not a pick), and » Hide tools in the corner.
  *
  * Hide tucks the toolbar into a handle flush with the corner (‹, the comment
  * count, an amber dot when the file changed since it was sent). A pointer in
@@ -76,6 +77,13 @@ export interface FullViewBarProps {
    * stacked window), which leads the bar instead.
    */
   leave: { kind: 'exit' | 'back'; onLeave: () => void };
+  /**
+   * × Exit full screen, just before » (the corner stays »'s: a pointer that
+   * reveals the toolbar there lands on the pin, never on ×). What Escape's
+   * last step does: the file goes back beside the thread, not a pick. Only
+   * where Side by side is the way out (`leave.kind` `exit`, not a phone).
+   */
+  onExitFull?: () => void;
   /** The Hide / Show tools chord (`Mod+Shift+X`, HTML only), shown in the tooltips. */
   chord: string | null;
   /** The comments drawer is open beside the page (desktop): the dock sits left of it. */
@@ -102,13 +110,14 @@ function Keys({ binding }: { binding: string }) {
   );
 }
 
-function Tip({ text, note, binding, phone, children }: { text: string; note?: string; binding?: string | null; phone: boolean; children: React.ReactElement }) {
+function Tip({ text, note, binding, phone, passEscape, children }: { text: string; note?: string; binding?: string | null; phone: boolean; passEscape?: boolean; children: React.ReactElement }) {
   // A phone has no hover: a tooltip there only opens on focus, unseen, and takes the next Escape for itself. The buttons carry their names.
   if (phone) return children;
   return (
     <Tooltip
       side={phone ? 'top' : 'bottom'}
       wide
+      escapePassesThrough={passEscape}
       content={
         <span className="flex flex-col gap-1">
           <span>{text}</span>
@@ -411,6 +420,21 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
         <span className="ib-fvdv" aria-hidden="true" />
         {props.more}
         {props.leave.kind === 'exit' && leaveButton}
+        {props.onExitFull && props.leave.kind === 'exit' && !phone && (
+          // Its tooltip says Esc, so one Esc on it leaves (the tooltip does not keep that press).
+          <Tip text="Exit full screen" binding="Escape" phone={phone} passEscape>
+            <button
+              type="button"
+              className="ib-fvb"
+              onClick={props.onExitFull}
+              aria-label="Exit full screen"
+              aria-keyshortcuts="Escape"
+              data-full-view-close=""
+            >
+              <Icon name="x" size={iconSize} />
+            </button>
+          </Tip>
+        )}
         <Tip text={hideText} binding={props.chord} phone={phone}>
           <button
             type="button"

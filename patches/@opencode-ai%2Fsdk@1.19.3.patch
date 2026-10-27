@@ -1,0 +1,30 @@
+diff --git a/dist/gen/core/serverSentEvents.gen.js b/dist/gen/core/serverSentEvents.gen.js
+index 51b0e275621e9140e0307ca80de29fdf23c925b1..3e7a6fbf20c8773e47f2fe2fa4f24ccdd53f0b2b 100644
+--- a/dist/gen/core/serverSentEvents.gen.js
++++ b/dist/gen/core/serverSentEvents.gen.js
+@@ -26,7 +26,9 @@ export const createSseClient = ({ onSseError, onSseEvent, responseTransformer, r
+                 let buffer = "";
+                 const abortHandler = () => {
+                     try {
+-                        void reader.cancel();
++                        // Bun >= 1.4 rejects this once the aborted fetch has errored the body;
++                        // unobserved, that rejection ends the process.
++                        reader.cancel().catch(() => { });
+                     }
+                     catch {
+                         // noop
+diff --git a/dist/v2/gen/core/serverSentEvents.gen.js b/dist/v2/gen/core/serverSentEvents.gen.js
+index 9684cb4f19593266b94f78e933f5039dc362c5a9..47302c680ab8cccf10dd292e3460c0dfc708ae58 100644
+--- a/dist/v2/gen/core/serverSentEvents.gen.js
++++ b/dist/v2/gen/core/serverSentEvents.gen.js
+@@ -40,7 +40,9 @@ export const createSseClient = ({ onRequest, onSseError, onSseEvent, responseTra
+                 let buffer = "";
+                 const abortHandler = () => {
+                     try {
+-                        reader.cancel();
++                        // Bun >= 1.4 rejects this once the aborted fetch has errored the body;
++                        // unobserved, that rejection ends the process.
++                        reader.cancel().catch(() => { });
+                     }
+                     catch {
+                         // noop

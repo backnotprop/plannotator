@@ -810,7 +810,7 @@ export async function startAnnotateServer(
   const serverSession = createServerSessionNonce();
   const sessionMismatch = () => Response.json(serverSessionMismatchBody(), { status: 409 });
   const alreadyDecided = () =>
-    Response.json({ error: "This review session has already been decided." }, { status: 409 });
+    Response.json({ error: "This review session has already been decided.", code: "already_decided" }, { status: 409 });
 
   // Last-client abandonment lease: once the tab's client-lease stream
   // disconnects (as reported by the transport) and stays disconnected for the

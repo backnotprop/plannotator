@@ -1045,6 +1045,106 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* The choices are a grid: its one column takes the card's width, not the longest choice's. */
 .ib-body [data-question-key] > :is([role="radiogroup"], [role="group"]) { grid-template-columns: minmax(0, 1fr); }
 .ib-qfoot-st { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; }
+/* The card's footer (ui's QuestionBlock: Add note, Skip, then Accept recommended and the host's status in one
+   right-aligned box). No button ever shrinks or breaks a word ("Acce pt reco mme nded" on a phone); when the row
+   cannot hold the buttons and the status, the status takes a line of its own ABOVE the buttons (wrap-reverse,
+   the thread foot's pattern), never between them. The right-aligned box is unwrapped (display: contents) so its
+   two parts wrap apart; its first part keeps the right alignment. On one line nothing moves. */
+.pn-inbox .question-block > div.border-t { flex-wrap: wrap-reverse; row-gap: 4px; }
+.pn-inbox .question-block > div.border-t > div.ml-auto { display: contents; }
+.pn-inbox .question-block > div.border-t > div.ml-auto > :first-child { margin-left: auto; }
+.pn-inbox .question-block > div.border-t button { white-space: nowrap; flex-shrink: 0; }
+.pn-inbox .question-block > div.border-t [data-question-host-footer] { flex: 0 1 auto; min-width: 0; }
+.pn-inbox .question-block > div.border-t .ib-qfoot-st { white-space: normal; }
+/* The card's radios and checkboxes, drawn by the page: WebKit's native dark-scheme control is a solid near-black
+   disc whether picked or not (the owner's iPhone), so picked and unpicked read alike. Unpicked: a hollow ring
+   on the card; picked: the accent's ring with its dot (radio), or the accent filled with a check (checkbox).
+   The size and place stay ui's (15 px, 20 px on a phone); a checkbox has the "Other…" box's 3 px corner. Only
+   on a touch screen (pointer: coarse) or in iOS and iPadOS WebKit (-webkit-touch-callout: a trackpad iPad's
+   primary pointer is fine): a desktop, a touch laptop and desktop Safari keep the system's control, as before.
+   Forced colours keep it everywhere. */
+/* drawn-controls:start */
+@media (pointer: coarse) {
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]) {
+    -webkit-appearance: none;
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    box-sizing: border-box;
+    border: 1.5px solid color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+    border-radius: 50%;
+    background-color: transparent;
+    color: var(--primary-foreground);
+    transition: border-color 120ms ease-out, background-color 120ms ease-out;
+  }
+  .pn-inbox .question-block input[data-question-control][type="checkbox"] { border-radius: 3px; }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"])::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary);
+    transform: scale(0);
+    transition: transform 120ms ease-out;
+  }
+  .pn-inbox .question-block input[data-question-control][type="checkbox"]::before {
+    width: 10px;
+    height: 10px;
+    border-radius: 0;
+    background: currentColor;
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):checked { border-color: var(--primary); }
+  .pn-inbox .question-block input[data-question-control][type="checkbox"]:checked { background-color: var(--primary); }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):checked::before { transform: scale(1); }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):disabled { opacity: 0.6; }
+}
+/* drawn-controls:end */
+/* The same rules for iPadOS and iOS WebKit, whose primary pointer is fine with a trackpad (CSS cannot join a
+   media query and @supports with OR). Keep the two blocks equal: questionCardPhone.test.tsx checks it. */
+@supports (-webkit-touch-callout: none) {
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]) {
+    -webkit-appearance: none;
+    appearance: none;
+    display: inline-grid;
+    place-content: center;
+    box-sizing: border-box;
+    border: 1.5px solid color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+    border-radius: 50%;
+    background-color: transparent;
+    color: var(--primary-foreground);
+    transition: border-color 120ms ease-out, background-color 120ms ease-out;
+  }
+  .pn-inbox .question-block input[data-question-control][type="checkbox"] { border-radius: 3px; }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"])::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary);
+    transform: scale(0);
+    transition: transform 120ms ease-out;
+  }
+  .pn-inbox .question-block input[data-question-control][type="checkbox"]::before {
+    width: 10px;
+    height: 10px;
+    border-radius: 0;
+    background: currentColor;
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):checked { border-color: var(--primary); }
+  .pn-inbox .question-block input[data-question-control][type="checkbox"]:checked { background-color: var(--primary); }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):checked::before { transform: scale(1); }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]):disabled { opacity: 0.6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .question-block input[data-question-control], .pn-inbox .question-block input[data-question-control]::before { transition: none; }
+}
+@media (forced-colors: active) {
+  .pn-inbox .question-block input[data-question-control]:is([type="radio"], [type="checkbox"]) { -webkit-appearance: auto; appearance: auto; }
+}
 
 /* empty state and the connect picker: one vertical rhythm between the heading, the cards, Other agents and the tabs */
 .ib-empty { --ib-rhythm: 26px; display: flex; flex-direction: column; gap: var(--ib-rhythm); padding: 34px 40px 60px 100px; max-width: 900px; }
@@ -1099,6 +1199,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-sw[aria-checked="true"]::after { left: 16px; background: #fff; }
 .ib-note { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin-top: 6px; }
 .pn-inbox .ib-note svg.ib-ic { width: 14px; height: 14px; }
+/* Checking for updates has failed for hours: why, and the command that updates without it (Settings → General and About). */
+.ib-chkfail { display: flex; flex-direction: column; gap: 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin-top: 8px; }
+.ib-chkfail .ib-cmd { margin-top: 4px; }
 .ib-stbl { width: 100%; border-collapse: collapse; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-stbl td { padding: 8px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
 .ib-stbl td .ib-ic { vertical-align: -2px; }
@@ -1157,6 +1260,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-sgroup > h2 { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; margin: 0 0 3px; }
 .ib-sgroup > p { margin: 0 0 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.5; }
 .ib-sgroup > h2 + .ib-card { margin-top: 8px; }
+/* Capabilities → Experimental's heading takes focus when `#settings/experimental` lands there, like a section's h1. */
+.pn-inbox .ib-sgroup > h2[tabindex]:focus, .pn-inbox .ib-sgroup > h2[tabindex]:focus-visible { outline: none; }
 .ib-sgroup > .ib-callout { margin-bottom: 10px; }
 .ib-spg > .ib-callout { margin-top: 16px; }
 .ib-card { border: 1px solid var(--ib-line); border-radius: 10px; overflow: hidden; background: var(--card); }
@@ -2373,6 +2478,15 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-body [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   .ib-body [data-question-key] input[type="text"] { min-height: 40px; }
   .ib-body [data-question-key] > [data-pinpoint-ignore]:last-child > button, .ib-body [data-question-key] > [data-pinpoint-ignore]:last-child > div > button { min-height: 44px; padding-left: 10px; padding-right: 10px; font-size: var(--ib-fs-14, 14px); }
+  /* The footer on a touch phone: the buttons and the status never fit one row, so the status leads on its own
+     line and the buttons follow it in reading order (one that does not fit goes to the next line, below). A
+     narrow desktop window keeps the base rule (one row when it fits, else the status above, wrap-reverse). */
+  @media (pointer: coarse) {
+    .pn-inbox .question-block > div.border-t { flex-wrap: wrap; column-gap: 4px; }
+    .pn-inbox .question-block > div.border-t > div.ml-auto > [data-question-host-footer] { order: -1; flex-basis: 100%; margin-left: 0; padding: 2px 0 0 4px; }
+  }
+  .pn-inbox .question-block input[data-question-control][type="radio"]::before { width: 10px; height: 10px; }
+  .pn-inbox .question-block input[data-question-control][type="checkbox"]::before { width: 12px; height: 12px; }
   .ib-atts.ib-tiles { grid-template-columns: minmax(0, 1fr); }
   .ib-att-t, .ib-pane.ib-withfile .ib-att-t, .ib-att-t.ib-guide { min-width: 0; width: 100%; min-height: 56px; }
   .ib-waitfoot button { min-height: 44px; }
@@ -3058,6 +3172,9 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   dialog.ib-cp[open]::backdrop { animation: ib-sp-fade 150ms ease-out; }
 }
 .ib-cp-to { position: relative; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 14px 6px 16px; border-bottom: 1px solid var(--ib-line); flex: none; }
+/* Create thread from a Board card: which card the new thread is for. */
+.ib-cp-card { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
+.ib-cp-card b { color: var(--foreground); font-weight: 600; }
 .ib-cp-tol { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); flex: none; }
 .pn-inbox .ib-cp-tobtn { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; height: 34px; padding: 0 8px; border-radius: 7px; border: 0; background: transparent; color: var(--foreground); font-size: var(--ib-fs-14, 14px); text-align: left; }
 .pn-inbox .ib-cp-tobtn:hover:not(:disabled), .pn-inbox .ib-cp-tobtn[aria-expanded="true"] { background: color-mix(in oklch, var(--muted) 70%, transparent); }
@@ -3141,6 +3258,10 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-foot, .ib-cp-ask { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 12px 10px 10px; border-top: 1px solid var(--ib-line); flex: none; flex-wrap: wrap; }
 .ib-cp-foot .ib-sp, .ib-cp-ask .ib-sp { flex: 1; }
 .ib-cp-ask { background: var(--ib-band); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; padding-left: 16px; border-radius: 0 0 10px 10px; }
+/* The reply box's attach button (a phone only): the compose paperclip's look, a 44 px target. */
+.pn-inbox .ib-rattach { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; border-radius: 9px; color: var(--muted-foreground); cursor: pointer; position: relative; }
+.pn-inbox .ib-rattach:hover, .pn-inbox .ib-rattach:focus-within { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-rattach:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 .pn-inbox .ib-cp-clip { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; position: relative; }
 .pn-inbox .ib-cp-clip:hover, .pn-inbox .ib-cp-clip:focus-within { background: var(--muted); color: var(--foreground); }
 .ib-cp-savedline { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
@@ -3793,6 +3914,12 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
 .ib-rl-lead { margin: 0; color: var(--foreground); font-size: var(--ib-fs-14, 14px); font-weight: 550; min-width: 0; }
 .ib-rl .ib-rl-lead { font-size: var(--ib-fs-15, 15px); }
 .ib-rl-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+/* OpenCode's one quiet line under its command (approval "reload-hosts"). */
+.ib-rl-quiet { margin: 0; color: var(--muted-foreground); font-weight: 400; }
+/* The pinned card's Copy, right after the value it copies. */
+.ib-rl-inline-copy { display: inline-flex; vertical-align: middle; font-weight: 400; }
+/* A long OpenCode command or spec breaks rather than overflow a phone. */
+.ib-rl-line code.ib-rl-wrap, .pn-inbox .ib-undl .ib-m-why code.ib-rl-wrap { white-space: normal; overflow-wrap: anywhere; }
 .ib-rl-line code { font-family: var(--font-mono); font-size: 0.93em; font-weight: 600; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 8%, transparent); white-space: nowrap; }
 ol.ib-rl-two { padding: 0 0 0 20px; list-style: decimal; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; }
 ol.ib-rl-two > li { min-width: 0; }
@@ -3951,7 +4078,18 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-act-undo:hover { text-decoration: underline; text-underline-offset: 2px; }
 .pn-inbox .ib-chk-panel { padding: 0 12px 12px 38px; min-width: 0; }
 .pn-inbox .ib-chk-panel[hidden] { display: none; }
-.pn-inbox .ib-chk-why { margin: 0 0 6px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; color: color-mix(in oklch, var(--muted-foreground) 55%, var(--foreground)); white-space: pre-line; overflow-wrap: anywhere; }
+/* The why, drawn as markdown (ContextMarkdown, as a question's context): kept at the card's size and spacing;
+   a long command, path or URL wraps rather than widening the card on a phone. */
+.pn-inbox .ib-chk-why { margin: 0 0 6px; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; color: color-mix(in oklch, var(--muted-foreground) 55%, var(--foreground)); overflow-wrap: anywhere; }
+.pn-inbox .ib-chk-why :is(p, li, blockquote, [data-rich-list-level], [data-rich-list-level] > span) { font-size: inherit; line-height: inherit; color: inherit; }
+.pn-inbox .ib-chk-why article > * { margin-top: 0; margin-bottom: 6px; }
+.pn-inbox .ib-chk-why article > :last-child { margin-bottom: 0; }
+.pn-inbox .ib-chk-why [data-pinpoint-group="list"] { padding-top: 0; padding-bottom: 0; }
+.pn-inbox .ib-chk-why [data-rich-list-level] { margin-top: 2px; margin-bottom: 2px; gap: 8px; }
+.pn-inbox .ib-chk-why :is(a, code) { overflow-wrap: anywhere; word-break: break-word; }
+.pn-inbox .ib-chk-why :not(pre) > code { font-size: 0.92em; padding: 0 4px; }
+.pn-inbox .ib-chk-why pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.pn-inbox .ib-chk-do code { font-size: 0.88em; padding: 0 4px; overflow-wrap: anywhere; word-break: break-word; }
 .pn-inbox .ib-chk-holds { margin: 0 0 8px; font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--ib-badge-hold-fg, var(--foreground)); overflow-wrap: anywhere; }
 .pn-inbox .ib-chk-holds b { font-weight: 600; }
 .pn-inbox .ib-chk-holds[data-action-stopped] { color: var(--ib-badge-stop-fg, var(--foreground)); }
@@ -4036,6 +4174,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-undl .ib-m-why > span { margin-right: 6px; }
 .pn-inbox .ib-undl .ib-m-why code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--foreground); white-space: nowrap; }
 .pn-inbox .ib-undl .ib-m-whybox .ib-rl-lead, .pn-inbox .ib-undl .ib-m-whybox .ib-rl-fold { padding-left: 20px; }
+/* OpenCode's one quiet line (approval "reload-hosts"): under the lead, in its column and tone. */
+.pn-inbox .ib-undl .ib-m-whybox > .ib-rw-after { padding-left: 20px; margin: 0; color: var(--muted-foreground); line-height: 1.7; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-delivered.ib-undl { width: 100%; flex-wrap: wrap; padding: 10px 10px 10px 12px; }
   .pn-inbox .ib-delivered.ib-undl .ib-dl-main { flex: 1 1 100%; }
@@ -4123,6 +4263,12 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-reask[data-highlighted] { background: var(--ib-hover-s, var(--ib-hover)); }
 .ib-oq-reask:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-oq-reask[data-disabled] { opacity: 0.55; }
+/* Decision mode's one way in (experimental, thread only): "Decide these N", the list's first row, quiet like Re-ask. */
+.ib-oq-decide { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 8px; border-radius: var(--ib-lr-sm, 8px); font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: default; outline: none; user-select: none; flex: none; }
+.ib-oq-decide > svg { color: var(--muted-foreground); flex: none; }
+.ib-oq-decide > span { flex: 1 1 auto; min-width: 0; }
+.ib-oq-decide[data-highlighted] { background: var(--ib-hover-s, var(--ib-hover)); }
+.ib-oq-decide:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 /* A phone: a sheet from the bottom edge, over a scrim, with 44 px targets (56 px rows). */
 .ib-oq-scrim { position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 0.4); }
 .ib-oq-pos[data-phone] { position: fixed !important; left: 0 !important; right: 0 !important; top: auto !important; bottom: 0 !important; transform: none !important; width: auto !important; }
@@ -4133,7 +4279,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-oq-row { min-height: 56px; padding: 9px 8px; }
 .ib-oq-pos[data-phone] .ib-oq-p { font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-oq-meta { font-size: var(--ib-fs-13, 13px); }
-.ib-oq-pos[data-phone] .ib-oq-reask { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
+.ib-oq-pos[data-phone] .ib-oq-reask, .ib-oq-pos[data-phone] .ib-oq-decide { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-oq-n, .ib-oq-pos[data-phone] .ib-oq-ck { width: 24px; height: 24px; margin-top: 0; }
 .ib-oq-pos[data-phone] .ib-oq-row { grid-template-columns: 24px minmax(0, 1fr) 16px; gap: 0 12px; }
 .ib-oq-pos[data-phone] .ib-oq-skipmode { min-height: 44px; padding: 6px 10px; font-size: var(--ib-fs-15, 15px); }
@@ -4237,6 +4383,8 @@ dialog.ib-dm[open] { display: flex; }
 dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dm-head { display: flex; align-items: baseline; gap: 12px; padding: 18px 22px 6px; flex: none; }
 .ib-dm-head h1 { margin: 0; font-size: var(--ib-fs-18, 18px); font-weight: 650; }
+/* The thread the sitting is scoped to (thread only): its subject, cut to the head's room before the count is. */
+.ib-dm-scope { font-size: var(--ib-fs-14, 14px); font-weight: 550; color: var(--foreground); min-width: 0; flex: 0 100 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-dm-count { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-dm-headacts { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; }
 .pn-inbox .ib-dm-x { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; color: var(--muted-foreground); }
@@ -4393,16 +4541,16 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dm-confirm p { margin: 6px 0 14px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-dm-confirm-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 /* The pill a tucked decision mode leaves above the open thread. */
-.pn-inbox .ib-dm-pill { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 42; translate: -50% 0; display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px 0 16px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-dm-pill { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 42; translate: -50% 0; display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px 0 16px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-14, 14px); max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)); }
 .ib-dm-pill b { font-weight: 650; }
-.ib-dm-pill > span { white-space: nowrap; }
+/* A row whose only shrinking part is the thread's subject: on a narrow screen the subject gives way, never the count or Resume. */
+.ib-dm-pill > span { display: flex; align-items: baseline; min-width: 0; white-space: pre; }
+.pn-inbox .ib-dm-pill > .ib-btn { flex: none; }
+/* The sitting's thread, while another is on screen: cut so the pill keeps its Resume in view. */
+.ib-dm-pill-thread { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: min(28ch, 40vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 /* While the pill floats over a thread, the thread's last lines can still scroll clear of it. */
 .pn-inbox:has(.ib-dm-pill) section.ib-pane .ib-pbody { padding-bottom: 64px; }
 .pn-inbox .ib-dm-pill .ib-btn { height: 30px; border-radius: 999px; }
-/* The sidebar's "Decide N" row and the list header's button. */
-.pn-inbox .ib-lhead-decide { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; margin-left: auto; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; flex: none; }
-.pn-inbox .ib-lhead-decide + .ib-lhead-compose { margin-left: 4px; }
-.pn-inbox .ib-lhead-decide:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .ib-dm-card, .ib-dm-card[data-stamped], .ib-dm-stamp, .ib-dm-endmark { animation: none; }
   .ib-dm-dots i, .ib-dm-choice { transition: none; }
@@ -4410,6 +4558,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   dialog.ib-dm { width: 100vw; height: 100dvh; border-radius: 0; }
   .ib-dm-head { padding: max(14px, env(safe-area-inset-top)) 16px 4px; }
+  /* No room beside the count on a phone; the card names the thread under it. */
+  .ib-dm-scope { display: none; }
   .pn-inbox .ib-dm-x { width: 44px; height: 44px; }
   .ib-dm-strip { padding: 4px 16px 10px; }
   .ib-dm-stage { padding: 0 8px max(8px, env(safe-area-inset-bottom)); }
@@ -4699,23 +4849,56 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-lane-empty { margin: 0; padding: 4px 14px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
 
 /* A card (variant C "Lean"): two lines, the time on the right, bold while unread. */
-.ib-bcard { position: relative; border-radius: var(--ib-lr-sm, 8px); background: var(--ib-bcard-bg); box-shadow: var(--ib-bcard-edge); transition: box-shadow 120ms ease-out; }
+.ib-bcard { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; color: var(--foreground); cursor: pointer; border-radius: var(--ib-lr-sm, 8px); background: var(--ib-bcard-bg); box-shadow: var(--ib-bcard-edge); transition: box-shadow 120ms ease-out; }
 .ib-bcard:hover { box-shadow: var(--ib-bcard-edge), 0 0 0 1px color-mix(in oklch, var(--foreground) 14%, transparent); }
 .ib-bcard[draggable="true"] { cursor: grab; }
 .ib-bcard[data-dragging] { opacity: 0.45; }
-.ib-bc-main { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; color: var(--foreground); text-decoration: none; border-radius: inherit; min-width: 0; }
-a.ib-bc-main { cursor: pointer; }
-.ib-bcard[draggable="true"] a.ib-bc-main { cursor: inherit; }
-.ib-bc-main:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.ib-bc-top { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 22px; }
+/* The title is the button that opens the card; its focus ring is the card's. */
+.ib-bc-main { display: flex; min-width: 0; flex: 0 1000000 auto; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: inherit; }
+.ib-bc-main:focus-visible { outline: none; }
+.ib-bcard:has(.ib-bc-main:focus-visible) { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* "You: …": its own button, to the thread where the person makes the call (a link: the arrow, and the link colour on hover and focus). */
+.ib-bc-youlink { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; min-width: 0; vertical-align: bottom; margin: 0; padding: 0; border: 0; border-radius: 3px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ib-bc-youlink > b { flex: none; }
+.ib-bc-yout { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-bc-youlink > svg { flex: none; align-self: center; opacity: 0.75; }
+.ib-bc-youlink:is(:hover, :focus-visible) .ib-bc-yout { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.ib-bc-youlink:is(:hover, :focus-visible) > svg { color: var(--primary); opacity: 1; }
+.ib-bc-youlink:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+/* Phone: "You: …" fills the bottom row and is at least 44 px tall, so a slightly missed tap still opens the
+   thread, not the card; the row takes the card's bottom padding and the gap above it for the height. */
+.ib-bstack .ib-bc-bot:has(.ib-bc-youlink) { align-items: center; margin: -4px 0 -10px; }
+.ib-bstack .ib-bc-youlink { display: flex; align-items: center; width: 100%; min-height: 44px; }
+.ib-bc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ib-bc-t { min-width: 0; flex: 0 1000000 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); font-weight: 500; color: color-mix(in oklab, var(--foreground) 72%, var(--card)); }
 .ib-bcard[data-unread] .ib-bc-t { font-weight: 650; color: var(--foreground); }
-.ib-bc-agetop { flex: none; margin-left: auto; margin-right: -22px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-bc-you { color: var(--muted-foreground); }
-.ib-bc-bot { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding-left: calc(var(--ib-mark-16) + 8px); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-bc-line { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-bc-bot { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-bc-line { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px; margin: -2px; }
 .ib-bc-youw { color: var(--ib-onyou-fg); font-weight: 600; }
 .ib-bc-age { flex: none; font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The bottom right (owner, 2026-10-27): the link mark, the agent as a small round mark, the age. The title and its line take the whole width. */
+.ib-bc-meta { flex: none; display: inline-flex; align-items: center; gap: 6px; align-self: center; margin-left: auto; }
+.ib-bc-who { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 4%); }
+.ib-bc-who .ib-mk, .ib-bc-who .ib-mk > svg, .ib-bc-who .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
+.ib-bc-who[data-host="you"] { background: none; }
+/* "Title row" (approval board-lane-card, r1): the marks and the age float at the right of the title's first
+   line and the title wraps under them; the line under it ("You: …", "Sent to …") gets the card's whole width;
+   the You link's arrow only on hover or focus. */
+.ib-bpage .ib-bcard { gap: 3px; padding: 9px 12px; }
+/* At most three lines: a sentence-long title is cut; its tooltip has it all (BoardPage measures this button, `titleCut`). */
+.ib-bpage .ib-bcard .ib-bc-main { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; flex: 1 1 auto; text-align: left; line-height: 1.4; overflow: hidden; }
+.ib-bpage .ib-bcard .ib-bc-t { display: inline; white-space: normal; overflow: visible; overflow-wrap: anywhere; line-height: 1.4; }
+/* WebKit lays a -webkit-box out as a box, so the float would sit on top: a plain block cut at three lines there. */
+@supports (font: -apple-system-body) {
+  .ib-bpage .ib-bcard .ib-bc-main { display: block; max-height: calc(1.4em * 3); }
+}
+.ib-bpage .ib-bcard .ib-bc-meta { float: right; display: inline-flex; height: calc(var(--ib-fs-14, 14px) * 1.4); margin: 0 0 0 8px; gap: 5px; }
+.ib-bpage .ib-bcard .ib-bc-age { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+@media (hover: hover) and (pointer: fine) {
+  .ib-bpage .ib-bcard .ib-bc-youlink > svg { display: none; }
+  .ib-bpage .ib-bcard .ib-bc-youlink:is(:hover, :focus-visible) > svg { display: inline; }
+}
+.ib-bc-who > .ib-bc-yourdot { width: 13px; height: 13px; }
 /* A linked PR's or issue's state (inbox-card-marks): GitHub's Octicon shapes and colours, the dark
    values first and the light ones below; unknown is the same shape, quiet. */
 .pn-inbox {
@@ -4771,7 +4954,7 @@ a.ib-bc-main { cursor: pointer; }
 .ib-bfield-err { margin: 10px 0 0; }
 
 /* A phone: the stacked list in column order, Shipped and Icebox folded at the end. */
-.ib-bstack { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 calc(24px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
+.ib-bstack { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 calc(10px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
 /* The approved phone mock: each lane a rounded pill (still the fold's button), its cards flat rows under it. */
 .ib-bgroup-h { margin: 12px 10px 2px; }
 .ib-bgroup-h button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--ib-lane-bg); color: var(--foreground); font: inherit; font-size: var(--ib-fs-15, 15px); font-weight: 600; text-align: left; cursor: pointer; }
@@ -4781,16 +4964,14 @@ a.ib-bc-main { cursor: pointer; }
 .ib-bgroup .ib-blist-h { padding: 8px 16px 0; }
 .ib-bgroup .ib-bcard { background: transparent; box-shadow: none; border-radius: 0; }
 .ib-bgroup .ib-bcard:hover { box-shadow: none; }
-.ib-bgroup .ib-bc-main { padding: 12px 16px; }
-.ib-bgroup .ib-bc-main:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 10px; }
+.ib-bgroup .ib-bcard { padding: 12px 16px; }
+.ib-bgroup .ib-bcard:has(.ib-bc-main:focus-visible) { border-radius: 10px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-bhead { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 8px; border-bottom: 1px solid var(--ib-hair); }
   .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
   /* A bare "+" (the mock), its hit area still 44 px. */
   .pn-inbox .ib-bnew { width: 44px; height: 44px; padding: 0; justify-content: center; border-color: transparent; background: transparent; box-shadow: none; color: var(--foreground); }
-  .ib-bc-main { padding: 12px; }
-  .ib-bc-top { padding-right: 0; }
-  .ib-bc-agetop { margin-right: 0; }
+  .ib-bcard { padding: 12px; }
   .ib-bc-t { white-space: normal; overflow-wrap: anywhere; font-size: var(--ib-fs-15, 15px); }
   .ib-bdrops { margin: 10px 12px; }
   .ib-bdrops li { flex-wrap: wrap; }
@@ -4800,9 +4981,9 @@ a.ib-bc-main { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .ib-lane, .ib-bcard { transition: none; } }
 
 /* The Board's body: the lanes (or a list), and the opened card's panel beside them; the lanes narrow and scroll. */
-.ib-bmain { position: relative; flex: 1; min-height: 0; display: flex; gap: 10px; padding: 0 12px 12px 0; }
-.ib-bmain > .ib-blanes { padding-right: 0; }
-.ib-bpage .ib-bc-main { width: 100%; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.ib-bmain { position: relative; flex: 1; min-height: 0; display: flex; gap: 10px; padding: 0 12px 10px 0; }
+/* The lanes run to 10 px above the page's edge, the gap between lanes (owner, 2026-10-27: there was 24 px, this padding and .ib-bmain's). */
+.ib-bmain > .ib-blanes { padding-right: 0; padding-bottom: 0; }
 .ib-bcard[data-open] { box-shadow: 0 0 0 2px var(--primary); }
 .ib-bc-sent { display: inline-flex; align-items: baseline; gap: 5px; max-width: 100%; }
 /* The text sets the line's baseline (beside the age); the tick or clock sits centred on it. */
@@ -4819,6 +5000,9 @@ a.ib-bc-main { cursor: pointer; }
 .ib-boff h2 { margin: 0; font-size: var(--ib-fs-18, 18px); font-weight: 600; }
 .ib-boff p { margin: 0; max-width: 460px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); line-height: 1.55; }
 .ib-boff .ib-btn { margin-top: 4px; }
+/* "The same switch is in Settings → Capabilities": a link like the ones in a settings row's description. */
+.ib-boff-note a { color: var(--primary); text-decoration: none; }
+.ib-boff-note a:hover { text-decoration: underline; }
 
 /* The opened card: a panel beside the Board (a full screen on a phone). */
 .ib-crdp { flex: 0 0 min(560px, 44%); min-width: 0; display: flex; flex-direction: column; border-radius: var(--ib-lr-lg, 10px); background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent); overflow: hidden; }
@@ -4836,12 +5020,17 @@ a.ib-bc-main { cursor: pointer; }
 .ib-crdp-sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
 .ib-crdp-state[data-agent-state="working"] .ib-crdp-sdot { background: var(--success, oklch(0.6 0.15 150)); }
 .ib-crdp-state[data-agent-state="ended"] .ib-crdp-sdot { background: none; box-shadow: inset 0 0 0 1.5px var(--muted-foreground); }
-.ib-crdp-ask { margin-left: auto; border: 0; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-14, 14px); padding: 4px 6px; border-radius: 6px; cursor: pointer; }
-.ib-crdp-ask:hover:not(:disabled) { color: var(--foreground); background: var(--ib-hover); }
-.ib-crdp-ask:disabled { opacity: 0.55; cursor: default; }
-.ib-crdp-asknote { flex-basis: 100%; text-align: right; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
 .ib-crdp-you { margin: 0; padding: 12px 16px; border-radius: var(--ib-lr-md, 9px); background: color-mix(in oklab, var(--warning, oklch(0.75 0.15 85)) 15%, var(--card)); font-size: var(--ib-fs-15, 15px); overflow-wrap: anywhere; }
 .ib-crdp-you b { color: var(--ib-onyou-fg); }
+/* The top: Open thread, or Create thread with no thread (approved 2026-10-27), right of the Move menu. */
+.pn-inbox .ib-crdp-open { gap: 5px; }
+.ib-crdp-top > :is(.ib-crdp-open, .ib-tipwrap:has(> .ib-crdp-open)) { margin-left: auto; }
+.ib-crdp-top > :is(.ib-crdp-open, .ib-tipwrap:has(> .ib-crdp-open)) ~ .ib-crdp-x { margin-left: 0; }
+/* "Ask for an update": a quiet link by History. */
+.ib-crdp-sec h3.ib-crdp-hhead { display: flex; align-items: baseline; gap: 8px; }
+.ib-crdp-ask { margin-left: auto; padding: 0; border: 0; background: none; color: var(--muted-foreground); font: inherit; font-weight: 500; cursor: pointer; }
+.ib-crdp-ask:is(:hover, :focus-visible):not(:disabled) { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.ib-crdp-ask:disabled { opacity: 0.55; cursor: default; }
 .ib-crdp-dropped { margin: 0; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-crdp-notes p { margin: 0 0 8px; font-size: var(--ib-fs-15, 15px); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ib-crdp-notes .ib-crdp-nonotes { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }

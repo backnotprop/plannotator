@@ -547,7 +547,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Agents', 'Prompts', 'Devices', 'Archived', 'Storage', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Agents', 'Prompts', 'Devices', 'Capabilities', 'Archived', 'Storage', 'About']);
   await nav.getByRole('link', { name: 'Agents' }).click();
   await expect(page).toHaveURL(/#settings\/agents$/);
   await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');

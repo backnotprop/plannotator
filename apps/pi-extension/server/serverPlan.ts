@@ -773,6 +773,8 @@ export async function startPlanReviewServer(options: {
 				closeAllFileBrowserWatchers();
 				aiRuntime?.dispose();
 			} finally {
+				// Before closeAllConnections, or a session-closed just sent is lost.
+				externalAnnotations?.endStreams();
 				server.close();
 				// close() only stops the listener; drain browser keep-alive sockets so a
 				// stopped session's connections die immediately instead of at the

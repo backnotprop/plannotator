@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import type { Annotation, Block } from '@plannotator/ui/types';
@@ -76,7 +77,7 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
-import { OpenQuestionsButton } from './OpenQuestions';
+import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRow, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
 import { selectionToolbarShowing } from '../selectionToolbar';
@@ -834,9 +835,11 @@ export interface ThreadPaneProps {
    * if folded or hidden in the middle fold, scrolled to the centre, focused
    * and ringed (a question's card when the match was in a question), and the
    * query's words are highlighted in it until the first click or key in the
-   * thread. `onLanded` then drops `msg=` from the hash.
+   * thread. `onLanded` then drops `msg=` from the hash. `focus: 'prompt'`
+   * (decision mode's "Open the thread", approval "inbox-decide-thread-only"):
+   * focus goes to the question's prompt, not the card.
    */
-  landing?: { messageId: string; terms: readonly string[]; questionKey: string | null } | null;
+  landing?: { messageId: string; terms: readonly string[]; questionKey: string | null; focus?: 'prompt' } | null;
   onLanded?: () => void;
   /**
    * The Artifacts view is on (approval "inbox-thread-artifacts", `#thread=…&artifacts`):
@@ -845,6 +848,12 @@ export interface ThreadPaneProps {
   artifacts?: boolean;
   /** Turn the Artifacts view on or off (the header's button, "Back to the thread"). Absent: no Artifacts button. */
   onArtifacts?: (open: boolean) => void;
+  /**
+   * Decision mode (experimental, thread only): "Decide these N" at the top of
+   * the open-questions list, which opens the dialog scoped to this thread.
+   * The window passes it only while two or more of the thread's decisions wait.
+   */
+  decide?: OpenQuestionsDecide | null;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -1002,7 +1011,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1175,6 +1184,13 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const sectionRef = useRef<HTMLElement>(null);
   /** After a fold changes: keep the message the person acted on in place, then move focus. */
   const anchorRef = useRef<{ id: string | null; top: number; focus: string | null; folding: boolean } | null>(null);
+  /** Stops holding the place put back after a file (threadPlace.ts `holdPlace`); everything that scrolls the thread calls it first. */
+  const holdRef = useRef<(() => void) | null>(null);
+  const stopHold = () => {
+    holdRef.current?.();
+    holdRef.current = null;
+  };
+  useEffect(() => () => holdRef.current?.(), []);
   const [announced, setAnnounced] = useState('');
   const announce = (text: string) => {
     setAnnounced('');
@@ -1269,6 +1285,9 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
 
   /** Scroll to a card or a message, focus it, and ring it briefly; a folded message opens first. */
   const jumpTo = useCallback((target: JumpTarget) => {
+    // A place held after a file closed must not pull the thread back while the message unfolds.
+    holdRef.current?.();
+    holdRef.current = null;
     if (unfold(target.messageId)) {
       requestAnimationFrame(() => jumpNow(target));
       return;
@@ -1283,6 +1302,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         ? body.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(target.messageId)}"]`)
         : body.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"] [data-question-key="${CSS.escape(target.key)}"]`);
     if (!element) return;
+    stopHold();
     const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     element.scrollIntoView?.({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
     if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', '-1');
@@ -1344,11 +1364,25 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         onLandedRef.current?.();
         return;
       }
-      const card = target.questionKey ? body.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"] [data-question-key="${CSS.escape(target.questionKey)}"]`) : null;
-      const element = card ?? article;
+      const inMessage = `[data-message-id="${CSS.escape(target.messageId)}"]`;
+      const key = target.questionKey ? CSS.escape(target.questionKey) : null;
+      const card = key ? body.querySelector<HTMLElement>(`${inMessage} [data-question-key="${key}"]`) : null;
+      // An action item is a row of its message's checklist (ActionChecklist), not a question card.
+      const actionRow = key && !card ? body.querySelector<HTMLElement>(`${inMessage} [data-action-card="${key}"]`) : null;
+      const element = card ?? actionRow ?? article;
+      stopHold();
       element.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
-      if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', '-1');
-      element.focus({ preventScroll: true });
+      // The card's prompt is what names it (its aria-labelledby): focus it there when asked, else the card. An
+      // action row's prompt is its task, the row's toggle.
+      const promptId = target.focus === 'prompt' ? card?.getAttribute('aria-labelledby') : null;
+      const prompt = promptId
+        ? card!.querySelector<HTMLElement>(`#${CSS.escape(promptId)}`)
+        : target.focus === 'prompt' && actionRow
+          ? actionRow.querySelector<HTMLElement>('[data-action-toggle]')
+          : null;
+      const focused = prompt ?? element;
+      if (!focused.hasAttribute('tabindex')) focused.setAttribute('tabindex', '-1');
+      focused.focus({ preventScroll: true });
       element.classList.remove('ib-q-target-out');
       element.classList.add('ib-q-target');
       setTimeout(() => {
@@ -1361,7 +1395,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       landedHits.current = { messageId: target.messageId, terms: target.terms };
       onLandedRef.current?.();
     };
-    // A folded message opens first, then the landing measures it.
+    // A folded message opens first, then the landing measures it. A place held after a file must not pull it back.
+    stopHold();
     if (unfold(target.messageId)) requestAnimationFrame(() => requestAnimationFrame(land));
     else requestAnimationFrame(land);
     // articleOf reads the body's ref.
@@ -1630,7 +1665,10 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     }
     // A comment on a message's text: that message, its passage brought into view and rung.
     if (record.message) {
+      // A place held after a file must not pull the thread back over the passage (show() scrolls inside rAF).
+      stopHold();
       const show = () => {
+        stopHold();
         const mark = bodyRef.current?.querySelector<HTMLElement>(
           `[data-message-id="${CSS.escape(record.message_id)}"] [data-bind-id="${CSS.escape(record.id)}"], [data-message-id="${CSS.escape(record.message_id)}"] [data-highlight-id="${CSS.escape(record.id)}"]`,
         );
@@ -1810,7 +1848,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
     const button = artifactsButtonRef.current;
     if (button) button.focus();
-    else bodyRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus();
+    else bodyRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
   }, [artifactsOn]);
   // The thread's scroll, kept while the grid is shown over it.
   useEffect(() => {
@@ -1822,6 +1860,98 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     body.addEventListener('scroll', keep, { passive: true });
     return () => body.removeEventListener('scroll', keep);
   }, [artifactsOn]);
+  // ── Your place in the thread, around a file (threadPlace.ts) ──
+  // Beside a file the thread is a narrow column, under a full-screen file it is covered, and on a phone or a
+  // stacked window it is display:none (WebKit then forgets its scrollTop). Each time that changes, the place
+  // on screen is read and put back once the new layout is laid out: the tile or image the person opened at the
+  // same distance from the top, else the first thing that was in view. A hidden layout keeps the place it was
+  // given, so closing the file brings the thread back where it was. Never the open-time landing (the New
+  // divider): that runs once per thread.
+  const placeKey = placeLayoutKey({ thread: thread.thread_id, file: fileCovers ? 'covered' : file ? 'side' : 'none', grid: artifactsOn, guide: covered });
+  /** The last tile, image or link a click or key in the thread was aimed at, and whether it came from the keyboard. */
+  const lastOpener = useRef<{ el: HTMLElement; keyboard: boolean; at: number } | null>(null);
+  /** The tile or image the open file was opened from by keyboard: focus goes back to it when the file closes. */
+  const returnFocus = useRef<{ el: HTMLElement; selector: string | null } | null>(null);
+  /**
+   * `saved`: the place to put back. `placedTop`: the scrollTop it was put back at; a scroll elsewhere (the person,
+   * `n`, a jump to a card) means the place on screen is the one to read next time, else `saved` is kept as it
+   * was (beside a file the thread is narrower and taller, and reading it there would lose what a clamp cost).
+   */
+  const place = useRef<{ committed: string; read: string | null; saved: ThreadPlace | null; placedTop: number | null }>({ committed: placeKey, read: null, saved: null, placedTop: null });
+  // Read in render, not in an effect: by the time any effect runs React has committed the new layout (the
+  // thread already narrowed, hidden or uncovered), so the old place can no longer be measured.
+  if (place.current.committed !== placeKey && place.current.read !== placeKey) {
+    place.current.read = placeKey;
+    const was = parsePlaceLayout(place.current.committed);
+    const body = bodyRef.current;
+    const sameThread = was.thread === thread.thread_id;
+    // The opener counts only when it opens the file that is opening now (not a button pressed a moment ago).
+    const recent = lastOpener.current && performance.now() - lastOpener.current.at < 2000 ? lastOpener.current : null;
+    const opener = sameThread && was.file === 'none' && file && recent && opensFile(recent.el, file.id) ? recent : null;
+    stopHold();
+    const untouched = was.file !== 'none' && place.current.saved !== null && place.current.placedTop !== null && body !== null && Math.abs(body.scrollTop - place.current.placedTop) <= 1;
+    if (!sameThread) place.current.saved = null;
+    else if (placeShown(was) && body && !untouched) {
+      place.current.saved = capturePlace(body, opener?.el ?? null);
+      place.current.placedTop = null;
+    }
+    // A file opening from the messages on screen: remember what opened it by keyboard, for focus on the way back.
+    if (sameThread && was.file === 'none' && file && placeShown(was)) returnFocus.current = opener?.keyboard ? { el: opener.el, selector: placeSelector(opener.el) } : null;
+  }
+  useLayoutEffect(() => {
+    const was = parsePlaceLayout(place.current.committed);
+    place.current.committed = placeKey;
+    place.current.read = null;
+    const now = parsePlaceLayout(placeKey);
+    if (placeLayoutKey(was) === placeKey) return;
+    const body = bodyRef.current;
+    // The file closed: whatever focus it is owed is settled here (the Artifacts grid gives focus back itself).
+    const focusBack = now.file === 'none' && was.file !== 'none' ? returnFocus.current : null;
+    if (now.file === 'none') returnFocus.current = null;
+    if (!body || !placeShown(now)) return;
+    const saved = place.current.saved;
+    const placed = () => {
+      place.current.placedTop = body.scrollTop;
+    };
+    // A file opening beside the thread moves the thread only when what was opened would leave the view: the
+    // narrower column keeps what the person sees above it (the message's head row) where it can.
+    if (saved && now.file === 'side' && was.file === 'none' && placeInView(body, saved)) placed();
+    else if (saved && restorePlace(body, saved)) {
+      placed();
+      stopHold();
+      holdRef.current = holdPlace(body, saved, placed, undefined, sectionRef.current ?? body);
+    }
+    // Focus back on what opened the file by keyboard, if nothing else has it.
+    if (focusBack) {
+      const active = document.activeElement;
+      if (!active || active === document.body || !active.isConnected) {
+        const target = focusBack.el.isConnected && body.contains(focusBack.el) ? focusBack.el : focusBack.selector ? body.querySelector<HTMLElement>(focusBack.selector) : null;
+        target?.focus({ preventScroll: true });
+      }
+    }
+    // Only the layout matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placeKey]);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const onClick = (event: MouseEvent) => {
+      const el = openerOf(event.target, body);
+      lastOpener.current = el ? { el, keyboard: event.detail === 0, at: performance.now() } : null;
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const el = openerOf(event.target, body);
+      lastOpener.current = el ? { el, keyboard: true, at: performance.now() } : null;
+    };
+    body.addEventListener('click', onClick, true);
+    body.addEventListener('keydown', onKey, true);
+    return () => {
+      body.removeEventListener('click', onClick, true);
+      body.removeEventListener('keydown', onKey, true);
+    };
+  }, []);
+
   // A file or a guided review opened from the grid closes: focus back on its tile, unless something took it.
   const gridCovered = file !== null || covered;
   const gridCoveredWas = useRef(gridCovered);
@@ -1869,7 +1999,10 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     const article = articleOf(first.id);
     if (!article) return;
     const by = followBy(measureFirstLines(article), body.getBoundingClientRect());
-    if (by > 0) body.scrollBy?.({ top: by, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    if (by > 0) {
+      stopHold();
+      body.scrollBy?.({ top: by, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    }
     // `announce` and `articleOf` are this render's; only a new thread payload matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread]);
@@ -1949,6 +2082,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     if (!body || !first) return;
     const target = below ? (newBelow(body, passedIds(), false)[0] ?? first) : first;
     const divider = target === first ? body.querySelector<HTMLElement>('[data-new-divider]') : null;
+    holdRef.current?.();
+    holdRef.current = null;
     (divider ?? target).scrollIntoView?.({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
     target.querySelector<HTMLElement>('[data-fold-head]')?.focus({ preventScroll: true });
   }, [passedIds]);
@@ -2655,8 +2790,16 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
           });
   // No Send now because that session runs an older plugin than a restart loads (the "Steps" line,
   // owner approval "restart-warning"): only while the reply waits for a working session.
-  const restartName = lastTo ? hostName(lastTo.host) : repliedTo?.author.kind === 'agent' && repliedTo.author.host ? hostName(repliedTo.author.host) : asker;
   const restart = delivered?.state === 'queued' && !last.deliver_now_at ? restartNote(recipientConnection) : null;
+  // Oh My Pi polls as host `pi`: its runtime names it (owner approval "reload-hosts").
+  const restartName =
+    restart?.runtime === 'oh-my-pi'
+      ? 'Oh My Pi'
+      : lastTo
+        ? hostName(lastTo.host)
+        : repliedTo?.author.kind === 'agent' && repliedTo.author.host
+          ? hostName(repliedTo.author.host)
+          : asker;
   // The name the waiting band uses ("Claude Code", "Claude Code (another session)").
   const ownerLineName = lastTo
     ? last.to
@@ -3840,6 +3983,28 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                   Cancel
                 </button>
                 <span className="ib-sp" />
+                {/* A phone has no way to paste a picture into the reply (iOS offers no Paste for an image in a plain
+                    text field), so it gets an attach button: the photo library or Files, into the same tiles,
+                    upload path and names as a paste. A desktop stays paste-only (the owner's choice). */}
+                {phone && (
+                  <Tip content="Attach files">
+                    <label className="ib-rattach" aria-label="Attach files">
+                      <Icon name="clip" size={19} />
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*,*/*"
+                        className="ib-sr"
+                        data-reply-attach=""
+                        onChange={(event) => {
+                          if (event.target.files) replyFiles.attach(event.target.files);
+                          event.target.value = '';
+                          setError(null);
+                        }}
+                      />
+                    </label>
+                  </Tip>
+                )}
                 {/* The in-thread New message button is off (approval "inbox-acknowledge"); its route and code stay. */}
                 {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
               </div>
@@ -3892,6 +4057,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                       ? { label: reaskItemLabel(reaskOpen), tooltip: reaskTooltip(reaskList), busy: reasking, onReask: () => void sendReask() }
                       : null
                   }
+                  decide={decide}
                   triggerRef={reaskRef}
                   phone={phone}
                   measure={measureOpenQuestions}

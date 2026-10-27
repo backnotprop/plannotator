@@ -191,7 +191,7 @@ The Plannotator Inbox is one local window per machine where you leave the person
 plannotator card <create|move|say|link|ship|drop|list> ...
 ```
 
-Only while the person has turned the Inbox's Board on (Settings → General); it is off by default, and then every call answers `board_off` and writes nothing, so use it only when your inbox tool lists `card` or the person asks. The Board holds one card per piece of work that outlasts a reply, in the column of its stage (backlog, designing, your_look, building, your_review, shipped). Use the `card` action of a `plannotator_inbox` tool when you have one; this CLI is the same call from a shell. `plannotator card --help` gives the arguments, and `plannotator inbox --help` its card section while the Board is on. The icebox is the person's only.
+Only while the person has turned the Inbox's Board on (Settings → Capabilities); it is off by default, and then every call answers `board_off` and writes nothing, so use it only when your inbox tool lists `card` or the person asks. The Board holds one card per piece of work that outlasts a reply, in the column of its stage (backlog, designing, your_look, building, your_review, shipped). Use the `card` action of a `plannotator_inbox` tool when you have one; this CLI is the same call from a shell. `plannotator card --help` gives the arguments, and `plannotator inbox --help` its card section while the Board is on. The icebox is the person's only. A title is 2–5 words naming the work ("Pi update fix"), never a sentence; where it stands goes in `say`. When a card waits on the person, link the Inbox thread where they make the call (`thread_id`), so "You: …" opens it.
 
 ## Other subcommands
 

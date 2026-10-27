@@ -189,6 +189,29 @@ describe.if(INBOX_CARD_ACTION_ON)("a card call writes no project, and tolerates 
     expect(created.structuredContent.card.column).toBe("backlog");
   });
 
+  // Approved 2026-10-27: titles are 2–5 words, and a sentence-long one gets a hint, never a refusal.
+  test("a title over 40 characters is kept but answered with a hint to shorten it; a short one, and a call that sets no title, get none", async () => {
+    const { card } = await world();
+    const long = "Fix the Pi extension so updates stop loading the stale copy"; // 59 characters
+    const made = await card({ op: "create", title: long, column: "building" });
+    expect(made.isError).toBeFalsy();
+    expect(made.structuredContent.card.title).toBe(long);
+    expect(made.structuredContent.title_hint).toContain("2–5 words");
+    expect(made.content[0]!.text).toContain("The title is 59 characters.");
+    const id = made.structuredContent.card.id as string;
+    // A say that leaves the title alone is not nagged about it.
+    const said = await card({ op: "say", card_id: id, say: "tests green" });
+    expect(said.structuredContent.title_hint).toBeUndefined();
+    expect(said.content[0]!.text).not.toContain("The title is");
+    // Renamed short: no hint.
+    const renamed = await card({ op: "say", card_id: id, title: "Pi update fix" });
+    expect(renamed.structuredContent.card.title).toBe("Pi update fix");
+    expect(renamed.structuredContent.title_hint).toBeUndefined();
+    const short = await card({ op: "create", title: "Settings search fuzzy" });
+    expect(short.structuredContent.title_hint).toBeUndefined();
+    expect(short.content[0]!.text).not.toContain("The title is");
+  });
+
   test("a field an op does not take is refused, but its `false` default is not", async () => {
     const { card } = await world();
     const id = (await card({ op: "create", title: "Defaults" })).structuredContent.card.id as string;

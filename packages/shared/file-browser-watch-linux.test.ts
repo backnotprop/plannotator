@@ -215,19 +215,26 @@ describe.skipIf(!onLinux)("per-directory watcher on real Linux inotify", () => {
 	test("folders the cap skipped that are later deleted never hold back a real folder", async () => {
 		const world = setup({ maxDirectoryWatches: 3 });
 		try {
-			mkdirSync(join(world.root, "a", "x"), { recursive: true });
-			mkdirSync(join(world.root, "b", "y"), { recursive: true });
-			mkdirSync(join(world.root, "c"));
+			const top = ["a", "b", "c"].map((name) => join(world.root, name));
+			for (const [i, folder] of top.entries()) mkdirSync(join(folder, `inner${i}`), { recursive: true });
 			world.subscribe();
 			await world.settled();
-			expect(world.registry.diagnostics().watchedDirectories).toEqual([world.root, join(world.root, "a"), join(world.root, "b")]);
-			// c was skipped by the cap; it goes away, then b frees a watch.
-			rmSync(join(world.root, "c"), { recursive: true });
+			// Which top folder the cap skips follows readdir order, which real
+			// filesystems do not sort (ext4 lists by name hash).
+			const watched = world.registry.diagnostics().watchedDirectories;
+			expect(watched).toHaveLength(3);
+			expect(watched).toContain(world.root);
+			const skipped = top.filter((folder) => !watched.includes(folder));
+			expect(skipped).toHaveLength(1);
+			const [freed, kept] = top.filter((folder) => watched.includes(folder));
+			const keptInner = join(kept!, `inner${top.indexOf(kept!)}`);
+			// The skipped folder goes away, then another frees a watch.
+			rmSync(skipped[0]!, { recursive: true });
 			await world.settled();
-			rmSync(join(world.root, "b"), { recursive: true });
-			await waitFor(() => world.registry.diagnostics().watchedDirectories.includes(join(world.root, "a", "x")));
+			rmSync(freed!, { recursive: true });
+			await waitFor(() => world.registry.diagnostics().watchedDirectories.includes(keptInner));
 			await world.settled();
-			expect(world.registry.diagnostics().watchedDirectories).toEqual([world.root, join(world.root, "a"), join(world.root, "a", "x")]);
+			expect(world.registry.diagnostics().watchedDirectories).toEqual([world.root, kept!, keptInner]);
 		} finally {
 			world.cleanup();
 		}

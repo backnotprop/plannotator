@@ -222,7 +222,11 @@ test.skipIf(!hasDom)('no live agent: Send sends nothing and says so; Escape asks
   act(() => (dialog()!.querySelector('[data-compose-discard]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   expect(await drafts()).toEqual([]);
-  expect(el.querySelector('[data-drafts-nav]')).toBeNull();
+  // The Drafts row counts only the seeded world's unsent replies (a picked
+  // question waits there), never the discarded message. Bun 1.3 passed a
+  // failing `.toBeNull()` here when the element was too big to print.
+  const { replies } = JSON.parse((await loopback('/api/inbox/drafts')).text) as { replies?: unknown[] };
+  expect(el.querySelector('[data-drafts-nav] .ib-n')?.textContent ?? '0').toBe(String(replies?.length ?? 0));
 });
 
 test.skipIf(!hasDom)('Keep draft: the sidebar\'s Drafts row and the Drafts page list it with its chip; delete has Undo', async () => {
@@ -709,4 +713,82 @@ test.skipIf(!hasDom)('dictation or a paste into the chip that cannot be a name i
   // A dictated sentence of eight words or more is a sentence, not a name, even when it would fit.
   expect(paste('this is a sentence the person said out loud').defaultPrevented).toBe(true);
   expect(paste('Short').defaultPrevented).toBe(false);
+});
+
+// Create thread (owner, 2026-10-27: a card with no thread offers "Create thread": "create, create, create is
+// the idea"). What regresses: the thread not linked to the card after the Send (Open thread never appears),
+// compose addressed to nobody, or a card's title the person did not change counted as words to keep.
+test.skipIf(!hasDom)('Create thread on a card with no thread: compose to a live session in its project, starting with the title; the Send links the thread to the card', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  // The first-visit dialog is claimed here, so it never covers the card.
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  const project = (JSON.parse((await loopback('/api/inbox/projects')).text) as { projects: { id: string; root: string }[] }).projects[0]!;
+  const made = JSON.parse((await loopback('/api/inbox/cards', 'POST', JSON.stringify({ project: project.id, title: 'Settings search' }))).text) as { card: { id: string; threads: string[] } };
+  expect(made.card.threads).toEqual([]);
+  await poll('ses_create_thread', 'claude-code', project.root);
+  const el = await renderApp(`#board&card=${made.card.id}`);
+  await until(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]:not(:disabled)') !== null, 'Create thread');
+  expect(el.querySelector('[data-card-open-thread]')).toBeNull();
+  act(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]')!.click());
+  await until(() => dialog()?.querySelector('[data-compose-to="ses_create_thread"]') != null, 'compose to the live session');
+  expect(dialog()!.querySelector('[data-compose-card]')!.textContent).toContain('Settings search');
+  expect((dialog()!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Settings search\n\n');
+  // Untouched, it is nothing to keep: Escape closes without asking.
+  key('Escape');
+  await until(() => dialog() === null, 'closed without asking');
+  act(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]')!.click());
+  await until(() => dialog()?.querySelector('[data-compose-to="ses_create_thread"]') != null, 'compose again');
+  type('Settings search\n\nFuzzy or prefix matching? Say which and why.');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'sent');
+  const thread = await threadIdOf('Settings search');
+  await until(async () => (JSON.parse((await loopback(`/api/inbox/cards/${made.card.id}`)).text) as { card: { threads: string[] } }).card.threads.includes(thread), 'the thread linked to the card');
+  await until(() => el.querySelector(`[data-card-open-thread="${thread}"]`) !== null, 'Open thread on the card');
+  expect(el.querySelector('[data-card-create-thread]')).toBeNull();
+});
+
+// Owner's follow-up to Create thread (2026-10-27): a draft kept from it must still link the thread when it is
+// sent later, from Drafts. What regresses: the draft dropping the card, so the later Send starts an unlinked
+// thread and the card keeps offering Create thread.
+test.skipIf(!hasDom)('Create thread kept as a draft: the draft keeps the card; sent later from Drafts, the thread is linked to the card', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  const project = (JSON.parse((await loopback('/api/inbox/projects')).text) as { projects: { id: string; root: string }[] }).projects[0]!;
+  const made = JSON.parse((await loopback('/api/inbox/cards', 'POST', JSON.stringify({ project: project.id, title: 'Draft card link' }))).text) as { card: { id: string } };
+  await poll('ses_draft_card', 'claude-code', project.root);
+  const el = await renderApp(`#board&card=${made.card.id}`);
+  await until(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]:not(:disabled)') !== null, 'Create thread');
+  act(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]')!.click());
+  await until(() => dialog()?.querySelector('[data-compose-to="ses_draft_card"]') != null, 'compose to the live session');
+  type('Draft card link\n\nWhich of the two search modes?');
+  key('Escape');
+  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'kept as a draft');
+  const kept = (await drafts()).find((d) => d.body.startsWith('Draft card link')) as unknown as { id: string; card?: { id: string; title: string } };
+  expect(kept.card).toEqual({ id: made.card.id, title: 'Draft card link' });
+  // Nothing sent yet: the card still has no thread.
+  expect((JSON.parse((await loopback(`/api/inbox/cards/${made.card.id}`)).text) as { card: { threads: string[] } }).card.threads).toEqual([]);
+
+  // Deleted from Drafts and brought back with Undo: it still names the card (review of #2248).
+  act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) !== null, 'the draft row');
+  act(() => (el.querySelector(`[data-draft-id="${kept.id}"] [data-draft-delete]`) as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) === null, 'the row gone');
+  act(() => (document.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) !== null, 'the draft back');
+  const restored = (await drafts()).find((d) => d.id === kept.id) as unknown as { card?: { id: string; title: string } };
+  expect(restored.card).toEqual({ id: made.card.id, title: 'Draft card link' });
+
+  // Later, from Drafts: the draft reopens naming the card, and its Send links the thread.
+  act(() => (el.querySelector(`[data-draft-id="${kept.id}"] .ib-draft-open`) as HTMLButtonElement).click());
+  await until(() => dialog()?.querySelector(`[data-compose-card="${made.card.id}"]`) != null, 'the draft names the card');
+  await until(() => dialog()!.querySelector('[data-compose-to="ses_draft_card"]') !== null, 'To keeps the session');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'sent');
+  const thread = await threadIdOf('Draft card link');
+  await until(async () => (JSON.parse((await loopback(`/api/inbox/cards/${made.card.id}`)).text) as { card: { threads: string[] } }).card.threads.includes(thread), 'the thread linked to the card');
+  // A draft naming something that is not a card is refused, not kept with a broken link.
+  const refused = await loopback(`/api/inbox/drafts/drf_${'0'.repeat(26)}`, 'POST', JSON.stringify({ body: 'x', base: null, card: { id: 'msg_x', title: 'x' } }));
+  expect(refused.status).toBe(422);
+  expect(JSON.parse(refused.text)).toMatchObject({ code: 'validation_error', field: 'card' });
 });

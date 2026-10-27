@@ -12,7 +12,15 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, resolveUpdateCheck } from "../generated/config.ts";
-import { buildUpdateAdvert, readUpdateState, scheduleReleaseCheck, type UpdateAdvert } from "../generated/update-check.ts";
+import {
+	buildUpdateAdvert,
+	buildUpdateCheckFailing,
+	PI_UPDATE_COMMAND,
+	readUpdateState,
+	scheduleReleaseCheck,
+	type UpdateAdvert,
+	type UpdateCheckFailingAdvert,
+} from "../generated/update-check.ts";
 
 let packageVersion: string | null | undefined;
 
@@ -36,15 +44,19 @@ export function piExtensionVersion(): string | null {
  * Nothing for another origin (oh-my-pi updates differently) or while update
  * checks are off.
  */
-export function piUpdateAdvert(origin?: string | null): { updateAvailable?: UpdateAdvert } {
+export function piUpdateAdvert(origin?: string | null): { updateAvailable?: UpdateAdvert; updateCheckFailing?: UpdateCheckFailingAdvert } {
 	try {
 		if ((origin ?? "pi") !== "pi") return {};
 		if (!resolveUpdateCheck(loadConfig())) return {};
 		const current = piExtensionVersion();
 		if (!current) return {};
 		scheduleReleaseCheck({ enabled: () => resolveUpdateCheck(loadConfig()) });
-		const advert = buildUpdateAdvert({ state: readUpdateState(), current, action: "pi", platform: process.platform });
-		return advert ? { updateAvailable: advert } : {};
+		const state = readUpdateState();
+		const advert = buildUpdateAdvert({ state, current, action: "pi", platform: process.platform });
+		if (advert) return { updateAvailable: advert };
+		// Checking has failed for hours: the Options menu says so, with the command (npm, not GitHub).
+		const failing = buildUpdateCheckFailing(state, Date.now(), PI_UPDATE_COMMAND);
+		return failing ? { updateCheckFailing: failing } : {};
 	} catch {
 		return {};
 	}

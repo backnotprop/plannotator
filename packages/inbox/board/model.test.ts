@@ -9,7 +9,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
-import { boardCounts, boardLanes, cardAge, cardFoot, cardLine, cardMessageBody, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops } from './model';
+import { boardCounts, boardLanes, cardAge, cardFoot, cardLine, cardMessageBody, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -127,4 +127,27 @@ test('a link’s live state reads like the hover card: Merged with its day, Open
   expect(refState({ state: 'merged', kind: 'pull', closedAt: '2026-10-20T10:00:00.000Z' }).label).toStartWith('Merged');
   expect(refState({ state: 'open', kind: 'issue', closedAt: null })).toEqual({ label: 'Open', tone: 'open' });
   expect(refState({ state: 'not_planned', kind: 'issue', closedAt: null } as never).label).toStartWith('Not planned');
+});
+
+test('"You: …" goes to the thread where the person makes the call: the sent thread, else the latest, else none', () => {
+  const rows: Record<string, { last_at: string }> = {
+    msg_old: { last_at: '2026-10-20T09:00:00.000Z' },
+    msg_new: { last_at: '2026-10-21T09:00:00.000Z' },
+    msg_sent: { last_at: '2026-10-19T09:00:00.000Z' },
+  };
+  const rowOf = (id: string) => rows[id] ?? null;
+  const sent = { at: '2026-10-19T09:00:00.000Z', to: CLAUDE, thread_id: 'msg_sent' };
+  // Sent first, even when another linked thread spoke later.
+  expect(youThread(card('a', { threads: ['msg_new', 'msg_sent'], sent }), rowOf)).toBe('msg_sent');
+  // Else the linked thread with the latest message, whatever order they were linked in.
+  expect(youThread(card('b', { threads: ['msg_new', 'msg_old'] }), rowOf)).toBe('msg_new');
+  // Threads the list does not hold: the later-linked one.
+  expect(youThread(card('c', { threads: ['msg_x', 'msg_y'] }), rowOf)).toBe('msg_y');
+  // A sent thread that is no longer linked (the wire drops a thread that is gone) is passed over, even when the list still holds it.
+  expect(youThread(card('d', { threads: ['msg_old'], sent: { ...sent, thread_id: 'msg_gone' } }), rowOf)).toBe('msg_old');
+  expect(youThread(card('d2', { threads: ['msg_old'], sent: { ...sent, thread_id: 'msg_new' } }), rowOf)).toBe('msg_old');
+  // No thread: none (the card opens instead).
+  expect(youThread(card('e'), rowOf)).toBeNull();
+  // The link's name holds its visible words as shown, case and all (WCAG 2.5.3: a voice user says what they see).
+  for (const you of ['Merge #14', 'PR #14: look', 'Pick one of three dialogs']) expect(youLinkLabel(you).startsWith(`You: ${you}`)).toBe(true);
 });

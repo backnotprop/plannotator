@@ -47,8 +47,20 @@ import {
 } from "./generated/inbox/agent-link.ts";
 import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
 import { isCtxAlive } from "./current-pi-session.ts";
-import { piExtensionVersion } from "./server/update-advert.ts";
+import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
 import { detectPiHost } from "./pi-host.ts";
+
+/** How long a read of package.json on disk is reused: every poll asks. */
+const ON_DISK_FRESH_MS = 2_000;
+let onDiskCache: { at: number; value: string | null } | null = null;
+
+/** The extension's version on disk now (null: unreadable or gone), read at most once per 2 s. */
+function readOnDiskVersion(): string | null {
+	if (onDiskCache && Date.now() - onDiskCache.at < ON_DISK_FRESH_MS) return onDiskCache.value;
+	const value = readPackageVersion();
+	onDiskCache = { at: Date.now(), value };
+	return value;
+}
 import { PI_INBOX_REMINDER_CUSTOM_TYPE } from "./pi-session-bridge.ts";
 
 /**
@@ -185,6 +197,8 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 
 	let ctx: ExtensionContext | null = null;
 	let wake: InboxWake | null = null;
+	/** The on-disk version the session was last told about (#2085's message, once per version). */
+	let notifiedOnDisk: string | null = null;
 	let activationSettled = false;
 	/** The tool is active in this instance's session (an interactive UI): only then is there a reminder to give. */
 	let toolActive = false;
@@ -258,9 +272,24 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 				// The session is gone: the reply stays readable in the Inbox.
 			}
 		},
-		// The extension version this process loaded: the Inbox says when it is behind (`pi update --extensions`, then /reload).
-		// Not inside Oh My Pi, which updates the extension its own way (as update-advert.ts skips it).
-		pluginVersion: () => (ohMyPi ? null : piExtensionVersion()),
+		// What this process loaded and what is on disk now, and which host (owner approval "reload-hosts"):
+		// the Inbox says `/reload` (Oh My Pi `/restart`) when the package changed under the session, or
+		// the update and the reload when both are behind it. The first time the files on disk differ, the
+		// session hears it once, before a command fails (#2085).
+		plugin: () => {
+			const version = loadedPackageVersion();
+			if (!version) return null;
+			const onDisk = readOnDiskVersion();
+			if (onDisk && onDisk !== version && notifiedOnDisk !== onDisk) {
+				notifiedOnDisk = onDisk;
+				try {
+					ctx?.ui.notify(packageUpdatedMessage(version, onDisk, ohMyPi ? "oh-my-pi" : "pi"), "warning");
+				} catch {
+					// No UI: the Inbox still says it.
+				}
+			}
+			return { version, on_disk: onDisk, host: ohMyPi ? ("oh-my-pi" as const) : ("pi" as const) };
+		},
 		// The session's working folder, so the Inbox lists it under its project from its first poll.
 		projectPath: () => {
 			const current = ctx;

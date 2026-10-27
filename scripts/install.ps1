@@ -1155,17 +1155,140 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -
 # Clear Pi jiti cache to force fresh download on next run
 Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
 
+# Pi extension (#902). `pi install npm:@plannotator/pi-extension` runs a bare
+# `npm install @plannotator/pi-extension` in <agent dir>\npm. npm may settle on
+# an older version and still exit 0 ("up to date"): it passes over a release
+# whose `engines` the running Node does not meet (0.28.32's Node floor), and a
+# registry mirror can lag. `pi update <source>` is Pi's own update: it asks the
+# registry for the newest version and installs `<name>@latest` by name (older
+# Pi reinstalls with `npm install -g`), and it leaves Pi's settings as they are.
+# So an existing install is updated with `pi update`, a first install that
+# landed on an older version gets the same `pi update`, the version on disk is
+# read back where Pi loads it from, and "installed"/"updated" is said only when
+# it reached this release; otherwise one line names the cause it can see and
+# the command to run. The step never pins a version in Pi's settings (a pinned
+# source is skipped by every later `pi update`). A source the person pinned
+# (npm:@plannotator/pi-extension@0.28.20) is left alone and the line says how
+# to move it. Nothing is removed first, so a failed step leaves the install as
+# it was. `pi update` shipped together with `pi install`, and it runs here only
+# when Pi's settings list the extension. Same logic in install.sh and
+# install.cmd's :UpdatePiExtension.
+$piExtensionSource = "npm:@plannotator/pi-extension"
+
+# Pi's agent dir: $env:PI_CODING_AGENT_DIR (~ expanded, as Pi does), else ~\.pi\agent.
+function Get-PiAgentDir {
+    $dir = $env:PI_CODING_AGENT_DIR
+    if (-not $dir) { return (Join-Path (Join-Path $env:USERPROFILE ".pi") "agent") }
+    if ($dir -eq "~") { return $env:USERPROFILE }
+    if ($dir.StartsWith("~/") -or $dir.StartsWith("~\")) { return (Join-Path $env:USERPROFILE $dir.Substring(2)) }
+    return $dir
+}
+
+# How Pi's user settings list the extension: "none", "unpinned", or
+# "pinned:<version>" for an exact version (what `pi update` skips).
+function Get-PiExtensionState {
+    $settings = Join-Path (Get-PiAgentDir) "settings.json"
+    if (-not (Test-Path -LiteralPath $settings -PathType Leaf)) { return "none" }
+    $text = ""
+    try { $text = [string](Get-Content -LiteralPath $settings -Raw -ErrorAction Stop) } catch { return "none" }
+    if ($text -notmatch '"npm:@plannotator/pi-extension(@[^"]*)?"') { return "none" }
+    if ($text -match '"npm:@plannotator/pi-extension@v?([0-9]+\.[0-9]+\.[0-9][0-9A-Za-z.+-]*)"') { return "pinned:" + $Matches[1] }
+    return "unpinned"
+}
+
+# The installed extension's version, read where Pi loads it from: the managed
+# <agent dir>\npm\node_modules copy when it exists, else the global npm root
+# (where older Pi installed user packages). Empty when it can't be read.
+function Get-PiExtensionVersion {
+    $local:ErrorActionPreference = 'Continue'
+    $pkg = Join-Path (Join-Path (Join-Path (Join-Path (Get-PiAgentDir) "npm") "node_modules") "@plannotator") "pi-extension"
+    if (-not (Test-Path -LiteralPath $pkg -PathType Container)) {
+        $pkg = $null
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            $root = $null
+            try { $root = & npm root -g 2>$null | Select-Object -First 1 } catch { }
+            if ($root) { $pkg = Join-Path (Join-Path ([string]$root).Trim() "@plannotator") "pi-extension" }
+        }
+    }
+    if (-not $pkg) { return "" }
+    $json = Join-Path $pkg "package.json"
+    if (-not (Test-Path -LiteralPath $json -PathType Leaf)) { return "" }
+    try { return [string](Get-Content -LiteralPath $json -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop).version } catch { return "" }
+}
+
+# Whether version $a is at least $b (major.minor.patch; any suffix ignored).
+function Test-PiVersionAtLeast($a, $b) {
+    $x = @(([string]$a -replace '^v', '' -replace '[-+].*$', '').Split('.'))
+    $y = @(([string]$b -replace '^v', '' -replace '[-+].*$', '').Split('.'))
+    for ($i = 0; $i -lt 3; $i++) {
+        $p = 0; $q = 0
+        if ($i -lt $x.Count) { [void][int]::TryParse($x[$i], [ref]$p) }
+        if ($i -lt $y.Count) { [void][int]::TryParse($y[$i], [ref]$q) }
+        if ($p -gt $q) { return $true }
+        if ($p -lt $q) { return $false }
+    }
+    return $true
+}
+
 function Update-PiExtensionIfPresent {
     if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
         return
     }
+    $local:ErrorActionPreference = 'Continue'
 
-    Write-Host "Updating Pi extension..."
-    pi install npm:@plannotator/pi-extension
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Pi extension updated."
+    $target = ([string]$latestTag) -replace '^v', ''
+    $state = Get-PiExtensionState
+    $fresh = $false
+    if ($state.StartsWith("pinned:")) {
+        Write-Host ("Pi extension: pinned to " + $state.Substring(7) + " in Pi's settings, left as is. To move it: pi install " + $piExtensionSource + "@" + $target)
+        return
+    }
+    if ($state -eq "none") {
+        $fresh = $true
+        Write-Host "Installing Pi extension..."
+        pi install $piExtensionSource
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Skipping Pi extension install (pi install failed)"
+            return
+        }
+        $before = Get-PiExtensionVersion
+        if (-not $before -or -not (Test-PiVersionAtLeast $before $target)) {
+            # npm settled on an older version (or it can't be read): Pi's own
+            # update asks for the newest one by name.
+            pi update $piExtensionSource
+        }
     } else {
-        Write-Host "Skipping Pi extension update (pi install failed)"
+        Write-Host "Updating Pi extension..."
+        $before = Get-PiExtensionVersion
+        pi update $piExtensionSource
+        if ($LASTEXITCODE -ne 0) {
+            # The update failed, or this Pi's update takes no source: the
+            # install command, as before. Neither removes anything first.
+            pi install $piExtensionSource
+        }
+    }
+
+    $after = Get-PiExtensionVersion
+    if (-not $after) {
+        Write-Host ("Pi extension: could not read its installed version. To update it: pi update " + $piExtensionSource)
+    } elseif (-not (Test-PiVersionAtLeast $after $target)) {
+        # The one cause visible from here: the registry npm uses does not have
+        # this release yet (a mirror catching up, or npm not published).
+        $view = ""
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            try { $view = (& npm view "@plannotator/pi-extension@$target" version --fetch-timeout=10000 --fetch-retries=0 2>&1 | Out-String) } catch { $view = "" }
+        }
+        if ($view -match 'E404') {
+            Write-Host ("Pi extension: still " + $after + " (" + $target + " is not on your npm registry yet). Run this later: pi update " + $piExtensionSource)
+        } else {
+            Write-Host ("Pi extension: still " + $after + " (this release is " + $target + "). To update it: pi update " + $piExtensionSource)
+        }
+    } elseif ($fresh) {
+        Write-Host "Pi extension installed ($after)."
+    } elseif ($before -eq $after) {
+        Write-Host "Pi extension already up to date ($after)."
+    } else {
+        Write-Host "Pi extension updated to $after."
     }
 }
 
@@ -1843,7 +1966,7 @@ if ($skipOpencodeResolved) {
     Write-Host ""
     Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
     Write-Host ""
-    Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
+    Write-Host "Then restart OpenCode (OpenCode 2: run opencode2 reload). The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 }
 # Agent-specific closing sections print only for agents this run detected,
 # reusing the detection the integration steps above already ran (Pi: `pi` on
@@ -1859,9 +1982,13 @@ if ($piDetected) {
     Write-Host "  PI USERS"
     Write-Host "=========================================="
     Write-Host ""
-    Write-Host "Install or update the extension:"
+    Write-Host "Install the extension:"
     Write-Host ""
     Write-Host "  pi install npm:@plannotator/pi-extension"
+    Write-Host ""
+    Write-Host "Update it (pi install leaves an existing install as it is):"
+    Write-Host ""
+    Write-Host "  pi update npm:@plannotator/pi-extension"
 }
 # Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). This run
 # installs nothing into OMP: the section says how, because "Ask this session"

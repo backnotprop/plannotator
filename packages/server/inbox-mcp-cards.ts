@@ -20,6 +20,7 @@ import {
   INBOX_CARD_LIVE_COLUMNS,
   inboxAgentName,
   inboxCardRefsOf,
+  inboxCardTitleHint,
   isInboxCardDropUnseen,
   type InboxAuthor,
   type InboxCardColumn,
@@ -37,7 +38,7 @@ export type InboxCardOp = (typeof INBOX_CARD_OPS)[number];
 
 /** For raw MCP clients; the agent tool words its action line itself (INBOX_AGENT_ACTION_LEADS.card). */
 export const CARD_DESCRIPTION =
-  "Keep a card on the person's Board for work that outlasts this reply (a lane started, a PR opened, \"I'll send you X\"), and keep it current with one short call as the work moves. op: create (a title, or thread_id to take its subject), move (column), say (your last word, or what the person owes in `you`), link (thread_id, pr), ship, drop (with a reason), list (your cards). A merged PR never moves a card by itself: ship it when it is merged or live.";
+  "Keep a card on the person's Board for work that outlasts this reply (a lane started, a PR opened, \"I'll send you X\"), and keep it current with one short call as the work moves. op: create (a title: 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in say), move (column), say (your last word, or what the person owes in `you`), link (thread_id, pr), ship, drop (with a reason), list (your cards). When a card waits on the person, link the Inbox thread where they make the call (thread_id), so \"You: …\" opens it. A merged PR never moves a card by itself: ship it when it is merged or live.";
 
 /** Short on purpose: Pi and OpenCode send it with every request (INBOX_TOOL_COST). */
 export const CARD_COLUMN_DESCRIPTION =
@@ -45,7 +46,7 @@ export const CARD_COLUMN_DESCRIPTION =
 
 /** What a `card` call gets while the Board is off (approval "inbox-board", 2026-10-26): nothing is written. */
 export const INBOX_BOARD_OFF_TEXT =
-  "board_off: The person's Board is off, so cards are not kept and nothing was written. They turn it on in the Plannotator Inbox's Settings → General; agents get the card action in their next session.";
+  "board_off: The person's Board is off, so cards are not kept and nothing was written. They turn it on in the Plannotator Inbox's Settings → Capabilities; agents get the card action in their next session.";
 
 const AGENT_SESSION_DESCRIPTION = "Your session id; the `plannotator inbox mcp` shim fills it. The cards you make are yours: list shows them.";
 
@@ -150,10 +151,14 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   }
   const session = input.agent_session?.trim() || null;
   const by: InboxAuthor = { kind: "agent", host: input.agent_host?.trim() || null, session, name: input.agent_name?.trim() || null };
-  const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}) => ({
-    text: `${verb}:\n${cardLineText(wire)}`,
-    structured: { card: wire, ...extra },
-  });
+  // A title that reads like a sentence gets a hint after the card line (approved 2026-10-27; never refused).
+  const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null) => {
+    const hint = titled === null ? null : inboxCardTitleHint(titled);
+    return {
+      text: `${verb}:\n${cardLineText(wire)}${hint ? `\n${hint}` : ""}`,
+      structured: { card: wire, ...extra, ...(hint ? { title_hint: hint } : {}) },
+    };
+  };
 
   if (input.op === "list") {
     if (!project) {
@@ -198,7 +203,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       refs: input.ref ? [input.ref] : [],
       idempotency_key: input.idempotency_key,
     });
-    return answer(replayed ? "Already made (the same idempotency_key)" : "Made a card on the person's Board; keep it current with move or say as the work moves", store.cardWire(card), { replayed });
+    return answer(replayed ? "Already made (the same idempotency_key)" : "Made a card on the person's Board; keep it current with move or say as the work moves", store.cardWire(card), { replayed }, card.title);
   }
 
   const card = cardInScope(store, input.card_id, projectIds);
@@ -218,7 +223,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     reason: input.reason,
   });
   const verb = next.column !== card.column ? `Moved to ${INBOX_CARD_COLUMN_LABELS[next.column]}` : "Updated";
-  return answer(verb, store.cardWire(next));
+  return answer(verb, store.cardWire(next), {}, input.title ? next.title : null);
 }
 
 export function registerInboxCardTool(server: McpServer, context: InboxMcpContext): void {
@@ -231,14 +236,14 @@ export function registerInboxCardTool(server: McpServer, context: InboxMcpContex
         .object({
           op: z.enum(INBOX_CARD_OPS),
           card_id: z.string().optional().describe("The card (crd_…); not for create or list."),
-          title: z.string().optional().describe("One line."),
+          title: z.string().optional().describe("2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in say. Create with thread_id: pass one, as subjects run long."),
           column: z.enum([...INBOX_CARD_COLUMNS, "asked"]).optional().describe(CARD_COLUMN_DESCRIPTION),
           say: z.string().optional().describe("Your last word: where the work is, one line."),
           you: z.string().optional().describe("What the person owes, one line."),
           pr: z.string().optional().describe("owner/repo#123 or a PR URL."),
           ref: z.string().optional().describe("An issue or PR: owner/repo#123 or its URL."),
           reason: z.string().optional().describe("Why it is dropped."),
-          thread_id: z.string().optional().describe("A thread or message id to link; create takes its subject."),
+          thread_id: z.string().optional().describe("A thread or message id to link; create takes its subject when no title. Link the thread where the person makes the call."),
           idempotency_key: z.string().optional().describe("Create: the same key answers the first card."),
           asked_by: z.enum(["me", "anyone"]).optional().describe("List: \"me\" (default) or \"anyone\"."),
           include_resolved: z.boolean().optional().describe("List: shipped and dropped too."),

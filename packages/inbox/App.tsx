@@ -23,6 +23,7 @@ import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
+import { threadDecisions } from './decisions/model';
 import {
   InboxApiError,
   inboxApi,
@@ -80,7 +81,7 @@ import { useInboxNotifications } from './notify';
 import { useInboxSound } from './sound';
 import { notificationLine, SoundIntroDialog } from './components/SoundIntro';
 import { GuidePane } from './components/GuidePane';
-import { AboutBlock, FailedDialog, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
+import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { canToggleRead, MARK_READ_UNDO_MS, markReadToast } from './markRead';
@@ -109,9 +110,11 @@ import { CardChip } from './board/CardChip';
 import { boardViewOf, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
-import type { CardsModel, DraftView } from './api';
+import type { CardsModel, DraftView, UpdateCheckFailing } from './api';
+import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
+import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
-import { sidebarUpdateNotice, updateForPage } from './updateNotice';
+import { pageOffersUpdates, sidebarUpdateNotice, updateForPage } from './updateNotice';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, except the theme, which goes to config.json `theme`
@@ -229,6 +232,8 @@ interface Route {
   section?: SettingsSection | null;
   /** `#settings/devices/pair`: Pair a phone is open. */
   pair?: boolean;
+  /** `#settings/experimental` (an old link): Capabilities, landing on its Experimental group. Never written to the address. */
+  experimental?: boolean;
 }
 
 function readRoute(): Route {
@@ -238,7 +243,7 @@ function readRoute(): Route {
 function routeOf(fullHash: string): Route {
   const hash = fullHash.replace(/^#/, '');
   const settingsAt = parseSettingsHash(hash);
-  if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair };
+  if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair, experimental: settingsAt.experimental };
   const params = new URLSearchParams(hash);
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
@@ -350,6 +355,18 @@ function settleTourEntry(): void {
  */
 const TOUR_DECIDED_COOKIE = 'plannotator-inbox-tour-decided';
 
+/**
+ * `#settings/experimental`, Experimental's own page before it moved into
+ * Capabilities (the owner, 2026-10-27): the address becomes
+ * `#settings/capabilities` in place (no new history entry). True when it
+ * did, so the route keeps landing on the Experimental group.
+ */
+function settleOldExperimental(): boolean {
+  if (!parseSettingsHash(window.location.hash.replace(/^#/, ''))?.experimental) return false;
+  window.history.replaceState(window.history.state, '', `#${settingsHash({ section: 'capabilities' })}`);
+  return true;
+}
+
 /** A `msg=` with no thread to land in (a hand-edited or truncated link) leaves the address bar; the route already ignores it. */
 function stripStrayMsg(): void {
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
@@ -439,7 +456,9 @@ function focusFirst(selectors: readonly string[]): void {
   for (const selector of selectors) {
     const el = [...document.querySelectorAll<HTMLElement>(selector)].find((candidate) => candidate.getClientRects().length > 0);
     if (el) {
-      el.focus();
+      // Inside a thread's messages (its subject heading): focus never moves the thread's scroll, the place the
+      // person was in (closing a file with `‹ Inbox` put the thread back at its top).
+      el.focus(el.closest('.ib-pbody') ? { preventScroll: true } : undefined);
       return;
     }
   }
@@ -487,13 +506,13 @@ function Inbox() {
   /**
    * Decision mode (experimental, approval "inbox-decision-mode"): the
    * projection while the feature is on, and the sitting (open, or tucked
-   * into its pill behind a thread). Off, nothing of it renders.
+   * into its pill behind a thread). Off, nothing of it renders. Thread only
+   * (owner, 2026-10-27): a sitting is one thread's decisions (`thread`), opened
+   * from that thread's open-questions list; there is no global way in.
    */
   const [decisions, setDecisions] = useState<InboxDecision[] | null>(null);
-  const decisionsRef = useRef(decisions);
-  decisionsRef.current = decisions;
-  // `startNonce`: a new start while the sitting is open (another notification) moves it to that card.
-  const [decide, setDecide] = useState<{ tucked: boolean; start: string | null; startNonce: number } | null>(null);
+  // `startNonce`: a new start while the sitting is open moves it to that card.
+  const [decide, setDecide] = useState<{ thread: string; title: string | null; tucked: boolean; start: string | null; startNonce: number } | null>(null);
   /** What opened decision mode: focus goes back there when the sitting ends. */
   const decideOpener = useRef<HTMLElement | null>(null);
   const [decideLeft, setDecideLeft] = useState(0);
@@ -590,13 +609,20 @@ function Inbox() {
   const [restarting, setRestarting] = useState(false);
   // What this page may offer: nothing over the tailnet, where the update routes are local only.
   const pageUpdate = updateForPage(update, settings);
-  // The sidebar toggle's dot while the sidebar is closed: an update the Update button offers.
+  // Checking for updates has failed for hours (packages/server/inbox-updates.ts): the sidebar's quiet row,
+  // About's dot and the General row's line. Not on a page opened over the tailnet (About is local only there).
+  const [checkFailing, setCheckFailing] = useState<UpdateCheckFailing | null>(null);
+  const pageCheckFailing = pageOffersUpdates(settings) ? checkFailing : null;
+  // The sidebar toggle's dot while the sidebar is closed: an update the Update button offers, or checking failing.
   const updateState = pageUpdate?.state ?? null;
-  const sidebarToggleNotice = useMemo(() => sidebarUpdateNotice(updateState, restarting), [updateState, restarting]);
+  const sidebarToggleNotice = useMemo(
+    () => sidebarUpdateNotice(updateState, restarting, !!pageCheckFailing),
+    [updateState, restarting, pageCheckFailing],
+  );
   /** This run started on a newer version: the sidebar's "What's new in X" link. */
   const [updated, setUpdated] = useState<string | null>(null);
   // Claude Code sessions a /reload-plugins would bring up to date: the sidebar's "Reload Claude Code N" (owner approval "restart-warning").
-  const [restartClaudeCode, setRestartClaudeCode] = useState(0);
+  const [restartAgents, setRestartAgents] = useState<InboxRestartAgents>(NO_RESTART_AGENTS);
   /** The update control's dialogs and what they read (GET /api/inbox/update). */
   const [updateDialog, setUpdateDialog] = useState<null | 'update' | 'restart' | 'failed'>(null);
   const [updateDetails, setUpdateDetails] = useState<UpdateDetails | null>(null);
@@ -633,6 +659,8 @@ function Inbox() {
   const searchOpener = useRef<HTMLElement | null>(null);
   /** The landing a search result asked for: the query's words to highlight in that message, a question's card to focus. */
   const searchLanding = useRef<SearchLanding | null>(null);
+  /** Decision mode's "Open the thread" (thread only): the question to land on, its prompt focused. */
+  const decideLanding = useRef<{ messageId: string; questionKey: string } | null>(null);
   /**
    * Compose (a new message to a connected agent): open with what it starts
    * from (a draft, a session), and the drafts not sent (the sidebar's Drafts
@@ -677,35 +705,10 @@ function Inbox() {
     // A click on a notification: the thread opens, and the list on screen catches up, even with a
     // thread open. The one exception to "the list holds still while a thread is open" (settle.ts):
     // the person was away, and the thread notified may not be on screen at all.
-    openThread: (threadId, questionId) => {
-      // With decision mode on, a Stopped notification opens it on that card (approval "inbox-decision-mode"):
-      // the question it notified about, else a Stopped one of that thread. The projection may not have the
-      // new question yet, so it is read once more before giving up on it.
-      const stoppedOf = (list: readonly InboxDecision[] | null) =>
-        (questionId ? list?.find((d) => d.id === questionId && d.question.stopped !== null) : undefined) ??
-        list?.find((d) => d.thread.id === threadId && d.question.stopped !== null);
-      const fallback = () => {
-        writeRoute({ page: 'inbox', project: null, thread: threadId });
-        void refreshList(true);
-      };
-      if (!decisionModeOnRef.current) return fallback();
-      const openOn = (decision: InboxDecision) => {
-        setDecide((current) => ({ tucked: false, start: decision.id, startNonce: (current?.startNonce ?? 0) + 1 }));
-        void refreshDecisions();
-        void refreshList(true);
-      };
-      const known = stoppedOf(decisionsRef.current);
-      if (known) return openOn(known);
-      if (!questionId) return fallback();
-      void inboxApi.decisions().then(
-        (model) => {
-          setDecisions(model.decisions);
-          const found = stoppedOf(model.decisions);
-          if (found) openOn(found);
-          else fallback();
-        },
-        () => fallback(),
-      );
+    // Decision mode is thread only (owner, 2026-10-27): a Stopped notification opens its thread too, never the dialog.
+    openThread: (threadId) => {
+      writeRoute({ page: 'inbox', project: null, thread: threadId });
+      void refreshList(true);
     },
     // A click on a burst's notice: the list at rest, as it now is.
     openList: () => {
@@ -719,9 +722,11 @@ function Inbox() {
     const onHash = () => {
       stripStrayMsg();
       settleTourEntry();
-      setRoute(readRoute());
+      const oldExperimental = settleOldExperimental();
+      setRoute(oldExperimental ? { ...readRoute(), experimental: true } : readRoute());
     };
     stripStrayMsg();
+    settleOldExperimental();
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onHash);
     return () => {
@@ -824,7 +829,8 @@ function Inbox() {
       const keep = adopt && refresh?.keepOpen ? routeRef.current.thread : null;
       setUpdate(next.update);
       setUpdated(next.updated ?? null);
-      setRestartClaudeCode(next.restart_claude_code ?? 0);
+      setRestartAgents(restartAgentsOf(next.restart_agents, next.restart_claude_code));
+      setCheckFailing(next.update_check_failing ?? null);
       // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
       setShown((current) =>
         current === null || !hasRows(current)
@@ -1165,10 +1171,11 @@ function Inbox() {
           if (pinsTimer) clearTimeout(pinsTimer);
           pinsTimer = setTimeout(() => void refreshList(false), 60);
         },
-        onStatus: (next, nextUpdated, nextRestart) => {
+        onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
           if (nextUpdated !== undefined) setUpdated(nextUpdated);
-          if (nextRestart !== undefined) setRestartClaudeCode(nextRestart);
+          if (nextAgents !== undefined || nextRestart !== undefined) setRestartAgents(restartAgentsOf(nextAgents, nextRestart));
+          if (nextFailing !== undefined) setCheckFailing(nextFailing);
         },
         // Whether any open Inbox tab can show a notification (Settings → General).
         onReach: setNotifyReach,
@@ -1312,6 +1319,16 @@ function Inbox() {
       void loadUpdateDetails();
     }
   }, [route.page, refreshSettings, loadUpdateDetails]);
+  // While Settings shows, General's and About's version rows follow the update control as it moves
+  // (available, installing, failed, checking failing), not only what they read when Settings opened.
+  // Only when the key changes: opening Settings already reads them (the effect above).
+  const updateKey = `${update?.state ?? ''}:${update?.version ?? ''}:${checkFailing?.since ?? ''}`;
+  const seenUpdateKey = useRef(updateKey);
+  useEffect(() => {
+    if (seenUpdateKey.current === updateKey) return;
+    seenUpdateKey.current = updateKey;
+    if (route.page === 'settings') void loadUpdateDetails();
+  }, [route.page, updateKey, loadUpdateDetails]);
 
   // Settings' Archived count in its nav: read while Settings is open, again whenever the store moves.
   const [archivedTotal, setArchivedTotal] = useState<number | null>(null);
@@ -1609,7 +1626,16 @@ function Inbox() {
       onUndo: () => {
         dismissToast();
         void inboxApi
-          .saveDraft(draft.id, { body: draft.body, to: draft.to, project: draft.project, files: draft.files.map((f) => f.upload_id), base: null })
+          // Everything the draft kept: its typed thread name and the Board card it was started for (Create thread).
+          .saveDraft(draft.id, {
+            body: draft.body,
+            to: draft.to,
+            project: draft.project,
+            files: draft.files.map((f) => f.upload_id),
+            base: null,
+            ...(draft.thread_name ? { thread_name: draft.thread_name } : {}),
+            ...(draft.card ? { card: draft.card } : {}),
+          })
           .then(() => refreshDrafts())
           .then(() => say('Draft restored.'))
           .catch(() => showToast({ icon: 'warn', lead: 'The draft could not be restored.', wrap: true }));
@@ -1626,6 +1652,7 @@ function Inbox() {
   /** The thread landed on the message `msg=` named: drop it from the hash, so a reload does not jump again. */
   const landed = () => {
     searchLanding.current = null;
+    decideLanding.current = null;
     if (routeRef.current.msg) writeRoute({ ...routeRef.current, msg: null }, { replace: true });
   };
 
@@ -2293,7 +2320,7 @@ function Inbox() {
       const result = await inboxApi.checkForUpdate();
       setUpdateDetails(result);
       setUpdate(result.update);
-      if (!result.checked.ok) setSettingsError(`Could not reach GitHub: ${result.checked.error ?? 'the check failed'}.`);
+      if (!result.checked.ok) setSettingsError(`Couldn't check for updates: ${result.checked.error ?? 'the check failed'}.`);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The check failed.');
     } finally {
@@ -2349,7 +2376,7 @@ function Inbox() {
     }
   };
 
-  // Settings → General → Experimental: decision mode, saved to config.json and applied at once.
+  // Settings → Capabilities → Experimental: decision mode, saved to config.json and applied at once.
   // The Board's switch: saved to config.json; the page and the sidebar row follow at once, agents at their next session.
   const toggleBoard = async (next: boolean) => {
     setSettingsError(null);
@@ -2424,24 +2451,29 @@ function Inbox() {
       setDecide(null);
     }
   }, [decisionModeOn, refreshDecisions]);
-  const decideCount = decisionModeOn ? (decisions?.length ?? 0) : 0;
-  const openDecide = (start: string | null = null) => {
-    const active = document.activeElement;
-    decideOpener.current = active instanceof HTMLElement && active !== document.body ? active : null;
-    setDecide((current) => ({ tucked: false, start, startNonce: (current?.startNonce ?? 0) + 1 }));
+  /** A thread's "Decide these N": decision mode on, no sitting going, and two or more of its decisions waiting. */
+  const decideInThread = (threadId: string) => {
+    if (!decisionModeOn || !decisions || decide) return null;
+    const count = threadDecisions(decisions, threadId).length;
+    return decideEntryShown(count) ? { count, onDecide: () => openDecide(threadId) } : null;
+  };
+  /** The sitting's queue: its thread's decisions only. */
+  const sittingDecisions = useMemo(() => (decisions && decide ? threadDecisions(decisions, decide.thread) : null), [decisions, decide?.thread]);
+  const openDecide = (threadId: string) => {
+    // Opened from the open-questions list, whose row goes with the list: focus comes back to its button.
+    decideOpener.current = document.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
+    const first = decisions ? threadDecisions(decisions, threadId)[0] : undefined;
+    setDecide((current) => ({ thread: threadId, title: first ? (first.thread.subject ?? first.thread.thread_name) : null, tucked: false, start: null, startNonce: (current?.startNonce ?? 0) + 1 }));
     void refreshDecisions();
   };
-  /** The sitting ended: focus back on what opened it, else on a Decide button still on screen. */
+  /** The sitting ended: focus back on what opened it, else on the thread's open-questions button. */
   const closeDecide = () => {
     setDecide(null);
     void refreshList(true);
     const opener = decideOpener.current;
     decideOpener.current = null;
     requestAnimationFrame(() => {
-      const target =
-        (opener?.isConnected ? opener : null) ??
-        document.querySelector<HTMLElement>('[data-decide-head]') ??
-        document.querySelector<HTMLElement>('[data-decide-nav]');
+      const target = (opener?.isConnected ? opener : null) ?? document.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
       target?.focus({ preventScroll: true });
     });
   };
@@ -3140,6 +3172,7 @@ function Inbox() {
         error={settingsError}
         onToggleTool={toggleTool}
         onToggleExperimental={(next) => void toggleExperimental(next)}
+        landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
         agents={agents}
         onAgents={setAgents}
@@ -3155,7 +3188,22 @@ function Inbox() {
         sound={settings?.sound ? sound : undefined}
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
         archivedTotal={archivedTotal}
-        aboutDot={!!pageUpdate}
+        aboutDot={pageUpdate ? true : pageCheckFailing ? 'check-failing' : false}
+        updateRow={
+          settings && pageOffersUpdates(settings) ? (
+            <GeneralUpdateRow
+              version={latest?.version ?? settings.version ?? 'dev'}
+              details={updateDetails}
+              update={pageUpdate}
+              restarting={restarting}
+              checking={checking}
+              failing={updateDetails?.check.failing ?? pageCheckFailing}
+              onCheckNow={() => void checkNow()}
+              onUpdate={pressUpdate}
+              onWhatsNew={openWhatsNew}
+            />
+          ) : undefined
+        }
         about={
           <AboutBlock
             version={latest?.version ?? settings?.version ?? 'dev'}
@@ -3256,6 +3304,7 @@ function Inbox() {
         }}
         onSeeDrops={seeDrops}
         onOpenThread={(card, threadId) => go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes' })}
+        onCreateThread={(card, session, opener) => openCompose({ session, card: { id: card.id, title: card.title } }, opener)}
         // The lane marks run this computer's gh / glab: never asked from a page opened over the tailnet.
         marks={settings !== null && settings.via !== 'tailnet'}
       />
@@ -3342,8 +3391,6 @@ function Inbox() {
           pinned={pinsOn ? pinnedIds : undefined}
           onSearch={(opener) => openSearch(opener)}
           onCompose={(opener) => openCompose({}, opener)}
-          decideCount={decideEntryShown(decideCount) ? decideCount : 0}
-          onDecide={() => openDecide()}
           phone={phone}
           empty={
             projectAllArchived(filterProject) ? (
@@ -3437,8 +3484,13 @@ function Inbox() {
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             artifacts={route.artifacts === true}
             onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, msg: null }) : close({ ...routeRef.current, artifacts: false }))}
+            // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
+            // sitting is tucked into its pill (the pill's Resume is the way back to it).
+            decide={decideInThread(thread.thread_id)}
             landing={
-              route.msg
+              route.msg && decideLanding.current?.messageId === route.msg
+                ? { messageId: route.msg, terms: [], questionKey: decideLanding.current.questionKey, focus: 'prompt' }
+                : route.msg
                 ? {
                     messageId: route.msg,
                     terms: searchLanding.current?.messageId === route.msg ? searchLanding.current.terms : [],
@@ -3538,8 +3590,6 @@ function Inbox() {
             updated={updated}
             onSearch={(opener) => openSearch(opener)}
             onCompose={(opener) => openCompose({}, opener)}
-            decideCount={decideEntryShown(decideCount) ? decideCount : 0}
-            onDecide={() => openDecide()}
             pins={pinRows}
             openThreadId={route.thread}
             onOpenPin={(row) => (tourRealStep ? endTour('finish', { page: 'inbox', project: null, thread: row.thread_id }) : openPinned(row))}
@@ -3559,7 +3609,9 @@ function Inbox() {
             onUpdate={pressUpdate}
             onWhatsNew={(version) => (tourRealStep ? endTour('finish', { page: 'whats-new', project: null, thread: null, version }) : openWhatsNew(version))}
             // Not on a page opened over the tailnet: Settings → Agents is local only there.
-            restartClaudeCode={settings && settings.via !== 'tailnet' ? restartClaudeCode : 0}
+            restartAgents={settings && settings.via !== 'tailnet' ? restartAgents : NO_RESTART_AGENTS}
+            checkFailing={pageCheckFailing}
+            onCheckFailing={() => leave({ page: 'settings', project: null, thread: null, section: 'about' })}
             onRestartSessions={() => leave({ page: 'settings', project: null, thread: null, section: 'agents' })}
             mcpCommand={settings?.mcp_command ?? null}
           />
@@ -3741,6 +3793,13 @@ function Inbox() {
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);
+            // Create thread from a Board card: the new thread is linked to the card, so its Open thread goes there.
+            if (sent.cardId) {
+              void inboxApi
+                .editCard(sent.cardId, { op: 'link', thread_id: sent.threadId })
+                .then(() => refreshCards())
+                .catch(() => showToast({ icon: 'warn', lead: 'Sent, but not linked to the card', detail: 'Open the thread from the Inbox.' }, 7000));
+            }
           }}
           onSaved={composeSaved}
           onDeleted={(draft) => {
@@ -3753,7 +3812,8 @@ function Inbox() {
       {decisionModeOn && decide && (
         <DecisionMode
           open={!decide.tucked}
-          decisions={decisions}
+          decisions={sittingDecisions}
+          scope={decide.title}
           rows={latestRows}
           start={decide.start}
           startNonce={decide.startNonce}
@@ -3762,14 +3822,25 @@ function Inbox() {
           subscribeQuestions={subscribeQuestions}
           onLeft={setDecideLeft}
           onPaused={setDecidePaused}
-          onTuck={(threadId, fileId) => {
+          onTuck={(threadId, fileId, question) => {
             setDecide((current) => (current ? { ...current, tucked: true } : current));
+            if (question && !fileId) {
+              // A card's "Open the thread" (approval "inbox-decide-thread-only"): the dialog closes into its pill and
+              // the thread (already behind it) lands on that question, its prompt focused. The same thread replaces
+              // the entry, as a search result's landing does, so Back never stops on the same thread twice.
+              decideLanding.current = { messageId: question.messageId, questionKey: question.key };
+              searchLanding.current = null;
+              const now = routeRef.current;
+              const same = now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide;
+              writeRoute({ page: 'inbox', project: same ? now.project : null, thread: threadId, msg: question.messageId }, same ? { replace: true } : {});
+              return;
+            }
             writeRoute({ page: 'inbox', project: null, thread: threadId, file: fileId ? { id: fileId, version: 'current', focus: null } : null });
           }}
           onClose={closeDecide}
         />
       )}
-      {decisionModeOn && decide?.tucked && <DecisionPill left={decideLeft} paused={decidePaused} onResume={() => setDecide((current) => (current ? { ...current, tucked: false } : current))} />}
+      {decisionModeOn && decide?.tucked && <DecisionPill left={decideLeft} paused={decidePaused} thread={route.page === 'inbox' && route.thread === decide.thread ? null : decide.title} onResume={() => setDecide((current) => (current ? { ...current, tucked: false } : current))} />}
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>

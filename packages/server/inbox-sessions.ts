@@ -36,12 +36,12 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { parseEngine, parseLoadedPlugin, parseSessionFolder, type LoadedPlugin } from "./inbox-restart";
+import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
 /** One live session as the window reads it. */
 export interface InboxLiveSession {
@@ -655,9 +655,20 @@ export function createInboxLiveSessions(options: {
       else missing.push(session);
     }
     if (old.length > 0) {
+      // Name the host's own command (owner approval "reload-hosts"): `/reload-plugins` in Claude Code,
+      // `/reload` in Pi, `/restart` in Oh My Pi, `opencode2 reload` for OpenCode 2, with the update first
+      // when the plugin on disk is itself behind this Inbox.
+      const fixes = [
+        ...new Set(
+          old.map((session) => {
+            const entry = sessions.get(session)!;
+            return tagUpdateFix(runtimeOf(entry.host, entry.plugin), outdatedOf(entry));
+          }),
+        ),
+      ];
       throw new InboxError(
         "tag_needs_update",
-        "A session you tagged runs an older Plannotator that can't be tagged: nothing was sent. Update Plannotator there, or remove the tag.",
+        `A session you tagged runs an older Plannotator that can't be tagged: nothing was sent. ${fixes.join(" ")} Or remove the tag.`,
         { sessions: old },
       );
     }
@@ -778,6 +789,7 @@ export function createInboxLiveSessions(options: {
         plugin: entry.plugin?.version ?? null,
         outdated,
         restart_command: restartCommandOf(session, entry),
+        ...(runtimeOf(entry.host, entry.plugin) ? { runtime: runtimeOf(entry.host, entry.plugin)! } : {}),
       };
       group.running += 1;
       if (outdated) group.outdated += 1;
@@ -793,6 +805,28 @@ export function createInboxLiveSessions(options: {
       if (entry.host === "claude-code" && isLive(entry) && outdatedOf(entry)?.fix === "restart") count += 1;
     }
     return count;
+  };
+
+  /**
+   * Live sessions a reload alone brings up to date, per runtime (owner
+   * approval "reload-hosts"): Claude Code's `restart`, and Pi's, Oh My Pi's
+   * and OpenCode 2's `reload`. An update first (`update_plugin`,
+   * `update_extension`) is not counted, as before: the Update button and
+   * Settings carry it.
+   */
+  const restartAgents = (): InboxRestartAgents => {
+    const runtimes: InboxRestartAgents["runtimes"] = {};
+    let total = 0;
+    for (const entry of sessions.values()) {
+      if (!isLive(entry)) continue;
+      const fix = outdatedOf(entry)?.fix;
+      if (fix !== "restart" && fix !== "reload") continue;
+      const runtime = runtimeOf(entry.host, entry.plugin);
+      if (!runtime) continue;
+      runtimes[runtime] = (runtimes[runtime] ?? 0) + 1;
+      total += 1;
+    }
+    return { total, runtimes };
   };
 
   /** Whether a session is live now (no grace: compose sends only to a session that polls). */
@@ -942,6 +976,7 @@ export function createInboxLiveSessions(options: {
     deliverySignature,
     hostSessions,
     restartCount,
+    restartAgents,
     mcpAgents,
     tagTargets,
   };

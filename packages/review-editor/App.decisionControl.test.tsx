@@ -134,6 +134,9 @@ let submissions: SubmittedBody[] = [];
 /** How many upcoming /api/feedback POSTs answer 500. Each failed attempt is
  *  still recorded in `submissions` so its captured body can be asserted. */
 let failFeedbackPosts = 0;
+/** Upcoming /api/feedback POSTs that reject as a network error (a stopped
+ *  server), recorded first. */
+let feedbackNetworkFailures = 0;
 /** When true, /api/diff carries `approvalNotesSupported: true` — the capable
  *  server. Default false mimics an OLD server whose payload has no such
  *  field at all, pinning that absent reads as not-capable. */
@@ -232,6 +235,10 @@ function makeFetch(): typeof fetch {
       if (failFeedbackPosts > 0) {
         failFeedbackPosts -= 1;
         return Response.json({ error: "boom" }, { status: 500 });
+      }
+      if (feedbackNetworkFailures > 0) {
+        feedbackNetworkFailures -= 1;
+        throw new TypeError("Failed to fetch");
       }
       return Response.json({ ok: true });
     }
@@ -345,6 +352,7 @@ afterEach(async () => {
   if (hasDom && originalMatchMedia) window.matchMedia = originalMatchMedia;
   submissions = [];
   failFeedbackPosts = 0;
+  feedbackNetworkFailures = 0;
   advertiseApprovalNotes = false;
   prDiffExtras = null;
   aiCapabilities = { available: false, providers: [] };
@@ -1023,5 +1031,78 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await doubleTapAlt();
     expect(primaryButton()!.textContent).toContain("Post Comments");
     expect(submissions).toHaveLength(0);
+  });
+});
+
+/**
+ * #1392 in code review: a send to a stopped server (or one that answered
+ * 500) used to set a "Failed to send" string nothing displayed, so the page
+ * looked the same as before the click. It must say the feedback was not sent
+ * and offer Retry and Copy feedback, with the review left as it was.
+ */
+describe.if(hasDom)("review: a send that does not reach Plannotator", () => {
+  // Sonner keeps earlier tests' toasts in its module store, so find this one
+  // by its title rather than taking the first toast on the page.
+  const failureToast = () =>
+    Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
+      // A dismissed toast stays in the DOM while it animates out.
+      .filter((el) => el.getAttribute("data-removed") !== "true")
+      .find((el) => el.querySelector("[data-title]")?.textContent?.endsWith(" not sent"));
+  const toastButton = (label: string) =>
+    Array.from(failureToast()?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((b) => b.textContent === label);
+  const completionState = () => document.querySelector("[data-completion-state]")?.getAttribute("data-completion-state") ?? null;
+
+  async function waitFor(check: () => unknown, what: string): Promise<void> {
+    for (let attempt = 0; attempt < 40 && !check(); attempt += 1) await settle();
+    if (!check()) throw new Error(`timed out waiting for ${what}`);
+  }
+
+  test("Send Feedback with the server gone: the message, Copy feedback, then Retry sends it", async () => {
+    feedbackNetworkFailures = 1;
+    const clipboard = navigator.clipboard;
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (text: string) => void copied.push(text) },
+    });
+    try {
+      seededExternalAnnotations = [EXTERNAL_FINDING];
+      await mountReview();
+      await settle();
+      await settle();
+      expect(primaryButton()!.title).toContain("Send");
+      await act(async () => primaryButton()!.click());
+      await waitFor(failureToast, "the failure message");
+
+      expect(completionState()).toBeNull();
+      // Deliberate copy: the title says the feedback did not go out, and why.
+      expect(failureToast()!.textContent).toContain("Feedback not sent");
+      expect(failureToast()!.textContent).toContain("isn't running");
+
+      await act(async () => toastButton("Copy feedback")!.click());
+      await waitFor(() => copied.length > 0, "the copy");
+      // The same markdown the review's Copy feedback copies and the send carried.
+      expect(copied[0]).toBe(submissions[0]!.feedback!);
+
+      await act(async () => toastButton("Retry")!.click());
+      await waitFor(() => completionState(), "the completion screen");
+      expect(submissions).toHaveLength(2);
+      expect(submissions[1]!.feedback).toContain("still drops null");
+    } finally {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
+    }
+  });
+
+  test("a bare Approve answered 500: Approval not sent, nothing to copy, no Approved screen", async () => {
+    failFeedbackPosts = 1;
+    await mountReview();
+    await act(async () => primaryButton()!.click());
+    await waitFor(failureToast, "the failure message");
+
+    expect(completionState()).toBeNull();
+    expect(failureToast()!.textContent).toContain("Approval not sent");
+    expect(failureToast()!.textContent).toContain("500");
+    expect(Boolean(toastButton("Copy feedback"))).toBe(false);
+    expect(primaryButton()!.title).toContain("Approve");
   });
 });

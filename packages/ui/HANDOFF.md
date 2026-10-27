@@ -2520,6 +2520,17 @@ Approval "inbox-decision-mode", agent contract lines (2026-10-24). All optional 
 - **Bridge** (additive, no `BRIDGE_PROTOCOL_VERSION` bump): the text-selection message gains `richCopy: true` and `textCut`; the parent posts `rich-copy-request` `{ id }` and the bridge answers `rich-copy` `{ id, html, text, truncated, tooLarge }`. An older bridge asset sends no `richCopy`, so its Copy stays plain text.
 - **`BlockRenderer`** list items carry `data-rich-list-level`, `data-rich-list-kind`, `data-rich-list-index` and `data-rich-list-checked` (read by the list rebuild).
 
+## The Inbox thread's rules in core: `./inbox-folding`, `./inbox-delivery-line`, `./inbox-open-questions`, `./inbox-format` (next core release; additive, no ui change)
+
+Slice 1 of the Inbox thread extract (plan record, not in this repo). These pure modules moved from `packages/inbox` into core **unchanged**, so a host of the shared thread parts can use the Inbox's own rules. Only their import specifiers changed: `@plannotator/core/x` became `./x`, and `./format` became `./inbox-format`. Each is browser-safe and imports only core. The old paths (`packages/inbox/folding.ts`, `deliveryLine.ts`, `openQuestions.ts`, `format.ts`) are one-line `export *` shims, so every Inbox import and test runs unedited. No ui export changes yet. **Experimental** until Workspaces ships on them: the names and shapes follow the Inbox and may still change with it.
+
+- **`./inbox-folding`**: what folds when a thread opens and what a folded line says (`lookBoundary`, `planFolds`, `foldSnippet`, `holdingsOf` …).
+- **`./inbox-delivery-line`**: the words under the person's last reply (`deliveryLine`, `deliveryText`, `restartNote`, `RecipientConnection` …). It is not named `inbox-delivery` because `inbox-delivery.ts` already exists.
+- **`./inbox-open-questions`**: the open questions list's rules (`threadOpenQuestions`, `openQuestionsLabel`, `skipSelection` …). It needs `./inbox-format`'s `formatCount`.
+- **`./inbox-format`**: display helpers with fixed `en-US` `Intl` formats (`shortTime`, `whenTime`, `fullTime`, `formatCount`, `agentName` …).
+
+Publish core first, then ui, as always. These subpaths need no ui bump until ui imports them.
+
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.

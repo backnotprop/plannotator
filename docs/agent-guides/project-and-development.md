@@ -154,7 +154,7 @@ claude --plugin-dir ./apps/hook
 
 ## Requirements
 
-- Bun runtime
+- Bun runtime (>= 1.4.4 to compile binaries; `scripts/require-bun.ts` checks it)
 - Claude Code with plugin/hooks support, or OpenCode
 - Cross-platform: macOS (`open`), Linux (`xdg-open`), Windows (`start`)
 
@@ -211,12 +211,18 @@ bun run build:hook && bun run build:opencode             # For OpenCode plugin
 Running only `build:hook` after review-editor changes will copy stale HTML files. When testing locally with a compiled binary, the full sequence is:
 
 ```bash
-bun run --cwd apps/review build && bun run build:hook && \
+bun scripts/require-bun.ts && bun run --cwd apps/review build && bun run build:hook && \
   bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
   --define "__CLI_VERSION__=\"0.0.0-dev\"" --outfile ~/.local/bin/plannotator
 ```
 
-These are the flags `.github/workflows/release.yml` compiles with; without the `__CLI_VERSION__` define `plannotator --version` falls back to `plannotator dev` and the binary cannot be told apart from any other local build. On macOS build with bun >= 1.3.14 (what CI pins): 1.3.12 loses the linker signature and the compiled binary is SIGKILLed on launch with no error (#541).
+These are the flags `.github/workflows/release.yml` compiles with; without the `__CLI_VERSION__` define `plannotator --version` falls back to `plannotator dev` and the binary cannot be told apart from any other local build. Build with bun >= 1.4.4 (what CI pins). The binary carries the compiling Bun's runtime, root certificates included: Bun before 1.4.4 still trusts emSign ECC Root CA - G3 and lacks the blocked-key check for the compromised eMudhra keys (Oct 2026). On macOS, 1.3.12 also loses the linker signature, and the compiled binary is SIGKILLed on launch with no error (#541).
+
+**Embedded pages.** The CLI embeds `apps/hook/dist/index.html`, `review.html` and `inbox.html` with `with { type: "file" }`, and reads each into a string when a server first needs it (`embeddedPage` in `apps/hook/server/index.ts`). Do not change them back to `type: "text"`. Bun 1.4 stores a text import that is not pure ASCII as UTF-16, so each ~20 MB page would cost twice its size, which on Bun 1.4.4 made the binary 243 MB instead of 179 MB. The read comes from the embedded files that Bun loads at startup, never from the binary's path. A running process whose binary the installer replaces still reads its own pages. `smoke-binaries` checks this on all three OSes with `scripts/smoke-pages.mjs`. It also checks that every served page is byte-identical to the build, using the build job's `page-digests` artifact.
+
+**Release trust gate.** `release.yml` runs `scripts/check-bun-runtime-trust.ts` over every compiled binary before upload. A binary fails when its embedded Bun is below 1.4.4, when it holds emSign ECC Root CA - G3 (as PEM, DER or public key), or when it lacks the blocked-key check (oven-sh/bun#46300; marker `addBlockedSPKIForTesting`). The script reads bytes only, so the Linux builder also checks the darwin and Windows binaries. Raise `MIN_BUN_VERSION` there together with the workflow pins.
+
+**Patched dependency.** `patches/@opencode-ai%2Fsdk@1.19.3.patch` (root `patchedDependencies`) makes the SDK's SSE abort handler catch `reader.cancel()`. On Bun 1.4 that promise rejects once the aborted fetch has errored the body, and the unhandled rejection ends the process: every OpenCode Ask AI answer or Stop aborts the event stream. `packages/ai/providers/opencode-sdk.test.ts` ("through the real client") fails without it. A new SDK version needs the patch carried over (`bun patch @opencode-ai/sdk`) until upstream catches the promise.
 
 Running only `build:opencode` will copy stale HTML files.
 

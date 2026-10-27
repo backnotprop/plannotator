@@ -1375,6 +1375,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           }
           moreOpen={moreOpen}
           leave={props.fullLocked ? { kind: 'back', onLeave: close } : { kind: 'exit', onLeave: () => toggleFull() }}
+          // × does what Escape's last step does: back beside the thread, not a pick (Side by side is the pick).
+          onExitFull={props.fullLocked ? undefined : () => toggleFull(false)}
           chord={isHtml ? TOOLS_CHORD : null}
           shifted={drawerMode && drawer && hasPanel}
         />

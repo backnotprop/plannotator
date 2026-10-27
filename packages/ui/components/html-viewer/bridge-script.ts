@@ -460,6 +460,10 @@ export const BRIDGE_SCRIPT = `(function() {
   // --- Selection ---
   var pendingSelection = null;
   var pendingRange = null; // live range for the pending selection (scroll tracking)
+  // The pending text selection's own text, uncapped: what plain-text Copy
+  // writes. Range.toString() would lose the rendered line breaks between
+  // blocks and keep the source indentation.
+  var pendingCopyText = '';
   var pendingPinEl = null; // element pinned by a pinpoint click (outline + scroll tracking)
   var pendingPinAnchor = null; // serialized anchor for the pending pin
   var pendingPinKey = null; // target key for the primary pinpoint target (multi-select)
@@ -581,6 +585,7 @@ export const BRIDGE_SCRIPT = `(function() {
 
     var rect = range.getBoundingClientRect();
     pendingRange = range;
+    pendingCopyText = fullText;
     pendingSelection = {
       text: text,
       startContainerPath: getNodePath(range.startContainer),
@@ -666,7 +671,7 @@ export const BRIDGE_SCRIPT = `(function() {
       var copyTooLarge = false;
       try {
         if (pendingRange && pendingSelection && pendingSelection.startContainerPath) {
-          copyText = pendingRange.toString();
+          copyText = pendingCopyText || pendingRange.toString();
           if (copyText.length > 262144) {
             var copyCut = 262144;
             var copyLast = copyText.charCodeAt(copyCut - 1);

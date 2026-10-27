@@ -253,7 +253,7 @@ export function EditModeAnnouncementDialog({
 
         <footer className="flex items-center justify-between gap-4 border-t border-border px-7 py-5">
           <p className="text-xs text-muted-foreground">
-            Change this anytime in Settings → Editor → Edit Code to Suggest.
+            Change this anytime in Settings → Experimental → Edit Code to Suggest.
           </p>
           {/* The enable decision is an explicit switch, deliberately separate from the
               dismiss action: a primary "Turn it on" button reads as a generic continue

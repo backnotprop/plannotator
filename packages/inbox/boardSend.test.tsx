@@ -50,6 +50,8 @@ let buffered = '';
 let loseAnswerOf: { method: string; path: RegExp } | null = null;
 /** The next request that fails before it reaches the server (nothing happens there). */
 let failBeforeOf: { method: string; path: RegExp } | null = null;
+/** Whether the window's read of the live sessions has been answered in this test. */
+let sessionsAnswered = false;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -116,6 +118,7 @@ beforeEach(() => {
   world = worlds[index]!;
   index += 1;
   savedFetch = globalThis.fetch;
+  sessionsAnswered = false;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
@@ -124,6 +127,7 @@ beforeEach(() => {
       throw new TypeError('Failed to fetch');
     }
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
+    if (method === 'GET' && path.startsWith('/api/inbox/sessions')) sessionsAnswered = true;
     if (loseAnswerOf && loseAnswerOf.method === method && loseAnswerOf.path.test(path)) {
       loseAnswerOf = null;
       throw new TypeError('Failed to fetch');
@@ -180,6 +184,7 @@ async function drawBoard(openCard: string | null) {
     onChanged: () => {},
     onSeeDrops: () => {},
     onOpenThread: () => {},
+    onCreateThread: () => {},
   };
   act(() => root!.render(<SidebarProvider><BoardPage {...props} /></SidebarProvider>));
 }
@@ -228,7 +233,9 @@ test.if(hasDom)('New card, Send to an agent: the card first and named in the mes
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'Sent from the Board');
     title.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  // Send to an agent: the radio, then the live session in the picker.
+  // Send to an agent once the window knows the live sessions (choosing Send opens the picker
+  // only then; Bun 1.4.4's loopback answers after the click when the test does not wait).
+  await until(() => sessionsAnswered, 'the live sessions read');
   await act(async () => document.querySelector<HTMLInputElement>('[data-new-card-mode="send"] input')!.click());
   await until(() => document.querySelectorAll('[role="option"]').length > 0, 'the live sessions');
   await act(async () => document.querySelector<HTMLElement>('[role="option"]')!.click());

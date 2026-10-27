@@ -57,7 +57,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
           no-cache: true
 
       - name: Install dependencies
@@ -92,7 +92,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
           no-cache: true
 
       - name: Install dependencies
@@ -116,10 +116,12 @@ jobs:
           sha256sum plannotator-darwin-x64 > plannotator-darwin-x64.sha256
 
           # Linux x64 (baseline: CPUID-dispatched SIMD, so it still runs on
-          # pre-AVX2 CPUs). Bun's default x64 target is x86-64-v3 and SIGILLs
-          # on Nehalem/Ivy Bridge class hardware. Proven by the emulated-CPU
-          # gate in `smoke-binaries`, which is itself proven by the
-          # default-target control binary compiled below.
+          # pre-AVX2 CPUs). Up to Bun 1.3 the default x64 target was
+          # x86-64-v3 and SIGILLed on Nehalem/Ivy Bridge class hardware; since
+          # Bun 1.4 bun-linux-x64 and bun-linux-x64-baseline are one
+          # byte-identical runtime, and the baseline target stays as the
+          # explicit ask. Proven by the emulated-CPU gate in `smoke-binaries`,
+          # which is itself proven by its AVX2 control.
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64-baseline --define "__CLI_VERSION__=\"$VERSION\"" --outfile plannotator-linux-x64
           sha256sum plannotator-linux-x64 > plannotator-linux-x64.sha256
 
@@ -160,27 +162,23 @@ jobs:
           bun build apps/paste-service/targets/bun.ts --compile --no-compile-autoload-bunfig --target=bun-windows-arm64 --outfile plannotator-paste-win32-arm64.exe
           sha256sum plannotator-paste-win32-arm64.exe > plannotator-paste-win32-arm64.exe.sha256
 
-      # Control subject for the emulated-CPU gate in `smoke-binaries`. Same
-      # source, same Bun, same flags as the shipped Linux x64 binary — only the
-      # target differs (bun-linux-x64 is x86-64-v3/AVX2). The gate asserts this
-      # one dies with SIGILL on the emulated pre-AVX2 CPU, which is what makes
-      # "the baseline binary ran there" a falsifiable claim. Uploaded under its
-      # own artifact name so it can never reach the `binaries` artifact, the
-      # attestation subjects, or the GitHub Release (both of which resolve
-      # `binaries` by name).
-      - name: Compile baseline-gate control binary (default x64 target)
+      # Every binary carries the Bun runtime it was compiled with, root
+      # certificates included. Fail unless each one embeds Bun >= 1.4.4, has
+      # the blocked-key check, and holds no emSign ECC Root CA - G3 (the
+      # compromised eMudhra chain, Oct 2026). Before any upload.
+      - name: Gate - Bun runtime trust in every binary
         run: |
-          VERSION=$(jq -r .version package.json)
-          mkdir -p baseline-control
-          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target=bun-linux-x64 --define "__CLI_VERSION__=\"$VERSION\"" --outfile baseline-control/control-cli-linux-x64-default
-
-      - name: Upload baseline-gate control binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: baseline-gate-control
-          path: baseline-control/control-cli-linux-x64-default
-          if-no-files-found: error
-          retention-days: 1
+          set -euo pipefail
+          binaries=()
+          for f in plannotator-*; do
+            [[ "$f" == *.sha256 ]] || binaries+=("$f")
+          done
+          # 6 CLI + 6 paste targets: never a gate over nothing.
+          if (( ${#binaries[@]} < 12 )); then
+            echo "FAIL: expected at least 12 binaries, found ${#binaries[@]}" >&2
+            exit 1
+          fi
+          bun scripts/check-bun-runtime-trust.ts "${binaries[@]}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -189,6 +187,17 @@ jobs:
           path: |
             plannotator-*
             !*.ts
+
+      # What the binaries embed, for smoke-binaries to compare each served page
+      # with byte for byte. Its own artifact: never a release asset.
+      - name: Record embedded page digests
+        run: sha256sum apps/hook/dist/index.html apps/hook/dist/review.html apps/hook/dist/inbox.html apps/hook/dist/diagram-engine/*.js | tee page-digests.txt
+
+      - name: Upload embedded page digests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: page-digests
+          path: page-digests.txt
 
   smoke-binaries:
     needs: build
@@ -221,10 +230,42 @@ jobs:
           name: binaries
           path: artifacts
 
+      - name: Download embedded page digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: page-digests
+          path: page-digests
+
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           package-manager-cache: false
+
+      # Only for the embedded-file probe in "Embedded pages" below, compiled on
+      # this runner with the Bun the release binaries are built with.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      # The pages are embedded as files and read when a server starts (#2215).
+      # Each is served byte for byte as built (local, and gzip in remote mode),
+      # and a process whose binary is replaced the way this OS's installer does
+      # it (plannotator update, Update now, auto-update) still serves its own
+      # page; a probe proves an embedded file first read after the replacement
+      # is the running binary's own. scripts/smoke-pages.mjs.
+      - name: Embedded pages, as built and after a self-update
+        shell: bash
+        env:
+          BINARY_NAME: ${{ matrix.binary }}
+          BROWSER: "true"
+        run: |
+          set -euo pipefail
+          binary="artifacts/${BINARY_NAME}"
+          replacement="artifacts/${BINARY_NAME/plannotator-/plannotator-paste-}"
+          chmod +x "$binary" "$replacement" 2>/dev/null || true
+          node scripts/smoke-pages.mjs --binary "$binary" --replacement "$replacement" \
+            --digests page-digests/page-digests.txt --bun bun --port-base 19560
 
       - name: Install QEMU for the older-CPU gate
         if: runner.os == 'Linux'
@@ -243,45 +284,42 @@ jobs:
           echo "FAIL: could not install qemu-user after 3 attempts" >&2
           exit 1
 
-      - name: Download baseline-gate control binary
-        if: runner.os == 'Linux'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: baseline-gate-control
-          path: control
-
       # Control for the gate below. Without it, "the baseline binary ran under
       # -cpu Nehalem" is unfalsifiable: a qemu that quietly emulated AVX2, an
-      # ignored -cpu flag, or a gate that never really executed the artifact
-      # would all look exactly like a pass. This runs the SAME source built with
-      # Bun's default x64 target (x86-64-v3/AVX2) through the SAME qemu
-      # invocation and requires it to die, so a green gate means the gate can
-      # actually tell the two builds apart.
-      - name: Control - default-target x64 binary must SIGILL on the emulated CPU
+      # ignored -cpu flag, or a gate that never really executed anything would
+      # all look exactly like a pass. Up to Bun 1.3 the control was the same
+      # source built for Bun's default x64 target (x86-64-v3); since Bun 1.4
+      # bun-linux-x64 and bun-linux-x64-baseline are one byte-identical
+      # runtime, so that build runs on Nehalem too. The control is now one
+      # AVX2 instruction: it runs on the runner and must die with SIGILL under
+      # the SAME qemu invocation, so a green gate means qemu enforced the CPU.
+      - name: Control - an AVX2 instruction must SIGILL on the emulated CPU
         if: runner.os == 'Linux'
         timeout-minutes: 5
         env:
-          CONTROL_BINARY: control/control-cli-linux-x64-default
           CPU_MODEL: Nehalem
           RUN_TIMEOUT: 120s
         run: |
           set -euo pipefail
           ulimit -c 0
-          chmod +x "$CONTROL_BINARY"
+          probe_dir="$(mktemp -d)"
+          printf '%s\n' 'int main(void) { __asm__ volatile("vpaddd %%ymm0, %%ymm0, %%ymm0" ::: "xmm0"); return 0; }' > "$probe_dir/avx2.c"
+          gcc -O0 -o "$probe_dir/avx2-probe" "$probe_dir/avx2.c"
+          # On a runner whose CPU has AVX2 the probe itself must run.
+          if grep -qw avx2 /proc/cpuinfo; then
+            "$probe_dir/avx2-probe"
+          fi
 
           status=0
-          timeout --kill-after=5s "$RUN_TIMEOUT" qemu-x86_64 -cpu "$CPU_MODEL" "$CONTROL_BINARY" --version \
-            > control.log 2>&1 || status=$?
-          cat control.log || true
-
+          timeout --kill-after=5s "$RUN_TIMEOUT" qemu-x86_64 -cpu "$CPU_MODEL" "$probe_dir/avx2-probe" || status=$?
           # 132 == 128 + SIGILL(4); qemu-user re-raises the guest signal and
           # timeout propagates signal deaths the same way.
           if [ "$status" -ne 132 ]; then
-            echo "FAIL: control binary $CONTROL_BINARY (built with bun-linux-x64, AVX2) exited ${status} under qemu-x86_64 -cpu ${CPU_MODEL}; expected 132 (SIGILL)." >&2
-            echo "The older-CPU gate cannot distinguish a baseline build from a non-baseline one on this runner, so its result would be meaningless. Fix the harness before trusting the gate." >&2
+            echo "FAIL: an AVX2 instruction exited ${status} under qemu-x86_64 -cpu ${CPU_MODEL}; expected 132 (SIGILL)." >&2
+            echo "The older-CPU gate cannot show that qemu enforces the CPU model on this runner, so its result would be meaningless." >&2
             exit 1
           fi
-          echo "OK: default-target control binary died with SIGILL on ${CPU_MODEL}; the gate below can fail."
+          echo "OK: an AVX2 instruction died with SIGILL on ${CPU_MODEL}; the gate below can fail."
 
       - name: Smoke-test Linux x64 baseline CPU compatibility
         if: runner.os == 'Linux'
@@ -310,7 +348,7 @@ jobs:
 
           # Nehalem has SSE4.2 but no AVX, AVX2 or BMI instructions. Execute the
           # downloaded release artifacts, not a separately compiled probe. The
-          # control step above proves a non-baseline build fails right here.
+          # control step above proves an AVX2 instruction fails right here.
           timeout --kill-after=5s "$RUN_TIMEOUT" qemu-x86_64 -cpu "$CPU_MODEL" "$BINARY" --help \
             || fail "CLI --help did not run on the emulated CPU" "$BINARY"
 
@@ -867,7 +905,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
           no-cache: true
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -1199,7 +1237,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
           no-cache: true
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -1257,7 +1295,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
           no-cache: true
 
       - name: Download binary subjects

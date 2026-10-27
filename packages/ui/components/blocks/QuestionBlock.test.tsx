@@ -217,6 +217,19 @@ describe('QuestionBlock', () => {
     expect(button(cards(el)[3], 'Accept recommended')).toBeUndefined();
   });
 
+  // The owner's 2026-10-27 report: an agent wrote `(recommended)` into a
+  // label (Claude Code's AskUserQuestion habit) with no `Recommended:` line,
+  // and the card showed it as label text with no tag and no Accept.
+  test.skipIf(!hasDom)('a recommendation marked in a label: the tag, a plain label and Accept recommended', async () => {
+    const md = [':::question', 'Should a broken config block uninstall?', '', '- [ ] Only block on ours (Recommended) — a stray file stays a warning', '- [ ] Block on any', ':::'].join('\n');
+    const el = await mount(<Harness markdown={md} />);
+    const card = cards(el)[0];
+    expect(card.textContent).not.toContain('(Recommended)');
+    expect(card.textContent).toContain('Recommended');
+    await click(button(card, 'Accept recommended')!);
+    expect(answerOf(0)?.selected).toEqual(['Only block on ours']);
+  });
+
   // The owner's 2026-10-14 report: ticking one box of a pick-any question
   // hid "Accept recommended", so the rest of the recommendation took a click
   // per box. It stays while the picks differ from the recommendation.

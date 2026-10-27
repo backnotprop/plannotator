@@ -13,8 +13,10 @@ import type { SidebarToggleNotice } from './shell/sidebar';
 type InboxUpdate = InboxHealth['update'];
 type UpdateState = NonNullable<InboxHealth['update']>['state'];
 
-export function sidebarUpdateNotice(state: UpdateState | null | undefined, restarting: boolean): SidebarToggleNotice | null {
-  if (!state || restarting) return null;
+export function sidebarUpdateNotice(state: UpdateState | null | undefined, restarting: boolean, checkFailing = false): SidebarToggleNotice | null {
+  if (restarting) return null;
+  // Checking has failed for hours: the quiet "Can't check for updates" row is in the sidebar too (neutral, like Failed).
+  if (!state) return checkFailing ? { tone: 'neutral', label: "can't check for updates" } : null;
   switch (state) {
     case 'available':
       return { tone: 'primary', label: 'update available' };
@@ -37,5 +39,14 @@ export function sidebarUpdateNotice(state: UpdateState | null | undefined, resta
  * the toggle's dot and Settings → About's update.
  */
 export function updateForPage(update: InboxUpdate, settings: { via?: 'local' | 'tailnet' } | null): InboxUpdate {
-  return settings && settings.via !== 'tailnet' ? update : null;
+  return pageOffersUpdates(settings) ? update : null;
+}
+
+/**
+ * Whether this page may offer anything about updating (the Update button, the
+ * dot, Settings → General's update row, "Can't check for updates"): only once
+ * the settings read says it came through this computer, never over the tailnet.
+ */
+export function pageOffersUpdates(settings: { via?: 'local' | 'tailnet' } | null): boolean {
+  return !!settings && settings.via !== 'tailnet';
 }

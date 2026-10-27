@@ -71,12 +71,12 @@ describe("package-directory bunfig.toml", () => {
 
 /**
  * The asset types (images, video) the source imports are loaded as files by an explicit
- * `[loader]` in every bunfig. Bun 1.3.14 has no runtime loader of its own for
- * some (`.webp`): an import of one worked until the test file importing it grew
- * past 50 KiB and was served from Bun's runtime transpiler cache, then the
- * image was parsed as JavaScript (`Expected ";"` in
- * packages/inbox/assets/tater-sidebar.webp, #2154's CI, where the plain
- * `bun test` step warms the cache the DOM step reads). Catches an asset type
+ * `[loader]` in every bunfig. Bun 1.3 loses the file treatment of an extension
+ * it has no loader for once the file importing it is past 50 KiB and served
+ * from the runtime transpiler cache, then parses the asset as JavaScript
+ * (`Expected ";"` in packages/inbox/assets/tater-sidebar.webp, #2154's CI,
+ * where the plain `bun test` step warms the cache the DOM step reads). Bun
+ * 1.4.4 does not; the loader still states the intent. Catches an asset type
  * imported with no loader, and a bunfig whose list drifts from the root's.
  */
 const ASSET_IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])[^'"\n]+?(\.(?:webp|png|jpe?g|gif|svg|avif|ico|bmp|mp3|wav|ogg|mp4|webm|woff2?|ttf|otf))(?:\?[^'"\n]*)?\1/gi;

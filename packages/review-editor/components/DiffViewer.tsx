@@ -27,6 +27,8 @@ import { DiffHScrollbar } from './DiffHScrollbar';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
+import { PackageChangesCard } from './PackageChangesCard';
+import { isPackageChangePath } from '@plannotator/core/package-changes';
 import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import type { AnnotationScrollTarget } from '../types';
@@ -194,6 +196,9 @@ interface DiffViewerProps {
   /** Snapshot the image preview binds its requests to (set in PR mode too,
    *  where `reviewSnapshotId` is not). Falls back to `reviewSnapshotId`. */
   imageSnapshotId?: string;
+  /** A package.json or lockfile diff shows its package changes under the
+   *  header. Absent (read-only hosts): nothing is fetched or drawn. */
+  packageChangesAvailable?: boolean;
   /** Current PR url + diff scope — used to namespace file-comment drafts so they don't leak across in-place PR switches. */
   prUrl?: string;
   prDiffScope?: string;
@@ -304,6 +309,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   reviewBase,
   reviewSnapshotId,
   imagePreviewAvailable = false,
+  packageChangesAvailable = false,
   imageSnapshotId,
   contextExpansionAvailable = true,
   prUrl,
@@ -1147,6 +1153,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   {isOversizedStub && <OversizedFileNotice />}
                   {isContentlessBinary && <BinaryFileNotice />}
                 </>
+              )}
+              {packageChangesAvailable && isPackageChangePath(filePath) && (
+                <PackageChangesCard
+                  key={`${imageSnapshotId ?? reviewSnapshotId ?? ''}:${filePath}`}
+                  filePath={filePath}
+                  reviewBase={reviewBase}
+                  reviewSnapshotId={imageSnapshotId ?? reviewSnapshotId}
+                  compactTouchLayout={compactTouchLayout}
+                />
               )}
               <FileCommentBanner
                 comments={fileComments}

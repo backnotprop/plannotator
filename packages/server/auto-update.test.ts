@@ -520,7 +520,12 @@ describe.skipIf(process.platform === "win32" || !Bun.which("curl"))("interrupted
   }
 
   test("a group SIGINT (Ctrl-C) to the wrapper records 130 and removes update.lock", async () => {
-    const server = fakeServer('echo "fake installer started"\nsleep 30\n');
+    // `exec`: the line is printed by the process that then becomes the sleep, so
+    // the group SIGINT finds either the shell or the sleep, never a child between
+    // fork and exec. With a plain `sleep 30` a SIGINT landing in that window left
+    // the sleep running, holding stdout, and `close` waited its 30 s (the wrapper
+    // had already recorded 130 and removed the lock).
+    const server = fakeServer('echo "fake installer started"\nexec sleep 30\n');
     const paths = autoUpdatePaths(dataDir);
     writeFileSync(paths.lock, "1");
     try {

@@ -235,7 +235,7 @@ export const TELEMETRY_COMMAND_USAGE = [
 export const CARD_COMMAND_USAGE = [
   "Usage:",
   "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>]",
-  "  plannotator card create --thread <id> [...]      (the thread's subject is the title)",
+  "  plannotator card create --thread <id> [...]      (the thread's subject is the title; pass a short <title> too, as subjects run long)",
   "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
   "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
   "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
@@ -247,7 +247,9 @@ export const CARD_COMMAND_USAGE = [
   `Columns: ${INBOX_CARD_COLUMNS.join(", ")} (icebox is the person's only).`,
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
-  "Works only while the person has the Board on (Inbox Settings → General); off, it exits 1 with board_off.",
+  "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
+  "When a card waits on the person, link the Inbox thread where they make the call (--thread), so \"You: …\" opens it.",
+  "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
 ].join("\n");
 

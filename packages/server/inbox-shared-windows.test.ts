@@ -19,6 +19,7 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 
 afterEach(() => {
+  liveStreams.clear();
   for (const server of servers.splice(0)) server.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -38,13 +39,26 @@ async function healthOf(server: InboxServer): Promise<{ notify_reach: InboxNotif
 const report = (server: InboxServer, body: Record<string, unknown>) =>
   fetch(`http://127.0.0.1:${server.port}/api/inbox/window`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+/**
+ * Open event streams, held until their controller aborts: Bun 1.4 closes the
+ * connection of a streamed response that is garbage-collected, and one read
+ * on it does not keep it alive, so a GC mid-test would close the tab.
+ */
+const liveStreams = new Set<Response>();
+
+function holdStream(url: string, controller: AbortController): void {
+  void fetch(url, { signal: controller.signal })
+    .then((res) => {
+      liveStreams.add(res);
+      controller.signal.addEventListener("abort", () => liveStreams.delete(res));
+      return res.body?.getReader().read();
+    })
+    .catch(() => {});
+}
+
 function openStream(server: InboxServer, id: string, permission = "granted"): AbortController {
   const controller = new AbortController();
-  void fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=0&window=${id}&permission=${permission}&origin=${encodeURIComponent("http://localhost:1")}`, {
-    signal: controller.signal,
-  })
-    .then((res) => res.body?.getReader().read())
-    .catch(() => {});
+  holdStream(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=0&window=${id}&permission=${permission}&origin=${encodeURIComponent("http://localhost:1")}`, controller);
   return controller;
 }
 
@@ -178,9 +192,7 @@ test("POST /api/inbox/window: served_by and gone are additive; health counts the
   await until(async () => (await healthOf(server)).event_streams === 1);
   // A stream without a window (the phone's door) counts too.
   const door = new AbortController();
-  void fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=0`, { signal: door.signal })
-    .then((r) => r.body?.getReader().read())
-    .catch(() => {});
+  holdStream(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=0`, door);
   await until(async () => (await healthOf(server)).event_streams === 2);
   door.abort();
   await until(async () => (await healthOf(server)).event_streams === 1);

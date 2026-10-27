@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
@@ -169,13 +170,16 @@ describe("pi port selection", () => {
 		await closeServer(servers[1]);
 		process.env.PLANNOTATOR_PORT = `${start}-${start + 1}`;
 		const server = createServer();
+		// Bun >= 1.4, like Node, gives every node:http Server its own "listening"
+		// listener (connection tracking): count only what listenOnPort leaves.
+		const initialListening = server.listenerCount("listening");
 		try {
 			expect(await listenOnPort(server)).toEqual({
 				port: start + 1,
 				portSource: "env",
 			});
 			expect(server.listenerCount("error")).toBe(0);
-			expect(server.listenerCount("listening")).toBe(0);
+			expect(server.listenerCount("listening")).toBe(initialListening);
 		} finally {
 			await closeServer(server);
 			await closeServer(servers[0]);
@@ -217,11 +221,12 @@ describe("pi port selection", () => {
 		const { start, servers } = await occupyConsecutivePorts(12);
 		process.env.PLANNOTATOR_PORT = `${start}-${start + servers.length - 1}`;
 		const server = createServer();
+		const initialListening = server.listenerCount("listening");
 
 		try {
 			await expect(listenOnPort(server)).rejects.toThrow("exhausted");
 			expect(server.listenerCount("error")).toBe(0);
-			expect(server.listenerCount("listening")).toBe(0);
+			expect(server.listenerCount("listening")).toBe(initialListening);
 		} finally {
 			await Promise.all(servers.map(closeServer));
 		}
@@ -234,13 +239,14 @@ describe("pi non-range port compatibility", () => {
 		const { start, servers } = await occupyConsecutivePorts(1);
 		process.env.PLANNOTATOR_PORT = String(start);
 		const server = createServer();
+		const initialListening = server.listenerCount("listening");
 
 		try {
 			await expect(listenOnPort(server)).rejects.toThrow(
 				new RegExp(`^Port ${start} in use after 5 retries$`),
 			);
 			expect(server.listenerCount("error")).toBe(0);
-			expect(server.listenerCount("listening")).toBe(0);
+			expect(server.listenerCount("listening")).toBe(initialListening);
 		} finally {
 			await closeServer(servers[0]);
 		}
@@ -402,9 +408,11 @@ function writeExecutable(dir: string, name: string, body: string): string {
 	return file;
 }
 
+// The fake browser's `> file` creates the file before printf writes to it:
+// wait for content, not just the file, or the read can see it empty.
 async function waitForFile(file: string, timeoutMs = 2000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
-	while (!existsSync(file)) {
+	while (!existsSync(file) || statSync(file).size === 0) {
 		if (Date.now() > deadline) throw new Error(`timed out waiting for ${file}`);
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	}

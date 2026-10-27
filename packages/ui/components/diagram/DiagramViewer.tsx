@@ -204,6 +204,12 @@ export function DiagramViewer({
     if (!sourceOpen) cancelComposer();
   }, [cancelComposer, sourceOpen]);
 
+  // A host that takes commenting away (no handler, no reason) closes an open
+  // composer: left open it became a Comment form nothing could save.
+  useEffect(() => {
+    if (!canCreate) cancelComposer();
+  }, [cancelComposer, canCreate]);
+
   // The composer handed to the host: the draft's part goes out, and the
   // host's cancel closes it only while it is still the open one.
   const onHostDraftRef = useRef(onHostDraft);

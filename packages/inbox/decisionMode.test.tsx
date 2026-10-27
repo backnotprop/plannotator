@@ -4,9 +4,11 @@
  * Inbox server in a temp data dir (its own process,
  * tests/helpers/inbox-dom-server.ts in its `decisions` mode, which turns the
  * feature on in the scratch config.json and seeds Claude Code asking two
- * questions, one Stopped, and Codex asking one). What is proved: the ways in
- * (the sidebar's "Decide N", the list header's button) and that nothing of it
- * renders with the gate off; walking the queue (a pick saves through the
+ * questions, one Stopped, and Codex asking one in the same thread). What is
+ * proved: no global way in (no sidebar row, no list-header button); the one
+ * way in, the thread's "Decide these N" in its open-questions list, only from
+ * two decisions, and nothing of it with the gate off; the dialog from a thread
+ * holding only that thread's decisions; walking the queue (a pick saves through the
  * picks route at once and the next card shows); the per-agent Send after the
  * Hold (one reply for the session, in its thread); Undo and Previous; Later;
  * a question the agent replaces while it is on screen; closing with an agent
@@ -81,7 +83,7 @@ async function agentSends(send: Record<string, unknown>): Promise<string> {
 }
 
 /** One seeded world per test (and one to spare): raise it with each test added. */
-const TESTS = 28;
+const TESTS = 33;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -204,38 +206,81 @@ function choose(label: string) {
   });
 }
 
-async function questionsOf(messageId: string, threadId = messageId): Promise<InboxQuestion[]> {
+async function questionsOf(messageId: string, threadId = world.decide.a): Promise<InboxQuestion[]> {
   const model = await api<{ thread: InboxThread }>(`/api/inbox/threads/${threadId}`);
   return model.thread.messages.find((m) => m.id === messageId)?.questions ?? [];
 }
 
-async function openDecide(el: HTMLElement) {
-  await until(() => el.querySelector('[data-decide-nav]') !== null, 'the Decide row');
-  act(() => (el.querySelector('[data-decide-nav]') as HTMLButtonElement).click());
+/** A press as a pointer makes it (Base UI's Menu opens on it). */
+async function press(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    target.click();
+  });
+}
+
+/** The thread open in the window (its route), its open-questions list open: the list. */
+async function openQuestionsOf(el: HTMLElement, threadId: string): Promise<HTMLElement> {
+  if (!window.location.hash.includes(`thread=${threadId}`)) {
+    act(() => {
+      window.location.hash = `#thread=${threadId}`;
+    });
+  }
+  const trigger = () => el.querySelector<HTMLElement>('section.ib-pane [data-open-questions]');
+  // A thread with a reply draft opens with its reply box, which takes the foot: Cancel keeps the draft and
+  // brings the foot's buttons back, as the person would.
+  const cancel = () => [...el.querySelectorAll<HTMLButtonElement>('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Cancel') ?? null;
+  await until(() => window.location.hash.includes(`thread=${threadId}`) && (trigger() !== null || cancel() !== null), 'the thread foot');
+  await settle();
+  if (cancel()) act(() => cancel()!.click());
+  await until(() => trigger() !== null, 'the open-questions button');
+  if (trigger()!.getAttribute('aria-expanded') !== 'true') await press(trigger()!);
+  await until(() => document.querySelector('[data-open-questions-list]') !== null, 'the open-questions list');
+  return document.querySelector<HTMLElement>('[data-open-questions-list]')!;
+}
+
+/** Decision mode's one way in (thread only): the thread's open-questions list, then "Decide these N". */
+async function openDecide(el: HTMLElement, threadId = world.decide.a) {
+  const list = await openQuestionsOf(el, threadId);
+  await until(() => list.querySelector('[data-thread-decide]') !== null, 'Decide these N');
+  act(() => (list.querySelector('[data-thread-decide]') as HTMLElement).click());
   await until(() => prompt() !== null, 'the first card');
 }
 
-test.skipIf(!hasDom)('the ways in show from two decisions; with the gate off nothing of decision mode renders and the route is gone', async () => {
+/** Another thread an agent opens in this test (archived again when the test ends, so later tests never see it). */
+async function otherThread(session: string, questions: string[]): Promise<string> {
+  const body = questions.map((p) => [':::question', p, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n')).join('\n\n');
+  return agentSends({ project: world.project, session, host: 'codex', body });
+}
+
+test.skipIf(!hasDom)('no global way in: no sidebar row, no list-header button, whatever waits; with the gate off nothing of decision mode renders and the route is gone', async () => {
   const el = await renderApp();
-  await until(() => el.querySelector('[data-decide-nav]') !== null, 'the Decide row');
-  expect(el.querySelector('[data-decide-nav]')!.textContent).toContain('Decide3');
-  expect(el.querySelector('[data-decide-head]')!.textContent).toBe('Decide 3');
+  await until(() => el.querySelector('[data-inbox-nav]') !== null, 'the sidebar');
+  // Three decisions wait in the list's one thread: the window draws no Decide entry outside it.
+  expect((await api<InboxDecisionsModel>('/api/inbox/decisions')).decisions).toHaveLength(3);
+  await settle();
+  expect(el.querySelector('[data-decide-nav]')).toBeNull();
+  expect(el.querySelector('[data-decide-head]')).toBeNull();
+  expect([...el.querySelectorAll('button')].some((b) => /^Decide\b/.test(b.textContent?.trim() ?? ''))).toBe(false);
   act(() => root?.unmount());
   host?.remove();
-  // Off: Settings' switch, then a fresh window.
+  // Off: Settings' switch, then a fresh window: the thread's list has no Decide row.
   expect((await apiPost('/api/inbox/settings', { experimental: { decision_mode: false } })).status).toBe(200);
   try {
     expect((await loopback('/api/inbox/decisions')).status).toBe(404);
-    const off = await renderApp();
-    await until(() => off.querySelector('[data-inbox-nav]') !== null, 'the sidebar');
+    const off = await renderApp(`#thread=${world.decide.a}`);
+    const list = await openQuestionsOf(off, world.decide.a);
     await settle();
-    expect(off.querySelector('[data-decide-nav]')).toBeNull();
-    expect(off.querySelector('[data-decide-head]')).toBeNull();
+    expect(list.querySelectorAll('[data-open-question]')).toHaveLength(3);
+    expect(list.querySelector('[data-thread-decide]')).toBeNull();
     expect(document.querySelector('[data-decision-mode]')).toBeNull();
-    // Settings → General shows the switch, off.
+    // Settings → Capabilities → Experimental shows the switch, off.
     act(() => root?.unmount());
     host?.remove();
-    const settings = await renderApp('#settings/general');
+    const settings = await renderApp('#settings/capabilities');
     await until(() => settings.querySelector('[data-settings-experimental]') !== null, 'the Experimental group');
     const sw = settings.querySelector('[data-settings-experimental] [role="switch"]') as HTMLButtonElement;
     expect(sw.getAttribute('aria-checked')).toBe('false');
@@ -244,6 +289,60 @@ test.skipIf(!hasDom)('the ways in show from two decisions; with the gate off not
     expect(posted.some((p) => p.path === '/api/inbox/settings' && (p.body.experimental as { decision_mode?: boolean })?.decision_mode === true)).toBe(true);
   } finally {
     await apiPost('/api/inbox/settings', { experimental: { decision_mode: true } });
+  }
+}, 30_000);
+
+test.skipIf(!hasDom)('the thread\'s way in: "Decide these N" at the top of its open-questions list from two decisions, none at one', async () => {
+  const single = await otherThread(`ses_one_${world.decide.sessionB}`, ['Bump the lockfile now?']);
+  try {
+    const el = await renderApp(`#thread=${world.decide.a}`);
+    const list = await openQuestionsOf(el, world.decide.a);
+    await until(() => list.querySelector('[data-thread-decide]') !== null, 'Decide these N');
+    const entry = list.querySelector('[data-thread-decide]')!;
+    // Three questions listed, three in the queue: "these".
+    expect(entry.textContent?.trim()).toBe('Decide these 3');
+    expect(entry.getAttribute('aria-haspopup')).toBe('dialog');
+    // The list's first row, before the questions.
+    expect(list.querySelector('[data-thread-decide], [data-open-question]')).toBe(entry);
+    // A thread with one decision: answered on its card, no Decide row.
+    act(() => root?.unmount());
+    host?.remove();
+    const other = await renderApp(`#thread=${single}`);
+    const one = await openQuestionsOf(other, single);
+    await until(() => one.querySelectorAll('[data-open-question]').length === 1, "the one-question thread's list");
+    await settle();
+    expect(one.querySelector('[data-thread-decide]')).toBeNull();
+  } finally {
+    await apiPost(`/api/inbox/messages/${single}/resolve`, { resolved: true });
+  }
+}, 30_000);
+
+test.skipIf(!hasDom)("the dialog from a thread holds only that thread's decisions, both agents' among them", async () => {
+  const elsewhere = await otherThread(`ses_two_${world.decide.sessionB}`, ['Rename the queue table?', 'Drop the old index?']);
+  try {
+    expect((await api<InboxDecisionsModel>('/api/inbox/decisions')).decisions).toHaveLength(5);
+    const el = await renderApp(`#thread=${world.decide.a}`);
+    await openDecide(el);
+    expect(dialog()!.querySelector('[data-decision-head]')!.textContent).toContain('1 of 3 · 2 agents waiting');
+    // The head names the thread it is scoped to.
+    const subject = (await api<{ thread: InboxThread }>(`/api/inbox/threads/${world.decide.a}`)).thread.subject;
+    expect(subject).toBeTruthy();
+    expect(dialog()!.querySelector('[data-decision-scope]')!.textContent).toBe(subject!);
+    act(() => (dialog()!.querySelector('[data-decision-overview]') as HTMLButtonElement).click());
+    await until(() => dialog()!.querySelector('[data-decision-all]') !== null, 'the overview');
+    const prompts = [...dialog()!.querySelectorAll('.ib-dm-allp')].map((p) => p.textContent?.trim());
+    expect(prompts).toEqual(['Which way should the worker go on a Stripe 409?', 'Page on-call after 5 tries?', 'Ship the new flag off by default?']);
+    // One chip per agent session in the thread.
+    expect(dialog()!.querySelectorAll('[data-decision-chip]')).toHaveLength(2);
+    // Every chip would read the same project here: each names its agent instead.
+    expect([...dialog()!.querySelectorAll('[data-decision-chip] .ib-dm-chipname')].map((n) => n.textContent)).toEqual(['Claude Code', 'Codex']);
+    // The other thread's Decide opens its own two once this sitting ends.
+    act(() => (dialog()!.querySelector('[data-decision-close]') as HTMLButtonElement).click());
+    await until(() => dialog() === null, 'the dialog to close');
+    await openDecide(el, elsewhere);
+    expect(dialog()!.querySelector('[data-decision-head]')!.textContent).toContain('1 of 2 · 1 agent waiting');
+  } finally {
+    await apiPost(`/api/inbox/messages/${elsewhere}/resolve`, { resolved: true });
   }
 }, 30_000);
 
@@ -376,6 +475,88 @@ test.skipIf(!hasDom)('Open the thread tucks decision mode into a pill; Resume br
   await settle();
   expect(dialog()!.open).toBe(true);
   expect(prompt()).toBe('Which way should the worker go on a Stripe 409?');
+}, 30_000);
+
+test.skipIf(!hasDom)("a card's Open the thread closes the dialog and lands the thread on that question, its prompt focused", async () => {
+  const scrolled: Element[] = [];
+  const saved = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this);
+  };
+  try {
+    const el = await renderApp();
+    await openDecide(el);
+    // Codex's card: the second agent's question, further down the thread.
+    await goTo('Ship the new flag off by default?');
+    const key = (await questionsOf(world.decide.b))[0]!.key;
+    act(() => (dialog()!.querySelector('[data-decision-open-thread]') as HTMLButtonElement).click());
+    await until(() => dialog()?.open === false, 'the dialog to close');
+    const card = () => el.querySelector<HTMLElement>(`section.ib-pane [data-message-id="${world.decide.b}"] [data-question-key="${key}"]`);
+    await until(() => card() !== null && document.activeElement?.id === card()!.getAttribute('aria-labelledby'), "focus on the question's prompt");
+    // Its prompt, inside its card, and the card scrolled into view.
+    expect(card()!.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement!.textContent).toContain('Ship the new flag off by default?');
+    expect(scrolled).toContain(card()!);
+    // The sitting is kept in its pill (a Hold never goes unseen), and the address drops the landing.
+    expect(el.querySelector('[data-decision-pill]')).not.toBeNull();
+    await until(() => !window.location.hash.includes('msg='), 'the landing dropped from the address');
+    expect(window.location.hash).toContain(`thread=${world.decide.a}`);
+  } finally {
+    Element.prototype.scrollIntoView = saved;
+  }
+}, 30_000);
+
+test.skipIf(!hasDom)("an action item's Open the thread lands on its checklist row, focus on the row's task", async () => {
+  const action = await agentSends({
+    project: world.project,
+    session: world.decide.sessionB,
+    host: 'codex',
+    reply_to: world.decide.b,
+    body: [':::action', 'Approve the staging deploy', ':::'].join('\n'),
+  });
+  const scrolled: Element[] = [];
+  const saved = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this);
+  };
+  try {
+    const el = await renderApp();
+    await openDecide(el);
+    await goTo('Approve the staging deploy');
+    const key = (await questionsOf(action))[0]!.key;
+    act(() => (dialog()!.querySelector('[data-decision-open-thread]') as HTMLButtonElement).click());
+    await until(() => dialog()?.open === false, 'the dialog to close');
+    const row = () => el.querySelector<HTMLElement>(`section.ib-pane [data-message-id="${action}"] [data-action-card="${key}"]`);
+    await until(() => row() !== null && document.activeElement === row()!.querySelector('[data-action-toggle]'), "focus on the row's task");
+    // The row, not the whole message, is what scrolled into view.
+    expect(scrolled).toContain(row()!);
+    expect(scrolled.some((s) => s.hasAttribute('data-message-article'))).toBe(false);
+  } finally {
+    Element.prototype.scrollIntoView = saved;
+  }
+}, 30_000);
+
+test.skipIf(!hasDom)("the Resume pill names the sitting's thread while another thread is on screen, and not in its own", async () => {
+  const elsewhere = await otherThread(`ses_pill_${world.decide.sessionB}`, ['Rotate the webhook secret?']);
+  try {
+    const el = await renderApp();
+    await openDecide(el);
+    act(() => (dialog()!.querySelector('[data-decision-open-thread]') as HTMLButtonElement).click());
+    await until(() => el.querySelector('[data-decision-pill]') !== null, 'the pill');
+    // In its own thread: the pill names no thread.
+    await until(() => !window.location.hash.includes('msg='), 'the landing');
+    expect(el.querySelector('[data-decision-pill-thread]')).toBeNull();
+    // Another thread on screen: the pill says whose decisions it holds.
+    const subject = (await api<{ thread: InboxThread }>(`/api/inbox/threads/${world.decide.a}`)).thread.subject!;
+    act(() => {
+      window.location.hash = `#thread=${elsewhere}`;
+    });
+    await until(() => el.querySelector('[data-decision-pill-thread]') !== null, "the pill's thread");
+    expect(el.querySelector('[data-decision-pill-thread]')!.textContent).toBe(subject);
+    expect(el.querySelector('[data-decision-pill]')!.textContent).toContain('3 left');
+  } finally {
+    await apiPost(`/api/inbox/messages/${elsewhere}/resolve`, { resolved: true });
+  }
 }, 30_000);
 
 // ─────────────────────────────── Review round ───────────────────────────────
@@ -546,7 +727,7 @@ test.skipIf(!hasDom)("an action item's Undo the server refuses (past its window)
   await goTo('Run the migration on staging');
   act(() => (dialog()!.querySelector('[data-decision-done]') as HTMLButtonElement).click());
   await until(async () => {
-    const model = await api<{ thread: InboxThread }>(`/api/inbox/threads/${world.decide.b}`);
+    const model = await api<{ thread: InboxThread }>(`/api/inbox/threads/${world.decide.a}`);
     const q = model.thread.messages.find((m) => m.id === action)?.questions?.[0];
     return q?.action_result?.outcome === 'done';
   }, 'Done saved');

@@ -447,9 +447,24 @@ export interface InboxWakeTarget {
    * The version of Plannotator's plugin or extension this process loaded
    * (Pi: the extension's package.json). Each poll carries it as `plugin:
    * { version }`, so the Inbox can say when the session runs an older one.
-   * Optional: a host without it sends nothing.
+   * Optional: a host without it sends nothing. `plugin` wins when both exist.
    */
   pluginVersion?(): string | null;
+  /**
+   * What this process loaded AND what is on disk now (owner approval
+   * "reload-hosts"): `{ version, on_disk, host }`. `on_disk` is null when the
+   * package is gone from disk (OpenCode 2: its generation folder was
+   * deleted), `host` `oh-my-pi` inside Oh My Pi. Each poll carries it as
+   * `plugin`, so the Inbox can say which command loads the newer code.
+   */
+  plugin?(): InboxLoadedPluginReport | null;
+}
+
+/** A poll's `plugin` as Pi, Oh My Pi and OpenCode 2 send it. */
+export interface InboxLoadedPluginReport {
+  version: string;
+  on_disk: string | null;
+  host?: "pi" | "oh-my-pi";
 }
 
 /**
@@ -634,11 +649,15 @@ export class InboxWake {
     } catch {
       projectPath = null;
     }
-    let pluginVersion: string | null = null;
+    let plugin: InboxLoadedPluginReport | { version: string } | null = null;
     try {
-      pluginVersion = this.target.pluginVersion?.() ?? null;
+      plugin = this.target.plugin?.() ?? null;
+      if (!plugin) {
+        const version = this.target.pluginVersion?.() ?? null;
+        plugin = version ? { version } : null;
+      }
     } catch {
-      pluginVersion = null;
+      plugin = null;
     }
     const response = await this.connection.bridge(
       INBOX_BRIDGE_POLL_PATH,
@@ -652,7 +671,7 @@ export class InboxWake {
         // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
         [INBOX_TAGS_POLL_FIELD]: true,
         // What this process loaded (additive): the Inbox says when the session runs an older one.
-        ...(pluginVersion ? { plugin: { version: pluginVersion } } : {}),
+        ...(plugin?.version ? { plugin } : {}),
       },
       signal,
     );
