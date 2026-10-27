@@ -536,21 +536,15 @@ const WINDOW_CSP = [
 ].join("; ");
 
 /**
- * The window on this computer's own port: WINDOW_CSP plus `frame-src` for a
- * live site's proxy (`inbox-live.ts`), which listens on another loopback port
- * and is framed under its localhost spelling (`buildLiveAppUrl`). Only the
- * port is a wildcard: the page is served once, before any proxy starts.
- * Each proxy's own `frame-ancestors` names only this Inbox's two loopback
- * origins. A srcdoc frame inherits this policy, and an HTML attachment framing
- * any local port would be a port scanner and a GET to every local service, so
- * the window gives every attachment document `frame-src <its own origin>` as
- * its first element (packages/inbox/framePolicy.ts; proved by
- * tests/e2e/inbox-live-sites.spec.ts). The tailnet page keeps WINDOW_CSP: no
- * live site opens there.
+ * The window's policy, on this computer's port and through the tailnet alike
+ * (exported for the tests that pin it). `frame-src` stays at `default-src
+ * 'self'`, never a localhost port: a live site's proxy is framed through a
+ * same-origin wrapper page whose own policy names that one port
+ * (`liveFrameCsp` in inbox-live.ts). A srcdoc frame (an HTML attachment) is
+ * checked against THIS policy when it navigates itself, so naming
+ * `http://localhost:*` here would let any attachment send its frame to any
+ * local port (proved by tests/e2e/inbox-live-sites.spec.ts).
  */
-export const LOCAL_WINDOW_CSP = WINDOW_CSP.replace("default-src 'self'", "default-src 'self'; frame-src 'self' http://localhost:*");
-
-/** The tailnet page's policy (exported for the tests that pin the difference). */
 export { WINDOW_CSP as INBOX_WINDOW_CSP };
 
 /** `/` before the window is built (a source run, the server tests). */
@@ -3015,7 +3009,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "GET") updates.nudge();
         if (via === "tailnet") return tailnetWindowPage(req, page);
         return new Response(req.method === "HEAD" ? null : page, {
-          headers: { ...WINDOW_PAGE_HEADERS, "Content-Security-Policy": LOCAL_WINDOW_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+          headers: { ...WINDOW_PAGE_HEADERS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
         });
       }
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();

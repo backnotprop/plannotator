@@ -13,9 +13,11 @@
  *    read) opens a draft at most: nothing is saved until the person saves;
  *  - Send: the agent's wait_for_reply gets the comments grouped by page with
  *    each element's context;
- *  - an HTML attachment frames nothing on another localhost port (the
- *    window allows localhost frames for the live pane only), and the live
- *    frame is sandboxed without top navigation;
+ *  - an HTML attachment frames nothing on another localhost port, and
+ *    cannot navigate its own frame there either (`location.href`, a meta
+ *    refresh, a `_self` link): the window's policy names no local port, and
+ *    the live pane frames its proxy through a same-origin wrapper page; the
+ *    live frame is sandboxed without top navigation;
  *  - on a phone-wide window the pane says "Open this on your computer".
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -131,7 +133,8 @@ test('an agent attaches its running app; the person opens it, pins on two pages,
   const pane = page.locator('[data-live-pane]');
   await expect(pane).toBeVisible();
   await expect(pane.locator('[data-live-url-shown]')).toHaveText(appUrl);
-  const frame = page.frameLocator('[data-live-pane] iframe').first();
+  // The pane frames the Inbox's wrapper page, which frames the proxy.
+  const frame = page.frameLocator('[data-live-pane] iframe').first().frameLocator('iframe');
   await expect(frame.locator('#price')).toHaveText('$240');
   await shot(page, '02-open');
 
@@ -159,10 +162,10 @@ test('an agent attaches its running app; the person opens it, pins on two pages,
 
   // The app's own script forges a bridge message with the token it can read: a draft at most, never saved.
   const handle = await page.locator('[data-live-pane] iframe').elementHandle();
-  const inner = (await handle!.contentFrame())!;
+  const inner = (await handle!.contentFrame())!.childFrames()[0]!;
   await inner.evaluate(() => {
     const config = (window as unknown as { __plannotatorLiveConfig: { token: string } }).__plannotatorLiveConfig;
-    window.parent.postMessage(
+    window.top!.postMessage(
       {
         type: 'plannotator-bridge-selection',
         text: 'Forged',
@@ -247,10 +250,41 @@ test("an HTML attachment can frame nothing on another localhost port, in the vie
   const sandbox = (await frame.getAttribute('sandbox')) ?? '';
   expect(sandbox.split(' ')).toEqual(expect.arrayContaining(['allow-scripts', 'allow-same-origin', 'allow-forms']));
   expect(sandbox).not.toContain('allow-top-navigation');
-  await expect(page.frameLocator('[data-live-pane] iframe').first().locator('#price')).toHaveText('$240');
+  await expect(page.frameLocator('[data-live-pane] iframe').first().frameLocator('iframe').locator('#price')).toHaveText('$240');
   // "Open in browser" is the site's own address.
   await expect(page.locator('[data-live-pane] a[aria-label="Open in browser"]')).toHaveAttribute('href', world.appUrl);
   expect(world.errors).toEqual([]);
+});
+
+test('an HTML attachment cannot navigate its own frame to another localhost port: location.href, a meta refresh, a _self link', async () => {
+  const { page, claude, project } = world;
+  // The window's policy decides where an attachment's frame may navigate itself; the attachment's own meta policy does not.
+  const hits: string[] = [];
+  const victim = createServer((req, res) => {
+    hits.push(req.url ?? '');
+    res.end('<p>victim</p>');
+  });
+  await new Promise<void>((done) => victim.listen(0, '127.0.0.1', done));
+  const port = (victim.address() as AddressInfo).port;
+  const pages: Record<string, string> = {
+    'nav-location.html': `<!doctype html><html><body><h1>Location</h1><script>setTimeout(() => { location.href = 'http://localhost:${port}/self-location'; }, 50);</script></body></html>`,
+    'nav-meta.html': `<!doctype html><html><head><meta http-equiv="refresh" content="0;url=http://localhost:${port}/self-meta-refresh"></head><body><h1>Meta</h1></body></html>`,
+    // The page's head script runs before the bridge's, so its window listener keeps the click from the bridge's link handler.
+    'nav-link.html': `<!doctype html><html><head><script>window.addEventListener('click', (e) => e.stopImmediatePropagation(), true);</script></head><body><h1>Link</h1><a id="go" href="http://localhost:${port}/self-link" target="_self">go</a><script>setTimeout(() => document.getElementById('go').click(), 50);</script></body></html>`,
+  };
+  try {
+    for (const [name, html] of Object.entries(pages)) writeFileSync(join(project, name), html);
+    const sent = await claude.send({ project_path: project, subject: 'Navigating reports', thread: 'nav-reports', body: 'Three pages.', attachments: Object.keys(pages) });
+    for (const name of Object.keys(pages)) {
+      await page.goto(`${world.url}#thread=${sent.thread_id}`);
+      await page.getByRole('button', { name: `Open ${name}` }).click();
+      await expect(page.locator('[data-attachment-pane] iframe').first()).toBeAttached();
+      await page.waitForTimeout(1500);
+    }
+    expect(hits).toEqual([]);
+  } finally {
+    await new Promise((done) => victim.close(done));
+  }
 });
 
 test('on a phone-wide window the site does not open: "Open this on your computer"', async ({ browser }: { browser: Browser }) => {

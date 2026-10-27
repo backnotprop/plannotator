@@ -23,17 +23,27 @@ import { AnnotationType, type Annotation } from "../../types";
 
 export interface LiveSiteViewerProps
   extends Omit<HtmlViewerProps, "rawHtml" | "src" | "liveSession" | "currentPageUrl" | "onPageChange" | "fullViewport" | "inputMethod" | "vimModeEnabled" | "onOpenLink"> {
-  /** What the frame loads: the proxy's URL (host's localhost spelling, the target's path and query). */
+  /**
+   * What the frame loads: the proxy's URL (host's localhost spelling, the
+   * target's path and query), or, with `liveNested`, the host's same-origin
+   * wrapper page that frames it.
+   */
   appUrl: string;
   /** The proxy's origin the bridge posts from, and the per-proxy token it stamps. */
   proxyOrigin: string;
   token: string;
+  /**
+   * Optional: `appUrl` is the host's same-origin wrapper page whose only
+   * frame is the proxy (`HtmlLiveSession.nested`). Absent: `appUrl` is the
+   * proxy itself, as annotate frames it.
+   */
+  liveNested?: boolean;
   /** Reports the page the person is on (pathname + search), for a host's route chip. */
   onPageChange?: (pageUrl: string) => void;
 }
 
 export const LiveSiteViewer = forwardRef<unknown, LiveSiteViewerProps>(function LiveSiteViewer(
-  { appUrl, proxyOrigin, token, onPageChange, onAddAnnotation, ...rest },
+  { appUrl, proxyOrigin, token, liveNested, onPageChange, onAddAnnotation, ...rest },
   ref,
 ) {
   const [pageUrl, setPageUrl] = useState<string | undefined>(undefined);
@@ -55,7 +65,7 @@ export const LiveSiteViewer = forwardRef<unknown, LiveSiteViewerProps>(function 
       ref={ref as never}
       rawHtml=""
       src={appUrl}
-      liveSession={{ origin: proxyOrigin, token }}
+      liveSession={liveNested ? { origin: proxyOrigin, token, nested: true } : { origin: proxyOrigin, token }}
       currentPageUrl={pageUrl}
       onPageChange={onPage}
       onAddAnnotation={add}

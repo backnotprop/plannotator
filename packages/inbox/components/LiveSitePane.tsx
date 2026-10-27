@@ -29,7 +29,8 @@ const PING_MS = 60_000;
 /**
  * The live frame's sandbox: the app keeps its own origin (cookies, storage,
  * same-origin requests), its scripts, forms, dialogs and new tabs, but not
- * `allow-top-navigation`: it can never navigate the Inbox's window.
+ * `allow-top-navigation`: it can never navigate the Inbox's window. Set on
+ * the wrapper page's frame; the app's frame inside the wrapper inherits it.
  */
 export const LIVE_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals';
 
@@ -160,7 +161,9 @@ export function LiveSitePane(props: {
           </p>
         ) : site ? (
           <LiveSiteViewer
-            appUrl={site.app_url}
+            // The wrapper page frames the proxy, so the window's own policy names no local port (inbox-live.ts liveFrameCsp).
+            appUrl={site.frame_url}
+            liveNested
             proxyOrigin={site.proxy_origin}
             token={site.token}
             title={`Live site ${hostOf(site.url)}`}

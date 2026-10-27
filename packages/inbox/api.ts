@@ -625,6 +625,8 @@ export interface LiveSiteWire {
   url: string;
   origin: string;
   app_url: string;
+  /** What the window frames: the Inbox's same-origin wrapper page, whose only frame is the proxy (`app_url`). */
+  frame_url: string;
   proxy_origin: string;
   token: string;
   opened_by: 'agent' | 'person';

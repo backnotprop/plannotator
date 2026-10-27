@@ -17,8 +17,8 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { INBOX_LIVE_SITES_MAX, type InboxAnnotationRecord, type InboxThread } from "@plannotator/core/inbox-types";
 import { PLANNOTATOR_SERVER_HEADER } from "@plannotator/shared/plannotator-server-marker";
 import { attachmentFeedback, liveSiteFeedback } from "../inbox/attachments";
-import { INBOX_WINDOW_CSP, LOCAL_WINDOW_CSP, startInboxServer, type InboxServer } from "./inbox";
-import { checkInboxLiveUrl, inboxLiveSiteId } from "./inbox-live";
+import { INBOX_WINDOW_CSP, startInboxServer, type InboxServer } from "./inbox";
+import { checkInboxLiveUrl, inboxLiveSiteId, liveFrameCsp } from "./inbox-live";
 import { createInboxDevices } from "./inbox-devices";
 
 const BRIDGE = { bridgeScript: "/* bridge */", bridgeBootstrap: "/* bootstrap */", annotationCss: "" };
@@ -119,7 +119,7 @@ async function pending(server: InboxServer, threadId: string): Promise<InboxAnno
 async function openSite(server: InboxServer, threadId: string, siteId: string) {
   const response = await fetch(`${base(server)}/api/inbox/threads/${threadId}/live/${siteId}`);
   expect(response.status).toBe(200);
-  return ((await response.json()) as { site: { id: string; url: string; app_url: string; proxy_origin: string; token: string; opened_by: string } }).site;
+  return ((await response.json()) as { site: { id: string; url: string; app_url: string; frame_url: string; proxy_origin: string; token: string; opened_by: string } }).site;
 }
 
 /** A pin on an element, as the live bridge makes it. */
@@ -394,6 +394,8 @@ describe("the doors", () => {
 
     for (const headers of [{ "Sec-Fetch-Site": "same-site" }, { "Sec-Fetch-Site": "cross-site" }, { Origin: site.proxy_origin }]) {
       expect((await fetch(`${base(server)}${live}/${id}`, { headers })).status).toBe(403);
+      // The wrapper page too: an HTML attachment's frame (an opaque origin, so cross-site) never loads it.
+      expect((await fetch(`${base(server)}${live}/${id}/frame`, { headers })).status).toBe(403);
       expect((await fetch(`${base(server)}${live}`, { headers })).status).toBe(403);
       // A comment forged from the proxied page is never saved.
       expect((await post(server, `${live}/${id}/annotations`, { annotation: pin("ann-forged", "Ship it", "/", "#pay") }, headers)).status).toBe(403);
@@ -402,13 +404,43 @@ describe("the doors", () => {
     expect(await pending(server, threadId)).toEqual([]);
   });
 
-  test("the page's frame-src admits loopback proxies on the loopback page only", async () => {
-    const { dataDir } = world();
+  test("the window's policy names no local port; the site's wrapper page frames its own proxy's port and nothing else", async () => {
+    const { project, dataDir } = world();
     const server = await start(dataDir, { htmlContent: "<!doctype html><title>Inbox</title>" });
+    // An HTML attachment's frame navigating ITSELF is checked against the window's policy: no local port there, ever.
     const page = await fetch(`${base(server)}/`);
-    expect(page.headers.get("content-security-policy")).toBe(LOCAL_WINDOW_CSP);
-    expect(LOCAL_WINDOW_CSP).toContain("frame-src 'self' http://localhost:*");
-    expect(INBOX_WINDOW_CSP).not.toContain("http://localhost:*");
+    expect(page.headers.get("content-security-policy")).toBe(INBOX_WINDOW_CSP);
+    expect(INBOX_WINDOW_CSP).not.toContain("localhost");
+    expect(INBOX_WINDOW_CSP).not.toContain("frame-src");
+
+    const client = await agent(server);
+    const app = devApp();
+    const sent = await send(client, project, { live_sites: [app.url + "settings?tab=plan"] });
+    const threadId = sent.structured.thread_id;
+    const id = inboxLiveSiteId(app.url + "settings?tab=plan");
+    const site = await openSite(server, threadId, id);
+    expect(site.frame_url).toBe(`/api/inbox/threads/${threadId}/live/${id}/frame`);
+    const wrapper = await fetch(`${base(server)}${site.frame_url}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "iframe" } });
+    expect(wrapper.status).toBe(200);
+    expect(wrapper.headers.get("content-type")).toContain("text/html");
+    const csp = wrapper.headers.get("content-security-policy") ?? "";
+    expect(csp).toBe(liveFrameCsp(site.proxy_origin));
+    expect(csp).toContain(`frame-src ${site.proxy_origin};`);
+    expect(csp).not.toContain("*");
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("frame-ancestors 'self'");
+    const html = await wrapper.text();
+    // One frame, on the proxy at the site's own path and query, and no script.
+    expect(html.match(/<iframe /g)).toHaveLength(1);
+    expect(html).toContain(`<iframe src="${site.app_url.replace(/&/g, "&amp;")}"`);
+    expect(site.app_url).toBe(`${site.proxy_origin}/settings?tab=plan`);
+    expect(html).not.toContain("<script");
+    // The proxy's bridge knows its editor is the wrapper's parent.
+    const bridge = await fetch(`${site.proxy_origin}/__plannotator__/bridge.js`, { headers: { "Sec-Fetch-Site": "same-origin" } });
+    expect(await bridge.text()).toContain('"nested":true');
+    // A site the thread does not show has no wrapper.
+    expect((await fetch(`${base(server)}/api/inbox/threads/${threadId}/live/${inboxLiveSiteId("http://localhost:9/")}/frame`)).status).toBe(404);
+    expect((await post(server, site.frame_url, {})).status).toBe(405);
   });
 
   test("the device door does not list the live routes: a paired phone never reaches them", async () => {
@@ -503,6 +535,13 @@ describe("the person opens a site and comments on it", () => {
     expect((await save({ ...pin("ann-c", "x", "/", "#pay"), elementContext: { tag: "div", text: huge } })).status).toBe(422);
     expect((await save({ ...pin("ann-a", "x", "/", "#pay"), htmlAnchor: { selector: huge } })).status).toBe(422);
     expect((await save({ ...pin("ann-x", "x", "/", "#pay"), extra: huge })).status).toBe(422);
+    // 40 KB: past the element cap (32 KB) but under the whole-object cap (128 KB), so only the element cap refuses it.
+    const forty = "x".repeat(40 * 1024);
+    for (const [key, value] of [["elementContext", { tag: "div", text: forty }], ["htmlAnchor", { selector: forty }]] as const) {
+      const refused = await save({ ...pin(`ann-40-${key}`, "x", "/", "#pay"), [key]: value });
+      expect([key, refused.status]).toEqual([key, 422]);
+      expect(((await refused.json()) as { field?: string }).field).toBe(`annotation.${key}`);
+    }
     expect(await pending(server, threadId)).toEqual([]);
     expect((await post(server, `/api/inbox/threads/${threadId}/live/${inboxLiveSiteId("http://localhost:9/")}/annotations`, { annotation: pin("ann-n", "x", "/", "#pay") })).status).toBe(404);
 

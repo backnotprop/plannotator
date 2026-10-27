@@ -32,6 +32,11 @@
  * - Reads and writes alike refuse another site's page
  *   (`isSameOriginOrNoOrigin`: `Sec-Fetch-Site: same-site` too, since the
  *   proxied app is same-site with the window on another localhost port).
+ * - The window's own policy names no proxy port: it frames the site's
+ *   same-origin wrapper page (`GET .../live/:site/frame`), whose policy
+ *   frames that one proxy origin (`liveFrameCsp`). An HTML attachment's
+ *   srcdoc frame navigating itself is checked against the window's policy,
+ *   so a `http://localhost:*` there would reach every local port.
  * - The token reaches only the window (`GET .../live/:site`). The proxied
  *   app's own scripts can read it (the bridge runs in the app's realm); what
  *   a forged bridge message can do is open a comment draft in the person's
@@ -68,7 +73,7 @@ export interface InboxLiveBridgeSources {
 export const INBOX_LIVE_IDLE_MS = 10 * 60_000;
 
 /** The paths this module answers (all under a thread). */
-const LIVE_PATH = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/live(?:\/(liv_[0-9a-f]{16})(?:\/(ping|annotations))?)?$/;
+const LIVE_PATH = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/live(?:\/(liv_[0-9a-f]{16})(?:\/(ping|annotations|frame))?)?$/;
 
 /** True for every path this module owns, so the server can keep them off the tailnet before anything else. */
 export function isInboxLivePath(path: string): boolean {
@@ -80,8 +85,14 @@ export interface InboxLiveSiteWire {
   id: string;
   url: string;
   origin: string;
-  /** What the window frames: the proxy under its localhost spelling, with the site's path and query. */
+  /** The proxy under its localhost spelling, with the site's path and query: what the wrapper frames. */
   app_url: string;
+  /**
+   * What the window frames: this Inbox's wrapper page for the site
+   * (`GET .../live/:site/frame`, same origin), whose own policy names this
+   * proxy's port and nothing else (`liveFrameCsp`).
+   */
+  frame_url: string;
   /** The proxy's origin the bridge posts from. */
   proxy_origin: string;
   /** This proxy's bridge token. */
@@ -92,6 +103,47 @@ export interface InboxLiveSiteWire {
 /** `liv_` + 16 hex of the URL's normalized identity (annotate's draft identity): one id per site, in every thread. */
 export function inboxLiveSiteId(url: string): string {
   return `liv_${createHash("sha256").update(liveAppDraftIdentity(url)).digest("hex").slice(0, 16)}`;
+}
+
+/**
+ * The wrapper page's policy: it frames this one proxy port and nothing else,
+ * and runs no script. The window's own policy keeps `frame-src` at its own
+ * origin: a srcdoc frame (an HTML attachment) is checked against the window's
+ * policy when it navigates ITSELF, and a meta policy in its document does not
+ * cover that, so a window policy naming `http://localhost:*` would let any
+ * attachment send its frame to any local port (#2258's review, M1).
+ */
+export function liveFrameCsp(proxyOrigin: string): string {
+  return [
+    "default-src 'none'",
+    "style-src 'unsafe-inline'",
+    `frame-src ${proxyOrigin}`,
+    "frame-ancestors 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join("; ");
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** The wrapper page: one full-size frame on the proxy. Its only frame is the bridge's window (HtmlViewer's `liveNested`). */
+function liveFramePage(site: InboxLiveSiteWire): Response {
+  const body =
+    '<!doctype html><html><head><meta charset="utf-8"><title>Live site</title>'
+    + "<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>"
+    + `</head><body><iframe src="${escapeAttribute(site.app_url)}" title="${escapeAttribute(site.url)}"></iframe></body></html>`;
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": liveFrameCsp(site.proxy_origin),
+      "X-Frame-Options": "SAMEORIGIN",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 function refuse(message: string): never {
@@ -208,7 +260,8 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       proxy = startLiveAppProxy({
         targetUrl: `${url.origin}/`,
         editorOrigins,
-        bridgeJs: composeLiveBridgeJs({ token, editorOrigins, ...options.bridge }),
+        // `nested`: the window frames the proxy through its wrapper page (`liveFramePage`), so the bridge's editor is its grandparent.
+        bridgeJs: composeLiveBridgeJs({ token, editorOrigins, ...options.bridge, nested: true }),
         // Never PLANNOTATOR_LIVE_PORT (annotate's one port): several sites run at once.
         anyFreePort: true,
       });
@@ -222,7 +275,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
     return entry;
   };
 
-  const wire = (site: InboxLiveSiteRef): InboxLiveSiteWire => {
+  const wire = (threadId: string, site: InboxLiveSiteRef): InboxLiveSiteWire => {
     // Checked again at every open: a port may have become Plannotator's since the site was recorded.
     const url = checkInboxLiveUrl(site.url, reservedPorts().filter((port) => port !== proxies.get(new URL(site.url).origin)?.proxy.port));
     const entry = proxyFor(url);
@@ -231,6 +284,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
       url: site.url,
       origin: url.origin,
       app_url: buildLiveAppUrl(entry.proxy.port, url.href),
+      frame_url: `/api/inbox/threads/${encodeURIComponent(threadId)}/live/${site.id}/frame`,
       proxy_origin: `http://localhost:${entry.proxy.port}`,
       token: entry.token,
       opened_by: site.opened_by,
@@ -302,11 +356,16 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
         const url = checkInboxLiveUrl(body.url, reservedPorts());
         await probe(url);
         const site = store.openLiveSite(threadId, { id: inboxLiveSiteId(url.href), url: url.href });
-        return json({ site: wire(site) });
+        return json({ site: wire(threadId, site) });
       }
       if (!action) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-        return json({ site: wire(siteOf(threadId, siteId)) });
+        return json({ site: wire(threadId, siteOf(threadId, siteId)) });
+      }
+      if (action === "frame") {
+        // The window's frame for the site: same origin only (the checks above), opening its proxy as GET .../live/:site does.
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        return liveFramePage(wire(threadId, siteOf(threadId, siteId)));
       }
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       if (action === "ping") {

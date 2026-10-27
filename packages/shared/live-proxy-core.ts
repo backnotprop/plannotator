@@ -556,6 +556,13 @@ export interface LiveBridgeSources {
   bridgeBootstrap: string;
   /** The bridge script itself. */
   bridgeScript: string;
+  /**
+   * Optional: the editor frames the app through a same-origin wrapper page
+   * (the Inbox, whose window names no proxy port in its own policy), so the
+   * editor is the frame's grandparent, not its parent. Absent: annotate's
+   * output, unchanged.
+   */
+  nested?: boolean;
 }
 
 /**
@@ -572,6 +579,7 @@ export function composeLiveBridgeJs(sources: LiveBridgeSources): string {
       token: sources.token,
       editorOrigins: sources.editorOrigins,
       css: sources.annotationCss,
+      ...(sources.nested ? { nested: true } : {}),
     })
     + ";\n"
     + sources.bridgeBootstrap

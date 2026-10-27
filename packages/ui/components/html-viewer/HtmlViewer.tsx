@@ -49,6 +49,7 @@ import {
   MAX_PAGE_URL_LENGTH,
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,
+  bridgeWindowOf,
   rejectsLiveMessage,
   useHtmlAnnotation,
   type HtmlLiveSession,
@@ -494,7 +495,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     /** Single choke point for direct-to-bridge posts: live sessions get the
      *  token + concrete targetOrigin, srcdoc keeps "*" and no token. */
     const postToBridge = useCallback((msg: Record<string, unknown>) => {
-      const win = iframeRef.current?.contentWindow;
+      const win = bridgeWindowOf(iframeRef.current, liveSessionRef.current);
       if (!win) return;
       const live = liveSessionRef.current;
       if (live) {
@@ -769,7 +770,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // WebKit runner, the Inbox surface's proof).
     useLayoutEffect(() => {
       function handler(e: MessageEvent<unknown>) {
-        if (e.source !== iframeRef.current?.contentWindow) return;
+        if (!e.source || e.source !== bridgeWindowOf(iframeRef.current, liveSessionRef.current)) return;
         // Live sessions verify origin + token before reading anything.
         const live = liveSessionRef.current;
         if (live && rejectsLiveMessage(live, e.origin, e.data)) return;

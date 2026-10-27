@@ -709,6 +709,7 @@ describe("live sites never answer through the tailnet", () => {
       ["GET", live, undefined],
       ["POST", live, { serverSession: inbox.serverSession, url: "http://localhost:5174/" }],
       ["GET", `${live}/${site.id}`, undefined],
+      ["GET", `${live}/${site.id}/frame`, undefined],
       ["POST", `${live}/${site.id}/ping`, {}],
       ["POST", `${live}/${site.id}/annotations`, { serverSession: inbox.serverSession, annotation: { id: "ann-1", type: "COMMENT", text: "x", pageUrl: "/" } }],
     ];
@@ -720,11 +721,12 @@ describe("live sites never answer through the tailnet", () => {
     expect(inbox.store.liveSites(sent.thread_id).map((s) => s.id)).toEqual([site.id]);
     expect(inbox.store.pendingAnnotations(sent.thread_id)).toEqual([]);
 
+    // Neither page's policy names a local port (the live pane frames its proxy through the wrapper page).
     const tailnetPage = await throughServe(inbox, "/");
     expect(tailnetPage.status).toBe(200);
-    expect(tailnetPage.headers.get("content-security-policy")).not.toContain("http://localhost:*");
+    expect(tailnetPage.headers.get("content-security-policy")).not.toContain("localhost");
     const localPage = await fetch(`http://127.0.0.1:${inbox.port}/`);
-    expect(localPage.headers.get("content-security-policy")).toContain("frame-src 'self' http://localhost:*");
+    expect(localPage.headers.get("content-security-policy")).not.toContain("localhost");
   });
 });
 
