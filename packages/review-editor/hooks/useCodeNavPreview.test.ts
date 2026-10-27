@@ -19,3 +19,13 @@ describe("codeNavPreviewErrorMessage too-large", () => {
     expect(message).toBe("This file is too large to preview (6 MB; the limit is 5 MB).");
   });
 });
+
+describe("codeNavPreviewErrorMessage changed", () => {
+  test("a file refused because it changed mid-read is not called outside the repository", () => {
+    // The server answers `changed` (409) when a directory on the way kept
+    // changing during the read: trying again is the fix, not a wrong path.
+    const message = codeNavPreviewErrorMessage({ reason: "changed" });
+    expect(message).not.toContain("outside");
+    expect(message).toContain("Try again");
+  });
+});

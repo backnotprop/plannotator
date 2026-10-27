@@ -15,7 +15,7 @@ import {
 	prepareGitCommand,
 	runGitDiff as runGitDiffCore,
 } from "../generated/review-core.ts";
-import { readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "../generated/repo-file.ts";
+import { checkRepoRoot, readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "../generated/repo-file.ts";
 import {
 	JJ_COLOR_FREE_ARGS,
 	type ReviewJjRuntime,
@@ -221,6 +221,11 @@ export const reviewRuntime: ReviewGitRuntime = {
 
 	async readWorkingTreeBytes(root, path, maxBytes) {
 		return readRepoWorkingTreeBytes(root, path, { maxBytes });
+	},
+
+	async checkRepoRoot(path) {
+		const checked = checkRepoRoot(path);
+		return checked.ok ? checked.realRoot : null;
 	},
 
 	runGitBytes(

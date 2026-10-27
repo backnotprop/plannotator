@@ -40,6 +40,8 @@ export function codeNavPreviewErrorMessage(body: CodeNavFileError | null): strin
       return 'This path is not a regular file, so it cannot be previewed.';
     case 'not-found':
       return 'This file was not found.';
+    case 'changed':
+      return 'This file changed while it was being read. Try again.';
     default:
       return 'This file could not be previewed.';
   }

@@ -213,7 +213,7 @@ import {
 	validateCodeNavRequest,
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
-import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
+import { pinRepoRoots, readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
 import {
 	createDefaultSemanticDiffRuntime,
 	getSemanticDiffAvailability,
@@ -4144,6 +4144,17 @@ export async function startReviewServer(options: {
 	const exitHandler = () => agentJobs.killAll();
 	process.once("exit", exitHandler);
 
+	// Pin this session's repository roots (repo-file.ts): a root directory
+	// replaced after this point (say `mv repo repo.old; ln -s /elsewhere repo`)
+	// is refused instead of read. Other roots pin on first read. Released on
+	// stop, so the long-lived Pi host does not keep them between reviews.
+	const releaseRootPins = pinRepoRoots([
+		options.agentCwd,
+		options.gitContext?.cwd,
+		options.gitContext?.root,
+		workspace?.root,
+	]);
+
 	if (options.onReady) {
 		options.onReady(serverUrl, isRemote, port);
 	}
@@ -4158,6 +4169,7 @@ export async function startReviewServer(options: {
 		stop: () => {
 			// try/finally: a throwing dispose must never leave the listener bound.
 			try {
+				releaseRootPins();
 				process.removeListener("exit", exitHandler);
 				agentJobs.killAll();
 				callFlowService.cancelAll();

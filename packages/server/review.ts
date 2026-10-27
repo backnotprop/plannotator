@@ -180,7 +180,7 @@ import { getExtraMarkdownExtensions } from "@plannotator/shared/resolve-file";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import { resolveWorkspaceFilePath, type LocalWorkspaceReview, type WorkspaceDiffType } from "./review-workspace";
 import { handleCodeNavResolve, handleCodeNavHover, extractChangedFiles } from "./code-nav";
-import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "@plannotator/shared/repo-file";
+import { pinRepoRoots, readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "@plannotator/shared/repo-file";
 import { decodeBunText } from "./git";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "./review-skill-loader";
 import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shared/guide-instructions-store";
@@ -4418,7 +4418,13 @@ export async function startReviewServer(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
+  // Pin this session's repository roots (repo-file.ts): a root directory
+  // replaced after this point (say `mv repo repo.old; ln -s /elsewhere repo`)
+  // is refused instead of read. Other roots pin on first read.
+  const releaseRootPins = pinRepoRoots([options.agentCwd, gitContext?.cwd, gitContext?.root, workspace?.root]);
+
   const stop = () => {
+    releaseRootPins();
     process.removeListener("exit", exitHandler);
     agentJobs.killAll();
     callFlowService.cancelAll();

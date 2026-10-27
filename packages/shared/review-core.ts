@@ -290,6 +290,13 @@ export interface ReviewGitRuntime {
     maxBytes: number,
   ) => Promise<RepoWorkingTreeBytes | RepoFileFailure>;
   /**
+   * The real path of a review root, held to the session's root pin
+   * (`checkRepoRoot` in repo-file.ts): `null` when the directory was replaced
+   * since the session pinned it. Working-tree reads check their `cwd` with it
+   * before running git there. Optional for the same reason as above.
+   */
+  checkRepoRoot?: (path: string) => Promise<string | null>;
+  /**
    * Read one working-tree path for diff context expansion: every directory
    * on the way resolves inside `root`, a final symlink comes back as its
    * target string, and anything else must be a regular file under the 5 MB
@@ -951,6 +958,35 @@ async function resolveRepoToplevel(
   const top = await runtime.runGit(["rev-parse", "--show-toplevel"], { cwd });
   const trimmed = top.exitCode === 0 ? top.stdout.trim() : "";
   return trimmed || cwd;
+}
+
+/** Path form for comparing a git toplevel with a real path (case folds on macOS and Windows). */
+function comparablePath(path: string): string {
+  const platform = typeof process === "undefined" ? "" : process.platform;
+  const slashed = path.replace(/\\/g, "/").replace(/\/+$/, "").normalize("NFC");
+  return platform === "darwin" || platform === "win32" ? slashed.toLowerCase() : slashed;
+}
+
+/**
+ * The toplevel for a working-tree read, held to the session's root pin
+ * (`checkRepoRoot`, repo-file.ts) where the runtime has one: `cwd` must still
+ * be the directory the session pinned (so a repo replaced by a symlink to
+ * another repo is refused before git runs in it), and the toplevel git
+ * reports must contain it. `null`: refused. The read then holds the toplevel
+ * to its own pin.
+ */
+async function pinnedRepoToplevel(
+  runtime: ReviewGitRuntime,
+  cwd?: string,
+): Promise<string | undefined | null> {
+  if (!runtime.checkRepoRoot || !cwd) return resolveRepoToplevel(runtime, cwd);
+  const pinnedCwd = await runtime.checkRepoRoot(cwd);
+  if (pinnedCwd === null) return null;
+  const top = await resolveRepoToplevel(runtime, cwd);
+  if (!top) return top;
+  const topPath = comparablePath(top);
+  const cwdPath = comparablePath(pinnedCwd);
+  return cwdPath === topPath || cwdPath.startsWith(`${topPath}/`) ? top : null;
 }
 
 interface RawDiffEntry {
@@ -2389,7 +2425,8 @@ export async function readDiffSideText(
   // cwd — from a subdirectory launch, cwd-resolution double-prefixes the
   // path and hunk expansion silently returns null. (The `git show ref:path`
   // sibling is immune: ref paths are root-relative regardless of cwd.)
-  const baseDir = await resolveRepoToplevel(runtime, cwd);
+  const baseDir = await pinnedRepoToplevel(runtime, cwd);
+  if (baseDir === null) return null;
   try {
     if (runtime.readWorkingTreeEntry) {
       // Shared guard (repo-file.ts): a path through a symlinked directory
@@ -2472,7 +2509,8 @@ export async function readDiffSideBytes(
   }
 
   if (!runtime.readWorkingTreeBytes) return { kind: "unavailable" };
-  const root = await resolveRepoToplevel(runtime, cwd);
+  const root = await pinnedRepoToplevel(runtime, cwd);
+  if (root === null) return { kind: "missing" };
   if (!root) return { kind: "unavailable" };
   const entry = await runtime.readWorkingTreeBytes(root, source.path, maxBytes);
   if (!entry.ok) {

@@ -455,3 +455,109 @@ describePosix("GET /api/file-content guards", () => {
     }, CHILD_TEST_TIMEOUT_MS);
   }
 });
+
+/**
+ * The repository root itself replaced while the review runs. Someone who can
+ * write the root's parent (a worktree under `.claude/worktrees`, a repo in
+ * /tmp) renames the repo away and puts something else at its path. Before
+ * the root was pinned, every read resolved the root path again, so both
+ * routes served the replacement's files.
+ */
+describePosix("a repository root replaced during the review", () => {
+  const APP_PATCH =
+    "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-v1\n+v2 inside\n";
+
+  function makeRepo(dir: string, content: string): void {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "app.ts"), "v1\n");
+    runGit(dir, ["init", "-q"]);
+    runGit(dir, ["config", "user.email", "test@example.com"]);
+    runGit(dir, ["config", "user.name", "Test"]);
+    runGit(dir, ["add", "."]);
+    runGit(dir, ["commit", "-q", "-m", "initial"]);
+    writeFileSync(join(dir, "src", "app.ts"), content);
+  }
+
+  /** How the root is replaced once the server runs. */
+  const replacements = [
+    [
+      "with a symlink to an outside directory",
+      (base: string, repo: string) => {
+        renameSync(repo, join(base, "repo.moved"));
+        symlinkSync(join(base, "outside"), repo);
+      },
+    ],
+    [
+      "with another repository moved into its place",
+      (base: string, repo: string) => {
+        renameSync(repo, join(base, "repo.moved"));
+        renameSync(join(base, "outside"), repo);
+      },
+    ],
+  ] as const;
+
+  for (const [runtime, startServer] of [
+    ["Bun", startBunReviewServer],
+    ["Pi", startPiReviewServer],
+  ] as const) {
+    for (const [how, replace] of replacements) {
+      test(`${runtime}: a root replaced ${how} is refused by code-nav and diff expansion`, async () => {
+        const base = realpathSync(mkdtempSync(join(tmpdir(), "pn-root-swap-")));
+        const repo = join(base, "repo");
+        makeRepo(repo, "v2 inside\n");
+        // A real git repo with the same layout, so git run in the replaced
+        // path answers too.
+        makeRepo(join(base, "outside"), "TOP SECRET\n");
+        let server: { url: string; stop: () => void } | null = null;
+        try {
+          setEnv("PLANNOTATOR_DATA_DIR", join(base, "data"));
+          setEnv("PLANNOTATOR_BROWSER", NO_BROWSER);
+          setEnv("PLANNOTATOR_UPDATE_CHECK", "0");
+          setEnv("PLANNOTATOR_INBOX_CONNECT", "0");
+          if (runtime === "Pi") await reservePiPort();
+          const gitContext = await getVcsContext(repo, "git");
+          server = await startServer({
+            rawPatch: APP_PATCH,
+            gitRef: "Working tree",
+            diffType: "uncommitted",
+            gitContext,
+            agentCwd: repo,
+            origin: runtime === "Pi" ? "pi" : "claude-code",
+            htmlContent: MINIMAL_HTML,
+          });
+          const url = server.url;
+          const probe = async () => {
+            const nav = await fetch(`${url}/api/code-nav/file?path=src/app.ts`, { signal: AbortSignal.timeout(5000) });
+            const content = await fetch(`${url}/api/file-content?path=src/app.ts`, {
+              signal: AbortSignal.timeout(5000),
+            });
+            return {
+              navStatus: nav.status,
+              nav: await nav.text(),
+              content: (await content.json()) as { newContent: string | null },
+            };
+          };
+
+          const before = await probe();
+          expect(before.navStatus).toBe(200);
+          expect(before.nav).toContain("v2 inside");
+          expect(before.content.newContent).toBe("v2 inside\n");
+
+          replace(base, repo);
+          // The replacement really is what the root path now reads.
+          expect(readFileSync(join(repo, "src", "app.ts"), "utf-8")).toBe("TOP SECRET\n");
+
+          const after = await probe();
+          expect(after.navStatus).toBe(403);
+          expect(after.nav).not.toContain("TOP SECRET");
+          expect(after.content.newContent).toBeNull();
+          expect(JSON.stringify(after.content)).not.toContain("TOP SECRET");
+        } finally {
+          server?.stop();
+          restoreEnv();
+          rmSync(base, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+});

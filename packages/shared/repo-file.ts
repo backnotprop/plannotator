@@ -55,6 +55,16 @@
  * the parent's ctime alone) is out of scope: that needs the user's own
  * rights, which already read every file.
  *
+ * The root itself is pinned per review session ({@link pinRepoRoots}): its
+ * real path, dev and ino when the server started (or when a session first
+ * read it). Someone who can write the root's parent (a worktree under
+ * `.claude/worktrees`, a repo in /tmp, a nested repo) could otherwise
+ * `mv repo repo.old; ln -s /elsewhere repo`, and every check above would pass
+ * against the new "root". A pinned root that no longer resolves to the same
+ * directory is refused; a racing swap of the root is caught like any other
+ * directory on the way. A root legitimately replaced mid-review is refused
+ * until the review ends; pins are dropped when the last session stops.
+ *
  * Hard links: a hard link inside the repo to a file outside it is the same
  * inode at a contained path, so it cannot be told apart and is read. Git never
  * creates hard links, so a cloned repo cannot carry one; making one needs
@@ -87,7 +97,9 @@ export type RepoFileFailureReason =
 	| "outside-root"
 	| "not-found"
 	| "not-a-file"
-	| "too-large";
+	| "too-large"
+	/** A directory on the way kept changing during the read; trying again may work. */
+	| "changed";
 
 export interface RepoFileSuccess {
 	ok: true;
@@ -163,6 +175,7 @@ export const REPO_FILE_ERROR_STATUS: Record<RepoFileFailureReason, number> = {
 	"not-found": 404,
 	"not-a-file": 400,
 	"too-large": 413,
+	changed: 409,
 };
 
 /** The JSON error body both servers send for a failed read. */
@@ -269,12 +282,97 @@ export function resolveRepoFilePath(
 	const validated = validateRepoFilePath(rawPath);
 	if (!validated.ok) return validated;
 
-	const realRoot = realpathOrNull(root);
-	if (realRoot === null) return fail("not-found", "Repository root is unavailable");
+	const pinned = checkRepoRoot(root);
+	if (!pinned.ok) return pinned;
+	const realRoot = pinned.realRoot;
 
 	const contained = containedRealPath(realRoot, validated.path);
 	if (!contained.ok) return contained;
 	return { ok: true, filePath: validated.path, absolutePath: contained.path };
+}
+
+// --- Pinning the root ---------------------------------------------------------
+
+/**
+ * The root as it was when a review session first saw it. Without a pin every
+ * read resolves the root path again, so someone who can write the root's
+ * parent (a worktree under `.claude/worktrees`, a repo in /tmp, a nested
+ * repo) can `mv repo repo.old; ln -s /elsewhere repo` and every check below
+ * passes against the new "root".
+ */
+interface RootPin {
+	real: string;
+	dev: bigint;
+	ino: bigint;
+}
+
+/** Keyed by the root as given (resolved lexically) and by its real path. */
+const rootPins = new Map<string, RootPin>();
+let pinSessions = 0;
+
+function pinKey(root: string): string {
+	return resolve(root);
+}
+
+function takePin(root: string): RootPin | null {
+	const real = realpathOrNull(root);
+	if (real === null) return null;
+	try {
+		const stats = lstatSync(real, { bigint: true });
+		if (!stats.isDirectory()) return null;
+		const pin = { real, dev: stats.dev, ino: stats.ino };
+		rootPins.set(pinKey(root), pin);
+		if (!rootPins.has(real)) rootPins.set(real, pin);
+		return pin;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Start a review session's root pins: pin `roots` now (missing ones are
+ * skipped), and pin any other root on its first read while a session is
+ * running. Returns the release; when the last session ends every pin is
+ * dropped, so a long-lived host (Pi, OpenCode) does not hold a root that was
+ * legitimately replaced between reviews.
+ */
+export function pinRepoRoots(roots: Iterable<string | null | undefined>): () => void {
+	pinSessions++;
+	for (const root of roots) {
+		if (root && !rootPins.has(pinKey(root))) takePin(root);
+	}
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		pinSessions--;
+		if (pinSessions === 0) rootPins.clear();
+	};
+}
+
+/**
+ * The root's real path, held to its pin: it must still resolve to the pinned
+ * real path, which must still be a directory (not a link) with the pinned
+ * dev and ino. Unpinned roots are pinned here while a session runs; with no
+ * session (tests, the VS Code guide source) the root is only resolved.
+ */
+export function checkRepoRoot(root: string): { ok: true; realRoot: string } | RepoFileFailure {
+	const real = realpathOrNull(root);
+	if (real === null) return fail("not-found", "Repository root is unavailable");
+	const pin = rootPins.get(pinKey(root)) ?? rootPins.get(real);
+	if (!pin) {
+		if (pinSessions > 0 && takePin(root) === null) return fail("not-found", "Repository root is unavailable");
+		return { ok: true, realRoot: real };
+	}
+	const replaced = (): RepoFileFailure => fail("outside-root", "The repository root was replaced during the review");
+	if (real !== pin.real) return replaced();
+	try {
+		const stats = lstatSync(pin.real, { bigint: true });
+		if (!stats.isDirectory() || stats.dev !== pin.dev || stats.ino !== pin.ino) return replaced();
+	} catch {
+		return replaced();
+	}
+	return { ok: true, realRoot: pin.real };
 }
 
 // --- Proving the open is contained -------------------------------------------
@@ -358,9 +456,10 @@ function stampDirs(realRoot: string, realPath: string): DirStamp[] | RepoFileFai
 /**
  * Deepest first: every directory is still the same inode with the same
  * ctime. Any change to a directory's entries (a rename, a new link) moves its
- * ctime, and the root's own path is out of a repo writer's reach, so by
- * induction from the root no name on the way changed between the stamps and
- * this check, and the open between them went where the stamps say.
+ * ctime, and the root is the pinned directory (its own ctime moves if it is
+ * renamed away and back), so by induction from the root no name on the way
+ * changed between the stamps and this check, and the open between them went
+ * where the stamps say.
  */
 function stampsUnchanged(stamps: readonly DirStamp[]): boolean {
 	for (let i = stamps.length - 1; i >= 0; i--) {
@@ -386,7 +485,7 @@ const CHANGED = Symbol("changed during the read");
 const MAX_ATTEMPTS = 3;
 
 function changedTooOften(): RepoFileFailure {
-	return fail("outside-root", "The path kept changing during the read; it could not be confirmed inside the repository");
+	return fail("changed", "The file changed while it was being read. Try again.");
 }
 
 /**
@@ -508,8 +607,9 @@ export async function readRepoFile(
 	const hooks = options.hooks;
 	const validated = validateRepoFilePath(rawPath);
 	if (!validated.ok) return validated;
-	const realRoot = realpathOrNull(root);
-	if (realRoot === null) return fail("not-found", "Repository root is unavailable");
+	const pinned = checkRepoRoot(root);
+	if (!pinned.ok) return pinned;
+	const realRoot = pinned.realRoot;
 	const contained = containedRealPath(realRoot, validated.path);
 	if (!contained.ok) return contained;
 	// A link inside the repo to the root itself: a directory, never a file.
@@ -635,8 +735,9 @@ export async function readRepoWorkingTreeBytes(
 	const hooks = options.hooks;
 	const validated = validateRepoFilePath(rawPath);
 	if (!validated.ok) return validated;
-	const realRoot = realpathOrNull(root);
-	if (realRoot === null) return fail("not-found", "Repository root is unavailable");
+	const pinned = checkRepoRoot(root);
+	if (!pinned.ok) return pinned;
+	const realRoot = pinned.realRoot;
 	const leaf = containedLeaf(realRoot, validated.path);
 	if (!leaf.ok) return leaf;
 	hooks?.afterCheck?.();

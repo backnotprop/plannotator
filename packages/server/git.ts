@@ -6,7 +6,7 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
-import { readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
+import { checkRepoRoot, readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
 import { lstat, readlink } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 
@@ -233,6 +233,10 @@ export const runtime: ReviewGitRuntime = {
   },
   async readWorkingTreeBytes(root, path, maxBytes) {
     return readRepoWorkingTreeBytes(root, path, { maxBytes });
+  },
+  async checkRepoRoot(path) {
+    const checked = checkRepoRoot(path);
+    return checked.ok ? checked.realRoot : null;
   },
   runGitBytes,
   async readTextFile(path: string): Promise<string | null> {

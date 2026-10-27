@@ -5,7 +5,7 @@
  * or hang or bloat on one it cannot afford. The old string check
  * (`validateFilePath`) let both symlink cases through.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
 	existsSync,
@@ -23,9 +23,11 @@ import { join } from "node:path";
 
 import {
 	MAX_REPO_FILE_BYTES,
+	checkRepoRoot,
 	type RepoFileReadHooks,
 	type RepoFileReadMethod,
 	isContainedPath,
+	pinRepoRoots,
 	readRepoFile,
 	readRepoWorkingTreeBytes,
 	readRepoWorkingTreeEntry,
@@ -490,7 +492,8 @@ describePosix("a directory swapped for an outside symlink during the read", () =
 			test(`${name} refuses when a directory on the way keeps changing, even with every inode the same`, async () => {
 				const flip = flipAndBack(Number.POSITIVE_INFINITY);
 				const result = await read(flip.hooks);
-				expect(result).toMatchObject({ ok: false, reason: "outside-root" });
+				// Its own reason: the preview says "try again", not "outside".
+				expect(result).toMatchObject({ ok: false, reason: "changed" });
 				// One read, three attempts: a busy directory gets retried.
 				expect(flip.flips()).toBe(3);
 			});
@@ -505,7 +508,7 @@ describePosix("a directory swapped for an outside symlink during the read", () =
 		test("a final symlink read is held to the same stamps", async () => {
 			const flip = flipAndBack(Number.POSITIVE_INFINITY);
 			const entry = await readRepoWorkingTreeEntry(repo, "sub/link", { hooks: flip.hooks });
-			expect(entry).toMatchObject({ ok: false, reason: "outside-root" });
+			expect(entry).toMatchObject({ ok: false, reason: "changed" });
 		});
 	});
 });
@@ -540,6 +543,91 @@ describe("readRepoWorkingTreeBytes (image previews)", () => {
 	});
 });
 
+
+/**
+ * The root itself replaced: someone who can write the root's parent renames
+ * the repo away and puts something else at its path. A review session pins
+ * its roots, so the replacement is refused; with no session running, the
+ * root is only resolved (pins never outlive the reviews that made them).
+ */
+describePosix("a review session pins its roots", () => {
+	let base = "";
+	let repo = "";
+
+	beforeEach(() => {
+		base = realpathSync(mkdtempSync(join(tmpdir(), "pn-repo-file-pin-")));
+		repo = join(base, "repo");
+		mkdirSync(join(repo, "src"), { recursive: true });
+		writeFileSync(join(repo, "src", "a.ts"), "inside\n");
+		mkdirSync(join(base, "outside", "src"), { recursive: true });
+		writeFileSync(join(base, "outside", "src", "a.ts"), "TOP SECRET\n");
+	});
+
+	afterEach(() => {
+		if (base) rmSync(base, { recursive: true, force: true });
+	});
+
+	const replacements = [
+		[
+			"for a symlink to an outside directory",
+			() => {
+				renameSync(repo, join(base, "repo.moved"));
+				symlinkSync(join(base, "outside"), repo);
+			},
+		],
+		[
+			"by another directory moved into its place",
+			() => {
+				renameSync(repo, join(base, "repo.moved"));
+				renameSync(join(base, "outside"), repo);
+			},
+		],
+	] as const;
+
+	for (const [how, replace] of replacements) {
+		test(`a root swapped ${how} is refused by every reader`, async () => {
+			const release = pinRepoRoots([repo]);
+			try {
+				expect(await readRepoFile(repo, "src/a.ts")).toMatchObject({ ok: true, content: "inside\n" });
+				replace();
+				for (const result of [
+					await readRepoFile(repo, "src/a.ts"),
+					await readRepoWorkingTreeEntry(repo, "src/a.ts"),
+					await readRepoWorkingTreeBytes(repo, "src/a.ts"),
+				]) {
+					expect(result).toMatchObject({ ok: false, reason: "outside-root" });
+					expect(JSON.stringify(result)).not.toContain("SECRET");
+				}
+				expect(checkRepoRoot(repo).ok).toBe(false);
+			} finally {
+				release();
+			}
+		});
+	}
+
+	test("a root first read during a session is pinned by that read", async () => {
+		const release = pinRepoRoots([]);
+		try {
+			expect(await readRepoFile(repo, "src/a.ts")).toMatchObject({ ok: true });
+			replacements[0][1]();
+			expect(await readRepoFile(repo, "src/a.ts")).toMatchObject({ ok: false, reason: "outside-root" });
+		} finally {
+			release();
+		}
+	});
+
+	test("pins end with the last session, so a later review reads the new directory", async () => {
+		const first = pinRepoRoots([repo]);
+		const second = pinRepoRoots([repo]);
+		replacements[1][1]();
+		first();
+		// Still one session running: still pinned.
+		expect(await readRepoFile(repo, "src/a.ts")).toMatchObject({ ok: false, reason: "outside-root" });
+		second();
+		second(); // releasing twice is harmless
+		expect(await readRepoFile(repo, "src/a.ts")).toMatchObject({ ok: true, content: "TOP SECRET\n" });
+	});
+});
 describe("text decoding", () => {
 	const BOM_FILE = "bom.txt";
 
