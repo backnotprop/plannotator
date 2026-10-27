@@ -24,6 +24,8 @@ import {
 } from '@plannotator/core/inbox-types';
 import { artifactKey, artifactMessageCount, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
 import { readableVersion } from '../attachments';
+import { attachmentFramePolicy } from '../framePolicy';
+import { prependSrcdocPolicy } from '@plannotator/ui/components/html-viewer';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { formatBytes, formatCount, fullTime, plural } from '../format';
 import { HostMark, Icon, type IconName } from '../icons';
@@ -203,7 +205,7 @@ function PageFrame({ html }: { html: string }) {
   }, []);
   return (
     <span ref={box} className="ib-art-frame" aria-hidden="true" inert>
-      <iframe title="" srcDoc={html} sandbox="" tabIndex={-1} loading="lazy" style={{ transform: `scale(${scale})` }} />
+      <iframe title="" srcDoc={prependSrcdocPolicy(html, attachmentFramePolicy())} sandbox="" tabIndex={-1} loading="lazy" style={{ transform: `scale(${scale})` }} />
     </span>
   );
 }

@@ -16,6 +16,7 @@ import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
+import { attachmentFramePolicy } from '../framePolicy';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
@@ -1494,6 +1495,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             <HtmlViewer
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
               rawHtml={view.html}
+              srcdocPolicy={attachmentFramePolicy()}
               title={attachment.name}
               annotations={annotations}
               onAddAnnotation={(annotation) => void save(annotation)}
@@ -1547,6 +1549,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 <HtmlViewer
                   key={`${linkedStack.length}:${linkedTop.path}`}
                   rawHtml={linkedTop.html}
+                  srcdocPolicy={attachmentFramePolicy()}
                   title={linkedTop.name}
                   annotations={NO_ANNOTATIONS}
                   onAddAnnotation={noop}

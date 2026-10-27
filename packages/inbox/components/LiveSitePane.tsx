@@ -26,6 +26,31 @@ import { Icon } from '../icons';
 /** The open pane keeps its proxy alive (the server stops one after 10 idle minutes). */
 const PING_MS = 60_000;
 
+/**
+ * The live frame's sandbox: the app keeps its own origin (cookies, storage,
+ * same-origin requests), its scripts, forms, dialogs and new tabs, but not
+ * `allow-top-navigation`: it can never navigate the Inbox's window.
+ */
+export const LIVE_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals';
+
+/**
+ * "Open in browser" for the page the person is on. The page comes from the
+ * bridge, which the app's own script can forge, so only a path on the site
+ * (one leading "/", no controls, the site's own origin once resolved) is
+ * used; anything else opens the site's own address.
+ */
+export function pageHref(siteUrl: string, page: string | null): string {
+  if (page && page.length <= 2048 && page.startsWith('/') && !page.startsWith('//') && !page.startsWith('/\\') && !/[\u0000-\u001f\u007f]/.test(page)) {
+    try {
+      const href = new URL(page, siteUrl);
+      if (href.origin === new URL(siteUrl).origin) return href.href;
+    } catch {
+      // Not a path after all: the site's own address.
+    }
+  }
+  return siteUrl;
+}
+
 function hostOf(url: string): string {
   try {
     return new URL(url).host;
@@ -87,7 +112,7 @@ export function LiveSitePane(props: {
   };
   const pages = new Set(mine.map((r) => r.live?.page_url ?? '/')).size;
   const shownUrl = site?.url ?? props.url ?? null;
-  const target = site ? new URL(page ?? '/', site.url).href : null;
+  const target = site ? pageHref(site.url, page) : null;
 
   return (
     <section className="ib-live" aria-label={`Live site ${shownUrl ? hostOf(shownUrl) : ''}`} data-live-pane="">
@@ -148,6 +173,7 @@ export function LiveSitePane(props: {
             onAnnotateModeExit={() => setArmed(false)}
             onAnnotateModeToggle={() => setArmed((v) => !v)}
             onPageChange={setPage}
+            liveSandbox={LIVE_FRAME_SANDBOX}
             hideControls
           />
         ) : (

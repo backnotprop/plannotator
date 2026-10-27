@@ -13,6 +13,9 @@
  *    read) opens a draft at most: nothing is saved until the person saves;
  *  - Send: the agent's wait_for_reply gets the comments grouped by page with
  *    each element's context;
+ *  - an HTML attachment frames nothing on another localhost port (the
+ *    window allows localhost frames for the live pane only), and the live
+ *    frame is sandboxed without top navigation;
  *  - on a phone-wide window the pane says "Open this on your computer".
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -21,7 +24,7 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
@@ -205,6 +208,48 @@ test('an agent attaches its running app; the person opens it, pins on two pages,
   expect(body).not.toContain('Forged');
   expect(body.indexOf('Ask before cancelling.')).toBeGreaterThan(body.indexOf('### Page: /settings'));
   expect(await pending(threadId)).toEqual([]);
+  expect(world.errors).toEqual([]);
+});
+
+test("an HTML attachment can frame nothing on another localhost port, in the viewer or as an Artifacts tile; the live frame is sandboxed without top navigation", async () => {
+  const { page, claude, project } = world;
+  // Another local service, and a page that frames it (statically and by script), as an agent could attach.
+  const hits: string[] = [];
+  const victim = createServer((req, res) => {
+    hits.push(req.url ?? '');
+    res.end('<p>victim</p>');
+  });
+  await new Promise<void>((done) => victim.listen(0, '127.0.0.1', done));
+  const port = (victim.address() as AddressInfo).port;
+  try {
+    writeFileSync(
+      join(project, 'report.html'),
+      `<!doctype html><html><head><script>const f=document.createElement('iframe');f.src='http://localhost:${port}/script-frame';document.documentElement.appendChild(f);</script></head><body><h1>Report</h1><iframe src="http://localhost:${port}/static-frame"></iframe><script>const g=document.createElement('iframe');g.src='http://127.0.0.1:${port}/body-frame';document.body.appendChild(g);</script></body></html>`,
+    );
+    const sent = await claude.send({ project_path: project, subject: 'A report', thread: 'report', body: 'The report is attached.', attachments: ['report.html'] });
+    await page.goto(`${world.url}#thread=${sent.thread_id}`);
+    await page.getByRole('button', { name: 'Open report.html' }).click();
+    await expect(page.frameLocator('[data-attachment-pane] iframe').first().getByRole('heading', { name: 'Report' })).toBeVisible();
+    await page.waitForTimeout(1000);
+    await page.goto(`${world.url}#thread=${sent.thread_id}&artifacts`);
+    await expect(page.locator('.ib-art-frame iframe').first()).toBeAttached();
+    await page.waitForTimeout(1000);
+    expect(hits).toEqual([]);
+  } finally {
+    await new Promise((done) => victim.close(done));
+  }
+
+  // The live frame (the first test's site) is sandboxed, and the app still works in it.
+  const live = await claude.send({ project_path: project, subject: 'Checkout again', thread: 'checkout-sandbox', body: 'Once more.', live_sites: [world.appUrl] });
+  await page.goto(`${world.url}#thread=${live.thread_id}`);
+  await page.locator('[data-live-tile]').click();
+  const frame = page.locator('[data-live-pane] iframe');
+  const sandbox = (await frame.getAttribute('sandbox')) ?? '';
+  expect(sandbox.split(' ')).toEqual(expect.arrayContaining(['allow-scripts', 'allow-same-origin', 'allow-forms']));
+  expect(sandbox).not.toContain('allow-top-navigation');
+  await expect(page.frameLocator('[data-live-pane] iframe').first().locator('#price')).toHaveText('$240');
+  // "Open in browser" is the site's own address.
+  await expect(page.locator('[data-live-pane] a[aria-label="Open in browser"]')).toHaveAttribute('href', world.appUrl);
   expect(world.errors).toEqual([]);
 });
 

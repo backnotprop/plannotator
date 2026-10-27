@@ -6,6 +6,7 @@ export {
   type HtmlViewerProps,
 } from "./HtmlViewer";
 export { BRIDGE_PROTOCOL_VERSION } from "./bridge-script";
+export { prependSrcdocPolicy } from "./srcdoc";
 export {
   checkBridgeProtocolVersion,
   formatBridgeProtocolWarning,

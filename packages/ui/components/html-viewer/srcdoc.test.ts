@@ -21,6 +21,7 @@ import {
   buildThemeTokenPayload,
   hasHostThemeOptIn,
   injectIntoHead,
+  prependSrcdocPolicy,
 } from "./srcdoc";
 
 const HOST_TOKENS = {
@@ -5042,5 +5043,30 @@ describe("injectIntoHead", () => {
     // Other meta tags survive untouched.
     const keep = '<meta http-equiv="refresh" content="0"><meta charset="utf-8">';
     expect(injectIntoHead(`<head>${keep}</head>`, "[X]")).toContain(keep);
+  });
+});
+
+describe("prependSrcdocPolicy (a host's optional srcdoc policy)", () => {
+  const POLICY = "frame-src http://127.0.0.1:59812";
+  const META = `<meta http-equiv="Content-Security-Policy" content="${POLICY}">`;
+
+  test("absent: the document is unchanged, byte for byte", () => {
+    const html = "<!doctype html><html><head></head><body>x</body></html>";
+    expect(prependSrcdocPolicy(html, undefined)).toBe(html);
+    expect(prependSrcdocPolicy(html, "")).toBe(html);
+  });
+
+  test("first thing parsed, after a leading doctype (standards mode kept), ahead of the page's own scripts", () => {
+    expect(prependSrcdocPolicy("<!-- c -->\n<!DOCTYPE html><head><script>frame()</script></head>", POLICY)).toBe(
+      `<!-- c -->\n<!DOCTYPE html>${META}<head><script>frame()</script></head>`,
+    );
+    expect(prependSrcdocPolicy("<script>frame()</script>", POLICY)).toBe(`${META}<script>frame()</script>`);
+  });
+
+  test("survives the page's own CSP being neutralized, and the value cannot break out of its attribute", () => {
+    const html = prependSrcdocPolicy(injectIntoHead('<head><meta http-equiv="Content-Security-Policy" content="default-src *"></head>', ""), POLICY);
+    expect(html.startsWith(META)).toBe(true);
+    expect(html).not.toContain("default-src *");
+    expect(prependSrcdocPolicy("x", 'a" onload="b<')).toBe('<meta http-equiv="Content-Security-Policy" content="a&quot; onload=&quot;b&lt;">x');
   });
 });

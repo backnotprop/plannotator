@@ -59,6 +59,7 @@ import {
   buildThemeTokenPayload,
   hasHostThemeOptIn,
   injectIntoHead,
+  prependSrcdocPolicy,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -196,6 +197,21 @@ export const STEP_MESSAGE_MIN_INTERVAL_MS = 150;
 
 export interface HtmlViewerProps {
   rawHtml: string;
+  /**
+   * Optional: a Content-Security-Policy the srcdoc document gets as its first
+   * element (`prependSrcdocPolicy`), on top of the host page's own. For a host
+   * whose page policy is wider than an attachment should get (the Inbox
+   * window's `frame-src` for live sites). Absent: the document is unchanged.
+   */
+  srcdocPolicy?: string;
+  /**
+   * Optional: a `sandbox` for the live (`src`) frame. Absent: no sandbox, as
+   * annotate's live mode has always run. A host that passes one keeps the
+   * app working with `allow-scripts allow-same-origin allow-forms` and takes
+   * away what it leaves out (`allow-top-navigation`: the app cannot navigate
+   * the host's window).
+   */
+  liveSandbox?: string;
   /** Live proxied-app mode: render `src` (no sandbox, no srcdoc) instead of
    *  rawHtml. The caller must also set `fullViewport` and `liveSession`. */
   src?: string;
@@ -383,6 +399,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
   (
     {
       rawHtml,
+      srcdocPolicy,
+      liveSandbox,
       src,
       liveSession,
       currentPageUrl,
@@ -518,8 +536,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(rawHtml, injection);
-    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+      return prependSrcdocPolicy(injectIntoHead(rawHtml, injection), srcdocPolicy);
+    }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl, srcdocPolicy]);
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -1292,10 +1310,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             )}
             {/* Live proxied-app mode navigates a real loopback origin: no
                 sandbox (the user's own app needs cookies, storage, and
-                same-origin XHR) and no srcdoc. Srcdoc mode is unchanged. */}
+                same-origin XHR) and no srcdoc, unless a host passes `liveSandbox`. Srcdoc mode is unchanged. */}
             <iframe
               ref={iframeRef}
-              {...(src ? { src } : { srcDoc: srcdoc, sandbox: HTML_VIEWER_SANDBOX + (hostNavigates ? " allow-popups" : "") })}
+              {...(src ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) } : { srcDoc: srcdoc, sandbox: HTML_VIEWER_SANDBOX + (hostNavigates ? " allow-popups" : "") })}
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,

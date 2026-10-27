@@ -540,9 +540,13 @@ const WINDOW_CSP = [
  * live site's proxy (`inbox-live.ts`), which listens on another loopback port
  * and is framed under its localhost spelling (`buildLiveAppUrl`). Only the
  * port is a wildcard: the page is served once, before any proxy starts.
- * Framing is not a privilege (the frame is cross-origin), and each proxy's
- * own `frame-ancestors` names only this Inbox's two loopback origins. The
- * tailnet page keeps WINDOW_CSP: no live site opens there.
+ * Each proxy's own `frame-ancestors` names only this Inbox's two loopback
+ * origins. A srcdoc frame inherits this policy, and an HTML attachment framing
+ * any local port would be a port scanner and a GET to every local service, so
+ * the window gives every attachment document `frame-src <its own origin>` as
+ * its first element (packages/inbox/framePolicy.ts; proved by
+ * tests/e2e/inbox-live-sites.spec.ts). The tailnet page keeps WINDOW_CSP: no
+ * live site opens there.
  */
 export const LOCAL_WINDOW_CSP = WINDOW_CSP.replace("default-src 'self'", "default-src 'self'; frame-src 'self' http://localhost:*");
 
@@ -841,7 +845,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
         // send_message's live_sites, checked and probed before anything is written (inbox-live.ts).
-        recordLiveSites: (urls) => liveSites.recordLiveSites(urls),
+        recordLiveSites: (urls, probing) => liveSites.recordLiveSites(urls, probing),
         // An open wait_for_reply keeps its session present (never "ended").
         presence: {
           seen: (session) => live.seenOverMcp(session),
