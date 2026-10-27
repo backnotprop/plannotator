@@ -145,6 +145,7 @@ async function open(
     ['plannotator-plan-look-choice-resolved', 'true'],
     ['plannotator-edit-mode-announcement-seen', '3'],
     ['plannotator-announce-tui-herdr-seen', '1'],
+    ['plannotator-announce-inbox-seen', '1'],
     ['plannotator-announce-ask-session-seen', '1'],
     ['plannotator-announce-agent-tool-seen', '1'],
     ['plannotator-guide-intro-seen', '1'],

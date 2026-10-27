@@ -24,6 +24,7 @@ type Query = { sessionId: string; prompt: string; draftAnnotations?: string; con
 const SEEN_COOKIES = [
   ['plannotator-plan-look-choice-resolved', 'true'],
   ['plannotator-announce-tui-herdr-seen', '1'],
+  ['plannotator-announce-inbox-seen', '1'],
   ['plannotator-announce-ask-session-seen', '1'],
   ['plannotator-announce-agent-tool-seen', '1'],
   ['plannotator-look-feel-announcement-seen', '2'],

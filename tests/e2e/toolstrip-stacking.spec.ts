@@ -332,6 +332,7 @@ test('Annotate (the editor plan review shares): the document never paints over t
           [
             ['plannotator-plan-look-choice-resolved', 'true'],
             ['plannotator-announce-tui-herdr-seen', '1'],
+            ['plannotator-announce-inbox-seen', '1'],
             ['plannotator-announce-ask-session-seen', '1'],
             ['plannotator-announce-agent-tool-seen', '1'],
           ].map(([name, value]) => ({ name: name!, value: value!, url })),

@@ -362,6 +362,8 @@ jobs:
           packages/editor/App.terminalToolsAnnouncement.test.tsx
           packages/ui/components/AskSessionAnnouncementDialog.test.tsx
           packages/editor/App.askSessionAnnouncement.test.tsx
+          packages/ui/components/InboxAnnouncementDialog.test.tsx
+          packages/editor/App.inboxAnnouncement.test.tsx
           packages/ui/components/AgentToolAnnouncementDialog.test.tsx
           packages/ui/components/ServerSessionReplacedBanner.test.tsx
           packages/editor/App.agentTool.test.tsx

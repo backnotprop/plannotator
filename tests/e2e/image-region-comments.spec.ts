@@ -152,6 +152,7 @@ async function open(browser: Browser, url: string, options: Parameters<Browser['
       ['plannotator-theme', options.colorScheme === 'dark' ? 'dark' : 'light'],
       ['plannotator-plan-look-choice-resolved', 'true'],
       ['plannotator-announce-tui-herdr-seen', '1'],
+      ['plannotator-announce-inbox-seen', '1'],
       ['plannotator-announce-ask-session-seen', '1'],
       ['plannotator-announce-agent-tool-seen', '1'],
       ['plannotator-permission-mode-configured', 'true'],
