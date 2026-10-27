@@ -71,6 +71,13 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "items": {
             "type": "string"
           }
+        },
+        "live_sites": {
+          "description": "Running local web apps to show, e.g. [\"http://localhost:5173/\"]: http on localhost, 127.x or [::1], answering now. The person opens one and pins comments; they come back in the reply by page and element.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
