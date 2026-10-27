@@ -157,7 +157,9 @@ export function LiveSitePane(props: {
       <footer className="ib-live-foot">
         <span data-live-count="">
           {mine.length === 0
-            ? armed
+            ? away
+              ? ''
+              : armed
               ? 'Click an element to comment. Interact to use the app.'
               : 'Interact: clicks reach the app. Annotate to comment.'
             : `${mine.length} comment${mine.length === 1 ? '' : 's'} on ${pages} page${pages === 1 ? '' : 's'} ride your next Send to ${props.agent}.`}

@@ -4149,7 +4149,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       <LiveSitePane
         threadId={thread.thread_id}
         siteId={liveSiteId}
-        url={thread.messages.flatMap((m) => m.live_sites ?? []).find((s) => s.id === liveSiteId)?.url}
+        url={thread.messages.flatMap((m) => [...(m.live_sites ?? []), ...(m.opened_live_sites ?? [])]).find((s) => s.id === liveSiteId)?.url}
         records={records}
         agent={asker}
         remote={remote === true}
