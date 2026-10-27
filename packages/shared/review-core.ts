@@ -16,7 +16,12 @@ import {
   OVERSIZED_REVIEW_STUB_MARKER,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
-import type { RepoFileFailure, RepoWorkingTreeEntry, RepoWorkingTreeReadOptions } from "./repo-file";
+import type {
+  RepoFileFailure,
+  RepoWorkingTreeBytes,
+  RepoWorkingTreeEntry,
+  RepoWorkingTreeReadOptions,
+} from "./repo-file";
 
 import {
   BARE_HEX_SHA_RE,
@@ -272,10 +277,18 @@ export interface ReviewGitRuntime {
     args: string[],
     options?: GitCommandOptions,
   ) => Promise<GitBytesCommandResult>;
-  /** Read at most `maxBytes + 1` bytes of a regular file (null on any error). */
-  readFileBytes?: (path: string, maxBytes: number) => Promise<Uint8Array | null>;
-  /** Canonical path with every symlink resolved (null on any error). */
-  realPath?: (path: string) => Promise<string | null>;
+  /**
+   * Read one working-tree path as bytes for the image preview, behind the
+   * same guard as `readWorkingTreeEntry` (`readRepoWorkingTreeBytes` in
+   * repo-file.ts) with the caller's cap. Optional: a runtime without it
+   * cannot serve working-tree image sides, and the preview reports itself
+   * unavailable.
+   */
+  readWorkingTreeBytes?: (
+    root: string,
+    path: string,
+    maxBytes: number,
+  ) => Promise<RepoWorkingTreeBytes | RepoFileFailure>;
   /**
    * Read one working-tree path for diff context expansion: every directory
    * on the way resolves inside `root`, a final symlink comes back as its
@@ -2415,13 +2428,6 @@ export async function getFileContentsForDiff(
   };
 }
 
-function isPathInside(root: string, child: string): boolean {
-  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "");
-  const r = normalize(root);
-  const c = normalize(child);
-  return c === r || c.startsWith(`${r}/`);
-}
-
 /**
  * Read one side as raw bytes for the image preview, capped at `maxBytes`.
  *
@@ -2430,10 +2436,12 @@ function isPathInside(root: string, child: string): boolean {
  * streams it undecoded. The spec is built by the caller from session state and
  * is passed on stdin, never argv, so it can never be taken for an option.
  *
- * Worktree: the final component must be a regular file (never a symlink, which
- * git would store as its target text), and its canonical path must stay inside
- * the canonical repository toplevel, which blocks an intermediate directory
- * swapped for a symlink after the diff was taken.
+ * Worktree: read by the shared guard (`readRepoWorkingTreeBytes` in
+ * repo-file.ts, through the runtime). The final component must be a regular
+ * file (never a symlink, which git would store as its target text), every
+ * directory on the way must resolve inside the repository toplevel, and the
+ * bytes come from a descriptor checked to be inside it, so a directory
+ * swapped for a symlink after the diff was taken is refused, even mid-read.
  */
 export async function readDiffSideBytes(
   runtime: ReviewGitRuntime,
@@ -2463,21 +2471,17 @@ export async function readDiffSideBytes(
     return { kind: "ok", bytes: blob.stdout, etag: `"${match[1]}"` };
   }
 
-  if (!runtime.readFileBytes || !runtime.realPath) return { kind: "unavailable" };
+  if (!runtime.readWorkingTreeBytes) return { kind: "unavailable" };
   const root = await resolveRepoToplevel(runtime, cwd);
   if (!root) return { kind: "unavailable" };
-  const info = await runtime.getFileInfo(root, source.path);
-  if (!info || info.isSymbolicLink || !info.isFile) return { kind: "missing" };
-  if (info.size > maxBytes) return { kind: "too-large", size: info.size };
-  const [realRoot, realFile] = await Promise.all([
-    runtime.realPath(root),
-    runtime.realPath(info.path),
-  ]);
-  if (!realRoot || !realFile || !isPathInside(realRoot, realFile)) return { kind: "missing" };
-  const bytes = await runtime.readFileBytes(realFile, maxBytes);
-  if (!bytes) return { kind: "missing" };
-  if (bytes.byteLength > maxBytes) return { kind: "too-large", size: bytes.byteLength };
-  return { kind: "ok", bytes, etag: `W/"${info.size}-${Math.trunc(info.mtimeMs)}"` };
+  const entry = await runtime.readWorkingTreeBytes(root, source.path, maxBytes);
+  if (!entry.ok) {
+    return entry.reason === "too-large" && entry.size !== undefined
+      ? { kind: "too-large", size: entry.size }
+      : { kind: "missing" };
+  }
+  if (entry.kind !== "file") return { kind: "missing" };
+  return { kind: "ok", bytes: entry.bytes, etag: `W/"${entry.size}-${Math.trunc(entry.mtimeMs)}"` };
 }
 
 /** Resolve and read one side of a git diff as bytes (see `readDiffSideBytes`). */

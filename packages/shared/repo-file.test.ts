@@ -23,13 +23,19 @@ import { join } from "node:path";
 
 import {
 	MAX_REPO_FILE_BYTES,
+	type RepoFileReadHooks,
+	type RepoFileReadMethod,
 	isContainedPath,
 	readRepoFile,
+	readRepoWorkingTreeBytes,
 	readRepoWorkingTreeEntry,
+	repoFileReadMethod,
 	validateRepoFilePath,
 } from "./repo-file";
 
 const posixOnly = process.platform === "win32" ? test.skip : test;
+/** The kernel names an open descriptor: /proc on Linux, Bun's realpath on macOS (these tests run in Bun). */
+const HAS_KERNEL_FD_PATH = process.platform === "linux" || process.platform === "darwin";
 const describePosix = process.platform === "win32" ? describe.skip : describe;
 const REPO_FILE_MODULE = join(import.meta.dir, "repo-file.ts");
 /** A blocked child is killed here; the test's own timeout sits above it. */
@@ -288,23 +294,27 @@ describe("readRepoWorkingTreeEntry (diff context expansion)", () => {
 	});
 });
 
+
 /**
  * A directory on the path swapped for a symlink to the outside between the
- * check and the open. O_NOFOLLOW covers only the last component, so without
- * the identity recheck open() follows the swapped directory and reads the
- * outside file. The swap runs in the read's own test hooks, so it lands at
- * the exact moment, every run.
+ * check and the read. O_NOFOLLOW covers only the last component, so an open
+ * by path follows the swapped directory and gets the outside file. The swap
+ * runs in the read's own test hooks, so it lands at the exact moment, every
+ * run. Both ways of proving the open contained (see repo-file.ts) are forced
+ * in turn: the kernel's path for the descriptor, and the directory stamps
+ * where the runtime cannot ask the kernel (Node on macOS, Windows).
  */
 describePosix("a directory swapped for an outside symlink during the read", () => {
 	let dir = "";
 	let repo = "";
+	let away = "";
 	let toOutside: () => void = () => {};
 	let toInside: () => void = () => {};
 
 	beforeAll(() => {
 		dir = realpathSync(mkdtempSync(join(tmpdir(), "pn-repo-file-swap-")));
 		repo = join(dir, "repo");
-		const away = join(dir, "outside");
+		away = join(dir, "outside");
 		mkdirSync(join(repo, "sub"), { recursive: true });
 		mkdirSync(away);
 		writeFileSync(join(repo, "sub", "f.txt"), "inside\n");
@@ -326,15 +336,21 @@ describePosix("a directory swapped for an outside symlink during the read", () =
 		if (dir) rmSync(dir, { recursive: true, force: true });
 	});
 
-	/** Run `read` with the swap in its hooks, and always restore the tree. */
+	/**
+	 * Run `read` with the swap at `at`, undone at `afterOpen` when `swapBack`,
+	 * and always restore the tree.
+	 */
 	async function withSwap<T>(
+		at: "afterCheck" | "beforeOpen",
 		swapBack: boolean,
-		read: (hooks: { beforeOpen: () => void; afterOpen: () => void }) => Promise<T>,
+		base: RepoFileReadHooks,
+		read: (hooks: RepoFileReadHooks) => Promise<T>,
 	): Promise<T> {
 		let swapped = false;
 		try {
 			return await read({
-				beforeOpen: () => {
+				...base,
+				[at]: () => {
 					toOutside();
 					swapped = true;
 					// The swap really does point the same path outside.
@@ -352,44 +368,176 @@ describePosix("a directory swapped for an outside symlink during the read", () =
 		}
 	}
 
-	test("readRepoFile reads the file when nothing is swapped", async () => {
-		const result = await readRepoFile(repo, "sub/f.txt");
-		expect(result).toMatchObject({ ok: true, content: "inside\n" });
+	const readers = [
+		["readRepoFile", (hooks: RepoFileReadHooks) => readRepoFile(repo, "sub/f.txt", { hooks })],
+		["readRepoWorkingTreeEntry", (hooks: RepoFileReadHooks) => readRepoWorkingTreeEntry(repo, "sub/f.txt", { hooks })],
+		["readRepoWorkingTreeBytes", (hooks: RepoFileReadHooks) => readRepoWorkingTreeBytes(repo, "sub/f.txt", { hooks })],
+	] as const;
+
+	/** Hooks that force the directory stamps: the kernel's answer is unknown. */
+	const STAMPS: RepoFileReadHooks = { descriptorPath: () => null };
+
+	const methods: { method: RepoFileReadMethod; hooks: RepoFileReadHooks; supported: boolean }[] = [
+		{ method: "descriptor", hooks: {}, supported: HAS_KERNEL_FD_PATH },
+		{ method: "dir-stamps", hooks: STAMPS, supported: true },
+	];
+
+	test.skipIf(!HAS_KERNEL_FD_PATH)("the kernel's answer is used wherever the runtime can ask", () => {
+		// A regression here silently drops every read to the directory stamps.
+		expect(repoFileReadMethod(repo)).toBe("descriptor");
 	});
 
-	test("readRepoFile refuses when the path resolves outside after the open", async () => {
-		const result = await withSwap(false, (hooks) => readRepoFile(repo, "sub/f.txt", { hooks }));
-		expect(result).toMatchObject({ ok: false, reason: "outside-root" });
-		expect(JSON.stringify(result)).not.toContain("SECRET");
-	});
+	for (const { method, hooks: base, supported } of methods) {
+		describe.skipIf(!supported)(`method: ${method}`, () => {
+			test("is the method these hooks select", () => {
+				expect(repoFileReadMethod(repo, base)).toBe(method);
+			});
 
-	test("readRepoFile refuses when the swap is undone before the recheck (inode differs)", async () => {
-		// The path is contained again by the time it is rechecked, so only the
-		// dev/ino comparison with the open descriptor catches this.
-		const result = await withSwap(true, (hooks) => readRepoFile(repo, "sub/f.txt", { hooks }));
-		expect(result).toMatchObject({ ok: false, reason: "outside-root" });
-		expect(JSON.stringify(result)).not.toContain("SECRET");
-	});
+			for (const [name, read] of readers) {
+				test(`${name} reads the file when nothing is swapped`, async () => {
+					const result = await read(base);
+					expect(result).toMatchObject({ ok: true, size: "inside\n".length });
+					expect(JSON.stringify(result)).not.toContain("SECRET");
+				});
 
-	test("readRepoWorkingTreeEntry reads the file when nothing is swapped", async () => {
-		const entry = await readRepoWorkingTreeEntry(repo, "sub/f.txt");
-		expect(entry).toMatchObject({ ok: true, kind: "file", content: "inside\n" });
-	});
+				for (const [at, swapBack] of [
+					["afterCheck", false],
+					["afterCheck", true],
+					["beforeOpen", false],
+					["beforeOpen", true],
+				] as const) {
+					const when = `swapped ${at === "afterCheck" ? "before the stamps" : "right before the open"}, ${swapBack ? "undone right after it" : "left in place"}`;
+					test(`${name} refuses a read through the swap (${when})`, async () => {
+						const result = await withSwap(at, swapBack, base, read);
+						expect(result).toMatchObject({ ok: false, reason: "outside-root" });
+						expect(JSON.stringify(result)).not.toContain("SECRET");
+					});
+				}
+			}
 
-	for (const swapBack of [false, true]) {
-		const when = swapBack ? "undone before the recheck" : "still in place at the recheck";
-		test(`readRepoWorkingTreeEntry refuses a file read through the swap (${when})`, async () => {
-			const entry = await withSwap(swapBack, (hooks) => readRepoWorkingTreeEntry(repo, "sub/f.txt", { hooks }));
-			expect(entry).toMatchObject({ ok: false, reason: "outside-root" });
-			expect(JSON.stringify(entry)).not.toContain("SECRET");
-		});
-
-		test(`readRepoWorkingTreeEntry refuses a link target read through the swap (${when})`, async () => {
-			const entry = await withSwap(swapBack, (hooks) => readRepoWorkingTreeEntry(repo, "sub/link", { hooks }));
-			expect(entry).toMatchObject({ ok: false, reason: "outside-root" });
-			expect(JSON.stringify(entry)).not.toContain("outside-secret-target");
+			for (const swapBack of [false, true]) {
+				const when = swapBack ? "undone right after the readlink" : "left in place";
+				test(`readRepoWorkingTreeEntry refuses a link target read through the swap (${when})`, async () => {
+					const entry = await withSwap("beforeOpen", swapBack, base, (hooks) =>
+						readRepoWorkingTreeEntry(repo, "sub/link", { hooks }),
+					);
+					expect(entry).toMatchObject({ ok: false, reason: "outside-root" });
+					expect(JSON.stringify(entry)).not.toContain("outside-secret-target");
+				});
+			}
 		});
 	}
+
+	describe("method: descriptor (the kernel's answer simulated, so these run anywhere)", () => {
+		test("an outside answer refuses the read even when every path check passes", async () => {
+			// Nothing is swapped, so every path check would accept; the kernel
+			// says the descriptor is outside, which is the case a path check
+			// cannot see (a swap undone between its own steps).
+			const outsidePath = join(away, "f.txt");
+			for (const [, read] of readers) {
+				let asked = 0;
+				const result = await read({
+					descriptorPath: () => {
+						asked++;
+						return outsidePath;
+					},
+				});
+				expect(asked).toBe(1);
+				expect(result).toMatchObject({ ok: false, reason: "outside-root" });
+			}
+		});
+
+		test("an answer under a sibling that shares the root's name prefix is outside", async () => {
+			const result = await readRepoFile(repo, "sub/f.txt", {
+				hooks: { descriptorPath: () => `${repo}-evil/sub/f.txt` },
+			});
+			expect(result).toMatchObject({ ok: false, reason: "outside-root" });
+		});
+
+		test("an inside answer is the one that counts", async () => {
+			const insidePath = join(repo, "sub", "f.txt");
+			for (const [, read] of readers) {
+				expect(await read({ descriptorPath: () => insidePath })).toMatchObject({ ok: true });
+			}
+		});
+	});
+
+	describe("method: dir-stamps", () => {
+		/**
+		 * Flip `sub` out and straight back before the open. Every name and
+		 * inode is as it was, so the open reads the inside file and every
+		 * identity check passes; only the repo directory's ctime shows that a
+		 * name on the way changed. A fast swapper beats the identity checks in
+		 * exactly this way, with the read coming from outside.
+		 */
+		function flipAndBack(times: number): { hooks: RepoFileReadHooks; flips: () => number } {
+			let flips = 0;
+			return {
+				hooks: {
+					...STAMPS,
+					beforeOpen: () => {
+						if (flips >= times) return;
+						flips++;
+						toOutside();
+						toInside();
+					},
+				},
+				flips: () => flips,
+			};
+		}
+
+		for (const [name, read] of readers) {
+			test(`${name} refuses when a directory on the way keeps changing, even with every inode the same`, async () => {
+				const flip = flipAndBack(Number.POSITIVE_INFINITY);
+				const result = await read(flip.hooks);
+				expect(result).toMatchObject({ ok: false, reason: "outside-root" });
+				// One read, three attempts: a busy directory gets retried.
+				expect(flip.flips()).toBe(3);
+			});
+
+			test(`${name} reads the file on the next attempt when a directory changed once`, async () => {
+				const flip = flipAndBack(1);
+				expect(await read(flip.hooks)).toMatchObject({ ok: true, size: "inside\n".length });
+				expect(flip.flips()).toBe(1);
+			});
+		}
+
+		test("a final symlink read is held to the same stamps", async () => {
+			const flip = flipAndBack(Number.POSITIVE_INFINITY);
+			const entry = await readRepoWorkingTreeEntry(repo, "sub/link", { hooks: flip.hooks });
+			expect(entry).toMatchObject({ ok: false, reason: "outside-root" });
+		});
+	});
+});
+
+describe("readRepoWorkingTreeBytes (image previews)", () => {
+	test("returns the bytes, the size and the descriptor's mtime", async () => {
+		const entry = await readRepoWorkingTreeBytes(root, "src/alpha.ts");
+		expect(entry).toMatchObject({ ok: true, kind: "file", size: "export const a = 1;\n".length });
+		if (entry.ok && entry.kind === "file") {
+			expect(Buffer.from(entry.bytes).toString("utf-8")).toBe("export const a = 1;\n");
+			expect(entry.mtimeMs).toBeGreaterThan(0);
+		}
+	});
+
+	posixOnly("a final symlink is never followed", async () => {
+		expect(await readRepoWorkingTreeBytes(root, "inside-link.ts")).toMatchObject({ ok: true, kind: "symlink" });
+	});
+
+	posixOnly("a path through a symlinked directory that leaves the root is refused", async () => {
+		expect(await readRepoWorkingTreeBytes(root, "escape-dir/secret.txt")).toMatchObject({
+			ok: false,
+			reason: "outside-root",
+		});
+	});
+
+	test("a file over the caller's cap is refused with its size", async () => {
+		expect(await readRepoWorkingTreeBytes(root, "src/alpha.ts", { maxBytes: 4 })).toMatchObject({
+			ok: false,
+			reason: "too-large",
+			size: "export const a = 1;\n".length,
+		});
+	});
 });
 
 describe("text decoding", () => {

@@ -387,25 +387,38 @@ describePosix("GET /api/file-content guards", () => {
     ["Pi", piGitRuntime, join(import.meta.dir, "../../apps/pi-extension/server/vcs.ts")],
   ] as const) {
     test(`${runtime}: a directory swapped for an outside symlink during the read is refused`, async () => {
+      let swapped = false;
+      const swapBack = () => {
+        if (!swapped) return;
+        renameSync(join(repo, "sub"), join(repo, "evil"));
+        renameSync(join(repo, "sub-real"), join(repo, "sub"));
+        swapped = false;
+      };
       const hooked: ReviewGitRuntime = {
         ...gitRuntime,
         readWorkingTreeEntry: (root, path, options) =>
           gitRuntime.readWorkingTreeEntry!(root, path, {
             ...options,
             hooks: {
-              beforeOpen() {
+              // Swapped after the realpath check, before the directory stamps
+              // and the open: an open by path would follow `sub` outside.
+              afterCheck() {
                 renameSync(join(repo, "sub"), join(repo, "sub-real"));
                 renameSync(join(repo, "evil"), join(repo, "sub"));
+                swapped = true;
               },
-              afterOpen() {
-                // Undo the swap: only the inode comparison can catch it now.
-                renameSync(join(repo, "sub"), join(repo, "evil"));
-                renameSync(join(repo, "sub-real"), join(repo, "sub"));
-              },
+              // Undone right after the open, so a path check after it sees
+              // the inside tree again; the directory stamps or the kernel's
+              // path for the descriptor must still refuse.
+              afterOpen: swapBack,
             },
           }),
       };
-      expect(await readDiffSideText(hooked, { kind: "worktree", path: "sub/f.txt" }, repo)).toBeNull();
+      try {
+        expect(await readDiffSideText(hooked, { kind: "worktree", path: "sub/f.txt" }, repo)).toBeNull();
+      } finally {
+        swapBack();
+      }
       // Unhooked, the same read succeeds.
       expect(await readDiffSideText(gitRuntime, { kind: "worktree", path: "sub/f.txt" }, repo)).toBe("committed f\n");
     });

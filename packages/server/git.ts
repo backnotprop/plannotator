@@ -6,8 +6,8 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
-import { readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
-import { lstat, open, readlink, realpath } from "node:fs/promises";
+import { readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
+import { lstat, readlink } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 
 import {
@@ -213,27 +213,6 @@ async function runGitBytes(
   }
 }
 
-/** Read at most `maxBytes + 1` bytes, so a caller can tell "over the cap". */
-export async function readFileBytesCapped(path: string, maxBytes: number): Promise<Uint8Array | null> {
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(path, "r");
-    const { size } = await handle.stat();
-    const buffer = new Uint8Array(Math.min(size, maxBytes) + 1);
-    let offset = 0;
-    while (offset < buffer.byteLength) {
-      const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, null);
-      if (bytesRead === 0) break;
-      offset += bytesRead;
-    }
-    return buffer.subarray(0, offset);
-  } catch {
-    return null;
-  } finally {
-    await handle?.close().catch(() => {});
-  }
-}
-
 /**
  * Decode file bytes exactly as `Bun.file(path).text()` does: a UTF-8 BOM is
  * stripped and a UTF-16LE BOM switches to UTF-16 (TextDecoder does not do
@@ -252,15 +231,10 @@ export const runtime: ReviewGitRuntime = {
   async readWorkingTreeEntry(root, path, options) {
     return readRepoWorkingTreeEntry(root, path, { ...options, decode: decodeBunText });
   },
-  runGitBytes,
-  readFileBytes: readFileBytesCapped,
-  async realPath(path: string): Promise<string | null> {
-    try {
-      return await realpath(path);
-    } catch {
-      return null;
-    }
+  async readWorkingTreeBytes(root, path, maxBytes) {
+    return readRepoWorkingTreeBytes(root, path, { maxBytes });
   },
+  runGitBytes,
   async readTextFile(path: string): Promise<string | null> {
     try {
       return await Bun.file(path).text();
