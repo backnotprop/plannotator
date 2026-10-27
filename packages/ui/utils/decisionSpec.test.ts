@@ -528,4 +528,42 @@ describe('buildDecisionSpec plan arm (#1057)', () => {
     expect(spec.primary.label).toBe('Send Feedback');
     expect(itemIds(spec)).toEqual(['note-with-feedback', 'discard-and-finish']);
   });
+
+  // The plan server refuses an approval while a question waits (open or
+  // skipped): every approve path mutes with the reason, never disappears, and
+  // sending answers or requesting changes stays live.
+  it('questions waiting: every approve path mutes; sending and requesting changes stay live', () => {
+    const reason = 'Answer every question before approving. Still waiting: Q2. Which cache?';
+    const mutes = (spec: DecisionSpec) => spec.items.map((item) => [item.id, !!item.muted]);
+    const empty = buildDecisionSpec({
+      app: 'plan', gate: true, count: 0, hasFeedback: false, approvalNotesSupported: true,
+      plan: plan({ unanswered: { count: 1, reason } }),
+    });
+    expect(empty.primary.label).toBe('Approve');
+    expect(empty.primary.muted).toBe(true);
+    expect(empty.primary.title).toBe(reason);
+    expect(mutes(empty)).toEqual([['note-with-approval', true], ['request-changes', false]]);
+    expect(empty.items[0].subtitle).toBe('1 question still unanswered');
+
+    const answering = buildDecisionSpec({
+      app: 'plan', gate: true, count: 1, hasFeedback: true, approvalNotesSupported: true,
+      plan: plan({ answers: 1, answersOnly: true, unanswered: { count: 2, reason } }),
+    });
+    expect(answering.primary.label).toBe('Send answers');
+    expect(answering.primary.muted).toBeUndefined();
+    expect(mutes(answering)).toEqual([['note-with-feedback', false], ['approve-with-notes', true], ['discard-and-finish', true]]);
+    expect(answering.items[1].subtitle).toBe('2 questions still unanswered');
+  });
+
+  // Every question answered: approving with the answers is open, but
+  // discarding them approves over questions the agent never hears answered.
+  it('all answered: Approve with notes is live; discarding the answers is muted', () => {
+    const spec = buildDecisionSpec({
+      app: 'plan', gate: true, count: 2, hasFeedback: true, approvalNotesSupported: true,
+      plan: plan({ answers: 2, answersOnly: true }),
+    });
+    expect(spec.items.map((item) => [item.id, !!item.muted]))
+      .toEqual([['note-with-feedback', false], ['approve-with-notes', false], ['discard-and-finish', true]]);
+    expect(spec.items[2].subtitle).toBe('Discarding your answers leaves 2 questions unanswered');
+  });
 });

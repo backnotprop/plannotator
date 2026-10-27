@@ -1132,6 +1132,8 @@ export interface QuestionBlockLocation {
   /** The exact source text of lines `startLine`..`endLine`, joined with `\n`
    *  (a `\r` before each newline is kept). */
   text: string;
+  /** The parsed block, with the de-duplicated `key`. */
+  question: ParsedQuestion;
 }
 
 /**
@@ -1157,12 +1159,14 @@ export const findQuestionBlocks = (
     if (!isQuestionDirectiveKind(directive.directiveKind)) continue;
     const parsed = parseQuestionBlock(directive.directiveKind, directive.inner);
     if (!parsed) continue;
+    const key = dedupe(parsed.key);
     out.push({
-      key: dedupe(parsed.key),
+      key,
       directiveKind: directive.directiveKind,
       startLine: directive.startLine,
       endLine: directive.endLine,
       text: directive.text,
+      question: { ...parsed, key },
     });
   }
   return out;
@@ -1419,6 +1423,47 @@ export const questionStatus = (
   if (question.choices.some((c) => c.settled)) return 'settled';
   return 'open';
 };
+
+/** A question an approval still waits on (see `unansweredQuestions`). */
+export interface UnansweredQuestion {
+  key: string;
+  /** 1-based position among the document's question blocks (`Q<n>`). */
+  number: number;
+  /** Document line of the prompt (1-based), as the export prints it. */
+  line: number;
+  prompt: string;
+  status: 'open' | 'skipped';
+}
+
+/**
+ * The questions of `markdown` a plan approval still waits on: every question
+ * block whose status with its answer is neither `answered` nor `settled`. A
+ * skipped question waits too: approving takes a pick, an Other or a written
+ * answer for every question the agent did not settle with `[x]`. `answers`
+ * are raw `questionAnswer` values; a malformed one counts as absent.
+ */
+export const unansweredQuestions = (markdown: string, answers: Iterable<unknown> = []): UnansweredQuestion[] => {
+  const byKey = new Map<string, QuestionAnswer>();
+  for (const raw of answers) {
+    const answer = parseQuestionAnswer(raw);
+    if (answer && !byKey.has(answer.key)) byKey.set(answer.key, answer);
+  }
+  return findQuestionBlocks(markdown).flatMap(({ startLine, question }, index) => {
+    const status = questionStatus(question, byKey.get(question.key));
+    if (status === 'answered' || status === 'settled') return [];
+    return [{ key: question.key, number: index + 1, line: startLine + 1 + question.promptLine, prompt: question.prompt, status }];
+  });
+};
+
+/** Why an approval was refused, naming each question it waits on. */
+export const unansweredQuestionsMessage = (unanswered: ReadonlyArray<UnansweredQuestion>): string =>
+  `Answer every question before approving. Still waiting: ${unanswered
+    .map((q) => `Q${q.number}. ${oneLine(q.prompt)}${q.status === 'skipped' ? ' (skipped)' : ''}`)
+    .join('; ')}`;
+
+/** The refusal code a plan server answers an approval with while
+ *  `unansweredQuestions` is not empty (HTTP 422). */
+export const QUESTIONS_UNANSWERED_CODE = 'questions_unanswered';
 
 /** An empty answer for a question, ready to edit. */
 export const emptyQuestionAnswer = (indexed: Pick<IndexedQuestion, 'line' | 'question'>): QuestionAnswer => ({

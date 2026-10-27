@@ -15,6 +15,7 @@
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { Origin } from "@plannotator/shared/agents";
+import { QUESTIONS_UNANSWERED_CODE, unansweredQuestions, unansweredQuestionsMessage } from "@plannotator/shared/question-block";
 import { resolve } from "path";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
@@ -688,6 +689,13 @@ export async function startPlannotatorServer(
             const rawApproveBody = (await req.json().catch(() => ({}))) as Record<string, unknown> | null;
             if (checkServerSession(rawApproveBody, serverSession) === "mismatch") return Response.json(serverSessionMismatchBody(), { status: 409 });
             if (isStaleRevision(rawApproveBody)) return staleRevisionResponse();
+            // Every question the agent did not settle needs an answer the
+            // approval carries; skipped ones count as unanswered.
+            const approveAnswers = rawApproveBody?.questionAnswers;
+            const unanswered = unansweredQuestions(plan, Array.isArray(approveAnswers) ? approveAnswers : []);
+            if (unanswered.length > 0) {
+              return Response.json({ error: unansweredQuestionsMessage(unanswered), code: QUESTIONS_UNANSWERED_CODE, unanswered }, { status: 422 });
+            }
             decisionClaimed = true;
             try {
               const body = (rawApproveBody ?? {}) as {

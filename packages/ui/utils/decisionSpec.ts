@@ -149,6 +149,13 @@ export interface DecisionPlanInput {
    * is already on disk. The agent won't be told about it.").
    */
   savedFilesOnly?: string;
+  /**
+   * The plan's questions still waiting on an answer (open or skipped). The
+   * plan server refuses an approval while any waits, so every approve path
+   * mutes: the Approve primary carries `reason` as its tooltip, each approve
+   * row says how many questions are left.
+   */
+  unanswered?: { count: number; reason: string };
 }
 
 export interface DecisionPlatformInput {
@@ -535,10 +542,10 @@ function buildPlanSpec(input: DecisionSpecInput): DecisionSpec {
 
   if (!input.hasFeedback) {
     const empty = buildEmptySpec(input, true);
-    return {
+    return muteUnansweredApprovals({
       primary: target ? { ...empty.primary, label: `${empty.primary.label}${target}` } : empty.primary,
       items: empty.items,
-    };
+    }, true, plan);
   }
 
   const { text: what, plural } = planFeedbackPhrase(input.count, plan);
@@ -611,7 +618,7 @@ function buildPlanSpec(input: DecisionSpecInput): DecisionSpec {
     },
   });
 
-  return {
+  return muteUnansweredApprovals({
     primary: plan.answersOnly
       ? {
           id: 'primary',
@@ -633,7 +640,32 @@ function buildPlanSpec(input: DecisionSpecInput): DecisionSpec {
           icon: 'send',
         },
     items,
-  };
+  }, false, plan);
+}
+
+/**
+ * A plan is approved only once every `:::question` is answered. Each approve
+ * path is muted, never removed, so the menu says why while sending answers and
+ * requesting changes stay live. "Approve, discard …" drops the answers it
+ * approves over, so it also waits on the questions those answers settle.
+ * `primaryApproves`: the primary is Approve (nothing to send), not a send.
+ */
+function muteUnansweredApprovals(spec: DecisionSpec, primaryApproves: boolean, plan: DecisionPlanInput): DecisionSpec {
+  const waiting = Math.max(plan.unanswered?.count ?? 0, 0);
+  const answered = Math.max(plan.answers, 0);
+  if (waiting === 0 && answered === 0) return spec;
+  const waitingRow = `${waiting} question${waiting === 1 ? '' : 's'} still unanswered`;
+  const items = spec.items.map((item): DecisionMenuItem => {
+    if (item.id === 'discard-and-finish' && waiting === 0 && answered > 0) {
+      return { ...item, muted: true, subtitle: `Discarding your answers leaves ${answered} question${answered === 1 ? '' : 's'} unanswered` };
+    }
+    const approves = item.id === 'note-with-approval' || item.id === 'approve-with-notes' || item.id === 'discard-and-finish';
+    return approves && waiting > 0 ? { ...item, muted: true, subtitle: waitingRow } : item;
+  });
+  const primary = primaryApproves && waiting > 0
+    ? { ...spec.primary, muted: true, title: plan.unanswered?.reason ?? waitingRow }
+    : spec.primary;
+  return { primary, items };
 }
 
 export function buildDecisionSpec(input: DecisionSpecInput): DecisionSpec {

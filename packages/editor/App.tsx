@@ -243,11 +243,17 @@ import {
 } from './questionDecision';
 import {
   buildQuestionPanelRows,
+  collectQuestionAnswers,
   focusQuestionCard,
   nextOpenQuestionKey,
   questionProgress,
   type QuestionPanelRow,
 } from '@plannotator/ui/utils/questionAnswers';
+import {
+  QUESTIONS_UNANSWERED_CODE,
+  unansweredQuestionsMessage,
+  type UnansweredQuestion,
+} from '@plannotator/shared/question-block';
 import {
   usePlanDiffNavigationAutoExit,
   usePlanDiffViewAutoExit,
@@ -3452,6 +3458,34 @@ const App: React.FC = () => {
         onJump: handleQuestionChipJump,
       }
     : undefined;
+  // Approving waits on every question the agent did not settle with `[x]`:
+  // a skipped one still waits. The plan server refuses such an approval too.
+  const approvalWaitingOn = useMemo(
+    () => questionRows.flatMap((row): UnansweredQuestion[] =>
+      !row.orphaned && row.number && row.line && (row.status === 'open' || row.status === 'skipped')
+        ? [{ key: row.key, number: row.number, line: row.line, prompt: row.prompt, status: row.status }]
+        : []),
+    [questionRows],
+  );
+  // "Approve, discard …" drops the answers as well, so every question the
+  // agent did not settle waits again, exactly as the server sees that bare body.
+  const discardWaitingOn = useMemo(
+    () => questionRows.flatMap((row): UnansweredQuestion[] =>
+      !row.orphaned && row.number && row.line && row.status !== 'settled'
+        ? [{ key: row.key, number: row.number, line: row.line, prompt: row.prompt, status: 'open' }]
+        : []),
+    [questionRows],
+  );
+  const planUnanswered = useMemo(
+    () => approvalWaitingOn.length > 0
+      ? { count: approvalWaitingOn.length, reason: unansweredQuestionsMessage(approvalWaitingOn) }
+      : undefined,
+    [approvalWaitingOn],
+  );
+  const refuseApprovalForQuestions = useCallback((waiting: ReadonlyArray<UnansweredQuestion>) => {
+    toast.error('Questions still unanswered', { description: unansweredQuestionsMessage(waiting) });
+    if (waiting[0]) jumpToQuestion(waiting[0].key);
+  }, [jumpToQuestion]);
   const hasUnsentFeedback = feedbackAnnotationCount > 0 || hasDirectEdits;
   const hasOnlySavedFileChanges = hasSavedFileChanges && !hasUnsentFeedback;
   const savedFileChangesLabel = savedFileChanges.length === 1 ? 'saved file change' : 'saved file changes';
@@ -4407,9 +4441,12 @@ const App: React.FC = () => {
         : autoSaveResultsRef.current;
 
       // Build request body - include integrations if enabled
-      const body: { draftGeneration: number; planRevision?: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string } = {
+      const body: { draftGeneration: number; planRevision?: number; obsidian?: object; bear?: object; octarine?: object; feedback?: string; agentSwitch?: string; planSave?: { enabled: boolean; customPath?: string }; permissionMode?: string; questionAnswers: unknown[] } = {
         draftGeneration: getDraftGeneration(),
         ...planRevisionBodyField(),
+        // The server checks every question is answered against these. A
+        // discarded approval sends none: the agent never sees those answers.
+        questionAnswers: options?.discardFeedback ? [] : [...collectQuestionAnswers(viewerAnnotations).values()],
       };
 
       // Include permission mode for Claude Code
@@ -4486,6 +4523,14 @@ const App: React.FC = () => {
       if (res.status === 409) {
         handleStaleRevisionRefusal();
         return false;
+      }
+      if (res.status === 422) {
+        const refusal = await res.json().catch(() => null) as { code?: string; unanswered?: UnansweredQuestion[] } | null;
+        if (refusal?.code === QUESTIONS_UNANSWERED_CODE) {
+          setIsSubmitting(false);
+          refuseApprovalForQuestions(refusal.unanswered ?? []);
+          return false;
+        }
       }
       setSubmitted('approved');
       return true;
@@ -6133,6 +6178,14 @@ const App: React.FC = () => {
   const agentWarningContinuationRef = useRef<(() => void) | null>(null);
   const requestPlanApprove = useCallback((options?: { discardFeedback?: boolean }): Promise<boolean> =>
     new Promise<boolean>((resolve) => {
+      // Questions first: the unsaved-edit and agent warnings would only lead
+      // to an approval the server refuses.
+      const waiting = options?.discardFeedback ? discardWaitingOn : approvalWaitingOn;
+      if (waiting.length > 0) {
+        refuseApprovalForQuestions(waiting);
+        resolve(false);
+        return;
+      }
       const approve = () => {
         const h = headerHandlersRef.current;
         if (origin === 'opencode') {
@@ -6154,7 +6207,7 @@ const App: React.FC = () => {
         return;
       }
       approve();
-    }), [maybeConfirmUnsavedSourceFileEdits, origin]);
+    }), [approvalWaitingOn, discardWaitingOn, maybeConfirmUnsavedSourceFileEdits, origin, refuseApprovalForQuestions]);
 
   // Deny carries every kind of feedback (direct edits included): on Claude
   // Code's classic hook it is the only channel whose output reaches the agent.
@@ -6431,6 +6484,7 @@ const App: React.FC = () => {
       agentName,
       approveTarget: planApproveTarget,
       ...(hasOnlySavedFileChanges ? { savedFilesOnly: savedFileAwarenessOnlyText } : {}),
+      ...(planUnanswered ? { unanswered: planUnanswered } : {}),
     },
   }), [
     hasOnlySavedFileChanges,
@@ -6442,6 +6496,7 @@ const App: React.FC = () => {
     hasDirectEdits,
     hasFeedbackToSend,
     planApproveTarget,
+    planUnanswered,
     questionAnswerCount,
   ]);
 
@@ -6631,15 +6686,17 @@ const App: React.FC = () => {
                   {
                     id: compactPrimaryIdForDecision(planDecisionSpec.primary),
                     label: planDecisionSpec.primary.mobileLabel ?? planDecisionSpec.primary.label,
-                    subtitle: answersOnlyFeedback
-                      ? `${questionAnswerCount} answer${questionAnswerCount === 1 ? '' : 's'}`
-                      : feedbackAnnotationCount > 0
-                        ? `${feedbackAnnotationCount} annotation${feedbackAnnotationCount === 1 ? '' : 's'}`
-                        : hasFeedbackToSend
-                          ? 'Edited document'
-                          : undefined,
+                    subtitle: planDecisionSpec.primary.muted
+                      ? `${approvalWaitingOn.length} question${approvalWaitingOn.length === 1 ? '' : 's'} still unanswered`
+                      : answersOnlyFeedback
+                        ? `${questionAnswerCount} answer${questionAnswerCount === 1 ? '' : 's'}`
+                        : feedbackAnnotationCount > 0
+                          ? `${feedbackAnnotationCount} annotation${feedbackAnnotationCount === 1 ? '' : 's'}`
+                          : hasFeedbackToSend
+                            ? 'Edited document'
+                            : undefined,
                     onSelect: submitPrimaryDecision,
-                    disabled: compactActionBusy,
+                    disabled: compactActionBusy || !!planDecisionSpec.primary.muted,
                   },
                   ...planDecisionSpec.items.map((item) => ({
                     id: compactRowIdForDecisionItem(item.id),
@@ -6656,7 +6713,7 @@ const App: React.FC = () => {
                       }
                       runPlanDecisionAction(item.id);
                     },
-                    disabled: compactActionBusy,
+                    disabled: compactActionBusy || !!item.muted,
                   })),
                 ]),
           ]
