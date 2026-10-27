@@ -47,7 +47,7 @@
     "@opencode-ai/sdk": "1.19.3",
     "@pierre/diffs": "1.5.2",
     "diff": "^8.0.4",
-    "dockview-react": "^5.2.0",
+    "dockview-react": "^8.6.1",
     "dompurify": "^3.4.17",
     "marked": "^17.0.6",
     "sonner": "^2.0.8"
