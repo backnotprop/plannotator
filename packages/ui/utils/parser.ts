@@ -1434,6 +1434,12 @@ export interface LinkedDocAnnotationEntry {
 export interface LinkedDocExportHeading {
   title: string;
   intro: string;
+  /**
+   * What each section is, in "I've reviewed this <subject>" and a global
+   * comment's "General feedback about the <subject>". Absent: "document"
+   * (today's output, byte for byte). The Inbox's live sites pass "site".
+   */
+  subject?: string;
 }
 
 export const LINKED_DOC_EXPORT_HEADING: LinkedDocExportHeading = {
@@ -1486,10 +1492,10 @@ export const exportLinkedDocAnnotations = (
     const sortedAnns = sortAnnotationsInDocumentOrder(annotations, docBlocks);
 
     if (annotations.length > 0 || answers.length === 0) {
-      output += `I've reviewed this document and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
+      output += `I've reviewed this ${heading.subject ?? 'document'} and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
     }
 
-    output += renderAnnotationEntries(sortedAnns, docBlocks, { subject: 'document', level: 3, injectedSkills });
+    output += renderAnnotationEntries(sortedAnns, docBlocks, { subject: heading.subject ?? 'document', level: 3, injectedSkills });
     output += labelSummaryBlock(sortedAnns, 3);
   }
 

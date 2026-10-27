@@ -15,7 +15,7 @@
  */
 
 import type { QuestionAnswer, QuestionKind } from "./question-block";
-import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
+import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 
@@ -376,6 +376,15 @@ export interface InboxMessage {
    * on a message whose body shows no local image, and on older records.
    */
   inline_images?: InboxInlineImage[];
+  /** On an agent's message: the running local sites it attached (`send_message` `live_sites`), checked and probed when it was sent. */
+  live_sites?: InboxLiveSiteRef[];
+  /**
+   * On a thread's root: the running local sites the person opened from the
+   * thread (`POST /api/inbox/threads/:id/live`), oldest first. Kept on the
+   * root's line so it outlives a restart; a site an agent attached in the
+   * thread is not repeated here.
+   */
+  opened_live_sites?: InboxLiveSiteRef[];
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until

@@ -612,6 +612,24 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
   return post<{ recent_searches: string[] }>('/api/inbox/search/recent', input);
 }
 
+/** A running local site as a thread lists it (`GET /api/inbox/threads/:id/live`; `InboxLiveSiteRef`). */
+export interface LiveSiteRefWire {
+  id: string;
+  url: string;
+  opened_by: 'agent' | 'person';
+  opened_at: string;
+}
+/** A live site ready to frame: the proxy URL and its bridge token (`GET .../live/:site`, this computer only). */
+export interface LiveSiteWire {
+  id: string;
+  url: string;
+  origin: string;
+  app_url: string;
+  proxy_origin: string;
+  token: string;
+  opened_by: 'agent' | 'person';
+}
+
 export const inboxApi = {
   /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */
   skills: () => get<{ skills?: unknown }>('/api/inbox/skills'),
@@ -742,6 +760,17 @@ export const inboxApi = {
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
     post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/annotations`, { annotation }),
+  // Running local sites shown in a thread through the live proxy (packages/server/inbox-live.ts).
+  liveSites: (threadId: string) =>
+    get<{ sites: LiveSiteRefWire[] }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/live`),
+  openLiveSite: (threadId: string, url: string) =>
+    post<{ site: LiveSiteWire }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/live`, { url }),
+  liveSite: (threadId: string, siteId: string) =>
+    get<{ site: LiveSiteWire }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}`),
+  pingLiveSite: (threadId: string, siteId: string) =>
+    post<{ running: boolean }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`, {}),
+  saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>
+    post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`, { annotation }),
   restart: () => post<{ ok: true }>('/api/inbox/restart', {}),
   // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
   updateDetails: () => get<UpdateDetails>('/api/inbox/update'),

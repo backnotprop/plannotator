@@ -222,6 +222,8 @@ interface Route {
    * artifact in place of the messages. A file or a guided review opened from it keeps it, so their Back returns to it.
    */
   artifacts?: boolean;
+  /** A running local site open beside the thread (`&live=liv_…`). */
+  live?: string | null;
   /**
    * A message to land on (`#thread=…&msg=msg_…`, a search result): the thread
    * opens there, the message unfolded, centred, focused and ringed. Dropped
@@ -262,6 +264,7 @@ function routeOf(fullHash: string): Route {
     card: thread ? params.get('card') : null,
     // The Board list the card was opened from (Shipped, Icebox): the way back goes there.
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
+    live: thread ? params.get('live') : null,
   };
 }
 
@@ -291,6 +294,7 @@ function hashOf(route: Route): string {
     // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
+    if (route.thread && route.live && !route.file) params.set('live', route.live);
     // `&artifacts`, a flag: written without its empty `=`.
     hash = params.toString().replace(/(^|&)artifacts=(?=&|$)/, '$1artifacts');
   }
@@ -2928,8 +2932,8 @@ function Inbox() {
     };
   }, [settingsMissing, refreshSettings]);
 
-  // A file beside the thread takes the list's and the sidebar's room (record 2.2).
-  const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  // A file (or a live site) beside the thread takes the list's and the sidebar's room (record 2.2).
+  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.live);
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
@@ -3487,6 +3491,8 @@ function Inbox() {
             // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
             // sitting is tucked into its pill (the pill's Resume is the way back to it).
             decide={decideInThread(thread.thread_id)}
+            live={route.live ?? null}
+            onOpenLive={(siteId) => (siteId ? go({ ...routeRef.current, file: null, live: siteId }) : close({ ...routeRef.current, live: null }))}
             landing={
               route.msg && decideLanding.current?.messageId === route.msg
                 ? { messageId: route.msg, terms: [], questionKey: decideLanding.current.questionKey, focus: 'prompt' }

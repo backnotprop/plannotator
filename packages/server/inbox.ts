@@ -139,6 +139,7 @@ import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
+import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
@@ -291,6 +292,12 @@ export interface InboxServerOptions {
    * tests): `/` answers a one-line page saying so.
    */
   htmlContent?: string;
+  /** The live bridge's sources for live sites (`inbox-live.ts`), passed by the CLI as annotate's are, so the server never imports ui. Absent: sites are listed but do not open. */
+  liveBridge?: InboxLiveBridgeSources;
+  /** Tests: how long a live site's proxy lives with no open or ping (default `INBOX_LIVE_IDLE_MS`, 10 minutes). */
+  liveIdleMs?: number;
+  /** Tests: the live probe's fetch. */
+  liveProbeFetch?: typeof fetch;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
   /**
@@ -396,6 +403,8 @@ export interface InboxServer {
   imageCapture: InboxImageCapture;
   /** The Codex wake (inbox-codex-wake.ts): tests run its sweep. */
   codexWake: InboxCodexWake;
+  /** The live sites' proxies (inbox-live.ts): tests read which run and run the idle sweep. */
+  liveSites: Pick<InboxLiveSites, "running" | "sweep">;
   stop: () => void;
 }
 
@@ -497,6 +506,9 @@ const ERROR_STATUS: Record<string, number> = {
   experimental_env_decides: 409,
   tailscale_unavailable: 409,
   local_only: 403,
+  live_unavailable: 503,
+  live_not_answering: 422,
+  live_site_not_found: 404,
 };
 
 /**
@@ -522,6 +534,20 @@ const WINDOW_CSP = [
   "base-uri 'self'",
   "form-action 'none'",
 ].join("; ");
+
+/**
+ * The window on this computer's own port: WINDOW_CSP plus `frame-src` for a
+ * live site's proxy (`inbox-live.ts`), which listens on another loopback port
+ * and is framed under its localhost spelling (`buildLiveAppUrl`). Only the
+ * port is a wildcard: the page is served once, before any proxy starts.
+ * Framing is not a privilege (the frame is cross-origin), and each proxy's
+ * own `frame-ancestors` names only this Inbox's two loopback origins. The
+ * tailnet page keeps WINDOW_CSP: no live site opens there.
+ */
+export const LOCAL_WINDOW_CSP = WINDOW_CSP.replace("default-src 'self'", "default-src 'self'; frame-src 'self' http://localhost:*");
+
+/** The tailnet page's policy (exported for the tests that pin the difference). */
+export { WINDOW_CSP as INBOX_WINDOW_CSP };
 
 /** `/` before the window is built (a source run, the server tests). */
 const NOT_BUILT_PAGE =
@@ -814,6 +840,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+        // send_message's live_sites, checked and probed before anything is written (inbox-live.ts).
+        recordLiveSites: (urls) => liveSites.recordLiveSites(urls),
         // An open wait_for_reply keeps its session present (never "ended").
         presence: {
           seen: (session) => live.seenOverMcp(session),
@@ -2197,6 +2225,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const localOnly = () =>
     json({ error: "This answers only on this computer, not over the tailnet.", code: "local_only" }, 403);
 
+  /** Running local sites shown in a thread through the live proxy (inbox-live.ts): this computer only. */
+  const liveSites = createInboxLiveSites({
+    store,
+    serverSession,
+    dataDir,
+    readBody,
+    json,
+    errorResponse,
+    localOnly,
+    port: () => port,
+    bridge: options.liveBridge ?? null,
+    idleMs: options.liveIdleMs,
+    fetchImpl: options.liveProbeFetch,
+  });
+
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({
     store,
@@ -2968,10 +3011,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method === "GET") updates.nudge();
         if (via === "tailnet") return tailnetWindowPage(req, page);
         return new Response(req.method === "HEAD" ? null : page, {
-          headers: { ...WINDOW_PAGE_HEADERS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+          headers: { ...WINDOW_PAGE_HEADERS, "Content-Security-Policy": LOCAL_WINDOW_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
         });
       }
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
+
+      // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
+      // person's signed-in dev app; another site's page is refused, reads included.
+      const liveAnswer = await liveSites.route(req, path, via);
+      if (liveAnswer) return liveAnswer;
 
       // Step 8: the live sessions of a thread's project, and New message.
       const newMessage = await live.route(req, path);
@@ -3143,6 +3191,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     stopped = true;
     clearInterval(dataCheck);
     windows.stop();
+    liveSites.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);
     setAsideTimers.clear();
     connectStop.abort();
@@ -3168,7 +3217,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

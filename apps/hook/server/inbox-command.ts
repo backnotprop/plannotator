@@ -21,6 +21,7 @@
  * auto-update back forever); its own registry is `inbox/inbox.json`.
  */
 
+import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP } from "@plannotator/ui/components/html-viewer/bridge-script";
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
@@ -260,6 +261,8 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       dataDir,
       version: getCliVersion() ?? "dev",
       htmlContent,
+      // Live sites (packages/server/inbox-live.ts): the live bridge's sources, as annotate's live sessions get them.
+      liveBridge: { bridgeScript: BRIDGE_SCRIPT, bridgeBootstrap: LIVE_BRIDGE_BOOTSTRAP, annotationCss: ANNOTATION_HIGHLIGHT_CSS },
       selfCommand: selfCommand(),
       publishTailnet: tailscale,
       // Testing knob: how long a reply waits on a busy agent before it goes in by itself (default 5 minutes).

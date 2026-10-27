@@ -28,6 +28,7 @@ import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, whenTime } from '../format';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
+import { LiveSitePane, LiveSiteTile, OpenLocalSite } from './LiveSitePane';
 import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
@@ -854,6 +855,10 @@ export interface ThreadPaneProps {
    * The window passes it only while two or more of the thread's decisions wait.
    */
   decide?: OpenQuestionsDecide | null;
+  /** A running local site open beside the thread (`&live=liv_…`; packages/server/inbox-live.ts). */
+  live?: string | null;
+  /** Open a live site beside the thread (null closes it). Absent: no live sites. */
+  onOpenLive?: (siteId: string | null) => void;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -1011,7 +1016,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, live: liveSiteId = null, onOpenLive }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1658,6 +1663,11 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     else go();
   };
   const openRecord = (record: InboxAnnotationRecord) => {
+    // A comment on a live site opens that site beside the thread.
+    if (record.live) {
+      onOpenLive?.(record.live.site_id);
+      return;
+    }
     // A comment on a guided review's diff: open that guide.
     if (record.guide) {
       onOpenGuide(record.message_id);
@@ -1729,8 +1739,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const buildFeedback = async (pending: readonly InboxAnnotationRecord[]): Promise<string> => {
     const texts = new Map<string, string>();
     for (const record of pending) {
-      // A guided-review comment carries its own file and lines; a message comment quotes its words.
-      if (record.guide || record.message) continue;
+      // A guided-review comment carries its own file and lines; a message comment quotes its words; a live comment names its page and element.
+      if (record.guide || record.message || record.live) continue;
       const attachment = allFiles.find((a) => a.id === record.attachment_id) ?? allFiles.find((a) => a.path === record.path);
       if (!attachment) continue;
       const key = `${attachment.id}\0${record.version}`;
@@ -3104,7 +3114,17 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
-  const fileOpen = openAttachment !== null;
+  // PROVISIONAL UI (live sites; the approved Files design replaces it): a live site beside the thread, when no file is.
+  const openLocalSite = async (url: string): Promise<string | null> => {
+    try {
+      const answer = await inboxApi.openLiveSite(thread.thread_id, url);
+      onOpenLive?.(answer.site.id);
+      return null;
+    } catch (cause) {
+      return cause instanceof InboxApiError ? cause.message : 'The site did not open.';
+    }
+  };
+  const fileOpen = openAttachment !== null || (!!liveSiteId && !!onOpenLive);
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
   const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
@@ -3284,6 +3304,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                 </button>
               </Tip>
             )}
+            {onOpenLive && !remote && !phone && <OpenLocalSite threadId={thread.thread_id} onOpen={openLocalSite} onOpenSite={(siteId) => onOpenLive(siteId)} />}
             {!one && !artifactsOn && (
               <Tip content={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}>
                 <button
@@ -3659,6 +3680,10 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                     openIn={openIn}
                   />
                 )}
+                {onOpenLive &&
+                  (message.live_sites ?? []).map((site) => (
+                    <LiveSiteTile key={site.id} url={site.url} open={liveSiteId === site.id} onOpen={() => onOpenLive(site.id)} />
+                  ))}
                 {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
                 {isAgent && message.ack && (
                   <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} />
@@ -4120,6 +4145,20 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         {error && !errorAbove && errorLine}
       </div>
     </section>
+    {!openAttachment && liveSiteId && onOpenLive && (
+      <LiveSitePane
+        threadId={thread.thread_id}
+        siteId={liveSiteId}
+        url={thread.messages.flatMap((m) => m.live_sites ?? []).find((s) => s.id === liveSiteId)?.url}
+        records={records}
+        agent={asker}
+        remote={remote === true}
+        phone={phone}
+        onSaved={saveRecord}
+        onClose={() => onOpenLive(null)}
+        onWriteReply={() => openBox()}
+      />
+    )}
     {openAttachment && (
       <AttachmentPane
         ref={paneRef}

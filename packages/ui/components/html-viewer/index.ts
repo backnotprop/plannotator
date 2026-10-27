@@ -20,3 +20,5 @@ export {
   type PersistedHtmlAnchorResult,
   type ProjectHostThreadsOptions,
 } from "./hostThreads";
+// A live proxied site with page tracking and pageUrl stamping (the Inbox's live sites).
+export { LiveSiteViewer, type LiveSiteViewerProps } from "./LiveSiteViewer";
