@@ -113,15 +113,47 @@ export function primaryAction(names: readonly string[]): { label: string; add: b
   return { label: `Add to ${whoLabel(names)}`, add: true };
 }
 
+/** Where Cursor keeps its global rules (in the app, not a file). */
+export const CURSOR_RULES_PLACE = 'Customize → Rules';
+
+/**
+ * A note the person copies by hand (Cursor: its rules live in the app, so
+ * nothing is written; the note is shown to copy). Plannotator never adds,
+ * sees or removes it.
+ */
+export function noteCopiedByHand(row: Pick<InboxAgentRow, 'note'>): boolean {
+  return row.note?.state === 'manual';
+}
+
+/** The note without its marker lines: what a person copies by hand (the markers promise a removal that never happens there). */
+export function noteWithoutMarkers(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !line.startsWith('<!-- plannotator-inbox:'))
+    .join('\n');
+}
+
+/**
+ * The dialog's primary with copy-by-hand agents among the ticked ones: it
+ * names only the agents a note is written for ("Add to Codex"); with only
+ * copy-by-hand agents ticked it shows the note to copy. Never disabled.
+ */
+export function notePrimaryAction(picked: readonly Pick<InboxAgentRow, 'label' | 'note'>[]): { label: string; add: boolean } {
+  const written = picked.filter((row) => !noteCopiedByHand(row)).map((row) => row.label);
+  if (written.length > 0) return primaryAction(written);
+  if (picked.length > 0) return { label: 'Show the note to copy', add: true };
+  return primaryAction([]);
+}
+
 /** Every agent in the dialog starts ticked (the owner's answer, 2026-10-13: Claude Code too). */
 export function defaultPicks(rows: readonly InboxAgentRow[]): Record<string, boolean> {
   return Object.fromEntries(rows.map((row) => [row.id, true]));
 }
 
 /** What a note result shows in its row. */
-export function noteResultLabel(result: { ok: true; action: string } | { ok: false }): 'Created' | 'Added' | 'Copy manually' | 'Not added' {
+export function noteResultLabel(result: { ok: true; action: string } | { ok: false }): 'Created' | 'Added' | 'Copy by hand' | 'Not added' {
   if (!result.ok) return 'Not added';
-  if (result.action === 'manual') return 'Copy manually';
+  if (result.action === 'manual') return 'Copy by hand';
   return result.action === 'created' ? 'Created' : 'Added';
 }
 

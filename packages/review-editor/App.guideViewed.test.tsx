@@ -212,6 +212,7 @@ async function waitFor(check: () => boolean, label: string): Promise<void> {
 function seedAnnouncementsSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
+  memory.set("plannotator-announce-inbox-seen", "1");
   memory.set("plannotator-announce-ask-session-seen", "1");
   memory.set("plannotator-announce-agent-tool-seen", "1");
   memory.set("plannotator-guide-intro-seen", "2");

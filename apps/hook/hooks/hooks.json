@@ -1,5 +1,5 @@
 {
-  "description": "Plannotator: plan review on ExitPlanMode's permission request. Where Claude Code runs hooks modules (interactive CLI sessions), the mod (mod/register.ts) makes plan review, annotate, code review and annotate-last non-blocking, unless the user turned it off (PLANNOTATOR_CLAUDE_MOD=0 or \"claudeCodeMod\": false in config.json); then the module passes every hook through. After a compaction, the SessionStart hook prints the Plannotator Inbox reminder the mod puts in PLANNOTATOR_INBOX_REMINDER, and nothing when it is unset (mod off, reminder off, Windows).",
+  "description": "Plannotator: plan review on ExitPlanMode's permission request. Where Claude Code runs hooks modules (interactive CLI sessions), the mod (mod/register.ts) makes plan review, annotate, code review and annotate-last non-blocking, unless the user turned it off (PLANNOTATOR_CLAUDE_MOD=0 or \"claudeCodeMod\": false in config.json); then the module passes every hook through. After a compaction, the SessionStart hook prints the Plannotator Inbox reminder the mod puts in PLANNOTATOR_INBOX_REMINDER (with the session's open Inbox threads, which the mod sets before each compaction), and nothing when it is unset (mod off, reminder off, Windows).",
   "modules": ["./mod/register.ts"],
   "hooks": {
     "PreToolUse": [

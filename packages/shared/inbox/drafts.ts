@@ -146,7 +146,7 @@ function checkCard(value: unknown): InboxDraft["card"] | null {
 export function saveInboxDraft(
   inboxDirPath: string,
   id: unknown,
-  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown; card?: unknown },
+  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown; card?: unknown; board_request?: unknown },
   at: string,
 ): InboxDraft {
   if (!isInboxId("drf", id)) throw new InboxError("validation_error", "id: a draft id (drf_…).", { field: "id" });
@@ -195,6 +195,8 @@ export function saveInboxDraft(
     files,
     ...(threadName.trim() ? { thread_name: threadName } : {}),
     ...(card ? { card } : {}),
+    // Compose's Board chip, kept as it was left (approval "inbox-compose-board-chip").
+    ...(input.board_request === true ? { board_request: true as const } : {}),
   };
   const dir = draftsDir(inboxDirPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });

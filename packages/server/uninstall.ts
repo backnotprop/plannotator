@@ -1043,10 +1043,11 @@ function removeInstallerData(
       state,
     );
   }
-  // Usage counts (packages/shared/usage-counts.ts) are worth nothing to keep
-  // and a reinstall should start clean: every uninstall removes them, purge or
-  // not. An opt-out (`usageCounts: false` in config.json) stays with the config,
-  // which a plain uninstall keeps.
+  // `usage-counts/` is left over from the usage counts for experimental
+  // features, removed before they counted anything (approval
+  // "remove-usage-counts"); v0.28.33's hidden `plannotator telemetry` could
+  // still make it. Every uninstall removes it, purge or not. config.json keys
+  // that command wrote (`usageCounts`) stay with the config and are ignored.
   removePath(join(state.dataDir, "usage-counts"), request, state);
 }
 

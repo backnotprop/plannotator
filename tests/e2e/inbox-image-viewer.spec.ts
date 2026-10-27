@@ -430,6 +430,7 @@ test('plan review and annotate get the light version: full screen, ← → acros
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -505,6 +506,7 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -605,6 +607,7 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -713,6 +716,7 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
       [
         ['plannotator-plan-look-choice-resolved', 'true'],
         ['plannotator-announce-tui-herdr-seen', '1'],
+        ['plannotator-announce-inbox-seen', '1'],
         ['plannotator-announce-ask-session-seen', '1'],
         ['plannotator-announce-agent-tool-seen', '1'],
       ].map(([name, value]) => ({ name: name!, value: value!, url })),
@@ -1088,6 +1092,7 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
         [
           ['plannotator-plan-look-choice-resolved', 'true'],
           ['plannotator-announce-tui-herdr-seen', '1'],
+          ['plannotator-announce-inbox-seen', '1'],
           ['plannotator-announce-ask-session-seen', '1'],
           ['plannotator-announce-agent-tool-seen', '1'],
         ].map(([name, value]) => ({ name: name!, value: value!, url })),

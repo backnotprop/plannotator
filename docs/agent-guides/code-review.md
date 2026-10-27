@@ -223,7 +223,7 @@ The default code-review diff is **`since-base`** — a composite of `merge-base(
 
 **Staging display invariant:** `useGitAdd`'s `stagedFiles` is the EFFECTIVE staged set (sections-sidecar snapshot + session stage/unstage overrides) and is the only source any surface may render staging state from. The sidecar entry's `staged` flag is a snapshot — ORing it back in makes files unstaged mid-session render as staged (and inverts the next toggle).
 
-`since-base` is only offered when the base ref actually resolves — on a repo whose trunk isn't discoverable (`trunk`, no `origin/HEAD`) `getGitContext` omits it and the default falls through to `uncommitted`, so committed branch work is never silently hidden. The since-base patch/sections/fingerprint/file-content paths all degrade to `HEAD` together when merge-base fails for a resolvable-but-unrelated base. There is no first-run review-setup dialog (`ReviewSetupDialog` was removed, as `DiffTypeSetupDialog` was before it): the panel view simply defaults to Tree and the panel toggle / Settings → Git change it. The one-time dialog chain is guide intro → look-and-feel → Edit Mode → token hover cards → the terminal-tools announcement; none of the dialogs stack. The token hover announcement is last and additionally skips a session where hover cards cannot run at all (no live workspace), WITHOUT consuming its cookie, and never shows to a reviewer whose trigger is already non-default (which after the boolean-to-trigger migration is exactly the early adopter who turned cards off). Analysis layers no longer add a startup dialog: Semantic Changes retains its enabled default, while Call Flow remains disabled until the user explicitly enables it in Settings, which is also consent for its managed runtime installation.
+`since-base` is only offered when the base ref actually resolves — on a repo whose trunk isn't discoverable (`trunk`, no `origin/HEAD`) `getGitContext` omits it and the default falls through to `uncommitted`, so committed branch work is never silently hidden. The since-base patch/sections/fingerprint/file-content paths all degrade to `HEAD` together when merge-base fails for a resolvable-but-unrelated base. There is no first-run review-setup dialog (`ReviewSetupDialog` was removed, as `DiffTypeSetupDialog` was before it): the panel view simply defaults to Tree and the panel toggle / Settings → Git change it. The one-time dialog chain is guide intro → look-and-feel → Edit Mode → token hover cards → the terminal-tools announcement → the Inbox announcement → "Ask this session" → the agent-tool offer; none of the dialogs stack, and no two announcements share a load. The token hover announcement is last and additionally skips a session where hover cards cannot run at all (no live workspace), WITHOUT consuming its cookie, and never shows to a reviewer whose trigger is already non-default (which after the boolean-to-trigger migration is exactly the early adopter who turned cards off). Analysis layers no longer add a startup dialog: Semantic Changes retains its enabled default, while Call Flow remains disabled until the user explicitly enables it in Settings, which is also consent for its managed runtime installation.
 
 ### First-run terminal-tools announcement
 
@@ -332,6 +332,41 @@ history-shortcut guard defer behind it like they do behind terminal tools.
 compiled CLI, real review app) whose model calls went to a scripted local stand-in for the
 Messages API, so the question, the Read tool call and the streamed answer are real traffic with
 scripted model text. Offline it says the video could not load; reduced motion waits on the poster.
+
+### First-run Plannotator Inbox announcement
+
+A one-time, nearly full-screen panel for the Plannotator Inbox on plan review, annotate and code
+review (the editor app shows it in both of its modes, as every announcement does):
+`packages/ui/components/InboxAnnouncementDialog.tsx` and `packages/ui/utils/inboxAnnouncement.ts`
+(one plain cookie, `plannotator-announce-inbox-seen` = `'1'`, shared by every surface; not a
+settings-registry entry, for the same seeding reason). The Inbox film fills the top; under it the
+title "The Plannotator Inbox", one sentence, **Close** (initial focus) and **Learn about the
+Inbox**, a link to `https://plannotator.ai/inbox` in a new tab. Close, Escape, the backdrop and the
+link all write the cookie (the link closes the panel on the next task, so the browser still follows
+it). Unlike the other announcements it is built on the shared dialog (`components/ui/dialog`, Base
+UI: modal, focus trapped and restored), with the same capture-phase keydown that swallows
+`Mod+Enter` and keeps Escape from the App's own handlers (`data-inbox-announcement-dialog`).
+
+**Media:** the marketing page's own film, `apps/marketing/public/assets/inbox-film.mp4`
+(1920x1080, ~14 MB, voice-led) and `inbox-film-poster.jpg` (~120 KB), from
+`https://plannotator.ai/assets/` like the other announcements' footage (no CSP is involved; see
+the terminal-tools section). It never autoplays and is `preload="none"`, so opening the panel loads
+only the poster; until it plays the frame is the poster with one play button, as on the Inbox page,
+then the native controls take over. A film that cannot load says so in the frame; the rest of the
+panel is unchanged.
+
+**Who sees it:** deferred WITHOUT writing the cookie in archive / shared / no-server sessions, in
+the VS Code extension's webview (`window.__PLANNOTATOR_VSCODE`, `isVSCodeWebview`), while loading,
+and behind every other first-run dialog. It is NOT deferred on the compact touch shell: the panel is
+a film and one link, and the Inbox is read on a phone too. The Inbox's own window never mounts
+either App. Timing is `useFirstRunAnnouncementWindow`, as for "Ask this session".
+
+**Ordering:** after the terminal-tools announcement, never on the same load (that one takes the
+load while it is pending and can show on this surface, i.e. not on the compact shell, or was shown
+this load), and before "Ask this session" and the agent-tool offer, which wait while this one takes
+the load (`inboxTakesThisLoad`: shown this load, or eligible now). Code review's destination
+spotlight, auto-viewed toast, history-shortcut guard and the update toast defer behind it. App
+tests that seed `plannotator-announce-tui-herdr-seen` to clear the chain seed this key too.
 
 ### Agent tool switch: Settings row and first-run offer
 

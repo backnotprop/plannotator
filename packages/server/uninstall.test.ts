@@ -275,7 +275,7 @@ async function startFakeT3Worker(dataDir: string) {
   return child;
 }
 
-describe("usage counts", () => {
+describe("a leftover usage-counts/ folder (the removed usage counts)", () => {
   function seed(dataDir: string): string {
     const dir = join(dataDir, "usage-counts");
     mkdirSync(dir, { recursive: true });
@@ -284,7 +284,7 @@ describe("usage counts", () => {
     return dir;
   }
 
-  test("a plain uninstall removes usage-counts/ and keeps an opt-out in config.json", async () => {
+  test("a plain uninstall removes it and leaves config.json as it was", async () => {
     const fixture = createFixture();
     const dir = seed(fixture.dataDir);
     writeFileSync(join(fixture.dataDir, "config.json"), JSON.stringify({ usageCounts: false }));
@@ -296,7 +296,7 @@ describe("usage counts", () => {
     expect(JSON.parse(readFileSync(join(fixture.dataDir, "config.json"), "utf-8")).usageCounts).toBe(false);
   });
 
-  test("purge removes usage-counts/, listed once in a dry run", async () => {
+  test("purge removes it, listed once in a dry run", async () => {
     const fixture = createFixture();
     const dir = seed(fixture.dataDir);
     const planned = await runPlannotatorUninstall({ purge: true, dryRun: true }, fixture.environment);

@@ -184,6 +184,44 @@ test('the reply box: after a pick, after a click on the message, after a chip', 
   expect(await box.inputValue()).toBe('Focused dictation. After a pick. After reading. After a chip. ');
 });
 
+test('a press in the reply box beside its text (the row of chips) puts the caret in the reply: typing and a dictation with Option held first land', async () => {
+  const p = await context.newPage();
+  try {
+    await p.goto(`${url}#thread=${threadId}`);
+    // Earlier tests leave a reply draft, which reopens the box by itself (see openReply).
+    await openReply(p);
+    const rbox = p.locator('section.ib-pane .ib-rbox');
+    const box = rbox.locator('textarea');
+    await expect(box).toBeFocused();
+    // An earlier test's picks may have drafted a reply: start from the person's own words.
+    await box.fill('Typed first. ');
+    // The box is drawn as one field (its focus ring is always on); its lower part is the chips' row, not the textarea.
+    const outer = (await rbox.boundingBox())!;
+    const text = (await box.boundingBox())!;
+    const chips = (await rbox.locator('.ib-rfoot').boundingBox())!;
+    expect(chips.y).toBeGreaterThanOrEqual(text.y + text.height - 1);
+    // Leave the box (a click on the message), then press inside it, right of the chips, as a person clicks into a field.
+    await p.getByText('I checked the 409 row.').click();
+    await expect(box).not.toBeFocused();
+    await p.mouse.click(outer.x + outer.width - 24, chips.y + chips.height / 2);
+    await expect(box).toBeFocused();
+    await p.keyboard.type('Then typed. ');
+    // Hex starts on Option (held, then released), then pastes with ⌘V.
+    await p.keyboard.down('Alt');
+    await p.waitForTimeout(400);
+    await p.keyboard.up('Alt');
+    await dictate(p, 'Then dictated.');
+    await expect(box).toHaveValue('Typed first. Then typed. Then dictated.');
+    // A press on a control in the box keeps its own meaning: the chip's button is pressed, not stolen.
+    const chip = rbox.locator('[data-skip-chip]');
+    const before = await chip.getAttribute('data-skip-chip');
+    await rbox.locator('[data-skip-toggle]').click();
+    await expect(chip).toHaveAttribute('data-skip-chip', before === 'keep' ? 'skip' : 'keep');
+  } finally {
+    await p.close();
+  }
+});
+
 test('a word double-clicked in the message (selected, nothing to comment on) does not keep the dictation out of the reply box', async () => {
   const p = await context.newPage();
   try {

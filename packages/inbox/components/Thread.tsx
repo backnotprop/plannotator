@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -23,6 +23,7 @@ import { stepsOf } from '../stepping';
 import { artifactKey, artifactOfFile, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
+import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import type { InboxToastModel } from './Toast';
 import { AnnotationsChip } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, whenTime } from '../format';
@@ -741,7 +742,15 @@ export interface ThreadPaneProps {
   file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null } | null;
   /** `replace`: swap the history entry (stepping between files), so Back returns to the thread in one press. */
   /** `back`: the browser's Back when the entry on screen was opened from `file` (a linked page's Back), else a new entry. */
-  onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null } | null, options?: { replace?: boolean; back?: boolean }) => void;
+  /** `move`: into full screen from beside the thread, or back out to it (fullScreenOrigin.ts): the window keeps the history a stack of frames. */
+  onOpenFile: (file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null } | null, options?: { replace?: boolean; back?: boolean; move?: FrameMove }) => void;
+  /**
+   * The full screen on screen was entered from the file beside the thread (the history entry's mark,
+   * fullScreenOrigin.ts): × and Escape go back beside the thread. Else they close the file, back to the thread.
+   */
+  fullFromSide?: boolean;
+  /** The file × and Escape go back to when it is not the one on screen (fullScreenOrigin.ts `fullExitFile`), or null. */
+  fullExitFile?: string | null;
   /** Open the guided review a message carries (the record's 4.2). */
   onOpenGuide: (messageId: string) => void;
   /**
@@ -896,6 +905,35 @@ const SHOW_NEW_MESSAGE_BUTTON = false;
 export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'delivered' | 'not-sent';
 
 /**
+ * What in the reply box keeps its own click: its controls (the chips'
+ * buttons, a file tile's ×), the annotations list, the skill picker, and the
+ * human-only notice (its text stays selectable).
+ */
+const REPLY_BOX_CONTROLS =
+  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file]';
+
+/**
+ * A press anywhere else in the reply box puts the caret in its text, as a
+ * press anywhere in an input does. The box is drawn as one field with a focus
+ * ring that is always on, but the textarea is only its upper part: a press on
+ * the row of chips under it, or beside them, used to move focus to the page
+ * while the box still looked focused. Typing then went nowhere, and so did a
+ * dictation app's ⌘V (the owner: "focused on the input … it doesn't work").
+ * The default is prevented so the press neither blurs the textarea nor starts
+ * a selection; a textarea that already has focus keeps its caret.
+ */
+function focusReplyFromBox(event: ReactMouseEvent<HTMLElement>, field: HTMLTextAreaElement | null): void {
+  if (event.button !== 0 || !field || field.disabled) return;
+  const target = event.target;
+  if (!(target instanceof Element) || target === field || target.closest(REPLY_BOX_CONTROLS)) return;
+  event.preventDefault();
+  if (field.ownerDocument.activeElement === field) return;
+  field.focus({ preventScroll: true });
+  const end = field.value.length;
+  field.setSelectionRange(end, end);
+}
+
+/**
  * The line under a 👍: the toast's Undo window still runs (`pending`), the
  * Inbox sent it and a connection wakes the agent with it (`queued`, or
  * `sending` while that session is idle: the same honest words as a reply's
@@ -1011,7 +1049,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1583,10 +1621,19 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const currentView: FileView = full ? 'full' : 'side';
   const fileRef = useRef(file);
   fileRef.current = file;
-  /** Switch the open file's view in place (the same history entry). Escape's last rung, a Send: never saved. */
-  const setFull = (next: boolean) => {
+  const fullRef = useRef(full);
+  fullRef.current = full;
+  /**
+   * Switch the open file's view (Escape's last rung, ×, Write the reply: never saved). Into full screen from beside
+   * the thread is a new history entry and back out of it the browser's Back (fullScreenOrigin.ts), so Back and ×
+   * agree; the view already shown, or `in-place` (Undo of a swap in place), only writes it into the address.
+   */
+  const setFull = (next: boolean, how: 'pick' | 'exit' | 'in-place' = 'pick') => {
     const current = fileRef.current;
-    if (current) onOpenFile({ ...current, view: next ? 'full' : 'side' }, { replace: true });
+    if (!current) return;
+    const view: FileView = next ? 'full' : 'side';
+    if (how === 'in-place' || next === fullRef.current) onOpenFile({ ...current, view }, { replace: true });
+    else onOpenFile({ ...current, view }, { move: next ? 'switch-full' : how === 'exit' ? 'exit-full' : 'show-side' });
   };
   /**
    * The person picked a view with a button: it applies now and to every
@@ -1600,6 +1647,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const pickView = (next: FileView) => {
     const pickedOn = fileRef.current?.id ?? null;
     const viewBefore = currentView;
+    // Side by side picked in a full screen opened from the thread swaps it in place: so does its Undo, and × then closes the file again.
+    const undoInPlace = viewBefore === 'full' && !fullFromSide;
     setFull(next === 'full');
     if (phone || fileStacked) return;
     const before = readFileViewChoice();
@@ -1614,7 +1663,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       speech: `${lead}, ${detail}.`,
       onUndo: () => {
         writeFileViewChoice(before);
-        if (viewBefore !== next && pickedOn !== null && fileRef.current?.id === pickedOn) setFull(viewBefore === 'full');
+        if (viewBefore !== next && pickedOn !== null && fileRef.current?.id === pickedOn) setFull(viewBefore === 'full', undoInPlace ? 'in-place' : 'pick');
       },
     });
   };
@@ -1643,7 +1692,10 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     // card in the reply box, its tile again: a one-off view from the ⋯ stays). Else the remembered choice,
     // else today's rule (fileView.ts).
     const kept = file && file.id === attachment.id ? currentView : null;
-    onOpenFile({ id: attachment.id, version, focus, view: view ?? kept ?? openingView(attachment) });
+    const opening = view ?? kept ?? openingView(attachment);
+    // Full screen over a file beside the thread: its × and Escape come back beside the thread (fullScreenOrigin.ts).
+    const overSide = file !== null && !shownFull && opening === 'full';
+    onOpenFile({ id: attachment.id, version, focus, view: opening }, overSide ? { move: 'open-full' } : undefined);
   };
   /** A tile, or a link in a message: the file as it is now, focus in its pane (a typed comment in the open file asks first). */
   /** `opening`: called only when the file does open (not after "Keep writing" on a typed comment). */
@@ -3514,6 +3566,15 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                   {sentTags.map((t) => tagName(t, ownerOfSent && 'host' in ownerOfSent ? ownerOfSent.host : null, ownerOfSent && 'session' in ownerOfSent ? ownerOfSent.session : null)).join(', ')}
                 </span>
               )}
+              {/* Sent with compose's Board chip on (approval "inbox-compose-board-chip"): a quiet mark, never the agent's block. */}
+              {!isAgent && message.board_request === true && (
+                <span className="ib-m-board" data-board-request="">
+                  <span className="ib-to-sep">·</span>
+                  <Icon name="board" />
+                  <span aria-hidden="true">Board</span>
+                  <span className="ib-sr">Board tracking asked</span>
+                </span>
+              )}
             </>
           );
           const foldLabel = `${name}, ${time}${isNew ? ', new' : ''}. Fold this message`;
@@ -3886,6 +3947,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             <div
               className="ib-rbox"
+              // A press beside the text (the row of chips under it) puts the caret in the reply.
+              onMouseDown={(event) => focusReplyFromBox(event, textRef.current)}
               // A paste that carries files (a screenshot, a copied image) attaches them; text pastes as text.
               onPaste={(event) => {
                 if (replyFiles.paste(event)) setError(null);
@@ -4136,6 +4199,10 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         onVersion={(version) => onOpenFile({ id: openAttachment.id, version, focus: null, view: currentView })}
         full={shownFull}
         fullLocked={phone || fileStacked}
+        // Full screen opened from the thread alone: × and Escape close the file, back to the thread as it was.
+        exitCloses={fullScreenExit(fullFromSide, phone || fileStacked) === 'close'}
+        // A full screen opened over another file beside the thread goes back to that file: the pane asks first about a comment not saved yet.
+        exitLeavesFor={fullExitFile && fullExitFile !== openAttachment.id ? (allFiles.find((a) => a.id === fullExitFile)?.name ?? 'that file') : null}
         phone={phone}
         openIn={openIn}
         steps={steps}
@@ -4148,7 +4215,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         onLinked={(linked, options) => onOpenFile({ id: openAttachment.id, version: file!.version, focus: null, linked, view: currentView }, options)}
         onToggleFull={(pick) => {
           if (pick) pickView(full ? 'side' : 'full');
-          else setFull(!full);
+          // × and Escape's last rung, where they go back beside the thread: back to the view full screen was opened from.
+          else setFull(!full, 'exit');
         }}
         // The switch's pressed half: the view on screen becomes the choice; the frame stays.
         onKeepView={() => pickView(currentView)}

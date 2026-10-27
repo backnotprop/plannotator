@@ -234,8 +234,8 @@ test('an HTML file opens full screen: the page fills the window, one toolbar is 
   await expect(bar().locator('[data-full-view-position]')).toHaveText('1/3');
   await expect(bar().getByRole('button', { name: 'Side by side' })).toBeVisible();
   await expect(hide()).toHaveAccessibleName('Hide tools');
-  // × Exit full screen sits just before », which keeps the corner.
-  await expect(bar().locator('button').nth(-2)).toHaveAccessibleName('Exit full screen');
+  // × sits just before », which keeps the corner. Opened from the thread alone, it goes back to the thread (fullScreenOrigin.ts).
+  await expect(bar().locator('button').nth(-2)).toHaveAccessibleName('Back to the thread');
   await expect(bar().locator('button').last()).toHaveAccessibleName('Hide tools');
   await expect(pane().locator('[data-full-view-changed]')).toHaveCount(0);
   // The shared plan-review choice is neither read nor written.
@@ -430,9 +430,10 @@ test('the approved states of an HTML page, in light and dark', async () => {
  * draft closes by its own key; typed words are asked about (Discard it);
  * the drawer closes before Annotate (from inside the page); Annotate goes to
  * Interact; in Interact the page's own Escape (its menu, its text field) stays
- * the page's; one it does not use leaves full screen.
+ * the page's; one it does not use leaves full screen, back where it was opened
+ * from: beside the thread after the switch, else the thread alone.
  */
-async function climbTheLadder(page: Page) {
+async function climbTheLadder(page: Page, from: 'side' | 'thread' = 'side') {
   const pen = bar(page).locator('[data-full-view-pen]');
   const guard = pane(page).locator('[data-step-guard]');
   // An empty draft: its own Escape closes it; nothing else moves.
@@ -481,14 +482,20 @@ async function climbTheLadder(page: Page) {
   await frame(page).locator('#q').press('Escape');
   await page.waitForTimeout(200);
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
-  // One the page does not use: full screen ends (nothing remembered), the file is beside the thread, focus on the switch's Side by side.
+  // One the page does not use: full screen ends (nothing remembered), back where it was opened from: the file beside the
+  // thread, focus on the switch's Side by side; or, opened from the thread alone, the thread as it was.
   // (A click on the headline moves the page's focus out of its field; in Interact it pins nothing.)
   await frame(page).locator('#headline').click();
   await page.waitForTimeout(200);
   await page.keyboard.press('Escape');
-  await expect(pane(page)).not.toHaveAttribute('data-full-view', '');
-  await expect(pane(page).locator('.ib-vhead [data-view-side]')).toBeFocused();
-  await expect(page.locator('[data-step-live]')).toHaveText('Side by side: the file is beside the thread.');
+  if (from === 'side') {
+    await expect(pane(page)).not.toHaveAttribute('data-full-view', '');
+    await expect(pane(page).locator('.ib-vhead [data-view-side]')).toBeFocused();
+    await expect(page.locator('[data-step-live]')).toHaveText('Side by side: the file is beside the thread.');
+  } else {
+    await expect(pane(page)).toHaveCount(0);
+    expect(new URL(page.url()).hash).toBe(`#thread=${world.threadId}`);
+  }
   expect((await page.context().cookies()).find((c) => c.name === 'plannotator-inbox-file-view')).toBeUndefined();
 }
 
@@ -524,7 +531,8 @@ test('the same Escape ladder in WebKit (Safari), on a desktop window', async () 
     await page.getByRole('button', { name: 'Open turnkey.html' }).click();
     await expect(pane(page)).toHaveAttribute('data-full-view', '');
     await expect(frame(page).locator('#headline')).toBeVisible();
-    await climbTheLadder(page);
+    // Opened from the thread alone: the last rung goes back to the thread.
+    await climbTheLadder(page, 'thread');
     await context.close();
   } finally {
     await browser.close();

@@ -733,6 +733,8 @@ test.skipIf(!hasDom)('Create thread on a card with no thread: compose to a live 
   await until(() => dialog()?.querySelector('[data-compose-to="ses_create_thread"]') != null, 'compose to the live session');
   expect(dialog()!.querySelector('[data-compose-card]')!.textContent).toContain('Settings search');
   expect((dialog()!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Settings search\n\n');
+  // The card is the Board's already: no Board chip here, even with the Board on.
+  expect(dialog()!.querySelector('[data-compose-board]')).toBeNull();
   // Untouched, it is nothing to keep: Escape closes without asking.
   key('Escape');
   await until(() => dialog() === null, 'closed without asking');
@@ -791,4 +793,89 @@ test.skipIf(!hasDom)('Create thread kept as a draft: the draft keeps the card; s
   const refused = await loopback(`/api/inbox/drafts/drf_${'0'.repeat(26)}`, 'POST', JSON.stringify({ body: 'x', base: null, card: { id: 'msg_x', title: 'x' } }));
   expect(refused.status).toBe(422);
   expect(JSON.parse(refused.text)).toMatchObject({ code: 'validation_error', field: 'card' });
+});
+
+// The Board chip (approval "inbox-compose-board-chip"). What regresses: the chip shown while the Board is off
+// (it would ask an agent for cards the Board refuses), the request not reaching the server, the person's words
+// changed, the choice forgotten, or the sent message unmarked.
+const BOARD_CHOICE_KEY = 'plannotator-inbox-compose-board';
+const boardChip = () => dialog()!.querySelector<HTMLButtonElement>('[data-compose-board]');
+
+test.skipIf(!hasDom)('Board chip: none while the Board is off', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: false } }))).status).toBe(200);
+  // The browser's last choice is on: with the Board off, the chip is still not drawn.
+  localStorage.setItem(BOARD_CHOICE_KEY, '1');
+  try {
+    await poll('ses_chip_off', 'claude-code', projects[0]!);
+    const el = await renderApp();
+    await openCompose(el);
+    await until(() => dialog()!.querySelector('[data-compose-thread-row]') !== null, 'the Thread row');
+    expect(boardChip()).toBeNull();
+  } finally {
+    localStorage.removeItem(BOARD_CHOICE_KEY);
+  }
+});
+
+test.skipIf(!hasDom)('Board chip: off by default; on, the Send asks for the Board with the words as typed, the sent message is marked, and the next compose remembers it', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  localStorage.removeItem(BOARD_CHOICE_KEY);
+  await poll('ses_chip', 'claude-code', projects[0]!);
+  let el = await renderApp();
+  await openCompose(el);
+  await until(() => boardChip() !== null, 'the Board chip');
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('false');
+  // The accessible name, pinned on purpose: the approval's name for the control (it holds its visible word, WCAG 2.5.3).
+  expect(boardChip()!.getAttribute('aria-label')).toBe('Track on Board');
+  act(() => boardChip()!.click());
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
+  expect(localStorage.getItem(BOARD_CHOICE_KEY)).toBe('1');
+  await pickTo('ses_chip');
+  type('Chip tracked work\n\nMove the retry budget into config.');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'sent');
+  const sendBody = posted.find((p) => p.path === '/api/inbox/messages')!.body;
+  expect(sendBody.board_request).toBe(true);
+  const threadId = await threadIdOf('Chip tracked work');
+  const stored = JSON.parse((await loopback(`/api/inbox/threads/${threadId}`)).text) as { thread: { messages: { body: string; board_request?: boolean }[] } };
+  expect(stored.thread.messages[0]).toMatchObject({ body: 'Chip tracked work\n\nMove the retry budget into config.', board_request: true });
+
+  // The next compose starts on (this browser's last choice); turned off, it is remembered off.
+  await openCompose(el);
+  await until(() => boardChip() !== null, 'the Board chip again');
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
+  act(() => boardChip()!.click());
+  expect(localStorage.getItem(BOARD_CHOICE_KEY)).toBeNull();
+  key('Escape');
+  await until(() => dialog() === null, 'closed');
+
+  // The sent message carries the quiet mark, not the agent's block.
+  act(() => root?.unmount());
+  host?.remove();
+  el = await renderApp(`#thread=${threadId}`);
+  await until(() => el.querySelector(`[data-message-article] [data-board-request]`) !== null, 'the Board mark');
+  expect(el.textContent).not.toContain('plannotator-board-request');
+});
+
+test.skipIf(!hasDom)('Board chip: a draft keeps it, whatever the browser chose since', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  localStorage.removeItem(BOARD_CHOICE_KEY);
+  await poll('ses_chip_draft', 'claude-code', projects[0]!);
+  const el = await renderApp();
+  await openCompose(el);
+  await until(() => boardChip() !== null, 'the Board chip');
+  act(() => boardChip()!.click());
+  type('Chip draft kept\n\nLater.');
+  key('Escape');
+  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'kept as a draft');
+  const kept = (await drafts()).find((d) => d.body.startsWith('Chip draft kept')) as unknown as { id: string; board_request?: boolean };
+  expect(kept.board_request).toBe(true);
+  localStorage.removeItem(BOARD_CHOICE_KEY);
+  act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) !== null, 'the draft row');
+  act(() => (el.querySelector(`[data-draft-id="${kept.id}"] .ib-draft-open`) as HTMLButtonElement).click());
+  await until(() => boardChip() !== null, 'the draft opens with the chip');
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
 });

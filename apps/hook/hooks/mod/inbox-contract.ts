@@ -73,6 +73,110 @@ export function inboxToolCallParams(call: { name: string; arguments: Record<stri
   return { name: call.name, arguments: call.arguments, ...(options.wakes ? { _meta: { [INBOX_WAKES_META_KEY]: true } } : {}) }
 }
 
+/**
+ * The rule for a write into a thread an agent may only remember (the
+ * misfiled-thread AAR, 2026-10-27: a thread id kept across a context
+ * compaction sent seven messages into the wrong thread). In reply_to's and
+ * read_thread's descriptions, the agent tool's reply_to, the note in each
+ * agent's instructions and the session's thread list.
+ */
+export const INBOX_REPLY_TO_CHECK = 'Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.'
+
+/**
+ * The `_meta` key a connection sets to `true` on the read_thread list it reads
+ * for the session's thread list (`inboxSessionThreadsParams`), not a call the
+ * agent made: the Inbox makes no project for a folder it does not know, and
+ * the rows do not count as the session having looked at those threads
+ * (send_message's warning line). An older Inbox ignores it.
+ */
+export const INBOX_PEEK_META_KEY = 'ai.plannotator/inbox-peek'
+
+/** How many of the session's open threads the thread list names (the rest are counted). */
+export const INBOX_SESSION_THREADS_MAX = 5
+
+/** The longest subject or name the thread list prints, in characters. */
+const SESSION_THREAD_TEXT_MAX = 80
+
+/**
+ * The `tools/call` params for the session's open threads: read_thread with no
+ * id, as the session itself would list them (its own threads and the ones the
+ * person tagged it in, open only), marked as a peek.
+ */
+export function inboxSessionThreadsParams(projectPath: string, session: string): Record<string, unknown> {
+  return {
+    name: 'read_thread',
+    arguments: { project_path: projectPath, agent_session: session, limit: INBOX_SESSION_THREADS_MAX },
+    _meta: { [INBOX_PEEK_META_KEY]: true },
+  }
+}
+
+/**
+ * Whether an Inbox's `/api/inbox/health` answer (parsed JSON) is the
+ * registry's Inbox (`serverSession`) and honours the peek mark (`peek: true`,
+ * additive). The session's thread list is read only from such an Inbox: an
+ * older one ignores the mark, so the read would make a project for every
+ * folder that compacts or resumes.
+ */
+export function inboxHealthPeeks(health: unknown, serverSession: string): boolean {
+  const value = health && typeof health === 'object' ? (health as { serverSession?: unknown; peek?: unknown }) : null
+  return !!value && value.serverSession === serverSession && value.peek === true
+}
+
+/**
+ * The thread list's last line: where the rest of the Inbox's context is (the
+ * owner's ask, 2026-10-27). The list shows only this session's open threads;
+ * every thread and older ones are a read_thread list or a search away.
+ */
+export const INBOX_SESSION_THREADS_MORE = 'More: read_thread with no id lists every thread (asked_by "anyone", include_resolved); search finds older ones by words (all_projects).'
+
+/**
+ * The session's open threads as a few short lines for the agent's context
+ * (after a compaction, on a resume), or null when there are none or the
+ * result is not a read_thread list. One line per thread: its id, subject,
+ * name, open questions, whether the person wrote something unread, and the
+ * last activity. Never a message body. Then INBOX_SESSION_THREADS_MORE.
+ * `result` is the read_thread list's MCP result (its `structuredContent`).
+ */
+export function inboxSessionThreadsText(result: unknown, toolName: string = INBOX_TOOL_NAME): string | null {
+  const structured = (result as { structuredContent?: unknown } | null)?.structuredContent as { threads?: unknown; total?: unknown } | undefined
+  if (!structured || !Array.isArray(structured.threads)) return null
+  const oneLine = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null
+    // Invisible and direction-changing characters go (zero-width, bidi marks, overrides and isolates,
+    // the BOM); control characters (C0, DEL, C1) and line or paragraph separators become a space.
+    const flat = value
+      .replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '')
+      .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!flat) return null
+    return JSON.stringify(flat.length > SESSION_THREAD_TEXT_MAX ? `${flat.slice(0, SESSION_THREAD_TEXT_MAX - 1)}…` : flat)
+  }
+  const time = (value: unknown): string | null =>
+    typeof value === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(value) ? `${value.slice(0, 10)} ${value.slice(11, 16)}Z` : null
+  const lines: string[] = []
+  for (const row of structured.threads.slice(0, INBOX_SESSION_THREADS_MAX)) {
+    const thread = row as Record<string, unknown> | null
+    const id = thread?.thread_id
+    if (typeof id !== 'string' || !/^msg_[0-9A-Za-z]{26}$/.test(id)) continue
+    const parts = [`- ${id}`, oneLine(thread!.subject) ?? '(no subject)']
+    const name = oneLine(thread!.thread_name)
+    if (name) parts.push(`name ${name}`)
+    const questions = thread!.questions as { open?: unknown } | undefined
+    const open = typeof questions?.open === 'number' && questions.open > 0 ? questions.open : 0
+    if (open > 0) parts.push(`${open} open question${open === 1 ? '' : 's'}`)
+    if (thread!.unread === true) parts.push('the person wrote something you have not read')
+    const at = time(thread!.last_at)
+    if (at) parts.push(`last ${thread!.last_author === 'person' ? 'the person' : 'an agent'} ${at}`)
+    lines.push(parts.join(' · '))
+  }
+  if (lines.length === 0) return null
+  const total = typeof structured.total === 'number' && structured.total > lines.length ? structured.total : lines.length
+  const count = total > lines.length ? `${lines.length} of ${total}, newest first` : `${lines.length}`
+  const check = INBOX_REPLY_TO_CHECK.replace('call read_thread', `call ${toolName} read_thread`)
+  return [`Your open Plannotator Inbox threads in this project (${count}). ${check} ${INBOX_SESSION_THREADS_CHANNEL}`, ...lines, INBOX_SESSION_THREADS_MORE].join('\n')
+}
+
 /** The bridge routes on the Inbox server (bearer token, loopback Host, no Origin). */
 export const INBOX_BRIDGE_POLL_PATH = '/api/inbox/bridge/poll'
 export const INBOX_BRIDGE_EVENT_PATH = '/api/inbox/bridge/event'
@@ -120,9 +224,27 @@ function leadOf(description: string): string {
   return (stop >= 0 ? line.slice(0, stop + 1) : line).trim()
 }
 
+/**
+ * Chat or Inbox, never a guess at whether the person is watching (the owner,
+ * 2026-10-27: an agent raised an Inbox decision again as a blocking question
+ * in the chat when the person typed there). A decision in the Inbox stays
+ * there; the chat may say what waits there (redundancy is fine), but never
+ * asks it again with a blocking question tool. Fixed text: the agent tool's
+ * lead and the Inbox's server instructions carry it whole; the reminder, the
+ * session's thread list, the note and `plannotator inbox --help` say the same.
+ */
+export const INBOX_CHANNEL_RULE =
+  "A decision in the Inbox stays there: when the person writes in the chat, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Ask in the chat only about something new they raised there that needs no pictures or files, or when they ask."
+
+/**
+ * The session's thread list says it too (after a compaction, on a resume):
+ * the decisions in these threads stay there.
+ */
+export const INBOX_SESSION_THREADS_CHANNEL = "Their decisions stay in these threads: when the person writes in the chat, say what waits and link the thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar)."
+
 /** What the agent tool says, before the per-action lines. Fixed text. */
 export const INBOX_TOOL_LEAD =
-  "The Plannotator Inbox on this machine: message the person and get their answer later, without holding this session open. Use it when the person may not be watching this chat: a decision only they can make (ask it as a :::question block, then go on with other work), finished long work to hand over (a short summary, files in `attachments`), or when they ask you to. Ask in the chat when they are there; never send routine progress. If another agent started you, report to it instead. Set `action` to a tool below and pass its fields; the project and this session are filled in."
+  `The Plannotator Inbox on this machine: message the person and get their answer later, without blocking this session. Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary, files in \`attachments\`), or when they ask. ${INBOX_CHANNEL_RULE} No routine progress. If another agent started you, report to it instead. Set \`action\` to a tool below with its fields; the project and session are filled in.`
 
 /**
  * Fixed text: how a reply comes back. The connection delivers the person's
@@ -131,7 +253,7 @@ export const INBOX_TOOL_LEAD =
  * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "When the person replies to a message you sent, their reply arrives in this session by itself once it is idle, as a message headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn, or go on with other work; do not call wait_for_reply. When they need to hear back, answer with send_message reply_to."
+  "A reply to a message you sent arrives in this session by itself once it is idle, headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
 
 /**
  * Fixed text, the description's last line: where everything the tool's short
@@ -147,9 +269,9 @@ export const INBOX_TOOL_HELP_NOTE = "Every field and the full question syntax: `
  * OpenCode request carries it).
  */
 export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
-  read_thread: 'Read a thread (thread_id): open questions, the newest messages, earlier ones one line each; or list yours.',
-  search: 'Find messages by words (read-only).',
-  get_guide_brief: "Get Plannotator's method, the guide's JSON shape and the rules for writing a guided review, with a worked submit_guide call.",
+  read_thread: 'Read a thread (thread_id): open questions, the newest messages, earlier ones one line each; with no id, list your threads (asked_by "anyone": all).',
+  search: 'Find messages by words, older ones too (read-only).',
+  get_guide_brief: "The method, JSON shape and rules for writing a guided review, with a worked submit_guide call.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
 }
 
@@ -179,12 +301,13 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       'Holds up: sync release',
       ':::',
       '',
-      '`:::question-multi` takes several choices, `:::question-text` free text. The person can always answer Other, add a note or skip, so never add an Other choice yourself. `Stopped: <why>` only when you cannot go on until it is answered (never `Stopped: no`); `Holds up: <work>` names work that waits while you go on. Ask only what you cannot decide alone, about 8 a round at most. Answers come back in the reply under "Answers to your questions".',
+      'Your recommendation goes on the `Recommended:` line, never in a choice label. `:::question-multi` takes several choices, `:::question-text` free text. The person can always answer Other, add a note or skip, so never add an Other choice yourself. `Stopped: <why>` only when you cannot go on until it is answered (never `Stopped: no`); `Holds up: <work>` names work that waits while you go on. Ask only what you cannot decide alone, about 8 a round at most. Answers come back in the reply under "Answers to your questions".',
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone. Visual options can be picture choices, `- [ ] Label — ![alt](path)`: the picture picks it, the label comes back.',
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why; optional `Where: <url>`, `Run: <command>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done or Can\'t do it comes back under "Action items you asked for".',
     ].join('\n'),
+    reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
     thread: "A short thread name, one line, to keep separate work apart: the same name in this project is the same open thread, across sessions. Without it, your messages join your session's open thread. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
     supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
@@ -205,14 +328,14 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
  * (the reply comes back as a turn).
  */
 export const INBOX_REMINDER_TEXT =
-  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works."
+  "Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. Their reply comes back here. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run `plannotator inbox --help` for how it works."
 
 /**
  * The same line for a host without the wake (OpenCode 1): the reply does not
  * come back by itself there, so it names wait_for_reply instead.
  */
 export const INBOX_REMINDER_TEXT_NO_WAKE =
-  "Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer. Run `plannotator inbox --help` for how it works."
+  "Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run `plannotator inbox --help` for how it works."
 
 /**
  * The reminder naming the tool as the host registered it. Claude Code defers

@@ -29,7 +29,7 @@
  * text alone; an older one appends this trimmed JSON as well.
  */
 
-import { INBOX_HOST_NAMES, inboxAgentName, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -122,6 +122,15 @@ export interface AgentMessage {
   to?: AgentAddressee;
   /** On a person's reply that tags agents (approval "inbox-tag-agents"): the sessions it tags, and whether one is the reader (`you`). */
   tagged?: AgentTagged[];
+  /**
+   * The person sent it with compose's Board chip on (approval
+   * "inbox-compose-board-chip"): the agent tracks the work on the Board.
+   * `messageText` puts `inboxBoardRequestBlock` after the body; `body` stays
+   * the person's words.
+   */
+  board_request?: true;
+  /** With `board_request`: the cards in flight that link this thread already (not shipped, not dropped), for `messageText`. */
+  board_cards?: { id: string; title: string }[];
 }
 
 /** One agent session a person's reply tags, as an agent reads it. */
@@ -153,6 +162,7 @@ export interface AgentMessageLine {
   ack?: true;
   to?: AgentAddressee;
   tagged?: AgentTagged[];
+  board_request?: true;
 }
 
 export interface ThreadReadInput {
@@ -407,6 +417,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.board_request === true ? { board_request: true as const } : {}),
   };
 }
 
@@ -434,6 +445,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.ack ? { ack: true as const } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.board_request === true ? { board_request: true as const } : {}),
   };
 }
 
@@ -511,7 +523,18 @@ export function windowedThread(
   for (const id of full) shown.add(id);
   const formOf = (id: string): AgentMessageForm => (whole.has(id) ? "whole" : personEarlier.has(id) ? "earlier" : "window");
   const caller = input.caller ?? null;
-  const messages = all.filter((m) => full.has(m.id)).map((m) => agentMessage(m, formOf(m.id), caller));
+  // A Board request in full names the cards that link the thread already (review of #2249: no second card on a re-read).
+  // Only cards still in flight: a shipped card is done (new work in the thread gets a new card), and the card
+  // list op hides shipped and dropped cards by default, so the agent's list agrees with this line.
+  const linkedCards = () =>
+    store
+      .listCards({ projectIds: new Set([thread.project.id]) })
+      .filter((card) => card.column !== "dropped" && card.column !== "shipped" && card.threads.includes(threadId))
+      .map((card) => ({ id: card.id, title: card.title }));
+  const messages = all
+    .filter((m) => full.has(m.id))
+    .map((m) => agentMessage(m, formOf(m.id), caller))
+    .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
   const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller));
   const leftOut = all.filter((m) => !shown.has(m.id));
   // The questions of messages left out, without repeating what the reader has:
@@ -625,6 +648,8 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
   if (line.guide) parts.push(`guided review: ${line.guide}`);
   if (line.ack) parts.push("👍");
+  // Shown in full only: the line says it is there, so a reader that sees just the line expands it.
+  if (line.board_request) parts.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
   return parts.join(" · ");
 }
 
@@ -642,6 +667,14 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   }
   if (message.guide) lines.push(`Guided review: ${message.guide.title}`);
   if (message.ack) lines.push(`👍 ${message.ack.label} (${shortTime(message.ack.at)}): the person read it and needs nothing more.`);
+  // Compose's Board chip: the request, once, after the words and files (the wake's order), and the cards
+  // that link the thread already, so a second reader keeps those current instead of making more.
+  if (message.board_request) {
+    lines.push("", inboxBoardRequestBlock(message.id));
+    if (message.board_cards?.length) {
+      lines.push(`Already on the Board for this thread: ${message.board_cards.map((c) => `${c.id} (${c.title})`).join("; ")}. Keep ${message.board_cards.length === 1 ? "it" : "them"} current; make no other.`);
+    }
+  }
   return lines.join("\n");
 }
 

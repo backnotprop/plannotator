@@ -224,7 +224,6 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
-import { runTelemetryCommand } from "./telemetry-command";
 import { formatInboxHelp } from "./inbox-help";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
@@ -314,11 +313,6 @@ const rawArgs = process.argv.slice(2);
         ensureRunning: () => ensureInboxRunning(cardDataDir),
       }),
     );
-  }
-  // Usage counts for experimental features (unreleased, HIDDEN_SUBCOMMANDS):
-  // telemetry-command.ts. Before the strict-annotate parse, which takes `--json`.
-  if (args[0] === "telemetry" && !args.slice(1).some((a) => a === "--help" || a === "-h")) {
-    process.exit(await runTelemetryCommand(args.slice(1), { version: getCliVersion() }));
   }
 }
 // T3 Code (opt-in, unreleased; HIDDEN_SUBCOMMANDS): `t3` is the connection's
@@ -2794,6 +2788,8 @@ if (args[0] === "sessions") {
     origin: "claude-code",
     planFilePath: input.planFilePath,
     permissionMode: input.permissionMode,
+    // A chain under the session root's project is continued after a shell cd (#2197).
+    historyRoot: input.projectRoot,
     planRevisions: true,
     // The mod delivers an approval's notes (planHostResult composes the
     // approved-with-notes prompt). The classic PermissionRequest hook below
@@ -3080,6 +3076,10 @@ if (args[0] === "sessions") {
     // model, so notes sent with an approval would be lost.
     // Claude Code writes the plan to disk before the hook fires.
     planFilePath: isGemini ? undefined : event.tool_input?.planFilePath,
+    // Claude Code sets CLAUDE_PROJECT_DIR (the session's project root) for
+    // hooks; a shell cd does not move it, so a chain under its project is
+    // continued (#2197). Gemini CLI sets the same variable as an alias: left out.
+    historyRoot: !isGemini && detectedOrigin === "claude-code" ? process.env.CLAUDE_PROJECT_DIR : undefined,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,

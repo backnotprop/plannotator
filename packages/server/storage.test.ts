@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, readFileSync, readdirSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateSlug, getPlanDir, savePlan, saveToHistory, getPlanVersion, getVersionCount, listVersions, resolveHistorySlug } from "./storage";
+import { generateSlug, getPlanDir, savePlan, saveToHistory, getPlanVersion, getVersionCount, listVersions, resolveHistoryChain, resolveHistorySlug } from "./storage";
 import { PLAN_HISTORY_CONTINUE_WINDOW_MS } from "@plannotator/shared/storage";
 
 const tempDirs: string[] = [];
@@ -404,3 +404,58 @@ describe("resolveHistorySlug", () => {
     });
   });
 });
+
+describe("resolveHistoryChain", () => {
+  /**
+   * #2197: the Claude Code hosts pass the current folder's project first and
+   * the session root's second. An existing chain is looked for in that order;
+   * a new chain always starts under the first, exactly as before.
+   */
+  function withDataDir<T>(fn: (dataDir: string) => T): T {
+    const saved = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = makeTempDir();
+    try {
+      return fn(process.env.PLANNOTATOR_DATA_DIR);
+    } finally {
+      if (saved === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = saved;
+    }
+  }
+
+  function seed(dataDir: string, project: string, slug: string): void {
+    const dir = join(dataDir, "history", project, slug);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "001.md"), "# V1", "utf-8");
+  }
+
+  test("the first project's existing chain wins when both hold one", () => {
+    withDataDir((dataDir) => {
+      seed(dataDir, "service-a", "ship-it-2026-10-04");
+      seed(dataDir, "workspace", "ship-it-2026-10-04");
+      expect(resolveHistoryChain(["service-a", "workspace"], "ship-it-2026-10-04")).toEqual({
+        project: "service-a",
+        slug: "ship-it-2026-10-04",
+      });
+    });
+  });
+
+  test("a chain only the second project (the session root's) holds is continued", () => {
+    withDataDir((dataDir) => {
+      seed(dataDir, "workspace", "ship-it-2026-10-03");
+      expect(resolveHistoryChain(["service-a", "workspace"], "ship-it-2026-10-04")).toEqual({
+        project: "workspace",
+        slug: "ship-it-2026-10-03",
+      });
+    });
+  });
+
+  test("no chain anywhere starts one under the first project (the current folder's)", () => {
+    withDataDir(() => {
+      expect(resolveHistoryChain(["service-a", "workspace"], "ship-it-2026-10-04")).toEqual({
+        project: "service-a",
+        slug: "ship-it-2026-10-04",
+      });
+    });
+  });
+});
+

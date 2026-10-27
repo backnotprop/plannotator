@@ -154,6 +154,17 @@ export interface AttachmentPaneProps {
   full: boolean;
   /** Full screen is the only way the window can show the file (a phone, a narrow window: stack.ts): the toolbar leads with Back to the thread instead of Side by side. */
   fullLocked?: boolean;
+  /**
+   * × and Escape's last rung close the file, back to the thread (fullScreenOrigin.ts): a full screen opened from
+   * the thread alone, and wherever the file can only be full screen. False: they put the file back beside the
+   * thread, where it was before full screen. Absent: only where it can only be full screen.
+   */
+  exitCloses?: boolean;
+  /**
+   * The name of the file × and Escape's last rung go back to when it is another file than this one (a full screen
+   * opened over a file beside the thread): leaving this file, they ask first about a comment not saved yet.
+   */
+  exitLeavesFor?: string | null;
   /** `pick`: the person chose with a button (remembered); Escape's last rung is not a pick. */
   onToggleFull: (pick: boolean) => void;
   /** The view switch's pressed half: the view on screen becomes the remembered one; the frame stays. */
@@ -900,8 +911,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         keepWriting();
         return;
       case 'leave':
-        if (props.fullLocked) close();
-        else toggleFull(false);
+        if (exitCloses) close();
+        else exitFull();
         return;
     }
   }
@@ -1213,6 +1224,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     props.onVersion(next);
   };
   const close = () => leave(null, props.onClose);
+  /** Where × and Escape's last rung go: the thread (the file closes), or back beside it. */
+  const exitCloses = props.exitCloses ?? props.fullLocked === true;
+  /** × and Escape's last rung back beside the thread: through `leave` when that shows another file (a typed comment is asked about). */
+  const exitFull = () => {
+    const to = props.exitLeavesFor ?? null;
+    if (to !== null) leave(to, () => toggleFull(false));
+    else toggleFull(false);
+  };
 
   const sentAt = whenTime(attachment.sent_at);
   /** An image the message's text shows (approval "inbox-image-viewer"). */
@@ -1375,8 +1394,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           }
           moreOpen={moreOpen}
           leave={props.fullLocked ? { kind: 'back', onLeave: close } : { kind: 'exit', onLeave: () => toggleFull() }}
-          // × does what Escape's last step does: back beside the thread, not a pick (Side by side is the pick).
-          onExitFull={props.fullLocked ? undefined : () => toggleFull(false)}
+          // × does what Escape's last step does, never a pick (Side by side is the pick): back where full screen
+          // was opened from, the thread alone (the file closes) or the file beside the thread.
+          onExitFull={props.fullLocked ? undefined : exitCloses ? close : exitFull}
+          exitCloses={exitCloses}
           chord={isHtml ? TOOLS_CHORD : null}
           shifted={drawerMode && drawer && hasPanel}
         />

@@ -157,6 +157,16 @@ export function entriesCarryReminder(entries: readonly BranchEntry[]): boolean {
 	return entries.slice(from).some((entry) => entry?.type === "custom_message" && entry.customType === PI_INBOX_REMINDER_CUSTOM_TYPE);
 }
 
+/** The session's open Inbox threads for the reminder after a compaction, or null (no context, no Inbox, nothing open). */
+async function sessionThreadsOf(connection: InboxAgentConnection, current: ExtensionContext | null): Promise<string | null> {
+	if (!current || !isCtxAlive(current)) return null;
+	try {
+		return await connection.sessionThreads({ sessionId: current.sessionManager.getSessionId(), cwd: current.cwd });
+	} catch {
+		return null;
+	}
+}
+
 function branchHasReminder(ctx: ExtensionContext): boolean {
 	try {
 		return entriesCarryReminder(ctx.sessionManager.getBranch() as BranchEntry[]);
@@ -330,17 +340,30 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 	// moves no cached prefix. Not again after /reload or /resume (the branch
 	// already holds it); again after a compaction that summarized it away
 	// (which has invalidated the cache anyway, the plan framing's rule).
+	// After a compaction the same message also names the session's open Inbox
+	// threads (`sessionThreads`, bounded, never starting the Inbox), so the
+	// thread ids come from the Inbox, not from the summary: the Claude Code
+	// mod's compact hook, here.
 	const reminderText = options.reminder;
 	if (reminderText) {
-		pi.on("before_agent_start", () => {
+		/** A compaction summarized the reminder away: the next one carries the thread list too. */
+		let afterCompaction = false;
+		pi.on("before_agent_start", async (_event, agentCtx: ExtensionContext) => {
 			if (!toolActive || reminderDelivered) return undefined;
 			reminderDelivered = true;
+			let content = reminderText;
+			if (afterCompaction) {
+				afterCompaction = false;
+				const threads = await sessionThreadsOf(connection, agentCtx ?? ctx);
+				if (threads) content = `${reminderText}\n\n${threads}`;
+			}
 			return {
-				message: { customType: PI_INBOX_REMINDER_CUSTOM_TYPE, content: reminderText, display: false },
+				message: { customType: PI_INBOX_REMINDER_CUSTOM_TYPE, content, display: false },
 			};
 		});
 		pi.on("session_compact", (_event, compactCtx: ExtensionContext) => {
 			reminderDelivered = compactCtx ? branchHasReminder(compactCtx) : false;
+			afterCompaction = !reminderDelivered;
 		});
 		pi.on("session_tree", (_event, treeCtx: ExtensionContext) => {
 			reminderDelivered = branchHasReminder(treeCtx);

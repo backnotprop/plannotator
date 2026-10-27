@@ -8,7 +8,7 @@ rm -rf generated
 mkdir -p generated generated/ai/providers
 
 # Modules that MOVED to @plannotator/core — vendor the real impl from core.
-for f in feedback-templates project diff-type file-kind review-prompt guide-prompt favicon forge-refs code-file annotatable annotation-threads diagram-anchor image-region html-anchor markdown-structure question-block text-cut server-session external-annotation agent-jobs agent-switch agent-terminal source-save open-in-apps diff-paths diff-files guide guide-format guide-viewer-manifest compress crypto package-changes package-changes-npm; do
+for f in feedback-templates project diff-type file-kind review-prompt guide-prompt favicon forge-refs code-file annotatable annotation-threads diagram-anchor image-region html-anchor markdown-structure question-block text-cut inline-markdown server-session external-annotation agent-jobs agent-switch agent-terminal source-save open-in-apps diff-paths diff-files guide guide-format guide-viewer-manifest compress crypto package-changes package-changes-npm; do
   src="../../packages/core/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" | cat - "$src" > "generated/$f.ts"
 done

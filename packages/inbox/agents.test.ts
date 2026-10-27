@@ -7,7 +7,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAgentRow, InboxAgentsModel } from '@plannotator/core/inbox-types';
-import { cardReport, noteQuestionRows, primaryAction, sentence, splitPath, tidyReason } from './agents';
+import { cardReport, notePrimaryAction, noteQuestionRows, noteWithoutMarkers, primaryAction, sentence, splitPath, tidyReason } from './agents';
 
 function row(id: InboxAgentRow['id'], over: Partial<InboxAgentRow> = {}): InboxAgentRow {
   return {
@@ -87,4 +87,16 @@ test('a reason never ends "))": an agent CLI\'s own message in parentheses is un
   expect(tidyReason('timed out after 10 s')).toBe('timed out after 10 s');
   expect(sentence('it failed (permission denied)')).toBe('it failed (permission denied).');
   expect(sentence('Nothing was changed.')).toBe('Nothing was changed.');
+});
+
+test('a note copied by hand (Cursor) is never named in "Add to …"; with only those ticked the primary shows the note to copy', () => {
+  const cursor = row('cursor', { label: 'Cursor', note: { agent: 'cursor', path: null, target: null, state: 'manual', create: false, created: false, reason: null } });
+  const codex = row('codex', { label: 'Codex' });
+  expect(notePrimaryAction([codex, cursor])).toEqual({ label: 'Add to Codex', add: true });
+  expect(notePrimaryAction([cursor])).toEqual({ label: 'Show the note to copy', add: true });
+  expect(notePrimaryAction([])).toEqual({ label: "Don't add a note", add: false });
+});
+
+test('the note copied by hand has no marker lines', () => {
+  expect(noteWithoutMarkers('<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it … -->\n## Plannotator Inbox\n\nBody.\n<!-- plannotator-inbox:end -->')).toBe('## Plannotator Inbox\n\nBody.');
 });

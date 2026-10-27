@@ -514,7 +514,8 @@ not hand the turn to an earlier dialog.
 ## Ask This Session Announcement Manual Checklist
 
 Not CI. The gate is one cookie, `plannotator-announce-ask-session-seen`. Seed
-`plannotator-announce-tui-herdr-seen=1` (and the other first-run keys) so the chain reaches it.
+`plannotator-announce-tui-herdr-seen=1` and `plannotator-announce-inbox-seen=1` (and the other
+first-run keys) so the chain reaches it.
 
 1. **Who sees it.** Open a review from Claude Code (`/plannotator-review`), Pi or OpenCode 2 and
    don't touch anything: the announcement opens within a few seconds, its headline names that

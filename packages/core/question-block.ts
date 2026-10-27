@@ -110,6 +110,7 @@
  */
 
 import { sliceText } from "./text-cut";
+import { stripInlineMarkup } from "./inline-markdown";
 import {
   DIRECTIVE_OPEN_RE,
   codeFenceCloseIndex,
@@ -502,6 +503,20 @@ export const recommendationHeadChoice = (
   return hits.length === 1 ? hits[0] : -1;
 };
 
+/** Inline markdown's plain words, normalized: link and wiki-link labels kept,
+ *  images and HTML tags out (normalizeQuestionText drops emphasis and code
+ *  marks). */
+const plainWords = (value: string): string => normalizeQuestionText(stripInlineMarkup(value));
+
+/** The one choice (index) one of whose texts has the same plain words as one
+ *  of the candidates, or -1 when none or several do. */
+const plainWordsChoice = (candidates: string[], texts: string[][]): number => {
+  const targets = new Set(candidates.map(plainWords).filter(Boolean));
+  if (targets.size === 0) return -1;
+  const hits = texts.flatMap((list, i) => (list.some((t) => t && targets.has(plainWords(t))) ? [i] : []));
+  return hits.length === 1 ? hits[0] : -1;
+};
+
 /** Resolve a recommendation's text against the choices. Returns the matched
  *  choice indices (empty when it names none). */
 const matchRecommendation = (
@@ -532,6 +547,12 @@ const matchRecommendation = (
     const hit = lead ? match(lead) : -1;
     if (hit !== -1) return [hit];
   }
+  // No exact match: the plain words of a label written as markdown
+  // (`[Pagefind](x.html)` is named by `Pagefind`), only when exactly one
+  // choice has them.
+  const choiceTexts = choices.map((c, i) => [c.label, raws[i], ...(names[i] ?? [])]);
+  const plainHit = plainWordsChoice([text, splitLabel(text).label], choiceTexts);
+  if (plainHit !== -1) return [plainHit];
   // Plain bullets only (task lists match exactly as they always have):
   // `b. Default off; …` names the one choice whose label starts `b.` / `b)`,
   // same case, so `A. Smith's proposal` never names an `a.` choice.
@@ -554,6 +575,9 @@ const matchRecommendation = (
   const fallbackHit = (candidate: string): number => {
     const lettered = letteredHit(candidate);
     if (lettered !== -1) return lettered;
+    // A part of a pick-any line (`Pagefind and Algolia`) names a markdown label by its plain words too.
+    const plain = plainWordsChoice([candidate, splitLabel(candidate).label], choiceTexts);
+    if (plain !== -1) return plain;
     const hit = headHit(candidate);
     return hit !== -1 ? hit : headHit(splitLabel(candidate).label);
   };

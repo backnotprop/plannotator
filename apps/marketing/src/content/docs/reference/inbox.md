@@ -80,13 +80,13 @@ The first time you open the Inbox after it connected your agents, a dialog asks 
 | Gemini CLI | `~/.gemini/GEMINI.md` (or your `context.fileName`) |
 | Pi | the one instructions file Pi reads in `~/.pi/agent/` |
 | OpenCode | `~/.config/opencode/AGENTS.md`, only when you already have it: creating it would stop OpenCode 1 reading your `~/.claude/CLAUDE.md` |
-| Cursor | Cursor User Rules in Settings → Rules (manual copy; no supported global rules file) |
+| Cursor | Customize → Rules in the Cursor app (you copy it by hand; Cursor has no global rules file) |
 
-Managed notes sit between two marker lines at the end of the file. Plannotator never overwrites a note you edited, and removing it removes only that section. `plannotator inbox --notes codex,gemini` adds managed notes from the terminal (the agent install prompt runs this only after you say yes). For Cursor, `plannotator inbox --notes cursor` prints the note to copy into Cursor Settings → Rules. Plannotator cannot detect whether it was pasted, update it or remove it; a copied Cursor rule is never shown as installed. `plannotator inbox --help` lists exact files and manual steps.
+Managed notes sit between two marker lines at the end of the file. Plannotator never overwrites a note you edited, and removing it removes only that section. `plannotator inbox --notes codex,gemini` adds managed notes from the terminal (the agent install prompt runs this only after you say yes). For Cursor, nothing is written: the dialog and Settings show the note (without the marker lines) to copy into Customize → Rules in Cursor, and `plannotator inbox --notes cursor` prints it. Plannotator cannot see whether it was pasted, update it or remove it; a copied Cursor rule is never shown as added. `plannotator inbox --help` lists exact files and manual steps.
 
 ### Settings → Agents
 
-Settings lists each agent found on this computer with up to three switches: **Reaches the Inbox** (its MCP entry, or the inbox tool for Claude Code, Pi and OpenCode), **Reminder at session start** (Claude Code, Pi and OpenCode: one line at the start of each session that has the inbox tool) and **Note in its instructions**. Cursor's note is a manual Show note workflow, not a managed switch; copy it into Settings → Rules. Plannotator cannot detect, update or remove that copy. Managed note changes apply to that agent's next session. An agent you turn off here is never connected again by `plannotator inbox`. Agents not found are folded under **Not found on this computer**, with the command or one-click link for each, editors included.
+Settings lists each agent found on this computer with up to three switches: **Reaches the Inbox** (its MCP entry, or the inbox tool for Claude Code, Pi and OpenCode), **Reminder at session start** (Claude Code, Pi and OpenCode: one line at the start of each session that has the inbox tool) and **Note in its instructions**. Cursor's note has no switch: **Show note** shows it to copy into Customize → Rules in Cursor. Plannotator cannot detect, update or remove that copy. Managed note changes apply to that agent's next session. An agent you turn off here is never connected again by `plannotator inbox`. Agents not found are folded under **Not found on this computer**, with the command or one-click link for each, editors included.
 
 ## What you see
 
@@ -228,7 +228,7 @@ The setting is read when a session starts and never during one, because a change
 
 Once you have run the Inbox on this computer, a session that has the tool also gets one line, so the agent knows when the Inbox is the right place:
 
-> Plannotator Inbox is on: when you finish long work, or need a decision the person isn't here to give, send it with plannotator_inbox send_message and keep going. Their reply comes back here. Run `plannotator inbox --help` for how it works.
+> Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. Their reply comes back here. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run `plannotator inbox --help` for how it works.
 
 Where it goes:
 

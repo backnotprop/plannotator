@@ -202,10 +202,40 @@ export interface ComposeSnapshot {
   files: readonly string[];
   /** The thread name the person typed in the chip (`draftThreadName`); absent counts as none. */
   threadName?: string;
+  /** The Board chip is on (approval "inbox-compose-board-chip"); absent counts as off. */
+  board?: boolean;
 }
 
-export function draftSnapshot(draft: Pick<InboxDraft, 'body' | 'to' | 'files' | 'thread_name'> | null): ComposeSnapshot {
-  return { body: draft?.body ?? '', session: draft?.to?.session ?? null, files: (draft?.files ?? []).map((file) => file.upload_id), threadName: draft?.thread_name ?? '' };
+export function draftSnapshot(draft: Pick<InboxDraft, 'body' | 'to' | 'files' | 'thread_name' | 'board_request'> | null): ComposeSnapshot {
+  return {
+    body: draft?.body ?? '',
+    session: draft?.to?.session ?? null,
+    files: (draft?.files ?? []).map((file) => file.upload_id),
+    threadName: draft?.thread_name ?? '',
+    board: draft?.board_request === true,
+  };
+}
+
+/** Where the browser keeps the Board chip's last choice (approval "inbox-compose-board-chip": remembered per browser). */
+export const COMPOSE_BOARD_CHOICE_KEY = 'plannotator-inbox-compose-board';
+
+/** The Board chip's last choice in this browser: off unless it was last turned on. */
+export function composeBoardChoice(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(COMPOSE_BOARD_CHOICE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Keep the Board chip's choice for the next compose in this browser. */
+export function rememberComposeBoardChoice(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(COMPOSE_BOARD_CHOICE_KEY, '1');
+    else localStorage.removeItem(COMPOSE_BOARD_CHOICE_KEY);
+  } catch {
+    // Storage refused (private mode, quota): the choice lasts this compose only.
+  }
 }
 
 /**
@@ -221,7 +251,8 @@ export function isDirty(now: ComposeSnapshot, saved: ComposeSnapshot, savedExist
     now.body !== saved.body ||
     now.session !== saved.session ||
     now.files.join('\n') !== saved.files.join('\n') ||
-    (now.threadName ?? '').trim() !== (saved.threadName ?? '').trim()
+    (now.threadName ?? '').trim() !== (saved.threadName ?? '').trim() ||
+    (now.board === true) !== (saved.board === true)
   );
 }
 

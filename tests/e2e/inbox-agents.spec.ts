@@ -16,8 +16,8 @@
  *  3. Gemini's switch goes off in Settings → Agents; a later run never adds
  *     it back, connects Pi and Amp (installed since), and the next load asks
  *     about Pi alone ("Add the note to Pi?"); Not now writes nothing and Pi is
- *     not asked again. A run that connects only an agent without a note file
- *     (Cursor) opens no dialog.
+ *     not asked again. A run that connects only Cursor (its rules live in the app)
+ *     asks to copy its note by hand; nothing is written.
  *  4. Stress: every note agent at once, with long and non-Latin paths.
  *
  * PNGs land in /tmp/agent-note-dialog-built/ (PLANNOTATOR_AGENT_NOTE_SHOTS),
@@ -25,6 +25,7 @@
  * (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 import { markTourDecided } from '../helpers/tour-decided';
+import { INBOX_NOTE_START } from '../../packages/server/inbox-agent-notes';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -143,7 +144,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await expect(primary).toBeFocused();
     await shot(page, 'checklist-01-several', ['desktop', 'narrow']);
     await dialog.getByRole('button', { name: 'Show the note' }).click();
-    await expect(dialog.locator('.ib-anote-note pre')).toContainText('<!-- plannotator-inbox:start v1');
+    await expect(dialog.locator('.ib-anote-note pre')).toContainText(INBOX_NOTE_START);
     await shot(page, 'checklist-05-show-note');
     await dialog.getByRole('button', { name: 'Hide the note' }).click();
 
@@ -180,7 +181,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await shot(page, 'checklist-07-added', ['desktop', 'narrow']);
     await dialog.getByRole('button', { name: 'Done' }).click();
     await expect(dialog).toHaveCount(0);
-    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8')).toMatch(/^# My rules\n\nBe brief\.\n\n<!-- plannotator-inbox:start v1 /);
+    expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8').startsWith(`# My rules\n\nBe brief.\n\n${INBOX_NOTE_START}\n`)).toBe(true);
     expect(readFileSync(join(fake.home, '.gemini', 'GEMINI.md'), 'utf8')).toContain('## Plannotator Inbox');
     // Claude Code was unticked: no file, and it is answered (asked once).
     expect(existsSync(join(fake.home, '.claude', 'rules', 'plannotator-inbox.md'))).toBe(false);
@@ -242,7 +243,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await page.reload();
     await expectNoDialog(page);
 
-    // Cursor's global User Rules have no supported file path: offer manual copy without reporting installation.
+    // Cursor keeps its rules in the app (Customize → Rules): its note is offered to copy by hand, never written or reported added.
     mkdirSync(join(fake.home, '.cursor'), { recursive: true });
     const cursor = run(['--no-open']);
     expect(cursor.status, cursor.stderr).toBe(0);
@@ -250,13 +251,13 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await page.reload();
     const cursorDialog = dialogOf(page);
     await expect(cursorDialog).toBeVisible({ timeout: 15_000 });
-    await expect(cursorDialog.getByRole('heading', { name: 'Add the note to Cursor?' })).toBeVisible();
+    await expect(cursorDialog.getByRole('heading', { name: 'Copy the note into Cursor?' })).toBeVisible();
     await expect(rowsOf(page).locator('.ib-anote-path')).toHaveCount(0);
-    await expect(cursorDialog.locator('[data-anote-primary]')).toHaveText('Show note to copy');
+    await expect(cursorDialog.locator('[data-anote-primary]')).toHaveText('Show the note to copy');
     await cursorDialog.locator('[data-anote-primary]').click();
-    await expect(cursorDialog.getByRole('heading', { name: 'Copy the note into Cursor Settings → Rules' })).toBeVisible();
-    await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText('Copy manually');
-    await expect(cursorDialog.locator('.ib-anote-doneline')).toContainText('Plannotator cannot detect, update or remove a copied rule.');
+    await expect(cursorDialog.getByRole('heading', { name: 'Copy the note into Cursor', exact: true })).toBeVisible();
+    await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText('Copy by hand');
+    await expect(cursorDialog.locator('.ib-anote-doneline')).toContainText("Plannotator can't see, update or remove that copy.");
     await expect(cursorDialog.locator('.ib-anote-note pre')).toContainText('## Plannotator Inbox');
     await expect(cursorDialog.locator('.ib-anote-note pre')).not.toContainText('plannotator-inbox:start');
     expect(existsSync(join(fake.home, '.cursor', 'rules'))).toBe(false);
@@ -268,10 +269,10 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await page.goto(`${url}#settings/agents`);
     const cursorSettings = page.locator('[data-agent="cursor"]');
     const cursorNoteRow = cursorSettings.locator('.ib-agrow').filter({ hasText: 'Note in its instructions' });
-    await expect(cursorNoteRow).toContainText('copy into Settings → Rules');
+    await expect(cursorNoteRow).toContainText('Customize → Rules in Cursor · copy by hand');
     await expect(cursorNoteRow.getByRole('switch')).toHaveCount(0);
     await cursorSettings.getByRole('button', { name: 'Show note' }).click();
-    await expect(cursorSettings.locator('.ib-agnote')).toContainText('Plannotator cannot detect, update or remove a copied rule.');
+    await expect(cursorSettings.locator('.ib-agnote')).toContainText("Plannotator can't see, update or remove that copy.");
     await expect(cursorSettings.locator('.ib-agnote pre')).toContainText('## Plannotator Inbox');
     await expect(cursorSettings.locator('.ib-agnote pre')).not.toContainText('plannotator-inbox:start');
   } finally {

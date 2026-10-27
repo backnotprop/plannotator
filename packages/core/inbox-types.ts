@@ -482,6 +482,15 @@ export interface InboxMessage {
    */
   started_by_person?: true;
   /**
+   * On the root of a thread the person started with compose's Board chip on
+   * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
+   * agent to track the work on the Board. The body stays as typed; what the
+   * agent receives for this message (the delivered turn, wait_for_reply,
+   * read_thread) carries `inboxBoardRequestBlock` after it. Absent on every
+   * other message.
+   */
+  board_request?: true;
+  /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
    * it in compose; otherwise the first reply from a session that may name it
@@ -1309,6 +1318,14 @@ export interface InboxHealth {
    * Inbox tabs of one browser origin share one stream (packages/inbox/sharedEvents.ts).
    */
   event_streams?: number;
+  /**
+   * This Inbox honours the peek mark on a read_thread list
+   * (`INBOX_PEEK_META_KEY`): no project made for a folder it does not know,
+   * the rows not counted as read (additive). A connection reads the session's
+   * threads only from an Inbox that says so; an older one would make a
+   * project for every folder that compacts or resumes.
+   */
+  peek?: true;
 }
 
 /** What an Inbox window reports about its browser's notification permission for its own origin. */
@@ -1751,10 +1768,27 @@ export type InboxToolCostHost = "pi" | "opencode";
  * arguments: measured on Pi with the cost test and the Board on, 10,171 →
  * 10,303 bytes (+132; about +35 tokens, so the rounded, high token figure
  * stands).
+ * The reply_to check (INBOX_REPLY_TO_CHECK, the misfiled-thread AAR,
+ * 2026-10-27) added one sentence to the agent tool's `reply_to`: measured on
+ * Pi with the cost test, 8,841 → 8,964 bytes (+123; about +30 tokens, so the
+ * rounded token figure stands). With the Board on 10,294 (10,171 + 123,
+ * estimated).
+ * Then the rules agents must get with no setup (the owner, 2026-10-27): the
+ * wake note's "reply_to set to that reply id, never an id from memory",
+ * read_thread's and search's leads (listing every thread, older messages),
+ * `asked_by` and `include_resolved` described, and the Recommended: line in
+ * `body`: measured on Pi, 9,227 bytes (+263, about +70 tokens). With the
+ * Board on 10,557 (10,294 + 263, estimated).
+ * Then the chat-or-Inbox rule in the lead (the owner, 2026-10-27), with the
+ * wake note and get_guide_brief's lead shortened to fit: measured on Pi,
+ * 9,283 bytes (+56); its one wording ("when the person writes in the chat",
+ * "with a blocking question tool (AskUserQuestion or similar)"): 9,298 bytes
+ * (+15). With the Board on 10,760 (the Board title rule's 10,303 + this
+ * branch's 457, estimated).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 8841, tokens: 2500 };
+const INBOX_TOOL_COST_NOW = { bytes: 9298, tokens: 2600 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 10303, tokens: 2900 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 10760, tokens: 3000 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
@@ -1884,6 +1918,8 @@ export interface InboxDraft {
    * any other draft.
    */
   card?: { id: string; title: string };
+  /** Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board. */
+  board_request?: true;
 }
 
 /** A draft's chip: its chosen session is live, has ended, or none was chosen. */

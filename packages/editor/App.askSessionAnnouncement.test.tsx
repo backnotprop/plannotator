@@ -14,6 +14,7 @@ const originalMatchMedia = hasDom ? window.matchMedia : undefined;
 
 const ASK_KEY = "plannotator-announce-ask-session-seen";
 const TERMINAL_TOOLS_KEY = "plannotator-announce-tui-herdr-seen";
+const INBOX_KEY = "plannotator-announce-inbox-seen";
 const LOOK_AND_FEEL_KEY = "plannotator-plan-look-choice-resolved";
 const PERMISSION_MODE_KEY = "plannotator-permission-mode-configured";
 const DIALOG = "[data-ask-session-announcement-dialog]";
@@ -159,6 +160,7 @@ function seedEarlierChainSeen(): void {
   memory.set(LOOK_AND_FEEL_KEY, "true");
   memory.set(PERMISSION_MODE_KEY, "true");
   memory.set(TERMINAL_TOOLS_KEY, "1");
+  memory.set(INBOX_KEY, "1");
 }
 
 describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
@@ -246,6 +248,8 @@ describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
   test("follows the terminal-tools announcement on the next load, never the same one", async () => {
     memory.set(LOOK_AND_FEEL_KEY, "true");
     memory.set(PERMISSION_MODE_KEY, "true");
+    // The Inbox announcement (between the two) is already seen here.
+    memory.set(INBOX_KEY, "1");
     await mountApp({ origin: "claude-code", ai: "bridge" });
 
     // The terminal-tools announcement owns this load.
@@ -266,6 +270,7 @@ describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
 
   test("defers behind the look-and-feel chooser without spending the announcement", async () => {
     memory.set(TERMINAL_TOOLS_KEY, "1");
+    memory.set(INBOX_KEY, "1");
     memory.set(PERMISSION_MODE_KEY, "true");
     await mountApp({ origin: "claude-code", ai: "bridge" });
 
@@ -277,6 +282,7 @@ describe.if(hasDom)("Ask this session announcement in the plan editor", () => {
   test("defers behind Claude Code's permission-mode setup without spending the announcement", async () => {
     memory.set(LOOK_AND_FEEL_KEY, "true");
     memory.set(TERMINAL_TOOLS_KEY, "1");
+    memory.set(INBOX_KEY, "1");
     await mountApp({ origin: "claude-code", ai: "bridge" });
 
     // The setup flow's heading (a structural landmark, not copy under test).

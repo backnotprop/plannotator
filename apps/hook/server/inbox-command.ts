@@ -324,16 +324,17 @@ async function writeNotes(dataDir: string, list: string): Promise<number> {
   const added: InboxNoteAgentId[] = [];
   for (const id of ids as InboxNoteAgentId[]) {
     const label = INBOX_AGENT_LABELS[id];
-    if (id === "cursor") {
-      process.stdout.write(`${INBOX_NOTE_BODY}\n\n`);
-      process.stderr.write("Cursor User Rules are managed in Cursor Settings → Rules. Copy the block above there; Plannotator cannot detect, update or remove a copied rule.\n");
-      added.push(id);
-      continue;
-    }
-    // Never a file for an agent that is not on this computer.
+    // Never a note, written or to copy, for an agent that is not on this computer.
     if (!agentSpec(id).detect(environment)) {
       ok = false;
       process.stderr.write(`${label}: not added (${label} was not found on this computer).\n`);
+      continue;
+    }
+    if (id === "cursor") {
+      // Cursor keeps its rules in the app: nothing is written; the note (without the markers) goes to stdout to copy.
+      process.stdout.write(`${INBOX_NOTE_BODY}\n\n`);
+      process.stderr.write("Cursor: nothing written. Cursor keeps its rules in the app: copy the note above into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.\n");
+      added.push(id);
       continue;
     }
     const change = addInboxNote(id, dataDir, environment);
@@ -358,7 +359,7 @@ async function writeNotes(dataDir: string, list: string): Promise<number> {
   }
   // The window never asks about an agent whose note is there now; the others are still asked, once each.
   await markNotesAsked(added, { dataDir, selfCommand: selfCommand(), environment });
-  if (ok && added.some((id) => id !== "cursor")) process.stderr.write("Managed notes are read from each agent's next session. Remove them in the Inbox's Settings or with plannotator uninstall.\n");
+  if (ok && added.some((id) => id !== "cursor")) process.stderr.write("Each agent reads it from its next session. Remove it in the Inbox's Settings or with plannotator uninstall.\n");
   return ok ? 0 : 1;
 }
 

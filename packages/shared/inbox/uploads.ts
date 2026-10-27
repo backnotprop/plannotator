@@ -43,6 +43,7 @@ import { join } from "node:path";
 import {
   inboxAttachmentId,
   inboxAttachmentNameRefusal,
+  inboxBoardRequestBlock,
   inboxId,
   isInboxId,
   THREAD_NAME_BIDI,
@@ -64,12 +65,21 @@ export function inboxAttachedLines(message: { attachments?: readonly InboxAttach
   return (message.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`).join("\n");
 }
 
-/** The words an agent reads for a person's message: its body, then `inboxAttachedLines`. */
-export function inboxBodyForAgent(message: { body: string; attachments?: readonly InboxAttachment[] | null }): string {
+/**
+ * The words an agent reads for a person's message: its body, then
+ * `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
+ * the Board request (`inboxBoardRequestBlock`). The stored body never holds it.
+ */
+export function inboxBodyForAgent(
+  message: { body: string; thread_id?: string; attachments?: readonly InboxAttachment[] | null; board_request?: true },
+  options: { boardRequest?: boolean } = {},
+): string {
   const attached = inboxAttachedLines(message);
-  if (!attached) return message.body;
   // A reply of pasted files alone may have no words.
-  return message.body.trim() ? `${message.body}\n\n${attached}` : attached;
+  let words = !attached ? message.body : message.body.trim() ? `${message.body}\n\n${attached}` : attached;
+  // `boardRequest: false`: a JSON field that keeps the person's words (the block is in the text beside it).
+  if (options.boardRequest !== false && message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
+  return words;
 }
 const PENDING_DIR = "pending";
 /** The most one uploaded file may hold (decision 1a: under the Inbox's 128 MiB request bound). */

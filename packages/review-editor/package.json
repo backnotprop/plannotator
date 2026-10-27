@@ -21,7 +21,7 @@
     "@plannotator/ui": "workspace:*",
     "lucide-react": "^1.59.0",
     "marked": "^17.0.6",
-    "motion": "^12.38.0",
+    "motion": "^14.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.1.18",

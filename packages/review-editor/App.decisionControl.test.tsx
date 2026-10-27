@@ -64,6 +64,7 @@ const memoryBackend: StorageBackend = {
 function seedFirstRunSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
+  memory.set("plannotator-announce-inbox-seen", "1");
   memory.set("plannotator-guide-intro-seen", "2");
   memory.set("plannotator-guide-hint-acked", "true");
   memory.set("plannotator-edit-mode-announcement-seen", "3");
@@ -671,6 +672,61 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(document.querySelector(DIALOG)).toBeNull();
     expect(memory.get("plannotator-announce-tui-herdr-seen")).toBe("1");
     expect(submissions).toHaveLength(0);
+  });
+
+  test("the Inbox announcement shows once, links to the Inbox page, and Mod+Enter cannot post behind it", async () => {
+    const DIALOG = "[data-inbox-announcement-dialog]";
+    const isOpen = () => document.querySelector(DIALOG) !== null;
+    const seed = () => {
+      seedFirstRunSeen();
+      memory.set("plannotator-token-hover-announcement-seen", "1");
+      memory.delete("plannotator-announce-inbox-seen");
+    };
+    await mount(isOpen, seed);
+    expect(isOpen()).toBe(true);
+
+    const link = document.querySelector<HTMLAnchorElement>(`${DIALOG} a[data-inbox-announcement-learn-more]`);
+    expect(link?.getAttribute("href")).toBe("https://plannotator.ai/inbox");
+    expect(link?.getAttribute("target")).toBe("_blank");
+
+    const close = document.querySelector<HTMLButtonElement>(`${DIALOG} [data-inbox-announcement-close]`);
+    if (!close) throw new Error("Close action did not render");
+    await act(async () => {
+      close.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
+    });
+    await settle();
+    expect(submissions).toHaveLength(0);
+
+    await act(async () => close.click());
+    await settle();
+    expect(isOpen()).toBe(false);
+    expect(memory.get("plannotator-announce-inbox-seen")).toBe("1");
+    expect(submissions).toHaveLength(0);
+
+    // Seen: the next load does not show it again.
+    await act(async () => root?.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+    await mount(() => document.body.textContent?.includes("Approve"), () => {});
+    expect(isOpen()).toBe(false);
+  });
+
+  test("the Inbox announcement never shows in the VS Code webview", async () => {
+    const target = window as { __PLANNOTATOR_VSCODE?: unknown };
+    target.__PLANNOTATOR_VSCODE = true;
+    try {
+      await mount(() => document.body.textContent?.includes("Approve"), () => {
+        seedFirstRunSeen();
+        memory.set("plannotator-token-hover-announcement-seen", "1");
+        memory.delete("plannotator-announce-inbox-seen");
+      });
+      for (let attempt = 0; attempt < 5; attempt += 1) await settle();
+      expect(document.querySelector("[data-inbox-announcement-dialog]") !== null).toBe(false);
+      expect(memory.has("plannotator-announce-inbox-seen")).toBe(false);
+    } finally {
+      delete target.__PLANNOTATOR_VSCODE;
+    }
   });
 
   test("the Ask this session announcement takes the last turn, and Mod+Enter cannot post behind it", async () => {

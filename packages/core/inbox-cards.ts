@@ -78,6 +78,28 @@ export function inboxCardTitleHint(title: string): string | null {
   return `The title is ${[...title.trim()].length} characters. A title is 2–5 words naming the work ("Pi update fix"), never a sentence; where it stands goes in \`say\`. Shorten it with op say and \`title\`.`;
 }
 
+/** The markers around the Board request an agent receives (approval "inbox-compose-board-chip"), each on its own line. */
+export const INBOX_BOARD_REQUEST_OPEN = "<plannotator-board-request>";
+export const INBOX_BOARD_REQUEST_CLOSE = "</plannotator-board-request>";
+
+/**
+ * What an agent receives after the words of a message the person sent with
+ * compose's Board chip on: the agent makes the card or cards itself, for
+ * what was asked (owner, 2026-10-27: "create board card(s) depending on the
+ * user ask"), linked to the thread, and keeps them current. Any session may
+ * read it again (read_thread after compaction, a session the thread moved
+ * to), so it makes cards only while none links the thread (review of #2249).
+ * "Your Inbox card tool" fits every host: plannotator_inbox's card action, or
+ * Codex's `card`; the CLI covers a session without either.
+ */
+export function inboxBoardRequestBlock(threadId: string): string {
+  return [
+    INBOX_BOARD_REQUEST_OPEN,
+    `The person turned on Board tracking for this thread (thread_id ${threadId}). If no Board card links it yet (card op list, asked_by anyone, shows them), create card(s) for the work they asked for and link each to it; if one does, keep that one current instead of making another. How: your Inbox card tool, or \`plannotator card --help\`.`,
+    INBOX_BOARD_REQUEST_CLOSE,
+  ].join("\n");
+}
+
 /** The longest one-line `say` or `you`, in characters. */
 export const INBOX_CARD_LINE_MAX = 280;
 /** The longest drop reason, in characters. */
