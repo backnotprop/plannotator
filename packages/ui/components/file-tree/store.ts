@@ -42,7 +42,7 @@ export interface FileTreeBadge {
   /** Lines added and deleted: drawn `+N -N`; folders show the sums of their files. */
   additions?: number;
   deletions?: number;
-  /** A count (comments on the file), drawn as a small pill; folders show the sum. */
+  /** A count (comments on the file), drawn as a small pill on the file's row; folders show none. */
   count?: number;
   /** A small round marker before the count (a save state: `•`, `!`, `✓`). */
   marker?: { glyph: string; tone: FileTreeMarkerTone; label?: string };
@@ -75,7 +75,7 @@ function badgeValues(badges: ReadonlyMap<string, FileTreeBadge> | null): Map<str
   const out = new Map<string, FileTreeValues>();
   if (!badges) return out;
   for (const [path, b] of badges) {
-    out.set(path, { mark: b.rollup ?? !!b.letter, additions: b.additions, deletions: b.deletions, count: b.count });
+    out.set(path, { mark: b.rollup ?? !!b.letter, additions: b.additions, deletions: b.deletions });
   }
   return out;
 }

@@ -31,7 +31,7 @@ function refCompare(a: string, b: string): number {
 const refName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 const refParent = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : null);
 
-type Values = { mark?: boolean; additions?: number; deletions?: number; count?: number };
+type Values = { mark?: boolean; additions?: number; deletions?: number };
 
 class Reference {
   files = new Set<string>();
@@ -91,12 +91,11 @@ class Reference {
   }
 
   totals(k: string, nodes: Set<string>) {
-    const t = { additions: 0, deletions: 0, count: 0, marked: 0 };
+    const t = { additions: 0, deletions: 0, marked: 0 };
     for (const [m, v] of this.values) {
       if (!nodes.has(m) || (m !== k && !m.startsWith(`${k}/`))) continue;
       t.additions += v.additions ?? 0;
       t.deletions += v.deletions ?? 0;
-      t.count += v.count ?? 0;
       t.marked += v.mark ? 1 : 0;
     }
     return t;
@@ -302,7 +301,7 @@ const OP: fc.Arbitrary<Op> = fc.oneof(
   {
     weight: 2,
     arbitrary: fc
-      .array(fc.tuple(TARGET, fc.record({ mark: fc.boolean(), additions: fc.nat(50), deletions: fc.nat(50), count: fc.nat(5) })), { maxLength: 5 })
+      .array(fc.tuple(TARGET, fc.record({ mark: fc.boolean(), additions: fc.nat(50), deletions: fc.nat(50) })), { maxLength: 5 })
       .map((entries) => ({ t: 'values' as const, vs: new Map(entries) })),
   },
   { weight: 2, arbitrary: QUERY.map((tokens) => ({ t: 'filter' as const, tokens })) },

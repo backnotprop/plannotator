@@ -40,10 +40,10 @@
  * total.
  *
  * Roll-ups: the host attaches values to paths (a change mark, lines added
- * and deleted, a comment count); every node keeps their sums over its subtree
- * (hidden nodes included), updated by delta on add and remove, so a folder's
- * "+12 -3", its comment count and "this collapsed folder holds changes" are
- * one read in render, never a walk.
+ * and deleted); every node keeps their sums over its subtree (hidden nodes
+ * included), updated by delta on add and remove, so a folder's "+12 -3" and
+ * "this collapsed folder holds changes" are one read in render, never a walk.
+ * A folder shows no count of its files (the owner's decision, 2026-10-27).
  *
  * Building can run in slices (`build()` is a generator; the constructor runs it
  * to the end), so a host can keep every task at load short.
@@ -71,7 +71,6 @@ export interface FileTreeValues {
   mark?: boolean;
   additions?: number;
   deletions?: number;
-  count?: number;
 }
 
 function normalizeValues(values: ReadonlyMap<string, FileTreeValues>): Map<string, FileTreeValues> {
@@ -168,7 +167,6 @@ export class FileTreeModel {
   private marks = new Int32Array(0);
   private sumAdd = new Int32Array(0);
   private sumDel = new Int32Array(0);
-  private sumCount = new Int32Array(0);
   private pos = new Int32Array(0);
   private kids: number[][] = [];
   private freeIds: number[] = [];
@@ -226,7 +224,6 @@ export class FileTreeModel {
     this.marks = g32(this.marks);
     this.sumAdd = g32(this.sumAdd);
     this.sumDel = g32(this.sumDel);
-    this.sumCount = g32(this.sumCount);
     this.pos = g32(this.pos);
     const f = new Uint8Array(cap);
     f.set(this.flags);
@@ -256,7 +253,6 @@ export class FileTreeModel {
     this.marks[id] = 0;
     this.sumAdd[id] = 0;
     this.sumDel[id] = 0;
-    this.sumCount[id] = 0;
     this.pos[id] = -1;
     this.kids[id] = EMPTY as number[];
     this.pathCache[id] = undefined;
@@ -403,8 +399,8 @@ export class FileTreeModel {
   }
 
   /** The host's numbers summed over `id` and everything under it. */
-  totals(id: number): { additions: number; deletions: number; count: number; marked: number } {
-    return { additions: this.sumAdd[id], deletions: this.sumDel[id], count: this.sumCount[id], marked: this.marks[id] };
+  totals(id: number): { additions: number; deletions: number; marked: number } {
+    return { additions: this.sumAdd[id], deletions: this.sumDel[id], marked: this.marks[id] };
   }
 
   /** Shown, and every ancestor shown and expanded. */
@@ -639,13 +635,11 @@ export class FileTreeModel {
     const m = v.mark ? sign : 0;
     const a = (v.additions ?? 0) * sign;
     const d = (v.deletions ?? 0) * sign;
-    const c = (v.count ?? 0) * sign;
-    if (m === 0 && a === 0 && d === 0 && c === 0) return;
+    if (m === 0 && a === 0 && d === 0) return;
     while (n >= 0) {
       this.marks[n] += m;
       this.sumAdd[n] += a;
       this.sumDel[n] += d;
-      this.sumCount[n] += c;
       n = n === ROOT ? -1 : this.parent[n];
     }
   }
@@ -655,12 +649,10 @@ export class FileTreeModel {
     const m = this.marks[from];
     const a = this.sumAdd[from];
     const d = this.sumDel[from];
-    const c = this.sumCount[from];
     while (n >= 0) {
       this.marks[n] -= m;
       this.sumAdd[n] -= a;
       this.sumDel[n] -= d;
-      this.sumCount[n] -= c;
       n = n === ROOT ? -1 : this.parent[n];
     }
   }
@@ -858,7 +850,6 @@ export class FileTreeModel {
     this.marks = new Int32Array(0);
     this.sumAdd = new Int32Array(0);
     this.sumDel = new Int32Array(0);
-    this.sumCount = new Int32Array(0);
     this.pos = new Int32Array(0);
     this.grow(Math.max(64, capacity));
     this.kids = [EMPTY as number[]];

@@ -687,7 +687,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
               badge={badge}
               additions={additions}
               deletions={deletions}
-              count={totals ? totals.count : (badge?.count ?? 0)}
+              count={r.isDir ? 0 : (badge?.count ?? 0)}
               dot={r.isDir && !r.expanded && r.markedBelow && additions === 0 && deletions === 0}
               dotLabel={dotLabel}
               touch={touch}

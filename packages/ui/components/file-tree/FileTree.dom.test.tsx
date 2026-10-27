@@ -303,7 +303,7 @@ describe.if(hasDom)('FileTree', () => {
     expect(focusedPath()).toBe('big/d7/f5947.ts');
   });
 
-  test('folders show the sums of their files and the filter keeps matches fully open', async () => {
+  test('folders show the +/- sums of their files and the filter keeps matches fully open', async () => {
     const tree = new FileTreeStore(PATHS);
     await mount({ tree });
     await act(async () => {
@@ -314,7 +314,6 @@ describe.if(hasDom)('FileTree', () => {
     });
     expect(item('src')!.textContent).toContain('+7');
     expect(item('src')!.textContent).toContain('-1');
-    expect(item('src')!.textContent).toContain('3');
     await act(async () => { tree.setFilter('widget'); });
     expect(shown()).toEqual(['src', 'src/components', 'src/components/deep', 'src/components/deep/Widget.tsx']);
     await act(async () => { tree.setFilter(''); });
