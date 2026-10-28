@@ -80,13 +80,13 @@ The first time you open the Inbox after it connected your agents, a dialog asks 
 | Gemini CLI | `~/.gemini/GEMINI.md` (or your `context.fileName`) |
 | Pi | the one instructions file Pi reads in `~/.pi/agent/` |
 | OpenCode | `~/.config/opencode/AGENTS.md`, only when you already have it: creating it would stop OpenCode 1 reading your `~/.claude/CLAUDE.md` |
-| Cursor | Cursor User Rules in Settings → Rules (manual copy; no supported global rules file) |
+| Cursor | Customize → Rules in the Cursor app (you copy it by hand; Cursor has no global rules file) |
 
-Managed notes sit between two marker lines at the end of the file. Plannotator never overwrites a note you edited, and removing it removes only that section. `plannotator inbox --notes codex,gemini` adds managed notes from the terminal (the agent install prompt runs this only after you say yes). For Cursor, `plannotator inbox --notes cursor` prints the note to copy into Cursor Settings → Rules. Plannotator cannot detect whether it was pasted, update it or remove it; a copied Cursor rule is never shown as installed. `plannotator inbox --help` lists exact files and manual steps.
+Managed notes sit between two marker lines at the end of the file. Plannotator never overwrites a note you edited, and removing it removes only that section. `plannotator inbox --notes codex,gemini` adds managed notes from the terminal (the agent install prompt runs this only after you say yes). For Cursor, nothing is written: the dialog and Settings show the note (without the marker lines) to copy into Customize → Rules in Cursor, and `plannotator inbox --notes cursor` prints it. Plannotator cannot see whether it was pasted, update it or remove it; a copied Cursor rule is never shown as added. `plannotator inbox --help` lists exact files and manual steps.
 
 ### Settings → Agents
 
-Settings lists each agent found on this computer with up to three switches: **Reaches the Inbox** (its MCP entry, or the inbox tool for Claude Code, Pi and OpenCode), **Reminder at session start** (Claude Code, Pi and OpenCode: one line at the start of each session that has the inbox tool) and **Note in its instructions**. Cursor's note is a manual Show note workflow, not a managed switch; copy it into Settings → Rules. Plannotator cannot detect, update or remove that copy. Managed note changes apply to that agent's next session. An agent you turn off here is never connected again by `plannotator inbox`. Agents not found are folded under **Not found on this computer**, with the command or one-click link for each, editors included.
+Settings lists each agent found on this computer with up to three switches: **Reaches the Inbox** (its MCP entry, or the inbox tool for Claude Code, Pi and OpenCode), **Reminder at session start** (Claude Code, Pi and OpenCode: one line at the start of each session that has the inbox tool) and **Note in its instructions**. Cursor's note has no switch: **Show note** shows it to copy into Customize → Rules in Cursor. Plannotator cannot detect, update or remove that copy. Managed note changes apply to that agent's next session. An agent you turn off here is never connected again by `plannotator inbox`. Agents not found are folded under **Not found on this computer**, with the command or one-click link for each, editors included.
 
 ## What you see
 

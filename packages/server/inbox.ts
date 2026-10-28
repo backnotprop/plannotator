@@ -1199,7 +1199,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     if (typeof body.note === "boolean") {
       if (!(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "note: this agent has no Inbox note workflow.", { field: "note" });
-      if (agent === "cursor") throw new InboxError("validation_error", "Cursor rules must be copied manually from Settings → Agents.", { field: "note" });
+      if (agent === "cursor") throw new InboxError("validation_error", "note: Cursor's note is copied by hand into Customize → Rules; Show note in Settings → Agents.", { field: "note" });
       if (inboxNotesDisabled(agentEnvironment.env) && body.note) throw new InboxError("notes_disabled", "PLANNOTATOR_INBOX_NOTES=0 is set: notes are off.");
       // Adding one needs the agent here, as the note dialog and --notes ask; switching one off never does.
       if (body.note && !agentSpec(agent).detect(agentEnvironment)) {
@@ -1225,10 +1225,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const isNoteList = (value: unknown) => Array.isArray(value) && value.every((id) => typeof id === "string" && (INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id));
     const add = body.add;
     if (!isNoteList(add)) {
-      throw new InboxError("validation_error", "add: a list of agents (claude-code, codex, gemini, pi, opencode).", { field: "add" });
+      throw new InboxError("validation_error", "add: a list of agents (claude-code, codex, gemini, pi, opencode, cursor).", { field: "add" });
     }
     if (body.asked !== undefined && !isNoteList(body.asked)) {
-      throw new InboxError("validation_error", "asked: a list of agents (claude-code, codex, gemini, pi, opencode).", { field: "asked" });
+      throw new InboxError("validation_error", "asked: a list of agents (claude-code, codex, gemini, pi, opencode, cursor).", { field: "asked" });
     }
     if (body.seen !== undefined && typeof body.seen !== "boolean") throw new InboxError("validation_error", "seen: a boolean.", { field: "seen" });
     const adding = [...new Set(add as InboxNoteAgentId[])];
@@ -1237,12 +1237,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Read before adding: an agent whose note is added is no longer a candidate.
     const shown = (body.asked as InboxNoteAgentId[] | undefined) ?? (await noteCandidateIds(options));
     const results = adding.map((agent) =>
-      agent === "cursor"
-        ? ({ ok: true, agent, action: "manual", path: null } as const)
-        // Never a file for an agent that is not on this computer.
-        : agentSpec(agent).detect(agentEnvironment)
-          ? addInboxNote(agent, dataDir, agentEnvironment)
-          : ({ ok: false, agent, reason: `${INBOX_AGENT_LABELS[agent]} was not found on this computer`, path: null } as const),
+      // Never a note, written or to copy, for an agent that is not on this computer.
+      !agentSpec(agent).detect(agentEnvironment)
+        ? ({ ok: false, agent, reason: `${INBOX_AGENT_LABELS[agent]} was not found on this computer`, path: null } as const)
+        : agent === "cursor"
+          ? // Cursor keeps its rules in the app: nothing is written, the window shows the note to copy.
+            ({ ok: true, agent, action: "manual", path: null } as const)
+          : addInboxNote(agent, dataDir, agentEnvironment),
     );
     const failed = new Set(results.filter((result) => !result.ok).map((result) => result.agent));
     await markNotesAsked([...new Set([...shown, ...adding])].filter((id) => !failed.has(id)), options);

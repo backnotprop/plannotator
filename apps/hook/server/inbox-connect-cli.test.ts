@@ -161,12 +161,20 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   mkdirSync(join(w.home, ".codex"), { recursive: true });
   writeFileSync(join(w.home, ".codex", "AGENTS.md"), "Mine.\n");
   mkdirSync(join(w.home, ".gemini"), { recursive: true });
+  // Cursor is not on this computer yet: refused like any agent not found, and nothing is printed to copy.
+  const missing = await cli(w, ["inbox", "--notes", "cursor"]);
+  expect(missing.code).toBe(1);
+  expect(missing.stdout).toBe("");
+  expect(missing.stderr).toContain("Cursor: not added (Cursor was not found on this computer).");
+  expect(existsSync(join(w.home, ".plannotator", "config.json"))).toBe(false);
+  // Found through its CLI on PATH (never run by --notes).
+  w.install("cursor-agent");
   const result = await cli(w, ["inbox", "--notes", "codex,gemini,cursor"]);
   expect(result.code).toBe(0);
   expect(result.stdout).toContain("## Plannotator Inbox");
   expect(result.stdout).not.toContain("plannotator-inbox:start");
-  expect(result.stderr).toContain("Cursor User Rules are managed in Cursor Settings → Rules");
-  expect(result.stderr).toContain("Plannotator cannot detect, update or remove a copied rule.");
+  expect(result.stderr).toContain("Cursor: nothing written. Cursor keeps its rules in the app: copy the note above into Customize → Rules in Cursor.");
+  expect(result.stderr).toContain("Plannotator can't see, update or remove that copy.");
   expect(result.stderr).toContain("Codex: Added a marked section to ~/.codex/AGENTS.md.");
   expect(result.stderr).toContain("Gemini CLI: Created ~/.gemini/GEMINI.md.");
   expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain("<!-- plannotator-inbox:start v3 ");

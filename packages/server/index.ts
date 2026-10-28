@@ -15,7 +15,8 @@
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { Origin } from "@plannotator/shared/agents";
-import { resolve } from "path";
+import { isAbsolute, resolve } from "path";
+import { statSync } from "node:fs";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
@@ -32,6 +33,7 @@ import {
 } from "./integrations";
 import {
   generateSlug,
+  resolveHistoryChain,
   resolveHistorySlug,
   savePlan,
   saveAnnotations,
@@ -117,6 +119,19 @@ export interface ServerOptions {
   mode?: "archive";
   /** Custom plan save path — used by archive mode to find saved plans */
   customPlanPath?: string | null;
+  /**
+   * A second folder whose history project (`history/{project}/`) this plan
+   * may continue: the agent session's root, which a shell `cd` does not move
+   * (#2197).Set by the Claude Code hosts only (the
+   * mod's `$.session.root()`, the classic hook's CLAUDE_PROJECT_DIR). A plan
+   * continues a chain the root's project holds when the current folder's has
+   * none; a new chain still starts under the current folder's project. Only
+   * the history project key (and the feedback archive, which names the same
+   * history version) follows it; plan file trust, linked docs, `/api/doc`
+   * and `projectRoot` keep the process's cwd. Ignored unless it is an
+   * existing absolute folder.
+   */
+  historyRoot?: string;
   /** The plan's file on disk as the harness reported it, trusted only when it holds `plan` */
   planFilePath?: string;
   /**
@@ -184,6 +199,24 @@ export interface ServerResult {
 }
 
 // --- Server Implementation ---
+
+/**
+ * The history projects a plan may belong to, in resolveHistoryChain's order:
+ * the current folder's project (where an existing chain is looked for first,
+ * and where a new chain starts, exactly as before #2197), then the session
+ * root's (a chain started there is continued after a shell cd). No usable
+ * root: the current folder alone.
+ */
+async function historyProjects(historyRoot: string | undefined): Promise<string[]> {
+  const cwdProject = (await detectProjectName()) ?? "_unknown";
+  if (!historyRoot || !isAbsolute(historyRoot) || resolve(historyRoot) === process.cwd()) return [cwdProject];
+  try {
+    if (!statSync(historyRoot).isDirectory()) return [cwdProject];
+  } catch {
+    return [cwdProject];
+  }
+  return [cwdProject, (await detectProjectName(historyRoot)) ?? "_unknown"];
+}
 
 /**
  * Start the Plannotator server
@@ -289,8 +322,7 @@ export async function startPlannotatorServer(
 
   if (mode !== "archive") {
     repoInfo = await getRepoInfo();
-    project = (await detectProjectName()) ?? "_unknown";
-    historySlug = resolveHistorySlug(project, slug);
+    ({ project, slug: historySlug } = resolveHistoryChain(await historyProjects(options.historyRoot), slug));
     const historyResult = saveToHistory(project, historySlug, plan);
     currentPlanPath = historyResult.path;
     previousPlan =

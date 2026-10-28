@@ -100,6 +100,41 @@ describe('plan review', () => {
     expect(stdin.plan).toBe(PLAN)
   })
 
+  // #2197: the CLI names the plan's history project from the session root,
+  // not from its cwd, which a shell cd moves between submits.
+  test("the session root rides the launch's stdin, read once per session", async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    let reads = 0
+    let root = '/work/workspace'
+    const mod = new PlannotatorMod(host, {
+      ...SESSION,
+      root: async () => {
+        reads += 1
+        return root
+      },
+    })
+
+    await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })
+    root = '/work/workspace/service-a'
+    decide(host, launches(host)[0]!, { surface: 'plan', decision: 'denied', message: 'No.', noop: false })
+    await host.tick()
+    await mod.onPlanCall({ tool_use_id: 't2', plan: `${PLAN}2. And more.\n` })
+
+    const roots = launches(host).map((call) => JSON.parse(host.files.get(`${launchDirOf(call)}/stdin`) ?? '{}').projectRoot)
+    expect(roots).toEqual(['/work/workspace', '/work/workspace'])
+    expect(reads).toBe(1)
+  })
+
+  test('without a session root the stdin names none, so the CLI keeps its cwd', async () => {
+    const host = fakeHost()
+    serveOnLaunch(host)
+    const mod = new PlannotatorMod(host, { ...SESSION, root: async () => '' })
+    await mod.onPlanCall({ tool_use_id: 't1', plan: PLAN })
+    const stdin = JSON.parse(host.files.get(`${launchDirOf(launches(host)[0]!)}/stdin`) ?? '{}')
+    expect('projectRoot' in stdin).toBe(false)
+  })
+
   test('the plan file wins over a stale inline plan (#1667)', async () => {
     const host = fakeHost()
     serveOnLaunch(host)

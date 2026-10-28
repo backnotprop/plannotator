@@ -288,6 +288,16 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
     expect(results()).toEqual(["codex:missing"]);
   });
 
+  test("Cursor's note is copied by hand: never refreshed, even when a record names a file holding an earlier block", () => {
+    const path = file(".cursor", "rules.md");
+    write(path, `${V1_BLOCK}\n`);
+    v1Records({ cursor: path });
+    expect(results()).toEqual([]);
+    expect(read(path)).toBe(`${V1_BLOCK}\n`);
+    expect(readInboxAgentNotes(dataDir).notes.cursor?.version).toBe(1);
+    expect(noteStatus("cursor", dataDir, e).state).toBe("manual");
+  });
+
   test("PLANNOTATOR_INBOX_NOTES=0: nothing refreshed", () => {
     const path = file(".codex", "AGENTS.md");
     write(path, `${V1_BLOCK}\n`);

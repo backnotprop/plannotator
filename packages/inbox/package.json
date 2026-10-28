@@ -19,7 +19,7 @@
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/review-editor": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "motion": "^12.38.0",
+    "motion": "^14.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "uqr": "^0.1.3"

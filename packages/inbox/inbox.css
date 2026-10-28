@@ -2774,6 +2774,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .pn-inbox .ib-anote-res svg.ib-ic { width: 15px; height: 15px; }
 .ib-anote-res.ib-anote-good { color: var(--success); }
 .ib-anote-res.ib-anote-bad { color: var(--warning); }
+.ib-anote-res.ib-anote-hand { color: var(--muted-foreground); }
 .ib-anote-fold { display: inline-flex; align-items: center; gap: 5px; margin-top: 14px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--muted-foreground); background: none; border: 0; padding: 0; cursor: pointer; }
 .ib-anote-fold:hover { color: var(--foreground); }
 .pn-inbox .ib-anote-fold svg.ib-ic { width: 13px; height: 13px; }

@@ -526,3 +526,21 @@ test("the connect run replaces Pi's MCP entry once the extension is there and it
   expect(JSON.parse(readFileSync(mcp, "utf8")).mcpServers["plannotator-inbox"]).toBeUndefined();
   expect(row(await get(s), "pi").reach).toMatchObject({ kind: "tool", on: true });
 });
+
+test("Cursor's note is copied by hand: the card answers it as shown to copy only when Cursor is here, and never writes a file; Settings has no switch for it", async () => {
+  const s = await start();
+  const missing = (await (await post(s, "/api/inbox/agents/notes", { add: ["cursor"] })).json()) as Model & { results: unknown[] };
+  expect(missing.results).toEqual([{ ok: false, agent: "cursor", reason: "Cursor was not found on this computer", path: null }]);
+  expect(existsSync(join(fake.home, ".cursor"))).toBe(false);
+  s.stop();
+  fake.install("cursor-agent");
+  const found = await start();
+  const answer = (await (await post(found, "/api/inbox/agents/notes", { add: ["cursor"] })).json()) as Model & { results: unknown[] };
+  expect(answer.results).toEqual([{ ok: true, agent: "cursor", action: "manual", path: null }]);
+  expect(existsSync(join(fake.home, ".cursor"))).toBe(false);
+  expect(existsSync(join(dataDir, "inbox", "agent-notes.json"))).toBe(false);
+  const note = row(answer, "cursor").note!;
+  expect(note).toMatchObject({ state: "manual", path: null, create: false });
+  expect(note.reason).toContain("Customize → Rules");
+  expect((await post(found, "/api/inbox/agents", { agent: "cursor", note: true })).status).toBe(422);
+});

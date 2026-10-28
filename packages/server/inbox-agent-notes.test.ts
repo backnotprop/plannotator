@@ -447,3 +447,12 @@ describe("review follow-ups", () => {
     expect(inboxNotesDisabled({})).toBe(false);
   });
 });
+
+test("Cursor keeps its rules in the app: its note is copied by hand, with no file, nothing written and no record", () => {
+  const status = noteStatus("cursor", dataDir, e);
+  expect(status).toMatchObject({ agent: "cursor", path: null, target: null, state: "manual", create: false, created: false, shared_with: [] });
+  expect(status.reason).toBe("Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy.");
+  expect(noteTarget("cursor", e).path).toBeNull();
+  expect(existsSync(file(".cursor"))).toBe(false);
+  expect(readInboxAgentNotes(dataDir).notes.cursor).toBeUndefined();
+});

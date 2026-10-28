@@ -19,7 +19,7 @@
  *    `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` (Pi reads only one); `AGENTS.md`
  *    created only when none does.
  *  - Gemini CLI: `~/.gemini/<context.fileName>`, default `GEMINI.md`.
- *  - Cursor: manual copy to Settings → Rules; Cursor documents no supported global rules file.
+ *  - Cursor: copied by hand into Customize → Rules in the app; Cursor documents no global rules file, so nothing is written.
  *
  * The block sits between markers at the END of the file. Exactly one start
  * before exactly one end: the block is ours; none: appended; anything else:
@@ -108,6 +108,9 @@ export const INBOX_NOTE_BODY = [
   "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
   'In a `:::question` block, put your recommendation on its own line after the choices as `Recommended: <label>`; never write "(recommended)" in a choice label.',
 ].join("\n");
+
+/** Cursor keeps its global rules in the app, so its note is copied by hand (the body only, never the markers). */
+export const CURSOR_NOTE_REASON = "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy.";
 
 export const INBOX_NOTE_BLOCK = `${INBOX_NOTE_START}\n${INBOX_NOTE_BODY}\n${INBOX_NOTE_END}`;
 
@@ -238,7 +241,7 @@ export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTa
   const exists = (path: string) => existsSync(path);
   switch (agent) {
     case "cursor":
-      return { path: null, create: false, reason: "Cursor User Rules are managed in Settings → Rules; Plannotator cannot install, update or remove a copied rule." };
+      return { path: null, create: false, reason: CURSOR_NOTE_REASON };
     case "claude-code":
       return { path: claudeRulesFile(e), create: !exists(claudeRulesFile(e)), reason: null };
     case "codex": {
@@ -533,6 +536,8 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
   const current = sha256(INBOX_NOTE_BLOCK);
   const byPath = new Map<string, InboxNoteAgentId[]>();
   for (const agent of INBOX_NOTE_AGENT_IDS) {
+    // Cursor's note is copied by hand into the app: never Plannotator's to rewrite, whatever a record says.
+    if (agent === "cursor") continue;
     const record = file.notes[agent];
     if (record) byPath.set(record.path, [...(byPath.get(record.path) ?? []), agent]);
   }

@@ -264,6 +264,15 @@ export const INBOX_TOOL_WAKE_NOTE =
 export const INBOX_TOOL_HELP_NOTE = "Every field and the full question syntax: `plannotator inbox --help`."
 
 /**
+ * Fixed text, one line: the agent tool's description carries it while the
+ * Inbox lists no `card` action, the Board being off (approval "inbox-board",
+ * the owner's answer of 2026-10-27: agents get one short line saying the
+ * Board exists, and `plannotator card --help`). With the Board on, the card
+ * action's own line says it and this one is left out.
+ */
+export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlasts a reply) is off until the person turns it on; see `plannotator card --help`."
+
+/**
  * The agent tool's own line for an action whose Inbox lead is long (the
  * description must stay under Claude Code's 2,048 characters, and every Pi and
  * OpenCode request carries it).
@@ -401,6 +410,8 @@ export function inboxAgentTool(
     ...tools.map((tool) => `- ${tool.name}: ${INBOX_AGENT_ACTION_LEADS[tool.name] ?? leadOf(tool.description)}`),
     ...(options.wakes === false ? [] : ['', INBOX_TOOL_WAKE_NOTE]),
     '',
+    // The Board off: no card action, one line that it exists (nothing changes while it is on).
+    ...(tools.some((tool) => tool.name === 'card') ? [] : [INBOX_TOOL_BOARD_OFF_NOTE]),
     INBOX_TOOL_HELP_NOTE,
   ].join('\n')
   const properties: Record<string, Record<string, unknown>> = {
