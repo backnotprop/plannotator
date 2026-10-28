@@ -9,6 +9,9 @@ import { describe, expect, test } from "bun:test";
 import {
   checkInboxActionResult,
   composeInboxActionsReply,
+  composeInboxActionsSection,
+  withInboxActionsSection,
+  withoutInboxActionsSection,
   inboxActionsStillOpenLine,
   inboxActionKey,
   INBOX_ACTION_EXAMPLE,
@@ -18,7 +21,7 @@ import {
 } from "./inbox-actions";
 import { findQuestionBlocks, indexQuestionBlocks, parseQuestionBlock, isQuestionDirectiveKind } from "./question-block";
 import { composeInboxReplyBody, composeInboxSetAsideBody, inboxQuestionState, parseInboxQuestionBlocks, parseInboxSupersedeRef, summarizeInboxQuestions } from "./inbox-questions";
-import { readInboxQuestionKind, type InboxQuestion, type InboxQuestionRecord } from "./inbox-types";
+import { inboxActionInDraft, inboxHasUnsent, readInboxQuestionKind, type InboxQuestion, type InboxQuestionRecord } from "./inbox-types";
 
 const BODY = [
   "The deploy is ready.",
@@ -218,6 +221,110 @@ describe("what the agent gets", () => {
 
   test("Mark read's note lists action items as A1 after the questions", () => {
     expect(composeInboxSetAsideBody([record({ position: 0 }), { ...record({ kind: "single", position: 0 }), prompt: "Ship on Friday?" }])).toContain("- Q1. Ship on Friday?\n- A1. Approve the production deploy on Vercel");
+  });
+});
+
+describe("in the person's reply (approval \"inbox-action-items-in-reply\")", () => {
+  const AT = "2026-10-21T15:12:00.000Z";
+  const wire = (r: InboxQuestionRecord, state: InboxQuestion["state"]) => ({ ...r, state, orphaned: false }) as unknown as InboxQuestion;
+
+  test("in the draft: a staged mark not sent; the agent's done only while the person's note waits; never a timed mark", () => {
+    const staged = record({ revision: 1, action_result: { outcome: "done", note: null, at: AT, by: "person", staged: true } });
+    expect(inboxActionInDraft(wire(staged, "picked"))).toBe(true);
+    expect(inboxActionInDraft(wire({ ...staged, sent_revision: 1 }, "sent"))).toBe(false);
+    expect(inboxActionInDraft(wire(record({ revision: 1, action_result: { outcome: "done", note: null, at: AT, by: "person" } }), "picked"))).toBe(false);
+    const seen = (note: string | null, sent = 0) =>
+      wire(record({ revision: 2, sent_revision: sent, action_result: { outcome: "done", note: null, at: AT, by: "agent", message_id: "m", person: { outcome: "done", note, at: AT } } }), "closed");
+    expect(inboxActionInDraft(seen("Rotated it too."))).toBe(true);
+    expect(inboxActionInDraft(seen(null))).toBe(false);
+    expect(inboxActionInDraft(seen("Rotated it too.", 2))).toBe(false);
+  });
+
+  test("a Done or Can't do it alone in the draft is unsent work (the row's Draft label, the New section)", () => {
+    const none = { reply_at: null, picks: 0, comments: 0 };
+    expect(inboxHasUnsent(none)).toBe(false);
+    expect(inboxHasUnsent({ ...none, done: 1 })).toBe(true);
+    expect(inboxHasUnsent({ ...none, cant: 1 })).toBe(true);
+    expect(inboxHasUnsent({ ...none, done: 0, cant: 0 })).toBe(false);
+  });
+
+  test("the row: a staged mark keeps the item's Stopped and Holds up, and counts as staged, not open", () => {
+    const summary = summarizeInboxQuestions([
+      wire(record({ stopped: "release 4.2", revision: 1, action_result: { outcome: "done", note: null, at: AT, by: "person", staged: true } }), "picked"),
+    ]);
+    expect(summary).toMatchObject({ open: 0, staged: 1, stopped: true });
+  });
+
+  test("one first line: the action sentence joins the answers' sentence, else opens the reply; the section goes last", () => {
+    const done = record({ revision: 1, action_result: { outcome: "done", note: null, at: AT, by: "person", staged: true } });
+    const section = composeInboxActionsSection({ groups: [{ message_id: "m1", reported: [done], all: [done] }], timeZone: "UTC" });
+    expect(withInboxActionsSection("Answered 1 question.\n\nGo ahead.\n\n## Answers to your questions\n\n### Q1. Ship?\nAnswer: Yes", section)).toBe(
+      "Answered 1 question, did 1 action item.\n\nGo ahead.\n\n## Answers to your questions\n\n### Q1. Ship?\nAnswer: Yes\n\n## Action items you asked for\n\n1 of 1 done.\n\n### A1. Approve the production deploy on Vercel\nDone, 3:12 PM.",
+    );
+    expect(withInboxActionsSection("Answered 1 question, skipped 1.\n\n## Answers to your questions", section).split("\n")[0]).toBe("Answered 1 question, skipped 1, did 1 action item.");
+    expect(withInboxActionsSection("Thanks.", section).startsWith("Did 1 action item.\n\nThanks.\n\n## Action items you asked for")).toBe(true);
+    expect(withInboxActionsSection("", section)).toBe(section);
+    expect(withInboxActionsSection("Thanks.", "")).toBe("Thanks.");
+  });
+
+  test("several messages: a sub-heading each; the agent's own done reads as seen with the person's note", () => {
+    const a = record({ revision: 1, action_result: { outcome: "done", note: null, at: AT, by: "person", staged: true } });
+    const b = record({
+      id: "msg_2/a-2",
+      message_id: "msg_2",
+      key: "a-2",
+      prompt: "Merge PR #12",
+      revision: 2,
+      action_result: { outcome: "done", note: null, at: "2026-10-21T15:14:00.000Z", by: "agent", message_id: "msg_3", person: { outcome: "done", note: "Squashed.\n\nKept the history.", at: AT } },
+    });
+    const body = composeInboxActionsSection({ groups: [{ message_id: "msg_1", reported: [a], all: [a] }, { message_id: "msg_2", reported: [b], all: [b] }], timeZone: "UTC" });
+    expect(body).toBe(
+      [
+        "Did 2 action items.",
+        "## Action items you asked for",
+        "### Your message msg_1",
+        "1 of 1 done.",
+        "#### A1. Approve the production deploy on Vercel\nDone, 3:12 PM.",
+        "### Your message msg_2",
+        "1 of 1 done.",
+        "#### A1. Merge PR #12\nYou saw it done, 3:14 PM.\nNote: Squashed.\nKept the history.",
+      ].join("\n\n"),
+    );
+  });
+
+  test("one group of another message than the replied-to one is labelled; a still-open item of another message is named with it", () => {
+    const a = record({ revision: 1, action_result: { outcome: "done", note: null, at: AT, by: "person", staged: true } });
+    const stillOpen = [
+      { kind: "action" as const, position: 0, prompt: "Sign in to npm", message_id: "msg_9" },
+      { kind: "action" as const, position: 1, prompt: "Merge", message_id: "msg_1" },
+    ];
+    const other = composeInboxActionsSection({ groups: [{ message_id: "msg_1", reported: [a], all: [a] }], stillOpen, replyTo: "msg_2", timeZone: "UTC" });
+    expect(other.split("\n\n").slice(1, 4)).toEqual(["## Action items you asked for", "### Your message msg_1", "1 of 1 done."]);
+    expect(other.endsWith("Still open: A1 (your message msg_9). Sign in to npm; A2 (your message msg_1). Merge — the person will do them in the Inbox; don't ask again.")).toBe(true);
+    // The replied-to message: no label, its items first and unqualified.
+    const own = composeInboxActionsSection({ groups: [{ message_id: "msg_1", reported: [a], all: [a] }], stillOpen, replyTo: "msg_1", timeZone: "UTC" });
+    expect(own).not.toContain("### Your message");
+    expect(own.endsWith("Still open: A2. Merge; A1 (your message msg_9). Sign in to npm — the person will do them in the Inbox; don't ask again.")).toBe(true);
+  });
+
+  test("a Can't do it the agent then saw done opens with the person's mark, not \"Did\"; it counts done in x of y", () => {
+    const seen = record({ revision: 2, action_result: { outcome: "done", note: null, at: AT, by: "agent", message_id: "msg_3", person: { outcome: "cant", note: "No access.", at: AT } } });
+    const body = composeInboxActionsSection({ groups: [{ message_id: "msg_1", reported: [seen], all: [seen] }], timeZone: "UTC" });
+    expect(body.split("\n\n").slice(0, 3)).toEqual(["Couldn't do 1 action item.", "## Action items you asked for", "1 of 1 done."]);
+    expect(body).toContain("You saw it done, 3:12 PM.\nTheir reason: No access.");
+  });
+
+  test("the window draws a sent reply without the agent-facing action sentence and section; everything else stays", () => {
+    const done = record({ revision: 1, action_result: { outcome: "done", note: "Approved.", at: AT, by: "person", staged: true } });
+    const section = composeInboxActionsSection({ groups: [{ message_id: "m1", reported: [done], all: [done] }], stillOpen: [{ kind: "action", position: 1, prompt: "Merge" }], timeZone: "UTC" });
+    const answered = "Answered 1 question.\n\nGo ahead.\n\n## Answers to your questions\n\n### Q1. Ship?\nAnswer: Yes";
+    expect(withoutInboxActionsSection(withInboxActionsSection(answered, section))).toBe(answered);
+    expect(withoutInboxActionsSection(withInboxActionsSection("Thanks.", section))).toBe("Thanks.");
+    expect(withoutInboxActionsSection(section)).toBe("");
+    // A legacy report sent on its own (the timed path) strips the same way.
+    expect(withoutInboxActionsSection(composeInboxActionsReply({ reported: [done], all: [done], timeZone: "UTC" }))).toBe("");
+    // Words that only mention the heading stay.
+    expect(withoutInboxActionsSection("Did you see the action items you asked for?")).toBe("Did you see the action items you asked for?");
   });
 });
 

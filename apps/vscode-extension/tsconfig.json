@@ -16,7 +16,8 @@
     "paths": {
       "vscode": ["./mocks/vscode.ts"],
       "@plannotator/core/*": ["../../packages/core/*"],
-      "@plannotator/shared/*": ["../../packages/shared/*"]
+      "@plannotator/shared/*": ["../../packages/shared/*"],
+      "@plannotator/acp-client/*": ["../../packages/acp-client/*"]
     }
   },
   "include": ["src/**/*.ts", "mocks/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],

@@ -11,6 +11,15 @@
  * a callback that shows the agent's own options; this module never answers
  * one by itself, except "cancelled" for a request still open when the turn is
  * cancelled, which ACP requires.
+ *
+ * An agent's own extension notifications (`_x.ai/*` from Grok Build) can carry
+ * secrets: Grok's `_x.ai/mcp/servers_updated` carries the person's MCP server
+ * env values, API keys included. The client hands a host only the method name
+ * (`onExtNotification`), never the params, and keeps no copy; extension
+ * requests answer "method not found".
+ *
+ * Shared by the VS Code extension's Guides and the Inbox's ACP runner
+ * (packages/server/inbox-acp-runner.ts).
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -36,7 +45,7 @@ import {
   type SessionConfigOption,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
-import { augmentedPath } from "../sources/runner";
+import { augmentedPath } from "./which";
 import { planSpawn } from "./spawn-plan";
 
 export interface AgentLaunch {
@@ -53,7 +62,36 @@ export interface AcpClientHandlers {
   requestPermission(request: RequestPermissionRequest, signal: AbortSignal): Promise<RequestPermissionResponse>;
   onStderr?(text: string): void;
   onExit?(info: { code: number | null; signal: NodeJS.Signals | null }): void;
+  /**
+   * An extension notification arrived (`_vendor/...`). Only its method name:
+   * the params never leave this module (they can carry secrets).
+   */
+  onExtNotification?(method: string): void;
 }
+
+/** How to start the agent's process beyond its launch. */
+export interface AcpStartOptions {
+  /** The environment the agent starts from (default: this process's). */
+  env?: Readonly<Record<string, string | undefined>>;
+  /** Append the usual program folders to PATH (default true; the Inbox passes its own PATH as it is). */
+  augmentPath?: boolean;
+  /**
+   * Give up on an agent that does not answer `initialize` in this long: its
+   * process group is stopped (SIGTERM, then SIGKILL) and `start` rejects.
+   * Default: no limit.
+   */
+  initializeTimeoutMs?: number;
+  /**
+   * Stop a process that is still starting: once aborted, its process group is
+   * stopped and `start` rejects. Aborted with the reason `"kill"`, the group
+   * gets SIGKILL at once (the caller is exiting); otherwise SIGTERM, then
+   * SIGKILL after a grace period.
+   */
+  signal?: AbortSignal;
+}
+
+/** `start` gave up: the agent did not answer `initialize` in time, or the caller stopped it. */
+export class AcpStartAbortedError extends Error {}
 
 export interface AcpClientInfo {
   name: string;
@@ -64,6 +102,76 @@ export interface AcpClientInfo {
 const STDERR_TAIL = 8 * 1024;
 /** How long a stopped agent gets to end before its whole process group is killed. */
 const KILL_GRACE_MS = 3000;
+
+/**
+ * Process groups sent SIGTERM whose SIGKILL is still waiting out the grace
+ * (the timer is unref'd, so it never fires once the program exits):
+ * `killPendingProcessGroups` kills them now, for a program about to exit.
+ */
+const pendingGroupKills = new Set<number>();
+
+/**
+ * Whether the agent's process group still has a member (POSIX: `kill(-pid, 0)`).
+ * An empty group's id is free: once its pid is reused by a new group leader (a
+ * detached spawn, a shell, the Inbox's own isolated git), a signal to it would
+ * reach an unrelated group, so a delayed signal is sent only while this holds.
+ * EPERM (a group of another user's) counts as not ours. Windows: no group
+ * probe; true.
+ */
+export function processGroupAlive(pid: number): boolean {
+  if (process.platform === "win32") return true;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** SIGTERM a group now, SIGKILL it after the grace (or at once through `killPendingProcessGroups`), if it still has a member then. */
+function stopProcessGroup(pid: number): ReturnType<typeof setTimeout> {
+  killProcessTree(pid, "SIGTERM");
+  pendingGroupKills.add(pid);
+  const timer = setTimeout(() => {
+    if (!pendingGroupKills.delete(pid)) return;
+    if (processGroupAlive(pid)) killProcessTree(pid, "SIGKILL");
+  }, KILL_GRACE_MS);
+  timer.unref?.();
+  return timer;
+}
+
+/**
+ * SIGKILL every agent process group still inside its grace and not yet empty:
+ * what a stopped, exited or crashed agent started (a dev server, a watcher)
+ * never outlives a program that exits within the grace.
+ */
+export function killPendingProcessGroups(): void {
+  for (const pid of pendingGroupKills) if (processGroupAlive(pid)) killProcessTree(pid, "SIGKILL");
+  pendingGroupKills.clear();
+}
+
+/** The agents running now (POSIX): an exit hook kills their groups when this program exits, an uncaught exception included. */
+const liveGroups = new Set<number>();
+let exitHookInstalled = false;
+
+/**
+ * Synchronous, for `process.on("exit")` (which runs on an uncaught exception
+ * too): SIGKILL every live agent's group and every group inside its grace.
+ */
+function killAgentGroupsOnExit(): void {
+  for (const pid of liveGroups) killProcessTree(pid, "SIGKILL");
+  liveGroups.clear();
+  killPendingProcessGroups();
+}
+
+function trackLiveGroup(pid: number): void {
+  if (process.platform === "win32") return;
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.on("exit", killAgentGroupsOnExit);
+  }
+  liveGroups.add(pid);
+}
 
 /**
  * What the client offers the agent: terminal sign-in, so it can list its login
@@ -171,6 +279,13 @@ export class AcpClient {
       releaseTerminal: async () => notOffered("terminal/release"),
       waitForTerminalExit: async () => notOffered("terminal/wait_for_exit"),
       killTerminal: async () => notOffered("terminal/kill"),
+      // The method name only: the params are dropped here, never stored or passed on.
+      extNotification: async (method: string) => {
+        this.handlers.onExtNotification?.(method);
+      },
+      extMethod: async (method: string) => {
+        throw RequestError.methodNotFound(method);
+      },
     };
     this.connection = new ClientSideConnection((_agent: Agent) => client, stream);
     child.stderr?.setEncoding("utf8");
@@ -178,9 +293,25 @@ export class AcpClient {
       this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL);
       this.handlers.onStderr?.(text);
     });
+    if (child.pid !== undefined) trackLiveGroup(child.pid);
     child.on("exit", (code, signal) => {
       this.exited = true;
       this.exitInfo = { code, signal };
+      const pid = child.pid;
+      if (pid !== undefined && process.platform !== "win32") {
+        liveGroups.delete(pid);
+        if (!this.stopped) {
+          // The agent exited or crashed by itself: what it started may still be in its group (a dev server,
+          // a watcher), which keeps the group's id while any member lives. An empty group gets no signal.
+          this.stopped = true;
+          if (processGroupAlive(pid)) this.killTimer = stopProcessGroup(pid);
+        } else if (!processGroupAlive(pid)) {
+          // Stopped (dispose) and the whole group is gone already: the delayed SIGKILL is not sent.
+          if (this.killTimer) clearTimeout(this.killTimer);
+          this.killTimer = null;
+          pendingGroupKills.delete(pid);
+        }
+      }
       for (const c of this.pendingPermissions) c.abort();
       this.handlers.onExit?.({ code, signal });
       for (const w of this.exitWaiters.splice(0)) w();
@@ -188,11 +319,12 @@ export class AcpClient {
   }
 
   /** Start the agent process and run `initialize`. */
-  static async start(launch: AgentLaunch, handlers: AcpClientHandlers, clientInfo: AcpClientInfo): Promise<AcpClient> {
+  static async start(launch: AgentLaunch, handlers: AcpClientHandlers, clientInfo: AcpClientInfo, options: AcpStartOptions = {}): Promise<AcpClient> {
     const plan = planSpawn(launch.command, launch.args);
+    const base = options.env ?? process.env;
     const child = spawn(plan.command, plan.args, {
       cwd: launch.cwd,
-      env: { ...process.env, PATH: augmentedPath(), ...plan.env, ...launch.env },
+      env: { ...base, PATH: options.augmentPath === false ? (base.PATH ?? "") : augmentedPath(base), ...plan.env, ...launch.env } as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
       // Its own process group, so Cancel can stop everything the agent started.
       detached: process.platform !== "win32",
@@ -204,23 +336,43 @@ export class AcpClient {
     });
     if (startError) throw new Error(`Could not start ${launch.command}: ${startError.message}`);
     const client = new AcpClient(child, handlers);
+    // An agent that hangs in `initialize` (a self-update, a sign-in waiting on a prompt) can still be stopped:
+    // by a time limit, or by the caller's signal.
+    const { signal, initializeTimeoutMs } = options;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let onAbort: (() => void) | null = null;
+    const gaveUp = new Promise<never>((_, reject) => {
+      onAbort = () => reject(new AcpStartAbortedError(`${launch.command} was stopped while it started.`));
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
+      if (initializeTimeoutMs !== undefined) {
+        timer = setTimeout(() => reject(new AcpStartAbortedError(`${launch.command} did not answer within ${Math.round(initializeTimeoutMs / 1000)} s of starting.`)), initializeTimeoutMs);
+      }
+    });
     try {
-      client.initializeResult = await client.raceExit(
-        client.connection.initialize({
-          protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: CLIENT_CAPABILITIES,
-          clientInfo,
-        }),
-        "initialize",
-      );
+      client.initializeResult = await Promise.race([
+        client.raceExit(
+          client.connection.initialize({
+            protocolVersion: PROTOCOL_VERSION,
+            clientCapabilities: CLIENT_CAPABILITIES,
+            clientInfo,
+          }),
+          "initialize",
+        ),
+        gaveUp,
+      ]);
     } catch (err) {
-      client.dispose();
+      if (signal?.aborted && signal.reason === "kill") client.kill();
+      else client.dispose();
       throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
     }
     const agentVersion = client.initializeResult.protocolVersion;
     if (agentVersion !== PROTOCOL_VERSION) {
       client.dispose();
-      throw new Error(`The agent speaks ACP protocol version ${String(agentVersion)}; this extension speaks version ${PROTOCOL_VERSION}. Update the adapter, then try again.`);
+      throw new Error(`The agent speaks ACP protocol version ${String(agentVersion)}; Plannotator speaks version ${PROTOCOL_VERSION}. Update the adapter, then try again.`);
     }
     return client;
   }
@@ -297,6 +449,22 @@ export class AcpClient {
     await this.raceExit(this.connection.setSessionMode({ sessionId, modeId }), "session/set_mode");
   }
 
+  /** The agent advertised `session/close` (`sessionCapabilities.close`). */
+  get canCloseSession(): boolean {
+    const caps = this.agentCapabilities as AgentCapabilities & { sessionCapabilities?: { close?: unknown } };
+    return !!caps.sessionCapabilities?.close;
+  }
+
+  /** `session/close`: the agent lets go of the session (only when advertised; a failure is ignored). */
+  async closeSession(sessionId: string): Promise<void> {
+    if (!this.canCloseSession || this.exited) return;
+    try {
+      await this.raceExit(this.connection.closeSession({ sessionId }), "session/close");
+    } catch {
+      // Closing is best effort: the session is still on disk.
+    }
+  }
+
   prompt(sessionId: string, text: string): Promise<PromptResponse> {
     return this.raceExit(this.connection.prompt({ sessionId, prompt: [{ type: "text", text }] }), "session/prompt");
   }
@@ -326,9 +494,7 @@ export class AcpClient {
       killProcessTree(pid, "SIGKILL");
       return;
     }
-    killProcessTree(pid, "SIGTERM");
-    this.killTimer = setTimeout(() => killProcessTree(pid, "SIGKILL"), KILL_GRACE_MS);
-    this.killTimer.unref?.();
+    this.killTimer = stopProcessGroup(pid);
   }
 
   /** Kill the agent and everything it started now (VS Code is shutting down). */
@@ -338,6 +504,7 @@ export class AcpClient {
     if (pid === undefined) return;
     this.stopped = true;
     if (this.killTimer) clearTimeout(this.killTimer);
+    pendingGroupKills.delete(pid);
     killProcessTree(pid, "SIGKILL");
   }
 

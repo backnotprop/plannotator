@@ -375,9 +375,8 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await page.mouse.move(canvas.x + canvas.width * 0.55, canvas.y + canvas.height * 0.6, { steps: 8 });
   await page.mouse.up();
   await shot('07-markup');
+  // Enter adds the drawing (with the suggestion's words in the box) to the reply at once.
   await page.keyboard.press('Enter');
-  await at('7-drawn-unsaved');
-  await page.locator('[data-attachment-pane] [data-image-comment-save]').click();
   await at('7-drawn');
   await shot('07-circled');
   await press('[data-tour-next]');

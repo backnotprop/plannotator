@@ -802,7 +802,38 @@ mkdir -p "$INSTALL_DIR"
 tmp_file=$(mktemp)
 curl -fsSL -o "$tmp_file" "$binary_url"
 
-expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+# Safe updates (step 1): `plannotator update`, Update now and auto-update run
+# this script after the running Plannotator downloaded it, and the .sha256 of
+# both binaries this OS may use, with its OWN connection (not this script's
+# curl, which on macOS still trusts the leaked eMudhra root keys). They arrive
+# as PLANNOTATOR_EXPECTED_SHA256="<asset>=<hex> [<asset>=<hex>]" (this machine's
+# CPU type, and the other one when it was available). A valid value for
+# ${binary_name} is the expected checksum, and the .sha256 is not fetched again.
+# A mismatch exits 113 before anything is replaced, after touching the marker
+# file the updater named in PLANNOTATOR_UPDATE_MISMATCH_FILE (the updater only
+# reports a mismatch when that marker exists). Without the variables (a
+# person running the script, an older Plannotator) nothing changes.
+pinned_checksum=""
+for _pin_pair in ${PLANNOTATOR_EXPECTED_SHA256:-}; do
+    case "$_pin_pair" in
+        "${binary_name}="*) pinned_checksum=$(printf '%s' "${_pin_pair#*=}" | tr 'ABCDEF' 'abcdef') ;;
+    esac
+done
+unset _pin_pair
+case "$pinned_checksum" in
+    *[!0123456789abcdef]*) pinned_checksum="" ;;
+esac
+[ "${#pinned_checksum}" -eq 64 ] || pinned_checksum=""
+if [ -n "$pinned_checksum" ]; then
+    expected_checksum="$pinned_checksum"
+else
+    if [ -n "${PLANNOTATOR_EXPECTED_SHA256:-}" ]; then
+        # Only our own bug can cause this (the value comes from the running
+        # Plannotator, never the network): check as before rather than block.
+        echo "Note: the update carried no checksum for ${binary_name}; checking the release's .sha256 instead."
+    fi
+    expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
     actual_checksum=$(shasum -a 256 "$tmp_file" | cut -d' ' -f1)
@@ -811,9 +842,21 @@ else
 fi
 
 if [ "$actual_checksum" != "$expected_checksum" ]; then
-    echo "Checksum verification failed!" >&2
     rm -f "$tmp_file"
+    if [ -n "$pinned_checksum" ]; then
+        echo "Stopped: the ${latest_tag} download doesn't match the checksum Plannotator fetched for it." >&2
+        echo "Nothing was changed; the Plannotator you have still works." >&2
+        echo "Something on the network may have changed the download. Try again later, or on another network." >&2
+        case "${PLANNOTATOR_UPDATE_MISMATCH_FILE:-}" in
+            /*/checksum-mismatch) : > "$PLANNOTATOR_UPDATE_MISMATCH_FILE" 2>/dev/null || true ;;
+        esac
+        exit 113
+    fi
+    echo "Checksum verification failed!" >&2
     exit 1
+fi
+if [ -n "$pinned_checksum" ]; then
+    echo "Checksum matches the one Plannotator fetched for ${latest_tag}."
 fi
 
 if [ "$verify_attestation" -eq 1 ]; then
@@ -1115,6 +1158,18 @@ if [ "$T3_HOOK_FLAG" -ne -1 ]; then
     fi
 fi
 
+# The sem archives' SHA-256 for SEM_VERSION, pinned here instead of read from
+# the release's checksums.txt, which would come over the same connection as
+# the archive. Bump them with SEM_VERSION (keep install.ps1 / install.cmd in step).
+sem_sha256_for_asset() {
+    case "$1" in
+        sem-darwin-arm64.tar.gz) echo "a98235ac9f8fae93364ddb7c681036fbe33af756db40e067331ef2091ecc8e6a" ;;
+        sem-linux-arm64.tar.gz)  echo "c0d4ccede55e166481358013c397f2772e4d76b72df45d567c45792b8033aec9" ;;
+        sem-linux-x86_64.tar.gz) echo "d3476497d8e5648ddb4aa6f82f75ad1a21d0155a5941744c744f464109928707" ;;
+        *)                       return 1 ;;
+    esac
+}
+
 sem_asset_for_platform() {
     case "$platform" in
         darwin-arm64) echo "sem-darwin-arm64.tar.gz" ;;
@@ -1147,7 +1202,6 @@ install_sem_sidecar() {
 
     tmp_sem_dir="$(mktemp -d)"
     sem_archive="${tmp_sem_dir}/${sem_asset}"
-    sem_checksums="${tmp_sem_dir}/checksums.txt"
     sem_base_url="https://github.com/${SEM_REPO}/releases/download/${SEM_VERSION}"
 
     # Bounded so a slow/hung download of this optional sidecar can't wedge an
@@ -1158,13 +1212,8 @@ install_sem_sidecar() {
         rm -rf "$tmp_sem_dir"
         return 0
     fi
-    if ! curl -fsSL --connect-timeout 10 --max-time 60 -o "$sem_checksums" "${sem_base_url}/checksums.txt"; then
-        echo "Skipping semantic diff sidecar install (checksum download failed)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
 
-    expected_sem_checksum="$(awk -v name="$sem_asset" '$2 == name { print $1 }' "$sem_checksums")"
+    expected_sem_checksum="$(sem_sha256_for_asset "$sem_asset" 2>/dev/null || true)"
     if [ -z "$expected_sem_checksum" ]; then
         echo "Skipping semantic diff sidecar install (checksum missing for ${sem_asset})"
         rm -rf "$tmp_sem_dir"

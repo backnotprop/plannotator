@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import * as vscode from "vscode";
-import { CLAUDE_CODE, OPENCODE, PI, resolveAgentLaunch, type AgentOptionsCache, type AgentStatus } from "../acp/agents";
+import { CLAUDE_CODE, OPENCODE, PI, resolveAgentLaunch, type AgentOptionsCache, type AgentStatus } from "@plannotator/acp-client/agents";
 import type { RepoInfo } from "../sources/git";
 import { agentRows, autoApproveChoice, pickAgentAndEffort, pullRequestChoice } from "./new-review";
 

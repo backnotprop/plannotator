@@ -299,13 +299,14 @@ function Install-SemSidecar {
     try {
         $semBaseUrl = "https://github.com/$semRepo/releases/download/$semVersion"
         $semArchive = Join-Path $tmpSemDir $semAsset
-        $semChecksums = Join-Path $tmpSemDir "checksums.txt"
         # Bounded so a slow/hung download of this optional sidecar can't wedge an
         # install where plannotator already landed; the catch below skips it.
         Invoke-WebRequest -Uri "$semBaseUrl/$semAsset" -OutFile $semArchive -UseBasicParsing -TimeoutSec 120
-        Invoke-WebRequest -Uri "$semBaseUrl/checksums.txt" -OutFile $semChecksums -UseBasicParsing -TimeoutSec 60
 
-        $expected = (Get-Content $semChecksums | Where-Object { $_ -match "\s$([regex]::Escape($semAsset))$" } | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+        # Pinned for $semVersion, not read from the release's checksums.txt
+        # (same connection as the archive). Keep in step with install.sh / install.cmd.
+        $semSha256 = @{ "sem-windows-x86_64.zip" = "2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06" }
+        $expected = $semSha256[$semAsset]
         if (-not $expected) {
             Write-Host "Skipping semantic diff sidecar install (checksum missing for $semAsset)"
             return

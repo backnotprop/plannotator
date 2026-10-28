@@ -321,8 +321,9 @@ function numbering(questions: readonly InboxQuestion[]): Map<string, number> {
 function actionResultWords(q: InboxQuestion): string | null {
   const result = q.action_result;
   if (q.kind !== "action" || !result) return null;
-  if (result.by === "agent") return "you saw it done";
-  const pending = q.state === "picked" ? " (not sent yet: the person can still undo it)" : "";
+  if (result.by === "agent") return result.person?.note && q.revision !== q.sent_revision ? "you saw it done (the person's note on it is in their reply draft, not sent yet)" : "you saw it done";
+  // In the person's reply draft (approval "inbox-action-items-in-reply"), or inside the timed path's Undo window.
+  const pending = q.state === "picked" ? (result.staged ? " (in the person's reply draft, not sent yet)" : " (not sent yet: the person can still undo it)") : "";
   if (result.outcome === "cant") return `can't do it: ${JSON.stringify(result.note ?? "")}${pending}`;
   return `done${result.note ? `, note: ${JSON.stringify(result.note)}` : ""}${pending}`;
 }
@@ -699,7 +700,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   } else {
     out.push(`Waiting on the person (${thread.open_questions.length}):`);
     for (const q of thread.open_questions) {
-      // An action item (key `a-…`): A1, A2…, "action item, open", or what the person marked inside its Undo window.
+      // An action item (key `a-…`): A1, A2…, "action item, open", or what the person marked and has not sent (in their reply draft, or inside its Undo window).
       const todo = q.key.startsWith("a-");
       const state = todo
         ? q.state === "picked"

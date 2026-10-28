@@ -11,13 +11,16 @@
  * extension. When an agent asks about one it is allowed once without a
  * prompt. They are matched by
  * their exact programmatic name or whole title, never a title that merely
- * mentions one (a shell command can).
+ * mentions one (a shell command can). The matching is shared with the
+ * Inbox's runner (packages/acp-client/permission-policy.ts).
  */
 
 import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";
+import { isOwnToolCall, ownToolAutoAllow, type OwnTools } from "@plannotator/acp-client/permission-policy";
 import { GUIDE_BUILDER_TOOL_NAMES } from "../core/adapter";
 
-const BUILDER_NAMES = new Set<string>([...(GUIDE_BUILDER_TOOL_NAMES as readonly string[]), "show_answer"]);
+/** The builder's tools on `plannotator-guide`, matched bare too (agents name them either way). */
+const BUILDER: OwnTools = { server: "plannotator-guide", names: new Set<string>([...(GUIDE_BUILDER_TOOL_NAMES as readonly string[]), "show_answer"]), bare: true };
 
 /**
  * Whether a tool call is one of the builder's own MCP tools: its programmatic
@@ -27,12 +30,7 @@ const BUILDER_NAMES = new Set<string>([...(GUIDE_BUILDER_TOOL_NAMES as readonly 
  * `plannotator-guide_guide_finish`, `plannotator-guide: guide_finish`).
  */
 export function isBuilderToolCall(toolCall: { name?: string | null; title?: string | null }): boolean {
-  for (const raw of [toolCall.name, toolCall.title]) {
-    if (typeof raw !== "string") continue;
-    const m = /^(?:(?:mcp__)?plannotator-guide(?:__|[._/]|: ?))?(guide_[a-z_]+|show_answer)$/.exec(raw.trim());
-    if (m && BUILDER_NAMES.has(m[1])) return true;
-  }
-  return false;
+  return isOwnToolCall(toolCall, BUILDER);
 }
 
 /**
@@ -41,8 +39,5 @@ export function isBuilderToolCall(toolCall: { name?: string | null; title?: stri
  * the user).
  */
 export function builderAutoAllow(request: RequestPermissionRequest): string | null {
-  const kind = request.toolCall.kind;
-  if (kind && kind !== "other") return null;
-  if (!isBuilderToolCall(request.toolCall)) return null;
-  return request.options.find((o) => o.kind === "allow_once")?.optionId ?? null;
+  return ownToolAutoAllow(request, BUILDER);
 }

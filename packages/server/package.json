@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.28.33",
+  "version": "0.28.35",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -27,6 +27,8 @@
     "./qr": "./qr.ts",
     "./sessions": "./sessions.ts",
     "./auto-update": "./auto-update.ts",
+    "./update-prepare": "./update-prepare.ts",
+    "./update-log": "./update-log.ts",
     "./project": "./project.ts",
     "./pr": "./pr.ts",
     "./html-assets": "./html-assets.ts",
@@ -47,6 +49,7 @@
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
     "@pierre/diffs": "1.5.2",
+    "@plannotator/acp-client": "workspace:*",
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",

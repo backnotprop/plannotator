@@ -786,11 +786,38 @@
   }
 }
 
+/* Inter's stylistic sets: ss01 (open digits), ss02 (disambiguation: I, l, 0)
+ * and cv01 (alternate one), set on body with font-feature-settings. That
+ * property is inherited by every font on the page, and feature tags mean
+ * different things in each font. On macOS, iOS and Windows that is the look
+ * users know (SF Pro, the system-ui themes' font, draws an open 4 and
+ * straight 6 and 9 with them), so it stays. On desktop Linux, Ubuntu Mono, the
+ * monospace fallback that code review diffs and gutters reach, draws ss02 as
+ * superscript digits (#1961). There (`pn-os-linux`, put on <html> before the
+ * first paint by ThemeProvider: see markRootPlatform in utils/platform.ts) the
+ * sets are named for Inter's families and applied with
+ * font-variant-alternates instead: a named value applies only to text a listed
+ * family renders, so monospace text, Pierre's diffs (inside their shadow
+ * roots), system-ui themes and any fallback font get none of them. */
+@font-feature-values "Inter Variable", "Inter", "InterVariable" {
+  @styleset {
+    pn-inter: 1 2;
+  }
+  @character-variant {
+    pn-inter-one: 1;
+  }
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--background);
   color: var(--foreground);
   font-feature-settings: "ss01", "ss02", "cv01";
+}
+
+:root.pn-os-linux body {
+  font-feature-settings: normal;
+  font-variant-alternates: styleset(pn-inter) character-variant(pn-inter-one);
 }
 
 /* Safari extends the page canvas beneath its floating browser controls. The

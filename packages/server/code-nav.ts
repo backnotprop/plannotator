@@ -15,6 +15,10 @@ import {
   extractChangedFiles,
 } from "@plannotator/shared/code-nav";
 
+import { readFileCapped } from "@plannotator/shared/repo-file";
+import { resolve } from "node:path";
+import { decodeBunText } from "./git";
+
 export type { CodeNavRequest, CodeNavResponse, CodeNavHoverResponse };
 
 const bunCodeNavRuntime: CodeNavRuntime = {
@@ -47,15 +51,12 @@ const bunCodeNavRuntime: CodeNavRuntime = {
   },
 
   async readFile(path, options) {
-    try {
-      const file = Bun.file(options?.cwd ? `${options.cwd}/${path}` : path);
-      // Check the size before pulling bytes: rg would not have searched a
-      // file this large either.
-      if (file.size > CODE_NAV_MAX_FILE_BYTES) return null;
-      return await file.text();
-    } catch {
-      return null;
-    }
+    // Capped at what rg searches, non-blocking (repo-file.ts).
+    const read = await readFileCapped(options?.cwd ? resolve(options.cwd, path) : path, {
+      maxBytes: CODE_NAV_MAX_FILE_BYTES,
+      decode: decodeBunText,
+    });
+    return read.ok ? read.content : null;
   },
 };
 

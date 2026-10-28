@@ -27,8 +27,8 @@ import {
   type GuideSymbolResolution,
 } from "./core/adapter";
 import type { GuideLaunchReview, GuideSnapshot } from "@plannotator/core/guide-format";
-import { ACP_AUTH_REQUIRED_CODE, AcpClient, readEffortSelect, readModeSelect, readModelSelect, type AcpClientInfo, type AgentLaunch } from "./acp/client";
-import { loginCommands, type AgentDescriptor, type LoginCommand } from "./acp/agents";
+import { ACP_AUTH_REQUIRED_CODE, AcpClient, readEffortSelect, readModeSelect, readModelSelect, type AcpClientInfo, type AgentLaunch } from "@plannotator/acp-client/client";
+import { loginCommands, type AgentDescriptor, type LoginCommand } from "@plannotator/acp-client/agents";
 import { builderAutoAllow } from "./acp/permission-policy";
 import type { RelayHost, RelaySession } from "./mcp/relay-host";
 import type { ChangedFileInfo } from "./sources/git";

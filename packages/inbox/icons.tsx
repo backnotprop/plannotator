@@ -215,6 +215,14 @@ export function HostMark({ host, big }: { host: string | null | undefined; big?:
     case 'cursor':
       mark = <CursorIcon />;
       break;
+    case 'grok':
+      // Grok Build: a plain letter G, drawn here (no brand asset in the repo).
+      mark = (
+        <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M17.6 8.4A6.6 6.6 0 1 0 18.6 12H12.6" />
+        </svg>
+      );
+      break;
     default:
       mark = <Icon name="code" />;
   }

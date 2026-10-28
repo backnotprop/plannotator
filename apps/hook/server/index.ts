@@ -89,6 +89,7 @@ import {
 } from "@plannotator/server/review";
 import { runGuideCli } from "@plannotator/server/guide-cli";
 import { runUpdateCommand } from "./update-command";
+import { runUpdatePrepareCommand } from "@plannotator/server/update-prepare";
 import { takeUpdateHint } from "@plannotator/shared/update-check";
 import {
   startAnnotateServer as startAnnotateServerUnguarded,
@@ -744,6 +745,13 @@ if (args[0] === "uninstall") {
 // auto-update trigger: it is not a session.
 if (args[0] === "update") {
   process.exit(await runUpdateCommand(rawArgs.slice(rawArgs.indexOf("update") + 1), { currentVersion: getCliVersion() }));
+}
+
+// Internal: the POSIX update wrapper's download step (safe updates, step 1).
+// This binary's own fetch downloads the install script and the expected
+// checksums into a private temp dir and prints the dir (update-prepare.ts).
+if (args[0] === "update-prepare") {
+  process.exit(await runUpdatePrepareCommand(args.slice(1), { platform: process.platform }));
 }
 
 if (args[0] === "install-runtime") {

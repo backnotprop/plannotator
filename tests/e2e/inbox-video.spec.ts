@@ -237,11 +237,13 @@ test('Mark up draws on the paused frame; the marked-up copy rides the comment, l
   await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.6, { steps: 8 });
   await page.mouse.up();
   await shot('6-mark-up-the-frame');
+  // Enter adds the marked-up frame to the reply at once, at the pinned moment; the words after it are its note.
   await page.keyboard.press('Enter');
-  await expect(pane.locator('[data-video-frame] .ib-vpen')).toBeVisible();
+  await expect(pane.locator('[data-video-composer] [data-markup-kept] img')).toBeVisible();
   await expect(pane.locator('[data-video-composer] [data-video-time]')).toHaveText('0:03');
-  await pane.getByRole('textbox', { name: /^Comment on launch-cut-v3\.webm at / }).fill('The counter jumps here; hold the colour change.');
-  await pane.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(pane.locator('.ib-apanel [data-video-card-time]')).toHaveText(['0:02', '0:03']);
+  await pane.getByRole('textbox', { name: 'A note with your drawing at 0:03' }).fill('The counter jumps here; hold the colour change.');
+  await pane.getByRole('button', { name: 'Add note', exact: true }).click();
   await expect(pane.locator('.ib-apanel [data-video-card-time]')).toHaveText(['0:02', '0:03']);
   await expect(pane.locator('[data-video-dot]')).toHaveCount(2);
   await shot('7-two-comments-by-time');

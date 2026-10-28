@@ -265,12 +265,17 @@
 
   height: 100%;
   font-family: var(--font-sans);
+  /* Inter's stylistic sets; on Linux, Inter's only (see body in packages/ui/theme.css, #1961). */
   font-feature-settings: "ss01", "ss02", "cv01";
   color: var(--foreground);
   background: var(--ib-ground);
   font-size: var(--ib-fs-14, 14px);
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+}
+:root.pn-os-linux .pn-inbox {
+  font-feature-settings: normal;
+  font-variant-alternates: styleset(pn-inter) character-variant(pn-inter-one);
 }
 /* Where relative colours and sign() are there: the shadows' colour is the background taken toward black in its
    own hue, and text Soft draws on the deeper ground or a lifted surface is mixed a little toward black on a light
@@ -1968,14 +1973,36 @@ pre code.pn-code[data-keep-layout] {
 .ib-imgbar .ib-btn { height: 28px; }
 .ib-imgbar .ib-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 .ib-imgshowing { position: absolute; top: 12px; left: 14px; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; font-size: var(--ib-fs-12-5, 12.5px); background: var(--card); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
-.ib-imgcompose { display: flex; align-items: flex-end; gap: 10px; padding: 12px 16px; background: var(--card); border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
-.pn-inbox .ib-imgcompose .ib-ta { flex: 1; margin: 0; min-height: 40px; max-height: 160px; }
-.ib-imgcompose .ib-markup { position: relative; width: 56px; height: 40px; flex: none; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
-.ib-imgcompose .ib-markup img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ib-imgcompose .ib-markup button { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: color-mix(in oklch, var(--foreground) 75%, transparent); color: var(--background); }
-.ib-imgcompose .ib-col { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
-.ib-imgcompose .ib-hint { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ib-imgcompose .ib-row { display: flex; align-items: flex-end; gap: 8px; }
+/* the comment box (approval "inbox-markup-flow", box 1): one floating row on the stage, in its own grid row so it never covers the image */
+.ib-imgcompose { display: flex; justify-content: center; align-items: flex-end; padding: 0 16px 16px; background: color-mix(in oklch, var(--muted) 55%, var(--background)); }
+.ib-ccard { display: flex; align-items: flex-end; gap: 4px; width: 100%; max-width: 560px; box-sizing: border-box; padding: 5px; border-radius: var(--ib-r12-s, 12px); background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--ib-float-line-s, color-mix(in oklch, var(--border) 85%, transparent)); box-shadow: var(--ib-float-s, 0 10px 30px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.12)); transition: border-color 120ms ease, box-shadow 120ms ease; }
+:root.light .ib-ccard { box-shadow: var(--ib-float-s, 0 8px 24px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08)); }
+.ib-ccard:focus-within { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 16%, transparent), var(--ib-float-s, 0 10px 30px rgba(0, 0, 0, 0.18)); }
+.pn-inbox .ib-ccard .ib-ta { flex: 1; min-width: 0; margin: 0; min-height: 34px; max-height: 160px; border: 0; border-radius: 8px; background: transparent; padding: 7px 8px; }
+.pn-inbox .ib-ccard .ib-ta:focus, .pn-inbox .ib-ccard .ib-ta:focus-visible { border: 0; box-shadow: none; }
+.pn-inbox .ib-ccard .ib-btn { flex: none; height: 34px; border-radius: 8px; }
+.pn-inbox .ib-ccard .ib-cbtn { gap: 6px; padding: 0 10px; border-color: transparent; background: transparent; color: var(--muted-foreground); }
+.pn-inbox .ib-ccard .ib-cbtn:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-ccard .ib-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-ccard .ib-csave { padding: 0 12px; }
+.ib-ccard .ib-markup { position: relative; align-self: center; width: 48px; height: 34px; flex: none; margin-left: 1px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+.ib-ccard .ib-markup img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ib-ccard .ib-markup button { position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: color-mix(in oklch, var(--foreground) 75%, transparent); color: var(--background); }
+/* the drawing the ✓ added: in the reply already (a check); a click draws again, × takes it out */
+.ib-kept { position: relative; display: inline-flex; flex: none; align-self: center; margin: 0 2px 0 1px; }
+.pn-inbox .ib-kept .ib-kept-img { position: relative; display: block; width: 48px; height: 34px; padding: 0; border-radius: 6px; overflow: hidden; border: 1px solid color-mix(in oklch, var(--success) 55%, var(--border)); background: var(--muted); cursor: pointer; }
+.pn-inbox .ib-kept.ib-kept-wide .ib-kept-img { width: 60px; }
+.pn-inbox .ib-kept .ib-kept-img:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-kept .ib-kept-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ib-kept .ib-kept-ok { position: absolute; left: 3px; bottom: 3px; width: 14px; height: 14px; border-radius: 7px; display: flex; align-items: center; justify-content: center; background: var(--success); color: var(--success-foreground, #fff); }
+.pn-inbox .ib-kept .ib-kept-x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: color-mix(in oklch, var(--foreground) 80%, var(--popover)); color: var(--background); box-shadow: 0 0 0 2px var(--popover); cursor: pointer; }
+.pn-inbox .ib-kept .ib-kept-x::after { content: ''; position: absolute; inset: -6px; }
+.pn-inbox .ib-kept .ib-kept-x:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* a drawing that has no words: its card shows the picture */
+.ib-markpic { display: block; margin-top: 2px; max-width: 100%; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); background: var(--muted); }
+.ib-markpic img { display: block; width: 100%; max-height: 180px; object-fit: contain; }
+/* the drawing screen's line ("Enter or ✓ adds to your reply · Esc cancels") */
+.ib-markkey { padding: 1px 6px; border-radius: 4px; background: var(--muted); color: var(--foreground); font: inherit; }
 
 /* a video (design record "inbox-video"): the native player fit to the stage, the comments' rail under it, the comment row */
 .ib-vidview { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto auto; }
@@ -1993,9 +2020,9 @@ pre code.pn-code[data-keep-layout] {
 .ib-vtime { display: inline-flex; align-items: center; flex: none; height: 22px; padding: 0 7px; border-radius: 5px; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); font-weight: 550; font-variant-numeric: tabular-nums; background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); }
 button.ib-vtime { cursor: pointer; }
 button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, transparent); }
-.ib-imgcompose .ib-vtime { height: 40px; padding: 0 10px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-imgcompose .ib-vtime { align-self: center; height: 34px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-vframe { position: relative; flex: none; width: 57px; height: 32px; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); background: #000; }
-.ib-imgcompose .ib-vframe { width: 71px; height: 40px; }
+.ib-imgcompose .ib-vframe { align-self: center; width: 60px; height: 34px; }
 .ib-vframe img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* a comment card in the panel: the moment and its frame, side by side (the quote and the image row are not drawn) */
 .ib-vcardtop { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
@@ -2019,7 +2046,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-vcard.ib-on { border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
 .ib-vtop { display: flex; align-items: center; gap: 8px; }
 .ib-vidphone .ib-vtime { height: 28px; padding: 0 9px; font-size: var(--ib-fs-13, 13px); }
-.ib-vidphone .ib-imgcompose .ib-vtime { height: 40px; }
+.ib-vidphone .ib-imgcompose .ib-vtime { height: 44px; }
+.ib-vidphone .ib-imgcompose { padding-top: 10px; background: var(--card); border-top: 1px solid var(--ib-hair); }
 .ib-vbar { padding: 10px 12px; border-top: 1px solid var(--ib-hair); background: var(--card); }
 .pn-inbox .ib-vbar .ib-vbig { width: 100%; height: 44px; justify-content: center; font-size: var(--ib-fs-15, 15px); font-weight: 600; border-radius: 11px; }
 
@@ -2554,9 +2582,23 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   /* the viewer's Global comment and Copy float right on a desktop; on a phone they sit on their own line, so the file keeps the width */
   .ib-phone [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
   .ib-imgstage { padding: 12px; }
-  .ib-imgcompose { flex-wrap: wrap; padding: 10px 12px; }
-  .pn-inbox .ib-imgcompose .ib-ta { flex: 1 1 100%; }
-  .ib-imgcompose > .ib-btn.ib-pri { margin-left: auto; }
+  /* the comment box: one row, 44 px targets, 16 px words (no zoom on focus), Mark up as its pen */
+  .ib-imgcompose { padding: 0 10px calc(10px + env(safe-area-inset-bottom)); }
+  .ib-ccard { max-width: none; }
+  .pn-inbox .ib-ccard .ib-ta { flex: 1 1 auto; min-height: 44px; padding: 11px 8px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-ccard .ib-btn { height: 44px; min-width: 44px; justify-content: center; }
+  .pn-inbox .ib-ccard .ib-cbtn { width: 44px; padding: 0; }
+  .ib-ccard .ib-cbtn-l { display: none; }
+  .ib-ccard .ib-markup, .pn-inbox .ib-kept .ib-kept-img { width: 44px; height: 44px; }
+  .pn-inbox .ib-kept.ib-kept-wide .ib-kept-img { width: 56px; }
+  /* the drawing's ×: an 18 px mark, a 44 px target */
+  .pn-inbox .ib-kept .ib-kept-x::after { inset: -13px; }
+  .ib-imgcompose .ib-vframe { width: 56px; height: 44px; }
+  /* the drawing's chip under the size bar, not beside it; the toast above the box and the full-screen toolbar, not over them */
+  .ib-imgshowing { top: 64px; left: 12px; }
+  .pn-inbox:has(.ib-imgcompose) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
+  /* the drawing screen's tools wrap to two lines rather than hide colours past the edge */
+  .pn-inbox [data-pn-image-toolbar-scroll] > div { flex-wrap: wrap; width: auto; justify-content: center; row-gap: 6px; }
   .ib-att-t.ib-dlcard { flex-wrap: wrap; }
 
   /* a guided review */
@@ -4128,6 +4170,12 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-chk-compose label { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .pn-inbox .ib-chk-note { width: 100%; min-height: 56px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 8px 10px; font: inherit; color: inherit; }
 .pn-inbox .ib-chk-compose .ib-chk-acts { margin-top: 4px; }
+/* A Done or Can't do it waiting in the reply draft (approval "inbox-action-items-in-reply"): its note under the row, then "Done 3:12 PM · in your draft". */
+.pn-inbox .ib-chk-draft { margin: -2px 10px 8px 38px; display: flex; flex-direction: column; gap: 3px; }
+.pn-inbox .ib-chk-dnote { width: 100%; min-height: 32px; resize: none; overflow: hidden; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); border-radius: 8px; background: var(--card); padding: 6px 10px; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.45; color: inherit; }
+.pn-inbox .ib-chk-dnote::placeholder { color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.pn-inbox .ib-chk-dnote:focus { outline: none; border-color: color-mix(in oklch, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); }
+.pn-inbox .ib-chk-dline { margin: 0; padding-left: 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .pn-inbox .ib-chk-foot { display: flex; align-items: flex-start; gap: 7px; margin: 8px 10px 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); line-height: 1.45; }
 .pn-inbox .ib-chk-foot .ib-ic { width: 14px; height: 14px; margin-top: 1px; flex: none; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -4147,6 +4195,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   .pn-inbox .ib-act-undo { position: relative; }
   .pn-inbox .ib-act-undo::after { content: ""; position: absolute; inset: -13px -10px; }
   .pn-inbox .ib-chk-note { font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-chk-draft { margin-left: 48px; }
+  .pn-inbox .ib-chk-dnote { font-size: var(--ib-fs-16-in, 16px); min-height: 44px; }
 }
 /*
  * A reply waiting on a busy agent (owner approval "inbox-busy-agent-reply", 2026-10-21; mock.html in
@@ -4814,6 +4864,55 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The tour thread's controls that do nothing in the tour (Mark read, Archive, Reply): drawn quiet, still focusable, their tooltip says why. */
 .pn-inbox [data-tour-thread] button[aria-disabled="true"] { opacity: 0.45; cursor: default; }
 .pn-inbox [data-tour-thread] button[aria-disabled="true"]:hover { background: none; }
+
+/* A session the Inbox runs itself (the ACP runner): the run line under each person message, in place of the
+   delivery line; the permission card; the thread foot's "Open in Grok Build"; compose's start rows. */
+.ib-run { margin-top: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-run-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ib-run-main > svg { flex: none; }
+.ib-run[data-run-line="working"] .ib-run-main > svg,
+.ib-run[data-run-line="starting"] .ib-run-main > svg { color: var(--primary); }
+.ib-run[data-run-line="permission"] .ib-run-main > svg,
+.ib-run[data-run-line="failed"] .ib-run-main > svg { color: var(--warning); }
+.ib-run[data-run-line="permission"] .ib-run-text,
+.ib-run[data-run-line="failed"] .ib-run-text { color: var(--foreground); }
+.ib-run-text { min-width: 0; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-run-btn { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; cursor: pointer; white-space: nowrap; }
+.pn-inbox .ib-run-btn:hover { background: var(--muted); }
+.pn-inbox .ib-run-btn:disabled { opacity: 0.6; cursor: progress; }
+.pn-inbox .ib-run-lnk { display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; padding: 0; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.pn-inbox .ib-run-lnk:hover { color: var(--foreground); }
+.ib-run-activity { margin-top: 8px; padding: 8px 10px; border-radius: var(--ib-lr-sm, 8px); background: var(--muted); color: var(--muted-foreground); max-height: 280px; overflow: auto; }
+.ib-run-activity ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.ib-run-activity li { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.ib-run-tool { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--ib-fs-12, 12px); }
+.ib-run-st { flex: none; font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-run-activity li[data-tool-status="failed"] .ib-run-st { color: var(--warning); }
+.ib-run-said { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ib-run-activity ul + .ib-run-said { border-top: 1px solid var(--border); padding-top: 8px; }
+.ib-perm { margin-top: 10px; padding: 12px; border-radius: var(--ib-lr-md, 9px); border: 1px solid color-mix(in oklab, var(--warning) 45%, var(--border)); background: color-mix(in oklab, var(--warning) 7%, var(--card)); color: var(--foreground); display: grid; gap: 8px; }
+.ib-perm-head { display: flex; align-items: center; gap: 6px; font-size: var(--ib-fs-13, 13px); }
+.ib-perm-head > svg { color: var(--warning); flex: none; }
+.ib-perm-title { display: block; padding: 6px 8px; border-radius: 6px; background: var(--muted); font-size: var(--ib-fs-12-5, 12.5px); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ib-perm-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.ib-perm-rest { justify-self: start; }
+.ib-perm-note { margin: 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-runfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-runfoot-cmd { min-width: 0; padding: 3px 7px; border-radius: 6px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-runfoot-note { color: var(--muted-foreground); }
+.ib-runfoot-fold { display: block; }
+.ib-runfoot-fold > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; cursor: pointer; list-style: none; }
+.ib-runfoot-fold > summary::-webkit-details-marker { display: none; }
+.ib-runfoot-body { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding-bottom: 6px; }
+.ib-rowrun { color: var(--primary); }
+.ib-cp-opt.ib-cp-start-first { border-top: 1px solid var(--border); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-run-btn { height: 36px; position: relative; }
+  .pn-inbox .ib-run-btn::after { content: ''; position: absolute; inset: -4px -2px; }
+  .ib-perm-opts .ib-btn { min-height: 44px; }
+  .pn-inbox .ib-run-lnk { min-height: 36px; }
+}
+.ib-runfoot-in { min-width: 0; overflow-wrap: anywhere; }
 
 /* ─────────────── The Board (approval "inbox-board", step 2; Soft + Lanes, cards variant C "Lean") ─────────────── */
 .ib-bpage {

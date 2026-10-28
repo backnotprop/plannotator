@@ -5,7 +5,9 @@
  */
 
 import type { AdapterResolution, AgentDescriptor } from "./agents";
-import type { InstallResult } from "./adapters";
+
+/** What installing an adapter answered (the extension's adapters.ts `installAdapter`). */
+export type InstallResult = { ok: true; dir: string } | { ok: false; message: string };
 
 export type ReadyLaunch = Extract<AdapterResolution, { ok: true }>;
 

@@ -15,6 +15,7 @@
         "sonner": "^2.0.8",
       },
       "devDependencies": {
+        "@agentclientprotocol/sdk": "1.9.0",
         "@modelcontextprotocol/client": "2.3.1",
         "@playwright/test": "1.64.1",
         "@types/node": "^26.6.5",
@@ -210,6 +211,7 @@
       "version": "0.16.8",
       "dependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
+        "@plannotator/acp-client": "workspace:*",
         "@vscode/codicons": "0.0.45",
         "dompurify": "3.4.17",
         "marked": "17.0.6",
@@ -229,6 +231,13 @@
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20241218.0",
         "wrangler": "^4.151.2",
+      },
+    },
+    "packages/acp-client": {
+      "name": "@plannotator/acp-client",
+      "version": "0.0.1",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "1.9.0",
       },
     },
     "packages/ai": {
@@ -334,6 +343,7 @@
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.5.2",
+        "@plannotator/acp-client": "workspace:*",
         "@plannotator/ai": "workspace:*",
         "@plannotator/core": "workspace:*",
         "@plannotator/shared": "workspace:*",
@@ -1061,6 +1071,8 @@
     "@pierre/theming": ["@pierre/theming@1.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.1.0 || ^2.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-WCI5Qd7iprDpISL9fBYOLe8RV53+b7mFNA3bPzl60/2CKCSrsKN8zEcep6Y3BAzvARlmca50zGjDodqPGiTUKA=="],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
+
+    "@plannotator/acp-client": ["@plannotator/acp-client@workspace:packages/acp-client"],
 
     "@plannotator/ai": ["@plannotator/ai@workspace:packages/ai"],
 

@@ -26,7 +26,8 @@
  * holds a lock of its own (`WINDOW_LOCK_PREFIX` + its id) for its life; the
  * leader queues for each follower's lock, which the browser grants when that
  * tab is gone (closed or crashed), and tells the server (`gone`). A tab also
- * says so itself at pagehide (a beacon).
+ * says so itself at pagehide (a beacon), and reports nothing more until a
+ * pageshow brings it back from the back/forward cache.
  *
  * Where Web Locks or BroadcastChannel is missing (an older browser, an
  * insecure context) `subscribeInboxEvents` opens this tab's own stream, as
@@ -195,7 +196,7 @@ export function parseEventStreamText(text: string): InboxEventFrame[] {
   }
   return frames;
 }
-const INBOX_EVENT_FRAME_NAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins'] as const;
+const INBOX_EVENT_FRAME_NAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'runs'] as const;
 
 async function defaultCatchUp(cursor: number): Promise<InboxEventFrame[]> {
   const res = await fetch(`/api/inbox/events?cursor=${cursor}&once=1`, { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
@@ -291,6 +292,19 @@ export function subscribeSharedInboxEvents(
   let stopped = false;
   /** Frozen, or in the back/forward cache: not a candidate, not the leader. */
   let suspended = false;
+  /**
+   * Said `gone` at pagehide: until a pageshow brings it back, this tab reports
+   * nothing. Its scripts can still hear the next leader before the page goes,
+   * and a report then could reach the server after every `gone` and count a
+   * closed tab for good.
+   */
+  let departed = false;
+  const tabHandlers: InboxEventHandlers = {
+    ...handlers,
+    onConnect: () => {
+      if (!departed) handlers.onConnect?.();
+    },
+  };
   let closeStream: (() => void) | null = null;
   let releaseLeader: (() => void) | null = null;
   let queued: AbortController | null = null;
@@ -356,7 +370,7 @@ export function subscribeSharedInboxEvents(
       lastSeq = seq;
       trace({ type: 'record', seq, via });
     }
-    env.dispatch(frame, handlers);
+    env.dispatch(frame, tabHandlers);
   };
 
   const clearRetry = () => {
@@ -421,7 +435,7 @@ export function subscribeSharedInboxEvents(
     leader = id;
     if (id !== null && id !== win.id && !stopped) {
       void catchUp();
-      handlers.onConnect?.();
+      tabHandlers.onConnect?.();
     }
     return true;
   };
@@ -631,12 +645,14 @@ export function subscribeSharedInboxEvents(
   const onResume = () => wake();
   const onPageHide = (event: Event) => {
     // Leaving for good, or for the back/forward cache: either way this tab stops counting now.
+    departed = true;
     env.sendGone(win.id, true);
     if ((event as PageTransitionEvent).persisted) suspend();
     else stepDown();
   };
   const onPageShow = (event: Event) => {
     if (!(event as PageTransitionEvent).persisted) return;
+    departed = false;
     wake();
     // The server heard `gone` at pagehide: count this tab again.
     handlers.onConnect?.();

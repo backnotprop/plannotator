@@ -95,6 +95,12 @@ export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
     const urgency = inboxUrgencyOf(row.questions);
     return urgency === 0 ? "stopped" : urgency === 1 ? "holding" : "waiting";
   }
+  // An action item's Done or Can't do it waits in the draft: the agent still waits on the person's Send, so the
+  // row stays where the item put it (approval "inbox-action-items-in-reply", Q2: a Stopped item keeps "Stopped on you").
+  if ((row.questions.staged ?? 0) > 0) {
+    const urgency = inboxUrgencyOf(row.questions);
+    return urgency === 0 ? "stopped" : urgency === 1 ? "holding" : "waiting";
+  }
   if (row.answered_not_sent) return "new";
   if (row.sent !== null && row.sent.checked_at === null) return "sent";
   if (row.unseen > 0) return "new";

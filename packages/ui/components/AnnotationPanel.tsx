@@ -222,7 +222,16 @@ interface PanelProps {
    * the frame in `renderCardHeader`) turns them off per card. Absent: both
    * drawn, exactly as before.
    */
-  cardParts?: (annotation: Annotation) => { quote?: boolean; images?: boolean };
+  cardParts?: (annotation: Annotation) => { quote?: boolean; images?: boolean; text?: boolean };
+  /**
+   * Optional: the host's own body for a plan-annotation card, drawn where the
+   * comment text goes, inside the card (a click on it selects the card). The
+   * Inbox draws a drawing that has no words as its picture, with `cardParts`
+   * `text: false` (its stored text is a stand-in for the agent, not the
+   * person's words: not drawn, and the edit box starts empty). Absent:
+   * nothing extra, exactly as before.
+   */
+  renderCardBody?: (annotation: Annotation) => React.ReactNode;
   /**
    * Comments on part of an image (`imageRegion`, #2100) draw a crop of their
    * box in place of the quote; this turns an image's src as written into a
@@ -272,6 +281,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   title = 'Annotations',
   titleNote,
   cardParts,
+  renderCardBody,
   imageRegionSrc,
 }) => {
   const regionCards = useMemo(
@@ -538,6 +548,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                             footer={group.isCurrent ? renderCardFooter?.(annotation) : undefined}
                             header={group.isCurrent ? renderCardHeader?.(annotation) : undefined}
                             parts={group.isCurrent ? cardParts?.(annotation) : undefined}
+                            body={group.isCurrent ? renderCardBody?.(annotation) : undefined}
                             mentionSource={mentionSource}
                             unanchored={group.isCurrent ? (unanchoredIds?.has(annotation.id) ?? false) : false}
                           />
@@ -653,6 +664,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                       footer={renderCardFooter?.(entry.annotation)}
                       header={renderCardHeader?.(entry.annotation)}
                   parts={cardParts?.(entry.annotation)}
+                  body={renderCardBody?.(entry.annotation)}
                       mentionSource={mentionSource}
                       unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                     />
@@ -670,6 +682,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   footer={renderCardFooter?.(entry.annotation)}
                   header={renderCardHeader?.(entry.annotation)}
                   parts={cardParts?.(entry.annotation)}
+                  body={renderCardBody?.(entry.annotation)}
                   mentionSource={mentionSource}
                   unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                 />
@@ -1018,10 +1031,14 @@ const AnnotationCard: React.FC<{
   /** The annotation has no live location in the document (host-reported). */
   unanchored?: boolean;
   /** Built-in parts to draw (see `cardParts`). */
-  parts?: { quote?: boolean; images?: boolean };
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false, parts }) => {
+  parts?: { quote?: boolean; images?: boolean; text?: boolean };
+  /** Host body, drawn where the comment text goes (see `renderCardBody`). */
+  body?: React.ReactNode;
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false, parts, body }) => {
+  // `text: false`: the stored text is the host's stand-in, never the person's words; the edit box starts empty.
+  const shownText = parts?.text === false ? '' : annotation.text || '';
   const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(annotation.text || '');
+  const [editText, setEditText] = useState(shownText);
   // A comment on part of an image (#2100): numbered like its box, with the
   // crop, file, size and line in place of the quote.
   const regionCards = useContext(RegionCardContext);
@@ -1031,13 +1048,13 @@ const AnnotationCard: React.FC<{
   // Update editText when annotation.text changes
   useEffect(() => {
     if (!isEditing) {
-      setEditText(annotation.text || '');
+      setEditText(shownText);
     }
-  }, [annotation.text, isEditing]);
+  }, [shownText, isEditing]);
 
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setEditText(annotation.text || '');
+    setEditText(shownText);
     setIsEditing(true);
   };
 
@@ -1054,7 +1071,7 @@ const AnnotationCard: React.FC<{
   };
 
   const handleCancelEdit = () => {
-    setEditText(annotation.text || '');
+    setEditText(shownText);
     setIsEditing(false);
   };
 
@@ -1185,13 +1202,14 @@ const AnnotationCard: React.FC<{
             isEditing ? (
               editComposer
             ) : (
-              annotation.text && (
+              shownText && (
                 <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-relaxed text-foreground/90">
-                  {annotation.text}
+                  {shownText}
                 </p>
               )
             )
           )}
+          {body != null && body !== false && body}
         </>
       )}
 

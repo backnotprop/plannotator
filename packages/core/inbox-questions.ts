@@ -440,10 +440,19 @@ export function summarizeInboxQuestions(questions: readonly InboxQuestion[]): In
   let open = 0;
   let picked = 0;
   let actions = 0;
+  let staged = 0;
   let stopped = false;
   const holdsUp: string[] = [];
   let prompt: string | null = null;
   for (const q of questions) {
+    // A Done or Can't do it waiting in the reply draft: the agent is still stopped on it, so it keeps the
+    // row's Stopped / Holds up (approval "inbox-action-items-in-reply", Q2). Not open, not a pick.
+    if (q.kind === "action" && q.state === "picked" && q.action_result?.by === "person" && q.action_result.staged === true && !q.orphaned) {
+      staged += 1;
+      if (q.stopped !== null) stopped = true;
+      for (const name of q.holds_up) if (!holdsUp.includes(name)) holdsUp.push(name);
+      continue;
+    }
     // The list's rule: a kind this build does not know still counts (see inboxQuestionWaitsForList).
     if (!inboxQuestionWaitsForList(q)) continue;
     if (q.state === "picked") picked += 1;
@@ -454,7 +463,7 @@ export function summarizeInboxQuestions(questions: readonly InboxQuestion[]): In
     for (const name of q.holds_up) if (!holdsUp.includes(name)) holdsUp.push(name);
     if (prompt === null) prompt = q.prompt;
   }
-  return { open, picked, stopped, holds_up: holdsUp, prompt, actions };
+  return { open, picked, stopped, holds_up: holdsUp, prompt, actions, ...(staged > 0 ? { staged } : {}) };
 }
 
 // ─────────────────────────────── Picks ───────────────────────────────

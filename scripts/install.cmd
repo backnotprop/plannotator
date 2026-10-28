@@ -2029,7 +2029,6 @@ if exist "!SEM_PATH!" (
 
 set "SEM_BASE_URL=https://github.com/!SEM_REPO!/releases/download/!SEM_VERSION!"
 set "SEM_ARCHIVE=%TEMP%\plannotator-sem-%RANDOM%.zip"
-set "SEM_CHECKSUMS=%TEMP%\plannotator-sem-checksums-%RANDOM%.txt"
 set "SEM_EXTRACT=%TEMP%\plannotator-sem-%RANDOM%"
 mkdir "!SEM_EXTRACT!" >nul 2>&1
 
@@ -2041,16 +2040,10 @@ if !ERRORLEVEL! neq 0 (
     goto :sem_cleanup
 )
 
-curl -fsSL --connect-timeout 10 --max-time 60 "!SEM_BASE_URL!/checksums.txt" -o "!SEM_CHECKSUMS!"
-if !ERRORLEVEL! neq 0 (
-    echo Skipping semantic diff sidecar install ^(checksum download failed^)
-    goto :sem_cleanup
-)
-
+REM Pinned for SEM_VERSION, not read from the release's checksums.txt (same
+REM connection as the archive). Keep in step with install.sh / install.ps1.
 set "EXPECTED_SEM_CHECKSUM="
-for /f "usebackq tokens=1,2" %%i in ("!SEM_CHECKSUMS!") do (
-    if "%%j"=="!SEM_ASSET!" set "EXPECTED_SEM_CHECKSUM=%%i"
-)
+if /i "!SEM_ASSET!"=="sem-windows-x86_64.zip" set "EXPECTED_SEM_CHECKSUM=2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06"
 if not defined EXPECTED_SEM_CHECKSUM (
     echo Skipping semantic diff sidecar install ^(checksum missing for !SEM_ASSET!^)
     goto :sem_cleanup
@@ -2092,7 +2085,6 @@ if !ERRORLEVEL! equ 0 (
 
 :sem_cleanup
 if exist "!SEM_ARCHIVE!" del "!SEM_ARCHIVE!"
-if exist "!SEM_CHECKSUMS!" del "!SEM_CHECKSUMS!"
 if exist "!SEM_EXTRACT!" rmdir /s /q "!SEM_EXTRACT!"
 goto :eof
 
