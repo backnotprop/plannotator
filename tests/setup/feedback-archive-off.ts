@@ -59,6 +59,8 @@ process.env.PLANNOTATOR_UPDATE_API_URL = "http://127.0.0.1:9/releases/latest";
 // The install script the update wrapper downloads: never the real one. A closed
 // loopback port refuses at once, so an unintended Update now fails fast.
 process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = "http://127.0.0.1:9/install.sh";
+// The .sha256 files `update-prepare` downloads next to it: never GitHub's.
+process.env.PLANNOTATOR_RELEASE_DOWNLOAD_URL = "http://127.0.0.1:9/download";
 
 // Every session a test starts, in this process or in a child that inherits
 // this environment, runs a program that exits at once instead of a browser.

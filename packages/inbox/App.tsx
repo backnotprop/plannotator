@@ -11,6 +11,7 @@
  */
 
 import type { ActionMark } from './components/ActionChecklist';
+import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
@@ -36,7 +37,7 @@ import {
   type WhatsNewModel,
 } from './api';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { addOwnThreads, adoptKeepingOpen, filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, filterSections, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { hasMovingDelivery } from './rowDelivery';
 import {
   captureSettle,
@@ -680,6 +681,8 @@ function Inbox() {
   const [replyDrafts, setReplyDrafts] = useState<InboxReplyDraftRow[]>([]);
   /** Raised when the open thread's reply draft changed (`event: drafts`): the thread reads it again. */
   const [draftChanged, setDraftChanged] = useState(0);
+  // Raised when the Inbox says a session it runs in the open thread changed (`event: runs`).
+  const [runsTick, setRunsTick] = useState(0);
   const [draftsError, setDraftsError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
   /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
@@ -803,13 +806,15 @@ function Inbox() {
   /**
    * The list on screen catches up: with the person's own reads and actions
    * (`own`: closing a thread; agent activity still waits behind "N new"), or
-   * with everything (`all`: Show, another folder or page).
+   * with everything (`all`: Show, another folder or page). `opening`: the
+   * thread a covered list settles behind (a phone, a stacked window), which
+   * settles as it now is, like the thread just closed.
    */
   const settleList = useCallback(
-    (what: 'own' | 'all', slide: boolean) => {
+    (what: 'own' | 'all', slide: boolean, opening?: OpenThread) => {
       cancelSettle();
       // The thread just closed settles as it now is, an arrival there included (held.ts settleOwn).
-      const closed = closing.current;
+      const closed = opening ?? closing.current;
       closing.current = null;
       const next = latestRef.current;
       if (!next) return;
@@ -1120,6 +1125,7 @@ function Inbox() {
     let deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
     let draftsTimer: ReturnType<typeof setTimeout> | null = null;
     let pinsTimer: ReturnType<typeof setTimeout> | null = null;
+    let runsTimer: ReturnType<typeof setTimeout> | null = null;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
@@ -1173,6 +1179,13 @@ function Inbox() {
             void refreshDrafts();
           }, 80);
         },
+        // A session the Inbox runs changed (the ACP runner): its row ("Grok Build is working", a permission in
+        // Stopped on you, with its notice) and the open thread's run line.
+        onRuns: (change) => {
+          if (routeRef.current.thread && change.thread_ids.includes(routeRef.current.thread)) setRunsTick((n) => n + 1);
+          if (runsTimer) clearTimeout(runsTimer);
+          runsTimer = setTimeout(() => void refreshList(false).then((next) => next && flushNotifications(next)), 120);
+        },
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => {
           if (pinsTimer) clearTimeout(pinsTimer);
@@ -1206,6 +1219,7 @@ function Inbox() {
       if (draftsTimer) clearTimeout(draftsTimer);
       if (cardsTimer) clearTimeout(cardsTimer);
       if (pinsTimer) clearTimeout(pinsTimer);
+      if (runsTimer) clearTimeout(runsTimer);
     };
   }, [refreshList, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
 
@@ -1251,7 +1265,12 @@ function Inbox() {
         opened = landed();
       }
       closing.current = null;
-      if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false);
+      // The thread opening settles as it now is too: an agent message the list
+      // held there is the person's to read now, not news for "N new". Held,
+      // its row kept the state the list showed (Quiet, say) and Back, which
+      // settles nothing when every message is seen, left it there with its
+      // questions open.
+      if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
       // The look covers what this read showed, not a message that lands before the server takes it.
       await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
       if (!cancelled) await refreshList(false);
@@ -1309,11 +1328,18 @@ function Inbox() {
     if (body && lastInput === 'keyboard' && (!active || active === document.body)) rowElement(body, closed)?.focus({ preventScroll: true });
     if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') {
       // The list as the person left it, except the thread they just closed
-      // when a message arrived there that they did not see: it comes back
-      // unread, in the section its state gives it (held.ts settleThread).
+      // when a message arrived there that they did not see, or when it now
+      // waits on them and is drawn in another group (an agent asked while it
+      // was open): it takes the section its state gives it (held.ts
+      // settlesOnBack, settleThread).
       closing.current = null;
       const next = latestRef.current?.sections.flatMap((section) => section.threads).find((row) => row.thread_id === closed);
-      if (next && next.unseen > 0) setShown((current) => (current ? settleThread(current, latestRef.current!.sections, closed) : current));
+      if (next && shownRef.current && settlesOnBack(shownRef.current, next)) {
+        // Back put focus on the row; the settle redraws it in another group, so focus goes with it ([shown] layout effect):
+        // after a key, and after a stacked window's Back by mouse (#1866 hands that focus to the row too); never after a phone's tap.
+        if (lastInput === 'keyboard' || !isPhone()) refocusRow.current = closed;
+        setShown((current) => (current ? settleThread(current, latestRef.current!.sections, closed) : current));
+      }
       return;
     }
     if (prefersReducedMotion()) settleList('own', false);
@@ -1922,32 +1948,26 @@ function Inbox() {
   };
 
   /**
-   * An action item's Done or Can't do it (approval "inbox-next-actions"): written at
-   * once, sent to the agent once the 10 s Undo window passes, as 👍 Looks
-   * good. `null` is the Undo. Resolves false when it was refused.
+   * An action item's Done or Can't do it (approval "inbox-action-items-in-reply"):
+   * into the reply draft, like a pick, sent only with the person's Send. No
+   * toast and no timer; `null` takes it back out of the draft. A note typed
+   * under the marked row saves quietly. Resolves the message's action items as
+   * saved, or null when it was refused.
    */
-  const markAction = async (threadId: string, messageId: string, key: string, mark: ActionMark | null, info: { agent: string; prompt: string }): Promise<boolean> => {
+  const markAction = async (messageId: string, key: string, mark: ActionMark | null): Promise<InboxQuestion[] | null> => {
+    let actions: InboxQuestion[];
     try {
-      await inboxApi.markAction(messageId, key, mark);
+      ({ actions } = await inboxApi.markAction(messageId, key, mark, true));
     } catch (cause) {
-      showError(cause);
+      // A note typed while the item was sent elsewhere or replaced: the thread redraws it as it is now.
+      if (!isMootNoteRefusal(mark, cause)) showError(cause);
       await afterWrite();
-      return false;
+      return null;
     }
     await afterWrite();
-    if (!mark) {
-      dismissToast();
-      say('Action item moved back. Nothing was sent.');
-      return true;
-    }
-    showToast({
-      icon: mark.outcome === 'done' ? 'check' : 'warn',
-      lead: mark.outcome === 'done' ? 'Done' : "Can't do it",
-      // Short enough for one line at 520 px with Undo and its Z (a toast's words always show whole).
-      detail: `Goes to ${info.agent} in 10 s`,
-      onUndo: () => void markAction(threadId, messageId, key, null, info),
-    });
-    return true;
+    if (!mark) say('Taken out of your draft.');
+    else if (!mark.quiet) say(mark.outcome === 'done' ? 'Done. It goes with your reply.' : "Can't do it. It goes with your reply.");
+    return actions;
   };
 
   /** Archive (the MCP's resolve) or Unarchive, with Undo. */
@@ -3029,6 +3049,8 @@ function Inbox() {
   // slot; Show (whose line goes away) hands it to the first row it brought in.
   const listOrder = useRef<string[]>([]);
   const focusAfterShow = useRef(false);
+  /** The row Back over a covered list focused (a key, or a stacked window's mouse Back), which its settle redraws in another group. */
+  const refocusRow = useRef<string | null>(null);
   useLayoutEffect(() => {
     const body = listBody(rootRef.current);
     const from = slideFrom.current;
@@ -3053,9 +3075,14 @@ function Inbox() {
     const shownAll = focusAfterShow.current;
     focusAfterShow.current = false;
     const gone = listFocus.current;
+    const refocus = refocusRow.current;
+    refocusRow.current = null;
     const active = document.activeElement;
     const lost = !active || active === document.body;
-    if (body && lost && shownAll) {
+    const moved = body && refocus ? rowElement(body, refocus) : null;
+    if (moved && lost) {
+      moved.focus({ preventScroll: true });
+    } else if (body && lost && shownAll) {
       const rows = [...body.querySelectorAll<HTMLElement>('[data-thread-id]')];
       (rows.find((row) => !order.includes(row.getAttribute('data-thread-id')!)) ?? rows[0])?.focus({ preventScroll: true });
     } else if (body && lastInput === 'keyboard' && gone && lost && !rowElement(body, gone)) {
@@ -3450,12 +3477,13 @@ function Inbox() {
             row={openThreadRow}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onAck={(messageId, on, agent) => void acknowledge(thread.thread_id, messageId, on, agent)}
-            onAction={(messageId, key, mark, info) => markAction(thread.thread_id, messageId, key, mark, info)}
+            onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
             onPin={pinsOn ? (next) => setPin(thread, next) : undefined}
             replyRequest={replyFor}
             draftChanged={draftChanged}
+            runsVersion={runsTick}
             onReplyOpened={() => setReplyFor(null)}
             onQuestions={patchQuestions}
             onChanged={afterWrite}

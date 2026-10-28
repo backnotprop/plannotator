@@ -6,6 +6,7 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
+import { readFileCapped } from "@plannotator/shared/repo-file";
 import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 
@@ -233,6 +234,15 @@ export async function readFileBytesCapped(path: string, maxBytes: number): Promi
   }
 }
 
+/**
+ * Decode bytes exactly as `Bun.file(path).text()` does (a UTF-8 BOM is
+ * stripped, a UTF-16LE BOM switches to UTF-16), so reads through
+ * repo-file.ts keep Bun's old output.
+ */
+export function decodeBunText(bytes: Uint8Array): Promise<string> {
+  return new Blob([bytes as Uint8Array<ArrayBuffer>]).text();
+}
+
 /** Bun-based git runtime. Exported for use with shared utilities (worktree, etc.) */
 export const runtime: ReviewGitRuntime = {
   runGit,
@@ -246,11 +256,10 @@ export const runtime: ReviewGitRuntime = {
     }
   },
   async readTextFile(path: string): Promise<string | null> {
-    try {
-      return await Bun.file(path).text();
-    } catch {
-      return null;
-    }
+    // Capped and non-blocking (repo-file.ts): a FIFO swapped in after the
+    // caller's lstat cannot hang the request.
+    const read = await readFileCapped(path, { decode: decodeBunText });
+    return read.ok ? read.content : null;
   },
   async getFileInfo(basePath, path) {
     const fullPath = resolvePath(basePath ?? "", path);

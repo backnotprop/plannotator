@@ -137,6 +137,14 @@ interface SeenSession {
   /** Claude Code's version (`engine`); null when it sent none. */
   engine: string | null;
   /**
+   * A session the Inbox runs itself over ACP (packages/server/inbox-acp-runner.ts):
+   * always live while this Inbox runs (the runner starts its agent on
+   * demand), but never offered as a target of its own: compose's list, a
+   * thread's project sessions and the reply route's `to` leave it out
+   * (compose starts a new one instead).
+   */
+  runner?: boolean;
+  /**
    * A session the Inbox wakes itself, with no connection that polls (Codex:
    * `codex queue`; packages/server/inbox-codex-wake.ts): seen from its MCP
    * calls, live while it called within `INBOX_WAKE_ONLY_LIVE_MS` and its
@@ -512,7 +520,7 @@ export function createInboxLiveSessions(options: {
     let wroteInProject: Set<string> | null = null;
     const out: (InboxLiveSession & { order: number; started: number })[] = [];
     for (const [session, entry] of sessions) {
-      if (!isLive(entry)) continue;
+      if (!isLive(entry) || entry.runner) continue;
       if (entry.root !== null) {
         if (entry.root !== project.root) continue;
       } else {
@@ -559,7 +567,7 @@ export function createInboxLiveSessions(options: {
   }[] => {
     const out = [];
     for (const [session, entry] of sessions) {
-      if (!isLive(entry)) continue;
+      if (!isLive(entry) || entry.runner) continue;
       out.push({
         session,
         host: entry.host,
@@ -854,7 +862,7 @@ export function createInboxLiveSessions(options: {
     if (typeof session !== "string" || !session) throw new InboxError("validation_error", "to.session: the live session to send to.", { field: "to.session" });
     if (host !== undefined && typeof host !== "string") throw new InboxError("validation_error", "to.host: a string.", { field: "to.host" });
     const entry = sessions.get(session);
-    if (!entry || !isLive(entry) || (host !== undefined && entry.host !== host)) return null;
+    if (!entry || !isLive(entry) || entry.runner || (host !== undefined && entry.host !== host)) return null;
     return { host: entry.host, session, root: entry.root };
   };
 
@@ -950,7 +958,46 @@ export function createInboxLiveSessions(options: {
     return store.requestDeliverNow(messageId, tag ? tag.session : null);
   };
 
+  /**
+   * A session the Inbox runs over ACP (inbox-acp-runner.ts): live from now
+   * until this Inbox stops (it holds one poll forever), idle until a turn
+   * runs, never able to take a reply mid-turn (no Send now: the runner
+   * gives each turn what waited when it starts).
+   */
+  const registerRunnerSession = (session: string, host: string, root: string, startedAt: number) => {
+    const known = sessions.get(session);
+    if (known?.runner) return;
+    sessions.set(session, {
+      host,
+      root,
+      startedAt,
+      lastSeen: now(),
+      holding: 1,
+      busy: false,
+      idleSince: now(),
+      idleAt: now(),
+      sendNow: false,
+      tags: false,
+      cwd: root,
+      folder: root,
+      plugin: null,
+      engine: null,
+      runner: true,
+    });
+  };
+  /** A runner session's turn started or ended. */
+  const setRunnerBusy = (session: string, busy: boolean) => {
+    const entry = sessions.get(session);
+    if (!entry?.runner) return;
+    const at = now();
+    entry.lastSeen = at;
+    applyState(entry, { busy }, at);
+    trackWaitsOf(session, entry, at);
+  };
+
   return {
+    registerRunnerSession,
+    setRunnerBusy,
     pollStarted,
     stateChanged,
     seenWakeOnly,

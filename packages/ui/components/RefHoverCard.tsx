@@ -575,9 +575,23 @@ function place(anchor: Element, card: HTMLElement): { left: number; top: number;
 /**
  * Hover cards for the issue / PR / MR links inside `rootRef`. Render what it
  * returns anywhere in the tree (it portals). Nothing happens without a transport.
+ *
+ * `onlyWithData` (default false): the card opens only once its data arrived
+ * and only when the forge answered (`ok`), with no loading state and no
+ * failure card; a hover that leaves first shows nothing. A tap on a touch
+ * screen follows the link as it always did (no sheet). For hosts where a
+ * person without gh / glab must see links exactly as before (plan review,
+ * annotate and code review).
  */
-export function useRefHoverCards(rootRef: React.RefObject<HTMLElement | null>, { delayMs = REF_CARD_DELAY_MS }: { delayMs?: number } = {}): React.ReactNode {
+export function useRefHoverCards(
+  rootRef: React.RefObject<HTMLElement | null>,
+  { delayMs = REF_CARD_DELAY_MS, onlyWithData = false }: { delayMs?: number; onlyWithData?: boolean } = {},
+): React.ReactNode {
   const [card, setCard] = useState<OpenCard | null>(null);
+  /** onlyWithData: the link a card is being fetched for (cleared when the hover or focus leaves it). */
+  const wanted = useRef<HTMLAnchorElement | null>(null);
+  const dataOnly = useRef(onlyWithData);
+  dataOnly.current = onlyWithData;
   const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const current = useRef<OpenCard | null>(null);
@@ -605,6 +619,20 @@ export function useRefHoverCards(rootRef: React.RefObject<HTMLElement | null>, {
 
   const open = useCallback((anchor: HTMLAnchorElement, target: ForgeRef, via: OpenCard['via']) => {
     clearTimers();
+    if (dataOnly.current) {
+      // Nothing on screen until the forge answered; then only if the hover or focus is still on the link.
+      wanted.current = anchor;
+      const href = anchor.href;
+      void loadRefCard(href, target).then((result) => {
+        if (wanted.current !== anchor) return;
+        wanted.current = null;
+        if (!result?.ok || !anchor.isConnected) return;
+        if (closeOther && closeOther !== closeSelf.current) closeOther();
+        closeOther = closeSelf.current;
+        setCard({ anchor, href, target, via, pinned: false, result });
+      });
+      return;
+    }
     if (closeOther && closeOther !== closeSelf.current) closeOther();
     closeOther = closeSelf.current;
     const href = anchor.href;
@@ -648,6 +676,7 @@ export function useRefHoverCards(rootRef: React.RefObject<HTMLElement | null>, {
     const onOut = (e: PointerEvent) => {
       const a = linkOf(e.target);
       if (!a || (e.relatedTarget instanceof Node && a.contains(e.relatedTarget))) return;
+      if (wanted.current === a) wanted.current = null;
       if (openTimer.current !== null && current.current?.anchor !== a) {
         window.clearTimeout(openTimer.current);
         openTimer.current = null;
@@ -664,6 +693,7 @@ export function useRefHoverCards(rootRef: React.RefObject<HTMLElement | null>, {
       const a = linkOf(e.target);
       if (!a) return;
       if (openTimer.current !== null) window.clearTimeout(openTimer.current);
+      if (wanted.current === a) wanted.current = null;
       const c = current.current;
       const next = e.relatedTarget;
       if (c?.anchor === a && c.via === 'focus' && !c.pinned && !(next instanceof Node && cardRef.current?.contains(next))) close();
@@ -678,6 +708,8 @@ export function useRefHoverCards(rootRef: React.RefObject<HTMLElement | null>, {
       first.focus();
     };
     const onClick = (e: MouseEvent) => {
+      // onlyWithData: a tap follows the link as it always did.
+      if (dataOnly.current) return;
       if (lastPointer.current !== 'touch' && !touchOnly()) return;
       const a = linkOf(e.target);
       const target = targetOf(a);
@@ -814,4 +846,21 @@ export function useRefHoverCards(rootRef: React.RefObject<HTMLElement | null>, {
     ),
     container,
   );
+}
+
+/**
+ * `useRefHoverCards` as a component: render it inside the region `rootRef`
+ * points at, so its listeners attach once that element exists (a host whose
+ * root is not on screen at its first render, behind a loading state).
+ */
+export function RefHoverCards({
+  rootRef,
+  delayMs,
+  onlyWithData,
+}: {
+  rootRef: React.RefObject<HTMLElement | null>;
+  delayMs?: number;
+  onlyWithData?: boolean;
+}): React.ReactElement {
+  return <>{useRefHoverCards(rootRef, { delayMs, onlyWithData })}</>;
 }

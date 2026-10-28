@@ -12,6 +12,8 @@ import { PHONE_QUERY } from '../phone';
 import { Tip } from './Tip';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { markupWords, noteOnto } from '../markup';
+import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -35,11 +37,18 @@ export function zoomPercent(scale: number): string {
  * pans, two fingers pinch, a double click toggles Fit and 2×, Fit to 800%.
  * The size bar shows the scale beside Fit / Actual size, which reset it.
  * Transforms only, so a gesture never lays anything out. "Mark up" opens
- * Plannotator's image annotator (pen, arrow, circle) on the image; the
- * drawing is kept by the Inbox and rides the comment, so the agent can open
- * the marked-up copy. Selecting a comment with a drawing lays the drawing
- * over the image in the image's own transform, so it stays aligned at any
- * zoom. The image is drawn only by `<img src>` from the attachment's route.
+ * Plannotator's image annotator (pen, arrow, circle) over the whole window;
+ * its ✓ (or Enter) adds the drawing to the reply at once, as its own comment
+ * (approval "inbox-markup-flow"): the drawing stays laid over the image, the
+ * window's toast says so with Undo, and the comment box keeps its picture
+ * (click: draw again; ×: take it out) beside "Note (optional)", whose words go
+ * onto that same comment. Escape cancels a drawing. Selecting a comment with a
+ * drawing lays the drawing over the image in the image's own transform, so it
+ * stays aligned at any zoom. The image is drawn only by `<img src>` from the
+ * attachment's route.
+ *
+ * The comment box is one floating row on the stage (in its own grid row, so
+ * it never covers the image): the words, Mark up, Comment.
  *
  * The pane keys it by attachment, so the comment box is never carried to the
  * next file and every file opens at Fit, except one the reader set to Actual
@@ -63,6 +72,9 @@ export function ImageAttachmentView({
   onSwipe,
   wheelHint,
   suggestion,
+  onSelect,
+  onRemove,
+  onNotice,
 }: {
   attachment: InboxAttachmentState;
   version: 'current' | 'sent';
@@ -80,6 +92,12 @@ export function ImageAttachmentView({
   wheelHint?: WheelHintGate;
   /** A suggested comment the box opens with (the tour's): kept with one press, or written over. */
   suggestion?: string;
+  /** Select a comment (a drawing just added is selected, so it stays on the image). */
+  onSelect?: (id: string | null) => void;
+  /** Take a comment out of the reply (the drawing's × and the toast's Undo). */
+  onRemove?: (id: string) => Promise<void> | void;
+  /** The window's toast ("Markup added to your reply · Undo"). */
+  onNotice?: Notice;
 }) {
   const [mode, setMode] = useState<ZoomMode>(initialFit ?? 'fit');
   const [scale, setScale] = useState<number | null>(null);
@@ -98,7 +116,16 @@ export function ImageAttachmentView({
   const [failed, setFailed] = useState(false);
   const [text, setText] = useState(suggestion ?? '');
   const [markup, setMarkup] = useState<ImageAttachment | null>(null);
+  // The drawing the ✓ just added to the reply: its comment's id, for a note, a redraw or ×.
+  const [kept, setKept] = useState<{ id: string; image: ImageAttachment } | null>(null);
+  // One drawing per opening of the drawing screen: set as it opens, taken by the first ✓ or Enter. ui calls
+  // onAccept once per press, each after its own encode, so a later press (even one landing after the first
+  // drawing is in the reply) adds nothing.
+  const acceptable = useRef(false);
   const [annotating, setAnnotating] = useState(false);
+  useEffect(() => {
+    if (annotating) acceptable.current = true;
+  }, [annotating]);
   const [saving, setSaving] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const zoomRef = useRef<ImageZoomStageHandle>(null);
@@ -163,6 +190,11 @@ export function ImageAttachmentView({
   // A selected comment that carries a drawing shows the drawing over the image.
   const selected = selectedId ? annotations.find((a) => a.id === selectedId) : undefined;
   const selectedMarkup = selected?.images?.[0] ?? null;
+  // The kept drawing's comment as it reads now; gone once removed (the panel, Undo) or sent, and the box lets it go.
+  const keptNow = kept ? annotations.find((a) => a.id === kept.id) ?? null : null;
+  useEffect(() => {
+    if (kept && !keptNow) setKept(null);
+  }, [kept, keptNow]);
   const [showOriginal, setShowOriginal] = useState(false);
   useEffect(() => setShowOriginal(false), [selectedId]);
   const showingMarkup = selectedMarkup !== null && !showOriginal && !failed;
@@ -170,13 +202,28 @@ export function ImageAttachmentView({
 
   const submit = async () => {
     const words = text.trim();
-    if ((!words && !markup) || saving) return;
+    if (saving) return;
+    // A note: onto the drawing the ✓ added, the same comment.
+    if (kept && keptNow) {
+      // (A redraw whose save failed waits as `markup`: it goes with the note.)
+      if (!words && !markup) return;
+      setSaving(true);
+      const ok = await onSave({ ...keptNow, text: noteOnto(keptNow, words), ...(markup ? { images: [markup] } : {}) });
+      setSaving(false);
+      if (ok) {
+        setText('');
+        setMarkup(null);
+        setKept(null);
+      }
+      return;
+    }
+    if (!words && !markup) return;
     setSaving(true);
     const ok = await onSave(
       imageCommentAnnotation({
         id: newId(),
         name: attachment.name,
-        text: words || 'See the marked-up image.',
+        text: markupWords(words, markup !== null),
         markup,
       }),
     );
@@ -185,6 +232,41 @@ export function ImageAttachmentView({
       setText('');
       setMarkup(null);
     }
+  };
+
+  /** Take the added drawing out of the reply (its × or the toast's Undo). */
+  const removeKept = (id: string) => {
+    setKept((current) => (current?.id === id ? null : current));
+    onSelect?.(null);
+    void onRemove?.(id);
+  };
+
+  /**
+   * The ✓: the drawing goes into the reply now, as its own comment (a redraw
+   * replaces the picture of the comment already added). Words already typed go
+   * with it; with none, the box offers a note for the same comment.
+   */
+  const addDrawing = async (image: ImageAttachment) => {
+    const words = text.trim();
+    // A redraw: the comment as it reads now, its picture replaced (and any words typed, as a note).
+    const redraw = kept && keptNow ? keptNow : null;
+    const id = redraw?.id ?? newId();
+    const ok = await onSave(
+      redraw
+        ? { ...redraw, text: noteOnto(redraw, words), images: [image] }
+        : imageCommentAnnotation({ id, name: attachment.name, text: markupWords(words, true), markup: image }),
+    );
+    if (!ok) {
+      // Not saved (the error shows): the drawing waits in the box for Comment, as before.
+      setMarkup(image);
+      return;
+    }
+    setMarkup(null);
+    setText('');
+    setKept(words ? null : { id, image });
+    onSelect?.(id);
+    // A new comment says so, with Undo; a redraw only replaced the picture (Undo would take the whole comment).
+    if (!redraw) onNotice?.(markupAddedToast(() => removeKept(id)));
   };
 
   return (
@@ -297,61 +379,77 @@ export function ImageAttachmentView({
       </div>
       {!readOnly && (
         <div className="ib-imgcompose" data-image-composer="">
-          {markup && (
-            <Tip content="Your marked-up copy rides this comment">
-              <span className="ib-markup">
-                <img src={getImageSrc(markup.path)} alt="Your marked-up copy" />
-                <button type="button" onClick={() => setMarkup(null)} aria-label="Remove the marked-up copy">
-                  <Icon name="x" size={10} />
-                </button>
-              </span>
+          <div className="ib-ccard">
+            {kept && <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} />}
+            {markup && (
+              <Tip content="Your marked-up copy rides this comment">
+                <span className="ib-markup">
+                  <img src={getImageSrc(markup.path)} alt="Your marked-up copy" />
+                  <button type="button" onClick={() => setMarkup(null)} aria-label="Remove the marked-up copy">
+                    <Icon name="x" size={10} />
+                  </button>
+                </span>
+              </Tip>
+            )}
+            <textarea
+              ref={textRef}
+              className="ib-ta"
+              rows={1}
+              value={text}
+              placeholder={kept ? 'Note (optional)' : markup ? 'What should change?' : 'Comment on this image…'}
+              aria-label={kept ? `A note with your drawing on ${attachment.name}` : `Comment on ${attachment.name}`}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if (isCommentSubmitKey(event, enterSavesComment)) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void submit();
+                }
+              }}
+            />
+            <Tip content="Draw on the image (pen, arrow, circle)">
+              <button type="button" className="ib-btn ib-cbtn" onClick={() => setAnnotating(true)} disabled={failed} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
+                <Icon name="pen" size={15} />
+                <span className="ib-cbtn-l" aria-hidden="true">
+                  {markup || kept ? 'Redraw' : 'Mark up'}
+                </span>
+              </button>
             </Tip>
-          )}
-          <textarea
-            ref={textRef}
-            className="ib-ta"
-            rows={1}
-            value={text}
-            placeholder={markup ? 'What should change?' : 'Comment on this image…'}
-            aria-label={`Comment on ${attachment.name}`}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={(event) => {
-              if (isCommentSubmitKey(event, enterSavesComment)) {
-                event.preventDefault();
-                event.stopPropagation();
-                void submit();
-              }
-            }}
-          />
-          <Tip content="Draw on the image (pen, arrow, circle)">
-            <button type="button" className="ib-btn" onClick={() => setAnnotating(true)} disabled={failed} data-markup-open="">
-              <Icon name="pen" size={14} />
-              {markup ? 'Redraw' : 'Mark up'}
+            <button
+              type="button"
+              className="ib-btn ib-pri ib-csave"
+              onClick={() => void submit()}
+              disabled={saving || (!text.trim() && !markup)}
+              data-image-comment-save=""
+            >
+              {kept ? 'Add note' : 'Comment'}
             </button>
-          </Tip>
-          <button type="button" className="ib-btn ib-pri" onClick={() => void submit()} disabled={saving || (!text.trim() && !markup)} data-image-comment-save="">
-            Comment
-          </button>
+          </div>
         </div>
       )}
-      <ImageAnnotator
-        imageSrc={src}
-        isOpen={annotating}
-        onClose={() => {
-          setAnnotating(false);
-          requestAnimationFrame(() => textRef.current?.focus());
-        }}
-        onAccept={async (blob, hasDrawings) => {
-          // Nothing drawn: nothing to keep; the comment box stays as it was.
-          if (!hasDrawings) return;
-          try {
-            const kept = await source.keepMarkup(blob);
-            setMarkup({ path: kept.path, name: `${stem(attachment.name)}, marked up` });
-          } catch (cause) {
-            onError(cause instanceof InboxApiError ? cause.message : 'The drawing was not kept.');
-          }
-        }}
-      />
+      <OverWindow>
+        <ImageAnnotator
+          imageSrc={src}
+          isOpen={annotating}
+          escapeCancels={DRAWING_SCREEN.escapeCancels}
+          hint={DRAWING_SCREEN.hint}
+          onClose={() => {
+            setAnnotating(false);
+            requestAnimationFrame(() => textRef.current?.focus());
+          }}
+          onAccept={async (blob, hasDrawings) => {
+            // Nothing drawn: nothing to keep; the comment box stays as it was.
+            if (!hasDrawings || !acceptable.current) return;
+            acceptable.current = false;
+            try {
+              const keptFile = await source.keepMarkup(blob);
+              await addDrawing({ path: keptFile.path, name: `${stem(attachment.name)}, marked up` });
+            } catch (cause) {
+              onError(cause instanceof InboxApiError ? cause.message : 'The drawing was not kept.');
+            }
+          }}
+        />
+      </OverWindow>
     </div>
   );
 }

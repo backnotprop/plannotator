@@ -7,6 +7,7 @@ import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
+import { RunAgentsSettings } from './RunAgentsSettings';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox-types';
@@ -477,9 +478,12 @@ function AgentsSection({
 }) {
   if (agents && onAgents) {
     return (
-      <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} />
-      </section>
+      <>
+        <section className="ib-sgroup" aria-label="Agents">
+          <AgentsSettings model={agents} onModel={onAgents} context={context} />
+        </section>
+        <RunAgentsSettings />
+      </>
     );
   }
   const env = settings.inbox_tool.env;

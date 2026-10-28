@@ -48,6 +48,7 @@ import {
   type ArchivedPlan,
 } from "./storage";
 import { getRepoInfo } from "./repo";
+import { createRefCards, refCardRouteResponse, type RefRunner } from "./ref-cards";
 import { detectProjectName } from "./project";
 import { agentSwitchConfigToSave, agentToolSaveFailed, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory } from "./config";
 import { getAutoUpdateAdvert, getUpdateAdvert, handleUpdateRoute } from "./auto-update";
@@ -113,6 +114,8 @@ export interface ServerOptions {
   pasteApiUrl?: string;
   /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
+  /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
+  refRunner?: RefRunner;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
   /** When set to "archive", server runs in read-only archive browser mode */
@@ -262,6 +265,9 @@ export async function startPlannotatorServer(
   };
 
   const isRemote = isRemoteSession();
+  // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for,
+  // and never in remote mode, where anyone who reaches the URL could drive the user's gh / glab.
+  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
   const wslFlag = await isWSL();
   const gitUser = detectGitUser();
 
@@ -550,6 +556,9 @@ export async function startPlannotatorServer(
 
           if (updateRoute) return updateRoute;
 
+          // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
+          const refRoute = await refCardRouteResponse(req, url, refCards, { enabled: !isRemote, serverSession });
+          if (refRoute) return refRoute;
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {

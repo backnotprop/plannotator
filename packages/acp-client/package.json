@@ -1,0 +1,22 @@
+{
+  "name": "@plannotator/acp-client",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Plannotator's ACP client: starts an agent over the Agent Client Protocol (Guides in VS Code, the Inbox's runner)",
+  "type": "module",
+  "exports": {
+    "./client": "./client.ts",
+    "./agents": "./agents.ts",
+    "./spawn-plan": "./spawn-plan.ts",
+    "./ensure-launch": "./ensure-launch.ts",
+    "./permission-policy": "./permission-policy.ts",
+    "./same-program": "./same-program.ts",
+    "./which": "./which.ts"
+  },
+  "files": [
+    "*.ts"
+  ],
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.9.0"
+  }
+}

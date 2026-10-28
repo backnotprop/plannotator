@@ -29,6 +29,8 @@
  * immediately and every failure ends in a log line, never a thrown error.
  */
 
+import { UPDATE_EXIT_CHECKSUM_MISMATCH, UPDATE_EXIT_DOWNLOAD_FAILED } from "@plannotator/core/update-exit-codes";
+import { lastRunLog, stagingFailureIn } from "./update-log";
 import { spawn } from "node:child_process";
 import {
   closeSync,
@@ -102,6 +104,24 @@ export {
 } from "@plannotator/shared/update-check";
 
 export const AUTO_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * The wrapper's exit code when the running binary could not download the
+ * install script or the checksums (update-prepare.ts): nothing ran, nothing
+ * changed, try again later (sysexits EX_TEMPFAIL; curl, whose exit codes
+ * install.sh can pass on, never uses it).
+ */
+export const UPDATE_PREPARE_FAILED = UPDATE_EXIT_DOWNLOAD_FAILED;
+/**
+ * The recorded result when install.sh stopped because the binary did not
+ * match PLANNOTATOR_EXPECTED_SHA256, before it replaced anything. install.sh
+ * exits with it AND first writes the wrapper's marker file; the wrapper
+ * records it only when that marker exists and turns any other exit with this
+ * number into 1, so "nothing was changed" is never claimed for another error
+ * (install.sh runs under `set -e`; curl's own codes stay below 100).
+ */
+export const UPDATE_CHECKSUM_MISMATCH = UPDATE_EXIT_CHECKSUM_MISMATCH;
+/** Auto-update's wait before retrying a version whose download did not match: 1, 3, then 7 days. */
+export const MISMATCH_BACKOFF_DAYS: readonly number[] = [1, 3, 7];
 /** A lock older than this is from a run that died without cleaning up. */
 export const AUTO_UPDATE_LOCK_STALE_MS = 60 * 60 * 1000;
 
@@ -114,12 +134,19 @@ export interface AutoUpdateResult {
 }
 
 export interface AutoUpdateNotice {
-  /** Stable per install attempt, so a client can remember it was shown. */
+  /** Stable per install attempt (per version for a mismatch), so a client can remember it was shown. */
   id: string;
   kind: "updated" | "failed";
   version: string;
   releaseUrl: string;
   logPath?: string;
+  /**
+   * Why a failed install failed, when it is one of the safe-update outcomes:
+   * `mismatch` (the download did not match the checksum Plannotator fetched)
+   * or `download` (Plannotator could not download the update), or `prepare`
+   * (downloaded, but the temp folder could not hold it). Additive.
+   */
+  reason?: "mismatch" | "download" | "prepare";
 }
 
 export function autoUpdatePaths(dataDir: string = getPlannotatorDataDir()) {
@@ -164,9 +191,60 @@ export function deriveAutoUpdateNotice(
     return { id, kind: "updated", version, releaseUrl: releaseUrlFor(version) };
   }
   if (result && result.version.replace(/^v/, "") === version && result.exitCode !== 0) {
-    return { id, kind: "failed", version, releaseUrl: releaseUrlFor(version), logPath };
+    // A background run that could not download anything changed nothing:
+    // update.log only, and the next window tries again. Never a notice.
+    if (result.exitCode === UPDATE_PREPARE_FAILED && pending.by !== "person") return undefined;
+    // A 75 whose download worked but whose temp folder could not hold it
+    // (update-prepare's staging line in this run's log) is `prepare`.
+    const reason =
+      result.exitCode === UPDATE_CHECKSUM_MISMATCH
+        ? "mismatch"
+        : result.exitCode === UPDATE_PREPARE_FAILED
+          ? stagingFailureIn(lastRunLog(logPath))
+            ? "prepare"
+            : "download"
+          : undefined;
+    return {
+      // A mismatch shows once per version, however many retries the back-off makes.
+      id: reason === "mismatch" ? `${version}@mismatch` : id,
+      kind: "failed",
+      version,
+      releaseUrl: releaseUrlFor(version),
+      logPath,
+      ...(reason && { reason }),
+    };
   }
   return undefined;
+}
+
+/** How long auto-update waits after the `attempts`-th mismatching download of one version. */
+export function mismatchBackoffMs(attempts: number): number {
+  const days = MISMATCH_BACKOFF_DAYS[Math.min(Math.max(attempts, 1), MISMATCH_BACKOFF_DAYS.length) - 1]!;
+  return days * AUTO_UPDATE_INTERVAL_MS;
+}
+
+/**
+ * Count a finished install whose download did not match (UPDATE_CHECKSUM_MISMATCH) into
+ * `mismatchBackoff`, once per install attempt (`pending.startedAt`). Returns
+ * the back-off as it stands. Pure.
+ */
+export function noteMismatchResult(state: AutoUpdateState, result: AutoUpdateResult | null): AutoUpdateState["mismatchBackoff"] {
+  const backoff = state.mismatchBackoff;
+  if (!result || result.exitCode !== UPDATE_CHECKSUM_MISMATCH) return backoff;
+  const version = result.version.replace(/^v/, "");
+  const pending = state.pending;
+  if (!pending || pending.version.replace(/^v/, "") !== version) return backoff;
+  if (backoff && backoff.version === version && backoff.lastAttemptAt === pending.startedAt) return backoff;
+  const attempts = backoff && backoff.version === version && Number.isFinite(backoff.attempts) ? backoff.attempts + 1 : 1;
+  return { version, attempts, lastAttemptAt: pending.startedAt };
+}
+
+/** Whether background auto-update holds back `latest` for now. Pure. */
+export function isMismatchBackedOff(backoff: AutoUpdateState["mismatchBackoff"], latest: string, now: number): boolean {
+  if (!backoff || backoff.version !== latest.replace(/^v/, "")) return false;
+  const at = backoff.lastAttemptAt;
+  if (typeof at !== "number" || !Number.isFinite(at) || at > now) return false;
+  return now - at < mismatchBackoffMs(backoff.attempts);
 }
 
 /**
@@ -413,6 +491,8 @@ export interface InstallerLaunch {
   platform: NodeJS.Platform;
   /** Validated remembered install flags (see readInstallFlags). */
   flags: InstallFlagId[];
+  /** Who runs `update-prepare` (POSIX). Default: this process (updatePrepareInvocation). Tests point it at a source entry. */
+  prepare?: { binary: string; entry: string };
 }
 
 export interface AutoUpdateDeps {
@@ -447,6 +527,7 @@ export type AutoUpdateOutcome =
   | "up-to-date"
   | "sessions-open"
   | "locked"
+  | "backed-off"
   | "launched"
   | "launch-failed";
 
@@ -514,6 +595,19 @@ export async function runAutoUpdateCheck(deps: AutoUpdateDeps): Promise<AutoUpda
     }
   }
   if (!isNewerStableVersion(latest, current)) return "up-to-date";
+
+  // Safe updates: a version whose download did not match the checksum
+  // Plannotator fetched waits 1, 3, then 7 days before the background tries
+  // it again (the 24 h window is spent: one check a day, never a loop).
+  const backoff = noteMismatchResult(state, readAutoUpdateResult(deps.dataDir));
+  if (backoff !== state.mismatchBackoff) patchUpdateState((s) => ({ ...s, mismatchBackoff: backoff }), deps.dataDir);
+  if (isMismatchBackedOff(backoff, latest, now)) {
+    log(
+      `v${latest} is held back until ${new Date(backoff!.lastAttemptAt + mismatchBackoffMs(backoff!.attempts)).toISOString()}: its last download did not match the checksum Plannotator fetched`,
+      deps.dataDir,
+    );
+    return "backed-off";
+  }
 
   const others = otherOpenSessions(deps.listSessions(), deps.pid);
   if (others.length > 0) {
@@ -669,12 +763,21 @@ export function startManualUpdateForThisBinary(currentVersion: string | undefine
 }
 
 /**
- * The detached wrapper. It downloads the same script a user pipes by hand,
- * runs it for exactly `version` without prompts plus the remembered install
- * flags, records the exit code, and releases the lock. Inputs travel as
- * environment variables or argv entries, never interpolated into the command
- * text: on POSIX the flags are the wrapper's own positional parameters
- * (`"$@"`).
+ * The detached POSIX wrapper (safe updates, step 1). It never downloads with
+ * the shell's curl: it asks the running Plannotator (`update-prepare`, its own
+ * fetch, update-prepare.ts) to download the install script and the expected
+ * checksums into a private temp dir, then runs that script for exactly
+ * `version` without prompts plus the remembered install flags, with
+ * PLANNOTATOR_EXPECTED_SHA256 so the script refuses a binary that does not
+ * match (UPDATE_CHECKSUM_MISMATCH, before it replaces anything). It records the exit code,
+ * removes the temp dir and releases the lock. When the download step fails
+ * nothing runs and the result is UPDATE_PREPARE_FAILED (75).
+ *
+ * Inputs travel as environment variables or argv entries, never interpolated
+ * into the command text: the flags are the wrapper's own positional
+ * parameters (`"$@"`). The staged dir comes from our own binary's stdout and
+ * is only used (or removed) when it is a single absolute path whose last part
+ * is plannotator-update-*.
  */
 const POSIX_WRAPPER = `
 # Detached (auto-update, Update now): the lock names this wrapper's process
@@ -686,28 +789,64 @@ if [ "\${PLANNOTATOR_UPDATE_DETACHED:-}" = 1 ]; then
   printf 'pid=%s group=%s host=%s boot=%s pidns=%s\\n' "$$" "$$" "$(uname -n 2>/dev/null)" \
     "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" "$(readlink /proc/$$/ns/pid 2>/dev/null)" > "$PLANNOTATOR_UPDATE_LOCK"
 fi
-tmp=$(mktemp "\${TMPDIR:-/tmp}/plannotator-install.XXXXXX") || exit 1
+update_dir=""
 code=1
+cleanup() {
+  [ -n "$update_dir" ] && rm -rf "$update_dir"
+}
+record() {
+  printf '{"version":"%s","exitCode":%d}\\n' "$PLANNOTATOR_UPDATE_VERSION" "$1" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+}
 # Interrupted (Ctrl-C on plannotator update, a TERM): record 130 and release
 # the lock now, so the next update does not wait an hour for a stale lock.
 on_signal() {
   trap '' INT TERM HUP
-  rm -f "$tmp"
-  printf '{"version":"%s","exitCode":130}\\n' "$PLANNOTATOR_UPDATE_VERSION" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+  cleanup
+  record 130
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] update: interrupted"
   rm -f "$PLANNOTATOR_UPDATE_LOCK"
   exit 130
 }
 trap on_signal INT TERM HUP
-if curl -fsSL --connect-timeout 30 --speed-limit 1 --speed-time 60 "$PLANNOTATOR_UPDATE_SCRIPT_URL" -o "$tmp"; then
-  bash "$tmp" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
-  code=$?
+if [ -n "$PLANNOTATOR_UPDATE_ENTRY" ]; then
+  prepared=$("$PLANNOTATOR_UPDATE_BINARY" "$PLANNOTATOR_UPDATE_ENTRY" update-prepare "$PLANNOTATOR_UPDATE_VERSION" </dev/null) || prepared=""
 else
-  echo "update: could not download $PLANNOTATOR_UPDATE_SCRIPT_URL"
+  prepared=$("$PLANNOTATOR_UPDATE_BINARY" update-prepare "$PLANNOTATOR_UPDATE_VERSION" </dev/null) || prepared=""
 fi
-rm -f "$tmp"
-printf '{"version":"%s","exitCode":%d}\\n' "$PLANNOTATOR_UPDATE_VERSION" "$code" > "$PLANNOTATOR_UPDATE_RESULT.tmp" && mv -f "$PLANNOTATOR_UPDATE_RESULT.tmp" "$PLANNOTATOR_UPDATE_RESULT"
+# Used (and later removed) only when it is an absolute path on one line whose
+# last part is plannotator-update-* (a case pattern's * crosses slashes, so
+# the last part is checked on its own).
+case "$prepared" in
+  *"
+"*|*/) ;;
+  /*) case "\${prepared##*/}" in
+        plannotator-update-?*) update_dir="$prepared" ;;
+      esac ;;
+esac
+if [ -n "$update_dir" ] && [ -f "$update_dir/install.sh" ]; then
+  # Written only when NODE_EXTRA_CA_CERTS is set: curl's own roots plus that
+  # certificate, so install.sh's curl trusts what Plannotator's fetch did.
+  if [ -f "$update_dir/curl-ca-bundle.pem" ]; then
+    export CURL_CA_BUNDLE="$update_dir/curl-ca-bundle.pem"
+  fi
+  PLANNOTATOR_EXPECTED_SHA256=$(cat "$update_dir/expected-sha256" 2>/dev/null) PLANNOTATOR_UPDATE_MISMATCH_FILE="$update_dir/checksum-mismatch" bash "$update_dir/install.sh" --version "$PLANNOTATOR_UPDATE_VERSION" --non-interactive "$@" </dev/null
+  code=$?
+  # A mismatch is only what install.sh's pin check marked as one.
+  if [ -f "$update_dir/checksum-mismatch" ]; then
+    code=113
+  elif [ "$code" -eq 113 ]; then
+    code=1
+  fi
+else
+  code=75
+  # update-prepare already said why (download, certificate, temp folder).
+  echo "update: nothing ran; nothing was changed"
+fi
+cleanup
+# The log line first: a reader that sees the new result also finds this run's
+# part of update.log (deriveAutoUpdateNotice tells "prepare" from "download" there).
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] update: install.sh exited $code"
+record "$code"
 rm -f "$PLANNOTATOR_UPDATE_LOCK"
 `;
 
@@ -788,8 +927,23 @@ export function installScriptUrl(platform: NodeJS.Platform, env: NodeJS.ProcessE
   return platform === "win32" ? INSTALL_PS1_URL : INSTALL_SH_URL;
 }
 
+/**
+ * How the POSIX wrapper reaches `update-prepare`: the compiled binary is its
+ * own entry; a source run (`bun …/index.ts`, the process tests' entries)
+ * passes its script as the first argument.
+ */
+export function updatePrepareInvocation(main: string = typeof Bun !== "undefined" ? Bun.main : process.argv[1] ?? ""): {
+  binary: string;
+  entry: string;
+} {
+  const normalized = main.replace(/\\/g, "/");
+  const compiled = normalized.startsWith("/$bunfs/") || /^\/?[A-Za-z]:\/(?:\$bunfs|~BUN)\//i.test(normalized);
+  return { binary: process.execPath, entry: compiled ? "" : main };
+}
+
 function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
   const { file, args, env: commandEnv } = installerCommand(launch.platform, launch.flags);
+  const prepare = launch.prepare ?? updatePrepareInvocation();
   return {
     file,
     args,
@@ -798,7 +952,12 @@ function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; 
       PLANNOTATOR_UPDATE_VERSION: launch.version,
       PLANNOTATOR_UPDATE_RESULT: launch.resultPath,
       PLANNOTATOR_UPDATE_LOCK: launch.lockPath,
+      // Windows only: its wrapper still downloads install.ps1 itself (Windows
+      // blocks the leaked eMudhra keys in its own certificate store).
       PLANNOTATOR_UPDATE_SCRIPT_URL: installScriptUrl(launch.platform),
+      // POSIX: the binary that runs `update-prepare` (this one).
+      PLANNOTATOR_UPDATE_BINARY: prepare.binary,
+      PLANNOTATOR_UPDATE_ENTRY: prepare.entry,
       ...commandEnv,
     },
   };

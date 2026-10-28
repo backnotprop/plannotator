@@ -14,6 +14,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -2462,6 +2463,131 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     }
   },
 );
+
+// Safe updates (step 1): Plannotator's own updater downloads this script and
+// the .sha256 of both binaries with its own connection, and hands them over in
+// PLANNOTATOR_EXPECTED_SHA256. The script must compare its download against
+// that value before anything is replaced, exit 113 on a mismatch (after
+// marking it in the updater's PLANNOTATOR_UPDATE_MISMATCH_FILE), and keep the
+// installed binary. Without the variables it behaves exactly as before.
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh PLANNOTATOR_EXPECTED_SHA256 (safe updates)",
+  () => {
+    const args = ["--version", "v99.9.9", "--non-interactive", "--skip-skills"];
+    const binary = "#!/bin/sh\necho plannotator-fixture-new\n";
+    const os = process.platform === "darwin" ? "darwin" : "linux";
+    const machine = Bun.spawnSync(["uname", "-m"]).stdout.toString().trim();
+    const arch = machine === "x86_64" || machine === "amd64" ? "x64" : "arm64";
+    const mine = `plannotator-${os}-${arch}`;
+    const other = `plannotator-${os}-${arch === "x64" ? "arm64" : "x64"}`;
+    const OLD = "#!/bin/sh\necho plannotator-old\n";
+
+    function run(pin: string | undefined, opts: { servedChecksum?: string; marker?: string } = {}) {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const installed = join(sandbox.home, ".local", "bin", "plannotator");
+      mkdirSync(join(sandbox.home, ".local", "bin"), { recursive: true });
+      writeFileSync(installed, OLD, { mode: 0o755 });
+      const log = join(sandbox.home, "curl.log");
+      const env: Record<string, string> = { STUB_CURL_LOG: log };
+      if (pin !== undefined) env.PLANNOTATOR_EXPECTED_SHA256 = pin;
+      if (opts.servedChecksum) env.STUB_CHECKSUM = opts.servedChecksum;
+      if (opts.marker) env.PLANNOTATOR_UPDATE_MISMATCH_FILE = opts.marker;
+      const result = runInstallSh(sandbox, args, env);
+      const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+      return { ...result, calls, installed: readFileSync(installed, "utf8"), checksum: sandbox.binaryChecksum! };
+    }
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    const fetchedSha256 = (calls: string[]) => calls.some((c) => c.endsWith(".sha256"));
+
+    test("a matching pin installs, says so, and does not fetch the .sha256 again", () => {
+      const r = run(`${other}=${"0".repeat(64)} ${mine}=${sha(binary)}`);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("Checksum matches the one Plannotator fetched for v99.9.9.");
+      expect(fetchedSha256(r.calls)).toBe(false);
+      expect(r.installed).toBe(binary);
+    });
+
+    test("the pin is read for this machine's CPU type only, and in any letter case", () => {
+      // Upper case is the pin itself (no fallback to the .sha256): it says so.
+      const upper = run(`${mine}=${sha(binary).toUpperCase()} ${other}=${"f".repeat(64)}`);
+      expect(upper.code).toBe(0);
+      expect(upper.out).toContain("Checksum matches the one Plannotator fetched for v99.9.9.");
+      expect(fetchedSha256(upper.calls)).toBe(false);
+      // Only the other CPU type matches: this one is a mismatch.
+      const r = run(`${mine}=${"f".repeat(64)} ${other}=${sha(binary)}`);
+      expect(r.code).toBe(113);
+    });
+
+    test("only this machine's pin is enough (the other CPU type's may be missing)", () => {
+      const r = run(`${mine}=${sha(binary)}`);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain("Checksum matches the one Plannotator fetched for v99.9.9.");
+      expect(r.installed).toBe(binary);
+    });
+
+    test("tamper: a download that differs from the pin exits 113, marks it, and keeps the installed binary", () => {
+      // The network serves a .sha256 that matches the altered binary: only the pin catches it.
+      const markerDir = mkdtempSync(join(tmpdir(), "plannotator-mismatch-mark-"));
+      const marker = join(markerDir, "checksum-mismatch");
+      const r = run(`${mine}=${sha("the genuine binary")} ${other}=${sha("the genuine binary")}`, { servedChecksum: sha(binary), marker });
+      expect(r.code).toBe(113);
+      expect(existsSync(marker)).toBe(true);
+      rmSync(markerDir, { recursive: true, force: true });
+      expect(r.out).toContain("Stopped: the v99.9.9 download doesn't match the checksum Plannotator fetched for it.");
+      expect(r.out).toContain("Nothing was changed; the Plannotator you have still works.");
+      expect(r.out).not.toContain("curl -fsSL");
+      expect(r.installed).toBe(OLD);
+      expect(fetchedSha256(r.calls)).toBe(false);
+    });
+
+    test("the marker is only ever a file named checksum-mismatch at an absolute path", () => {
+      const markerDir = mkdtempSync(join(tmpdir(), "plannotator-mismatch-mark-"));
+      const elsewhere = join(markerDir, "some-other-file");
+      const r = run(`${mine}=${"f".repeat(64)}`, { marker: elsewhere });
+      expect(r.code).toBe(113);
+      expect(existsSync(elsewhere)).toBe(false);
+      rmSync(markerDir, { recursive: true, force: true });
+    });
+
+    test("a pin with no entry for this binary, or a malformed one, falls back to the .sha256 check", () => {
+      for (const pin of [`${other}=${sha(binary)}`, `${mine}=nothex`, `${mine}=${"a".repeat(63)}`, "garbage"]) {
+        const r = run(pin);
+        expect(r.code).toBe(0);
+        expect(r.out).toContain(`the update carried no checksum for ${mine}`);
+        expect(fetchedSha256(r.calls)).toBe(true);
+        expect(r.installed).toBe(binary);
+      }
+    });
+
+    test("without the variable nothing changes: the .sha256 is fetched and a mismatch is exit 1, as before", () => {
+      const ok = run(undefined);
+      expect(ok.code).toBe(0);
+      expect(fetchedSha256(ok.calls)).toBe(true);
+      expect(ok.out).not.toContain("Plannotator fetched");
+      const bad = run(undefined, { servedChecksum: "0".repeat(64) });
+      expect(bad.code).toBe(1);
+      expect(bad.out).toContain("Checksum verification failed!");
+      expect(bad.installed).toBe(OLD);
+    });
+  },
+);
+
+describe("install scripts pin the sem sidecar's checksums (no checksums.txt fetch)", () => {
+  const sh = readFileSync(join(scriptsDir, "install.sh"), "utf8");
+  const ps1 = readFileSync(join(scriptsDir, "install.ps1"), "utf8");
+  const cmd = readFileSync(join(scriptsDir, "install.cmd"), "utf8");
+  // Bumping SEM_VERSION without new pins would make every sem install skip
+  // ("checksum mismatch"); this fails first, naming the version to re-pin.
+  test("each installer pins sem v0.8.0 and no longer reads checksums.txt", () => {
+    for (const [name, text] of [["install.sh", sh], ["install.ps1", ps1], ["install.cmd", cmd]] as const) {
+      expect(`${name}:${/v0\.8\.0/.test(text)}`).toBe(`${name}:true`);
+      expect(`${name}:${text.includes("checksums.txt\"") || /\/checksums\.txt/.test(text)}`).toBe(`${name}:false`);
+    }
+    expect(sh).toContain("a98235ac9f8fae93364ddb7c681036fbe33af756db40e067331ef2091ecc8e6a");
+    expect(ps1).toContain("2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06");
+    expect(cmd).toContain("2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06");
+  });
+});
 
 describe("is_release_tag (install.sh): only a plain vX.Y.Z tag", () => {
   const script = readScript("install.sh");

@@ -4,8 +4,10 @@
  * Done / Can't do it / Undo go through `POST /api/inbox/messages/:id/actions/:key`
  * on a running Inbox (temp data dir, loopback, the Undo window shortened), and
  * the answer comes back as the person's reply: over the bridge with the exact
- * wake text, and through wait_for_reply. Failures to catch: anything sent
- * inside the Undo window; a wake text that drifts; `done` accepted for another
+ * wake text, and through wait_for_reply. The window stages its marks
+ * (`staged: true`, approval "inbox-action-items-in-reply"): they go only with
+ * the person's Send (`actions` on the reply route). Failures to catch:
+ * anything sent inside the Undo window, or a staged mark sent on a timer; a wake text that drifts; `done` accepted for another
  * thread or a question; the route open to another site or a stale tab.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -218,6 +220,49 @@ describe("the person's Done", () => {
     expect((await mark(server, sent.message_id, "a-00000000", { outcome: "done" })).status).toBe(404);
     expect((await mark(server, sent.message_id, key, { outcome: "maybe" })).status).toBe(422);
     expect((await actionOf(server, sent.thread_id, sent.message_id)).state).toBe("open");
+  });
+});
+
+describe("the window's Done goes with the person's reply (approval \"inbox-action-items-in-reply\")", () => {
+  test("a staged Done never goes on a timer; read_thread says it waits in the draft; the Send carries it with the words, once", async () => {
+    const { server, client, sent } = await setup();
+    const key = sent.actions![0]!.key;
+    expect((await mark(server, sent.message_id, key, { outcome: "done", note: "Approved.", staged: true })).status).toBe(200);
+    await sleep(DELAY + 250);
+    expect(await poll(server)).toEqual([]);
+    expect(await rowOf(server, sent.thread_id)).toMatchObject({ section: "stopped", last_author: "agent", unsent: { done: 1 } });
+    const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id } })) as { content: { text: string }[] };
+    expect(read.content[0]!.text).toContain(`(A1) done, note: "Approved." (in the person's reply draft, not sent yet)`);
+
+    const reply = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, {
+      serverSession: server.serverSession,
+      idempotency_key: "send-1",
+      words: "Go ahead with the release.",
+      questions: [],
+      actions: [{ key }],
+    });
+    expect(reply.status).toBe(200);
+    const commands = await poll(server);
+    expect(commands).toHaveLength(1);
+    const at = (await actionOf(server, sent.thread_id, sent.message_id)).action_result!.at;
+    expect(commands[0]!).toMatchObject({
+      type: "reply",
+      reply_to: sent.message_id,
+      body: ["Did 1 action item.", "Go ahead with the release.", "## Action items you asked for", "1 of 1 done.", `### A1. Approve the production deploy on Vercel\nDone, ${inboxActionTime(at)}.\nNote: Approved.`].join("\n\n"),
+    });
+    expect((await actionOf(server, sent.thread_id, sent.message_id)).state).toBe("sent");
+    // No second reply on a timer: only that one (the bridge hands it again until it is taken).
+    await sleep(DELAY + 250);
+    expect((await poll(server)).map((c) => c.id)).toEqual([commands[0]!.id]);
+  });
+
+  test("the route passes note_only: a note save landing after the take-back does not stage the item again", async () => {
+    const { server, sent } = await setup();
+    const key = sent.actions![0]!.key;
+    expect((await mark(server, sent.message_id, key, { outcome: "done", staged: true })).status).toBe(200);
+    expect((await mark(server, sent.message_id, key, { outcome: null, staged: true })).status).toBe(200);
+    expect((await mark(server, sent.message_id, key, { outcome: "done", note: "Late.", staged: true, note_only: true })).status).toBe(200);
+    expect(await actionOf(server, sent.thread_id, sent.message_id)).toMatchObject({ state: "open", action_result: null });
   });
 });
 

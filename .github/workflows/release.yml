@@ -541,6 +541,19 @@ jobs:
           )
           chmod 755 "$guard_root/parent"
 
+      # Safe updates (step 1): the compiled binary's `update-prepare` (the
+      # update wrapper's download step) prints exactly the staged dir, and a
+      # full `plannotator update` reaches it through the wrapper (compiled-
+      # binary detection) against a loopback mirror. Temp HOME and data dir; a
+      # stand-in install script; nothing leaves the runner.
+      - name: Smoke-test update-prepare (safe updates)
+        if: runner.os != 'Windows'
+        env:
+          BINARY: artifacts/${{ matrix.binary }}
+        run: |
+          chmod +x "$BINARY"
+          bash scripts/smoke-update-prepare.sh "$BINARY"
+
       - name: Smoke-test binary
         if: runner.os == 'Windows'
         shell: pwsh

@@ -36,7 +36,7 @@
  */
 
 import { blockKeyHash8, findDirectiveBlocks, MAX_QUESTION_PROMPT_CHARS, normalizeQuestionText } from "./question-block";
-import { isNegativeWaitValue } from "./inbox-questions";
+import { INBOX_REPLY_SENTENCE_LINE, isNegativeWaitValue } from "./inbox-questions";
 import { cutText } from "./text-cut";
 import type { InboxActionFacts, InboxActionResult, InboxQuestionRecord } from "./inbox-types";
 
@@ -264,43 +264,160 @@ export function inboxActionTime(at: string, timeZone?: string): string {
 
 const actionsWord = (n: number): string => `${n} action item${n === 1 ? "" : "s"}`;
 
+type ReportedAction = Pick<InboxQuestionRecord, "key" | "position" | "prompt" | "action_result">;
+type AnyAction = Pick<InboxQuestionRecord, "key" | "position" | "action_result" | "superseded_by" | "sent_revision" | "revision">;
+
+/** One asking message's action items a report carries (`reported`), and all of that message's action items (`all`), for "x of y done". */
+export interface InboxActionsReportGroup {
+  message_id: string;
+  reported: readonly ReportedAction[];
+  all: readonly AnyAction[];
+}
+
 /**
- * The reply a Done or Can't do it sends: "Did 1 action item." (or "Couldn't do 1
- * action item.", "Did 1 action item, couldn't do 1."), then the section listing each
- * action item it reports, A-numbered as the card, with "Done, 3:12 PM." and the
- * note, or "Can't do it: <reason>". `all` is the message's action items, for the
- * "x of y done" line (an agent's own `done` counts as done).
+ * The person's own mark on a reported item, for the reply's first sentence: an item the agent's own `done`
+ * settled (Q3) counts as the person had marked it in their draft, so a Can't do it they marked reads
+ * "Couldn't do 1 action item." over "You saw it done" and their reason, never "Did 1 action item.". The
+ * "x of y done." line still counts it done: it is.
  */
-export function composeInboxActionsReply(input: {
-  reported: readonly Pick<InboxQuestionRecord, "key" | "position" | "prompt" | "action_result">[];
-  all: readonly Pick<InboxQuestionRecord, "key" | "position" | "action_result" | "superseded_by" | "sent_revision" | "revision">[];
-  /** That message's questions and action items still waiting on the person, for the last line (#2059). */
-  stillOpen?: readonly InboxStillOpenItem[];
-  timeZone?: string;
-}): string {
-  const reported = [...input.reported].filter((r) => r.action_result).sort((a, b) => a.position - b.position);
-  if (reported.length === 0) return "";
+function personOutcome(result: InboxActionResult): "done" | "cant" {
+  return result.by === "agent" ? (result.person?.outcome ?? "done") : result.outcome;
+}
+
+/** A note or reason inside one item's lines: blank lines closed up, so the item stays one paragraph. */
+const flatNote = (text: string | null | undefined): string => (text ?? "").trim().replace(/\n[ \t]*\n+/g, "\n");
+
+/** One reported action item's lines, under a heading of its level. */
+function reportedItem(r: ReportedAction, heading: "###" | "####", timeZone: string | undefined): string {
+  const result = r.action_result!;
+  const head = `${heading} A${r.position + 1}. ${r.prompt.replace(/\s+/g, " ").trim()}`;
+  if (result.by === "agent") {
+    // The agent saw it done while the person's mark waited in their draft: the person's note still goes (Q3).
+    const note = flatNote(result.person?.note);
+    const label = result.person?.outcome === "cant" ? "Their reason" : "Note";
+    return [head, `You saw it done, ${inboxActionTime(result.at, timeZone)}.`, ...(note ? [`${label}: ${note}`] : [])].join("\n");
+  }
+  if (result.outcome === "cant") return `${head}\nCan't do it: ${flatNote(result.note)}`;
+  return [head, `Done, ${inboxActionTime(result.at, timeZone)}.`, ...(result.note ? [`Note: ${flatNote(result.note)}`] : [])].join("\n");
+}
+
+/** "x of y done." for one message: y its action items not superseded (the agent's own `done` counts as done). */
+function doneLine(group: InboxActionsReportGroup, reported: readonly ReportedAction[]): string {
   const reportedKeys = new Set(reported.map((r) => r.key));
-  const done = reported.filter((r) => r.action_result!.outcome === "done").length;
-  const cant = reported.length - done;
-  const sentence =
-    done > 0 && cant > 0 ? `Did ${actionsWord(done)}, couldn't do ${cant}.` : done > 0 ? `Did ${actionsWord(done)}.` : `Couldn't do ${actionsWord(cant)}.`;
-  const live = input.all.filter((r) => !r.superseded_by);
+  const live = group.all.filter((r) => !r.superseded_by);
   const total = Math.max(live.length, reported.length);
   const doneAll = live.filter((r) => {
-    if (reportedKeys.has(r.key)) return reported.find((x) => x.key === r.key)!.action_result!.outcome === "done";
+    if (reportedKeys.has(r.key)) {
+      const result = reported.find((x) => x.key === r.key)!.action_result!;
+      return result.by === "agent" || result.outcome === "done";
+    }
     const result = r.action_result;
     if (!result || result.outcome !== "done") return false;
     return result.by === "agent" || (r.revision > 0 && r.sent_revision === r.revision);
   }).length;
-  const items = reported.map((r) => {
-    const result = r.action_result!;
-    const head = `### A${r.position + 1}. ${r.prompt.replace(/\s+/g, " ").trim()}`;
-    if (result.outcome === "cant") return `${head}\nCan't do it: ${(result.note ?? "").trim()}`;
-    return [head, `Done, ${inboxActionTime(result.at, input.timeZone)}.`, ...(result.note ? [`Note: ${result.note.trim()}`] : [])].join("\n");
-  });
-  const open = inboxActionsStillOpenLine(input.stillOpen ?? []);
-  return [sentence, `## ${INBOX_ACTIONS_HEADING}`, `${doneAll} of ${total} done.`, ...items, ...(open ? [open] : [])].join("\n\n");
+  return `${doneAll} of ${total} done.`;
+}
+
+/**
+ * The person's action items as a reply carries them: "Did 1 action item." (or
+ * "Couldn't do 1 action item.", "Did 1 action item, couldn't do 1."), then the
+ * "Action items you asked for" section, each action item A-numbered as the
+ * card, with "Done, 3:12 PM." and the note, or "Can't do it: <reason>" (an item
+ * the agent saw done itself while the person's mark waited in their draft:
+ * "You saw it done, 3:14 PM." and the person's note). One message: "x of y
+ * done." then its items. Several (one reply answers one session's messages),
+ * or one that is not the message the reply answers (`replyTo`): a
+ * "### Your message <id>" sub-heading each, as the answers section does, so
+ * "A1" never names two items. Then the still-open line (#2059), where an item
+ * of another message than `replyTo` is named with its message. Empty when
+ * nothing is reported.
+ */
+export function composeInboxActionsSection(input: {
+  groups: readonly InboxActionsReportGroup[];
+  /** The asking session's questions and action items still waiting on the person, for the last line (#2059). */
+  stillOpen?: readonly InboxStillOpenItem[];
+  /** The message the reply answers (its `reply_to`): its items need no message named. Absent: one message, nothing named. */
+  replyTo?: string;
+  timeZone?: string;
+}): string {
+  const groups = input.groups
+    .map((g) => ({ group: g, reported: [...g.reported].filter((r) => r.action_result).sort((a, b) => a.position - b.position) }))
+    .filter((g) => g.reported.length > 0);
+  if (groups.length === 0) return "";
+  const all = groups.flatMap((g) => g.reported);
+  const done = all.filter((r) => personOutcome(r.action_result!) === "done").length;
+  const cant = all.length - done;
+  const sentence =
+    done > 0 && cant > 0 ? `Did ${actionsWord(done)}, couldn't do ${cant}.` : done > 0 ? `Did ${actionsWord(done)}.` : `Couldn't do ${actionsWord(cant)}.`;
+  const open = inboxActionsStillOpenLine(input.stillOpen ?? [], input.replyTo);
+  const labelled = groups.length > 1 || (input.replyTo !== undefined && groups[0]!.group.message_id !== input.replyTo);
+  const body =
+    !labelled
+      ? [doneLine(groups[0]!.group, groups[0]!.reported), ...groups[0]!.reported.map((r) => reportedItem(r, "###", input.timeZone))]
+      : groups.flatMap(({ group, reported }) => [
+          `### Your message ${group.message_id}`,
+          doneLine(group, reported),
+          ...reported.map((r) => reportedItem(r, "####", input.timeZone)),
+        ]);
+  return [sentence, `## ${INBOX_ACTIONS_HEADING}`, ...body, ...(open ? [open] : [])].join("\n\n");
+}
+
+/**
+ * The report the timed path sends on its own (decision mode, the phone door,
+ * an older window; approval "inbox-next-actions"): one asking message's
+ * action items, as `composeInboxActionsSection` writes them. `all` is the
+ * message's action items, for the "x of y done" line.
+ */
+export function composeInboxActionsReply(input: {
+  reported: readonly ReportedAction[];
+  all: readonly AnyAction[];
+  /** That message's questions and action items still waiting on the person, for the last line (#2059). */
+  stillOpen?: readonly InboxStillOpenItem[];
+  timeZone?: string;
+}): string {
+  return composeInboxActionsSection({ groups: [{ message_id: "", reported: input.reported, all: input.all }], stillOpen: input.stillOpen, timeZone: input.timeZone });
+}
+
+/**
+ * A person's reply with their action items in it (approval
+ * "inbox-action-items-in-reply"): the action sentence joins the reply's own
+ * first line when it has one ("Answered 1 question, did 1 action item."),
+ * else opens the reply; the "Action items you asked for" section goes after
+ * everything else (the words, the still-open line, the answers).
+ */
+export function withInboxActionsSection(replyBody: string, actionsSection: string): string {
+  if (actionsSection === "") return replyBody;
+  const [actionSentence, ...section] = actionsSection.split("\n\n");
+  const parts = replyBody === "" ? [] : replyBody.split("\n\n");
+  if (INBOX_REPLY_SENTENCE_LINE.test(parts[0] ?? "")) {
+    parts[0] = `${parts[0]!.slice(0, -1)}, ${actionSentence!.charAt(0).toLowerCase()}${actionSentence!.slice(1)}`;
+  } else parts.unshift(actionSentence!);
+  return [...parts, ...section].join("\n\n");
+}
+
+/** The action sentence a reply opens with, alone or joined to the answers' ("…, did 1 action item."). */
+const ACTION_SENTENCE = String.raw`(?:Did \d+ action items?(?:, couldn't do \d+)?|Couldn't do \d+ action items?)`;
+
+const ACTION_SENTENCE_JOINED = String.raw`(?:did \d+ action items?(?:, couldn't do \d+)?|couldn't do \d+ action items?)`;
+
+/**
+ * A person's reply as the window draws it once the action items it carried
+ * are listed apart (the thread's "You did 1 action item"): without the action
+ * sentence (or its half of a joined first line) and without the "Action items
+ * you asked for" section (its heading, "x of y done.", its items and its
+ * still-open line).
+ * Display only: the agent got every word.
+ */
+export function withoutInboxActionsSection(body: string): string {
+  let text = body.replace(new RegExp(String.raw`^((?:Answered|Skipped) [^\n]*?), ${ACTION_SENTENCE_JOINED}\.(?=\n|$)`), "$1.");
+  text = text.replace(new RegExp(String.raw`^${ACTION_SENTENCE}\.(?:\n\n|$)`), "");
+  // The section is paragraphs: its heading, "x of y done.", the items (### / ####), the still-open line.
+  const paragraphs = text.split("\n\n");
+  const at = paragraphs.indexOf(`## ${INBOX_ACTIONS_HEADING}`);
+  if (at < 0) return text.trim();
+  let end = at + 1;
+  while (end < paragraphs.length && /^(?:\d+ of \d+ done\.$|#{3,4} |Still open: )/.test(paragraphs[end]!)) end += 1;
+  return [...paragraphs.slice(0, at), ...paragraphs.slice(end)].join("\n\n").trim();
 }
 
 /** A question (Q1…) or action item (A1…) of the message a report answers that still waits on the person. */
@@ -309,6 +426,8 @@ export interface InboxStillOpenItem {
   /** 0-based, as the record's `position`: Q1 / A1 is 0. */
   position: number;
   prompt: string;
+  /** The message that asks it: named in the line when it is not the message the reply answers. */
+  message_id?: string;
 }
 
 /**
@@ -317,10 +436,12 @@ export interface InboxStillOpenItem {
  * "Still open: A2. Approve the 2FA prompt for the npm org — the person will
  * do it in the Inbox; don't ask again." Empty when nothing is open.
  */
-export function inboxActionsStillOpenLine(items: readonly InboxStillOpenItem[]): string {
+export function inboxActionsStillOpenLine(items: readonly InboxStillOpenItem[], replyTo?: string): string {
   if (items.length === 0) return "";
-  const sorted = [...items].sort((a, b) => (a.kind === b.kind ? a.position - b.position : a.kind === "question" ? -1 : 1));
-  const names = sorted.map((i) => `${i.kind === "action" ? "A" : "Q"}${i.position + 1}. ${i.prompt.replace(/\s+/g, " ").trim()}`);
+  // The replied-to message's items first, then each other message's, in the order given.
+  const other = (i: InboxStillOpenItem) => replyTo !== undefined && i.message_id !== undefined && i.message_id !== replyTo;
+  const sorted = [...items].sort((a, b) => Number(other(a)) - Number(other(b)) || (a.kind === b.kind ? a.position - b.position : a.kind === "question" ? -1 : 1));
+  const names = sorted.map((i) => `${i.kind === "action" ? "A" : "Q"}${i.position + 1}${other(i) ? ` (your message ${i.message_id})` : ""}. ${i.prompt.replace(/\s+/g, " ").trim()}`);
   const one = items.length === 1;
   const actions = items.some((i) => i.kind === "action");
   const questions = items.some((i) => i.kind === "question");
@@ -382,4 +503,4 @@ export const INBOX_ACTION_GUIDE = [
 
 /** send_message's (and submit_guide's) `done`, as an agent reads it. */
 export const INBOX_DONE_DESCRIPTION =
-  "Your own action items (`:::action` blocks) in this thread that you saw done yourself, e.g. the deployment you were watching is Ready: \"<message id>/<key>\" for one (the key starts with a-; read_thread gives it) or \"<message id>\" for every open action item of that message. The card then says you saw it done, and nothing is sent to the person. Only your own action items that are still open (not one the person already marked) in the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_done, lists the thread's open action items. Never mark done what you did not see happen.";
+  "Your own action items (`:::action` blocks) in this thread that you saw done yourself, e.g. the deployment you were watching is Ready: \"<message id>/<key>\" for one (the key starts with a-; read_thread gives it) or \"<message id>\" for every open action item of that message. The card then says you saw it done, and nothing is sent to the person. Only your own action items that are still open, or that the person marked in a reply draft they have not sent, in the thread this message lands in (use reply_to); otherwise nothing is sent and the refusal, invalid_done, lists the thread's open action items. Never mark done what you did not see happen.";

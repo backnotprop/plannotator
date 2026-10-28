@@ -18,6 +18,7 @@ import {
 } from '../utils/themeRegistry';
 import type { Mode } from './themeModes';
 import { usePrintMedia } from '../hooks/usePrintMedia';
+import { markRootPlatform } from '../utils/platform';
 
 // Kept here because published consumers already import Mode from ThemeProvider.
 export type { Mode } from './themeModes';
@@ -223,6 +224,8 @@ export function ThemeProvider({
   // without this the first frame has no valid --background/--foreground.
   if (typeof window !== 'undefined') {
     applyThemeClasses(colorTheme, resolvedMode);
+    // theme.css scopes the Linux-only font-feature rule to this class (#1961).
+    markRootPlatform();
   }
 
   // Keep class in sync after state changes

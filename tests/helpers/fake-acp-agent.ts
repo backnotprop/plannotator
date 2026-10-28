@@ -5,7 +5,7 @@
  * hands it in `session/new` (the builder relay), and calls their tools like a
  * real agent would. Everything it receives is appended to FAKE_ACP_LOG.
  *
- * Run with bun: `bun tests/fake-acp-agent.ts`.
+ * Run with bun: `bun tests/helpers/fake-acp-agent.ts` (FAKE_ACP_SCRIPT and FAKE_ACP_LOG set).
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -40,7 +40,16 @@ type Step =
   | { editWithoutAsking: { path: string; content: string } }
   /** Switch the session's mode by itself and report it (`current_mode_update`, or `config_option_update` with `via: "config"`). */
   | { modeUpdate: string; via?: "mode" | "config" }
-  | { mcp: { name: string; args?: Record<string, unknown> } }
+  /**
+   * Call a tool of the MCP server the client handed over. `server` names it in
+   * the tool call's title (default `mcp__plannotator-guide__<name>`; with a
+   * server, Grok Build's form `<server>__<name>`); `ask` asks permission for
+   * it first, as Grok Build does even for an MCP tool. In `args`, the string
+   * "$REPLY_TO" becomes the id the prompt's first line names (`(msg_…)`).
+   */
+  | { mcp: { name: string; args?: Record<string, unknown>; server?: string; ask?: boolean } }
+  /** Send an extension notification (`_x.ai/...`), as Grok Build does; its params may carry secrets. */
+  | { extNotify: { method: string; params: Record<string, unknown> } }
   | { usage: { cost: number } }
   | { plan: Array<{ content: string; status: "pending" | "in_progress" | "completed" }> }
   | { sleep: number }
@@ -86,6 +95,10 @@ interface Script {
    * Without it, `steps` is played.
    */
   askTurns?: Step[][];
+  /** One list of steps per prompt in a session (counted across session/load), the last one repeated. Without it, `steps`. */
+  turns?: Step[][];
+  /** Advertise `session/close` (`sessionCapabilities.close`), as Grok Build does. */
+  closeSession?: boolean;
 }
 
 const script: Script = JSON.parse(readFileSync(process.env.FAKE_ACP_SCRIPT ?? "", "utf8"));
@@ -167,6 +180,8 @@ function setMode(mode: string): void {
 }
 
 const sessions = new Map<string, { cwd: string; mcp: McpClient | null; cancelled: boolean; tools: string[]; turns: number }>();
+/** Prompts per session id, kept across session/load (`turns`). */
+const promptsBySession = new Map<string, number>();
 
 /** Start the stdio MCP server the client handed over (the relay), as a real agent does. */
 async function startMcp(servers: Array<unknown>): Promise<{ mcp: McpClient | null; tools: string[] }> {
@@ -193,12 +208,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 new AgentSideConnection((conn): Agent => ({
   async initialize(params) {
-    log({ event: "initialize", clientCapabilities: params.clientCapabilities, clientInfo: params.clientInfo });
+    log({ event: "initialize", pid: process.pid, clientCapabilities: params.clientCapabilities, clientInfo: params.clientInfo });
     // Like claude-agent-acp: terminal sign-ins only for a client that can run them.
     const authMethods = params.clientCapabilities?.auth?.terminal
       ? [{ id: "claude-ai-login", name: "Claude Subscription", type: "terminal" as const, args: ["--cli", "auth", "login", "--claudeai"] }]
       : [];
-    return { protocolVersion: (script.protocolVersion ?? PROTOCOL_VERSION) as typeof PROTOCOL_VERSION, agentCapabilities: { loadSession: !!script.loadSession }, authMethods };
+    return {
+      protocolVersion: (script.protocolVersion ?? PROTOCOL_VERSION) as typeof PROTOCOL_VERSION,
+      agentCapabilities: { loadSession: !!script.loadSession, ...(script.closeSession ? { sessionCapabilities: { close: {} } } : {}) } as never,
+      authMethods,
+    };
   },
   async authenticate() {
     return {};
@@ -239,13 +258,23 @@ new AgentSideConnection((conn): Agent => ({
   async prompt(params) {
     const session = sessions.get(params.sessionId)!;
     const text = params.prompt.map((b) => (b.type === "text" ? b.text : "")).join("");
-    log({ event: "prompt", text, model: currentModel, effort: currentEffort, mode: currentMode ?? null });
+    log({ event: "prompt", pid: process.pid, sessionId: params.sessionId, text, model: currentModel, effort: currentEffort, mode: currentMode ?? null });
     const update = (u: Record<string, unknown>) => conn.sessionUpdate({ sessionId: params.sessionId, update: u as never });
     let toolNo = 0;
     session.cancelled = false;
     const asking = session.tools.includes("show_answer") && !!script.askTurns?.length;
-    const steps = asking ? script.askTurns![Math.min(session.turns, script.askTurns!.length - 1)] : script.steps;
+    const prompted = promptsBySession.get(params.sessionId) ?? 0;
+    promptsBySession.set(params.sessionId, prompted + 1);
+    const steps = asking
+      ? script.askTurns![Math.min(session.turns, script.askTurns!.length - 1)]
+      : script.turns?.length
+        ? script.turns[Math.min(prompted, script.turns.length - 1)]!
+        : script.steps;
     session.turns++;
+    // The id the prompt's first line names (`Plannotator Inbox: <subject> (msg_…)`), for "$REPLY_TO".
+    const replyTo = /\((msg_[0-9A-Za-z]+)\)\s*$/m.exec(text.split("\n")[0] ?? "")?.[1] ?? null;
+    const fill = (value: unknown): unknown =>
+      value === "$REPLY_TO" ? replyTo : value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fill(v)])) : value;
     for (const step of steps) {
       if (session.cancelled) break;
       if (script.pace) await sleep(script.pace);
@@ -312,11 +341,32 @@ new AgentSideConnection((conn): Agent => ({
         if (!session.mcp) throw new Error("no MCP server was given");
         const toolCallId = `t${++toolNo}`;
         // Like the real adapter: the builder call also shows as a tool call (the client folds it into the builder line).
-        await update({ sessionUpdate: "tool_call", toolCallId, title: `mcp__plannotator-guide__${step.mcp.name}`, kind: "other", status: "in_progress" });
-        const res = await session.mcp.request("tools/call", { name: step.mcp.name, arguments: step.mcp.args ?? {} });
+        const title = step.mcp.server ? `${step.mcp.server}__${step.mcp.name}` : `mcp__plannotator-guide__${step.mcp.name}`;
+        await update({ sessionUpdate: "tool_call", toolCallId, title, kind: "other", status: "in_progress" });
+        if (step.mcp.ask) {
+          // Grok Build asks permission even for an MCP tool.
+          const answer = await conn.requestPermission({
+            sessionId: params.sessionId,
+            toolCall: { toolCallId, title, kind: "other", status: "pending" } as never,
+            options: [
+              { optionId: "always-allow", name: "always allow", kind: "allow_always" },
+              { optionId: "allow-once", name: "allow once", kind: "allow_once" },
+              { optionId: "reject-once", name: "reject once", kind: "reject_once" },
+            ] as never,
+          });
+          log({ event: "mcpPermission", title, outcome: answer.outcome });
+          if (answer.outcome.outcome !== "selected" || !/allow/.test(answer.outcome.optionId)) {
+            await update({ sessionUpdate: "tool_call_update", toolCallId, status: "failed" });
+            continue;
+          }
+        }
+        const res = await session.mcp.request("tools/call", { name: step.mcp.name, arguments: fill(step.mcp.args ?? {}) });
         const answerText = res.result?.content?.[0]?.text ?? JSON.stringify(res.error);
         log({ event: "mcpCall", name: step.mcp.name, isError: res.result?.isError ?? true, text: answerText });
         await update({ sessionUpdate: "tool_call_update", toolCallId, status: "completed" });
+      } else if ("extNotify" in step) {
+        await conn.extNotification(step.extNotify.method, step.extNotify.params);
+        log({ event: "extNotify", method: step.extNotify.method });
       } else if ("usage" in step) {
         await update({ sessionUpdate: "usage_update", used: 1000, size: 200000, cost: { amount: step.usage.cost, currency: "USD" } });
       } else if ("plan" in step) {
@@ -344,6 +394,13 @@ new AgentSideConnection((conn): Agent => ({
     log({ event: "cancel" });
     const s = sessions.get(params.sessionId);
     if (s) s.cancelled = true;
+  },
+  async closeSession(params) {
+    log({ event: "closeSession", sessionId: params.sessionId });
+    const s = sessions.get(params.sessionId);
+    s?.mcp?.close();
+    sessions.delete(params.sessionId);
+    return {};
   },
 }), stream);
 

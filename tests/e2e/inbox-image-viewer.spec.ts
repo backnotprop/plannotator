@@ -298,11 +298,12 @@ test('an image in a message takes a comment and a markup, like an attached image
   await page.mouse.move(at(0.5, 0.15).x, at(0.5, 0.15).y, { steps: 8 });
   await page.mouse.move(at(0.64, 0.19).x, at(0.64, 0.19).y, { steps: 8 });
   await page.mouse.up();
+  // Enter adds the drawing to the reply at once; the words after it are its note.
   await page.keyboard.press('Enter');
-  await expect(pane().locator('.ib-imgcompose .ib-markup img')).toBeVisible();
-  await pane().getByRole('textbox', { name: 'Comment on checkout-b-steps.png' }).fill('Make step 1 bold, and say which step you are on.');
+  await expect(pane().locator('[data-image-composer] [data-markup-kept] img')).toBeVisible();
+  await pane().getByRole('textbox', { name: 'A note with your drawing on checkout-b-steps.png' }).fill('Make step 1 bold, and say which step you are on.');
   await shot(page, '03-inline-image-comment-and-markup');
-  await pane().getByRole('button', { name: 'Comment', exact: true }).click();
+  await pane().getByRole('button', { name: 'Add note', exact: true }).click();
   await expect(pane().locator('.ib-apanel')).toContainText('Make step 1 bold');
   await shot(page, '04-inline-image-comment-saved');
 });
@@ -899,9 +900,9 @@ test('the Inbox\'s file viewer zooms like the lightbox: Ctrl + wheel keeps the p
   await page.mouse.move(c.x + c.width * (target.u + reach), c.y + c.height * target.v, { steps: 10 });
   await page.mouse.up();
   await page.keyboard.press('Enter');
-  await expect(pane().locator('.ib-imgcompose .ib-markup img')).toBeVisible();
-  await pane().getByRole('textbox', { name: 'Comment on summary.png' }).fill('Circle the total; it should be bigger.');
-  await pane().getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(pane().locator('[data-image-composer] [data-markup-kept] img')).toBeVisible();
+  await pane().getByRole('textbox', { name: 'A note with your drawing on summary.png' }).fill('Circle the total; it should be bigger.');
+  await pane().getByRole('button', { name: 'Add note', exact: true }).click();
   await page.locator('[data-full-view-comments]').click();
   const drawer = pane().locator('[data-comments-drawer="open"]');
   await expect(drawer).toBeVisible();

@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxUpdate } from '@plannotator/core/inbox-types';
 import type { UpdateDetails } from './api';
+import { UPDATE_EXIT_CHECKSUM_MISMATCH, UPDATE_EXIT_DOWNLOAD_FAILED } from '@plannotator/core/update-exit-codes';
 
 const hasDom = typeof document !== 'undefined';
 // Updates.tsx draws What's new with ui's Viewer, which reads `window` at module-eval time.
@@ -193,4 +194,135 @@ test.skipIf(!hasDom)('the failure dialog names the exit code and the log, and of
   const retry = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Try Again') as HTMLButtonElement;
   act(() => retry.click());
   expect(retried).toBe(1);
+});
+
+// Safe updates (step 1): after a mismatch (install.sh's pin check), or a
+// download refused for a revoked certificate (a blocked key), the dialog must
+// not hand the person the `curl | bash` line: it would go through the same
+// connection, and curl trusts it.
+for (const [name, failure, heading] of [
+  ['exit 113', { exit_code: UPDATE_EXIT_CHECKSUM_MISMATCH }, 'The update stopped'],
+  ['exit 75, a revoked certificate', { exit_code: UPDATE_EXIT_DOWNLOAD_FAILED, tls: 'revoked' as const }, "The update didn't install"],
+] as const) {
+  test.skipIf(!hasDom)(`${name}: no install-script line, the old version still works, Try Again stays`, () => {
+    let retried = 0;
+    const el = render(
+      <FailedDialog
+        update={update('failed')}
+        details={details({ failure: { ...failure, log: '/home/u/.plannotator/update.log' } })}
+        home="/home/u"
+        onRetry={() => retried++}
+        onClose={() => {}}
+      />,
+    );
+    expect(el.querySelector('h2')?.textContent).toBe(heading);
+    expect(el.textContent).not.toContain('curl -fsSL');
+    expect(el.querySelector('[data-failed-release]')).toBeNull();
+    expect(el.textContent).not.toContain('Or run the install script yourself');
+    expect(el.textContent).not.toContain('exited with code');
+    expect(el.textContent).toContain('Plannotator 0.28.10 still works');
+    expect(el.textContent).toContain('~/.plannotator/update.log');
+    const retry = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Try Again') as HTMLButtonElement;
+    act(() => retry.click());
+    expect(retried).toBe(1);
+  });
+}
+
+// A failed download can be lasting (a proxy, a network that inspects HTTPS):
+// the dialog keeps a way out, and on an untrusted certificate says how to add
+// the network's own.
+for (const tls of [undefined, 'untrusted'] as const) {
+  test.skipIf(!hasDom)(`exit 75${tls ? `, an ${tls} certificate` : ''}: the old version still works, and the way out is shown`, () => {
+    const el = render(
+      <FailedDialog
+        update={update('failed')}
+        details={details({ failure: { exit_code: UPDATE_EXIT_DOWNLOAD_FAILED, log: '/home/u/.plannotator/update.log', ...(tls && { tls }) } })}
+        home="/home/u"
+        onRetry={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(el.textContent).toContain('Plannotator 0.28.10 still works');
+    expect(el.textContent).toContain('If this keeps happening, install it yourself');
+    expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini');
+    expect(el.querySelector('[data-failed-release]')?.getAttribute('href')).toBe('https://github.com/backnotprop/plannotator/releases/tag/v0.28.12');
+    expect(el.textContent.includes('NODE_EXTRA_CA_CERTS=/path/to/its-root.pem plannotator update')).toBe(tls === 'untrusted');
+  });
+}
+
+// macOS (the server sets release_first for an untrusted certificate there):
+// the release page comes before the `curl | bash` line, since macOS curl
+// still trusts emSign G3.
+test.skipIf(!hasDom)('exit 75, untrusted on macOS: the release page comes before the install command', () => {
+  const el = render(
+    <FailedDialog
+      update={update('failed')}
+      details={details({ failure: { exit_code: UPDATE_EXIT_DOWNLOAD_FAILED, log: '/home/u/.plannotator/update.log', tls: 'untrusted', release_first: true } })}
+      home="/home/u"
+      onRetry={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  const text = el.textContent ?? '';
+  expect(text.indexOf('the release page')).toBeGreaterThan(-1);
+  expect(text.indexOf('curl -fsSL')).toBeGreaterThan(text.indexOf('the release page'));
+  expect(el.querySelector('[data-failed-release]')?.getAttribute('href')).toBe('https://github.com/backnotprop/plannotator/releases/tag/v0.28.12');
+});
+
+test.skipIf(!hasDom)('exit 75 that could not stage the update: the plain reason, no download wording, no install command', () => {
+  const el = render(
+    <FailedDialog
+      update={update('failed')}
+      details={details({ failure: { exit_code: UPDATE_EXIT_DOWNLOAD_FAILED, log: '/home/u/.plannotator/update.log', prepare: 'the temp folder /tmp is full (ENOSPC)' } })}
+      home="/home/u"
+      onRetry={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  const text = el.textContent ?? '';
+  expect(text).toContain("Plannotator couldn't prepare the update: the temp folder /tmp is full (ENOSPC).");
+  expect(text).toContain('Plannotator 0.28.10 still works');
+  expect(text).toContain('Free some space there, then try again.');
+  expect(text).toContain('TMPDIR=/another/folder plannotator update');
+  expect(text).not.toContain("couldn't download");
+  expect(text).not.toContain('curl -fsSL');
+  expect(el.querySelector('[data-failed-release]')).toBeNull();
+});
+
+// Freeing space does not fix permissions or a missing folder: the advice follows the cause.
+for (const [prepare, advice] of [
+  ["the temp folder /tmp can't be written (EACCES)", 'Make it writable, then try again.'],
+  ['the temp folder /tmp does not exist (ENOENT)', 'Create it, then try again.'],
+  ['could not write to the temp folder /tmp (boom)', 'Check that folder, then try again.'],
+] as const) {
+  test.skipIf(!hasDom)(`exit 75 that could not stage the update (${prepare}): advice for that cause, and another temp folder`, () => {
+    const el = render(
+      <FailedDialog
+        update={update('failed')}
+        details={details({ failure: { exit_code: UPDATE_EXIT_DOWNLOAD_FAILED, log: '/home/u/.plannotator/update.log', prepare } })}
+        home="/home/u"
+        onRetry={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    const text = el.textContent ?? '';
+    expect(text).toContain(`Plannotator couldn't prepare the update: ${prepare}.`);
+    expect(text).toContain(advice);
+    expect(text).not.toContain('Free some space');
+    expect(text).toContain('TMPDIR=/another/folder plannotator update');
+    expect(text).not.toContain('curl -fsSL');
+  });
+}
+
+test.skipIf(!hasDom)('any other failure still offers the install script to run by hand', () => {
+  const el = render(
+    <FailedDialog
+      update={update('failed')}
+      details={details({ failure: { exit_code: 1, log: '/home/u/.plannotator/update.log' } })}
+      home="/home/u"
+      onRetry={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini');
 });

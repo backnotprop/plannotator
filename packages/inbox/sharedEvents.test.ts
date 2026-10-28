@@ -526,6 +526,27 @@ test('the leader tells the server when a follower is gone: a crash (its lock fre
   expect(w.gone.some((g) => g.by === a.id && g.window === a.win.id)).toBe(false);
 });
 
+test('a leader still running after its pagehide reports nothing more: the next leader\'s announcement and hello do not count it again', async () => {
+  // The page is not gone the moment pagehide fires: its scripts can still hear the next leader. A report
+  // then (served_by the next leader) could reach the server after every `gone` and count a closed tab.
+  const w = world();
+  const a = w.open();
+  await settle();
+  const b = w.open();
+  await settle(10);
+  expect(w.leader()).toBe(a.id);
+  const connects = a.connects;
+  const hide = new Event('pagehide');
+  Object.defineProperty(hide, 'persisted', { value: false });
+  a.win2.dispatchEvent(hide);
+  w.server.write(2);
+  await settle(16);
+  expect(w.leader()).toBe(b.id);
+  expect(w.gone).toContainEqual({ by: a.id, window: a.win.id, unloading: true });
+  expect(a.connects).toBe(connects);
+  w.kill(a);
+});
+
 test('a frozen leader steps down so another leads; it queues again when it resumes, as a follower', async () => {
   const w = world();
   const a = w.open();
@@ -578,12 +599,15 @@ test('the back/forward cache: pagehide (persisted) steps down and says gone; pag
   await settle();
   const b = w.open();
   await settle(8);
+  const hidden = a.connects;
   const hide = new Event('pagehide');
   Object.defineProperty(hide, 'persisted', { value: true });
   a.win2.dispatchEvent(hide);
   await settle(10);
   expect(w.leader()).toBe(b.id);
   expect(w.gone).toContainEqual({ by: a.id, window: a.win.id, unloading: true });
+  // Going into the cache, it heard B lead but did not report: it counts again only at pageshow.
+  expect(a.connects).toBe(hidden);
   const connects = a.connects;
   const show = new Event('pageshow');
   Object.defineProperty(show, 'persisted', { value: true });
@@ -593,6 +617,12 @@ test('the back/forward cache: pagehide (persisted) steps down and says gone; pag
   expect(a.connects).toBeGreaterThan(connects);
   expectAll(a, 0, 2);
   expect(w.server.streams.size).toBe(1);
+  // Back from the cache it is live: its later reports (a leader change, a hello) go out again.
+  const restored = a.connects;
+  w.kill(b);
+  await settle(16);
+  expect(w.leader()).toBe(a.id);
+  expect(a.connects).toBeGreaterThan(restored);
 });
 
 test('a sleeping follower behind a new leader that started past it fetches the lines between, once, in order', async () => {

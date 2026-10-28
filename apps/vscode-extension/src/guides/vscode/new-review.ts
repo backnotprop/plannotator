@@ -7,8 +7,8 @@
  */
 
 import * as vscode from "vscode";
-import type { ConfigChoice } from "../acp/client";
-import { canStart, pickDefault, type AgentDescriptor, type AgentOptionsCache, type AgentStatus } from "../acp/agents";
+import type { ConfigChoice } from "@plannotator/acp-client/client";
+import { canStart, pickDefault, type AgentDescriptor, type AgentOptionsCache, type AgentStatus } from "@plannotator/acp-client/agents";
 import type { DashboardModel } from "../dashboard";
 import { ghRepoArg, isOpenRepository, parsePullRequestRef, parsePullRequestUrl, type PullRequestRow } from "../sources/github";
 import type { RepoInfo } from "../sources/git";

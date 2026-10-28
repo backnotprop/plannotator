@@ -8,6 +8,7 @@ import { contentHash, deleteDraft, loadDraft } from "../generated/draft.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent, type HostCloseOutcome } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
+import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import {
@@ -126,6 +127,8 @@ export interface PlanServerResult {
 }
 
 export async function startPlanReviewServer(options: {
+	/** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
+	refRunner?: RefRunner;
 	/** Turns on `/api/host/status` for a caller in another process (never in remote mode or archive mode). */
 	hostControlToken?: string;
 	plan: string;
@@ -260,6 +263,8 @@ export async function startPlanReviewServer(options: {
 	// on a port a new server now owns) is refused with 409 session_mismatch.
 	// A body without it (an older client) is accepted.
 	const serverSession = createServerSessionNonce();
+	// Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
+	const refCards = createPiRefCards(options.refRunner);
 	const decisionPromise = new Promise<PlanReviewDecision>((r) => {
 		resolveDecision = r;
 	});
@@ -337,6 +342,7 @@ export async function startPlanReviewServer(options: {
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
+		if (await handleRefCards(req, res, url, refCards, serverSession)) return;
 
 		if (url.pathname === "/api/done" && req.method === "POST") {
 			resolveDone?.();

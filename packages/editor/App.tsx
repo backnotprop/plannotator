@@ -53,6 +53,8 @@ import { ImportModal } from '@plannotator/ui/components/ImportModal';
 import { ConfirmDialog } from '@plannotator/ui/components/ConfirmDialog';
 import { Annotation, AnnotationType, Block, EditorMode, type CodeAnnotation, type DocumentRenderAs, type InputMethod, type ImageAttachment, type ActionsLabelMode } from '@plannotator/ui/types';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
+import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
+import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { Tooltip, TooltipProvider } from '@plannotator/ui/components/Tooltip';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { StickyHeaderLane } from '@plannotator/ui/components/StickyHeaderLane';
@@ -636,6 +638,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isApiMode) primeSkillCatalog();
   }, [isApiMode]);
+  // Hover cards for issue, PR and MR links (ui RefHoverCard): the server reads them with this
+  // computer's gh / glab (GET /api/ref, ref-cards.ts). Only when a Plannotator server serves
+  // the page, never on a share link. A card shows only when the forge answered (`onlyWithData`).
+  // (The transport is installed further down, once `isSharedSession` exists.)
+  const refCardRootRef = useRef<HTMLDivElement>(null);
   const [origin, setOrigin] = useState<Origin | null>(null);
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
@@ -2766,6 +2773,14 @@ const App: React.FC = () => {
       setActionsLabelMode((prev) => (prev === next ? prev : next));
     });
   }, [isLoading, isSharedSession]);
+
+  // Hover cards (see refCardRootRef above): the transport over GET /api/ref, only while a
+  // Plannotator server serves the page, never for a share link.
+  useEffect(() => {
+    if (!isApiMode || isSharedSession) return;
+    setRefCardTransport(refCardRouteTransport('/api/ref'));
+    return () => setRefCardTransport(null);
+  }, [isApiMode, isSharedSession]);
 
   // The user's current direct-edit text: the open editor buffer, else the
   // last commit; null when there is none or it matches the baseline. Never
@@ -7333,12 +7348,14 @@ const App: React.FC = () => {
     <ThemeProvider defaultTheme="dark" manageFavicon>
       <TooltipProvider disableHoverableContent>
       <div
+        ref={refCardRootRef}
         data-print-region="root"
         data-pn-browser-canvas={browserCanvas}
         data-pn-compact-touch-layout={usesDocumentScroll ? 'true' : undefined}
         data-pn-document-scroll={usesDocumentScroll ? 'true' : undefined}
         className={`pn-app-viewport flex flex-col ${usesDocumentScroll ? 'overflow-visible' : 'overflow-hidden'} ${browserCanvas === 'card' ? 'bg-card' : 'bg-background'}`}
       >
+        <RefHoverCards rootRef={refCardRootRef} onlyWithData />
         <AppHeader
           sticky={!usesDocumentScroll}
           htmlSurface={isHtmlSurface}

@@ -11,7 +11,8 @@
  * update checks are off (PLANNOTATOR_UPDATE_CHECK=0); it says so.
  *
  * Exit codes: 0 up to date, updated, or `--check`; 1 the update could not run
- * or failed; 2 usage.
+ * or failed (including a download that did not match its checksum, or one
+ * that could not be downloaded: the old binary is kept either way); 2 usage.
  */
 
 import { homedir } from "node:os";
@@ -37,8 +38,12 @@ import {
   isManagedBinary,
   managedBinaryPath,
   runInstallerForeground,
+  UPDATE_CHECKSUM_MISMATCH,
+  UPDATE_PREPARE_FAILED,
   type InstallerLaunch,
 } from "@plannotator/server/auto-update";
+import { stagingFailureIn, tlsFailureIn, withoutLogOnlyLines } from "@plannotator/server/update-log";
+import { UPDATE_OTHER_TMPDIR_COMMAND, updateStagingAdvice } from "@plannotator/core/update-exit-codes";
 import { UPDATE_COMMAND_USAGE } from "./cli";
 
 export interface UpdateCommandDeps {
@@ -155,12 +160,77 @@ export async function runUpdateCommand(args: string[], deps: UpdateCommandDeps):
       : `Installing v${latest}.\n`,
   );
   const run = deps.runInstaller ?? runInstallerForeground;
-  const code = await run(begun.launch, out);
+  let printed = "";
+  const code = await run(begun.launch, (text) => {
+    printed += text;
+    // Notes meant for update.log only (the tee still writes them there).
+    const shown = withoutLogOnlyLines(text);
+    if (shown) out(shown);
+  });
   if (code === 130) {
     err(
       `The update was interrupted. Plannotator is still ${current}; the lock is released, so run plannotator update again when you like.\n`,
     );
     return 130;
+  }
+  // Safe updates: never the `curl | bash` line here. After a mismatch it
+  // would send the person through the very connection that just failed.
+  if (code === UPDATE_CHECKSUM_MISMATCH) {
+    err(
+      `The update to ${latest} stopped: the download didn't match the checksum Plannotator fetched for it.\n` +
+        `${current} is still installed and works. Try again later, or on another network: plannotator update\n` +
+        `Details: ${autoUpdatePaths(dataDir).log}\n`,
+    );
+    return 1;
+  }
+  if (code === UPDATE_PREPARE_FAILED) {
+    const staging = stagingFailureIn(printed);
+    if (staging) {
+      // Downloaded, but the temp folder could not hold it: not a network problem.
+      err(
+        `Couldn't prepare the update: ${staging}. ${current} is still installed and works.\n` +
+          `${updateStagingAdvice(staging)}, then: plannotator update\n` +
+          `Or use another temp folder:\n  ${UPDATE_OTHER_TMPDIR_COMMAND}\n` +
+          `Details: ${autoUpdatePaths(dataDir).log}\n`,
+      );
+      return 1;
+    }
+    const tls = tlsFailureIn(printed);
+    if (tls === "revoked") {
+      // A blocked key: the network is the problem, and curl would trust it.
+      err(
+        `Couldn't download the update: the connection presented a revoked certificate. ${current} is still installed and works.\n` +
+          `Don't install Plannotator over this network. Try again on another network: plannotator update\n` +
+          `Details: ${autoUpdatePaths(dataDir).log}\n`,
+      );
+      return 1;
+    }
+    // A failed download can be a lasting local condition (a proxy, a network
+    // that inspects HTTPS), so the way out is always shown.
+    const extraCa =
+      "If your network inspects HTTPS with its own certificate, point NODE_EXTRA_CA_CERTS at that certificate:\n" +
+      "  NODE_EXTRA_CA_CERTS=/path/to/its-root.pem plannotator update\n";
+    if (tls === "untrusted" && platform === "darwin") {
+      // macOS curl still trusts emSign G3: should a network that holds a
+      // leaked key get "untrusted" instead of "revoked", the release page
+      // (the browser's own trust) comes before the `curl | bash` line.
+      err(
+        `Couldn't download the update. ${current} is still installed and works. Try again later: plannotator update\n` +
+          extraCa +
+          `If this keeps happening, download it from ${releaseUrlFor(latest)}\n` +
+          `or install it yourself:\n  ${command}\n` +
+          `Details: ${autoUpdatePaths(dataDir).log}\n`,
+      );
+      return 1;
+    }
+    err(
+      `Couldn't download the update. ${current} is still installed and works. Try again later: plannotator update\n` +
+        `If this keeps happening, install it yourself:\n  ${command}\n` +
+        `or download it from ${releaseUrlFor(latest)}\n` +
+        (tls === "untrusted" ? extraCa : "") +
+        `Details: ${autoUpdatePaths(dataDir).log}\n`,
+    );
+    return 1;
   }
   if (code !== 0) {
     err(

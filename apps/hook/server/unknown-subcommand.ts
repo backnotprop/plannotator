@@ -6,6 +6,7 @@ import {
 
 const INTERNAL_SUBCOMMANDS = [
   "install-runtime",
+  "update-prepare",
   "opencode-plan",
   "opencode-review",
   "opencode-review-directory",

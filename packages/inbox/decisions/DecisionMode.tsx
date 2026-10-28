@@ -126,12 +126,14 @@ type SendResult = 'sent' | 'draft' | 'failed';
 
 /**
  * What a reply carries, for its key (`replyKeysToRenew`): each pick with its revision, so a changed answer
- * (a new pick is a new revision) takes a new key, and an unchanged retry replays the old one.
+ * (a new pick is a new revision) takes a new key, and an unchanged retry replays the old one; and each
+ * action item whose Done or Can't do it waits in the thread's draft, so one marked since takes a new key.
  */
 function answersOf(target: SendTarget): string[] {
   return [
     ...target.questions.map((q) => `a:${q.message_id ?? target.message.id}/${q.key}@${q.revision}`),
     ...target.skip.map((q) => `s:${q.message_id ?? target.message.id}/${q.key}`),
+    ...target.actions.map((a) => `x:${a.message_id ?? target.message.id}/${a.key}`),
   ];
 }
 
@@ -519,6 +521,9 @@ export function DecisionMode(props: DecisionModeProps) {
           words: '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
+          // The session's Done and Can't do it waiting in the thread's draft go with its answers, as picks do:
+          // one reply, never the answers here and the action items in a second Send.
+          ...(target.actions.length > 0 ? { actions: target.actions } : {}),
         });
         const created = (result.reply as { created_at?: unknown } | null)?.created_at;
         if (typeof created === 'string') sentAt = created;

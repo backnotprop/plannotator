@@ -476,6 +476,15 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     runOnly: () => runFlag && resolve().source === "flag",
     /** The tailnet-only listener's port while published (tests). */
     listenerPort: () => (listener ? (listener.port as number) : null),
+    /**
+     * A request the listener let in came from the machine's owner, not a login
+     * config.json `inboxTailscaleAllow` added: only the owner may start or
+     * steer an agent the Inbox runs (inbox-acp-runner.ts).
+     */
+    isOwnerRequest: (headers: Headers): boolean => {
+      const identity = checkTailnetIdentity(headers, state.allowed);
+      return identity.ok && state.owner !== null && normalizeTailnetLogin(identity.login) === state.owner;
+    },
   };
 }
 

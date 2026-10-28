@@ -2,11 +2,12 @@
  * Where an issue / PR / MR hover card's data comes from (`components/RefHoverCard`).
  *
  * A host seam in the `configurePlannotatorUI` style: the default is NO
- * transport, so a host that installs none (plan review, annotate and code
- * review today, every `@plannotator/ui` consumer) draws no card and makes no
- * request: byte for byte as before. A host that can fetch (the Inbox, through
- * its `/api/inbox/ref` route) installs one with `setRefCardTransport` or
- * `configurePlannotatorUI({ refCardTransport })`.
+ * transport, so a host that installs none (every `@plannotator/ui` consumer
+ * that does not opt in) draws no card and makes no request: byte for byte as
+ * before. A host that can fetch installs one with `setRefCardTransport` or
+ * `configurePlannotatorUI({ refCardTransport })`: the Inbox over its
+ * `/api/inbox/ref` route, plan review, annotate and code review over
+ * `GET /api/ref` (`refCardRouteTransport` below).
  *
  * The client keeps answers for `REF_CARD_CLIENT_FRESH_MS` per ref and shares
  * one request between hovers of the same ref. The server keeps its own cache;
@@ -29,6 +30,28 @@ export function setRefCardTransport(next: RefCardTransport | null): void {
 
 export function getRefCardTransport(): RefCardTransport | null {
   return transport;
+}
+
+/**
+ * A transport over a server route answering like Plannotator's `GET /api/ref`
+ * (and the Inbox's `/api/inbox/ref`): `?url=<link>` → `{ ok, data | error,
+ * fetchedAt }`. A 404 means the route is not there (an older server) or is off
+ * (a session other devices can reach): the transport then stops asking for
+ * the life of the page and answers null. Any other failure answers null.
+ */
+export function refCardRouteTransport(route: string): RefCardTransport {
+  let off = false;
+  return async (href, _ref, signal) => {
+    if (off) return null;
+    const res = await fetch(`${route}?url=${encodeURIComponent(href)}`, { signal, headers: { accept: 'application/json' } });
+    if (res.status === 404) {
+      off = true;
+      return null;
+    }
+    if (!res.ok) return null;
+    const body = (await res.json()) as unknown;
+    return body && typeof body === 'object' && typeof (body as { ok?: unknown }).ok === 'boolean' ? (body as ForgeRefCardResult) : null;
+  };
 }
 
 export const REF_CARD_CLIENT_FRESH_MS = 30_000;

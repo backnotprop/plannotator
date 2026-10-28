@@ -11,7 +11,7 @@ import * as vscode from "vscode";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLAUDE_CODE } from "../acp/agents";
+import { CLAUDE_CODE } from "@plannotator/acp-client/agents";
 import { answersPath, listAnswers } from "../ask/answers";
 import { startRelayHost, type RelayHost } from "../mcp/relay-host";
 import { ReaderModel } from "../reader-model";
@@ -19,7 +19,7 @@ import type { LoadedGuide } from "../store";
 import { approveAlwaysTarget } from "../trust";
 import { GuideAsks, type AsksHost } from "./asks";
 
-const FAKE_AGENT = join(import.meta.dir, "..", "..", "..", "tests", "fake-acp-agent.ts");
+const FAKE_AGENT = join(import.meta.dir, "..", "..", "..", "..", "..", "tests", "helpers", "fake-acp-agent.ts");
 const RELAY_SCRIPT = join(import.meta.dir, "..", "mcp", "relay-script.ts");
 const GUIDE_ID = "1761200000000-retry-failed-webhook-deliveries";
 const REPO_KEY = "github.com__northwind__checkout-service";

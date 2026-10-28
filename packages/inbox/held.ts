@@ -222,6 +222,21 @@ export function settleThread(shown: readonly InboxListSection[], latest: readonl
 }
 
 /**
+ * Where the thread covers the list, does Back move the thread just closed
+ * (`settleThread`) instead of showing it as left? Yes when an agent message
+ * there is still unseen (it comes back unread), and when the thread now waits
+ * on the person (Stopped, Holding, Waiting: an agent asked while it was open,
+ * seen or not) and is drawn in another group, so it is never left folded in
+ * Quiet with questions open. A thread only read stays where it was left.
+ */
+export function settlesOnBack(shown: readonly InboxListSection[], row: InboxListRow): boolean {
+  if (row.unseen > 0) return true;
+  if (row.section !== 'stopped' && row.section !== 'holding' && row.section !== 'waiting') return false;
+  const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
+  return drawn?.id !== row.section;
+}
+
+/**
  * The held list with threads the person just started (compose's Send) put in
  * (the owner, 2026-10-16: "When I create a new thread and hit send, why
  * doesn't it show up in the Sent list?"). A thread the person started is

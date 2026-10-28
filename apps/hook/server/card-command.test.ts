@@ -191,6 +191,21 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     const top = await plannotator(box, ["--help"]);
     expect(top.stdout).toContain("plannotator card <create|move|say|link|ship|drop|list>");
   }, 30_000);
+
+  // The agent tool's Board-off line (INBOX_TOOL_BOARD_OFF_NOTE) sends agents here while the Board is off:
+  // the help must answer then, reach no Inbox, and say where the person turns the Board on.
+  test("--help with the Board off exits 0, starts or reaches no Inbox, and says where to turn the Board on", async () => {
+    const box = sandbox();
+    writeFileSync(join(box.dataDir, "config.json"), JSON.stringify({ inboxBoard: false }));
+    const help = await card(box, ["--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stderr).toBe("");
+    expect(help.stdout).toContain("plannotator card create <title>");
+    // Pinned on purpose: the place the Board-off line promises.
+    expect(help.stdout).toContain("Inbox Settings → Capabilities");
+    expect(inboxEntryOf(box.dataDir)).toBeNull();
+    expect(existsSync(join(box.dataDir, "inbox"))).toBe(false);
+  }, 30_000);
 });
 
 // The action held back (INBOX_CARD_ACTION_ON false): the command says so, and changes nothing.

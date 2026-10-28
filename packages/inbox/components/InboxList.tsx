@@ -128,6 +128,14 @@ function subjectOf(row: InboxListRow): string {
 }
 
 function countOf(row: InboxListRow): ReactNode {
+  // A session the Inbox runs (the ACP runner): it works now, or waits on the person's OK.
+  if (row.run) {
+    return (
+      <span className="ib-rowrun" data-row-run={row.run.state}>
+        {row.run.state === 'permission' ? `${row.run.label} needs your OK` : row.run.state === 'starting' ? `Starting ${row.run.label}…` : `${row.run.label} is working`}
+      </span>
+    );
+  }
   // A reply waiting on a busy agent (approval "inbox-busy-agent-reply"): how long, in place of the count.
   const wait = rowWait(row.delivery);
   if (wait) return <UndeliveredBadge wait={wait} />;

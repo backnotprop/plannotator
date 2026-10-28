@@ -385,6 +385,13 @@ export interface PlannotatorConfig {
    */
   inboxTextSize?: number;
   /**
+   * Settings → Agents' "Run in the Inbox", per agent the Inbox can run over
+   * ACP (packages/server/inbox-acp-runner.ts): `{ "grok": false }` takes
+   * "New Grok Build session" out of compose. Unset: on (when the
+   * agent is installed).
+   */
+  inboxRun?: Partial<Record<string, boolean>>;
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST

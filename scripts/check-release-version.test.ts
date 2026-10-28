@@ -29,8 +29,18 @@ function createFixture(version = "1.2.3"): string {
     mkdirSync(dirname(absolutePath), { recursive: true });
     writeFileSync(absolutePath, `${JSON.stringify({ version }, null, 2)}\n`);
   }
+  writeMarketplace(root, version);
   writeFileSync(join(root, "openpackage.yml"), `name: plannotator\nversion: ${version}\n`);
   return root;
+}
+
+function writeMarketplace(root: string, version: string): void {
+  const absolutePath = join(root, ".github/plugin/marketplace.json");
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  writeFileSync(
+    absolutePath,
+    `${JSON.stringify({ name: "plannotator", plugins: [{ name: "plannotator-copilot", source: "./apps/copilot", version }] }, null, 2)}\n`,
+  );
 }
 
 function runCheck(root: string, tag?: string) {
@@ -56,6 +66,30 @@ describe("release version consistency check", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("Release-coupled versions do not match");
     expect(result.stderr.toString()).toContain("apps/pi-extension/package.json: 1.2.4");
+  });
+
+  // The Copilot marketplace entry sat at 0.17.0 for eleven minor releases.
+  test("rejects a stale Copilot marketplace entry version", () => {
+    const root = createFixture();
+    writeMarketplace(root, "0.17.0");
+
+    const result = runCheck(root);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(".github/plugin/marketplace.json: 0.17.0");
+  });
+
+  test("rejects a Copilot marketplace entry with no version", () => {
+    const root = createFixture();
+    writeFileSync(
+      join(root, ".github/plugin/marketplace.json"),
+      '{"plugins":[{"name":"plannotator-copilot","source":"./apps/copilot"}]}\n',
+    );
+
+    const result = runCheck(root);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain("plannotator-copilot");
   });
 
   test("rejects a tag that does not match the manifests", () => {

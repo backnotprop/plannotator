@@ -296,7 +296,9 @@ export function groupKeys(state: QueueState): string[] {
 /**
  * The replies a group's Send makes: the thread's own Send targets
  * (`sendTargetsOf`, one per session; approval "inbox-explicit-skip"), kept to
- * this group's session and to the ones that carry an answer. Words, files
+ * this group's session and to the ones that carry an answer. The session's
+ * action items whose Done or Can't do it waits in the thread's draft ride
+ * along (`actions`), as picks do; alone they make no reply here. Words, files
  * and comments wait for the thread's own Send.
  */
 export function groupSendTargets(thread: InboxThread, sessionKey: string): SendTarget[] {

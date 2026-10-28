@@ -143,9 +143,24 @@ describe.skipIf(!posix)("update.lock never holds Updating… for good, and never
   });
 });
 
-describe.skipIf(!posix || !Bun.which("curl"))("the detached wrapper names its process group and machine in the lock", () => {
+describe.skipIf(!posix)("the detached wrapper names its process group and machine in the lock", () => {
+  /**
+   * A loopback stand-in for plannotator.ai and the release downloads, as the
+   * wrapper's `update-prepare` (run from source, update-prepare-entry.ts)
+   * fetches them: the install script with the lines it requires, and a
+   * `.sha256` per binary.
+   */
   async function startWrapper(script: string) {
-    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(script) });
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        if (path === "/install.sh") return new Response(`#!/bin/bash\nREPO="backnotprop/plannotator"\n${script}`);
+        if (/^\/download\/v\d+\.\d+\.\d+\/plannotator-[a-z]+-(arm64|x64)\.sha256$/.test(path)) return new Response(`${"c".repeat(64)}  x\n`);
+        return new Response("not found", { status: 404 });
+      },
+    });
     const paths = autoUpdatePaths(dataDir);
     writeUpdateState({ pending: { version: "0.28.32", fromVersion: "0.28.31", startedAt: NOW, by: "person" } }, dataDir);
     writeFileSync(paths.lock, String(process.pid));
@@ -160,7 +175,10 @@ describe.skipIf(!posix || !Bun.which("curl"))("the detached wrapper names its pr
         PLANNOTATOR_UPDATE_VERSION: "v0.28.32",
         PLANNOTATOR_UPDATE_RESULT: paths.result,
         PLANNOTATOR_UPDATE_LOCK: paths.lock,
-        PLANNOTATOR_UPDATE_SCRIPT_URL: `http://127.0.0.1:${server.port}/install.sh`,
+        PLANNOTATOR_UPDATE_BINARY: process.execPath,
+        PLANNOTATOR_UPDATE_ENTRY: join(import.meta.dir, "update-prepare-entry.ts"),
+        PLANNOTATOR_INSTALL_SCRIPT_URL: `http://127.0.0.1:${server.port}/install.sh`,
+        PLANNOTATOR_RELEASE_DOWNLOAD_URL: `http://127.0.0.1:${server.port}/download`,
       },
     });
     started.push(child);

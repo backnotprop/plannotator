@@ -11,7 +11,7 @@ import { createGuideHtml, guideExportFilename, resolveGuideViewerAssets } from "
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/core/guide-viewer-manifest";
 import { findSavedGuideById } from "@plannotator/shared/guide-store";
 import { readGuideInstructions } from "@plannotator/shared/guide-instructions-store";
-import { AcpClient } from "../acp/client";
+import { AcpClient, killPendingProcessGroups } from "@plannotator/acp-client/client";
 import {
   CLAUDE_CODE,
   CUSTOM_AGENT_ID,
@@ -29,10 +29,10 @@ import {
   type AgentStatus,
   type CommandOverride,
   type LoginCommand,
-} from "../acp/agents";
-import { planSpawn } from "../acp/spawn-plan";
+} from "@plannotator/acp-client/agents";
+import { planSpawn } from "@plannotator/acp-client/spawn-plan";
 import { adaptersRoot, hasManagedCopy, installAdapter, managedLaunch, type InstallResult } from "../acp/adapters";
-import { ensureAgentLaunch, type ReadyLaunch } from "../acp/ensure-launch";
+import { ensureAgentLaunch, type ReadyLaunch } from "@plannotator/acp-client/ensure-launch";
 import { parseGuideLink } from "../core/adapter";
 import { loadDashboard, type DashboardModel } from "../dashboard";
 import { GuideGeneration, type GenerationState, type PendingPermission, type PermissionAnswer } from "../generation";
@@ -1735,6 +1735,8 @@ export class GuidesController implements vscode.Disposable {
     // VS Code is closing: no grace period for the agent or anything it started.
     this.run?.gen.kill();
     this.asks.kill();
+    // An agent stopped, exited or crashed earlier whose group still waits out its grace: killed now too.
+    killPendingProcessGroups();
     for (const d of this.disposables) d.dispose();
   }
 }

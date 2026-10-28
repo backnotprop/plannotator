@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -348,6 +348,25 @@ describe('the open thread', () => {
     expect(moved.find((s) => s.id === 'new')!.threads[0]).toBe(other);
     // No row for it in the list read: nothing changes.
     expect(ids(settleThread(before, bySection(q2), 'open'))).toEqual(ids(before));
+  });
+
+  // The owner, 2026-10-27: "Why is this thread showing up in quiet? ... it has open questions". The questions
+  // arrived while the thread was open (or the list was held) and were seen, so `unseen` was 0 and Back left
+  // the row drawn in Quiet, its state Holding.
+  test('settlesOnBack (the list the thread covered): an unseen arrival moves the row; so does waiting on the person while drawn elsewhere; a row only read stays as left', () => {
+    const quietOpen = r('open', 'billing-svc', 1, 'quiet', 0);
+    const drawnQuiet = bySection(quietOpen, other);
+    const holdsSeen = r('open', 'billing-svc', 5, 'holding', 0);
+    expect(settlesOnBack(drawnQuiet, holdsSeen)).toBe(true);
+    expect(settlesOnBack(drawnQuiet, { ...holdsSeen, section: 'stopped' })).toBe(true);
+    expect(settlesOnBack(drawnQuiet, { ...holdsSeen, section: 'waiting' })).toBe(true);
+    expect(ids(settleThread(drawnQuiet, bySection(holdsSeen, other), 'open'))).toEqual(['holding:open', 'new:other']);
+    // Already drawn where it waits: it stays as left.
+    expect(settlesOnBack(bySection({ ...quietOpen, section: 'holding' }, other), holdsSeen)).toBe(false);
+    // Only read (no agent activity, state Quiet), drawn in New where it was opened: as left.
+    expect(settlesOnBack(shown, seen)).toBe(false);
+    // An arrival not seen: it comes back unread, as before.
+    expect(settlesOnBack(shown, arrived)).toBe(true);
   });
 });
 

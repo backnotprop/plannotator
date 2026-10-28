@@ -24,7 +24,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxAgentTool, inboxToolCall, parseInboxToolList } from "@plannotator/shared/inbox/connection";
+import { INBOX_TOOL_BOARD_OFF_NOTE, inboxAgentTool, inboxToolCall, parseInboxToolList } from "@plannotator/shared/inbox/connection";
+import { inboxAgentTool as modAgentTool } from "../../apps/hook/hooks/mod/inbox-contract";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
 import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-tools";
@@ -91,6 +92,13 @@ test("off by default: no card tool, a card call answers board_off and writes not
   expect(await intro.json()).toEqual({ show: false });
   // The Claude Code mod's bundled list (from a default Inbox) has no card action either.
   expect(INBOX_DEFAULT_TOOLS.map((tool) => tool.name)).not.toContain("card");
+  // Off, the agent tool says once that the Board exists and where to read about it (the owner, 2026-10-27):
+  // built from the live list (Pi, OpenCode) and from the mod's bundled one.
+  for (const tool of [inboxAgentTool(parseInboxToolList((await w.rpc("tools/list", {})).result))!, modAgentTool(INBOX_DEFAULT_TOOLS)!]) {
+    expect(tool.description.split(INBOX_TOOL_BOARD_OFF_NOTE)).toHaveLength(2);
+    // Claude Code cuts a description at 2,048 characters: the last line (the help pointer) must survive.
+    expect(tool.description.length).toBeLessThan(2048);
+  }
 });
 
 test("off → on → off → on: the next tools/list follows; a session's cached list gets board_off; cards kept; the Inbox untouched", async () => {
@@ -110,6 +118,9 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   // (the Claude Code mod reads it once per process; Pi and OpenCode at session start).
   const cached = inboxAgentTool(listed)!;
   expect((cached.inputSchema.properties as Record<string, { enum?: string[] }>).action!.enum).toContain("card");
+  // On, the card action's own line says it: no Board-off line.
+  expect(cached.description).not.toContain(INBOX_TOOL_BOARD_OFF_NOTE);
+  expect(cached.description.length).toBeLessThan(2048);
 
   // on → off: every card kept, the tool gone from the next list, the cached call refused, nothing written.
   expect((await (await w.setBoard(false)).json()) as { board: { on: boolean } }).toMatchObject({ board: { on: false } });

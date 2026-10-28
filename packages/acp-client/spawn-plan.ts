@@ -5,7 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import { win32 } from "node:path";
-import { findExecutable } from "../sources/runner";
+import { findExecutable } from "./which";
 
 /** How to spawn a command: on Windows a `.cmd` shim cannot be spawned without a shell. */
 export interface SpawnPlan {
