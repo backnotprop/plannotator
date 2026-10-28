@@ -137,7 +137,7 @@ describe('Guided Reviews for VS Code screens in astro dev', () => {
     await new Promise<void>((done, fail) => {
       body.on('finish', done);
       guidesVscodeDevMiddleware(assetsDir)(
-        { method: 'GET', url: '/assets/guides-vscode/generating.webp' } as IncomingMessage,
+        { method: 'GET', url: '/assets/guides-vscode/diff-hover.webp' } as IncomingMessage,
         res,
         () => fail(new Error('passed on')),
       );
