@@ -6,6 +6,7 @@
  *
  *   GET  /api/inbox/threads/:id/files/folder        which folder, or why none (no listing)
  *   GET  /api/inbox/threads/:id/files?dir=          one folder level
+ *   GET  /api/inbox/threads/:id/files/levels?dir=&dir=  several levels at once (the window's refresh)
  *   GET  /api/inbox/threads/:id/files/content?path= a file for the viewers
  *   GET  /api/inbox/threads/:id/files/raw?path=     its bytes (img, video, Download)
  *   GET  /api/inbox/threads/:id/files/changed       change marks since the thread began
@@ -14,14 +15,15 @@
  * The files root is the folder the thread's latest agent message was sent
  * from, taken to its project root, or to its linked worktree when that is
  * where the agent works; never the home folder, a folder holding it, or `/`
- * ({@link inboxThreadFilesFolder}). Every read goes
- * through the repo-file guard (packages/shared/repo-file.ts: realpath
- * containment, a descriptor that is proved to be the contained file, a byte
- * cap); the listing and lock rules are packages/shared/project-listing.ts.
- * Names are browsable; contents of a dotenv file, of a file under a hidden
- * segment git tracks nothing under, and of anything outside the root are
- * never served. A request another site makes is refused before anything is
- * read. Every refusal is a short code; the window owns the words.
+ * ({@link inboxThreadFilesFolder}). Every read goes through the Inbox's own
+ * guard (packages/server/inbox-files-guard.ts: a plain relative path,
+ * symlinks followed as VS Code follows them, `.git` never reached, a FIFO
+ * never waited on, a byte cap); the listing and lock rules are
+ * packages/shared/project-listing.ts. Names are browsable; a dotenv file's
+ * contents are never served. The routes answer on this computer only: a
+ * request that came in over the tailnet is refused (`403 local_only`), and so
+ * is a request another site makes, before anything is read. Every refusal is
+ * a short code; the window owns the words.
  */
 
 import { createHash } from "node:crypto";
@@ -29,11 +31,9 @@ import { readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_VIEW_MAX_BYTES, isInboxAnnotatableKind, isInboxTextBytes, isInboxTextKind, type InboxAttachmentKind, type InboxThread } from "@plannotator/core/inbox-types";
-import { checkRepoRoot, isContainedPath, readRepoWorkingTreeBytes, resolveRepoFilePath, validateRepoFilePath, type RepoFileFailure } from "@plannotator/shared/repo-file";
 import {
   compareProjectEntries,
   hasGitSegment,
-  hiddenSegmentPrefixes,
   normalizeProjectDir,
   parseNameStatusZ,
   PROJECT_CHANGES_MAX,
@@ -55,6 +55,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { sniffImageContentType } from "@plannotator/shared/review-image";
 import { contentDisposition } from "./inbox-attachments";
+import { readFilesFile, resolveFilesPath, type FilesGuardFailure } from "./inbox-files-guard";
 import { inboxProjectRootGitEnv, type InboxProjectRoot } from "./inbox-project-root";
 
 /** The raw route's cap: bigger files are refused (`too_large`). */
@@ -174,38 +175,27 @@ interface GitState {
   branch: string | null;
 }
 
-async function gitState(root: string, withBranch: boolean): Promise<GitState> {
+/** How long a folder's git state (a repository? which branch?) is used again before git is asked anew. */
+const GIT_STATE_TTL_MS = 10_000;
+const gitStates = new Map<string, { at: number; state: Promise<GitState> }>();
+
+async function askGitState(root: string): Promise<GitState> {
   const inside = await runGit(["rev-parse", "--is-inside-work-tree"], root);
   if (!inside || inside.exitCode !== 0 || inside.stdout.trim() !== "true") return { git: false, branch: null };
-  if (!withBranch) return { git: true, branch: null };
   const branch = await runGit(["symbolic-ref", "--short", "-q", "HEAD"], root);
   const name = branch && branch.exitCode === 0 ? branch.stdout.trim() : "";
   return { git: true, branch: name || null };
 }
 
-/**
- * Which of `prefixes` git tracks something at or under (one `ls-files` run,
- * stopped once every prefix is seen). Not a git repository, or a git that
- * cannot answer: none, so every hidden file stays locked.
- */
-async function trackedPrefixes(root: string, isGit: boolean, prefixes: Iterable<string>): Promise<Set<string>> {
-  const wanted = new Set(prefixes);
-  const seen = new Set<string>();
-  if (!isGit || wanted.size === 0) return seen;
-  await runGit(["ls-files", "-z", "--cached", "--", ...wanted], root, {
-    maxBytes: 8 * 1024 * 1024,
-    onRecord: (path) => {
-      // Each ancestor of the path (and the path) that was asked about is tracked.
-      let at = path.length;
-      while (at > 0) {
-        const prefix = path.slice(0, at);
-        if (wanted.has(prefix)) seen.add(prefix);
-        at = path.lastIndexOf("/", at - 1);
-      }
-      return seen.size === wanted.size;
-    },
-  });
-  return seen;
+/** Whether the folder is a git work tree, and its branch: two git runs at most every 10 s per folder. */
+function gitState(root: string): Promise<GitState> {
+  const now = Date.now();
+  const cached = gitStates.get(root);
+  if (cached && now - cached.at < GIT_STATE_TTL_MS) return cached.state;
+  const state = askGitState(root);
+  gitStates.set(root, { at: now, state });
+  if (gitStates.size > 200) gitStates.delete(gitStates.keys().next().value!);
+  return state;
 }
 
 /** Which of `paths` git ignores (`check-ignore`; tracked files are never ignored). */
@@ -231,6 +221,12 @@ export type InboxFilesFolder =
       path: string;
     }
   | { root: null; reason: "home" | "gone" };
+
+/** True when `candidate` is `root` or lies under it (both real paths). */
+function isContainedPath(candidate: string, root: string): boolean {
+  if (candidate === root) return true;
+  return candidate.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+}
 
 /** A path for people: `~/…` under the home folder. */
 function displayPath(real: string, home: string | null): string {
@@ -316,50 +312,38 @@ export async function inboxFilesChangeBase(input: { root: string; threadStartedA
 
 type Refusal = { refused: ProjectFileRefusalCode; reason?: ProjectEntryLock; size?: number };
 
-function fromGuard(failure: RepoFileFailure): Refusal {
-  return { refused: projectFileRefusalOf(failure.reason), ...(failure.size !== undefined ? { size: failure.size } : {}) };
+function fromGuard(failure: FilesGuardFailure): Refusal {
+  return { refused: projectFileRefusalOf(failure.reason) };
 }
 
-/** A real path under the real root as a `/` path relative to it. */
-function relativeOf(realRoot: string, real: string): string {
-  return relative(realRoot, real).split(sep).join("/");
+/** A real path under the real root as a `/` path relative to it, or null when it is not under it (a symlink out). */
+function relativeOf(realRoot: string, real: string): string | null {
+  if (real === realRoot) return "";
+  const prefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
+  return real.startsWith(prefix) ? relative(realRoot, real).split(sep).join("/") : null;
 }
 
 interface ResolvedFile {
+  /** The path as asked for, relative to the folder. */
   rel: string;
-  realRel: string;
+  /** Where it resolves to, every symlink followed. */
   absolutePath: string;
-  realRoot: string;
 }
 
 /**
- * A file a request names, refused unless it is a readable file of the root:
- * a plain relative path, inside the root by realpath, not in `.git`, not a
- * folder, and neither a dotenv file nor under a hidden segment git tracks
- * nothing under (by the path asked for and by the file it resolves to).
+ * A file a request names, refused unless it is a readable file: a plain
+ * relative path, not in `.git` (as asked or where it leads), not a folder,
+ * and not a dotenv file (by the name asked for and by the file it resolves
+ * to). Symlinks are followed wherever they lead, as VS Code follows them.
  */
-async function resolveFile(root: string, raw: string | null): Promise<ResolvedFile | Refusal> {
-  const validated = validateRepoFilePath(raw ?? "");
-  if (!validated.ok) return fromGuard(validated);
-  const rel = validated.path;
-  if (hasGitSegment(rel)) return { refused: "not_found" };
-  const pinned = checkRepoRoot(root);
-  if (!pinned.ok) return fromGuard(pinned);
-  const resolved = resolveRepoFilePath(root, rel);
+function resolveFile(root: string, raw: string | null): ResolvedFile | Refusal {
+  if (raw === null || raw === "") return { refused: "invalid_path" };
+  const resolved = resolveFilesPath(root, raw);
   if (!resolved.ok) return fromGuard(resolved);
-  const realRel = relativeOf(pinned.realRoot, resolved.absolutePath);
-  if (realRel === "") return { refused: "not_a_file" };
-  if (hasGitSegment(realRel)) return { refused: "not_found" };
-  try {
-    if (statSync(resolved.absolutePath).isDirectory()) return { refused: "not_a_file" };
-  } catch {
-    return { refused: "not_found" };
-  }
-  const hidden = [...hiddenSegmentPrefixes(rel), ...hiddenSegmentPrefixes(realRel)];
-  const tracked = hidden.length === 0 ? new Set<string>() : await trackedPrefixes(root, (await gitState(root, false)).git, hidden);
-  const lock = projectFileLock(rel, realRel, (prefix) => tracked.has(prefix));
+  if (resolved.rel === "") return { refused: "not_a_file" };
+  const lock = projectFileLock(resolved.rel, resolved.real);
   if (lock) return { refused: "locked", reason: lock };
-  return { rel, realRel, absolutePath: resolved.absolutePath, realRoot: pinned.realRoot };
+  return { rel: resolved.rel, absolutePath: resolved.real };
 }
 
 interface ReadFile extends ResolvedFile {
@@ -369,23 +353,10 @@ interface ReadFile extends ResolvedFile {
   mtimeMs: number;
 }
 
-/** A resolved file's bytes through the guard (by its real path, so a final symlink is the file it leads to). */
+/** A resolved file's bytes through the guard (`readFilesFile`: no FIFO waited on, a regular file proved by its descriptor, a cap). */
 async function readFile(file: ResolvedFile, maxBytes: number): Promise<ReadFile | Refusal> {
-  const read = await readRepoWorkingTreeBytes(file.realRoot, file.realRel, { maxBytes });
-  if (!read.ok) {
-    if (read.reason === "too-large") {
-      let mtimeMs = 0;
-      try {
-        mtimeMs = statSync(file.absolutePath).mtimeMs;
-      } catch {
-        // Reported with no time.
-      }
-      return { ...file, bytes: null, size: read.size ?? 0, mtimeMs };
-    }
-    return fromGuard(read);
-  }
-  // The real path never ends in a symlink; one swapped in after the realpath is a refusal.
-  if (read.kind !== "file") return { refused: "outside_root" };
+  const read = await readFilesFile(file.absolutePath, maxBytes);
+  if (!read.ok) return fromGuard(read);
   return { ...file, bytes: read.bytes, size: read.size, mtimeMs: read.mtimeMs };
 }
 
@@ -418,101 +389,115 @@ async function decideKind(name: string, bytes: Uint8Array | null, size: number):
 interface Candidate {
   name: string;
   kind: ProjectEntryKind;
-  outside: boolean;
-  /** The entry's real path (a symlink's target), when it is inside the root. */
+  /** Where the entry resolves to (a symlink followed), or null when it leads nowhere. */
   real: string | null;
+  /** It resolves into a repository's `.git`: listed, never read or opened. */
+  git: boolean;
 }
 
-function candidateOf(dirent: Dirent, realDir: string, realRoot: string): Candidate {
+function candidateOf(dirent: Dirent, realDir: string): Candidate {
   const name = dirent.name;
-  if (!dirent.isSymbolicLink()) return { name, kind: dirent.isDirectory() ? "dir" : "file", outside: false, real: join(realDir, name) };
+  if (!dirent.isSymbolicLink()) return { name, kind: dirent.isDirectory() ? "dir" : "file", real: join(realDir, name), git: false };
   let real: string;
   try {
     real = realpathSync(join(realDir, name));
   } catch {
-    // Dangling.
-    return { name, kind: "file", outside: true, real: null };
+    // Dangling: a file that does not open.
+    return { name, kind: "file", real: null, git: false };
   }
-  if (!isContainedPath(real, realRoot) || hasGitSegment(relativeOf(realRoot, real))) return { name, kind: "file", outside: true, real: null };
+  if (real.split(sep).includes(".git")) return { name, kind: "file", real, git: true };
   try {
-    return { name, kind: statSync(real).isDirectory() ? "dir" : "file", outside: false, real };
+    return { name, kind: statSync(real).isDirectory() ? "dir" : "file", real, git: false };
   } catch {
-    return { name, kind: "file", outside: true, real: null };
+    return { name, kind: "file", real: null, git: false };
   }
 }
 
-type Listing = { root: { name: string; branch: string | null; git: boolean }; dir: string; entries: ProjectEntry[]; more: number };
+/** One listed folder level, or why not. */
+type Level = { dir: string; entries: ProjectEntry[]; more: number } | ({ dir: string } & Refusal);
 
-async function listFolder(root: string, rawDir: string | null): Promise<Listing | Refusal> {
-  const dir = normalizeProjectDir(rawDir);
-  if (dir === null) return { refused: "invalid_path" };
-  if (hasGitSegment(dir)) return { refused: "not_found" };
-  const pinned = checkRepoRoot(root);
-  if (!pinned.ok) return fromGuard(pinned);
-  const realRoot = pinned.realRoot;
-  let realDir = realRoot;
-  if (dir !== "") {
-    const resolved = resolveRepoFilePath(root, dir);
-    if (!resolved.ok) return fromGuard(resolved);
-    realDir = resolved.absolutePath;
-  }
-  const realDirRel = relativeOf(realRoot, realDir);
-  if (hasGitSegment(realDirRel)) return { refused: "not_found" };
+/** A folder level's entries before git marks them: refused, or read and cut at the cap. */
+function readLevel(root: string, rawDir: string | null): { dir: string; realDir: string; candidates: Candidate[]; more: number } | ({ dir: string } & Refusal) {
+  const asked = rawDir ?? "";
+  const resolved = resolveFilesPath(root, rawDir);
+  if (!resolved.ok) return { dir: asked, ...fromGuard(resolved) };
   let dirents: Dirent[];
   try {
-    if (!statSync(realDir).isDirectory()) return { refused: "not_a_dir" };
-    dirents = readdirSync(realDir, { withFileTypes: true });
+    if (!statSync(resolved.real).isDirectory()) return { dir: resolved.rel, refused: "not_a_dir" };
+    dirents = readdirSync(resolved.real, { withFileTypes: true });
+  } catch {
+    return { dir: resolved.rel, refused: "not_found" };
+  }
+  const candidates = dirents.filter((d) => d.name !== ".git").map((d) => candidateOf(d, resolved.real));
+  candidates.sort(compareProjectEntries);
+  return { dir: resolved.rel, realDir: resolved.real, candidates: candidates.slice(0, PROJECT_LISTING_MAX_ENTRIES), more: Math.max(0, candidates.length - PROJECT_LISTING_MAX_ENTRIES) };
+}
+
+type Listing = { root: { name: string; branch: string | null; git: boolean }; levels: Level[] };
+
+/**
+ * Several folder levels in one answer: one cached git state and one
+ * `check-ignore` for all of them, so the window's refresh costs one git run
+ * however many folders are open. A level reached through a symlink out of
+ * the folder is listed with nothing marked ignored (git does not judge it).
+ */
+async function listFolders(root: string, rawDirs: readonly (string | null)[]): Promise<Listing | Refusal> {
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(root);
   } catch {
     return { refused: "not_found" };
   }
-
-  const candidates = dirents.filter((d) => d.name !== ".git").map((d) => candidateOf(d, realDir, realRoot));
-  candidates.sort(compareProjectEntries);
-  const shown = candidates.slice(0, PROJECT_LISTING_MAX_ENTRIES);
-  const state = await gitState(root, true);
-
-  // Ignored: this folder or any folder above it, or the entry itself (by its real place).
+  const state = await gitState(realRoot);
   const join2 = (a: string, b: string) => (a === "" ? b : `${a}/${b}`);
-  const ancestors: string[] = [];
-  if (realDirRel !== "") {
-    const parts = realDirRel.split("/");
-    for (let i = 1; i <= parts.length; i++) ancestors.push(parts.slice(0, i).join("/"));
-  }
-  const ignored = await ignoredPaths(root, state.git, [...ancestors, ...shown.map((c) => join2(realDirRel, c.name))]);
-  const folderIgnored = ancestors.some((a) => ignored.has(a));
-
-  // Hidden: every hidden segment of each file's path, as asked and where it really is.
-  const pathsOf = (c: Candidate) => ({ asked: join2(dir, c.name), real: c.real ? relativeOf(realRoot, c.real) : join2(realDirRel, c.name) });
-  const prefixes = new Set<string>();
-  for (const c of shown) {
-    if (c.kind !== "file" || c.outside) continue;
-    const { asked, real } = pathsOf(c);
-    for (const p of hiddenSegmentPrefixes(asked)) prefixes.add(p);
-    for (const p of hiddenSegmentPrefixes(real)) prefixes.add(p);
-  }
-  const tracked = await trackedPrefixes(root, state.git, prefixes);
-
-  const entries = shown.map((c): ProjectEntry => {
-    const isIgnored = folderIgnored || ignored.has(join2(realDirRel, c.name));
-    if (c.outside) return { name: c.name, kind: "file", ignored: isIgnored, locked: "outside", size: null };
-    if (c.kind === "dir") return { name: c.name, kind: "dir", ignored: isIgnored, locked: null, size: null };
-    const { asked, real } = pathsOf(c);
-    let size: number | null = null;
-    try {
-      const stat = statSync(c.real!);
-      size = stat.isFile() ? stat.size : null;
-    } catch {
-      // Gone since the listing: no size.
+  const read = rawDirs.map((dir) => readLevel(realRoot, dir));
+  // Every path git is asked about: each level's folders above it, and its entries, where they really are.
+  const ask = new Set<string>();
+  const plans = read.map((level) => {
+    if ("refused" in level) return null;
+    const realDirRel = relativeOf(realRoot, level.realDir);
+    if (realDirRel === null) return { level, realDirRel, ancestors: [] as string[] };
+    const ancestors: string[] = [];
+    if (realDirRel !== "") {
+      const parts = realDirRel.split("/");
+      for (let i = 1; i <= parts.length; i++) ancestors.push(parts.slice(0, i).join("/"));
     }
-    return { name: c.name, kind: "file", ignored: isIgnored, locked: projectFileLock(asked, real, (p) => tracked.has(p)), size };
+    for (const a of ancestors) ask.add(a);
+    for (const c of level.candidates) ask.add(join2(realDirRel, c.name));
+    return { level, realDirRel, ancestors };
   });
-  return { root: { name: basename(realRoot), branch: state.branch, git: state.git }, dir, entries, more: candidates.length - shown.length };
+  const ignored = await ignoredPaths(realRoot, state.git, [...ask]);
+  const levels = read.map((level, i): Level => {
+    if ("refused" in level) return level;
+    const plan = plans[i]!;
+    const folderIgnored = plan.ancestors.some((a) => ignored.has(a));
+    const entries = level.candidates.map((c): ProjectEntry => {
+      const isIgnored = plan.realDirRel !== null && (folderIgnored || ignored.has(join2(plan.realDirRel, c.name)));
+      if (c.git) return { name: c.name, kind: "file", ignored: isIgnored, locked: "git", size: null };
+      if (c.kind === "dir") return { name: c.name, kind: "dir", ignored: isIgnored, locked: null, size: null };
+      let size: number | null = null;
+      if (c.real) {
+        try {
+          const stat = statSync(c.real);
+          size = stat.isFile() ? stat.size : null;
+        } catch {
+          // Gone since the listing: no size.
+        }
+      }
+      return { name: c.name, kind: "file", ignored: isIgnored, locked: projectFileLock(join2(level.dir, c.name), c.real ?? c.name), size };
+    });
+    return { dir: level.dir, entries, more: level.more };
+  });
+  return { root: { name: basename(realRoot), branch: state.branch, git: state.git }, levels };
 }
+
+/** At most this many levels in one `levels` request. */
+export const INBOX_FILES_LEVELS_MAX = 300;
 
 // --- changes ------------------------------------------------------------------------
 
 async function changedFiles(root: string, threadStartedAt: string): Promise<{ git: boolean; base: { commit: string | null; source: "thread_start" | "none" }; changes: Record<string, ProjectChangeMark>; truncated: boolean }> {
-  const state = await gitState(root, false);
+  const state = await gitState(root);
   if (!state.git) return { git: false, base: { commit: null, source: "none" }, changes: {}, truncated: false };
   const base = await inboxFilesChangeBase({ root, threadStartedAt });
   let against = base.commit;
@@ -565,7 +550,7 @@ export interface InboxFilesRoutesContext {
   home: string | null;
 }
 
-const ROUTE = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/files(?:\/(folder|content|raw|changed|annotations))?$/;
+const ROUTE = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/files(?:\/(folder|levels|content|raw|changed|annotations))?$/;
 
 export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
   const { store, serverSession } = context;
@@ -586,15 +571,16 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
 
   /**
    * Answers a request on one of these routes, or null when the path is not
-   * one of them. `via` is where it came in; the tailnet reaches these routes
-   * like the window's own port (reads, and comments through the Inbox's
-   * same-origin write guard), never anything beyond them.
+   * one of them. `via` is where it came in: over the tailnet every route
+   * answers `403 local_only`.
    */
-  return async function handle(req: Request, url: URL, _via: "local" | "tailnet" = "local"): Promise<Response | null> {
+  return async function handle(req: Request, url: URL, via: "local" | "tailnet" = "local"): Promise<Response | null> {
     const match = ROUTE.exec(url.pathname);
     if (!match) return null;
+    // The project folder is read on this computer only (a reviewer's call, the safe default; the owner can open it up).
+    if (via === "tailnet") return json({ error: "The project folder opens only on this computer, not over the tailnet.", code: "local_only", serverSession }, 403);
     const threadId = match[1]!;
-    const route = (match[2] ?? "list") as "list" | "folder" | "content" | "raw" | "changed" | "annotations";
+    const route = (match[2] ?? "list") as "list" | "levels" | "folder" | "content" | "raw" | "changed" | "annotations";
 
     if (route === "annotations") {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -605,7 +591,7 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
       const folder = await folderOf(thread);
       if (folder.root === null) return noFolder(folder.reason);
       const root = folder.root;
-      const file = await resolveFile(root, typeof body.path === "string" ? body.path : null);
+      const file = resolveFile(root, typeof body.path === "string" ? body.path : null);
       if ("refused" in file) return refuse(file);
       const read = await readFile(file, INBOX_VIEW_MAX_BYTES);
       if ("refused" in read) return refuse(read);
@@ -630,17 +616,27 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
     if (folder.root === null) return noFolder(folder.reason);
     const root = folder.root;
 
+    const rootOf = (listing: Listing) => ({ ...listing.root, project: folder.project, worktree: folder.worktree, path: folder.path });
     if (route === "list") {
-      const listing = await listFolder(root, url.searchParams.get("dir"));
+      const listing = await listFolders(root, [url.searchParams.get("dir")]);
       if ("refused" in listing) return refuse(listing);
-      return json({ serverSession, ...listing, root: { ...listing.root, project: folder.project, worktree: folder.worktree, path: folder.path } });
+      const level = listing.levels[0]!;
+      if ("refused" in level) return refuse(level);
+      return json({ serverSession, root: rootOf(listing), dir: level.dir, entries: level.entries, more: level.more });
+    }
+    if (route === "levels") {
+      const dirs = url.searchParams.getAll("dir");
+      if (dirs.length === 0 || dirs.length > INBOX_FILES_LEVELS_MAX) return refuse({ refused: "invalid_path" });
+      const listing = await listFolders(root, dirs);
+      if ("refused" in listing) return refuse(listing);
+      return json({ serverSession, root: rootOf(listing), levels: listing.levels });
     }
 
     if (route === "changed") {
       return json({ serverSession, ...(await changedFiles(root, thread.messages[0]?.created_at ?? "")) });
     }
 
-    const file = await resolveFile(root, url.searchParams.get("path"));
+    const file = resolveFile(root, url.searchParams.get("path"));
     if ("refused" in file) return refuse(file);
 
     if (route === "content") {

@@ -8,42 +8,22 @@ import { describe, expect, test } from "bun:test";
 import {
   compareProjectEntries,
   hasGitSegment,
-  hiddenSegmentPrefixes,
   normalizeProjectDir,
   parseNameStatusZ,
   projectFileLock,
 } from "./project-listing";
 
-describe("projectFileLock", () => {
-  const nothingTracked = () => false;
-  const tracks = (...prefixes: string[]) => (p: string) => prefixes.includes(p);
-
-  test("dotenv files are locked by the name asked for and by the file it leads to; .env.example is not", () => {
-    expect(projectFileLock(".env", ".env", nothingTracked)).toBe("dotenv");
-    expect(projectFileLock("config/prod.env", "config/prod.env", nothingTracked)).toBe("dotenv");
-    expect(projectFileLock(".envrc", ".envrc", nothingTracked)).toBe("dotenv");
-    expect(projectFileLock(".env.local", ".env.local", tracks(".env.local"))).toBe("dotenv");
-    // A harmless name that resolves to a dotenv file.
-    expect(projectFileLock("notes.txt", "secrets/.env", tracks("secrets/.env"))).toBe("dotenv");
-    expect(projectFileLock(".env.example", ".env.example", tracks(".env.example"))).toBeNull();
-  });
-
-  test("a file under a hidden segment git tracks nothing under is locked; a tracked one is not", () => {
-    expect(projectFileLock(".claude/settings.json", ".claude/settings.json", nothingTracked)).toBe("hidden");
-    expect(projectFileLock(".npmrc", ".npmrc", nothingTracked)).toBe("hidden");
-    expect(projectFileLock(".github/workflows/ci.yml", ".github/workflows/ci.yml", tracks(".github"))).toBeNull();
-    // Every hidden segment counts: a tracked `.github` does not open an untracked `.github/.secret/x`.
-    expect(projectFileLock(".github/.secret/x", ".github/.secret/x", tracks(".github"))).toBe("hidden");
-    // A plain name that resolves into an untracked hidden folder.
-    expect(projectFileLock("docs/key", ".ssh/id_rsa", nothingTracked)).toBe("hidden");
-    expect(projectFileLock("src/a.ts", "src/a.ts", nothingTracked)).toBeNull();
-  });
-});
-
-test("hiddenSegmentPrefixes names each prefix ending in a hidden segment", () => {
-  expect(hiddenSegmentPrefixes("a/.b/c/.d/e")).toEqual(["a/.b", "a/.b/c/.d"]);
-  expect(hiddenSegmentPrefixes("src/a.ts")).toEqual([]);
-  expect(hiddenSegmentPrefixes("")).toEqual([]);
+test("dotenv files are locked by the name asked for and by the file it leads to; .env.example and hidden files are not", () => {
+  expect(projectFileLock(".env", "/p/.env")).toBe("dotenv");
+  expect(projectFileLock("config/prod.env", "/p/config/prod.env")).toBe("dotenv");
+  expect(projectFileLock(".envrc", "/p/.envrc")).toBe("dotenv");
+  expect(projectFileLock(".env.local", "/p/.env.local")).toBe("dotenv");
+  // A harmless name that resolves to a dotenv file.
+  expect(projectFileLock("notes.txt", "/p/secrets/.env")).toBe("dotenv");
+  expect(projectFileLock(".env.example", "/p/.env.example")).toBeNull();
+  // Hidden files open like any other (owner, "like VS Code").
+  expect(projectFileLock(".npmrc", "/p/.npmrc")).toBeNull();
+  expect(projectFileLock(".vscode/settings.json", "/p/.vscode/settings.json")).toBeNull();
 });
 
 test(".git is caught at any depth, and only as a whole segment", () => {

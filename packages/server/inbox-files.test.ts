@@ -2,13 +2,15 @@
  * Files: the thread's project folder in the Inbox (packages/server/inbox-files.ts),
  * proved against a real started Inbox on loopback (temp data dir), a real git
  * repository built here, and the agent through the MCP SDK. What it guards:
- * the listing rule (everything but `.git`, ignored marked, dotenv / hidden /
- * outside locked), every refusal code, the 5,000 cap, the change marks and
+ * the listing rule (owner, "like VS Code": everything but `.git`, ignored
+ * marked, hidden files open, symlinks followed, dotenv and `.git` locked),
+ * every refusal code, the routes refused over the tailnet, several levels in
+ * one request, the 5,000 cap, the change marks and
  * their base (the commit the thread started on), the files root following a
  * linked worktree, which folder a thread has and why none (the home folder,
  * a folder holding it, a folder gone), and project-file comments riding a Send.
  */
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +18,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { InboxAnnotationRecord } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -92,13 +95,16 @@ function repo() {
   symlinkSync(join(project, "src", "a.ts"), join(project, "link-in"));
   symlinkSync(join(project, "src"), join(project, "link-dir-in"));
   symlinkSync(join(project, "gone.txt"), join(project, "dangling"));
+  // A harmless name for the dotenv file, and a link into the repository's own .git.
+  symlinkSync(join(project, ".env"), join(project, "innocent.txt"));
+  symlinkSync(join(project, ".git"), join(project, "gitlink"));
   Bun.spawnSync(["mkfifo", join(project, "pipe")]);
   return { root, project, outside };
 }
 
-async function start(root: string, home?: string): Promise<InboxServer> {
+async function start(root: string, home?: string, extra: Parameters<typeof startInboxServer>[0] = {}): Promise<InboxServer> {
   const agentEnvironment = home ? createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: "" } }) : undefined;
-  const server = await startInboxServer({ dataDir: join(root, "data"), ...(agentEnvironment ? { agentEnvironment } : {}) });
+  const server = await startInboxServer({ dataDir: join(root, "data"), ...(agentEnvironment ? { agentEnvironment } : {}), ...extra });
   servers.push(server);
   return server;
 }
@@ -142,7 +148,7 @@ const code = async (res: Response) => {
 const content = (server: InboxServer, thread: string, path: string, route = "content") =>
   get(server, `/api/inbox/threads/${thread}/files/${route}?path=${encodeURIComponent(path)}`);
 
-test("the root listing: everything but .git, ignored marked, secrets and escapes locked, folders first", async () => {
+test("the root listing: everything but .git, ignored marked, hidden files and links as VS Code shows them, dotenv and .git locked, folders first", async () => {
   const { root, project } = repo();
   const server = await start(root);
   const { thread_id } = await send(server, project);
@@ -152,7 +158,7 @@ test("the root listing: everything but .git, ignored marked, secrets and escapes
   expect(listing.more).toBe(0);
   const names = listing.entries.map((e) => e.name);
   expect(names).not.toContain(".git");
-  // Folders first (a symlink to a folder inside the root is a folder), each group by name.
+  // Folders first (a symlink to a folder is a folder, wherever it leads), each group by name.
   const firstFile = listing.entries.findIndex((e) => e.kind === "file");
   expect(listing.entries.slice(0, firstFile).every((e) => e.kind === "dir")).toBe(true);
   expect(listing.entries.slice(firstFile).every((e) => e.kind === "file")).toBe(true);
@@ -165,22 +171,25 @@ test("the root listing: everything but .git, ignored marked, secrets and escapes
   expect(pick("dist")).toEqual(["dir", true, null]);
   expect(pick("src")).toEqual(["dir", false, null]);
   expect(pick(".github")).toEqual(["dir", false, null]);
-  // A hidden folder git tracks nothing under: listed, expandable, unlocked (its files are locked).
   expect(pick(".claude")).toEqual(["dir", false, null]);
   expect(pick(".env")).toEqual(["file", false, "dotenv"]);
   expect(pick(".env.example")).toEqual(["file", false, null]);
   expect(pick(".gitignore")).toEqual(["file", false, null]);
-  expect(pick("link-out-file")).toEqual(["file", false, "outside"]);
-  expect(pick("link-out-dir")).toEqual(["file", false, "outside"]);
-  expect(pick("dangling")).toEqual(["file", false, "outside"]);
+  // Symlinks are followed wherever they lead (owner, "like VS Code"); one into .git is listed and locked.
+  expect(pick("link-out-file")).toEqual(["file", false, null]);
+  expect(pick("link-out-dir")).toEqual(["dir", false, null]);
+  expect(pick("dangling")).toEqual(["file", false, null]);
+  expect(pick("innocent.txt")).toEqual(["file", false, "dotenv"]);
+  expect(pick("gitlink")).toEqual(["file", false, "git"]);
   expect(pick("link-in")).toEqual(["file", false, null]);
   expect(pick("link-dir-in")).toEqual(["dir", false, null]);
   expect(pick("pipe")[0]).toBe("file");
   expect(entries.get("README.md")!.size).toBe("# Shop\n".length);
-  expect(entries.get("link-out-file")!.size).toBeNull();
+  expect(entries.get("link-out-file")!.size).toBe("OUTSIDE SECRET".length);
+  expect(entries.get("dangling")!.size).toBeNull();
 });
 
-test("deeper levels: ignored folders' children, nested ignored paths, hidden-untracked files, dotenv by name, links inside", async () => {
+test("deeper levels: ignored folders' children, nested ignored paths, hidden files open, dotenv by name, links in and out", async () => {
   const { root, project } = repo();
   const server = await start(root);
   const { thread_id } = await send(server, project);
@@ -188,16 +197,17 @@ test("deeper levels: ignored folders' children, nested ignored paths, hidden-unt
   const web = byName(await list(server, thread_id, "packages/web"));
   expect(web.get("dist")!.ignored).toBe(true);
   expect(web.get("index.ts")!.ignored).toBe(false);
-  expect(byName(await list(server, thread_id, ".claude")).get("settings.json")!.locked).toBe("hidden");
+  expect(byName(await list(server, thread_id, ".claude")).get("settings.json")!.locked).toBeNull();
   expect(byName(await list(server, thread_id, ".github/workflows")).get("ci.yml")!.locked).toBeNull();
   const config = byName(await list(server, thread_id, "config"));
   expect(config.get("prod.env")!.locked).toBe("dotenv");
   expect(config.get("app.json")!.locked).toBeNull();
-  // A folder link inside the root lists its target's entries.
+  // A folder link lists its target's entries, inside the root or out of it (nothing marked ignored out there).
   expect(byName(await list(server, thread_id, "link-dir-in")).has("a.ts")).toBe(true);
+  expect(byName(await list(server, thread_id, "link-out-dir")).get("secret.txt")).toMatchObject({ kind: "file", ignored: false, locked: null });
 });
 
-test("listing refusals: bad paths, escapes, .git, missing, a file", async () => {
+test("listing refusals: bad paths, .git (as asked or through a link), missing, a file", async () => {
   const { root, project } = repo();
   const server = await start(root);
   const { thread_id } = await send(server, project);
@@ -205,8 +215,9 @@ test("listing refusals: bad paths, escapes, .git, missing, a file", async () => 
   expect(await code(await dir("../outside"))).toEqual([400, "invalid_path"]);
   expect(await code(await dir("/etc"))).toEqual([400, "invalid_path"]);
   expect(await code(await dir("src\0"))).toEqual([400, "invalid_path"]);
-  expect(await code(await dir("link-out-dir"))).toEqual([403, "outside_root"]);
   expect(await code(await dir(".git"))).toEqual([404, "not_found"]);
+  expect(await code(await dir("gitlink"))).toEqual([404, "not_found"]);
+  expect(await code(await dir("src/../.git"))).toEqual([400, "invalid_path"]);
   expect(await code(await dir("nope"))).toEqual([404, "not_found"]);
   expect(await code(await dir("README.md"))).toEqual([400, "not_a_dir"]);
   expect(await code(await dir("", { "Sec-Fetch-Site": "cross-site" }))).toEqual([403, "cross_origin"]);
@@ -266,27 +277,30 @@ test("content and raw refuse every bad case with its code", async () => {
     expect(await refused("/etc/hosts")).toEqual([400, "invalid_path"]);
     expect(await refused("README.md\0")).toEqual([400, "invalid_path"]);
     expect(await refused("")).toEqual([400, "invalid_path"]);
-    expect(await refused("link-out-file")).toEqual([403, "outside_root"]);
-    expect(await refused("link-out-dir/secret.txt")).toEqual([403, "outside_root"]);
     expect(await refused(".env")).toEqual([403, "locked", "dotenv"]);
     expect(await refused("config/prod.env")).toEqual([403, "locked", "dotenv"]);
-    expect(await refused(".claude/settings.json")).toEqual([403, "locked", "hidden"]);
+    expect(await refused("innocent.txt")).toEqual([403, "locked", "dotenv"]);
     expect(await refused(".git/config")).toEqual([404, "not_found"]);
+    expect(await refused("gitlink/config")).toEqual([404, "not_found"]);
     expect(await refused("dangling")).toEqual([404, "not_found"]);
     expect(await refused("nope.txt")).toEqual([404, "not_found"]);
     expect(await refused("src")).toEqual([400, "not_a_file"]);
     expect(await refused("pipe")).toEqual([400, "not_a_file"]);
     expect(await code(await get(server, `/api/inbox/threads/${thread_id}/files/${route}?path=README.md`, { "Sec-Fetch-Site": "same-site" }))).toEqual([403, "cross_origin"]);
   }
-  // A tracked hidden file reads.
+  // Hidden files read like any other, tracked or not, and links are followed wherever they lead (owner, "like VS Code").
   expect((await content(server, thread_id, ".github/workflows/ci.yml")).status).toBe(200);
+  expect((await content(server, thread_id, ".claude/settings.json")).status).toBe(200);
+  expect(((await (await content(server, thread_id, "link-out-file")).json()) as { text: string }).text).toBe("OUTSIDE SECRET");
+  expect((await content(server, thread_id, "link-out-dir/secret.txt")).status).toBe(200);
 });
 
-test("a folder that is not a git repository: no git, every hidden file locked, names still listed", async () => {
-  const root = scratch("plannotator-inbox-files-home-");
-  const home = join(root, "home");
-  write(join(home, ".ssh", "id_rsa"), "PRIVATE KEY");
+test("a folder that is not a git repository: no git, nothing ignored, hidden files open, dotenv still locked", async () => {
+  const root = scratch("plannotator-inbox-files-plain-");
+  const home = join(root, "notes");
+  write(join(home, ".config", "tool.json"), "{}");
   write(join(home, ".bashrc"), "export X=1");
+  write(join(home, ".env"), "TOKEN=1");
   write(join(home, "notes.txt"), "hello");
   const server = await start(root);
   const { thread_id } = await send(server, home);
@@ -294,10 +308,11 @@ test("a folder that is not a git repository: no git, every hidden file locked, n
   expect(listing.root.git).toBe(false);
   expect(listing.root.branch).toBeNull();
   const entries = byName(listing);
-  expect(entries.get(".ssh")).toMatchObject({ kind: "dir", locked: null, ignored: false });
-  expect(entries.get(".bashrc")!.locked).toBe("hidden");
-  expect(byName(await list(server, thread_id, ".ssh")).get("id_rsa")!.locked).toBe("hidden");
-  expect(await code(await content(server, thread_id, ".ssh/id_rsa"))).toEqual([403, "locked", "hidden"]);
+  expect(entries.get(".config")).toMatchObject({ kind: "dir", locked: null, ignored: false });
+  expect(entries.get(".bashrc")!.locked).toBeNull();
+  expect(entries.get(".env")!.locked).toBe("dotenv");
+  expect((await content(server, thread_id, ".config/tool.json")).status).toBe(200);
+  expect(await code(await content(server, thread_id, ".env"))).toEqual([403, "locked", "dotenv"]);
   expect((await content(server, thread_id, "notes.txt")).status).toBe(200);
   const changed = (await (await get(server, `/api/inbox/threads/${thread_id}/files/changed`)).json()) as Record<string, unknown>;
   expect(changed).toMatchObject({ git: false, changes: {}, base: { commit: null, source: "none" } });
@@ -447,8 +462,8 @@ test("comments on project files: saved, pending, refused on secrets and download
   expect(record).toMatchObject({ attachment_id: "", path: join(project, "src", "a.ts"), version: "current", project_file: { path: "src/a.ts" }, message_id, thread_id });
 
   expect(await code(await save(".env", "ann-pf-2"))).toEqual([403, "locked", "dotenv"]);
-  expect(await code(await save("link-out-file", "ann-pf-2"))).toEqual([403, "outside_root"]);
-  expect(await code(await save(".claude/settings.json", "ann-pf-2"))).toEqual([403, "locked", "hidden"]);
+  expect(await code(await save("innocent.txt", "ann-pf-2"))).toEqual([403, "locked", "dotenv"]);
+  expect(await code(await save("gitlink/config", "ann-pf-2"))).toEqual([404, "not_found"]);
   expect(await code(await save("doc.pdf", "ann-pf-2"))).toEqual([422, "annotation_not_allowed"]);
   expect(await code(await save("blob.bin", "ann-pf-2"))).toEqual([422, "annotation_not_allowed"]);
   expect(await code(await save("src/a.ts", "ann-pf-2", "an-older-inbox"))).toEqual([409, "session_mismatch"]);
@@ -474,4 +489,66 @@ test("comments on project files: saved, pending, refused on secrets and download
   // An archived thread takes no new comments.
   expect((await post(server, `/api/inbox/messages/${thread_id}/resolve`, { serverSession: server.serverSession, resolved: true })).status).toBe(200);
   expect(await code(await save("src/a.ts", "ann-pf-4"))).toEqual([409, "thread_resolved"]);
+});
+
+test("several levels in one request: each listed or refused, one answer", async () => {
+  const { root, project } = repo();
+  const server = await start(root);
+  const { thread_id } = await send(server, project);
+  const res = await get(server, `/api/inbox/threads/${thread_id}/files/levels?dir=&dir=src&dir=node_modules&dir=nope&dir=..%2Fup`);
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { root: { name: string; git: boolean }; levels: Array<{ dir: string; entries?: Entry[]; refused?: string }> };
+  expect(body.root).toMatchObject({ name: "shop", git: true });
+  expect(body.levels.map((l) => [l.dir, l.refused ?? l.entries!.length > 0])).toEqual([
+    ["", true],
+    ["src", true],
+    ["node_modules", true],
+    ["nope", "not_found"],
+    ["../up", "invalid_path"],
+  ]);
+  // Marks as the single route gives them: ignored inside an ignored folder.
+  expect(body.levels[2]!.entries!.find((e) => e.name === "pkg")).toMatchObject({ kind: "dir", ignored: true });
+  expect(await code(await get(server, `/api/inbox/threads/${thread_id}/files/levels`))).toEqual([400, "invalid_path"]);
+});
+
+describe("over the tailnet", () => {
+  const MAGIC = "macbook-pro.tail0000.ts.net";
+  const OWNER = "ramos@example.com";
+  const tailscale: TailscaleRunner = (() => {
+    const serve = new Map<number, string>();
+    return (args) => {
+      const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+      if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: OWNER } } }));
+      if (args[1] === "status") {
+        const Web = Object.fromEntries([...serve].map(([port, proxy]) => [`${MAGIC}:${port}`, { Handlers: { "/": { Proxy: proxy } } }]));
+        return ok(serve.size === 0 ? "{}" : JSON.stringify({ TCP: Object.fromEntries([...serve.keys()].map((port) => [String(port), { HTTPS: true }])), Web }));
+      }
+      const port = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+      if (args.includes("off")) serve.delete(port);
+      else serve.set(port, args.at(-1)!);
+      return ok(`Available within your tailnet:\n\nhttps://${MAGIC}:${port}/\n`);
+    };
+  })();
+
+  test("every Files route answers local_only; the same routes answer on this computer", async () => {
+    const { root, project } = repo();
+    const server = await start(root, undefined, { tailscale, publishTailnet: true });
+    const { thread_id } = await send(server, project);
+    const listener = server.tailscale.listenerPort()!;
+    expect(listener).not.toBeNull();
+    const through = (path: string, init: { method?: string; body?: string } = {}) =>
+      fetch(`http://127.0.0.1:${listener}${path}`, {
+        method: init.method ?? "GET",
+        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, "Content-Type": "application/json", Origin: `https://${MAGIC}:${server.port}` },
+        body: init.body,
+      });
+    const base = `/api/inbox/threads/${thread_id}/files`;
+    for (const path of [base, `${base}/folder`, `${base}/levels?dir=`, `${base}/content?path=README.md`, `${base}/raw?path=logo.png`, `${base}/changed`]) {
+      expect(await code(await through(path))).toEqual([403, "local_only"]);
+    }
+    expect(await code(await through(`${base}/annotations`, { method: "POST", body: JSON.stringify({ path: "README.md", annotation: {} }) }))).toEqual([403, "local_only"]);
+    // The tailnet still reaches the rest of the Inbox, and this computer still reads the folder.
+    expect((await through(`/api/inbox/threads/${thread_id}`)).status).toBe(200);
+    expect((await content(server, thread_id, "README.md")).status).toBe(200);
+  });
 });

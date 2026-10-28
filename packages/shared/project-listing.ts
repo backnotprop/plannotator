@@ -6,15 +6,13 @@
  *
  * Listing ("like VS Code", owner): everything in a folder except `.git`,
  * never listed at any depth. Gitignored entries are listed and marked
- * `ignored`. Names are always browsable; contents are refused for a dotenv
- * file (`locked: "dotenv"`, the attachment rule `isDotenvFileName`, so
- * `.env.example` stays readable), for a file under a hidden segment git
- * tracks nothing at or under (`locked: "hidden"`: `.claude/`, `.npmrc`, any
- * hidden entry of a folder that is not a git repository, which protects a
- * project at a home folder such as `~/.ssh`), and for a symlink that leaves
- * the root or leads nowhere (`locked: "outside"`, listed as a file, never
- * expandable). A hidden folder git tracks nothing under is listed unlocked
- * and expandable; its files are locked.
+ * `ignored`. Hidden files and folders are listed and open like any other,
+ * and symlinks are followed wherever they lead (owner, 2026-10-27; the
+ * routes answer on this computer only). Two locks, names always shown:
+ * a dotenv file's contents are never served (`locked: "dotenv"`, the
+ * attachment rule `isDotenvFileName`, so `.env.example` stays readable), and
+ * an entry that resolves into a repository's `.git` is never read
+ * (`locked: "git"`).
  *
  * Every refusal is a short machine code ({@link ProjectFileRefusalCode});
  * the window owns the words.
@@ -31,7 +29,7 @@ export const PROJECT_CHANGES_MAX = 20_000;
 export type ProjectEntryKind = "dir" | "file";
 
 /** Why a listed entry's contents are never served. */
-export type ProjectEntryLock = "dotenv" | "hidden" | "outside";
+export type ProjectEntryLock = "dotenv" | "git";
 
 export interface ProjectEntry {
   name: string;
@@ -46,41 +44,36 @@ export type ProjectChangeMark = "M" | "A" | "D" | "R" | "U";
 
 export type ProjectFileRefusalCode =
   | "invalid_path"
-  | "outside_root"
   | "not_found"
   | "not_a_dir"
   | "not_a_file"
   | "locked"
-  | "too_large"
-  | "changed";
+  | "too_large";
 
 /** The HTTP status of each refusal. */
 export const PROJECT_FILE_REFUSAL_STATUS: Record<ProjectFileRefusalCode, number> = {
   invalid_path: 400,
-  outside_root: 403,
   not_found: 404,
   not_a_dir: 400,
   not_a_file: 400,
   locked: 403,
   too_large: 413,
-  changed: 409,
 };
 
-/** The refusal for a failure of the repo-file guard (packages/shared/repo-file.ts). */
-export function projectFileRefusalOf(reason: "invalid-path" | "outside-root" | "not-found" | "not-a-file" | "too-large" | "changed"): ProjectFileRefusalCode {
+/** The refusal for a failure of the Files guard (packages/server/inbox-files-guard.ts): `.git` is not found. */
+export function projectFileRefusalOf(reason: "invalid-path" | "not-found" | "not-a-file" | "not-a-dir" | "git" | "too-large"): ProjectFileRefusalCode {
   switch (reason) {
     case "invalid-path":
       return "invalid_path";
-    case "outside-root":
-      return "outside_root";
     case "not-found":
+    case "git":
       return "not_found";
     case "not-a-file":
       return "not_a_file";
+    case "not-a-dir":
+      return "not_a_dir";
     case "too-large":
       return "too_large";
-    case "changed":
-      return "changed";
   }
 }
 
@@ -98,21 +91,6 @@ export function hasGitSegment(rel: string): boolean {
   return rel.split("/").some((segment) => segment === ".git");
 }
 
-/**
- * Every prefix of `rel` that ends in a hidden segment (`a/.b/c/.d/e` →
- * `a/.b`, `a/.b/c/.d`): the paths git must track something at or under for
- * the files below them to be readable.
- */
-export function hiddenSegmentPrefixes(rel: string): string[] {
-  if (rel === "") return [];
-  const segments = rel.split("/");
-  const out: string[] = [];
-  for (let i = 0; i < segments.length; i++) {
-    if (segments[i]!.startsWith(".")) out.push(segments.slice(0, i + 1).join("/"));
-  }
-  return out;
-}
-
 /** The last segment of a `/` path. */
 export function lastSegment(rel: string): string {
   const at = rel.lastIndexOf("/");
@@ -122,14 +100,10 @@ export function lastSegment(rel: string): string {
 /**
  * Why a file's contents are never served, or null when they may be:
  * `dotenv` when the path it was asked by or the file it resolves to has a
- * dotenv name; `hidden` when either path has a hidden segment git tracks
- * nothing at or under (`tracked` answers for one such prefix).
+ * dotenv name.
  */
-export function projectFileLock(requested: string, real: string, tracked: (prefix: string) => boolean): Exclude<ProjectEntryLock, "outside"> | null {
+export function projectFileLock(requested: string, real: string): "dotenv" | null {
   if (isDotenvFileName(lastSegment(requested)) || isDotenvFileName(lastSegment(real))) return "dotenv";
-  for (const prefix of [...hiddenSegmentPrefixes(requested), ...hiddenSegmentPrefixes(real)]) {
-    if (!tracked(prefix)) return "hidden";
-  }
   return null;
 }
 
