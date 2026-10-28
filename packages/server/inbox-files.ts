@@ -460,8 +460,9 @@ async function listFolders(root: string, rawDirs: readonly (string | null)[]): P
   }
   const state = await gitState(realRoot);
   const join2 = (a: string, b: string) => (a === "" ? b : `${a}/${b}`);
-  // Each folder once, and at most INBOX_FILES_LEVELS_MAX_ENTRIES rows in one answer: the levels past it are not
-  // read (`too_large`; the window lists them again on its next refresh, or when opened).
+  // Each folder once, and never more than INBOX_FILES_LEVELS_MAX_ENTRIES rows in one answer: a level whose rows would
+  // pass it is refused `too_large` (a smaller one after it may still fit), and once the answer is full the rest are
+  // not read. The window sends the levels refused last time first on its next refresh, so none stays stale.
   const seen = new Set<string>();
   let rows = 0;
   const read: ReturnType<typeof readLevel>[] = [];
@@ -469,12 +470,19 @@ async function listFolders(root: string, rawDirs: readonly (string | null)[]): P
     const key = normalizeProjectDir(dir) ?? `\u0000${dir ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    const tooLarge = { dir: normalizeProjectDir(dir) ?? dir ?? "", refused: "too_large" as const };
     if (rows >= INBOX_FILES_LEVELS_MAX_ENTRIES) {
-      read.push({ dir: normalizeProjectDir(dir) ?? dir ?? "", refused: "too_large" });
+      read.push(tooLarge);
       continue;
     }
     const level = readLevel(realRoot, dir);
-    if (!("refused" in level)) rows += level.candidates.length;
+    if (!("refused" in level)) {
+      if (rows + level.candidates.length > INBOX_FILES_LEVELS_MAX_ENTRIES) {
+        read.push({ ...tooLarge, dir: level.dir });
+        continue;
+      }
+      rows += level.candidates.length;
+    }
     read.push(level);
   }
   // Every path git is asked about: each level's folders above it, and its entries, where they really are.
@@ -519,7 +527,7 @@ async function listFolders(root: string, rawDirs: readonly (string | null)[]): P
 
 /** At most this many levels in one `levels` request. */
 export const INBOX_FILES_LEVELS_MAX = 300;
-/** At most this many rows in one `levels` answer (five full levels); the levels past it are refused `too_large`. */
+/** At most this many rows in one `levels` answer (five full levels); a level that would pass it is refused `too_large`. */
 export const INBOX_FILES_LEVELS_MAX_ENTRIES = 25_000;
 
 // --- changes ------------------------------------------------------------------------

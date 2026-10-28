@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { readInboxAttachmentKind, type InboxAttachmentKind } from '@plannotator/core/inbox-types';
 import { FILE_TREE_ROOT, FileTree, FileTreeStore, type FileTreeBadge, type FileTreeIconInfo } from '@plannotator/ui/components/file-tree';
 import { inboxApi, InboxApiError, type NoFolderReason, type ProjectChanges, type ProjectListing, type ThreadFolder } from '../api';
+import { relistOrder } from './relist';
 import { artifactKey, type Artifact, type FileArtifact } from '../artifacts';
 import { Icon, type IconName } from '../icons';
 import { Tip } from '../components/Tip';
@@ -205,13 +206,15 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
     if (!visible || !state.root) return;
     let busy = false;
     let stopped = false;
+    let starved: ReadonlySet<string> = new Set();
     const relist = async () => {
       if (busy || stopped || !refreshing(visible)) return;
       busy = true;
       try {
-        const dirs = ['', ...[...tree.expandedPaths()].filter((d) => tree.isLoaded(d))];
+        const dirs = relistOrder([...tree.expandedPaths()].filter((d) => tree.isLoaded(d)), starved);
         const answer = await inboxApi.filesLevels(threadId, dirs).catch(() => null);
         if (!answer || stopped) return;
+        starved = new Set(answer.levels.filter((level) => 'refused' in level && level.refused === 'too_large').map((level) => level.dir));
         for (const level of answer.levels) {
           if ('refused' in level) continue;
           const listing = { dir: level.dir, entries: level.entries, more: level.more };

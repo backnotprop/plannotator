@@ -532,10 +532,10 @@ test("a big folder is cut before its links are followed: a linked folder past th
   expect(top.entries.find((e) => e.name === "link-dir-in")).toMatchObject({ kind: "dir" });
 });
 
-test("levels: each folder once, and at most 25,000 rows an answer (the rest too_large, not read)", async () => {
+test("levels: each folder once, and never more than 25,000 rows an answer (a level that would pass it too_large)", async () => {
   const { root, project } = repo();
   mkdirSync(join(project, "many"));
-  for (let i = 0; i < 5_000; i++) writeFileSync(join(project, "many", `f${i}.txt`), "");
+  for (let i = 0; i < 4_999; i++) writeFileSync(join(project, "many", `f${i}.txt`), "");
   for (let i = 1; i <= 5; i++) symlinkSync(join(project, "many"), join(project, `many${i}`));
   const server = await start(root);
   const { thread_id } = await send(server, project);
@@ -544,15 +544,17 @@ test("levels: each folder once, and at most 25,000 rows an answer (the rest too_
   expect(twice.levels.map((l) => l.dir)).toEqual(["src", ""]);
   const dirs = ["many", "many1", "many2", "many3", "many4", "many5", "src"].map((d) => `dir=${d}`).join("&");
   const capped = (await (await get(server, `${base}?${dirs}`)).json()) as { levels: Array<{ dir: string; entries?: Entry[]; refused?: string }> };
+  // Five levels of 4,999 (24,995 rows): the sixth would pass 25,000 and is refused; the small one after it still fits.
   expect(capped.levels.map((l) => [l.dir, l.refused ?? l.entries!.length])).toEqual([
-    ["many", 5_000],
-    ["many1", 5_000],
-    ["many2", 5_000],
-    ["many3", 5_000],
-    ["many4", 5_000],
+    ["many", 4_999],
+    ["many1", 4_999],
+    ["many2", 4_999],
+    ["many3", 4_999],
+    ["many4", 4_999],
     ["many5", "too_large"],
-    ["src", "too_large"],
+    ["src", 2],
   ]);
+  expect(capped.levels.reduce((n, l) => n + (l.entries?.length ?? 0), 0)).toBeLessThanOrEqual(25_000);
 });
 
 test("raw answers Range from the guarded descriptor: a probe, a slice, past the end, If-Range", async () => {
@@ -585,13 +587,20 @@ test("a folder that sits under a .git still lists and reads; a link out into ano
   const root = scratch("plannotator-inbox-files-under-git-");
   const project = join(root, "holder", ".git", "work");
   write(join(project, "README.md"), "# Work\n");
+  write(join(project, "src", "a.ts"), "export const a = 1;\n");
   write(join(root, "other", ".git", "config"), "[core]\n");
   symlinkSync(join(root, "other", ".git", "config"), join(project, "escape"));
+  // Links that stay inside the folder: judged below it, so the `.git` above the folder locks nothing.
+  symlinkSync(join(project, "src"), join(project, "inner"));
+  symlinkSync(join(project, "src", "a.ts"), join(project, "inner-file"));
   const server = await start(root);
   const { thread_id } = await send(server, project);
   const top = await list(server, thread_id, "");
   expect(top.entries.find((e) => e.name === "README.md")).toMatchObject({ kind: "file", locked: null });
   expect(top.entries.find((e) => e.name === "escape")).toMatchObject({ locked: "git" });
+  expect(top.entries.find((e) => e.name === "inner")).toMatchObject({ kind: "dir", locked: null });
+  expect(top.entries.find((e) => e.name === "inner-file")).toMatchObject({ kind: "file", locked: null });
+  expect((await content(server, thread_id, "inner/a.ts")).status).toBe(200);
   expect((await content(server, thread_id, "README.md")).status).toBe(200);
   expect(await code(await content(server, thread_id, "escape"))).toEqual([404, "not_found"]);
 });
