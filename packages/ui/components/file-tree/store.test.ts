@@ -299,3 +299,110 @@ describe('FileTreeStore sliced against built at once', () => {
     );
   });
 });
+
+/** A loader the test answers by hand: each call waits until `answer(dir, children)` or `fail(dir)`. */
+function manualLoader() {
+  const calls: string[] = [];
+  const waiting = new Map<string, { resolve: (v: string[]) => void; reject: (e: unknown) => void }>();
+  const loader = (dir: string) =>
+    new Promise<string[]>((resolve, reject) => {
+      calls.push(dir);
+      waiting.set(dir, { resolve, reject });
+    });
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  return {
+    loader,
+    calls,
+    answer: async (dir: string, children: string[]) => {
+      waiting.get(dir)!.resolve(children);
+      waiting.delete(dir);
+      await settle();
+    },
+    fail: async (dir: string) => {
+      waiting.get(dir)!.reject(new Error('gone'));
+      waiting.delete(dir);
+      await settle();
+    },
+  };
+}
+
+describe('FileTreeStore lazy folders', () => {
+  test('opening an unloaded folder asks the loader once; its children land under it', async () => {
+    const l = manualLoader();
+    const store = new FileTreeStore(['src/', 'README.md'], { loadChildren: l.loader });
+    store.expand('src');
+    store.collapse('src');
+    store.expand('src');
+    expect(l.calls).toEqual(['src']);
+    expect(listing(store)).toEqual(['src/ open', 'README.md']);
+    await l.answer('src', ['src/a.ts', 'src/lib/']);
+    expect(listing(store)).toEqual(['src/ open', '  lib/', '  a.ts', 'README.md']);
+    expect(store.isLoaded('src')).toBe(true);
+    // Loaded once: closing and opening again asks nothing.
+    store.collapse('src');
+    store.expand('src');
+    expect(l.calls).toEqual(['src']);
+    // A child folder is lazy in turn.
+    store.expand('src/lib');
+    expect(l.calls).toEqual(['src', 'src/lib']);
+  });
+
+  test('loads that answer out of order both land; a folder closed during its load stays closed', async () => {
+    const l = manualLoader();
+    const store = new FileTreeStore(['a/', 'b/'], { loadChildren: l.loader });
+    store.expand('a');
+    store.expand('b');
+    store.collapse('a');
+    await l.answer('b', ['b/two.ts']);
+    await l.answer('a', ['a/one.ts']);
+    expect(listing(store)).toEqual(['a/', 'b/ open', '  two.ts']);
+    store.expand('a');
+    expect(listing(store)).toEqual(['a/ open', '  one.ts', 'b/ open', '  two.ts']);
+    expect(l.calls).toEqual(['a', 'b']);
+  });
+
+  test('a failed load closes the folder, and the next open tries again', async () => {
+    const l = manualLoader();
+    const store = new FileTreeStore(['src/'], { loadChildren: l.loader });
+    store.expand('src');
+    await l.fail('src');
+    expect(listing(store)).toEqual(['src/']);
+    expect(store.isLoaded('src')).toBe(false);
+    store.expand('src');
+    expect(l.calls).toEqual(['src', 'src']);
+    await l.answer('src', ['src/x.ts']);
+    expect(listing(store)).toEqual(['src/ open', '  x.ts']);
+  });
+
+  test('a folder that already holds children, or was marked loaded, is never asked for', () => {
+    const l = manualLoader();
+    const store = new FileTreeStore(['docs/guide.md', 'empty/'], { loadChildren: l.loader });
+    store.markLoaded('empty');
+    store.expand('docs');
+    store.expand('empty');
+    expect(l.calls).toEqual([]);
+  });
+
+  test('the spinner state comes only after the delay', async () => {
+    const l = manualLoader();
+    const store = new FileTreeStore(['src/'], { loadChildren: l.loader, loadingDelayMs: 30 });
+    store.expand('src');
+    expect(store.loadState('src')).toBe('pending');
+    await new Promise((r) => setTimeout(r, 60));
+    expect(store.loadState('src')).toBe('slow');
+    await l.answer('src', []);
+    expect(store.loadState('src')).toBe(null);
+    // An empty folder is loaded too: opening it again asks nothing.
+    store.collapse('src');
+    store.expand('src');
+    expect(l.calls).toEqual(['src']);
+  });
+
+  test('expandSiblings (the * key) opens every folder beside a row, lazy ones loading', () => {
+    const l = manualLoader();
+    const store = new FileTreeStore(['a/x.ts', 'b/', 'c/', 'z.ts'], { loadChildren: l.loader });
+    store.expandSiblings('z.ts');
+    expect(listing(store)).toEqual(['a/ open', '  x.ts', 'b/ open', 'c/ open', 'z.ts']);
+    expect([...l.calls].sort()).toEqual(['b', 'c']);
+  });
+});

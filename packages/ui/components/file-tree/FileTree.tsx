@@ -19,7 +19,20 @@
  * with `aria-activedescendant`. Keys are VS Code's (a standard tree widget):
  * Up/Down, Right opens or goes to the first child, Left closes or goes to the
  * parent, Home/End, PageUp/PageDown, type-ahead, Enter and Space open a file
- * or toggle a folder. Nothing global is registered.
+ * or toggle a folder, `*` opens every folder beside the focused row. Every
+ * key it uses is taken (`preventDefault`) on the tree element only, so a
+ * host's bare-letter shortcuts can stand down for it; nothing global is
+ * registered.
+ *
+ * Rows the host marks: `locked` (listed, never opened: a lock in place of the
+ * icon, the host's words as tooltip and description; Enter and a click call
+ * `onBlocked`), `disabled`, `dimmed` (git-ignored). A store with a
+ * `loadChildren` loader fills a folder the first time it opens; its row shows
+ * a spinner only once the load runs past the store's delay (300 ms).
+ *
+ * Several trees can share one scroll with the host's section headers between
+ * them (`scrollParent`): each grows to its full height and draws only the rows
+ * in that element's view.
  *
  * Everything kept across changes is kept by path, since node ids change when
  * a sliced build lands or a snapshot rebuilds: the focused row, a pending
@@ -72,6 +85,19 @@ export interface FileTreeProps {
   onOpen?: (path: string) => void;
   /** A folder was opened or closed by the user. */
   onToggle?: (path: string, expanded: boolean) => void;
+  /**
+   * A disabled or locked row was asked to open (a click, Enter or Space). It
+   * opens nothing; the host may say why (a toast on a touch screen, where the
+   * lock's tooltip never shows).
+   */
+  onBlocked?: (path: string) => void;
+  /**
+   * The element that scrolls, when it is not the tree: several trees (and the
+   * host's section headers between them) in one scroll. The tree then grows
+   * to its full height, draws the rows that show in that element, and scrolls
+   * it to keep the focused row in view. Default: the tree scrolls itself.
+   */
+  scrollParent?: React.RefObject<HTMLElement | null>;
   /** Icons. Default: FileBrowser's folder and file glyphs. Return null for none. Keep the function stable. */
   renderIcon?: (info: FileTreeIconInfo) => React.ReactNode;
   /**
@@ -86,7 +112,7 @@ export interface FileTreeProps {
   /** The tree's accessible name. */
   label?: string;
   /** Words for screen readers. */
-  labels?: { markedBelow?: string; indexing?: string };
+  labels?: { markedBelow?: string; indexing?: string; loading?: string };
   className?: string;
   style?: React.CSSProperties;
 }
@@ -117,6 +143,24 @@ function Chevron({ open }: { open: boolean }) {
   return (
     <svg className={`w-3 h-3 flex-shrink-0 ${open ? 'rotate-90' : 'rtl:-scale-x-100'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function Lock() {
+  return (
+    <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden data-ft-lock="">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+    </svg>
+  );
+}
+
+/** A folder's children loading for longer than the store's delay: in the chevron's place. Still under reduced motion. */
+function Spinner({ label }: { label: string }) {
+  return (
+    <svg className="w-3 h-3 flex-shrink-0 animate-spin motion-reduce:animate-none" viewBox="0 0 24 24" fill="none" role="img" aria-label={label} data-ft-loading="">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   );
 }
@@ -178,19 +222,29 @@ interface RowViewProps {
   dot: boolean;
   dotLabel: string;
   touch: boolean;
+  /** The folder's children are loading and the spinner delay passed. */
+  loading: boolean;
+  loadingLabel: string;
   renderIcon: (info: FileTreeIconInfo) => React.ReactNode;
 }
 
 const RowView = memo(function RowView(p: RowViewProps) {
   const left = PAD + p.depth * p.indent;
-  const icon = p.renderIcon({ path: p.path, name: p.name, isDir: p.isDir, expanded: p.expanded, depth: p.depth });
+  const locked = p.badge?.locked;
+  const icon = locked ? <Lock /> : p.renderIcon({ path: p.path, name: p.name, isDir: p.isDir, expanded: p.expanded, depth: p.depth });
   const guideLeft = PAD + TWISTIE / 2;
-  const disabled = p.badge?.disabled === true;
+  const disabled = p.badge?.disabled === true || locked !== undefined;
+  const dimmed = p.badge?.dimmed === true && !p.selected;
   const marker = p.badge?.marker;
   const nameText = p.touch ? 'text-[15px]' : 'text-[13px]';
   const base = p.isDir
-    ? 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
-    : `text-muted-foreground ${disabled ? 'opacity-70 cursor-default' : 'hover:bg-muted hover:text-foreground'}`;
+    ? `text-muted-foreground hover:bg-muted/50 ${dimmed ? 'opacity-60' : 'hover:text-foreground'}`
+    : `text-muted-foreground ${disabled ? 'opacity-70 cursor-default' : `hover:bg-muted ${dimmed ? 'opacity-60' : 'hover:text-foreground'}`}`;
+  const name = (
+    <span dir="auto" className={`truncate min-w-0 flex-1 ${p.badge?.struck ? 'line-through' : ''}`}>
+      {p.displayName}
+    </span>
+  );
   const tint = p.selected ? 'bg-primary/30 text-primary hover:bg-primary/30 hover:text-primary' : !p.isDir && p.count > 0 ? 'bg-primary/[0.08]' : '';
   return (
     <div
@@ -207,6 +261,8 @@ const RowView = memo(function RowView(p: RowViewProps) {
       data-path={p.path}
       data-selected={p.selected || undefined}
       data-ring={p.ring || undefined}
+      data-locked={locked !== undefined || undefined}
+      data-dimmed={p.badge?.dimmed || undefined}
       className={`absolute inset-x-1 flex items-center gap-1.5 pe-2 rounded-sm select-none whitespace-nowrap cursor-pointer data-[ring]:outline data-[ring]:outline-1 data-[ring]:-outline-offset-1 data-[ring]:outline-ring ${base} ${tint} ${nameText}`}
       style={{ top: p.index * p.height, height: p.height, paddingInlineStart: left }}
     >
@@ -230,11 +286,9 @@ const RowView = memo(function RowView(p: RowViewProps) {
           style={{ insetInlineStart: guideLeft + p.strongLevel * p.indent, background: 'var(--ft-guide-strong)' }}
         />
       )}
-      {p.isDir ? <Chevron open={p.expanded} /> : <span aria-hidden className="w-3 flex-shrink-0" />}
+      {p.loading ? <Spinner label={p.loadingLabel} /> : p.isDir ? <Chevron open={p.expanded} /> : <span aria-hidden className="w-3 flex-shrink-0" />}
       {icon != null && icon !== false && icon}
-      <HostTitle title={p.displayName} cut>
-        <span dir="auto" className={`truncate min-w-0 flex-1 ${p.badge?.struck ? 'line-through' : ''}`}>{p.displayName}</span>
-      </HostTitle>
+      {locked !== undefined ? <HostTitle title={locked}>{name}</HostTitle> : <HostTitle title={p.displayName} cut>{name}</HostTitle>}
       <span className="ms-auto flex flex-shrink-0 items-center gap-1.5 text-[10px]">
         {marker && (
           <span
@@ -253,6 +307,7 @@ const RowView = memo(function RowView(p: RowViewProps) {
         )}
         {p.dot && <span role="img" aria-label={p.dotLabel} className="size-1.5 rounded-full bg-warning" />}
         {!p.isDir && p.badge?.label && <span className="sr-only">{p.badge.label}</span>}
+        {locked !== undefined && <span className="sr-only">{locked}</span>}
       </span>
     </div>
   );
@@ -296,7 +351,9 @@ const TYPEAHEAD_MS = 700;
 const ROW_TEXT_PADDING = 2;
 
 export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree(props, ref) {
-  const { tree, selectedPath = null, onOpen, onToggle, renderIcon = defaultFileTreeIcon, indent = FILE_TREE_INDENT, overscan = 10, label = 'Files', labels, className, style } = props;
+  const { tree, selectedPath = null, onOpen, onToggle, onBlocked, scrollParent, renderIcon = defaultFileTreeIcon, indent = FILE_TREE_INDENT, overscan = 10, label = 'Files', labels, className, style } = props;
+  /** Another element scrolls (several trees in one scroll): rows are placed against it. */
+  const external = scrollParent !== undefined;
   const version = useSyncExternalStore(tree.subscribe, tree.getVersion, tree.getVersion);
   const model = tree.model;
   const coarse = useCoarsePointer();
@@ -326,11 +383,15 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   // again whenever it changes size (text-only zoom, a minimum font size, a font
   // that loads late). Every row is the same height, so the window stays exact.
   const h = Math.max(minRow, textH > 0 ? Math.ceil(textH) + ROW_TEXT_PADDING : 0);
+  const hRef = useRef(h);
+  hRef.current = h;
 
   // Viewport height and text height: one read each at mount, then ResizeObserver.
   // Both read clientHeight / offsetHeight, so padding never makes them disagree.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
+  // In a host's scroll (`scrollParent`) the viewport is that element's. Its ref is attached only after this
+  // tree's layout effects ran (a parent's ref comes after its children's effects), so that one is measured
+  // in a passive effect.
+  const measure = (el: HTMLElement | null) => {
     const probe = probeRef.current;
     if (!el || !probe) return;
     setViewH(el.clientHeight);
@@ -345,7 +406,36 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     ro.observe(el);
     ro.observe(probe);
     return () => ro.disconnect();
-  }, []);
+  };
+  useLayoutEffect(() => (external ? undefined : measure(scrollRef.current)), [external]);
+  useEffect(() => (external ? measure(scrollParent.current ?? null) : undefined), [external, scrollParent]);
+
+  /**
+   * In a host's scroll: where the tree's first row sits in the scrolled
+   * content, and so the scroll measured from it (negative while the tree
+   * starts below the top of the view). Two rect reads, on a scroll and after
+   * a render (the host's sections above may have grown).
+   */
+  const readExternal = useCallback((): number | null => {
+    const scroller = scrollParent?.current;
+    const el = scrollRef.current;
+    if (!scroller || !el) return null;
+    const offset = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    return scroller.scrollTop - offset;
+  }, [scrollParent]);
+
+  useEffect(() => {
+    const scroller = external ? scrollParent.current : null;
+    if (!scroller) return;
+    const onScroll = () => {
+      const rel = readExternal();
+      if (rel === null) return;
+      scrollTopRef.current = rel;
+      setFirstRow(Math.floor(rel / hRef.current));
+    };
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller.removeEventListener('scroll', onScroll);
+  }, [external, scrollParent, readExternal]);
 
   // A filter waiting for a sliced build has no rows yet: the tree says "Indexing…".
   const pending = tree.filterPending;
@@ -381,6 +471,18 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
 
   const scrollTo = useCallback(
     (y: number) => {
+      if (external) {
+        // The host's element scrolls: put row offset `y` at its top (the browser clamps), then read where it landed.
+        const scroller = scrollParent.current;
+        const rel = readExternal();
+        if (!scroller || rel === null) return;
+        scroller.scrollTop += Math.round(y) - rel;
+        const now = readExternal() ?? rel;
+        scrollTopRef.current = now;
+        setFirstRow(Math.floor(now / h));
+        redraw();
+        return;
+      }
       const el = scrollRef.current;
       const max = Math.max(0, total * h - viewport);
       const next = clamp(Math.round(y), 0, max);
@@ -389,7 +491,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       setFirstRow(Math.floor(next / h));
       redraw();
     },
-    [total, h, viewport],
+    [total, h, viewport, external, scrollParent, readExternal],
   );
 
   const ensureVisible = useCallback(
@@ -408,7 +510,19 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   // placed, so the browser's own scroll anchoring cannot). Not at the very top:
   // a new row there should show, as with CSS scroll anchoring. Then note the
   // top row for next time.
+  // In a host's scroll that scroll keeps its own place; only where this tree now starts in it is read again
+  // after each render (the host's sections above it may have grown or shrunk).
   useLayoutEffect(() => {
+    if (!external) return;
+    const rel = readExternal();
+    if (rel !== null && rel !== scrollTopRef.current) {
+      scrollTopRef.current = rel;
+      setFirstRow(Math.floor(rel / h));
+    }
+  });
+
+  useLayoutEffect(() => {
+    if (external) return;
     const a = anchor.current;
     const el = scrollRef.current;
     let hostScrolled = false;
@@ -438,7 +552,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
     const topIndex = Math.floor(scrollTopRef.current / h);
     const topId = total > 0 ? model.rowAt(clamp(topIndex, 0, total - 1)) : -1;
     anchor.current = topId > ROOT ? { path: model.pathOf(topId), offset: scrollTopRef.current - topIndex * h, version, h } : null;
-  }, [version, model, h, total, scrollTo, firstRow]);
+  }, [version, model, h, total, scrollTo, firstRow, external]);
 
   // Focus held on a row that is gone or hidden moves for good to the row that shows it.
   useLayoutEffect(() => {
@@ -494,6 +608,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const toggle = (id: number) => {
     const path = model.pathOf(id);
     const open = !model.isExpanded(id);
+    // A locked folder never opens (its contents are refused too); a disabled one still toggles.
+    if (open && tree.badgeOf(path)?.locked !== undefined) {
+      onBlocked?.(path);
+      return;
+    }
     if (open) tree.expand(path);
     else tree.collapse(path);
     onToggle?.(path, open);
@@ -506,7 +625,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       return;
     }
     const path = model.pathOf(id);
-    if (tree.badgeOf(path)?.disabled) return;
+    const badge = tree.badgeOf(path);
+    if (badge?.disabled || badge?.locked !== undefined) {
+      onBlocked?.(path);
+      return;
+    }
     onOpen?.(path);
   };
 
@@ -555,6 +678,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       case 'Enter':
         if (cur < 0) moveTo(0);
         else activate(id);
+        break;
+      case '*':
+        // The tree pattern's key: open every folder beside the focused row (lazy ones load).
+        if (id > ROOT) tree.expandSiblings(model.pathOf(id));
+        else if (cur < 0) moveTo(0);
         break;
       default:
         if (key.length === 1 && (key !== ' ' || typing)) {
@@ -609,6 +737,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
   const ringId = hasFocus && keyboard ? focus : -1;
   const activeDescendant = hasFocus && focusIndex >= 0 ? `${domPrefix}-${focus}` : undefined;
   const dotLabel = labels?.markedBelow ?? 'Contains changes';
+  const loadingLabel = labels?.loading ?? 'Loading';
   const indexingId = `${domPrefix}-indexing`;
 
   const treeStyle = useMemo(
@@ -632,9 +761,9 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
       aria-describedby={pending ? indexingId : undefined}
       tabIndex={0}
       data-file-tree=""
-      className={`group/ft relative h-full overflow-auto outline-none ${className ?? ''}`}
+      className={`group/ft relative outline-none ${external ? '' : 'h-full overflow-auto'} ${className ?? ''}`}
       style={treeStyle}
-      onScroll={onScroll}
+      onScroll={external ? undefined : onScroll}
       onKeyDown={onKeyDown}
       onClick={onClick}
       onPointerDown={() => keyboard && setKeyboard(false)}
@@ -658,7 +787,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
           {labels?.indexing ?? 'Indexing…'}
         </div>
       )}
-      <div role="presentation" style={{ position: 'relative', height: total * h, minHeight: '100%' }}>
+      <div role="presentation" style={{ position: 'relative', height: total * h, minHeight: external ? undefined : '100%' }}>
         {rows.map((r) => {
           const path = model.pathOf(r.id);
           const badge = tree.badgeOf(path);
@@ -691,6 +820,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileT
               dot={r.isDir && !r.expanded && r.markedBelow && additions === 0 && deletions === 0}
               dotLabel={dotLabel}
               touch={touch}
+              loading={r.isDir && tree.loadState(path) === 'slow'}
+              loadingLabel={loadingLabel}
               renderIcon={renderIcon}
             />
           );
