@@ -447,11 +447,13 @@ export interface ArtifactsViewProps {
   openIn?: OpenInSurface;
   /** A phone: the header names the view, so the heading here is for a screen reader only. */
   phone?: boolean;
+  /** The thread's project folder beside the grid (the Files panel): an empty grid points there. */
+  folderName?: string | null;
 }
 
 /** The grid itself, with its heading ("Artifacts") as the region's name and the focus target when it opens. */
 export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(function ArtifactsView(
-  { artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, onBack, openIn, phone = false },
+  { artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, onBack, openIn, phone = false, folderName = null },
   headingRef,
 ) {
   const ordered = artifacts ? artifactsNewestFirst(artifacts) : [];
@@ -492,6 +494,7 @@ export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(
           </span>
           <b>No artifacts in this thread yet</b>
           <span>Files, images and guided reviews an agent sends, and files you paste into a reply, show here.</span>
+          {folderName && <span data-artifacts-empty-folder="">Open a file from {folderName} in the files panel.</span>}
         </div>
       ) : (
         <ul className="ib-art-grid" aria-label={plural(count, 'artifact')}>

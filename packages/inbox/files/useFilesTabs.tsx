@@ -12,13 +12,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from 'react-dom';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
-import type { ProjectFileContent } from '../api';
+import { inboxApi, type ProjectFileContent, type ThreadFolder } from '../api';
 import { attachmentLabel } from '../attachments';
 import type { Artifact } from '../artifacts';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
-import { ChangesToggle, FilesPanel, fileKindIcon, type ChangesToggleAt } from './FilesPanel';
+import { FilesPanel, fileKindIcon } from './FilesPanel';
 import { FilesTabRow, type FileTabView } from './FilesTabRow';
 import { isProjectFileId, projectFileDir, projectFileId, projectFilePath, projectFileSource, projectFileState } from './projectFiles';
 import { closeOtherTabs, closeTab, keepKnownTabs, openTab, stepTab, threadTabs, type FileTabs } from './tabs';
@@ -27,16 +27,6 @@ import { closeOtherTabs, closeTab, keepKnownTabs, openTab, stepTab, threadTabs, 
 export const FILES_PANEL_COOKIE = 'plannotator-inbox-files-panel';
 /** The quiet changes toggle is on. */
 export const FILES_CHANGES_COOKIE = 'plannotator-inbox-files-changes';
-/**
- * Where the changes toggle sits, while the owner chooses (`header`, `chip`, `tools`); remove once chosen.
- * Default: the folder's header, beside what it marks.
- */
-export const FILES_CHANGES_AT_COOKIE = 'plannotator-inbox-files-changes-at';
-
-function readChangesAt(): ChangesToggleAt {
-  const v = storage.getItem(FILES_CHANGES_AT_COOKIE);
-  return v === 'chip' || v === 'tools' ? v : 'header';
-}
 
 export interface FilesTabsInput {
   enabled: boolean;
@@ -54,6 +44,8 @@ export interface FilesTabsInput {
   /** Comments waiting, by path (fileCommentKey: a project file's by its relative path). */
   counts: ReadonlyMap<string, number>;
   projectRoot: string;
+  /** Changes when the folder may have moved (the latest agent message: it can come from another worktree). */
+  folderKey: string;
   /** Show a file beside the thread, in its tab (switching tabs: replaces the entry). */
   showFile: (id: string, options?: { replace?: boolean }) => void;
   /** The Artifacts tab (no file shown), or close the pane (`open` false). */
@@ -91,7 +83,26 @@ export function useFilesTabs(input: FilesTabsInput) {
     setShowChangesState(on);
     storage.setItem(FILES_CHANGES_COOKIE, on ? 'on' : 'off');
   };
-  const [changesAt] = useState(readChangesAt);
+  // The thread's project folder (PROJECT-FOLDER definition, packages/server/inbox-files.ts `inboxThreadFilesFolder`):
+  // undefined while asked, null when it has none (`noFolder` says why).
+  const [folderState, setFolderState] = useState<{ threadId: string; folder: ThreadFolder | null; reason: 'home' | 'gone' | null } | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let gone = false;
+    inboxApi.filesFolder(threadId).then(
+      (answer) => {
+        if (!gone) setFolderState({ threadId, folder: answer.folder, reason: answer.folder ? null : answer.reason });
+      },
+      () => {
+        if (!gone) setFolderState({ threadId, folder: null, reason: null });
+      },
+    );
+    return () => {
+      gone = true;
+    };
+  }, [enabled, threadId, input.folderKey]);
+  const folder = folderState && folderState.threadId === threadId ? folderState.folder : undefined;
+  const noFolder = folderState && folderState.threadId === threadId ? folderState.reason : null;
   const [filterFocus, setFilterFocus] = useState(0);
 
   // Another thread: its own tabs.
@@ -237,7 +248,6 @@ export function useFilesTabs(input: FilesTabsInput) {
       </button>
     </Tip>
   );
-  const changesInTools = changesAt === 'tools' && treeOpen ? <ChangesToggle on={showChanges} onChange={setShowChanges} at="tools" /> : null;
 
   const tabRow = (tools: { file: ReactNode; view: ReactNode } | null, trailing?: ReactNode) => (
     <FilesTabRow
@@ -258,7 +268,6 @@ export function useFilesTabs(input: FilesTabsInput) {
       trailing={
         tools ? (
           <>
-            {changesInTools}
             {treeButton}
             {tools.view}
           </>
@@ -305,7 +314,7 @@ export function useFilesTabs(input: FilesTabsInput) {
         onBlocked={input.onBlocked}
         showChanges={showChanges}
         onShowChanges={setShowChanges}
-        changesAt={changesAt}
+        noFolder={noFolder}
         focusFilter={filterFocus}
         onFilterFocused={() => setFilterFocus(0)}
       />
@@ -324,12 +333,7 @@ export function useFilesTabs(input: FilesTabsInput) {
           // One file open: its tools fold into the tab row.
           fold: tabs.length <= 1,
           crumb: crumb(attachment),
-          extra: (
-            <>
-              {changesInTools}
-              {treeButton}
-            </>
-          ),
+          extra: treeButton,
         }
       : undefined;
 
@@ -349,6 +353,8 @@ export function useFilesTabs(input: FilesTabsInput) {
     panelPortal,
     artifactsTabRow: tabRow(null, treeButton),
     treeOpen,
+    /** The thread's project folder: undefined while asked, null when it has none (desktop only). */
+    folder,
   };
 }
 

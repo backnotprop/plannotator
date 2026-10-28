@@ -3052,7 +3052,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody, streamIdleMs: options.streamIdleMs, scheduleImageCapture: imageCapture.schedule });
-  filesRoutes = createInboxFilesRoutes({ store, serverSession, readBody, htmlAssets: attachmentRoutes.htmlAssets, projectRootOf: (path) => projectRoots.resolve(path) });
+  filesRoutes = createInboxFilesRoutes({ store, serverSession, readBody, htmlAssets: attachmentRoutes.htmlAssets, projectRootOf: (path) => projectRoots.resolve(path), home: agentEnvironment.homeDir });
   const started = startOnLoopback(fetch, previous?.port ?? null);
   server = started.server;
   portChanged = started.portChanged;

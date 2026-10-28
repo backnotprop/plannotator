@@ -5369,17 +5369,13 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-ftsec-acts { display: inline-flex; align-items: center; gap: 2px; flex: none; }
 .pn-inbox .ib-ftsec-acts .ib-iconbtn { width: 26px; height: 26px; }
 .ib-ftline { padding: 6px 16px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
-/* The quiet changes toggle: an icon (or a small chip) that reads as a state, never as an alarm. */
+/* The quiet changes toggle: an icon in the folder's header that reads as a state, never as an alarm. */
 .pn-inbox .ib-iconbtn.ib-ftchanges { width: auto; min-width: 26px; gap: 3px; padding: 0 5px; }
 /* The files panel's place in a pane: the panel is the grid item (useFilesTabs' PanelSlot). */
 .pn-inbox .ib-ftree-slot { display: contents; }
 /* On in the folder header: the accent colour and the count, no fill (quiet). */
 .pn-inbox .ib-ftsec-h .ib-ftchanges[aria-pressed="true"] { color: var(--primary); background: transparent; }
-.ib-ftchanges-n, .ib-ftchip-n { font-size: var(--ib-fs-11, 11px); font-weight: 600; font-variant-numeric: tabular-nums; }
-.ib-ftchiprow { display: flex; padding: 2px 12px 2px; flex: none; }
-.ib-ftchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--muted-foreground); box-shadow: inset 0 0 0 1px var(--ib-line); cursor: pointer; }
-.ib-ftchip:hover { color: var(--foreground); background: var(--muted); }
-.ib-ftchip.ib-on { color: var(--primary); background: color-mix(in oklch, var(--primary) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent); }
+.ib-ftchanges-n { font-size: var(--ib-fs-11, 11px); font-weight: 600; font-variant-numeric: tabular-nums; }
 /* The Artifacts tab: the grid scrolls in the body. */
 .ib-filesart .ib-artarea { overflow: auto; min-height: 0; }
 .ib-filesart .ib-artarea .ib-art { padding: 18px 24px 24px; }

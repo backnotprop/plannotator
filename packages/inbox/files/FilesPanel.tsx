@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentKind } from '@plannotator/core/inbox-types';
 import { FILE_TREE_ROOT, FileTree, FileTreeStore, type FileTreeBadge, type FileTreeIconInfo } from '@plannotator/ui/components/file-tree';
-import { inboxApi, InboxApiError, type ProjectChanges, type ProjectListing } from '../api';
+import { inboxApi, InboxApiError, type ProjectChanges, type ProjectListing, type ThreadFolder } from '../api';
 import { artifactKey, type Artifact, type FileArtifact } from '../artifacts';
 import { Icon, type IconName } from '../icons';
 import { Tip } from '../components/Tip';
@@ -36,7 +36,6 @@ export function fileKindIcon(kind: InboxAttachmentKind | string): IconName {
 }
 
 /** Where the quiet changes toggle sits (rendered for the owner to choose; one prop, `showChanges`, either way). */
-export type ChangesToggleAt = 'header' | 'chip' | 'tools';
 
 /** Why a locked row does not open, in the window's words (the server sends only the reason). */
 export const LOCK_WORDS: Record<'dotenv' | 'hidden' | 'outside', string> = {
@@ -97,7 +96,8 @@ export interface FilesPanelProps {
   onBlocked: (words: string) => void;
   showChanges: boolean;
   onShowChanges: (on: boolean) => void;
-  changesAt: ChangesToggleAt;
+  /** Why the thread has no project folder (`GET …/files/folder`), for the line that says so. */
+  noFolder?: 'home' | 'gone' | null;
   /** Bumped to move focus into the filter (the tab row's +). */
   focusFilter?: number;
   /** Called once the filter took that focus, so a remount (another tab) does not take it again. */
@@ -166,7 +166,7 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
       },
       (cause) => {
         if (gone) return;
-        setState({ root: null, error: cause instanceof InboxApiError && cause.code === 'files_no_folder' ? 'No project folder' : 'The folder could not be read', loaded: true });
+        setState({ root: null, error: cause instanceof InboxApiError && cause.code === 'files_no_folder' ? 'none' : 'The folder could not be read', loaded: true });
       },
     );
     return () => {
@@ -258,33 +258,34 @@ function SectionHeader({ open, onToggle, title, count, tip, actions, id }: { ope
   );
 }
 
-/** The quiet toggle, in each of its placements: the same state, the same words. */
-export function ChangesToggle({ on, onChange, at, base, count }: { on: boolean; onChange: (on: boolean) => void; at: ChangesToggleAt; base?: ProjectChanges['base'] | null; count?: number | null }) {
+/** The quiet changes toggle, in the project folder's header (owner, 2026-10-27): an icon that reads as a state. */
+export function ChangesToggle({ on, onChange, base, count }: { on: boolean; onChange: (on: boolean) => void; base?: ProjectChanges['base'] | null; count?: number | null }) {
   const since = base?.commit ? `the commit this thread started on (${base.commit.slice(0, 7)})` : 'this thread started';
   const tip = on ? `Hide changes` : `Show changes since ${since}, plus uncommitted work`;
-  if (at === 'chip') {
-    return (
-      <Tip content={tip}>
-        <button type="button" className={`ib-ftchip${on ? ' ib-on' : ''}`} aria-pressed={on} onClick={() => onChange(!on)} data-files-changes="chip">
-          <Icon name="changed" size={13} />
-          <span>Changes</span>
-          {on && count != null && <span className="ib-ftchip-n">{count}</span>}
-        </button>
-      </Tip>
-    );
-  }
   return (
     <Tip content={tip}>
-      <button type="button" className={`ib-iconbtn ib-ftchanges${at === 'header' ? ' ib-sm' : ''}`} aria-pressed={on} aria-label="Changes" onClick={() => onChange(!on)} data-files-changes={at}>
-        <Icon name="changed" size={at === 'header' ? 15 : 16} />
+      <button type="button" className="ib-iconbtn ib-ftchanges ib-sm" aria-pressed={on} aria-label="Changes" onClick={() => onChange(!on)} data-files-changes="">
+        <Icon name="changed" size={15} />
         {on && count != null && <span className="ib-ftchanges-n">{count}</span>}
       </button>
     </Tip>
   );
 }
 
+/** The folder's name in the panel and on the folder button: the project's, with the worktree's beside it when it is one. */
+export function folderLabel(folder: Pick<ThreadFolder, 'name' | 'project' | 'worktree'>): string {
+  return folder.worktree ? `${folder.project} · ${folder.worktree}` : folder.project;
+}
+
+/** Why the thread has no project folder, in words. */
+export function noFolderWords(reason: 'home' | 'gone' | null | undefined): string {
+  if (reason === 'home') return "No project folder: this thread's agent works in your home folder";
+  if (reason === 'gone') return 'The project folder is gone';
+  return 'No project folder';
+}
+
 export function FilesPanel(props: FilesPanelProps) {
-  const { threadId, artifacts, counts, openId, onOpenArtifact, onOpenProjectFile, onBlocked, showChanges, onShowChanges, changesAt } = props;
+  const { threadId, artifacts, counts, openId, onOpenArtifact, onOpenProjectFile, onBlocked, showChanges, onShowChanges, noFolder } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState('');
@@ -331,7 +332,8 @@ export function FilesPanel(props: FilesPanelProps) {
   const openPath = openId?.startsWith('pf:') ? openId.slice(3) : null;
   const changeCount = project.changes ? Object.keys(project.changes.changes).length : null;
   const root = project.state.root;
-  const toggle = <ChangesToggle on={showChanges} onChange={onShowChanges} at={changesAt} base={project.changes?.base ?? null} count={changeCount} />;
+  const toggle = <ChangesToggle on={showChanges} onChange={onShowChanges} base={project.changes?.base ?? null} count={changeCount} />;
+  const label = root ? (root.project ? folderLabel({ name: root.name, project: root.project, worktree: root.worktree ?? null }) : root.name) : 'Project folder';
 
   return (
     <aside className="ib-ftree" aria-label="Files" data-files-panel="">
@@ -355,7 +357,6 @@ export function FilesPanel(props: FilesPanelProps) {
           data-files-filter=""
         />
       </div>
-      {changesAt === 'chip' && root?.git && <div className="ib-ftchiprow">{toggle}</div>}
       <div className="ib-ftscroll" ref={scroller}>
         {(artifacts?.length ?? 0) > 0 && (
           <>
@@ -379,12 +380,12 @@ export function FilesPanel(props: FilesPanelProps) {
           id={`ib-ft-proj-${threadId}`}
           open={openSecs.proj}
           onToggle={() => setOpenSecs((s) => ({ ...s, proj: !s.proj }))}
-          title={root?.name ?? 'Project folder'}
-          tip={root ? `${root.name}${root.branch ? ` · ${root.branch}` : ''}` : undefined}
+          title={label}
+          tip={root ? `${root.path ?? root.name}${root.branch ? ` · ${root.branch}` : ''}` : undefined}
           actions={
             root ? (
               <>
-                {changesAt === 'header' && root.git && toggle}
+                {root.git && toggle}
                 <Tip content="Collapse folders">
                   <button type="button" className="ib-iconbtn ib-sm" aria-label="Collapse folders" onClick={() => project.tree.collapseAll()} data-files-collapse="">
                     <Icon name="collapseAll" size={14} />
@@ -396,14 +397,14 @@ export function FilesPanel(props: FilesPanelProps) {
         />
         {openSecs.proj &&
           (project.state.error ? (
-            <div className="ib-ftline" data-files-error="">{project.state.error}</div>
+            <div className="ib-ftline" data-files-error="">{project.state.error === 'none' ? noFolderWords(noFolder) : project.state.error}</div>
           ) : !project.state.loaded ? (
             <div className="ib-ftline">Reading the folder…</div>
           ) : (
             <FileTree
               tree={project.tree}
               scrollParent={scroller}
-              label={root?.name ?? 'Project folder'}
+              label={label}
               selectedPath={openPath}
               onOpen={onOpenProjectFile}
               onBlocked={(path) => onBlocked(project.tree.badgeOf(path)?.locked ?? 'Not opened here')}

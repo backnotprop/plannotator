@@ -24,6 +24,7 @@ import { artifactKey, artifactOfFile, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { FilesPane } from '../files/FilesPane';
 import { useFilesTabs } from '../files/useFilesTabs';
+import { folderLabel } from '../files/FilesPanel';
 import { fileCommentKey, isProjectFileId, projectFilePath, projectFileState } from '../files/projectFiles';
 import { InboxFileSourceProvider } from '../fileSource';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
@@ -1058,6 +1059,12 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
+/** The latest agent message's id: the Files view's folder follows it (a worktree's message moves it). */
+function lastAgentMessageId(messages: readonly { id: string; author: { kind: string } }[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.author.kind === 'agent') return messages[i]!.id;
+  return '';
+}
+
 export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, onFilesRoute, decide = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
@@ -1696,7 +1703,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   /** The Artifacts view swaps the thread's body for the grid (the messages never change). */
   const artifactsOn = artifactsRoute && !filesTabsOn;
   /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
-  const artifactsButton = onArtifacts !== undefined && ((files !== null && artifactList.length > 0) || artifactsOn);
+  const hasArtifacts = files !== null && artifactList.length > 0;
   const artifactsButtonRef = useRef<HTMLButtonElement>(null);
   const artifactsHeadingRef = useRef<HTMLHeadingElement>(null);
   const artifactsBodyRef = useRef<HTMLDivElement>(null);
@@ -3194,6 +3201,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     artifacts: files === null ? null : artifactList,
     counts: countsByPath,
     projectRoot: thread.project.root,
+    folderKey: lastAgentMessageId(thread.messages),
     showFile: (id, options) => onFilesRoute?.({ file: id, artifacts: artifactsRoute }, options),
     showArtifacts: (open, options) => onFilesRoute?.({ file: null, artifacts: open }, options),
     openOnPurpose: (attachment) => openFromMessage(attachment),
@@ -3204,6 +3212,10 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       onToast?.({ icon: 'warn', lead: cut > 0 ? words.slice(0, cut) : words, detail: cut > 0 ? words.slice(cut + 2) : undefined });
     },
   });
+  // The folder button: the thread's artifacts, and on a desktop its project folder too, so a thread with a folder and
+  // nothing sent yet still has it (owner, 2026-10-27; PROJECT-FOLDER definition).
+  const folderOnly = filesTabsOn && !hasArtifacts && files !== null && filesUi.folder != null;
+  const artifactsButton = onArtifacts !== undefined && (hasArtifacts || artifactsOn || folderOnly);
   // Files beside the thread ("inbox-files-tabs"): opening the pane on Artifacts focuses its heading; closing it
   // (Escape, the pressed button) returns focus to the button when it was in the pane or nowhere. A change only,
   // never on the first draw.
@@ -3212,8 +3224,11 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     if (filesPaneWas.current === filesUi.paneOpen) return;
     filesPaneWas.current = filesUi.paneOpen;
     if (filesUi.paneOpen) {
-      // Opened on its Artifacts tab (the button): focus moves to the grid's heading, as the Artifacts view's did.
-      if (filesUi.artifactsTab) document.querySelector<HTMLElement>('[data-files-pane="artifacts"] [data-artifacts-view] h2')?.focus({ preventScroll: true });
+      // Opened on its Artifacts tab (the button): focus moves to the grid's heading, as the Artifacts view's did; with
+      // nothing in the grid, to the files panel (the pane opened on the project folder).
+      if (!filesUi.artifactsTab) return;
+      const into = folderOnly ? document.querySelector<HTMLElement>('[data-files-panel] [data-files-filter]') : null;
+      (into ?? document.querySelector<HTMLElement>('[data-files-pane="artifacts"] [data-artifacts-view] h2'))?.focus({ preventScroll: true });
       return;
     }
     const active = document.activeElement;
@@ -3384,20 +3399,36 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
             )}
             {pinButton}
             {artifactsButton && (
-              <Tip content={filesTabsOn ? (filesUi.paneOpen ? 'Hide the artifacts' : 'Artifacts: every file, image and guided review in this thread, and the project folder') : artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
+              <Tip
+                content={
+                  folderOnly
+                    ? filesUi.paneOpen
+                      ? 'Hide the project folder'
+                      : `Project folder: ${filesUi.folder!.path}`
+                    : filesTabsOn
+                      ? filesUi.paneOpen
+                        ? 'Hide the artifacts'
+                        : 'Artifacts: every file, image and guided review in this thread, and the project folder'
+                      : artifactsOn
+                        ? 'Back to the thread'
+                        : 'Artifacts: every file, image and guided review in this thread'
+                }
+              >
                 <button
                   ref={artifactsButtonRef}
                   type="button"
                   className="ib-iconbtn ib-artbtn"
-                  aria-label={`Artifacts, ${artifactList.length}`}
+                  aria-label={folderOnly ? `Project folder, ${folderLabel(filesUi.folder!)}` : `Artifacts, ${artifactList.length}`}
                   aria-pressed={filesTabsOn ? filesUi.paneOpen : artifactsOn}
                   onClick={() => (filesTabsOn ? filesUi.toggleDoor() : onArtifacts?.(!artifactsOn))}
                   data-artifacts-button=""
                 >
                   <Icon name={filesTabsOn ? 'folder' : 'artifacts'} size={17} />
-                  <span className="ib-artbtn-n" aria-hidden="true">
-                    {artifactList.length}
-                  </span>
+                  {!folderOnly && (
+                    <span className="ib-artbtn-n" aria-hidden="true">
+                      {artifactList.length}
+                    </span>
+                  )}
                 </button>
               </Tip>
             )}
@@ -4264,6 +4295,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
             }}
             onOpenAs={(artifact, view) => openFromMessage(artifact.attachment, view, () => (artifactOpened.current = artifactKey(artifact)))}
             openIn={openIn}
+            folderName={filesUi.folder ? folderLabel(filesUi.folder) : null}
           />
         }
         aside={filesUi.aside}

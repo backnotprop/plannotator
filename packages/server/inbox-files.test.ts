@@ -5,7 +5,8 @@
  * the listing rule (everything but `.git`, ignored marked, dotenv / hidden /
  * outside locked), every refusal code, the 5,000 cap, the change marks and
  * their base (the commit the thread started on), the files root following a
- * linked worktree, and project-file comments riding a Send.
+ * linked worktree, which folder a thread has and why none (the home folder,
+ * a folder holding it, a folder gone), and project-file comments riding a Send.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxAnnotationRecord } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { createAgentEnvironmentFor } from "./inbox-agents";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -94,8 +96,9 @@ function repo() {
   return { root, project, outside };
 }
 
-async function start(root: string): Promise<InboxServer> {
-  const server = await startInboxServer({ dataDir: join(root, "data") });
+async function start(root: string, home?: string): Promise<InboxServer> {
+  const agentEnvironment = home ? createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: "" } }) : undefined;
+  const server = await startInboxServer({ dataDir: join(root, "data"), ...(agentEnvironment ? { agentEnvironment } : {}) });
   servers.push(server);
   return server;
 }
@@ -117,12 +120,18 @@ const post = (server: InboxServer, path: string, body: unknown) =>
   fetch(`http://127.0.0.1:${server.port}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 type Entry = { name: string; kind: "dir" | "file"; ignored: boolean; locked: null | "dotenv" | "hidden" | "outside"; size: number | null };
-type Listing = { root: { name: string; branch: string | null; git: boolean }; dir: string; entries: Entry[]; more: number };
+type Listing = { root: { name: string; branch: string | null; git: boolean; project?: string; worktree?: string | null; path?: string }; dir: string; entries: Entry[]; more: number };
 
 async function list(server: InboxServer, thread: string, dir?: string): Promise<Listing> {
   const res = await get(server, `/api/inbox/threads/${thread}/files${dir === undefined ? "" : `?dir=${encodeURIComponent(dir)}`}`);
   expect(res.status).toBe(200);
   return (await res.json()) as Listing;
+}
+
+async function folderOf(server: InboxServer, thread: string): Promise<{ folder: { name: string; project: string; worktree: string | null; path: string } | null; reason?: string }> {
+  const res = await get(server, `/api/inbox/threads/${thread}/files/folder`);
+  expect(res.status).toBe(200);
+  return (await res.json()) as { folder: { name: string; project: string; worktree: string | null; path: string } | null; reason?: string };
 }
 
 const byName = (listing: Listing) => new Map(listing.entries.map((e) => [e.name, e]));
@@ -138,7 +147,7 @@ test("the root listing: everything but .git, ignored marked, secrets and escapes
   const server = await start(root);
   const { thread_id } = await send(server, project);
   const listing = await list(server, thread_id);
-  expect(listing.root).toEqual({ name: "shop", branch: "main", git: true });
+  expect(listing.root).toEqual({ name: "shop", branch: "main", git: true, project: "shop", worktree: null, path: project });
   expect(listing.dir).toBe("");
   expect(listing.more).toBe(0);
   const names = listing.entries.map((e) => e.name);
@@ -378,7 +387,9 @@ test("the files root follows the latest agent message into a linked worktree", a
   const second = await send(server, worktree, { reply_to: first.message_id });
   expect(second.thread_id).toBe(first.thread_id);
   const listing = await list(server, first.thread_id);
-  expect(listing.root).toMatchObject({ name: "agent-1", branch: "feature", git: true });
+  expect(listing.root).toMatchObject({ name: "agent-1", branch: "feature", git: true, project: "shop", worktree: "agent-1" });
+  // The folder route names the worktree beside the project, so the window can say which checkout it is.
+  expect((await folderOf(server, first.thread_id)).folder).toMatchObject({ name: "agent-1", project: "shop", worktree: "agent-1" });
   const entries = byName(listing);
   expect(entries.has("only-here.txt")).toBe(true);
   // A worktree's `.git` is a file: never listed either.
@@ -386,6 +397,40 @@ test("the files root follows the latest agent message into a linked worktree", a
   // Its reads stay inside the worktree.
   expect(await code(await content(server, first.thread_id, "../../../README.md"))).toEqual([400, "invalid_path"]);
   expect((await content(server, first.thread_id, "only-here.txt")).status).toBe(200);
+});
+
+test("which folder: the project with its path under ~; none for the home folder, a folder holding it, or a folder gone", async () => {
+  const root = scratch("plannotator-inbox-files-home-");
+  const home = join(root, "home");
+  const project = join(home, "src", "shop");
+  write(join(project, "README.md"), "# Shop\n");
+  write(join(home, "Documents", "taxes.pdf"), "%PDF-1.4\n");
+  git(project, ["init", "-q", "-b", "main"]);
+  const server = await start(root, home);
+
+  // A project under the home folder: named, its path said from ~, browsable.
+  const inProject = await send(server, project);
+  const folder = await folderOf(server, inProject.thread_id);
+  expect(folder.folder).toEqual({ name: "shop", project: "shop", worktree: null, path: "~/src/shop" });
+  const listing = await list(server, inProject.thread_id);
+  expect(listing.root).toMatchObject({ name: "shop", project: "shop", worktree: null, path: "~/src/shop" });
+
+  // An agent working in the home folder itself: no folder, and nothing in it is listed or read.
+  const inHome = await send(server, home, { agent_session: "ses_home" });
+  expect(inHome.thread_id).not.toBe(inProject.thread_id);
+  expect(await folderOf(server, inHome.thread_id)).toMatchObject({ folder: null, reason: "home" });
+  for (const path of [`/api/inbox/threads/${inHome.thread_id}/files`, `/api/inbox/threads/${inHome.thread_id}/files/content?path=Documents%2Ftaxes.pdf`, `/api/inbox/threads/${inHome.thread_id}/files/changed`]) {
+    expect(await code(await get(server, path))).toEqual([404, "files_no_folder", "home"]);
+  }
+  // A folder holding the home folder: none either.
+  const above = await send(server, root, { agent_session: "ses_above" });
+  expect(await folderOf(server, above.thread_id)).toMatchObject({ folder: null, reason: "home" });
+  expect(await code(await get(server, `/api/inbox/threads/${above.thread_id}/files?dir=home`))).toEqual([404, "files_no_folder", "home"]);
+
+  // The project folder deleted: gone.
+  rmSync(project, { recursive: true, force: true });
+  expect(await folderOf(server, inProject.thread_id)).toMatchObject({ folder: null, reason: "gone" });
+  expect(await code(await get(server, `/api/inbox/threads/${inProject.thread_id}/files`))).toEqual([404, "files_no_folder", "gone"]);
 });
 
 test("comments on project files: saved, pending, refused on secrets and downloads, carried and closed by a Send", async () => {

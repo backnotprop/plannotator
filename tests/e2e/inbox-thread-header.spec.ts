@@ -209,8 +209,10 @@ test('a thread that came back from the archive, and an archived one: the same or
   const backPane = page.locator(`section.ib-pane[data-thread-id="${threads.back}"]`);
   await expect(backPane.locator('[data-came-back]')).toBeVisible();
   await shot(page, '5-came-back');
-  // A thread that came back is not resolved for the window, so Mark read is offered and leads.
-  expect(await headerOrder(backPane)).toEqual(['mark-read', 'pin', 'expand', 'archive', 'close']);
+  // A thread that came back is not resolved for the window, so Mark read is offered and leads. It has no artifact,
+  // but it has a project folder: the folder button keeps its place (owner, 2026-10-27).
+  await expect(backPane.locator('[data-artifacts-button]')).toHaveAccessibleName(/^Project folder, /);
+  expect(await headerOrder(backPane)).toEqual(['mark-read', 'pin', 'artifacts', 'expand', 'archive', 'close']);
 
   await page.goto(`${world.url}#thread=${threads.archived}`);
   const archivedPane = page.locator(`section.ib-pane[data-thread-id="${threads.archived}"]`);

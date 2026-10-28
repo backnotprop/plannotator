@@ -17,6 +17,10 @@
  * - The tree's keys stay in the tree: ArrowDown moves in it, and j, k and /
  *   change nothing outside it.
  * - Full screen stays as it was: no tab row.
+ * - Which folder (PROJECT-FOLDER definition, owner 2026-10-27): a thread
+ *   with no artifact in a project still has the button, named for the
+ *   folder with no count, and it opens the pane on the folder; a thread
+ *   whose agent works in the home folder has none.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-files.spec.ts`.
@@ -40,6 +44,10 @@ interface World {
   errors: string[];
   contentPaths: string[];
   threadId: string;
+  /** A thread with no artifact, in the same project. */
+  plainThread: string;
+  /** A thread whose agent works in the home folder. */
+  homeThread: string;
 }
 let world: World;
 
@@ -108,6 +116,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   put(project, 'src/api/totals.ts', 'export const total = (lines: number[]) => lines.map((l) => Math.round(l * 100) / 100).reduce((a, b) => a + b, 0);\n');
   await claude.send({ project_path: project, reply_to: firstId, body: 'I changed `totals.ts` to round each line.', attachments: ['src/api/totals.ts'] });
   await claude.close();
+  // Another session in the same project, with nothing attached; and one working in the home folder.
+  const codex = await SimAgent.connect({ binary: builtBinary, env, name: 'Codex', host: 'codex', cwd: project });
+  const plain = await codex.send({ project_path: project, subject: 'Rounding question', body: 'Should rounding stay per line?' });
+  await codex.close();
+  const pi = await SimAgent.connect({ binary: builtBinary, env, name: 'Pi', host: 'pi', cwd: home });
+  const fromHome = await pi.send({ project_path: home, subject: 'From the home folder', body: 'Working in the home folder.' });
+  await pi.close();
+  expect(plain.thread_id).not.toBe(threadId);
 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
@@ -118,7 +134,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     const at = new URL(request.url());
     if (at.pathname.endsWith('/files/content') || at.pathname.endsWith('/files/raw')) contentPaths.push(at.searchParams.get('path') ?? '');
   });
-  world = { url, context, page, errors, contentPaths, threadId };
+  world = { url, context, page, errors, contentPaths, threadId, plainThread: plain.thread_id as string, homeThread: fromHome.thread_id as string };
 });
 
 test.afterAll(async () => {
@@ -223,5 +239,31 @@ test('full screen stays as it was: no tab row', async () => {
   await expect.poll(() => page.evaluate(() => location.hash)).toContain('view=full');
   await expect(page.locator('[data-files-tabs]')).toHaveCount(0);
   await expect(page.locator('[data-files-panel]')).toHaveCount(0);
+  expect(world.errors).toEqual([]);
+});
+
+test('a thread with no artifact: the button opens its project folder; none for the home folder', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#thread=${world.plainThread}`);
+  const door = page.locator('[data-artifacts-button]');
+  await expect(door).toHaveAttribute('aria-label', 'Project folder, ledger');
+  await expect(door.locator('.ib-artbtn-n')).toHaveCount(0);
+  await door.click();
+  // The pane opens on the folder: the panel lists it, focus in its filter, the empty grid points there.
+  await expect(projectRow('README.md')).toBeVisible();
+  await expect(page.locator('[data-files-filter]')).toBeFocused();
+  await expect(page.locator('[data-artifacts-empty-folder]')).toHaveText('Open a file from ledger in the files panel.');
+  // A file opens from it (full screen here: the step before chose full screen, and that choice is remembered).
+  await projectRow('README.md').click();
+  await expect(page.locator('[data-attachment-pane]').getByRole('heading', { name: 'Ledger' })).toBeVisible();
+  await expect(page).toHaveURL(/file=pf/);
+
+  // The agent works in the home folder: no folder, so no button (nothing in it is listed).
+  await page.goto(`${world.url}#thread=${world.homeThread}`);
+  await expect(page.locator('section.ib-pane [data-archive]')).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(page.locator('[data-artifacts-button]')).toHaveCount(0);
+  const answer = await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}/files/folder`)).json(), world.homeThread);
+  expect(answer).toMatchObject({ folder: null, reason: 'home' });
   expect(world.errors).toEqual([]);
 });

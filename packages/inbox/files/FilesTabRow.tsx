@@ -69,7 +69,7 @@ export function FilesTabRow(props: FilesTabRowProps) {
             <button type="button" role="tab" aria-selected={artifactsOn} tabIndex={artifactsOn ? 0 : -1} className="ib-tsel" onClick={props.onArtifacts} data-artifacts-tab="">
               <Icon name="artifacts" size={14} />
               <span className="ib-tl">Artifacts</span>
-              <span className="ib-tcm ib-tcm-q">{props.artifactsCount}</span>
+              {props.artifactsCount > 0 && <span className="ib-tcm ib-tcm-q">{props.artifactsCount}</span>}
             </button>
           </Tip>
         </span>

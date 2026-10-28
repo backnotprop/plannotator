@@ -16,6 +16,8 @@
  *   address carries `&artifacts`.
  * - A tile opens the same viewer in a tab; the viewer's stepping keeps thread
  *   order and counts the files only ("of 10").
+ * - A thread with no artifact keeps the button on a desktop for its project
+ *   folder (no count); a link to its grid says there is nothing yet.
  * - Closing the file returns to the Artifacts tab with focus on its tile;
  *   Escape and the pressed button close the pane with focus on the button; a
  *   reload keeps the pane; a guided review's Back returns to the grid.
@@ -369,11 +371,12 @@ test("a guided review opens its reader; the reader's Back returns to the grid", 
   await expect(tiles()).toHaveCount(11);
 });
 
-test('a thread with no artifact: no button; a link to the view says so', async () => {
+test('a thread with no artifact: the button is its project folder\'s (no count); a link to the view says so', async () => {
   const page = world.page;
   await page.goto(`${world.url}#thread=${world.emptyThread}`);
   await expect(page.locator('section.ib-pane [data-archive]')).toBeVisible();
-  await expect(artifactsButton()).toHaveCount(0);
+  // On a desktop the thread's project folder keeps the button (owner, 2026-10-27): named for the folder, no count.
+  await expect(artifactsButton()).toHaveAttribute('aria-label', 'Project folder, checkout-web');
   await page.goto(`${world.url}#thread=${world.emptyThread}&artifacts`);
   await expect(page.locator('[data-artifacts-empty]')).toContainText('No artifacts in this thread yet');
   await shot(page, '04-empty-desktop');

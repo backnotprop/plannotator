@@ -170,7 +170,7 @@ async function openThread() {
   return el;
 }
 
-test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at the right, Mark read keeping its label; none on a thread with nothing', async () => {
+test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at the right, Mark read keeping its label; a thread with no artifact has it for its project folder', async () => {
   const el = await openThread();
   const b = button(el)!;
   // Seven artifacts: the image in the text (also attached: one), the spec, the sketch, the after image, the ZIP, the guide, the SQL.
@@ -186,15 +186,20 @@ test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at t
     n.hasAttribute('data-artifacts-button') ? 'artifacts' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-archive') ? 'archive' : n.classList.contains('ib-vsep') ? '|' : 'close',
   );
   expect(order).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
-  // A thread with no artifact has no button.
+  // A thread with no artifact, in a project folder (owner, 2026-10-27): the button opens the folder; no count.
   act(() => root?.unmount());
   host?.remove();
   const plain = await renderApp(`#thread=${ids.waiting}`);
-  await until(() => plain.querySelector('section.ib-pane [data-archive]') !== null, 'the plain thread');
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 200));
-  });
-  expect(button(plain)).toBeNull();
+  await until(() => button(plain) !== null, 'the folder button on a thread with no artifact');
+  const folderButton = button(plain)!;
+  expect(folderButton.getAttribute('aria-label')).toMatch(/^Project folder, billing/);
+  expect(folderButton.textContent).toBe('');
+  act(() => folderButton.click());
+  // The pane opens on the project folder: the files panel shows, focus in its filter, the empty grid points there.
+  await until(() => plain.querySelector('[data-files-panel]') !== null, 'the files panel');
+  await until(() => document.activeElement?.hasAttribute('data-files-filter') === true, 'focus in the files filter');
+  expect(plain.querySelector('[data-artifacts-empty-folder]')?.textContent).toMatch(/^Open a file from billing.* in the files panel\.$/);
+  expect(plain.querySelector('[data-artifacts-tab] .ib-tcm')).toBeNull();
 });
 
 test.skipIf(!hasDom)('the button opens the grid beside the thread on the Artifacts tab, newest first; the address carries it; the messages stay', async () => {

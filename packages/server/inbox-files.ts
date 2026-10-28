@@ -4,6 +4,7 @@
  * routes in packages/server/inbox.ts, behind the Inbox's Host, Origin and
  * same-origin guards).
  *
+ *   GET  /api/inbox/threads/:id/files/folder        which folder, or why none (no listing)
  *   GET  /api/inbox/threads/:id/files?dir=          one folder level
  *   GET  /api/inbox/threads/:id/files/content?path= a file for the viewers
  *   GET  /api/inbox/threads/:id/files/raw?path=     its bytes (img, video, Download)
@@ -12,7 +13,8 @@
  *
  * The files root is the folder the thread's latest agent message was sent
  * from, taken to its project root, or to its linked worktree when that is
- * where the agent works ({@link inboxThreadFilesRoot}). Every read goes
+ * where the agent works; never the home folder, a folder holding it, or `/`
+ * ({@link inboxThreadFilesFolder}). Every read goes
  * through the repo-file guard (packages/shared/repo-file.ts: realpath
  * containment, a descriptor that is proved to be the contained file, a byte
  * cap); the listing and lock rules are packages/shared/project-listing.ts.
@@ -24,7 +26,7 @@
 
 import { createHash } from "node:crypto";
 import { readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_VIEW_MAX_BYTES, isInboxAnnotatableKind, isInboxTextBytes, isInboxTextKind, type InboxAttachmentKind, type InboxThread } from "@plannotator/core/inbox-types";
 import { checkRepoRoot, isContainedPath, readRepoWorkingTreeBytes, resolveRepoFilePath, validateRepoFilePath, type RepoFileFailure } from "@plannotator/shared/repo-file";
@@ -217,15 +219,48 @@ async function ignoredPaths(root: string, isGit: boolean, paths: readonly string
 
 // --- the files root ------------------------------------------------------------
 
+/** The thread's project folder, or why it has none. */
+export type InboxFilesFolder =
+  | {
+      root: string;
+      /** The thread's project name (`ledger`). */
+      project: string;
+      /** The linked worktree's folder name when the folder is one (`agent-a7d33112`), else null. */
+      worktree: string | null;
+      /** The folder's path for people: under the home folder as `~/…`. */
+      path: string;
+    }
+  | { root: null; reason: "home" | "gone" };
+
+/** A path for people: `~/…` under the home folder. */
+function displayPath(real: string, home: string | null): string {
+  if (home && real !== home && isContainedPath(real, home)) return `~/${relative(home, real).split(sep).join("/")}`;
+  return real;
+}
+
+function realOrNull(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The folder the Files view shows for a thread: the folder its latest agent
  * message was sent from (`base_path`), taken to the project root, or to its
  * linked worktree when the project folded that worktree in (an agent in
  * `.claude/worktrees/agent-…`). A message sent from the project root (no
- * `base_path`), or a thread no agent wrote in: the project root. Null when
- * that folder is gone or not a folder (the routes answer `files_no_folder`).
+ * `base_path`), or a thread no agent wrote in: the project root. None
+ * (`gone`) when that folder is gone or not a folder; none (`home`) when it is
+ * the home folder, a folder holding it, or the filesystem root: an agent
+ * working in `~` does not make the whole home folder browsable.
  */
-export async function inboxThreadFilesRoot(thread: InboxThread, projectRootOf: (path: string) => Promise<InboxProjectRoot>): Promise<string | null> {
+export async function inboxThreadFilesFolder(
+  thread: InboxThread,
+  projectRootOf: (path: string) => Promise<InboxProjectRoot>,
+  home: string | null,
+): Promise<InboxFilesFolder> {
   let base: string | null = null;
   for (const message of thread.messages) if (message.author.kind === "agent") base = message.base_path ?? null;
   let root = thread.project.root;
@@ -235,18 +270,29 @@ export async function inboxThreadFilesRoot(thread: InboxThread, projectRootOf: (
       resolved = await projectRootOf(base);
     } catch {
       // The folder the agent worked in is gone (a removed worktree).
-      return null;
+      return { root: null, reason: "gone" };
     }
     // A linked worktree of the project (inside it, as `.claude/worktrees/…`, or beside it): the agent's own checkout.
     // Anything else (a subfolder of the project, a nested repository): the project root.
     if (resolved.worktree !== null && resolved.root === thread.project.root) root = resolved.worktree;
   }
+  const real = realOrNull(root);
+  let isDir = false;
   try {
-    const real = realpathSync(root);
-    return statSync(real).isDirectory() ? real : null;
+    isDir = real !== null && statSync(real).isDirectory();
   } catch {
-    return null;
+    isDir = false;
   }
+  if (real === null || !isDir) return { root: null, reason: "gone" };
+  const realHome = home ? realOrNull(home) : null;
+  if (dirname(real) === real || (realHome !== null && isContainedPath(realHome, real))) return { root: null, reason: "home" };
+  const projectReal = realOrNull(thread.project.root);
+  return {
+    root: real,
+    project: thread.project.name,
+    worktree: projectReal !== null && real !== projectReal ? basename(real) : null,
+    path: displayPath(real, realHome),
+  };
 }
 
 /**
@@ -515,9 +561,11 @@ export interface InboxFilesRoutesContext {
   htmlAssets: { rewriteHtml(html: string, htmlFilePath: string): string };
   /** The project root of a folder (packages/server/inbox-project-root.ts), cached by the server. */
   projectRootOf: (path: string) => Promise<InboxProjectRoot>;
+  /** The person's home folder (the Inbox's agent environment's): never browsable, nor any folder holding it. */
+  home: string | null;
 }
 
-const ROUTE = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/files(?:\/(content|raw|changed|annotations))?$/;
+const ROUTE = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/files(?:\/(folder|content|raw|changed|annotations))?$/;
 
 export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
   const { store, serverSession } = context;
@@ -533,7 +581,8 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
       },
       PROJECT_FILE_REFUSAL_STATUS[refusal.refused],
     );
-  const noFolder = () => json({ error: "files_no_folder", code: "files_no_folder", serverSession }, 404);
+  const noFolder = (reason: "home" | "gone") => json({ error: "files_no_folder", code: "files_no_folder", reason, serverSession }, 404);
+  const folderOf = (thread: InboxThread) => inboxThreadFilesFolder(thread, context.projectRootOf, context.home);
 
   /**
    * Answers a request on one of these routes, or null when the path is not
@@ -545,7 +594,7 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
     const match = ROUTE.exec(url.pathname);
     if (!match) return null;
     const threadId = match[1]!;
-    const route = (match[2] ?? "list") as "list" | "content" | "raw" | "changed" | "annotations";
+    const route = (match[2] ?? "list") as "list" | "folder" | "content" | "raw" | "changed" | "annotations";
 
     if (route === "annotations") {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -553,8 +602,9 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
       const thread = store.thread(threadId);
       if (!thread) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-      const root = await inboxThreadFilesRoot(thread, context.projectRootOf);
-      if (!root) return noFolder();
+      const folder = await folderOf(thread);
+      if (folder.root === null) return noFolder(folder.reason);
+      const root = folder.root;
       const file = await resolveFile(root, typeof body.path === "string" ? body.path : null);
       if ("refused" in file) return refuse(file);
       const read = await readFile(file, INBOX_VIEW_MAX_BYTES);
@@ -571,13 +621,19 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
     if (crossSite(req)) return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
     const thread = store.thread(threadId);
     if (!thread) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const root = await inboxThreadFilesRoot(thread, context.projectRootOf);
-    if (!root) return noFolder();
+    const folder = await folderOf(thread);
+    // Which folder (the window's folder button and label), or why none: no listing, no read.
+    if (route === "folder") {
+      if (folder.root === null) return json({ serverSession, folder: null, reason: folder.reason });
+      return json({ serverSession, folder: { name: basename(folder.root), project: folder.project, worktree: folder.worktree, path: folder.path } });
+    }
+    if (folder.root === null) return noFolder(folder.reason);
+    const root = folder.root;
 
     if (route === "list") {
       const listing = await listFolder(root, url.searchParams.get("dir"));
       if ("refused" in listing) return refuse(listing);
-      return json({ serverSession, ...listing });
+      return json({ serverSession, ...listing, root: { ...listing.root, project: folder.project, worktree: folder.worktree, path: folder.path } });
     }
 
     if (route === "changed") {
