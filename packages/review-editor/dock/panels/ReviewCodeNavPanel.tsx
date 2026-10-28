@@ -36,9 +36,8 @@ function groupByFile(locations: CodeNavLocation[]): FileGroup[] {
 
 const CodePreview: React.FC<{
   preview: PreviewData | null;
-  error: string | null;
   isLoading: boolean;
-}> = ({ preview, error, isLoading }) => {
+}> = ({ preview, isLoading }) => {
   const targetRef = useRef<HTMLTableRowElement>(null);
 
   useEffect(() => {
@@ -50,14 +49,6 @@ const CodePreview: React.FC<{
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
         <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-full px-4 text-center text-muted-foreground text-xs">
-        {error}
       </div>
     );
   }
@@ -260,7 +251,7 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
     >
       <div className="flex-1 min-h-0 flex">
         <div className="flex-1 min-w-0 overflow-auto border-r border-border/30">
-          <CodePreview preview={preview.previewData} error={preview.error} isLoading={preview.isLoading} />
+          <CodePreview preview={preview.previewData} isLoading={preview.isLoading} />
         </div>
         <div className="w-[260px] flex-shrink-0 overflow-auto">
           <ReferenceList

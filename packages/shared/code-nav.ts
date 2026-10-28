@@ -55,9 +55,7 @@ export interface CodeNavRuntime {
    *
    * Implementations must return `null` (never throw) for a missing or
    * unreadable file, and for one larger than CODE_NAV_MAX_FILE_BYTES — the
-   * ceiling rg itself searches under (`--max-filesize 1M`). Both servers read
-   * through `readRepoFile` (repo-file.ts), which also refuses a path whose
-   * realpath leaves `cwd` and anything that is not a regular file.
+   * ceiling rg itself searches under (`--max-filesize 1M`).
    */
   readFile?: (
     path: string,

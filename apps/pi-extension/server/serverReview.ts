@@ -10,7 +10,7 @@ import {
 	isDiagramEngineRequest,
 	type DiagramEngineSource,
 } from "../generated/diagram-engine-assets.ts";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
 import { basename, dirname as dirnamePath, join as joinPath, resolve as resolvePath } from "node:path";
@@ -213,7 +213,6 @@ import {
 	validateCodeNavRequest,
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
-import { pinRepoRoots, readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
 import {
 	createDefaultSemanticDiffRuntime,
 	getSemanticDiffAvailability,
@@ -253,8 +252,7 @@ import {
 	vcsSupportsSnapshot,
 } from "./vcs.ts";
 
-/** Exported for tests: `readFile` is the hover's definition read. */
-export const piCodeNavRuntime: CodeNavRuntime = {
+const piCodeNavRuntime: CodeNavRuntime = {
 	runCommand(command, args, options) {
 		return new Promise((resolve) => {
 			const proc = spawn(command, args, {
@@ -285,10 +283,15 @@ export const piCodeNavRuntime: CodeNavRuntime = {
 	},
 
 	async readFile(path, options) {
-		// Same guard as /api/code-nav/file, capped at what rg searches (1 MB).
-		if (!options?.cwd) return null;
-		const read = await readRepoFile(options.cwd, path, { maxBytes: CODE_NAV_MAX_FILE_BYTES });
-		return read.ok ? read.content : null;
+		try {
+			const full = options?.cwd ? `${options.cwd}/${path}` : path;
+			// Check the size before pulling bytes: rg would not have searched a
+			// file this large either.
+			if (statSync(full).size > CODE_NAV_MAX_FILE_BYTES) return null;
+			return readFileSync(full, "utf-8");
+		} catch {
+			return null;
+		}
 	},
 };
 
@@ -3741,14 +3744,22 @@ export async function startReviewServer(options: {
 				json(res, { error: "Code navigation requires local access" }, 400);
 				return;
 			}
-			// Realpath containment, regular files only, and the 5 MB cap
-			// (generated/repo-file.ts; the Bun server uses the same).
-			const read = await readRepoFile(resolveAgentCwd(), url.searchParams.get("path"));
-			if (!read.ok) {
-				json(res, repoFileErrorBody(read), REPO_FILE_ERROR_STATUS[read.reason]);
+			const filePath = url.searchParams.get("path");
+			if (!filePath) {
+				json(res, { error: "Missing path" }, 400);
 				return;
 			}
-			json(res, { content: read.content });
+			try { validateFilePath(filePath); } catch {
+				json(res, { error: "Invalid path" }, 400);
+				return;
+			}
+			try {
+				const navCwd = resolveAgentCwd();
+				const content = readFileSync(`${navCwd}/${filePath}`, "utf-8");
+				json(res, { content });
+			} catch {
+				json(res, { error: "File not found" }, 404);
+			}
 		} else if (url.pathname === "/api/config" && req.method === "POST") {
 			if (!isSameOriginOrNoOrigin(req.headers.origin ?? null, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
 				json(res, { error: "Cross-origin config writes are not allowed" }, 403);
@@ -4144,17 +4155,6 @@ export async function startReviewServer(options: {
 	const exitHandler = () => agentJobs.killAll();
 	process.once("exit", exitHandler);
 
-	// Pin this session's repository roots (repo-file.ts): a root directory
-	// replaced after this point (say `mv repo repo.old; ln -s /elsewhere repo`)
-	// is refused instead of read. Other roots pin on first read. Released on
-	// stop, so the long-lived Pi host does not keep them between reviews.
-	const releaseRootPins = pinRepoRoots([
-		options.agentCwd,
-		options.gitContext?.cwd,
-		options.gitContext?.root,
-		workspace?.root,
-	]);
-
 	if (options.onReady) {
 		options.onReady(serverUrl, isRemote, port);
 	}
@@ -4169,7 +4169,6 @@ export async function startReviewServer(options: {
 		stop: () => {
 			// try/finally: a throwing dispose must never leave the listener bound.
 			try {
-				releaseRootPins();
 				process.removeListener("exit", exitHandler);
 				agentJobs.killAll();
 				callFlowService.cancelAll();

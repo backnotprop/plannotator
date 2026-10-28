@@ -14,13 +14,10 @@ import {
   validateCodeNavRequest,
   extractChangedFiles,
 } from "@plannotator/shared/code-nav";
-import { readRepoFile } from "@plannotator/shared/repo-file";
-import { decodeBunText } from "./git";
 
 export type { CodeNavRequest, CodeNavResponse, CodeNavHoverResponse };
 
-/** Exported for tests: `readFile` is the hover's definition read. */
-export const bunCodeNavRuntime: CodeNavRuntime = {
+const bunCodeNavRuntime: CodeNavRuntime = {
   async runCommand(command, args, options) {
     let proc;
     try {
@@ -50,14 +47,15 @@ export const bunCodeNavRuntime: CodeNavRuntime = {
   },
 
   async readFile(path, options) {
-    // Same guard as /api/code-nav/file, capped at what rg searches (1 MB).
-    // decodeBunText keeps the Bun.file().text() output (a BOM is stripped).
-    if (!options?.cwd) return null;
-    const read = await readRepoFile(options.cwd, path, {
-      maxBytes: CODE_NAV_MAX_FILE_BYTES,
-      decode: decodeBunText,
-    });
-    return read.ok ? read.content : null;
+    try {
+      const file = Bun.file(options?.cwd ? `${options.cwd}/${path}` : path);
+      // Check the size before pulling bytes: rg would not have searched a
+      // file this large either.
+      if (file.size > CODE_NAV_MAX_FILE_BYTES) return null;
+      return await file.text();
+    } catch {
+      return null;
+    }
   },
 };
 

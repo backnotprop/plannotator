@@ -6,8 +6,7 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
-import { checkRepoRoot, readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
-import { lstat, readlink } from "node:fs/promises";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 
 import {
@@ -213,32 +212,39 @@ async function runGitBytes(
   }
 }
 
-/**
- * Decode file bytes exactly as `Bun.file(path).text()` does: a UTF-8 BOM is
- * stripped and a UTF-16LE BOM switches to UTF-16 (TextDecoder does not do
- * the latter). Bun's guarded reads (repo-file.ts) read from a descriptor, so
- * they decode with this to keep the output they had before the guard.
- */
-export function decodeBunText(bytes: Uint8Array): Promise<string> {
-  // repo-file.ts reads into a Buffer.alloc, so the backing store is never a
-  // SharedArrayBuffer.
-  return new Blob([bytes as Uint8Array<ArrayBuffer>]).text();
+/** Read at most `maxBytes + 1` bytes, so a caller can tell "over the cap". */
+export async function readFileBytesCapped(path: string, maxBytes: number): Promise<Uint8Array | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(path, "r");
+    const { size } = await handle.stat();
+    const buffer = new Uint8Array(Math.min(size, maxBytes) + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, null);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    return buffer.subarray(0, offset);
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
 }
 
 /** Bun-based git runtime. Exported for use with shared utilities (worktree, etc.) */
 export const runtime: ReviewGitRuntime = {
   runGit,
-  async readWorkingTreeEntry(root, path, options) {
-    return readRepoWorkingTreeEntry(root, path, { ...options, decode: decodeBunText });
-  },
-  async readWorkingTreeBytes(root, path, maxBytes) {
-    return readRepoWorkingTreeBytes(root, path, { maxBytes });
-  },
-  async checkRepoRoot(path) {
-    const checked = checkRepoRoot(path);
-    return checked.ok ? checked.realRoot : null;
-  },
   runGitBytes,
+  readFileBytes: readFileBytesCapped,
+  async realPath(path: string): Promise<string | null> {
+    try {
+      return await realpath(path);
+    } catch {
+      return null;
+    }
+  },
   async readTextFile(path: string): Promise<string | null> {
     try {
       return await Bun.file(path).text();

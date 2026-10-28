@@ -16,7 +16,6 @@ import {
   type ReviewGitRuntime,
 } from "@plannotator/shared/review-core";
 import { parseRemoteHost, parseRemoteUrl } from "@plannotator/shared/repo";
-import { readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
 import { deriveGuideRepoKeyFallback, deriveGuideRepoKeyFromRemote } from "@plannotator/shared/guide-store";
 import type { Runner } from "./runner";
 
@@ -79,10 +78,6 @@ export function gitRuntime(runner: Runner): ReviewGitRuntime {
       } catch {
         return null;
       }
-    },
-    // Default decoder: Node's readFile(path, "utf8"), as readTextFile above.
-    async readWorkingTreeEntry(root, path, options) {
-      return readRepoWorkingTreeEntry(root, path, options);
     },
   };
 }
