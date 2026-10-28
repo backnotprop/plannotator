@@ -174,9 +174,21 @@ export interface InboxMessageCommentTarget {
 }
 
 /**
+ * Where a comment on a file of the thread's project folder sits (the Inbox's
+ * Files view, not an attachment): the file's path relative to the thread's
+ * files root, with `/`. The record's `path` is the file's realpath and its
+ * `attachment_id` is empty.
+ */
+export interface InboxProjectFileCommentTarget {
+  /** The file as the Files view named it, relative to the thread's files root. */
+  path: string;
+}
+
+/**
  * One annotation of the person's, stored until it rides a Send: on an
  * attachment, (with `guide`) on the diff of the guided review a message
- * carries, or (with `message`) on the text of an agent's message.
+ * carries, (with `message`) on the text of an agent's message, or (with
+ * `project_file`) on a file of the thread's project folder.
  */
 export interface InboxAnnotationRecord {
   /** The annotation's own id (Plannotator's `Annotation.id`). */
@@ -199,6 +211,13 @@ export interface InboxAnnotationRecord {
    * find and exports it under the message id.
    */
   message?: InboxMessageCommentTarget;
+  /**
+   * Set on a comment on a file of the thread's project folder (additive):
+   * then `attachment_id` is empty, `path` is the file's realpath and
+   * `version` is "current", so an older reader sees a record whose
+   * attachment it cannot find and exports it under the path.
+   */
+  project_file?: InboxProjectFileCommentTarget;
   /** Plannotator's `Annotation` (attachments) or the review app's `CodeAnnotation` (guided reviews), as the viewer made it (opaque to the store beyond the checks). */
   annotation: Record<string, unknown>;
   created_at: string;

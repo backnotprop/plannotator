@@ -3654,7 +3654,7 @@ export class InboxStore {
     const existing = this.annotations.get(id);
     // A draft's key is the file's path and the version, so an annotation
     // made through one attachment of a file edits from another of the same file.
-    if (existing && (existing.guide || existing.message || existing.path !== hit.attachment.path || existing.version !== input.version || existing.thread_id !== hit.message.thread_id)) {
+    if (existing && (existing.guide || existing.message || existing.project_file || existing.path !== hit.attachment.path || existing.version !== input.version || existing.thread_id !== hit.message.thread_id)) {
       throw new InboxError("validation_error", "annotation.id: already used on another file or version.", { field: "annotation.id" });
     }
     if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
@@ -3804,6 +3804,60 @@ export class InboxStore {
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
       annotation: withoutExportLocation(fields),
+      created_at: existing?.created_at ?? at,
+      updated_at: at,
+      removed_at: null,
+      sent_reply_id: null,
+    };
+    this.appendAnnotation(record, at);
+    return record;
+  }
+
+  /**
+   * Save a comment on a file of the thread's project folder (the Files view;
+   * a new one, or an edit of one still waiting). The caller (the Files
+   * route, packages/server/inbox-files.ts) has already read the file
+   * through the project-file guard and judged it annotatable: `rel` is the
+   * path the view named, `realpath` the file it resolved to. The record's
+   * key is the thread and the realpath; `attachment_id` is empty, `version`
+   * "current", `project_file` names `rel`, and `message_id` is the thread's
+   * latest agent message (its root when no agent wrote in it). Sent with the
+   * reply like an attachment's annotation.
+   */
+  saveProjectFileAnnotation(input: { threadId: string; rel: string; realpath: string; annotation: unknown }): InboxAnnotationRecord {
+    const { threadId, rel, realpath } = input;
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    if (typeof rel !== "string" || rel === "" || typeof realpath !== "string" || realpath === "") {
+      throw new InboxError("validation_error", "path: a file of the thread's project folder.", { field: "path" });
+    }
+    const annotation = input.annotation;
+    if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) {
+      throw new InboxError("validation_error", "annotation: an object.", { field: "annotation" });
+    }
+    const id = (annotation as Record<string, unknown>).id;
+    if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
+    let message = root;
+    for (const member of this.threadMessages(threadId)) if (member.author.kind === "agent" && !isAckNote(member)) message = member;
+    if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const existing = this.annotations.get(id);
+    if (existing && (!existing.project_file || existing.thread_id !== threadId || existing.path !== realpath)) {
+      throw new InboxError("validation_error", "annotation.id: already used on another file.", { field: "annotation.id" });
+    }
+    if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
+      throw new InboxError("annotation_closed", "This annotation was already sent or removed.");
+    }
+    const at = this.stamp();
+    const record: InboxAnnotationRecord = {
+      id,
+      project_id: message.project_id,
+      thread_id: threadId,
+      message_id: existing?.message_id ?? message.id,
+      attachment_id: "",
+      path: realpath,
+      version: INBOX_ANNOTATION_CURRENT,
+      project_file: { path: rel },
+      annotation: withoutExportLocation(annotation as Record<string, unknown>),
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
