@@ -205,11 +205,11 @@ test('beside the thread first, then the switch: ×, Escape and Back go back besi
   await freshThread();
   await p.getByRole('button', { name: 'Open rollout.md' }).first().click();
   await expect(pane()).not.toHaveClass(/ib-full/);
-  const toFull = () => pane().locator('.ib-vhead [data-full-screen-toggle]').click();
+  const toFull = () => pane().locator('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]').click();
   const beside = async () => {
     await expect(pane()).toHaveAttribute('data-attachment-pane', world.ids['rollout.md']!);
     await expect(pane()).not.toHaveClass(/ib-full/);
-    await expect(pane().locator('.ib-vhead [data-view-side]')).toBeVisible();
+    await expect(pane().locator('.ib-vhead [data-view-side], [data-files-header] [data-view-side]')).toBeVisible();
   };
   await shot(p, 'desktop-05-beside');
   await toFull();

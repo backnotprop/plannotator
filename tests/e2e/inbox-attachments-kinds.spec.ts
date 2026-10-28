@@ -359,7 +359,10 @@ test('the code file opens in the code view and takes a line comment', async () =
 
 test('Send carries the image comment with its marked-up copy and the code comment with its lines; the agent reads both', async () => {
   const page = world.page;
-  await page.locator('[data-attachment-pane]').getByRole('button', { name: /^Close / }).click();
+  // Beside the thread each open file has a tab ("inbox-files-tabs"): close them all to return to the thread.
+  const tabClose = page.locator('[data-tab-close]');
+  while ((await tabClose.count()) > 0) await tabClose.first().click();
+  await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
   const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await expect(page.locator('[data-annotations-chip]')).toHaveText('2 annotations');

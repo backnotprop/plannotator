@@ -163,7 +163,7 @@ async function openTile(name: string) {
 }
 /** Close the file beside the thread. */
 async function close() {
-  await act(async () => host!.querySelector<HTMLButtonElement>('.ib-vhead [aria-label^="Close "]')!.click());
+  await act(async () => host!.querySelector<HTMLButtonElement>('.ib-vhead [aria-label^="Close "], [data-files-header] [aria-label^="Close "]')!.click());
 }
 
 const toolbarState = () => host!.querySelector('[data-full-view-dock]')?.getAttribute('data-bar') ?? null;
@@ -176,7 +176,7 @@ test.skipIf(!hasDom)('an HTML file opens full screen with the toolbar showing, e
   const el = await renderThread();
   await openTile('page.html');
   await until(inFullScreen, 'full screen');
-  expect(el.querySelector('.ib-vhead')).toBeNull();
+  expect(el.querySelector('.ib-vhead, [data-files-header]')).toBeNull();
   expect(toolbarState()).toBe('pinned');
   expect(el.querySelector('[data-full-view-pen]')).not.toBeNull();
 
@@ -186,10 +186,10 @@ test.skipIf(!hasDom)('an HTML file opens full screen with the toolbar showing, e
   await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-handle]')!.click());
   await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-exit="exit"]')!.click());
   await until(() => !inFullScreen(), 'beside the thread');
-  expect(document.activeElement === el.querySelector('.ib-vhead [data-view-side]')).toBe(true);
+  expect(document.activeElement === el.querySelector('.ib-vhead [data-view-side], [data-files-header] [data-view-side]')).toBe(true);
 
   // Full screen again: the toolbar starts showing.
-  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]')!.click());
   await until(inFullScreen, 'full screen again');
   expect(toolbarState()).toBe('pinned');
 
@@ -199,7 +199,7 @@ test.skipIf(!hasDom)('an HTML file opens full screen with the toolbar showing, e
   await until(() => view() === null, 'the file closed');
   await openTile('page.html');
   expect(inFullScreen()).toBe(false);
-  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]')!.click());
   await until(inFullScreen, 'full screen once more');
   expect(toolbarState()).toBe('pinned');
   expect(getHtmlChromeState()).toEqual({ sidebarOpen: true, panelOpen: true, toolsHidden: true });
@@ -212,7 +212,7 @@ test.skipIf(!hasDom)('a markdown file opens beside the thread; Full screen takes
   await openTile('plan.md');
   expect(inFullScreen()).toBe(false);
   expect(el.querySelector('[data-html-tools-toggle]')).toBeNull();
-  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]')!.click());
   await until(inFullScreen, 'full screen');
   expect(toolbarState()).toBe('pinned');
   expect(document.activeElement === el.querySelector('[data-full-view-bar] button')).toBe(true);
@@ -232,7 +232,7 @@ test.skipIf(!hasDom)('a markdown file opens beside the thread; Full screen takes
   await close();
   await until(() => view() === null, 'the file closed');
   await openTile('plan.md');
-  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]')!.click());
   await until(inFullScreen, 'full screen');
   expect(view()!.classList.contains('ib-drawer')).toBe(true);
 });

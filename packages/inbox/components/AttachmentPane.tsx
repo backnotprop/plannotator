@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import {
   formatInboxVideoTime,
@@ -222,6 +222,15 @@ export interface AttachmentPaneProps {
    * new-tab icon through the tailnet or on a phone (`tab`). Absent: neither.
    */
   openIn?: OpenInSurface;
+  /**
+   * Files tabs (approval "inbox-files-tabs"): beside the thread, the header is the tab row. With one file open
+   * (`fold`) the file's tools sit in that row (`row({ file, view })`); with more, the row (`row(null)`) and under it a
+   * slim bar: `crumb`, the file's tools, then `extra` (the files panel's button) and the view switch. The tab's ×
+   * closes the file, so the bar has no close. Full screen ignores it. Absent: today's header.
+   */
+  tabs?: { row: (tools: { file: ReactNode; view: ReactNode } | null) => ReactNode; fold: boolean; crumb: ReactNode; extra?: ReactNode };
+  /** The files panel at the body's right edge (Files tabs): while it shows, the comments fold into the header's button. */
+  aside?: ReactNode;
 }
 
 /**
@@ -301,7 +310,10 @@ const recordKey = (path: string, version: string) => (version === 'current' ? pa
  */
 export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPaneProps>(function AttachmentPane(props, ref) {
   const { attachment, version } = props;
-  const [view, setView] = useState<AttachmentView | null>(null);
+  const [loadedView, setView] = useState<AttachmentView | null>(null);
+  // Only the file on screen's own text: for the one render after another file comes in (before the read below
+  // starts again), the last file's text is not drawn as this one's kind (an HTML page read as Markdown).
+  const view = loadedView && loadedView.attachment.id === attachment.id ? loadedView : null;
   const [error, setError] = useState<string | null>(null);
   // The text grew past what the window reads whole (413): the Download card instead.
   const [tooLarge, setTooLarge] = useState(false);
@@ -369,7 +381,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** ⋯ is open (a popover of the toolbar: it does not tuck while open). */
   const [moreOpen, setMoreOpen] = useState(false);
   /** Beside the thread in a narrow pane: the header's button opens the panel as a sheet over the file (inbox.css). */
-  const folded = !full && (phone || narrowPane);
+  const folded = !full && (phone || narrowPane || props.aside != null);
   /** Full screen on a desktop: the comments are a drawer beside the page, which narrows (not covered). */
   const drawerMode = full && !phone;
   /** Where the panel is a sheet over the file: folded beside the thread, or full screen on a phone (a bottom sheet). */
@@ -562,7 +574,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       if (stepsRef.current.length < 2) showChipRef.current(null);
     } else if (toggled) {
       // The switch's pressed part, Side by side, which the person just chose (or Escape chose for them).
-      sectionRef.current?.querySelector<HTMLElement>('.ib-vhead [data-view-side]')?.focus({ preventScroll: true });
+      sectionRef.current?.querySelector<HTMLElement>('.ib-vhead [data-view-side], [data-files-header] [data-view-side]')?.focus({ preventScroll: true });
       announce('Side by side: the file is beside the thread.');
     }
   }, [full, announce]);
@@ -1314,11 +1326,75 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** The file changed since it was sent, or is gone: the tucked handle carries an amber dot. */
   const changedSinceSent = currentUnavailable || (view?.attachment ?? attachment).changed_since_sent;
 
+  /** The header's tools: the file's own, then the view switch (Files tabs place them in the tab row or the bar under it). */
+  const fileTools = (
+    <>
+      {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
+      {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
+      {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
+      {source.writes && (
+        <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
+          <a
+            className="ib-btn ib-sm ib-ghost"
+            href={source.downloadUrl(attachment, effectiveVersion)}
+            download={attachment.name}
+            data-attachment-download=""
+          >
+            <Icon name="download" size={14} />
+            Download
+          </a>
+        </Tip>
+      )}
+      {folded && hasPanel && (
+        <button
+          type="button"
+          ref={sheetButtonRef}
+          className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
+          onClick={togglePanel}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && sheet && !event.defaultPrevented) {
+              event.preventDefault();
+              closeSheet();
+            }
+          }}
+          aria-expanded={sheet}
+          aria-controls={sheetId}
+          aria-label={`Comments, ${annotations.length}`}
+          data-annotations-sheet=""
+        >
+          <Icon name="comment" size={15} />
+          {annotations.length}
+        </button>
+      )}
+    </>
+  );
+  const viewTools = (
+    <>
+      {!props.fullLocked && (
+        // The view's two parts (fileView.ts), the one shown pressed. This header shows only while the file is side by side.
+        <div className="ib-seg ib-viewseg" role="group" aria-label="View" data-view-switch="">
+          <Tip content="Side by side: files open beside the thread until you choose again">
+            <button type="button" className="ib-seg-o" aria-pressed="true" data-on="" onClick={() => props.onKeepView?.()} aria-label={folded ? 'Side by side' : undefined} data-view-side="">
+              <Icon name="sideBySide" size={14} />
+              {!folded && 'Side by side'}
+            </button>
+          </Tip>
+          <Tip content="Full screen: files open this way until you choose again">
+            <button type="button" className="ib-seg-o" aria-pressed="false" onClick={() => toggleFull()} aria-label={folded ? 'Full screen' : undefined} data-full-screen-toggle="">
+              <Icon name="frame" size={14} />
+              {!folded && 'Full screen'}
+            </button>
+          </Tip>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <section
       ref={sectionRef}
       tabIndex={-1}
-      className={`ib-view${full ? ' ib-full ib-fullview' : ''}${phone ? ' ib-phone' : ''}${folded && !phone ? ' ib-fold' : ''}${hasPanel ? '' : ' ib-nopanel'}${sheetMode && sheet ? ' ib-panel-open' : ''}${drawerMode && drawer && hasPanel ? ' ib-drawer' : ''}`}
+      className={`ib-view${full ? ' ib-full ib-fullview' : ''}${phone ? ' ib-phone' : ''}${folded && !phone ? ' ib-fold' : ''}${hasPanel ? '' : ' ib-nopanel'}${sheetMode && sheet ? ' ib-panel-open' : ''}${drawerMode && drawer && hasPanel ? ' ib-drawer' : ''}${props.tabs && !full ? ' ib-tabbed' : ''}${props.aside != null && !full ? ' ib-withtree' : ''}`}
       aria-label={multi ? `${attachment.name}, file ${index + 1} of ${steps.length}` : attachment.name}
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
@@ -1401,6 +1477,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           chord={isHtml ? TOOLS_CHORD : null}
           shifted={drawerMode && drawer && hasPanel}
         />
+      ) : props.tabs ? (
+        <div className={`ib-ftop${props.tabs.fold ? '' : ' ib-ftop2'}`} data-files-header="">
+          {props.tabs.row(props.tabs.fold ? { file: fileTools, view: viewTools } : null)}
+          {!props.tabs.fold && (
+            <div className="ib-vhead ib-vslim">
+              {props.tabs.crumb}
+              <span className="ib-vtools">{fileTools}</span>
+              <span className="ib-sp" />
+              {props.tabs.extra}
+              {viewTools}
+            </div>
+          )}
+        </div>
       ) : (
         <div className="ib-vhead">
           {/* With more than one file the bar under the file names it. */}
@@ -1418,60 +1507,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 : `from ${props.agent} in ${props.projectName}`}
           </span>
           <span className="ib-sp" />
-          {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
-          {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
-          {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
-          {source.writes && (
-            <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
-              <a
-                className="ib-btn ib-sm ib-ghost"
-                href={source.downloadUrl(attachment, effectiveVersion)}
-                download={attachment.name}
-                data-attachment-download=""
-              >
-                <Icon name="download" size={14} />
-                Download
-              </a>
-            </Tip>
-          )}
-          {folded && hasPanel && (
-            <button
-              type="button"
-              ref={sheetButtonRef}
-              className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
-              onClick={togglePanel}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape' && sheet && !event.defaultPrevented) {
-                  event.preventDefault();
-                  closeSheet();
-                }
-              }}
-              aria-expanded={sheet}
-              aria-controls={sheetId}
-              aria-label={`Comments, ${annotations.length}`}
-              data-annotations-sheet=""
-            >
-              <Icon name="comment" size={15} />
-              {annotations.length}
-            </button>
-          )}
-          {!props.fullLocked && (
-            // The view's two parts (fileView.ts), the one shown pressed. This header shows only while the file is side by side.
-            <div className="ib-seg ib-viewseg" role="group" aria-label="View" data-view-switch="">
-              <Tip content="Side by side: files open beside the thread until you choose again">
-                <button type="button" className="ib-seg-o" aria-pressed="true" data-on="" onClick={() => props.onKeepView?.()} aria-label={folded ? 'Side by side' : undefined} data-view-side="">
-                  <Icon name="sideBySide" size={14} />
-                  {!folded && 'Side by side'}
-                </button>
-              </Tip>
-              <Tip content="Full screen: files open this way until you choose again">
-                <button type="button" className="ib-seg-o" aria-pressed="false" onClick={() => toggleFull()} aria-label={folded ? 'Full screen' : undefined} data-full-screen-toggle="">
-                  <Icon name="frame" size={14} />
-                  {!folded && 'Full screen'}
-                </button>
-              </Tip>
-            </div>
-          )}
+          {fileTools}
+          {viewTools}
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={close} aria-label={`Close ${attachment.name}`}>
               <Icon name="x" />
@@ -1871,6 +1908,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
         </div>
+        {!full && props.aside}
       </div>
       {guard ? (
         <div

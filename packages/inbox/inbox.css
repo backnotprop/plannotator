@@ -5301,3 +5301,85 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .pn-inbox .pm-disc, .pn-inbox .pm-fold { min-height: 44px; }
   .pm-ag .ib-desc a { display: inline-flex; align-items: center; min-height: 44px; margin: -12px 0; }
 }
+
+/* ───── Files beside the thread (approval "inbox-files-tabs", packages/inbox/files/) ─────
+   Tabs in the pane's title row: the fixed Artifacts tab, one tab per open file, +; with one file open its tools
+   fold into the row, with more a slim bar under it carries the path and the tools. The files panel sits at the
+   body's right edge (the comments fold into the header's button while it shows). */
+.ib-view.ib-tabbed { grid-template-rows: auto auto minmax(0, 1fr) auto auto; }
+.ib-ftop { display: flex; flex-direction: column; min-width: 0; background: var(--card); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+.ib-ftop2 .ib-tabrow { border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
+.ib-tabrow { height: 46px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 10px 0 7px; min-width: 0; }
+.ib-tabrow .ib-sp, .ib-vslim .ib-sp { flex: 1; }
+.ib-tablist { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; }
+.ib-tscroll { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; padding: 0 1px; }
+.ib-tscroll::-webkit-scrollbar { display: none; }
+.ib-tdiv { width: 1px; height: 18px; background: color-mix(in oklch, var(--border) 80%, transparent); margin: 0 5px; flex: none; }
+.ib-tab { display: inline-flex; align-items: center; height: 30px; border-radius: 8px; max-width: 220px; flex: none; color: var(--muted-foreground); transition: background-color 120ms ease, color 120ms ease; }
+.ib-tab:hover { background: var(--muted); color: var(--foreground); }
+.ib-tab.ib-on { background: color-mix(in oklch, var(--muted) 70%, var(--card)); color: var(--foreground); box-shadow: inset 0 0 0 1px var(--ib-line); }
+.ib-tsel { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 2px 0 10px; min-width: 0; flex: 1 1 auto; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: inherit; border-radius: 8px; cursor: pointer; }
+.ib-tabfixed .ib-tsel { padding-right: 10px; }
+.ib-tsel .ib-ic { flex: none; opacity: 0.8; }
+.ib-tab.ib-on .ib-tsel .ib-ic { opacity: 1; }
+.ib-tsel:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-tl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-tcm { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); font-variant-numeric: tabular-nums; }
+.ib-tcm-q { color: var(--muted-foreground); font-weight: 500; }
+.ib-tend { position: relative; width: 22px; height: 30px; flex: none; display: inline-grid; place-items: center; margin-right: 3px; }
+.ib-tend .ib-tcm { grid-area: 1 / 1; pointer-events: none; }
+.ib-tx { grid-area: 1 / 1; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); opacity: 0; cursor: pointer; }
+.ib-tab.ib-on .ib-tx, .ib-tab:hover .ib-tx, .ib-tx:focus-visible { opacity: 1; }
+.ib-tab.ib-on .ib-tend .ib-tcm, .ib-tab:hover .ib-tend .ib-tcm, .ib-tab:focus-within .ib-tend .ib-tcm { opacity: 0; }
+.ib-tx:hover { background: var(--muted); color: var(--foreground); }
+@media (hover: none) { .ib-tx { opacity: 1; } .ib-tend .ib-tcm { opacity: 0; } }
+.pn-inbox .ib-iconbtn.ib-tplus { width: 28px; height: 28px; flex: none; }
+.ib-tovf { height: 28px; padding: 0 6px 0 9px; border-radius: 7px; display: inline-flex; align-items: center; gap: 3px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; border: 1px solid var(--ib-line); flex: none; margin-right: 4px; cursor: pointer; }
+.ib-tovf:hover, .ib-tovf[aria-expanded="true"] { background: var(--muted); color: var(--foreground); }
+.ib-tm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-tm-n { color: var(--primary); font-weight: 600; font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-tm-where { color: var(--muted-foreground); font-size: var(--ib-fs-11-5, 11.5px); max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* With one file, its tools sit in the row, after +. */
+.ib-tabfold .ib-tscroll { flex: 0 1 auto; }
+.ib-tabrow > .ib-btn, .ib-tabrow > .ib-seg, .ib-tabrow > a.ib-btn { flex: none; }
+.ib-tabrow, .ib-vslim { --ib-tools-gap: 6px; }
+.ib-tabrow .ib-viewseg, .ib-vslim .ib-viewseg { margin-left: 4px; }
+.pn-inbox .ib-tabrow .ib-iconbtn[aria-pressed="true"], .pn-inbox .ib-vslim .ib-iconbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+/* With more, a slim bar under the tabs: where the file is, then its tools. */
+.ib-vhead.ib-vslim { height: 42px; gap: 10px; background: transparent; border-bottom: 0; padding: 0 10px 0 16px; }
+.ib-vtools { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.ib-crumbs { display: inline-flex; align-items: center; min-width: 0; gap: 2px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); overflow: hidden; }
+.ib-crumb { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.ib-crumb .ib-ic { opacity: 0.6; }
+.ib-crumb.ib-cur { color: var(--foreground); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+/* The files panel at the right of the body. */
+.ib-view.ib-withtree .ib-vbody { grid-template-columns: minmax(0, 1fr) 272px; }
+.ib-ftree { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid color-mix(in oklch, var(--border) 60%, transparent); background: var(--card); }
+.ib-ftfilter { display: flex; align-items: center; gap: 8px; height: 32px; margin: 10px 10px 4px; padding: 0 12px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--ib-line); color: var(--muted-foreground); flex: none; }
+.ib-ftfilter input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.ib-ftfilter:focus-within { box-shadow: inset 0 0 0 1.5px var(--primary); }
+.ib-ftscroll { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 12px; }
+.ib-ftsec-h { display: flex; align-items: center; height: 30px; padding: 0 8px 0 6px; margin-top: 4px; }
+.ib-ftsec-tg { display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: 1; height: 26px; padding: 0 4px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); cursor: pointer; text-align: start; }
+.ib-ftsec-tg:hover { color: var(--foreground); }
+.ib-ftsec-chev { flex: none; transition: transform 120ms ease; }
+.ib-ftsec-tg[aria-expanded="true"] .ib-ftsec-chev { transform: rotate(90deg); }
+.ib-ftsec-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-ftsec-n { font-weight: 500; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.ib-ftsec-acts { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.pn-inbox .ib-ftsec-acts .ib-iconbtn { width: 26px; height: 26px; }
+.ib-ftline { padding: 6px 16px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* The quiet changes toggle: an icon (or a small chip) that reads as a state, never as an alarm. */
+.pn-inbox .ib-iconbtn.ib-ftchanges { width: auto; min-width: 26px; gap: 3px; padding: 0 5px; }
+/* The files panel's place in a pane: the panel is the grid item (useFilesTabs' PanelSlot). */
+.pn-inbox .ib-ftree-slot { display: contents; }
+/* On in the folder header: the accent colour and the count, no fill (quiet). */
+.pn-inbox .ib-ftsec-h .ib-ftchanges[aria-pressed="true"] { color: var(--primary); background: transparent; }
+.ib-ftchanges-n, .ib-ftchip-n { font-size: var(--ib-fs-11, 11px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ib-ftchiprow { display: flex; padding: 2px 12px 2px; flex: none; }
+.ib-ftchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--muted-foreground); box-shadow: inset 0 0 0 1px var(--ib-line); cursor: pointer; }
+.ib-ftchip:hover { color: var(--foreground); background: var(--muted); }
+.ib-ftchip.ib-on { color: var(--primary); background: color-mix(in oklch, var(--primary) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent); }
+/* The Artifacts tab: the grid scrolls in the body. */
+.ib-filesart .ib-artarea { overflow: auto; min-height: 0; }
+.ib-filesart .ib-artarea .ib-art { padding: 18px 24px 24px; }

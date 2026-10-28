@@ -157,7 +157,7 @@ async function renderApp(hash: string) {
 
 /** The file beside the thread (`view=side`), where the pane header holds Open in: a link without it opens HTML full screen. */
 const fileHash = (name: string) => `#thread=${world.openIn.thread}&file=${world.openIn.ids[name]}&view=side`;
-const pane = (el: ParentNode) => el.querySelector('.ib-view .ib-vhead')!;
+const pane = (el: ParentNode) => el.querySelector('.ib-view .ib-vhead, .ib-view [data-files-header]')!;
 const menuOf = (id: string) => document.querySelector<HTMLElement>(`[data-open-in-menu="${id}"]`);
 const itemsOf = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[data-open-in-item]')].map((item) => item.getAttribute('data-open-in-item'));
 const checkedOf = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[data-open-in-item]')].filter((item) => item.querySelector('.ib-openin-check')).map((item) => item.getAttribute('data-open-in-item'));
@@ -183,7 +183,7 @@ test.skipIf(!hasDom)('HTML: the button opens the page in a new browser tab; the 
   expect(primary.getAttribute('rel')).toBe('noopener noreferrer');
   expect(primary.textContent).toBe('Open');
   // Before Download, as the mock draws it.
-  const order = [...pane(el).children].map((child) => (child.hasAttribute('data-open-in') ? 'open-in' : child.hasAttribute('data-attachment-download') ? 'download' : null)).filter(Boolean);
+  const order = [...pane(el).querySelectorAll('[data-open-in], [data-attachment-download]')].map((child) => (child.hasAttribute('data-open-in') ? 'open-in' : child.hasAttribute('data-attachment-download') ? 'download' : null)).filter(Boolean);
   expect(order).toEqual(['open-in', 'download']);
   const menu = await openMenu(pane(el), '[data-open-in-caret]', id);
   expect(itemsOf(menu)).toEqual(['browser', 'vscode', 'cursor', 'zed', 'reveal', 'copy-path']);

@@ -620,7 +620,8 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
       (kind === "image" ? sniffImageContentType(head) : kind === "video" ? sniffInboxVideo(head) : kind === "pdf" && isPdfHead(head) ? "application/pdf" : null) ??
       "application/octet-stream";
     const inline = contentType !== "application/octet-stream" && url.searchParams.get("download") !== "1";
-    return new Response(req.method === "HEAD" ? null : bytes, {
+    // A file read is backed by a plain ArrayBuffer (never shared), which is what a Response body takes.
+    return new Response(req.method === "HEAD" ? null : (bytes as Uint8Array<ArrayBuffer>), {
       headers: {
         "X-Content-Type-Options": "nosniff",
         "Cross-Origin-Resource-Policy": "same-origin",

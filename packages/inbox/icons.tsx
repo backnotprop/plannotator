@@ -69,6 +69,10 @@ const PATHS = {
     'M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15',
   // The two views (fileView.ts): a window split by its divider for Side by side, frame corners for Full screen.
   sideBySide: 'M9.75 4.5v15M4.125 19.5h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125Z',
+  // Files (approval "inbox-files-tabs"): the files panel at the right, the changes toggle (a commit), collapse every folder.
+  panelR: 'M3.75 5.25h16.5v13.5H3.75zM14.25 5.25v13.5',
+  changed: 'M12 15.75a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5ZM12 3v5.25M12 15.75V21',
+  collapseAll: 'm4.5 12.75 7.5-7.5 7.5 7.5m-15 6 7.5-7.5 7.5 7.5',
   frame: 'M3.75 8.25v-3a1.5 1.5 0 0 1 1.5-1.5h3m7.5 0h3a1.5 1.5 0 0 1 1.5 1.5v3m0 7.5v3a1.5 1.5 0 0 1-1.5 1.5h-3m-7.5 0h-3a1.5 1.5 0 0 1-1.5-1.5v-3',
   collapse:
     'M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25',

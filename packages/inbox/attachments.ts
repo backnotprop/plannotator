@@ -9,6 +9,7 @@ import { codeFenceFor } from '@plannotator/core/markdown-structure';
 import { cutText } from '@plannotator/core/inbox-questions';
 import {
   formatInboxVideoTime,
+  inboxAttachmentKind,
   INBOX_VIDEO_BLOCK_ID,
   readInboxAttachmentKind,
   readInboxVideoTime,
@@ -552,6 +553,12 @@ export const ATTACHMENT_FEEDBACK_HEADING = {
   intro: 'The following feedback is on the files you attached, one section per file and version.',
 };
 
+/** Comments on files of the project folder (Files, approval "inbox-files-tabs"): never attached, read as they are on disk. */
+export const PROJECT_FILE_FEEDBACK_HEADING = {
+  title: 'Feedback on files in the project',
+  intro: 'The following feedback is on files in the project folder as they are on disk now, one section per file, named by its path from the folder.',
+};
+
 /** The same heading when the feedback covers an image your message's text showed. */
 export const ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING = {
   title: ATTACHMENT_FEEDBACK_HEADING.title,
@@ -587,7 +594,8 @@ export function attachmentFeedback(
   const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[]; video?: { durationMs?: number } }>();
   for (const record of records) {
     // Comments on a guided review's diff go in their own section, after the files'; a message's text has its own, before them.
-    if (record.guide || record.message) continue;
+    // A project file's have their own too, after the attached files'.
+    if (record.guide || record.message || record.project_file) continue;
     const attachment = attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path);
     const sent = record.version !== 'current';
     if (!attachment) {
@@ -647,6 +655,44 @@ export function attachmentFeedback(
     }
   }
   const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
-  const files = records.some(isFileComment) ? exportLinkedDocAnnotations(entries, inlineImages ? ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING : ATTACHMENT_FEEDBACK_HEADING).trim() : '';
-  return [messages, files, guideFeedback(records)].filter(Boolean).join('\n\n');
+  const files = groups.size > 0 ? exportLinkedDocAnnotations(entries, inlineImages ? ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING : ATTACHMENT_FEEDBACK_HEADING).trim() : '';
+  return [messages, files, projectFileFeedback(records, texts, options.tagNames), guideFeedback(records)].filter(Boolean).join('\n\n');
+}
+
+/**
+ * The comments on files of the project folder (`project_file` records), one
+ * section per file under its path from the folder. A document's text is in
+ * `texts` under `pf:<path>\0current` (read when the Send is built), so line
+ * numbers name the lines the person read; code comments carry their own.
+ */
+export function projectFileFeedback(
+  records: readonly InboxAnnotationRecord[],
+  texts: ReadonlyMap<string, string>,
+  tagNames?: (ids: readonly string[]) => string[],
+): string {
+  const groups = new Map<string, { annotations: Annotation[]; blocks: Block[] }>();
+  for (const record of records) {
+    if (!record.project_file) continue;
+    const path = record.project_file.path;
+    let group = groups.get(path);
+    if (!group) {
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      const kind = inboxAttachmentKind(name);
+      group = { annotations: [], blocks: kind === 'code' ? [] : attachmentBlocks(kind, texts.get(`pf:${path}\0current`) ?? '', name) };
+      groups.set(path, group);
+    }
+    const { exportLocation: _stored, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
+    let entry = annotation as Annotation;
+    const ids = tagNames && Array.isArray(entry.mentions) ? entry.mentions : [];
+    const names = ids.length > 0 ? tagNames!(ids) : [];
+    if (names.length > 0) entry = { ...entry, exportLocation: `Tagged ${names.join(', ')}: this comment sends the reply to ${names.length === 1 ? 'it' : 'them'} too.` } as Annotation;
+    group.annotations.push(entry);
+  }
+  if (groups.size === 0) return '';
+  for (const group of groups.values()) {
+    const code = codeCommentBlocks(group.annotations);
+    if (code.length > 0) group.blocks = [...group.blocks, ...code];
+  }
+  const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
+  return exportLinkedDocAnnotations(entries, PROJECT_FILE_FEEDBACK_HEADING).trim();
 }

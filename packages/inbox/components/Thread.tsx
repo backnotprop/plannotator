@@ -22,6 +22,10 @@ import type { OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
 import { artifactKey, artifactOfFile, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
+import { FilesPane } from '../files/FilesPane';
+import { useFilesTabs } from '../files/useFilesTabs';
+import { fileCommentKey, isProjectFileId, projectFilePath, projectFileState } from '../files/projectFiles';
+import { InboxFileSourceProvider } from '../fileSource';
 import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileViewChoice, type FileView } from '../fileView';
 import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import type { InboxToastModel } from './Toast';
@@ -858,6 +862,11 @@ export interface ThreadPaneProps {
   /** Turn the Artifacts view on or off (the header's button, "Back to the thread"). Absent: no Artifacts button. */
   onArtifacts?: (open: boolean) => void;
   /**
+   * Files tabs (approval "inbox-files-tabs"): show a file beside the thread in its tab (`file`, side by side), the
+   * Artifacts tab (`file` null, `artifacts` true), or close the pane (both off). Absent: today's Artifacts view.
+   */
+  onFilesRoute?: (next: { file: string | null; artifacts: boolean }, options?: { replace?: boolean }) => void;
+  /**
    * Decision mode (experimental, thread only): "Decide these N" at the top of
    * the open-questions list, which opens the dialog scoped to this thread.
    * The window passes it only while two or more of the thread's decisions wait.
@@ -1049,7 +1058,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, onFilesRoute, decide = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1556,7 +1565,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     setNewMessage(sessions.length === 0 ? { kind: 'none' } : sessions.length === 1 ? { kind: 'compose', target: sessions[0]! } : { kind: 'pick' });
   };
 
-  const fileRecords = useMemo(() => records.filter(isFileComment), [records]);
+  // A project file's comments are keyed by its relative path, as its viewer state is (files/projectFiles.ts).
+  const fileRecords = useMemo(() => records.filter(isFileComment).map(fileCommentKey), [records]);
   // Comments on the text of agents' messages (approval "inbox-message-comments"), by message.
   const messageComments = useMemo(() => {
     const byMessage = new Map<string, Annotation[]>();
@@ -1610,7 +1620,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
    * keeps it.
    */
   // The view rides the address (`view=full|side`; fileView.ts): a link without it opens by the remembered choice, else by kind.
-  const fileAttachment = file ? (allFiles.find((a) => a.id === file.id) ?? null) : null;
+  const fileAttachment = file ? (allFiles.find((a) => a.id === file.id) ?? (isProjectFileId(file.id) ? projectFileState(projectFilePath(file.id)!) : null)) : null;
   const viewOf = (narrow: boolean) =>
     file ? fileViewFor(fileAttachment ?? { kind: 'file' }, { address: parseFileView(file.view), choice: readFileViewChoice(), narrow }) : 'side';
   /** The view the file is in, as the address carries it (a phone's or a stacked window's room left out). */
@@ -1678,8 +1688,13 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const artifactList = useMemo(() => threadArtifacts(thread.messages, attachments, inlineImages), [thread.messages, attachments, inlineImages]);
   /** Every file of the thread in thread order: what the pane steps through. */
   const steps = useMemo(() => stepsOf(artifactList), [artifactList]);
+  /**
+   * Files tabs beside the thread (approval "inbox-files-tabs"): on a desktop with room, `&artifacts` opens the pane
+   * beside the thread on its Artifacts tab. A phone and a stacked window keep the Artifacts view below.
+   */
+  const filesTabsOn = !phone && !fileStacked && onFilesRoute !== undefined;
   /** The Artifacts view swaps the thread's body for the grid (the messages never change). */
-  const artifactsOn = artifactsRoute;
+  const artifactsOn = artifactsRoute && !filesTabsOn;
   /** The button shows once the thread's files have loaded and something is there (or the view is open, from a link). */
   const artifactsButton = onArtifacts !== undefined && ((files !== null && artifactList.length > 0) || artifactsOn);
   const artifactsButtonRef = useRef<HTMLButtonElement>(null);
@@ -1739,7 +1754,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       else show();
       return;
     }
-    const attachment = allFiles.find((a) => a.id === record.attachment_id);
+    const attachment = allFiles.find((a) => a.id === record.attachment_id) ?? (record.project_file ? projectFileState(record.project_file.path) : undefined);
     if (!attachment) return;
     const go = () => openFile(attachment, record.version === 'current' ? 'current' : 'sent', record.id);
     // Another file than the one open: a typed comment in the open file asks first.
@@ -1763,7 +1778,9 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         ? await inboxApi.saveGuideAnnotation(record.message_id, next)
         : record.message
           ? await inboxApi.saveMessageAnnotation(record.message_id, next)
-          : await inboxApi.saveAnnotation(record.attachment_id, record.version, next);
+          : record.project_file
+            ? await inboxApi.saveProjectFileAnnotation(thread.thread_id, record.project_file.path, next)
+            : await inboxApi.saveAnnotation(record.attachment_id, record.version, next);
       saveRecord(result.annotation);
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
@@ -1783,6 +1800,14 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     for (const record of pending) {
       // A guided-review comment carries its own file and lines; a message comment quotes its words.
       if (record.guide || record.message) continue;
+      if (record.project_file) {
+        const path = record.project_file.path;
+        const key = `pf:${path}\0current`;
+        const state = projectFileState(path);
+        if (texts.has(key) || !isInboxTextKind(state.kind) || state.kind === 'code') continue;
+        texts.set(key, (await inboxApi.fileContent(thread.thread_id, path).catch(() => null))?.text ?? '');
+        continue;
+      }
       const attachment = allFiles.find((a) => a.id === record.attachment_id) ?? allFiles.find((a) => a.path === record.path);
       if (!attachment) continue;
       const key = `${attachment.id}\0${record.version}`;
@@ -2015,16 +2040,19 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   useEffect(() => {
     const was = gridCoveredWas.current;
     gridCoveredWas.current = gridCovered;
-    if (!was || gridCovered || !artifactsOn) return;
+    // The grid is the Artifacts view, or the Artifacts tab beside the thread (Files, "inbox-files-tabs").
+    const gridOn = artifactsOn || (filesTabsOn && artifactsRoute);
+    if (!was || gridCovered || !gridOn) return;
     const key = artifactOpened.current;
     if (!key) return;
     const frame = requestAnimationFrame(() => {
       const active = document.activeElement;
       if (active && active !== document.body && active.isConnected) return;
-      artifactsBodyRef.current?.querySelector<HTMLElement>(`[data-artifact-tile="${CSS.escape(key)}"]`)?.focus();
+      const grid = artifactsBodyRef.current ?? document.querySelector<HTMLElement>('[data-files-pane="artifacts"]');
+      grid?.querySelector<HTMLElement>(`[data-artifact-tile="${CSS.escape(key)}"]`)?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [gridCovered, artifactsOn]);
+  }, [gridCovered, artifactsOn, filesTabsOn, artifactsRoute]);
 
   // Arrivals while the thread is open: announced to a screen reader, drawn
   // with a short entrance, and, when the person is at the end of the thread,
@@ -2156,7 +2184,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         if (target.tagName === 'INPUT' && !['radio', 'checkbox'].includes((target as HTMLInputElement).type)) return;
         // Keys aimed at the open file, a dialog or a popover are theirs.
         if (target !== document.body && !sectionRef.current?.contains(target)) return;
-        if (target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')) return;
+        if (target.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tree"]')) return;
       }
       const body = bodyRef.current;
       if (!body) return;
@@ -3155,11 +3183,48 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const markReadEnabled = markReadOffered && canToggleRead(row!);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
-  const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
+  const filesUi = useFilesTabs({
+    enabled: filesTabsOn,
+    threadId: thread.thread_id,
+    fileId: file?.id ?? null,
+    artifactsRoute,
+    shownFull,
+    filesLoaded: files !== null,
+    allFiles,
+    artifacts: files === null ? null : artifactList,
+    counts: countsByPath,
+    projectRoot: thread.project.root,
+    showFile: (id, options) => onFilesRoute?.({ file: id, artifacts: artifactsRoute }, options),
+    showArtifacts: (open, options) => onFilesRoute?.({ file: null, artifacts: open }, options),
+    openOnPurpose: (attachment) => openFromMessage(attachment),
+    openArtifact: (artifact) => (artifact.type === 'file' ? openFromMessage(artifact.attachment) : onOpenGuide(artifact.messageId)),
+    leave: (to, go) => (paneRef.current ? paneRef.current.leave(to, go) : go()),
+    onBlocked: (words) => {
+      const cut = words.indexOf(': ');
+      onToast?.({ icon: 'warn', lead: cut > 0 ? words.slice(0, cut) : words, detail: cut > 0 ? words.slice(cut + 2) : undefined });
+    },
+  });
+  // Files beside the thread ("inbox-files-tabs"): opening the pane on Artifacts focuses its heading; closing it
+  // (Escape, the pressed button) returns focus to the button when it was in the pane or nowhere. A change only,
+  // never on the first draw.
+  const filesPaneWas = useRef(filesUi.paneOpen);
+  useLayoutEffect(() => {
+    if (filesPaneWas.current === filesUi.paneOpen) return;
+    filesPaneWas.current = filesUi.paneOpen;
+    if (filesUi.paneOpen) {
+      // Opened on its Artifacts tab (the button): focus moves to the grid's heading, as the Artifacts view's did.
+      if (filesUi.artifactsTab) document.querySelector<HTMLElement>('[data-files-pane="artifacts"] [data-artifacts-view] h2')?.focus({ preventScroll: true });
+      return;
+    }
+    const active = document.activeElement;
+    const stray = !active || active === document.body || !active.isConnected;
+    if (stray) artifactsButtonRef.current?.focus();
+  }, [filesUi.paneOpen]);
+  const openAttachment = file ? (allFiles.find((a) => a.id === file.id) ?? filesUi.projectAttachment(file.id)) : null;
   const fileOpen = openAttachment !== null;
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
-  const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  const backBesideFile = (file !== null || filesUi.artifactsTab) && !phone && !stacked && !fileStacked && onBackToList !== undefined;
   const backToList = () => {
     const name = openAttachment?.name ?? null;
     const go = () => {
@@ -3248,7 +3313,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     <>
     <section
       ref={sectionRef}
-      className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
+      className={`ib-pane${fileOpen || filesUi.artifactsTab ? ' ib-withfile' : ''}`}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
     >
@@ -3319,17 +3384,17 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
             )}
             {pinButton}
             {artifactsButton && (
-              <Tip content={artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
+              <Tip content={filesTabsOn ? (filesUi.paneOpen ? 'Hide the artifacts' : 'Artifacts: every file, image and guided review in this thread, and the project folder') : artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
                 <button
                   ref={artifactsButtonRef}
                   type="button"
                   className="ib-iconbtn ib-artbtn"
                   aria-label={`Artifacts, ${artifactList.length}`}
-                  aria-pressed={artifactsOn}
-                  onClick={() => onArtifacts?.(!artifactsOn)}
+                  aria-pressed={filesTabsOn ? filesUi.paneOpen : artifactsOn}
+                  onClick={() => (filesTabsOn ? filesUi.toggleDoor() : onArtifacts?.(!artifactsOn))}
                   data-artifacts-button=""
                 >
-                  <Icon name="artifacts" size={17} />
+                  <Icon name={filesTabsOn ? 'folder' : 'artifacts'} size={17} />
                   <span className="ib-artbtn-n" aria-hidden="true">
                     {artifactList.length}
                   </span>
@@ -4183,9 +4248,33 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         {error && !errorAbove && errorLine}
       </div>
     </section>
+    {(filesUi.artifactsTab || (openAttachment && !shownFull)) && filesUi.panelPortal}
+    {filesUi.artifactsTab && (
+      <FilesPane
+        tabRow={filesUi.artifactsTabRow}
+        grid={
+          <ArtifactsView
+            artifacts={files === null ? null : artifactList}
+            annotationCounts={countsByPath}
+            openId={null}
+            onOpen={(artifact) => openFromMessage(artifact.attachment, null, () => (artifactOpened.current = artifactKey(artifact)))}
+            onOpenGuide={(artifact) => {
+              artifactOpened.current = artifactKey(artifact);
+              onOpenGuide(artifact.messageId);
+            }}
+            onOpenAs={(artifact, view) => openFromMessage(artifact.attachment, view, () => (artifactOpened.current = artifactKey(artifact)))}
+            openIn={openIn}
+          />
+        }
+        aside={filesUi.aside}
+      />
+    )}
     {openAttachment && (
+      <InboxFileSourceProvider source={filesUi.source}>
       <AttachmentPane
         ref={paneRef}
+        tabs={shownFull ? undefined : filesUi.paneTabs(openAttachment)}
+        aside={shownFull ? undefined : filesUi.aside}
         attachment={openAttachment}
         attachments={allFiles}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
@@ -4207,7 +4296,11 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         openIn={openIn}
         steps={steps}
         // A step keeps the frame the person is in, and replaces the route.
-        onStep={(attachmentId, version) => onOpenFile({ id: attachmentId, version, focus: null, view: currentView }, { replace: true })}
+        onStep={(attachmentId, version) => {
+          // `]` / `[` step inside the tab on screen (Files tabs).
+          filesUi.noteStep(attachmentId);
+          onOpenFile({ id: attachmentId, version, focus: null, view: currentView }, { replace: true });
+        }}
         // A link in an attached HTML page to another file of the thread: a new entry, so Back returns to the page; the frame stays.
         onOpenLinked={(attachmentId) => onOpenFile({ id: attachmentId, version: 'current', focus: null, view: currentView })}
         // A page the attached page links to: in the route (`linked=`), so each one is a history entry and Back steps back through them.
@@ -4224,6 +4317,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         focusRequest={paneFocus}
         fromPerson={thread.messages.find((m) => m.id === openAttachment.message_id)?.author.kind === 'person'}
         readOnly={(() => {
+          // A project file's comments ride the thread's next Send while the thread takes replies.
+          if (isProjectFileId(openAttachment.id)) return !liveMessage(root) || resolved;
           const owner = thread.messages.find((m) => m.id === openAttachment.message_id) ?? root;
           // The person does not comment on their own upload.
           return !liveMessage(owner) || owner.author.kind === 'person';
@@ -4243,6 +4338,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
           },
         }}
       />
+      </InboxFileSourceProvider>
     )}
     </>
   );

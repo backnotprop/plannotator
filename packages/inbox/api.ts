@@ -799,6 +799,17 @@ export const inboxApi = {
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
     post<{ annotation: InboxAnnotationRecord }>('/api/inbox/annotations', { attachment_id: attachmentId, version, annotation }),
   removeAnnotation: (id: string) => post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/annotations/${encodeURIComponent(id)}/remove`, {}),
+  // Files (approval "inbox-files-tabs"): the thread's project folder, by a path relative to its root (packages/server/inbox-files.ts).
+  /** One folder level ('' is the root). */
+  files: (threadId: string, dir: string) =>
+    get<ProjectListing>(`/api/inbox/threads/${encodeURIComponent(threadId)}/files${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`),
+  /** A project file for the viewers (its text, an HTML page with its asset base). */
+  fileContent: (threadId: string, path: string) =>
+    get<ProjectFileContent>(`/api/inbox/threads/${encodeURIComponent(threadId)}/files/content?path=${encodeURIComponent(path)}`),
+  /** The change marks since the thread started, plus uncommitted work. */
+  filesChanged: (threadId: string) => get<ProjectChanges>(`/api/inbox/threads/${encodeURIComponent(threadId)}/files/changed`),
+  saveProjectFileAnnotation: (threadId: string, path: string, annotation: object) =>
+    post<{ annotation: InboxAnnotationRecord }>(`/api/inbox/threads/${encodeURIComponent(threadId)}/files/annotations`, { path, annotation }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>('/api/inbox/open-in', { attachment_id: attachmentId, app_id: appId }),
@@ -939,6 +950,43 @@ export interface AttachmentView {
   version: string;
   text: string;
   html: string | null;
+}
+
+/** One level of the thread's project folder (`GET …/files?dir=`). */
+export interface ProjectListing {
+  serverSession: string;
+  root: { name: string; branch: string | null; git: boolean };
+  /** The folder listed, relative to the root ('' for the root). */
+  dir: string;
+  entries: Array<{ name: string; kind: 'dir' | 'file'; ignored: boolean; locked: 'dotenv' | 'hidden' | 'outside' | null; size: number | null }>;
+  /** Entries left out past the listing's cap. */
+  more: number;
+}
+
+/** A project file as the viewers read it (`GET …/files/content?path=`). */
+export interface ProjectFileContent {
+  serverSession: string;
+  path: string;
+  name: string;
+  kind: string;
+  size: number;
+  mtime: string;
+  /** Null for a file too large to read whole (then `kind` is `file`, a download). */
+  sha256: string | null;
+  text: string | null;
+  html: string | null;
+  media_type?: string;
+  width?: number;
+  height?: number;
+}
+
+/** The change marks (`GET …/files/changed`): since the commit the thread started on, plus uncommitted work. */
+export interface ProjectChanges {
+  serverSession: string;
+  git: boolean;
+  base: { commit: string | null; source: 'thread_start' | 'none' };
+  changes: Record<string, 'M' | 'A' | 'D' | 'R' | 'U'>;
+  truncated: boolean;
 }
 
 /** A page an attached HTML page links to, as `/linked-page` answers it. */
