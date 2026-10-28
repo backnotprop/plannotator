@@ -76,6 +76,7 @@ test.beforeAll(async () => {
       PLANNOTATOR_INSTALL_SCRIPT_URL: 'http://127.0.0.1:9/install.sh',
       PLANNOTATOR_UPDATE_LATEST_URL: `http://127.0.0.1:${port}/r/p/releases/latest`,
       PLANNOTATOR_UPDATE_API_URL: `http://127.0.0.1:${port}/api/releases/latest`,
+      PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

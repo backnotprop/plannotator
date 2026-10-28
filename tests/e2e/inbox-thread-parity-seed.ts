@@ -64,6 +64,7 @@ export function parityEnv(home: string, dataDir: string): Record<string, string>
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
+    PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
     PLANNOTATOR_INSTALL_SCRIPT_URL: 'http://127.0.0.1:9/install.sh',
   };
 }

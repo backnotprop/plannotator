@@ -56,6 +56,14 @@ process.env.PLANNOTATOR_INBOX_CONNECT = "0";
 // serve a fake API and set this in their own bodies or spawned env.
 process.env.PLANNOTATOR_UPDATE_API_URL = "http://127.0.0.1:9/releases/latest";
 
+// Product feedback (the Inbox's Feedback dialog, `plannotator feedback`): never
+// the live Worker, whose table is append-only, so one stray row needs a trigger
+// dropped by hand. A closed loopback port refuses at once ("Couldn't send
+// feedback right now"). Overrides a contributor's own value too. Tests that
+// send point it (or the Inbox's `feedbackUrl` option) at a local fake in their
+// own bodies or spawned env. tests/feedback-live-url.test.ts guards both.
+process.env.PLANNOTATOR_FEEDBACK_URL = "http://127.0.0.1:9/feedback";
+
 // The install script the update wrapper downloads: never the real one. A closed
 // loopback port refuses at once, so an unintended Update now fails fast.
 process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = "http://127.0.0.1:9/install.sh";

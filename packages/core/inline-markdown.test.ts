@@ -8,7 +8,7 @@
  * tags takes most of a second to read (every card render and every send).
  */
 import { expect, test } from "bun:test";
-import { cleanInline } from "./inbox-folding";
+import { cleanInline, plainLabel } from "./inbox-folding";
 import { stripInlineMarkup } from "./inline-markdown";
 
 test("links, wiki links, images and tags out, their words kept", () => {
@@ -21,10 +21,19 @@ test("links, wiki links, images and tags out, their words kept", () => {
   expect(stripInlineMarkup("see ![x](a_(1).png)here")).toBe("see here");
 });
 
-test("a 20,000-character run of brackets or tags is read in linear time, here and in cleanInline", () => {
-  for (const run of ["[", "[[", "![", "<a", "[a](", "[[a|", "[a]((", "[a](x(", "![a](("]) {
+test("a link label with one level of balanced brackets keeps its words; a second level is not a link", () => {
+  expect(stripInlineMarkup("[a [nested] label](x.html)")).toBe("a [nested] label");
+  expect(stripInlineMarkup("[a [b [c] d] e](x.html)")).toBe("[a [b [c] d] e](x.html)");
+});
+
+test("tags stay with keepTags (a choice label reads `Array<string>`)", () => {
+  expect(stripInlineMarkup("[Array<string>](t.html) type", { keepTags: true })).toBe("Array<string> type");
+});
+
+test("a 20,000-character run of brackets or tags is read in linear time, here, in cleanInline and in plainLabel", () => {
+  for (const run of ["[", "[[", "![", "<a", "[a](", "[[a|", "[a]((", "[a](x(", "![a]((", "[a[b]", "[[a]", "a[b]", "<http://", "<a@", "![](", "![](a("]) {
     const text = run.repeat(Math.ceil(20_000 / run.length)).slice(0, 20_000);
-    for (const strip of [stripInlineMarkup, cleanInline]) {
+    for (const strip of [stripInlineMarkup, cleanInline, plainLabel]) {
       const start = performance.now();
       strip(text);
       expect(performance.now() - start).toBeLessThan(50);

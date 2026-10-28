@@ -404,6 +404,7 @@ export async function runPlannotatorUninstall(
   // A running Inbox writes into inbox/ until it exits: purge stops it first,
   // over its own token-guarded stop route (registry pid as the fallback).
   let inboxBlocksPurge = false;
+  let othersInbox = false;
   if (request.purge && !dataDirSafetyIssue) {
     if (request.dryRun) {
       const status = await inboxStatus(state.dataDir);
@@ -414,6 +415,11 @@ export async function runPlannotatorUninstall(
       const stopped = await stopInbox(state.dataDir);
       if (stopped.state === "stopped") {
         state.removed.push(`Stopped the running Plannotator Inbox (pid ${stopped.pid})`);
+      } else if (stopped.state === "not_running" && stopped.stale?.reason === "not_ours") {
+        // A copied data dir: its record names another data dir's Inbox, which refused the stop and
+        // runs on. Both tailnet mappings the record names are that Inbox's, so they stay up too.
+        othersInbox = true;
+        state.warnings.push(`This data dir's record named the Plannotator Inbox of another data dir (pid ${stopped.stale.pid}); it was left running.`);
       } else if (stopped.state === "still_running") {
         inboxBlocksPurge = true;
         state.errors.push(
@@ -422,7 +428,7 @@ export async function runPlannotatorUninstall(
       }
     }
     // "Reach from my tailnet": a mapping a crashed Inbox left behind (a clean stop already took its own down).
-    if (!inboxBlocksPurge && readInboxRegistry(state.dataDir)?.tailnet) {
+    if (!inboxBlocksPurge && !othersInbox && readInboxRegistry(state.dataDir)?.tailnet) {
       if (request.dryRun) {
         state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
       } else {
@@ -432,7 +438,7 @@ export async function runPlannotatorUninstall(
       }
     }
     // "Over your tailnet": the window's mapping a crashed Inbox left behind (a clean stop, including the stop above, takes its own down).
-    const kept = inboxBlocksPurge ? undefined : readInboxRegistry(state.dataDir)?.tailscale;
+    const kept = inboxBlocksPurge || othersInbox ? undefined : readInboxRegistry(state.dataDir)?.tailscale;
     if (kept?.https_port && kept.proxy_port) {
       if (request.dryRun) {
         state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${kept.https_port})`);

@@ -412,6 +412,17 @@ describe("Inbox over your tailnet", () => {
     expect(atRestart).toBeUndefined();
   });
 
+  test("the stop route says whether the run was published by the flag alone, so `plannotator inbox restart` publishes the next run again", async () => {
+    const stopAnswer = async (inbox: InboxServer) =>
+      (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/control/stop`, { method: "POST", headers: { Authorization: `Bearer ${inbox.token}` } })).json()) as Json;
+    const ts = fakeTailscale();
+    const flagged = await start(world(), ts.run, { publishTailnet: true, onStopRequested: () => {} });
+    expect(await stopAnswer(flagged)).toMatchObject({ stopping: true, tailscale_run_only: true });
+    // Kept on in config.json: the next start publishes by itself, so the restart adds no flag.
+    const kept = await start(world({ inboxTailscale: true }), ts.run, { onStopRequested: () => {} });
+    expect(await stopAnswer(kept)).toMatchObject({ stopping: true, tailscale_run_only: false });
+  });
+
   test("the run's flag and the control route publish for this run only, and say so", async () => {
     const dataDir = world();
     const ts = fakeTailscale();

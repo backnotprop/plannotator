@@ -19,6 +19,7 @@ import { QuestionContext } from '@plannotator/ui/components/blocks/QuestionConte
 import type { InboxAuthor, InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { agentName, whenTime } from '../format';
+import { plainLabel } from '../folding';
 import { Icon } from '../icons';
 
 /** What replaced a question, read from its thread. */
@@ -32,10 +33,10 @@ export interface Replacement {
 /** Where a jump lands: one question's card, or a message. */
 export type JumpTarget = { kind: 'question'; messageId: string; key: string } | { kind: 'message'; messageId: string };
 
-/** The answer's words, as the card's "Your pick" shows them. */
+/** The answer's words, as the card's "Your pick" shows them; a picked label as its plain words (`plainLabel`). */
 export function pickWords(answer: QuestionAnswer): string {
   if (answer.skipped) return 'Skipped';
-  const parts = [...answer.selected];
+  const parts = answer.selected.map(plainLabel);
   if (answer.other) parts.push(answer.other);
   if (answer.text) parts.push(answer.text);
   return parts.join(', ');

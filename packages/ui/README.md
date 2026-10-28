@@ -553,6 +553,8 @@ npm install @plannotator/ui @plannotator/core
 4. Import components: `import { Viewer } from "@plannotator/ui/components/Viewer";`
 5. Build with a bundler that compiles TS/TSX (Vite + React 19 + Tailwind v4). The packages ship **source**, so your bundler compiles them — set `moduleResolution: "bundler"`, `allowImportingTsExtensions`, `jsx: "react-jsx"`.
 
+**Upgrade note: the plan look defaults to Clean.** `gridEnabled` (storage key `plannotator-grid-enabled`) now defaults to `false`, and a stored value counts only with the v2 marker `plannotator-plan-look-v2 = 'resolved'`. Plannotator's chooser and its Settings switch write it. On the first settings read, a v1 marker (`plannotator-plan-look-choice-resolved = 'true'`, or the legacy `plannotator-look-feel-announcement-seen = '2'`) next to a stored `'true'` is moved to Clean once (the stored value is rewritten to `'false'` and the v2 key set to `'notice'`); a v1 marker with Clean becomes `'resolved'` silently. Plannotator's apps then show a one-time notice. That includes the share portal's root and demo pages; only a shared session puts it off. A host that renders no chooser (Workspaces) shows nothing, so its users simply open in Clean, and every user with no marker opens in Clean too. To keep stored values instead, call `markLookAndFeelChoiceResolved()` from `@plannotator/ui/utils/lookAndFeelAnnouncement` before the first settings read, or seed `plannotator-plan-look-v2 = 'resolved'` in your `storageBackend`. A host that writes `gridEnabled` from its own UI should call `markLookAndFeelChoiceResolved()` with it, or the value will not survive a reload.
+
 ## Packages & publishing
 
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
