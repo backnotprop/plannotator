@@ -385,4 +385,101 @@ describe.if(hasDom)('FileTree', () => {
     expect(dir.children[0]!.tagName.toLowerCase()).toBe('svg');
     expect(file.children[0]!.className).toContain('w-3');
   });
+
+  test('a locked row shows a lock, takes focus, and Enter or a click calls onBlocked, never onOpen', async () => {
+    const opened: string[] = [];
+    const blocked: string[] = [];
+    const tree = new FileTreeStore(['.env', 'app/', 'app/x.ts', 'z.md']);
+    tree.setBadges(new Map([
+      ['.env', { locked: 'Secrets are not shown' }],
+      ['app', { locked: 'Outside the project' }],
+    ]));
+    await mount({ tree, onOpen: (p) => opened.push(p), onBlocked: (p) => blocked.push(p) });
+    const env = item('.env')!;
+    expect(env.dataset.locked).toBeDefined();
+    expect(env.getAttribute('aria-disabled')).toBe('true');
+    expect(env.textContent).toContain('Secrets are not shown');
+    await focusTree();
+    await press('ArrowDown');
+    expect(focusedPath()).toBe('.env');
+    await press('Enter');
+    await act(async () => env.click());
+    // A locked folder stays shut, by Enter, ArrowRight or *.
+    await press('ArrowUp');
+    expect(focusedPath()).toBe('app');
+    await press('Enter');
+    await press('ArrowRight');
+    await press('*');
+    expect(tree.isExpanded('app')).toBe(false);
+    expect(opened).toEqual([]);
+    expect(blocked).toEqual(['.env', '.env', 'app', 'app']);
+    await act(async () => item('z.md')!.click());
+    expect(opened).toEqual(['z.md']);
+  });
+
+  test('a dimmed row is marked dimmed; a renderIcon that returns null draws no icon', async () => {
+    const tree = new FileTreeStore(['dist/out.js', 'a.ts']);
+    tree.setBadges(new Map([['dist', { dimmed: true }]]));
+    await mount({ tree, renderIcon: () => null });
+    expect(item('dist')!.dataset.dimmed).toBeDefined();
+    expect(item('a.ts')!.dataset.dimmed).toBeUndefined();
+    // The twistie column, then the name: nothing between.
+    const file = item('a.ts')!;
+    expect(file.children[0]!.className).toContain('w-3');
+    expect(file.children[1]!.textContent).toBe('a.ts');
+  });
+
+  test('a lazy folder shows a spinner only once its load is slow, then its children', async () => {
+    let answer: (v: string[]) => void = () => {};
+    const tree = new FileTreeStore(['src/'], {
+      loadChildren: () => new Promise<string[]>((r) => { answer = r; }),
+      loadingDelayMs: 30,
+    });
+    await mount({ tree, labels: { loading: 'Loading' } });
+    await focusTree();
+    await press('ArrowRight');
+    expect(document.querySelector('[data-ft-loading]')).toBeNull();
+    await act(async () => { await new Promise((r) => setTimeout(r, 60)); });
+    expect(item('src')!.querySelector('[data-ft-loading]')?.getAttribute('aria-label')).toBe('Loading');
+    await act(async () => { answer(['src/a.ts']); await new Promise((r) => setTimeout(r, 0)); });
+    expect(document.querySelector('[data-ft-loading]')).toBeNull();
+    expect(shown()).toEqual(['src', 'src/a.ts']);
+  });
+
+  test('the keys the tree uses are taken on the tree, so a page shortcut (j, k, /) does not also fire', async () => {
+    const tree = new FileTreeStore(PATHS);
+    await mount({ tree });
+    await focusTree();
+    const seen: string[] = [];
+    const onDoc = (e: KeyboardEvent) => { if (!e.defaultPrevented) seen.push(e.key); };
+    document.addEventListener('keydown', onDoc);
+    try {
+      for (const key of ['j', 'k', '/', 'ArrowDown', '*']) await press(key);
+    } finally {
+      document.removeEventListener('keydown', onDoc);
+    }
+    expect(seen).toEqual([]);
+  });
+
+  test('a coarse pointer gets 44 px rows', async () => {
+    const real = window.matchMedia;
+    window.matchMedia = ((q: string) => ({
+      matches: q === '(pointer: coarse)',
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      onchange: null,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const tree = new FileTreeStore(PATHS);
+      await mount({ tree });
+      expect(item('src')!.style.height).toBe('44px');
+      expect(item('README.md')!.style.top).toBe(`${4 * 44}px`);
+    } finally {
+      window.matchMedia = real;
+    }
+  });
 });

@@ -48,8 +48,16 @@ export interface FileTreeBadge {
   marker?: { glyph: string; tone: FileTreeMarkerTone; label?: string };
   /** Draw the name struck through (a file deleted on disk). */
   struck?: boolean;
-  /** The row cannot be opened. */
+  /** The row cannot be opened (Enter, Space and a click do nothing; it still takes focus). */
   disabled?: boolean;
+  /**
+   * Listed but never opened (a secrets file, a link out of the folder): the
+   * row is disabled, draws a lock in place of its icon, and this text is its
+   * tooltip and its screen-reader description. The host owns the words.
+   */
+  locked?: string;
+  /** Drawn quieter (a git-ignored file or folder): still opens. */
+  dimmed?: boolean;
   /** What the badge means, for screen readers ("Added, 2 comments"). */
   label?: string;
   /** Counts toward the dot on a collapsed folder. Default: true when there is a letter. */
@@ -64,7 +72,21 @@ export interface FileTreeStoreOptions {
   displayName?: (name: string) => string;
   /** Build a large list in slices, showing its top-level entries first. Default false (build now). */
   sliced?: boolean;
+  /**
+   * Lazy folders: a folder listed with a trailing `/` and nothing under it
+   * yet is loaded the first time it opens (by a click, a key, `expand`,
+   * `expandAll(path)` or `*`). The loader gets the folder's path and resolves
+   * with the paths to add (full paths; a folder ends in `/`), or adds them
+   * itself and resolves with nothing. A folder is loaded once; a failed load
+   * closes the folder again and the next open tries again.
+   */
+  loadChildren?: FileTreeLoader | null;
+  /** How long a load runs before its row shows a spinner. Default 300 ms (a quick load shows none). */
+  loadingDelayMs?: number;
 }
+
+/** Loads one folder's children (see `FileTreeStoreOptions.loadChildren`). */
+export type FileTreeLoader = (dir: string) => Promise<Iterable<string> | void>;
 
 /** Below this many paths a build is a few milliseconds and runs at once. */
 const SLICE_MIN_PATHS = 4000;
@@ -244,10 +266,18 @@ export class FileTreeStore {
   private values = new Map<string, FileTreeValues>();
   private sliced: boolean;
   private initialExpanded: string[] | undefined;
+  private loader: FileTreeLoader | null;
+  private loadingDelayMs: number;
+  /** Folders whose children were loaded (by key). */
+  private loadedDirs = new Set<string>();
+  /** Loads in flight by folder key: `slow` once the spinner delay passed. */
+  private loads = new Map<string, { slow: boolean; timer: ReturnType<typeof setTimeout> | null }>();
   readonly displayName: (name: string) => string;
 
   constructor(paths: Iterable<string> = [], options: FileTreeStoreOptions = {}) {
     this.displayName = options.displayName ?? ((name) => name);
+    this.loader = options.loadChildren ?? null;
+    this.loadingDelayMs = options.loadingDelayMs ?? 300;
     this.initialExpanded = options.expanded ? [...options.expanded] : undefined;
     this.sliced = options.sliced ?? false;
     if (options.badges) this.indexBadges(options.badges);
@@ -540,7 +570,95 @@ export class FileTreeStore {
   }
 
   expand(path: string): boolean {
-    return this.run({ kind: 'expansion', run: (m) => m.expand(m.find(path)) });
+    const changed = this.run({ kind: 'expansion', run: (m) => m.expand(m.find(path)) });
+    this.loadOpened();
+    return changed;
+  }
+
+  // ---------------------------------------------------------------- lazy folders
+
+  /** Set or clear the loader (see `FileTreeStoreOptions.loadChildren`). */
+  setLoader(loader: FileTreeLoader | null): void {
+    this.loader = loader;
+    this.loadOpened();
+  }
+
+  /** The folder's children were loaded (or it was never lazy: it had children already). */
+  isLoaded(path: string): boolean {
+    const key = normalizeTreePath(path)?.key;
+    return key !== undefined && this.loadedDirs.has(key);
+  }
+
+  /** A load of this folder is running; `slow` once it has run longer than the spinner delay. */
+  loadState(path: string): 'slow' | 'pending' | null {
+    const key = this.loads.size === 0 ? undefined : normalizeTreePath(path)?.key;
+    const load = key === undefined ? undefined : this.loads.get(key);
+    return load ? (load.slow ? 'slow' : 'pending') : null;
+  }
+
+  /** Mark folders as loaded without asking the loader (the host listed their children itself). */
+  markLoaded(paths: string | Iterable<string>): void {
+    for (const p of typeof paths === 'string' ? [paths] : paths) {
+      const key = normalizeTreePath(p)?.key;
+      if (key) this.loadedDirs.add(key);
+    }
+  }
+
+  /** A folder that opens with nothing under it, never loaded and not loading. */
+  private needsLoad(key: string): boolean {
+    if (!this.loader || this.loadedDirs.has(key) || this.loads.has(key)) return false;
+    const m = this.current;
+    const id = m.find(key);
+    return id > ROOT && m.isDir(id) && m.childrenOf(id).length === 0;
+  }
+
+  /** Start a load for every open folder that needs one. */
+  private loadOpened(): void {
+    if (!this.loader) return;
+    for (const key of this.current.expandedPaths()) if (this.needsLoad(key)) void this.load(key);
+  }
+
+  /**
+   * Load one folder's children now (also what opening an unloaded folder
+   * does). Resolves once they are in the tree. One load per folder at a time;
+   * a loaded folder is not loaded again.
+   */
+  load(path: string): Promise<void> {
+    const key = normalizeTreePath(path)?.key;
+    const loader = this.loader;
+    if (!key || !loader || this.loadedDirs.has(key) || this.loads.has(key)) return Promise.resolve();
+    const entry: { slow: boolean; timer: ReturnType<typeof setTimeout> | null } = { slow: false, timer: null };
+    entry.timer = setTimeout(() => {
+      entry.timer = null;
+      if (this.loads.get(key) !== entry) return;
+      entry.slow = true;
+      this.commit();
+    }, this.loadingDelayMs);
+    this.loads.set(key, entry);
+    const finish = () => {
+      if (entry.timer) clearTimeout(entry.timer);
+      if (this.loads.get(key) === entry) this.loads.delete(key);
+    };
+    let pending: Promise<Iterable<string> | void>;
+    try {
+      pending = Promise.resolve(loader(key));
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+    return pending.then(
+      (children) => {
+        finish();
+        this.loadedDirs.add(key);
+        const list = children ? [...children] : [];
+        // Added under the folder whatever was opened or closed meanwhile; a folder closed during the load stays closed.
+        if (list.length === 0 || !this.add(list)) this.commit();
+      },
+      () => {
+        finish();
+        // Not loaded: the folder closes again, and the next open tries again.
+        if (!this.collapse(key)) this.commit();
+      },
+    );
   }
 
   collapse(path: string): boolean {
@@ -569,7 +687,7 @@ export class FileTreeStore {
    * under it. One pass and one render.
    */
   expandAll(path?: string): boolean {
-    return this.run({
+    const changed = this.run({
       kind: 'expansion',
       run: (m) => {
         if (path === undefined) return m.expandAll();
@@ -580,6 +698,31 @@ export class FileTreeStore {
         return a || b;
       },
     });
+    // Lazy folders opened here load their own children (one level: what they hold arrives closed).
+    this.loadOpened();
+    return changed;
+  }
+
+  /**
+   * Open every folder beside `path` (its siblings, itself included): the
+   * tree pattern's `*` key. One update; lazy folders among them load.
+   */
+  expandSiblings(path: string): boolean {
+    const changed = this.run({
+      kind: 'expansion',
+      run: (m) => {
+        const id = m.find(path);
+        if (id <= ROOT) return false;
+        let any = false;
+        for (const c of m.childrenOf(m.parentOf(id))) {
+          // A locked folder stays shut: the host refuses what is in it.
+          if (m.isShown(c) && m.isDir(c) && this.badgeMap.get(m.pathOf(c))?.locked === undefined) any = m.expand(c) || any;
+        }
+        return any;
+      },
+    });
+    this.loadOpened();
+    return changed;
   }
 
   /** Collapse everything (no path), or a folder and every folder under it. */

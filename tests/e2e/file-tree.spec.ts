@@ -231,3 +231,65 @@ test('file and folder icons line up, and a right-to-left page mirrors the indent
   expect(rtl.row.right - rtl.guides.right).toBe(ltr.guides.left - ltr.row.left);
 });
 
+// Several trees in one host scroll (`scrollParent`), the host's section headers between them (?mode=sections).
+async function openSections(page: Page) {
+  await page.goto(`${base}/?mode=sections&theme=light`);
+  await page.waitForFunction(() => (window as any).__h?.ready === true);
+}
+
+/** Rows of the second tree ("Folder") inside the scroller's view, by path. */
+const folderRowsInView = (page: Page) =>
+  page.evaluate(() => {
+    const h = (window as any).__h;
+    const box = (h.scroller() as HTMLElement).getBoundingClientRect();
+    const tree = h.trees()[1] as HTMLElement;
+    return [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')]
+      .filter((r) => {
+        const b = r.getBoundingClientRect();
+        return b.bottom > box.top && b.top < box.bottom;
+      })
+      .map((r) => r.dataset.path!)
+      .sort();
+  });
+
+test('trees in one host scroll draw the rows that show in it, below the host header', async ({ page }) => {
+  await openSections(page);
+  const mounted = await page.evaluate(() => (window as any).__h.trees()[1].querySelectorAll('[role="treeitem"]').length);
+  // A window, not 500 rows, even though the tree is its full height in the scroll.
+  expect(mounted).toBeLessThan(80);
+  const first = await folderRowsInView(page);
+  expect(first[0]).toBe('g000.ts');
+  // The view is filled under the first tree and the two headers: 600 - 2 × 40 - 12 × 22 = 256 px of the second.
+  expect(first.length).toBeGreaterThanOrEqual(11);
+
+  // Scrolled far down in the host's element: the rows there are drawn, the first ones are not.
+  await page.evaluate(() => {
+    const h = (window as any).__h;
+    const s = h.scroller() as HTMLElement;
+    const tree = h.trees()[1] as HTMLElement;
+    s.scrollTop = tree.offsetTop + 300 * 22;
+  });
+  await page.waitForTimeout(80);
+  const later = await folderRowsInView(page);
+  expect(later).toContain('g300.ts');
+  expect(later.length).toBeGreaterThan(20);
+  expect(await page.evaluate(() => !!(window as any).__h.trees()[1].querySelector('[data-path="g000.ts"]'))).toBe(false);
+});
+
+test('keys in a tree in a host scroll scroll that element to the focused row', async ({ page }) => {
+  await openSections(page);
+  await page.evaluate(() => (window as any).__h.trees()[1].focus());
+  await page.keyboard.press('End');
+  await page.waitForTimeout(80);
+  expect(await folderRowsInView(page)).toContain('g499.ts');
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(80);
+  expect(await folderRowsInView(page)).toContain('g000.ts');
+  // The first row is fully in view (its top at or below the scroller's top).
+  const rowTop = await page.evaluate(() => {
+    const h = (window as any).__h;
+    return h.trees()[1].querySelector('[data-path="g000.ts"]').getBoundingClientRect().top - (h.scroller() as HTMLElement).getBoundingClientRect().top;
+  });
+  expect(rowTop).toBeGreaterThanOrEqual(0);
+});
+

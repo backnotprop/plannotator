@@ -322,6 +322,30 @@ function Live() {
   );
 }
 
+/**
+ * `?mode=sections`: two trees in one host scroll (`scrollParent`), the host's section headers between them, in a
+ * 320 × 600 panel: "Artifacts" (12 files) then "Folder" (500 files g000…g499). Driven by tests/e2e/file-tree.spec.ts.
+ */
+function Sections() {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [first] = useState(() => new FileTreeStore(Array.from({ length: 12 }, (_, i) => `artifact-${String(i).padStart(2, '0')}.md`)));
+  const [second] = useState(() => new FileTreeStore(Array.from({ length: 500 }, (_, i) => `g${String(i).padStart(3, '0')}.ts`)));
+  h.scroller = () => scroller.current;
+  h.trees = () => [...document.querySelectorAll<HTMLElement>('[role="tree"]')];
+  useEffect(() => {
+    h.ready = true;
+  }, []);
+  const header = (text: string) => <div style={{ height: 40, lineHeight: '40px', padding: '0 12px', fontWeight: 600 }}>{text}</div>;
+  return (
+    <div id="sections" ref={scroller} style={{ width: 320, height: 600, overflowY: 'auto' }} className="bg-card">
+      {header('Artifacts')}
+      <FileTree tree={first} scrollParent={scroller} label="Artifacts" />
+      {header('Folder')}
+      <FileTree tree={second} scrollParent={scroller} label="Folder" />
+    </div>
+  );
+}
+
 function Shots() {
   const set = q.get('set') ?? 'small';
   const ref = useRef<FileTreeHandle>(null);
@@ -372,6 +396,10 @@ function Shots() {
   const root = document.getElementById('root')!;
   if (mode === 'live') {
     ReactDOM.createRoot(root).render(<Live />);
+    return;
+  }
+  if (mode === 'sections') {
+    ReactDOM.createRoot(root).render(<Sections />);
     return;
   }
   if (mode === 'shots') {
