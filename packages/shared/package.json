@@ -86,6 +86,7 @@
     "./at-reference": "./at-reference.ts",
     "./code-nav": "./code-nav.ts",
     "./repo-file": "./repo-file.ts",
+    "./project-listing": "./project-listing.ts",
     "./token-hover": "./token-hover.ts",
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",

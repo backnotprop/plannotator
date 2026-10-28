@@ -139,6 +139,7 @@ import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
+import { createInboxFilesRoutes } from "./inbox-files";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
@@ -2192,6 +2193,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let stopRequested = false;
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
+  let filesRoutes: ReturnType<typeof createInboxFilesRoutes>;
   // Null while phones are off (the default): no door, no window routes, no listeners, no relay.
   let phones: ReturnType<typeof createInboxDevices> | null = null;
   let relay: ReturnType<typeof createInboxRelay> | null = null;
@@ -3008,6 +3010,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const attached = await attachmentRoutes(req, url);
       if (attached) return attached;
 
+      // Files: the thread's project folder, browsed and commented on (packages/server/inbox-files.ts).
+      const files = await filesRoutes(req, url, via);
+      if (files) return files;
+
       // Phones: pairing, the device list and revoke, the tailnet and Wi-Fi switches.
       const phoneRoute = phones ? await phones.windowRoute(req, url) : null;
       if (phoneRoute) return phoneRoute;
@@ -3046,6 +3052,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody, streamIdleMs: options.streamIdleMs, scheduleImageCapture: imageCapture.schedule });
+  filesRoutes = createInboxFilesRoutes({ store, serverSession, readBody, htmlAssets: attachmentRoutes.htmlAssets, projectRootOf: (path) => projectRoots.resolve(path) });
   const started = startOnLoopback(fetch, previous?.port ?? null);
   server = started.server;
   portChanged = started.portChanged;
