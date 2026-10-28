@@ -17,10 +17,19 @@
  * - The tree's keys stay in the tree: ArrowDown moves in it, and j, k and /
  *   change nothing outside it.
  * - Full screen stays as it was: no tab row.
+ * - Beside the thread the header's line stays ("from <agent> in <project>",
+ *   "in <project>" for a file of the folder); Escape closes the file on
+ *   screen; Close all goes back to the thread; the folder button keeps a
+ *   panel the person closed closed; the panel's open folders survive a
+ *   full-screen round trip; a project HTML file opens full screen.
  * - Which folder (PROJECT-FOLDER definition, owner 2026-10-27): a thread
  *   with no artifact in a project still has the button, named for the
  *   folder with no count, and it opens the pane on the folder; a thread
  *   whose agent works in the home folder has none.
+ * - This computer only: with "Over your tailnet" on, every Files route asked
+ *   through the tailnet listener answers 403 local_only, while the thread
+ *   itself still answers there (a scripted `tailscale` that keeps its serve
+ *   mapping in a file, as inbox-tailscale.spec.ts's does).
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-files.spec.ts`.
@@ -28,13 +37,34 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
+const MAGIC = 'studio.tail0000.ts.net';
+const OWNER = 'owner@example.com';
+/** The scripted tailscale (run by this Node): `status --json`, `serve status --json`, serve on and off, the mapping kept in a file. */
+const FAKE_TAILSCALE = `
+const { existsSync, readFileSync, writeFileSync } = require("node:fs");
+const state = process.argv[2];
+const args = process.argv.slice(3);
+const out = (text) => { process.stdout.write(text); process.exit(0); };
+const serve = existsSync(state) ? JSON.parse(readFileSync(state, "utf8")) : {};
+if (args[0] === "status") out(JSON.stringify({ Self: { DNSName: "${MAGIC}.", UserID: 1 }, User: { "1": { LoginName: "${OWNER}" } } }));
+if (args[0] === "serve" && args[1] === "status") {
+  const ports = Object.keys(serve);
+  if (ports.length === 0) out("{}");
+  out(JSON.stringify({ TCP: Object.fromEntries(ports.map((p) => [p, { HTTPS: true }])), Web: Object.fromEntries(ports.map((p) => ["${MAGIC}:" + p, { Handlers: { "/": { Proxy: serve[p] } } }])) }));
+}
+const port = (/--https=(\\d+)/.exec(args.join(" ")) || [])[1];
+if (args[0] === "serve" && port && args.includes("off")) { delete serve[port]; writeFileSync(state, JSON.stringify(serve)); out(""); }
+if (args[0] === "serve" && port && args.includes("--bg")) { serve[port] = args[args.length - 1]; writeFileSync(state, JSON.stringify(serve)); out("https://${MAGIC}:" + port + "/\\n"); }
+process.exit(2);
+`;
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 
 interface World {
@@ -48,6 +78,8 @@ interface World {
   plainThread: string;
   /** A thread whose agent works in the home folder. */
   homeThread: string;
+  /** The scripted tailscale's serve mapping (`{ "<https port>": "<proxy URL>" }`). */
+  serveState: string;
 }
 let world: World;
 
@@ -67,11 +99,13 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  // Nothing here may reach a real gh or tailscale.
-  for (const name of ['gh', 'tailscale']) {
-    writeFileSync(join(trap, name), `#!/bin/sh\necho "inbox-files: ${name} must not run" >&2\nexit 97\n`);
-    chmodSync(join(trap, name), 0o755);
-  }
+  // Nothing here may reach a real gh or tailscale: gh is a trap, tailscale a script.
+  writeFileSync(join(trap, 'gh'), `#!/bin/sh\necho "inbox-files: gh must not run" >&2\nexit 97\n`);
+  chmodSync(join(trap, 'gh'), 0o755);
+  const serveState = join(root, 'serve.json');
+  writeFileSync(join(root, 'fake-tailscale.cjs'), FAKE_TAILSCALE);
+  writeFileSync(join(trap, 'tailscale'), `#!/bin/sh\nexec '${process.execPath}' '${join(root, 'fake-tailscale.cjs')}' '${serveState}' "$@"\n`);
+  chmodSync(join(trap, 'tailscale'), 0o755);
   const env = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     HOME: home,
@@ -134,7 +168,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     const at = new URL(request.url());
     if (at.pathname.endsWith('/files/content') || at.pathname.endsWith('/files/raw')) contentPaths.push(at.searchParams.get('path') ?? '');
   });
-  world = { url, context, page, errors, contentPaths, threadId, plainThread: plain.thread_id as string, homeThread: fromHome.thread_id as string };
+  world = { url, context, page, errors, contentPaths, threadId, plainThread: plain.thread_id as string, homeThread: fromHome.thread_id as string, serveState };
 });
 
 test.afterAll(async () => {
@@ -155,7 +189,9 @@ test('the folder button opens Artifacts with the project listed like VS Code', a
   await page.locator('[data-artifacts-button]').click();
   await expect(page.locator('[data-files-pane="artifacts"]')).toBeVisible();
   await expect(page.locator('[data-artifacts-tab]')).toHaveAttribute('aria-selected', 'true');
-  if (!(await panel().isVisible())) await page.locator('[data-files-panel-toggle]').click();
+  // The panel starts as the person left it (closed, the first time): the button never opens it for them.
+  await expect(panel()).toHaveCount(0);
+  await page.locator('[data-files-panel-toggle]').click();
   await expect(projectRow('README.md')).toBeVisible();
   await expect(projectRow('.git')).toHaveCount(0);
   await expect(projectRow('node_modules')).toHaveAttribute('data-dimmed', 'true');
@@ -176,6 +212,8 @@ test('one file keeps its tools in the tab row; a second drops them to a bar', as
   await expect(fileTabs()).toHaveCount(1);
   await expect(page.locator('.ib-ftop .ib-vslim')).toHaveCount(0);
   await expect(page.locator('[data-files-tabs]')).toHaveClass(/ib-tabfold/);
+  // The header's line stays beside the thread: in the tab row with one file.
+  await expect(page.locator('[data-files-header] [data-files-tabs] [data-header-from]')).toHaveText('from Claude Code in ledger');
   await projectRow('docs').click();
   await projectRow('docs/notes.md').click();
   await expect(fileTabs()).toHaveCount(2);
@@ -183,6 +221,8 @@ test('one file keeps its tools in the tab row; a second drops them to a bar', as
   await expect(fileTabs().nth(1)).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.ib-ftop .ib-vslim')).toBeVisible();
   await expect(page.locator('[data-files-crumbs]')).toContainText('docs');
+  // With two, in the bar under the tabs; a file of the folder was sent by nobody.
+  await expect(page.locator('.ib-ftop .ib-vslim [data-header-from]')).toHaveText('in ledger');
   expect(world.contentPaths).toContain('docs/notes.md');
   // Closing the open tab shows its left neighbour (none to its right), then the last one shows Artifacts.
   await page.locator('[data-tab-close]').nth(1).click({ force: true });
@@ -194,6 +234,42 @@ test('one file keeps its tools in the tab row; a second drops them to a bar', as
   await expect(page.locator('[data-artifacts-tab]')).toHaveAttribute('aria-selected', 'true');
   // One panel for every tab: the folder opened beside a file is still open on Artifacts.
   await expect(projectRow('docs')).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('Escape closes the file on screen; Close all goes back to the thread; the button keeps a closed panel closed', async () => {
+  const { page } = world;
+  await projectRow('README.md').click();
+  await projectRow('docs/plan.md').click();
+  await expect(fileTabs()).toHaveCount(2);
+  // Escape closes the file on screen by the tab's rule: its neighbour shows, then the last goes back to Artifacts.
+  await page.keyboard.press('Escape');
+  await expect(fileTabs()).toHaveCount(1);
+  await expect(fileTabs().first()).toContainText('README.md');
+  await page.keyboard.press('Escape');
+  await expect(fileTabs()).toHaveCount(0);
+  await expect(page.locator('[data-artifacts-tab]')).toHaveAttribute('aria-selected', 'true');
+  // Close all: back to the thread alone.
+  await projectRow('README.md').click();
+  await projectRow('docs/plan.md').click();
+  await expect(fileTabs()).toHaveCount(2);
+  await page.locator('[data-tabs-menu]').click();
+  await page.getByRole('menuitem', { name: 'Close all' }).click();
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => location.hash)).not.toMatch(/artifacts|file=/);
+  // The person hides the panel; the button opens the pane without it, and it comes back only when asked for.
+  const door = page.locator('[data-artifacts-button]');
+  await door.click();
+  await expect(panel()).toBeVisible();
+  await page.locator('[data-files-panel-toggle]').click();
+  await expect(panel()).toHaveCount(0);
+  await door.click();
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  await door.click();
+  await expect(page.locator('[data-files-pane="artifacts"]')).toBeVisible();
+  await expect(panel()).toHaveCount(0);
+  await page.locator('[data-files-panel-toggle]').click();
+  await expect(panel()).toBeVisible();
 });
 
 test('change marks show only while the changes toggle is on', async () => {
@@ -208,6 +284,7 @@ test('change marks show only while the changes toggle is on', async () => {
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect(projectRow('src/api/totals.ts')).toContainText('M');
   await expect(projectRow('src/api/totals.ts')).toContainText('Modified');
+  if ((await projectRow('docs').getAttribute('aria-expanded')) !== 'true') await projectRow('docs').click();
   await expect(projectRow('docs/mock.html')).toContainText('Added');
   await toggle.click();
   await expect(projectRow('src/api/totals.ts')).not.toContainText('Modified');
@@ -265,5 +342,71 @@ test('a thread with no artifact: the button opens its project folder; none for t
   await expect(page.locator('[data-artifacts-button]')).toHaveCount(0);
   const answer = await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}/files/folder`)).json(), world.homeThread);
   expect(answer).toMatchObject({ folder: null, reason: 'home' });
+  expect(world.errors).toEqual([]);
+});
+
+test('the panel keeps its open folders through full screen; a project HTML file opens full screen', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#thread=${world.threadId}`);
+  await page.locator('[data-artifacts-button]').click();
+  await expect(panel()).toBeVisible();
+  if ((await projectRow('docs').getAttribute('aria-expanded')) !== 'true') await projectRow('docs').click();
+  await expect(projectRow('docs/mock.html')).toBeVisible();
+  // An HTML page of the folder opens full screen, as an attached one does, and renders.
+  await projectRow('docs/mock.html').click();
+  const view = page.locator('[data-attachment-pane]');
+  await expect(view).toHaveClass(/ib-full/);
+  await expect(view.frameLocator('iframe').first().getByRole('heading', { name: 'Mock' })).toBeVisible();
+  await expect(panel()).toHaveCount(0);
+  // Back beside the thread: the panel is the same one, its folder still open.
+  await view.getByRole('button', { name: 'Side by side' }).click();
+  await expect(view).not.toHaveClass(/ib-full/);
+  await expect(projectRow('docs')).toHaveAttribute('aria-expanded', 'true');
+  await expect(projectRow('docs/mock.html')).toBeVisible();
+  expect(world.errors).toEqual([]);
+});
+
+/** A GET as tailscale serve hands it on: to the tailnet listener, with the served Host and the owner's login. */
+function throughTailnet(listener: number, served: string, path: string): Promise<{ status: number; code: string | null }> {
+  return new Promise((done, fail) => {
+    const req = httpRequest({ host: '127.0.0.1', port: listener, path, headers: { Host: `${MAGIC}:${served}`, 'Tailscale-User-Login': OWNER } }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => (text += chunk));
+      res.on('end', () => {
+        let code: string | null = null;
+        try {
+          code = (JSON.parse(text) as { code?: string }).code ?? null;
+        } catch {}
+        done({ status: res.statusCode ?? 0, code });
+      });
+    });
+    req.on('error', fail);
+    req.end();
+  });
+}
+
+test('over the tailnet every Files route answers local_only; the thread still answers there', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#settings/devices`);
+  const toggle = page.locator('[data-settings-tailscale]').getByRole('switch', { name: 'Reach the Inbox over Tailscale' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 20_000 });
+  try {
+    const mapping = () => (existsSync(world.serveState) ? (JSON.parse(readFileSync(world.serveState, 'utf8')) as Record<string, string>) : {});
+    await expect.poll(() => Object.keys(mapping()).length, { timeout: 20_000 }).toBe(1);
+    const [served, proxy] = Object.entries(mapping())[0]!;
+    const listener = Number(new URL(proxy).port);
+    const base = `/api/inbox/threads/${world.threadId}/files`;
+    for (const path of [base, `${base}/folder`, `${base}/levels?dir=`, `${base}/content?path=README.md`, `${base}/raw?path=README.md`, `${base}/changed`]) {
+      expect(await throughTailnet(listener, served, path), path).toEqual({ status: 403, code: 'local_only' });
+    }
+    expect((await throughTailnet(listener, served, `/api/inbox/threads/${world.threadId}`)).status).toBe(200);
+    // This computer still reads the folder.
+    expect((await page.request.get(new URL(`${base}/folder`, world.url).href)).status()).toBe(200);
+  } finally {
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 20_000 });
+  }
   expect(world.errors).toEqual([]);
 });

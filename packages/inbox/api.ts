@@ -802,6 +802,9 @@ export const inboxApi = {
   // Files (approval "inbox-files-tabs"): the thread's project folder, by a path relative to its root (packages/server/inbox-files.ts).
   /** Which folder the thread has, or why none (no listing). */
   filesFolder: (threadId: string) => get<ProjectFolderAnswer>(`/api/inbox/threads/${encodeURIComponent(threadId)}/files/folder`),
+  /** Several folder levels in one answer (the panel's refresh: one git run however many folders are open). */
+  filesLevels: (threadId: string, dirs: readonly string[]) =>
+    get<ProjectLevels>(`/api/inbox/threads/${encodeURIComponent(threadId)}/files/levels?${dirs.map((d) => `dir=${encodeURIComponent(d)}`).join('&')}`),
   /** One folder level ('' is the root). */
   files: (threadId: string, dir: string) =>
     get<ProjectListing>(`/api/inbox/threads/${encodeURIComponent(threadId)}/files${dir ? `?dir=${encodeURIComponent(dir)}` : ''}`),
@@ -966,6 +969,8 @@ export interface ThreadFolder {
   path: string;
 }
 export type ProjectFolderAnswer = { serverSession: string; folder: ThreadFolder; reason?: undefined } | { serverSession: string; folder: null; reason: 'home' | 'gone' };
+/** Why a thread shows no project folder: the server's reasons, and `remote` for a window over the tailnet (the routes answer `local_only`). */
+export type NoFolderReason = 'home' | 'gone' | 'remote';
 
 /** One level of the thread's project folder (`GET …/files?dir=`). */
 export interface ProjectListing {
@@ -973,9 +978,16 @@ export interface ProjectListing {
   root: { name: string; branch: string | null; git: boolean; project?: string; worktree?: string | null; path?: string };
   /** The folder listed, relative to the root ('' for the root). */
   dir: string;
-  entries: Array<{ name: string; kind: 'dir' | 'file'; ignored: boolean; locked: 'dotenv' | 'hidden' | 'outside' | null; size: number | null }>;
+  entries: Array<{ name: string; kind: 'dir' | 'file'; ignored: boolean; locked: 'dotenv' | 'git' | null; size: number | null }>;
   /** Entries left out past the listing's cap. */
   more: number;
+}
+
+/** Several levels (`GET …/files/levels?dir=&dir=`): each listed, or refused with its code. */
+export interface ProjectLevels {
+  serverSession: string;
+  root: ProjectListing['root'];
+  levels: Array<{ dir: string; entries: ProjectListing['entries']; more: number } | { dir: string; refused: string; reason?: string }>;
 }
 
 /** A project file as the viewers read it (`GET …/files/content?path=`). */

@@ -11,7 +11,7 @@
  * pattern), Enter or Space shows one. No window shortcut is added.
  */
 import { useRef, type KeyboardEvent, type ReactNode } from 'react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { Icon, type IconName } from '../icons';
 import { Tip } from '../components/Tip';
 
@@ -133,15 +133,18 @@ export function FilesTabRow(props: FilesTabRowProps) {
             </DropdownMenuTrigger>
           </Tip>
           <DropdownMenuContent align="end" sideOffset={6} className="min-w-[16rem]" finalFocus={false}>
-            <DropdownMenuLabel>Open files · {tabs.length}</DropdownMenuLabel>
-            {tabs.map((tab) => (
-              <DropdownMenuItem key={tab.id} onClick={() => props.onSelect(tab.id)} data-tabs-menu-item={tab.id}>
-                <Icon name={tab.icon} size={14} />
-                <span className="ib-tm-name">{tab.name}</span>
-                {tab.count > 0 && <span className="ib-tm-n">{tab.count}</span>}
-                {tab.where && <span className="ib-tm-where">{tab.where}</span>}
-              </DropdownMenuItem>
-            ))}
+            {/* Base UI's group label needs its group (without one the menu throws, and never opens). */}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Open files · {tabs.length}</DropdownMenuLabel>
+              {tabs.map((tab) => (
+                <DropdownMenuItem key={tab.id} onClick={() => props.onSelect(tab.id)} data-tabs-menu-item={tab.id}>
+                  <Icon name={tab.icon} size={14} />
+                  <span className="ib-tm-name">{tab.name}</span>
+                  {tab.count > 0 && <span className="ib-tm-n">{tab.count}</span>}
+                  {tab.where && <span className="ib-tm-where">{tab.where}</span>}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={props.onCloseOthers} disabled={artifactsOn || current === null}>
               Close the others

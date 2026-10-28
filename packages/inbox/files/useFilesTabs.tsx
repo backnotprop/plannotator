@@ -12,7 +12,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from 'react-dom';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
-import { inboxApi, type ProjectFileContent, type ThreadFolder } from '../api';
+import { inboxApi, InboxApiError, type NoFolderReason, type ProjectFileContent, type ThreadFolder } from '../api';
+import { selectionToolbarShowing } from '../selectionToolbar';
+import { inOverlay, isComposingKey, isEditableTarget, modalOpen } from '../shortcuts/guards';
 import { attachmentLabel } from '../attachments';
 import type { Artifact } from '../artifacts';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
@@ -78,6 +80,8 @@ export function useFilesTabs(input: FilesTabsInput) {
     setTreeOpenState(open);
     storage.setItem(FILES_PANEL_COOKIE, open ? 'open' : 'closed');
   };
+  /** The pane was opened on a thread's folder with nothing else to show: the panel shows for this visit, the cookie untouched. */
+  const [treeForced, setTreeForced] = useState(false);
   const [showChanges, setShowChangesState] = useState(() => storage.getItem(FILES_CHANGES_COOKIE) === 'on');
   const setShowChanges = (on: boolean) => {
     setShowChangesState(on);
@@ -85,7 +89,7 @@ export function useFilesTabs(input: FilesTabsInput) {
   };
   // The thread's project folder (PROJECT-FOLDER definition, packages/server/inbox-files.ts `inboxThreadFilesFolder`):
   // undefined while asked, null when it has none (`noFolder` says why).
-  const [folderState, setFolderState] = useState<{ threadId: string; folder: ThreadFolder | null; reason: 'home' | 'gone' | null } | null>(null);
+  const [folderState, setFolderState] = useState<{ threadId: string; folder: ThreadFolder | null; reason: NoFolderReason | null } | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let gone = false;
@@ -93,8 +97,9 @@ export function useFilesTabs(input: FilesTabsInput) {
       (answer) => {
         if (!gone) setFolderState({ threadId, folder: answer.folder, reason: answer.folder ? null : answer.reason });
       },
-      () => {
-        if (!gone) setFolderState({ threadId, folder: null, reason: null });
+      (cause) => {
+        // Over the tailnet the Files routes answer local_only: no folder here.
+        if (!gone) setFolderState({ threadId, folder: null, reason: cause instanceof InboxApiError && cause.code === 'local_only' ? 'remote' : null });
       },
     );
     return () => {
@@ -170,6 +175,10 @@ export function useFilesTabs(input: FilesTabsInput) {
   const current = fileId && !shownFull ? fileId : null;
   /** The pane beside the thread is open (a file in its tab, or the Artifacts tab). */
   const paneOpen = enabled && (artifactsRoute || fileId !== null);
+  const treeShown = treeOpen || treeForced;
+  useEffect(() => {
+    if (!paneOpen) setTreeForced(false);
+  }, [paneOpen]);
   // Closing the pane (to the thread alone: Escape, a file's ×, the button) closes its tabs, so a file opened later
   // starts a row of its own, as a file opened before the tabs did.
   useEffect(() => {
@@ -212,10 +221,11 @@ export function useFilesTabs(input: FilesTabsInput) {
     else go();
   };
   const closeOthers = () => setTabs(closeOtherTabs(tabsRef.current, fileId));
+  // Close all: back to the thread alone, as closing the last file does when Artifacts was never shown.
   const closeAll = () =>
     input.leave(null, () => {
       setTabs([]);
-      input.showArtifacts(true, { replace: true });
+      input.showArtifacts(false, { replace: true });
     });
   const toArtifacts = () => {
     if (!fileId) return;
@@ -231,10 +241,29 @@ export function useFilesTabs(input: FilesTabsInput) {
     const back = lastCurrent.current && tabsRef.current.includes(lastCurrent.current) ? lastCurrent.current : tabsRef.current[tabsRef.current.length - 1];
     if (back) input.showFile(back);
     else {
-      setTreeOpen(true);
+      // The panel as the person left it; a thread with nothing but its folder opens on the folder (this visit only).
+      if ((input.artifacts?.length ?? 0) === 0 && folder) setTreeForced(true);
       input.showArtifacts(true);
     }
   };
+
+  // Escape beside the thread closes the file on screen, by the tab's own rule (the next tab, else back), once
+  // nothing inside the window used the key: a field, a dialog or popover, a menu, a draft that closes itself.
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!current) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event)) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (isEditableTarget(target) || inOverlay(target) || modalOpen() || selectionToolbarShowing()) return;
+      if (document.querySelector('[role="menu"], [data-comment-popover], [data-pn-annotation-toolbar-row], [data-quick-label-picker]')) return;
+      event.preventDefault();
+      closeRef.current(current);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [current]);
 
   /** `]` / `[` inside the tab on screen: the next file takes this tab's place. */
   const noteStep = (to: string) => {
@@ -242,8 +271,18 @@ export function useFilesTabs(input: FilesTabsInput) {
   };
 
   const treeButton = (
-    <Tip content={treeOpen ? 'Hide files' : 'Show files'}>
-      <button type="button" className="ib-iconbtn" aria-pressed={treeOpen} aria-label="Files panel" onClick={() => setTreeOpen(!treeOpen)} data-files-panel-toggle="">
+    <Tip content={treeShown ? 'Hide files' : 'Show files'}>
+      <button
+        type="button"
+        className="ib-iconbtn"
+        aria-pressed={treeShown}
+        aria-label="Files panel"
+        onClick={() => {
+          setTreeForced(false);
+          setTreeOpen(!treeShown);
+        }}
+        data-files-panel-toggle=""
+      >
         <Icon name="panelR" size={17} />
       </button>
     </Tip>
@@ -299,7 +338,7 @@ export function useFilesTabs(input: FilesTabsInput) {
   };
 
   const panel =
-    enabled && treeOpen ? (
+    enabled && treeShown ? (
       <FilesPanel
         threadId={threadId}
         artifacts={input.artifacts}
@@ -315,12 +354,14 @@ export function useFilesTabs(input: FilesTabsInput) {
         showChanges={showChanges}
         onShowChanges={setShowChanges}
         noFolder={noFolder}
+        active={paneOpen && !shownFull}
         focusFilter={filterFocus}
         onFilterFocused={() => setFilterFocus(0)}
       />
     ) : null;
   // One panel for both panes (the Artifacts tab and a file beside the thread): drawn once into a host element that
-  // the pane on screen holds, so switching tabs keeps its open folders, filter and scroll.
+  // the pane on screen holds, so switching tabs keeps its open folders, filter and scroll. It stays mounted while no
+  // pane holds it (full screen, the pane closed): it refreshes only while on screen.
   const [panelHost] = useState(() => (typeof document === 'undefined' ? null : document.createElement('div')));
   const aside = panel && panelHost ? <PanelSlot host={panelHost} /> : undefined;
   const panelPortal = panel && panelHost ? createPortal(panel, panelHost) : null;
@@ -352,7 +393,7 @@ export function useFilesTabs(input: FilesTabsInput) {
     /** The panel itself: ThreadPane renders it while a pane holds `aside`. */
     panelPortal,
     artifactsTabRow: tabRow(null, treeButton),
-    treeOpen,
+    treeOpen: treeShown,
     /** The thread's project folder: undefined while asked, null when it has none (desktop only). */
     folder,
   };

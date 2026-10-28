@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentKind } from '@plannotator/core/inbox-types';
 import { FILE_TREE_ROOT, FileTree, FileTreeStore, type FileTreeBadge, type FileTreeIconInfo } from '@plannotator/ui/components/file-tree';
-import { inboxApi, InboxApiError, type ProjectChanges, type ProjectListing, type ThreadFolder } from '../api';
+import { inboxApi, InboxApiError, type NoFolderReason, type ProjectChanges, type ProjectListing, type ThreadFolder } from '../api';
 import { artifactKey, type Artifact, type FileArtifact } from '../artifacts';
 import { Icon, type IconName } from '../icons';
 import { Tip } from '../components/Tip';
@@ -35,22 +35,28 @@ export function fileKindIcon(kind: InboxAttachmentKind | string): IconName {
   return 'doc';
 }
 
-/** Where the quiet changes toggle sits (rendered for the owner to choose; one prop, `showChanges`, either way). */
-
 /** Why a locked row does not open, in the window's words (the server sends only the reason). */
-export const LOCK_WORDS: Record<'dotenv' | 'hidden' | 'outside', string> = {
+export const LOCK_WORDS: Record<'dotenv' | 'git', string> = {
   dotenv: 'Not opened here: .env files may hold secrets',
-  hidden: 'Not opened here: hidden, and git tracks nothing in it',
-  outside: 'Not opened here: it leads outside the project folder',
+  git: "Not opened here: it leads into git's own files",
 };
 
 const CHANGE_TONE: Record<string, FileTreeBadge['tone']> = { M: 'modified', A: 'added', U: 'untracked', D: 'deleted', R: 'renamed' };
 const CHANGE_WORD: Record<string, string> = { M: 'Modified', A: 'Added', U: 'Untracked', D: 'Deleted', R: 'Renamed' };
 /** Folders listed so a change's dot shows, at most. */
 const CHANGE_FOLDERS_MAX = 300;
-/** How often the folders on screen are listed again while the panel shows (a file an agent writes appears). */
-const RELIST_MS = 5000;
-const CHANGES_MS = 15000;
+/**
+ * How often the folders on screen are listed again while the panel shows and the window has focus (a file an agent
+ * writes appears): the root and the open folders, in one request, never two at once; and on the window's focus.
+ */
+export const RELIST_MS = 5000;
+/** How often the change marks are read while the toggle is on, the panel shows and the window has focus; never two at once. */
+export const CHANGES_MS = 15000;
+
+/** The panel is worth refreshing now: on screen, in a window that is shown and has focus. */
+function refreshing(active: boolean): boolean {
+  return active && !document.hidden && document.hasFocus();
+}
 
 /** Every folder above a path, top first (`a/b/c.ts` → `a`, `a/b`). */
 export function foldersAbove(path: string): string[] {
@@ -97,7 +103,9 @@ export interface FilesPanelProps {
   showChanges: boolean;
   onShowChanges: (on: boolean) => void;
   /** Why the thread has no project folder (`GET …/files/folder`), for the line that says so. */
-  noFolder?: 'home' | 'gone' | null;
+  noFolder?: NoFolderReason | null;
+  /** The panel is on screen (it stays mounted through full screen, so its open folders and filter survive). */
+  active?: boolean;
   /** Bumped to move focus into the filter (the tab row's +). */
   focusFilter?: number;
   /** Called once the filter took that focus, so a remount (another tab) does not take it again. */
@@ -116,9 +124,18 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
   const [state, setState] = useState<ProjectState>({ root: null, error: null, loaded: false });
   const [changes, setChanges] = useState<ProjectChanges | null>(null);
   const applyRef = useRef<() => void>(() => undefined);
-  const take = useCallback((listing: ProjectListing) => {
+  /** Folders listed only in part (over 5,000 entries): how many were left out, by folder. */
+  const [cut, setCut] = useState<ReadonlyMap<string, number>>(new Map());
+  const take = useCallback((listing: Pick<ProjectListing, 'dir' | 'entries' | 'more'>) => {
     const prefix = listing.dir ? `${listing.dir}/` : '';
     for (const e of listing.entries) meta.current.set(`${prefix}${e.name}`, { locked: e.locked, ignored: e.ignored });
+    setCut((before) => {
+      if ((before.get(listing.dir) ?? 0) === listing.more) return before;
+      const next = new Map(before);
+      if (listing.more > 0) next.set(listing.dir, listing.more);
+      else next.delete(listing.dir);
+      return next;
+    });
   }, []);
   const tree = useMemo(
     () =>
@@ -156,6 +173,7 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
   useEffect(() => {
     let gone = false;
     meta.current.clear();
+    setCut(new Map());
     setState({ root: null, error: null, loaded: false });
     inboxApi.files(threadId, '').then(
       (listing) => {
@@ -166,7 +184,8 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
       },
       (cause) => {
         if (gone) return;
-        setState({ root: null, error: cause instanceof InboxApiError && cause.code === 'files_no_folder' ? 'none' : 'The folder could not be read', loaded: true });
+        const code = cause instanceof InboxApiError ? cause.code : null;
+        setState({ root: null, error: code === 'files_no_folder' ? 'none' : code === 'local_only' ? 'remote' : 'The folder could not be read', loaded: true });
       },
     );
     return () => {
@@ -177,19 +196,22 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
   useEffect(() => {
     if (!visible || !state.root) return;
     let busy = false;
+    let stopped = false;
     const relist = async () => {
-      if (busy || document.hidden) return;
+      if (busy || stopped || !refreshing(visible)) return;
       busy = true;
       try {
         const dirs = ['', ...[...tree.expandedPaths()].filter((d) => tree.isLoaded(d))];
-        for (const dir of dirs) {
-          const listing = await inboxApi.files(threadId, dir).catch(() => null);
-          if (!listing) continue;
+        const answer = await inboxApi.filesLevels(threadId, dirs).catch(() => null);
+        if (!answer || stopped) return;
+        for (const level of answer.levels) {
+          if ('refused' in level) continue;
+          const listing = { dir: level.dir, entries: level.entries, more: level.more };
           take(listing);
           const now = new Set(listingPaths(listing).map((p) => p.replace(/\/$/, '')));
           const model = tree.model;
-          const at = dir ? model.find(dir) : FILE_TREE_ROOT;
-          if (dir && at <= FILE_TREE_ROOT) continue;
+          const at = level.dir ? model.find(level.dir) : FILE_TREE_ROOT;
+          if (level.dir && at <= FILE_TREE_ROOT) continue;
           const had = model.childrenOf(at).map((id) => model.pathOf(id));
           const gone = had.filter((p) => !now.has(p));
           const added = listingPaths(listing).filter((p) => !had.includes(p.replace(/\/$/, '')));
@@ -205,6 +227,7 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
     const onFocus = () => void relist();
     window.addEventListener('focus', onFocus);
     return () => {
+      stopped = true;
       window.clearInterval(timer);
       window.removeEventListener('focus', onFocus);
     };
@@ -217,15 +240,24 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
       return;
     }
     let gone = false;
+    let busy = false;
+    let first = true;
     const read = async () => {
-      if (document.hidden) return;
-      const next = await inboxApi.filesChanged(threadId).catch(() => null);
-      if (gone || !next) return;
-      for (const level of changeFolders(next.changes)) {
-        await Promise.all(level.filter((dir) => !tree.isLoaded(dir) && tree.model.find(dir) > 0).map((dir) => tree.load(dir).catch(() => undefined)));
-        if (gone) return;
+      // The first read once the toggle turns on; then only on screen with focus, and never two at once (a diff can be slow).
+      if (busy || (!first && !refreshing(visible))) return;
+      first = false;
+      busy = true;
+      try {
+        const next = await inboxApi.filesChanged(threadId).catch(() => null);
+        if (gone || !next) return;
+        for (const level of changeFolders(next.changes)) {
+          await Promise.all(level.filter((dir) => !tree.isLoaded(dir) && tree.model.find(dir) > 0).map((dir) => tree.load(dir).catch(() => undefined)));
+          if (gone) return;
+        }
+        setChanges(next);
+      } finally {
+        busy = false;
       }
-      setChanges(next);
     };
     void read();
     const timer = visible ? window.setInterval(() => void read(), CHANGES_MS) : 0;
@@ -239,7 +271,7 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
     applyBadges();
   }, [applyBadges, state.loaded]);
 
-  return { tree, state, changes };
+  return { tree, state, changes, cut };
 }
 
 function SectionHeader({ open, onToggle, title, count, tip, actions, id }: { open: boolean; onToggle: () => void; title: ReactNode; count?: number | null; tip?: string; actions?: ReactNode; id: string }) {
@@ -278,8 +310,9 @@ export function folderLabel(folder: Pick<ThreadFolder, 'name' | 'project' | 'wor
 }
 
 /** Why the thread has no project folder, in words. */
-export function noFolderWords(reason: 'home' | 'gone' | null | undefined): string {
+export function noFolderWords(reason: NoFolderReason | null | undefined): string {
   if (reason === 'home') return "No project folder: this thread's agent works in your home folder";
+  if (reason === 'remote') return 'The project folder opens only on the computer the Inbox runs on';
   if (reason === 'gone') return 'The project folder is gone';
   return 'No project folder';
 }
@@ -290,7 +323,7 @@ export function FilesPanel(props: FilesPanelProps) {
   const filterRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState('');
   const [openSecs, setOpenSecs] = useState({ art: true, proj: true });
-  const project = useProjectTree(threadId, showChanges, counts, true);
+  const project = useProjectTree(threadId, showChanges, counts, props.active ?? true);
 
   // The Artifacts section: one row per artifact, keyed by its id, named by its file.
   const fileArtifacts = useMemo(() => (artifacts ?? []).filter((a): a is FileArtifact => a.type === 'file'), [artifacts]);
@@ -397,7 +430,9 @@ export function FilesPanel(props: FilesPanelProps) {
         />
         {openSecs.proj &&
           (project.state.error ? (
-            <div className="ib-ftline" data-files-error="">{project.state.error === 'none' ? noFolderWords(noFolder) : project.state.error}</div>
+            <div className="ib-ftline" data-files-error="">
+              {project.state.error === 'none' ? noFolderWords(noFolder) : project.state.error === 'remote' ? noFolderWords('remote') : project.state.error}
+            </div>
           ) : !project.state.loaded ? (
             <div className="ib-ftline">Reading the folder…</div>
           ) : (
@@ -411,6 +446,12 @@ export function FilesPanel(props: FilesPanelProps) {
               renderIcon={projIcon}
               labels={{ markedBelow: 'Has changes', loading: 'Loading' }}
             />
+          ))}
+        {openSecs.proj &&
+          [...project.cut.keys()].filter((dir) => dir === '' || [...project.tree.expandedPaths()].includes(dir)).map((dir) => (
+            <div key={dir} className="ib-ftline" data-files-more={dir}>
+              Showing the first 5,000 entries of {dir === '' ? label : dir}
+            </div>
           ))}
         {showChanges && project.changes?.truncated && <div className="ib-ftline">Too many changes to mark them all</div>}
       </div>

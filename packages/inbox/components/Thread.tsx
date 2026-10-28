@@ -4279,7 +4279,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         {error && !errorAbove && errorLine}
       </div>
     </section>
-    {(filesUi.artifactsTab || (openAttachment && !shownFull)) && filesUi.panelPortal}
+    {filesUi.panelPortal}
     {filesUi.artifactsTab && (
       <FilesPane
         tabRow={filesUi.artifactsTabRow}

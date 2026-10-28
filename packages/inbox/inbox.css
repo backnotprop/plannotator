@@ -5371,6 +5371,8 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-ftline { padding: 6px 16px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 /* The quiet changes toggle: an icon in the folder's header that reads as a state, never as an alarm. */
 .pn-inbox .ib-iconbtn.ib-ftchanges { width: auto; min-width: 26px; gap: 3px; padding: 0 5px; }
+/* The header's line beside the thread with tabs: quiet, cut before the tools are. */
+.pn-inbox .ib-ftop .ib-from { flex: 0 1 auto; min-width: 0; margin: 0 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The files panel's place in a pane: the panel is the grid item (useFilesTabs' PanelSlot). */
 .pn-inbox .ib-ftree-slot { display: contents; }
 /* On in the folder header: the accent colour and the count, no fill (quiet). */

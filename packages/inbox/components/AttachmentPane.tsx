@@ -1368,6 +1368,20 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       )}
     </>
   );
+  /** The header's line: a film's length and size, an image's message ("You · 9:41 AM"), else whose file. */
+  const fromLine = (
+    <span className="ib-from" data-header-from="">
+      {isVideo && inboxVideoMeta(attachment)
+        ? inboxVideoMeta(attachment)
+        : // An image the message's text shows: whose message, and when (approval "inbox-image-viewer").
+          inline
+          ? `${props.fromPerson ? 'You' : props.agent} · ${sentAt}`
+          : // A file of the project folder (Files): nobody sent it.
+            attachment.id.startsWith('pf:')
+            ? `in ${props.projectName}`
+            : `from ${props.agent} in ${props.projectName}`}
+    </span>
+  );
   const viewTools = (
     <>
       {!props.fullLocked && (
@@ -1479,10 +1493,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         />
       ) : props.tabs ? (
         <div className={`ib-ftop${props.tabs.fold ? '' : ' ib-ftop2'}`} data-files-header="">
-          {props.tabs.row(props.tabs.fold ? { file: fileTools, view: viewTools } : null)}
+          {/* The header's line (whose file, a film's length, an image's message) stays beside the thread: after the
+              tools in the tab row with one file, after the path in the bar with more. */}
+          {props.tabs.row(props.tabs.fold ? { file: <>{fileTools}{fromLine}</>, view: viewTools } : null)}
           {!props.tabs.fold && (
             <div className="ib-vhead ib-vslim">
               {props.tabs.crumb}
+              {fromLine}
               <span className="ib-vtools">{fileTools}</span>
               <span className="ib-sp" />
               {props.tabs.extra}
@@ -1498,14 +1515,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               <FileName name={attachment.name} />
             </span>
           )}
-          <span className="ib-from" data-header-from="">
-            {isVideo && inboxVideoMeta(attachment)
-              ? inboxVideoMeta(attachment)
-              : // An image the message's text shows: whose message, and when (approval "inbox-image-viewer").
-                inline
-                ? `${props.fromPerson ? 'You' : props.agent} · ${sentAt}`
-                : `from ${props.agent} in ${props.projectName}`}
-          </span>
+          {fromLine}
           <span className="ib-sp" />
           {fileTools}
           {viewTools}
