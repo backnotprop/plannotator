@@ -290,12 +290,14 @@ export interface ReviewGitRuntime {
     maxBytes: number,
   ) => Promise<RepoWorkingTreeBytes | RepoFileFailure>;
   /**
-   * The real path of a review root, held to the session's root pin
-   * (`checkRepoRoot` in repo-file.ts): `null` when the directory was replaced
-   * since the session pinned it. Working-tree reads check their `cwd` with it
-   * before running git there. Optional for the same reason as above.
+   * Accept `top` (what `git rev-parse --show-toplevel` printed in `cwd`) as
+   * the folder working-tree paths are read under, held to the review
+   * session's pins (`checkRepoToplevel` in repo-root-pins.ts): `cwd` must
+   * still be its pinned directory, and a `top` other than `cwd` itself must
+   * be a folder the server pinned. Returns the real path to read under, or
+   * `null` when refused. Optional for the same reason as above.
    */
-  checkRepoRoot?: (path: string) => Promise<string | null>;
+  checkRepoToplevel?: (cwd: string, top: string) => Promise<string | null>;
   /**
    * Read one working-tree path for diff context expansion: every directory
    * on the way resolves inside `root`, a final symlink comes back as its
@@ -960,33 +962,33 @@ async function resolveRepoToplevel(
   return trimmed || cwd;
 }
 
-/** Path form for comparing a git toplevel with a real path (case folds on macOS and Windows). */
-function comparablePath(path: string): string {
-  const platform = typeof process === "undefined" ? "" : process.platform;
-  const slashed = path.replace(/\\/g, "/").replace(/\/+$/, "").normalize("NFC");
-  return platform === "darwin" || platform === "win32" ? slashed.toLowerCase() : slashed;
+/**
+ * The given folders plus each one's git toplevel, without duplicates: what a
+ * review server pins when it starts (repo-root-pins.ts), so a toplevel above
+ * the folder it was opened on is a trusted pin.
+ */
+export async function withRepoToplevels(
+  runtime: ReviewGitRuntime,
+  paths: Iterable<string | null | undefined>,
+): Promise<string[]> {
+  const folders = [...new Set([...paths].filter((path): path is string => !!path))];
+  const tops = await Promise.all(folders.map((folder) => resolveRepoToplevel(runtime, folder)));
+  return [...new Set([...folders, ...tops.filter((top): top is string => !!top)])];
 }
 
 /**
- * The toplevel for a working-tree read, held to the session's root pin
- * (`checkRepoRoot`, repo-file.ts) where the runtime has one: `cwd` must still
- * be the directory the session pinned (so a repo replaced by a symlink to
- * another repo is refused before git runs in it), and the toplevel git
- * reports must contain it. `null`: refused. The read then holds the toplevel
- * to its own pin.
+ * The toplevel for a working-tree read, held to the session's pins where the
+ * runtime has them (`checkRepoToplevel`): `null` when refused. The read then
+ * holds the toplevel to its own pin.
  */
 async function pinnedRepoToplevel(
   runtime: ReviewGitRuntime,
   cwd?: string,
 ): Promise<string | undefined | null> {
-  if (!runtime.checkRepoRoot || !cwd) return resolveRepoToplevel(runtime, cwd);
-  const pinnedCwd = await runtime.checkRepoRoot(cwd);
-  if (pinnedCwd === null) return null;
+  if (!runtime.checkRepoToplevel || !cwd) return resolveRepoToplevel(runtime, cwd);
   const top = await resolveRepoToplevel(runtime, cwd);
   if (!top) return top;
-  const topPath = comparablePath(top);
-  const cwdPath = comparablePath(pinnedCwd);
-  return cwdPath === topPath || cwdPath.startsWith(`${topPath}/`) ? top : null;
+  return runtime.checkRepoToplevel(cwd, top);
 }
 
 interface RawDiffEntry {

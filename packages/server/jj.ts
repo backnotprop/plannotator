@@ -1,4 +1,5 @@
 import { childEnv } from "@plannotator/shared/child-env";
+import { checkRepoCommandCwd } from "@plannotator/shared/repo-root-pins";
 import { readCappedBytes } from "./git";
 import {
   type DiffResult,
@@ -72,6 +73,9 @@ async function runJj(
   args: string[],
   options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
 ): Promise<GitCommandResult> {
+  // Same gate as git (repo-root-pins.ts): a replaced pinned folder never runs jj.
+  const pinned = checkRepoCommandCwd(options?.cwd);
+  if (!pinned.ok) return { stdout: "", stderr: pinned.message, exitCode: 1 };
   try {
     const proc = Bun.spawn(["jj", ...JJ_COLOR_FREE_ARGS, ...args], {
       cwd: options?.cwd,
@@ -109,6 +113,8 @@ async function runJjBytes(
   args: string[],
   options?: { cwd?: string; timeoutMs?: number; maxOutputBytes?: number },
 ): Promise<GitBytesCommandResult> {
+  const pinned = checkRepoCommandCwd(options?.cwd);
+  if (!pinned.ok) return { stdout: new Uint8Array(0), stderr: pinned.message, exitCode: 1 };
   try {
     const proc = Bun.spawn(["jj", ...JJ_COLOR_FREE_ARGS, ...args], {
       cwd: options?.cwd,

@@ -15,7 +15,8 @@ import {
 	prepareGitCommand,
 	runGitDiff as runGitDiffCore,
 } from "../generated/review-core.ts";
-import { checkRepoRoot, readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "../generated/repo-file.ts";
+import { readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "../generated/repo-file.ts";
+import { checkRepoCommandCwd, checkRepoToplevel, withGitCeiling } from "../generated/repo-root-pins.ts";
 import {
 	JJ_COLOR_FREE_ARGS,
 	type ReviewJjRuntime,
@@ -106,11 +107,20 @@ function runCommandBytes(
 	commandEnvironment?: NodeJS.ProcessEnv,
 	isolateProcessGroup = preparedGitCommand?.isolateProcessGroup ?? false,
 ): Promise<GitBytesCommandResult> {
+	// A review session's pinned folder must still be the pinned directory
+	// before git or jj runs in it (repo-root-pins.ts).
+	const pinned = checkRepoCommandCwd(options?.cwd);
+	if (!pinned.ok) {
+		return Promise.resolve({ stdout: new Uint8Array(0), stderr: pinned.message, exitCode: command === "git" ? 128 : 1 });
+	}
+	const environment = preparedGitCommand?.env ?? commandEnvironment;
 	return new Promise((resolve) => {
 		const proc = spawn(command, args, {
 			cwd: options?.cwd,
 			detached: isolateProcessGroup,
-			env: preparedGitCommand?.env ?? commandEnvironment,
+			env: command === "git" && pinned.gitCeiling
+				? withGitCeiling(environment ?? process.env, pinned.gitCeiling)
+				: environment,
 			stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
 			windowsHide: true,
 		});
@@ -223,9 +233,8 @@ export const reviewRuntime: ReviewGitRuntime = {
 		return readRepoWorkingTreeBytes(root, path, { maxBytes });
 	},
 
-	async checkRepoRoot(path) {
-		const checked = checkRepoRoot(path);
-		return checked.ok ? checked.realRoot : null;
+	async checkRepoToplevel(cwd, top) {
+		return checkRepoToplevel(cwd, top);
 	},
 
 	runGitBytes(

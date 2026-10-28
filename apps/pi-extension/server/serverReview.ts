@@ -11,7 +11,7 @@ import {
 	type DiagramEngineSource,
 } from "../generated/diagram-engine-assets.ts";
 import { readFileSync, existsSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import os from "node:os";
 import { basename, dirname as dirnamePath, join as joinPath, resolve as resolvePath } from "node:path";
 
@@ -81,6 +81,7 @@ import {
 	parseWorktreeDiffType,
 	resolveBaseBranch,
 	validateFilePath,
+	withRepoToplevels,
 } from "../generated/review-core.ts";
 import {
 	REVIEW_IMAGE_ENDPOINT,
@@ -213,7 +214,8 @@ import {
 	validateCodeNavRequest,
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
-import { pinRepoRoots, readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
+import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
+import { checkRepoCommandCwd, RepoRootPins } from "../generated/repo-root-pins.ts";
 import {
 	createDefaultSemanticDiffRuntime,
 	getSemanticDiffAvailability,
@@ -256,6 +258,9 @@ import {
 /** Exported for tests: `readFile` is the hover's definition read. */
 export const piCodeNavRuntime: CodeNavRuntime = {
 	runCommand(command, args, options) {
+		// A replaced pinned folder is never searched (repo-root-pins.ts).
+		const pinned = checkRepoCommandCwd(options?.cwd);
+		if (!pinned.ok) return Promise.resolve({ stdout: "", stderr: pinned.message, exitCode: 1 });
 		return new Promise((resolve) => {
 			const proc = spawn(command, args, {
 				cwd: options?.cwd,
@@ -2206,8 +2211,25 @@ export async function startReviewServer(options: {
 		env: process.env,
 	});
 
+	// Pin this session's folders (repo-root-pins.ts) before the first request:
+	// the folders it was opened on, their git toplevels, every workspace member
+	// and every PR worktree the pool creates. A pinned folder replaced after
+	// this point (say `mv repo repo.old; ln -s /elsewhere repo`) is refused by
+	// the readers and by every git or jj command, and only these pins may stand
+	// as a toplevel above a reviewed folder. Requests run inside the session;
+	// stop releases it, so the long-lived Pi host keeps no pins between reviews.
+	const rootPins = new RepoRootPins();
+	rootPins.pin(await withRepoToplevels(reviewRuntime, [
+		options.agentCwd,
+		options.gitContext?.cwd,
+		options.gitContext?.root,
+		workspace?.root,
+		...(workspace?.repos ?? []).flatMap((repo) => [repo.cwd, repo.gitContext?.cwd, repo.gitContext?.root]),
+	]));
+	const stopPoolPins = options.worktreePool?.onEntryReady?.((entry) => rootPins.pin([entry.path]));
+
 	const requestHostGuard = createRequestHostGuard();
-	const server = createServer(async (req, res) => {
+	const server = createServer(rootPins.scoped(async (req: IncomingMessage, res: ServerResponse) => {
 		// Host allowlist first, before any route (request-host-guard.ts).
 		if (requestHostGuard.refuse(req, res)) return;
 		// Then no write from another site, before any route (request-origin-guard.ts).
@@ -4131,7 +4153,7 @@ export async function startReviewServer(options: {
 		} else {
 			await html(req, res, options.htmlContent, isRemoteSession());
 		}
-	});
+	}));
 
 	requestHostGuard.attach(server);
 	const { port, portSource } = await listenOnPort(server);
@@ -4143,17 +4165,6 @@ export async function startReviewServer(options: {
 	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();
 	process.once("exit", exitHandler);
-
-	// Pin this session's repository roots (repo-file.ts): a root directory
-	// replaced after this point (say `mv repo repo.old; ln -s /elsewhere repo`)
-	// is refused instead of read. Other roots pin on first read. Released on
-	// stop, so the long-lived Pi host does not keep them between reviews.
-	const releaseRootPins = pinRepoRoots([
-		options.agentCwd,
-		options.gitContext?.cwd,
-		options.gitContext?.root,
-		workspace?.root,
-	]);
 
 	if (options.onReady) {
 		options.onReady(serverUrl, isRemote, port);
@@ -4169,7 +4180,8 @@ export async function startReviewServer(options: {
 		stop: () => {
 			// try/finally: a throwing dispose must never leave the listener bound.
 			try {
-				releaseRootPins();
+				stopPoolPins?.();
+				rootPins.release();
 				process.removeListener("exit", exitHandler);
 				agentJobs.killAll();
 				callFlowService.cancelAll();

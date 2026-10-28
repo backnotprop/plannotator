@@ -6,7 +6,8 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
-import { checkRepoRoot, readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
+import { readRepoWorkingTreeBytes, readRepoWorkingTreeEntry } from "@plannotator/shared/repo-file";
+import { checkRepoCommandCwd, checkRepoToplevel, withGitCeiling } from "@plannotator/shared/repo-root-pins";
 import { lstat, readlink } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 
@@ -87,11 +88,15 @@ async function runGit(
   args: string[],
   options?: GitCommandOptions,
 ): Promise<GitCommandResult> {
+  // A review session's pinned folder must still be the pinned directory
+  // before git runs in it (repo-root-pins.ts).
+  const pinned = checkRepoCommandCwd(options?.cwd);
+  if (!pinned.ok) return { stdout: "", stderr: pinned.message, exitCode: 128 };
   const command = prepareGitCommand(args, options, process.env);
   const proc = Bun.spawn(["git", ...command.args], {
     cwd: options?.cwd,
     detached: command.isolateProcessGroup,
-    env: command.env ?? childEnv(),
+    env: withGitCeiling(command.env ?? childEnv(), pinned.gitCeiling),
     stdin: options?.stdin === undefined
       ? "ignore"
       : new TextEncoder().encode(options.stdin),
@@ -188,10 +193,12 @@ async function runGitBytes(
   args: string[],
   options?: GitCommandOptions,
 ): Promise<GitBytesCommandResult> {
+  const pinned = checkRepoCommandCwd(options?.cwd);
+  if (!pinned.ok) return { stdout: new Uint8Array(0), stderr: pinned.message, exitCode: 128 };
   const command = prepareGitCommand(args, options, process.env);
   const proc = Bun.spawn(["git", ...command.args], {
     cwd: options?.cwd,
-    env: command.env ?? childEnv(),
+    env: withGitCeiling(command.env ?? childEnv(), pinned.gitCeiling),
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -234,9 +241,8 @@ export const runtime: ReviewGitRuntime = {
   async readWorkingTreeBytes(root, path, maxBytes) {
     return readRepoWorkingTreeBytes(root, path, { maxBytes });
   },
-  async checkRepoRoot(path) {
-    const checked = checkRepoRoot(path);
-    return checked.ok ? checked.realRoot : null;
+  async checkRepoToplevel(cwd, top) {
+    return checkRepoToplevel(cwd, top);
   },
   runGitBytes,
   async readTextFile(path: string): Promise<string | null> {

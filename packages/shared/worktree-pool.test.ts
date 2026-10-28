@@ -322,3 +322,37 @@ describe("worktree-pool seeded warmup", () => {
     expect(firstPr4Index).toBeGreaterThan(pr3AddIndex);
   });
 });
+
+// The review server pins every PR checkout the moment it is ready
+// (repo-root-pins.ts); a checkout it never hears about is pinned only on
+// first use, after a swap could already have happened.
+describe("worktree-pool ready checkouts", () => {
+  test("a subscriber hears of every ready checkout once: the seeded warmup and each one created later", async () => {
+    const { runtime } = fakeRuntime();
+    const warmup = deferred<{ path: string; prUrl: string; number: number; ready: boolean }>();
+    const pool = createWorktreePool(
+      { sessionDir: "/tmp/session", repoDir: "/repo", isSameRepo: true },
+      notReadyInitial(),
+      warmup.promise,
+    );
+    const heard: string[] = [];
+    const unsubscribe = pool.onEntryReady!((entry) => heard.push(entry.path));
+    expect(heard).toEqual([]); // still warming up
+
+    warmup.resolve({ path: "/tmp/session/pool/pr-3", prUrl: PR3_URL, number: 3, ready: true });
+    await warmup.promise;
+    await Bun.sleep(0);
+    await pool.ensure(runtime, makeMetadata(5));
+    expect(heard).toEqual(["/tmp/session/pool/pr-3", "/tmp/session/pool/pr-5"]);
+
+    // A late subscriber hears of the ready ones at once.
+    const late: string[] = [];
+    pool.onEntryReady!((entry) => late.push(entry.path));
+    expect(late).toEqual(["/tmp/session/pool/pr-3", "/tmp/session/pool/pr-5"]);
+
+    unsubscribe();
+    await pool.ensure(runtime, makeMetadata(6));
+    expect(heard).toHaveLength(2);
+    expect(late).toContain("/tmp/session/pool/pr-6");
+  });
+});

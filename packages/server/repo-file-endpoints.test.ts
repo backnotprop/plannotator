@@ -45,6 +45,9 @@ import { reviewRuntime as piGitRuntime } from "../../apps/pi-extension/server/vc
 import { bunCodeNavRuntime } from "./code-nav";
 import { runtime as bunGitRuntime } from "./git";
 import { getVcsContext } from "./vcs";
+import { buildLocalWorkspaceReview as buildBunWorkspaceReview } from "./review-workspace";
+import * as piVcs from "../../apps/pi-extension/server/vcs";
+import { WorkspaceReviewSession as PiWorkspaceReviewSession } from "../../apps/pi-extension/generated/review-workspace";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const PATCH = "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-a\n+export const app = 1;\n";
@@ -457,101 +460,148 @@ describePosix("GET /api/file-content guards", () => {
 });
 
 /**
- * The repository root itself replaced while the review runs. Someone who can
- * write the root's parent (a worktree under `.claude/worktrees`, a repo in
- * /tmp) renames the repo away and puts something else at its path. Before
- * the root was pinned, every read resolved the root path again, so both
- * routes served the replacement's files.
+ * A reviewed folder replaced while the review runs. Someone who can write the
+ * folder's parent (a worktree under `.claude/worktrees`, a repo in /tmp)
+ * renames the repo away and puts something else at its path. Each server
+ * pins its folders when it starts (repo-root-pins.ts). Before the pins, every
+ * read resolved the path again and served the replacement's files; before
+ * the command gate, git ran in the replacement and served its history
+ * (`git show HEAD:path` for the old side, the raw patch on a diff switch).
  */
-describePosix("a repository root replaced during the review", () => {
+describePosix("a reviewed folder replaced during the review", () => {
   const APP_PATCH =
     "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-v1\n+v2 inside\n";
+  const RUNTIMES = [
+    ["Bun", startBunReviewServer],
+    ["Pi", startPiReviewServer],
+  ] as const;
+  type Server = { url: string; stop: () => void };
 
-  function makeRepo(dir: string, content: string): void {
-    mkdirSync(join(dir, "src"), { recursive: true });
-    writeFileSync(join(dir, "src", "app.ts"), "v1\n");
+  function initRepo(dir: string): void {
     runGit(dir, ["init", "-q"]);
     runGit(dir, ["config", "user.email", "test@example.com"]);
     runGit(dir, ["config", "user.name", "Test"]);
     runGit(dir, ["add", "."]);
     runGit(dir, ["commit", "-q", "-m", "initial"]);
-    writeFileSync(join(dir, "src", "app.ts"), content);
   }
 
-  /** How the root is replaced once the server runs. */
+  /** A repo whose HEAD has `committed` in src/app.ts and whose working tree has `working`. */
+  function makeRepo(dir: string, committed: string, working: string): void {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "app.ts"), committed);
+    initRepo(dir);
+    writeFileSync(join(dir, "src", "app.ts"), working);
+  }
+
+  /** Another repo: secrets in its history, its working tree and an untracked file. */
+  function makeSecretRepo(dir: string): void {
+    makeRepo(dir, "TOP SECRET committed\n", "TOP SECRET working\n");
+    writeFileSync(join(dir, "src", "untracked.ts"), "export const SECRET_SYMBOL = \"TOP SECRET untracked\";\n");
+  }
+
+  async function sandbox(runtime: "Bun" | "Pi", base: string): Promise<void> {
+    setEnv("PLANNOTATOR_DATA_DIR", join(base, "data"));
+    setEnv("PLANNOTATOR_BROWSER", NO_BROWSER);
+    setEnv("PLANNOTATOR_UPDATE_CHECK", "0");
+    setEnv("PLANNOTATOR_INBOX_CONNECT", "0");
+    if (runtime === "Pi") await reservePiPort();
+  }
+
+  async function startOn(
+    runtime: "Bun" | "Pi",
+    startServer: (typeof RUNTIMES)[number][1],
+    repo: string,
+  ): Promise<Server> {
+    if (runtime === "Pi") await reservePiPort();
+    return startServer({
+      rawPatch: APP_PATCH,
+      gitRef: "Working tree",
+      diffType: "uncommitted",
+      gitContext: await getVcsContext(repo, "git"),
+      agentCwd: repo,
+      origin: runtime === "Pi" ? "pi" : "claude-code",
+      htmlContent: MINIMAL_HTML,
+    });
+  }
+
+  const get = (url: string) => fetch(url, { signal: AbortSignal.timeout(10_000) });
+
+  async function probe(url: string, path: string) {
+    const nav = await get(`${url}/api/code-nav/file?path=${encodeURIComponent(path)}`);
+    const content = await get(`${url}/api/file-content?path=${encodeURIComponent(path)}`);
+    return {
+      navStatus: nav.status,
+      nav: await nav.text(),
+      content: (await content.json()) as { oldContent: string | null; newContent: string | null },
+    };
+  }
+
+  async function switchDiff(url: string, diffType: string): Promise<string> {
+    const response = await fetch(`${url}/api/diff/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ diffType }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return response.text();
+  }
+
   const replacements = [
     [
-      "with a symlink to an outside directory",
+      "for a symlink to another repository",
       (base: string, repo: string) => {
         renameSync(repo, join(base, "repo.moved"));
-        symlinkSync(join(base, "outside"), repo);
+        symlinkSync(join(base, "other"), repo);
       },
     ],
     [
-      "with another repository moved into its place",
+      "by another repository moved into its place",
       (base: string, repo: string) => {
         renameSync(repo, join(base, "repo.moved"));
-        renameSync(join(base, "outside"), repo);
+        renameSync(join(base, "other"), repo);
       },
     ],
   ] as const;
 
-  for (const [runtime, startServer] of [
-    ["Bun", startBunReviewServer],
-    ["Pi", startPiReviewServer],
-  ] as const) {
+  for (const [runtime, startServer] of RUNTIMES) {
     for (const [how, replace] of replacements) {
-      test(`${runtime}: a root replaced ${how} is refused by code-nav and diff expansion`, async () => {
+      test(`${runtime}: a root swapped ${how} is refused by the readers and by git`, async () => {
         const base = realpathSync(mkdtempSync(join(tmpdir(), "pn-root-swap-")));
         const repo = join(base, "repo");
-        makeRepo(repo, "v2 inside\n");
-        // A real git repo with the same layout, so git run in the replaced
-        // path answers too.
-        makeRepo(join(base, "outside"), "TOP SECRET\n");
-        let server: { url: string; stop: () => void } | null = null;
+        makeRepo(repo, "v1\n", "v2 inside\n");
+        makeSecretRepo(join(base, "other"));
+        let server: Server | null = null;
         try {
-          setEnv("PLANNOTATOR_DATA_DIR", join(base, "data"));
-          setEnv("PLANNOTATOR_BROWSER", NO_BROWSER);
-          setEnv("PLANNOTATOR_UPDATE_CHECK", "0");
-          setEnv("PLANNOTATOR_INBOX_CONNECT", "0");
-          if (runtime === "Pi") await reservePiPort();
-          const gitContext = await getVcsContext(repo, "git");
-          server = await startServer({
-            rawPatch: APP_PATCH,
-            gitRef: "Working tree",
-            diffType: "uncommitted",
-            gitContext,
-            agentCwd: repo,
-            origin: runtime === "Pi" ? "pi" : "claude-code",
-            htmlContent: MINIMAL_HTML,
-          });
-          const url = server.url;
-          const probe = async () => {
-            const nav = await fetch(`${url}/api/code-nav/file?path=src/app.ts`, { signal: AbortSignal.timeout(5000) });
-            const content = await fetch(`${url}/api/file-content?path=src/app.ts`, {
-              signal: AbortSignal.timeout(5000),
-            });
-            return {
-              navStatus: nav.status,
-              nav: await nav.text(),
-              content: (await content.json()) as { newContent: string | null },
-            };
-          };
+          await sandbox(runtime, base);
+          server = await startOn(runtime, startServer, repo);
 
-          const before = await probe();
+          const before = await probe(server.url, "src/app.ts");
           expect(before.navStatus).toBe(200);
           expect(before.nav).toContain("v2 inside");
-          expect(before.content.newContent).toBe("v2 inside\n");
+          expect(before.content).toMatchObject({ oldContent: "v1\n", newContent: "v2 inside\n" });
 
           replace(base, repo);
-          // The replacement really is what the root path now reads.
-          expect(readFileSync(join(repo, "src", "app.ts"), "utf-8")).toBe("TOP SECRET\n");
+          // The replacement really is what the root path now holds.
+          expect(readFileSync(join(repo, "src", "app.ts"), "utf-8")).toBe("TOP SECRET working\n");
 
-          const after = await probe();
-          expect(after.navStatus).toBe(403);
-          expect(after.nav).not.toContain("TOP SECRET");
-          expect(after.content.newContent).toBeNull();
-          expect(JSON.stringify(after.content)).not.toContain("TOP SECRET");
+          const after = await probe(server.url, "src/app.ts");
+          expect(after.navStatus).toBe(409);
+          expect(JSON.parse(after.nav)).toMatchObject({ reason: "root-replaced" });
+          // Old side from git, new side from the working tree: neither reads the replacement.
+          expect(after.content).toMatchObject({ oldContent: null, newContent: null });
+          // Nor does a code-navigation search (rg or git grep in the root).
+          const search = await fetch(`${server.url}/api/code-nav/resolve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbol: "SECRET_SYMBOL", filePath: "src/app.ts", side: "new" }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          const found = await search.text();
+          expect(found).not.toContain("TOP SECRET");
+          expect(found).not.toContain("untracked.ts");
+          const switched = await switchDiff(server.url, "uncommitted");
+          expect(switched).not.toContain("TOP SECRET");
+          expect(JSON.stringify(after)).not.toContain("TOP SECRET");
         } finally {
           server?.stop();
           restoreEnv();
@@ -559,5 +609,115 @@ describePosix("a repository root replaced during the review", () => {
         }
       });
     }
+
+    test(`${runtime}: a git repository above the reviewed one is never read, even when the reviewed repo loses its .git`, async () => {
+      // The reviewed repo sits inside another repo (like .claude/worktrees/x
+      // inside the main checkout). With its .git gone, git run in it finds
+      // the repo above; rev-parse then names that repo as the toplevel.
+      const base = realpathSync(mkdtempSync(join(tmpdir(), "pn-root-above-")));
+      const parent = join(base, "P");
+      const repo = join(parent, "wt", "x");
+      mkdirSync(parent, { recursive: true });
+      writeFileSync(join(parent, "secret.txt"), "TOP SECRET committed\n");
+      writeFileSync(join(parent, ".gitignore"), "wt/\n");
+      initRepo(parent);
+      writeFileSync(join(parent, "secret.txt"), "TOP SECRET working\n");
+      makeRepo(repo, "v1\n", "v2 inside\n");
+      let server: Server | null = null;
+      try {
+        await sandbox(runtime, base);
+        server = await startOn(runtime, startServer, repo);
+        expect((await probe(server.url, "src/app.ts")).content.newContent).toBe("v2 inside\n");
+
+        renameSync(join(repo, ".git"), join(base, "x.git.moved"));
+        const after = await probe(server.url, "secret.txt");
+        expect(JSON.stringify(after)).not.toContain("TOP SECRET");
+        expect(await switchDiff(server.url, "uncommitted")).not.toContain("TOP SECRET");
+      } finally {
+        server?.stop();
+        restoreEnv();
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+
+    test(`${runtime}: each review keeps its own pins: a new review of a recreated folder reads it, the old one refuses`, async () => {
+      const base = realpathSync(mkdtempSync(join(tmpdir(), "pn-root-sessions-")));
+      const repo = join(base, "repo");
+      makeRepo(repo, "v1\n", "v2 inside\n");
+      makeRepo(join(base, "other"), "v1\n", "v3 recreated\n");
+      let first: Server | null = null;
+      let second: Server | null = null;
+      try {
+        await sandbox(runtime, base);
+        first = await startOn(runtime, startServer, repo);
+        renameSync(repo, join(base, "repo.moved"));
+        renameSync(join(base, "other"), repo);
+        second = await startOn(runtime, startServer, repo);
+
+        const fresh = await probe(second.url, "src/app.ts");
+        expect(fresh.navStatus).toBe(200);
+        expect(fresh.content.newContent).toBe("v3 recreated\n");
+        const stale = await probe(first.url, "src/app.ts");
+        expect(stale.navStatus).toBe(409);
+        expect(stale.content.newContent).toBeNull();
+        // Stopping the old review leaves the new one's pins alone.
+        first.stop();
+        first = null;
+        expect((await probe(second.url, "src/app.ts")).navStatus).toBe(200);
+      } finally {
+        first?.stop();
+        second?.stop();
+        restoreEnv();
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+
+    test(`${runtime}: every workspace member is pinned when the review starts, before any read`, async () => {
+      const base = realpathSync(mkdtempSync(join(tmpdir(), "pn-root-workspace-")));
+      const root = join(base, "ws");
+      makeRepo(join(root, "api"), "v1\n", "v2 api\n");
+      makeRepo(join(root, "web"), "v1\n", "v2 web\n");
+      makeSecretRepo(join(base, "other"));
+      let server: Server | null = null;
+      try {
+        await sandbox(runtime, base);
+        const workspace = runtime === "Bun"
+          ? await buildBunWorkspaceReview(root)
+          : await PiWorkspaceReviewSession.create({
+            getVcsContext: piVcs.getVcsContext,
+            runVcsDiff: piVcs.runVcsDiff,
+            getVcsFileContentsForDiff: piVcs.getVcsFileContentsForDiff,
+            getVcsFileBytesForDiff: piVcs.getVcsFileBytesForDiff,
+            getVcsDiffFingerprint: piVcs.getVcsDiffFingerprint,
+            canStageFiles: piVcs.canStageFiles,
+            stageFile: piVcs.stageFile,
+            unstageFile: piVcs.unstageFile,
+          }, root);
+        server = await (startServer as (options: Record<string, unknown>) => Promise<Server>)({
+          rawPatch: workspace.rawPatch,
+          gitRef: workspace.gitRef,
+          origin: runtime === "Pi" ? "pi" : "claude-code",
+          workspace,
+          agentCwd: workspace.root,
+          htmlContent: MINIMAL_HTML,
+        });
+        // The routes serve members (only `web` is read before the swap).
+        expect((await probe(server.url, "web/src/app.ts")).content).toMatchObject({ newContent: "v2 web\n" });
+
+        renameSync(join(root, "api"), join(base, "api.moved"));
+        renameSync(join(base, "other"), join(root, "api"));
+        // The member's own reads and git (diff expansion, the diff itself)
+        // refuse the replacement. Code navigation reads from the workspace
+        // root, and a directory moved into the root is inside it like any
+        // file written there, so it is not checked here.
+        const after = await probe(server.url, "api/src/app.ts");
+        expect(after.content).toMatchObject({ oldContent: null, newContent: null });
+        expect(await switchDiff(server.url, "workspace-current")).not.toContain("TOP SECRET");
+      } finally {
+        server?.stop();
+        restoreEnv();
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
   }
 });

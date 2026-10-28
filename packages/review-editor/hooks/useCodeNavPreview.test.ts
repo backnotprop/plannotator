@@ -29,3 +29,15 @@ describe("codeNavPreviewErrorMessage changed", () => {
     expect(message).toContain("Try again");
   });
 });
+
+describe("codeNavPreviewErrorMessage root-replaced", () => {
+  test("a replaced repository folder is not reported as a file outside the repository", () => {
+    // The server answers `root-replaced` (409) when the folder the review
+    // pinned is no longer the same directory: the file is not "outside", and
+    // trying again will not help until the review is reopened.
+    const message = codeNavPreviewErrorMessage({ reason: "root-replaced" });
+    expect(message).not.toContain("outside");
+    expect(message).not.toBe(codeNavPreviewErrorMessage({ reason: undefined }));
+    expect(message).toContain("Reopen");
+  });
+});

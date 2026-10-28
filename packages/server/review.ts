@@ -47,6 +47,7 @@ import {
   STATIC_PATCH_DIFF_TYPE,
   type RemoteDefaultInfo,
   type SinceBaseSections,
+  withRepoToplevels,
 } from "@plannotator/shared/review-core";
 import {
   getGitButlerContextRevision,
@@ -180,7 +181,8 @@ import { getExtraMarkdownExtensions } from "@plannotator/shared/resolve-file";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import { resolveWorkspaceFilePath, type LocalWorkspaceReview, type WorkspaceDiffType } from "./review-workspace";
 import { handleCodeNavResolve, handleCodeNavHover, extractChangedFiles } from "./code-nav";
-import { pinRepoRoots, readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "@plannotator/shared/repo-file";
+import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "@plannotator/shared/repo-file";
+import { RepoRootPins } from "@plannotator/shared/repo-root-pins";
 import { decodeBunText } from "./git";
 import { discoverCuratedSkills, resolveRequestedReviewProfile, listAllSkills, enableReviewSkill } from "./review-skill-loader";
 import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shared/guide-instructions-store";
@@ -2256,9 +2258,25 @@ export async function startReviewServer(
     env: process.env,
   });
 
+  // Pin this session's folders (repo-root-pins.ts) before the first request:
+  // the folders it was opened on, their git toplevels, every workspace member
+  // and every PR worktree the pool creates. A pinned folder replaced after
+  // this point (say `mv repo repo.old; ln -s /elsewhere repo`) is refused by
+  // the readers and by every git or jj command, and only these pins may stand
+  // as a toplevel above a reviewed folder. Requests run inside the session.
+  const rootPins = new RepoRootPins();
+  rootPins.pin(await withRepoToplevels(gitRuntime, [
+    options.agentCwd,
+    gitContext?.cwd,
+    gitContext?.root,
+    workspace?.root,
+    ...(workspace?.repos ?? []).flatMap((repo) => [repo.cwd, repo.gitContext?.cwd, repo.gitContext?.root]),
+  ]));
+  const stopPoolPins = options.worktreePool?.onEntryReady?.((entry) => rootPins.pin([entry.path]));
+
   const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
-    Bun.serve(withPlannotatorServerHeader({
+    Bun.serve(withPlannotatorServerHeader(rootPins.scopeFetch({
         hostname: getServerHostname(),
         port,
         // Bun's default 10s idleTimeout kills requests that legitimately park:
@@ -4408,7 +4426,7 @@ export async function startReviewServer(
             { status: 500, headers: { "Content-Type": "text/plain" } },
           );
         },
-    })),
+    }))),
   );
 
   const port = server.port!;
@@ -4418,13 +4436,9 @@ export async function startReviewServer(
   const exitHandler = () => agentJobs.killAll();
   process.once("exit", exitHandler);
 
-  // Pin this session's repository roots (repo-file.ts): a root directory
-  // replaced after this point (say `mv repo repo.old; ln -s /elsewhere repo`)
-  // is refused instead of read. Other roots pin on first read.
-  const releaseRootPins = pinRepoRoots([options.agentCwd, gitContext?.cwd, gitContext?.root, workspace?.root]);
-
   const stop = () => {
-    releaseRootPins();
+    stopPoolPins?.();
+    rootPins.release();
     process.removeListener("exit", exitHandler);
     agentJobs.killAll();
     callFlowService.cancelAll();

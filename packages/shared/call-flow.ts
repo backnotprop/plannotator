@@ -24,6 +24,7 @@ import {
 } from "./call-flow-languages";
 import type { CallFlowLanguageDefinition, CallFlowLanguageId } from "./call-flow-languages";
 import { getPlannotatorDataDir } from "./data-dir";
+import { checkRepoCommandCwd } from "./repo-root-pins";
 import { gitColorFreeEnvironment } from "./review-core";
 import { indexCallFlowImpacts, parseCallDiffWorkerResult } from "./call-flow-types";
 import type {
@@ -958,6 +959,11 @@ async function runCommand(
   options: { cwd?: string; input?: string; timeoutMs?: number; maxOutputBytes?: number; env?: NodeJS.ProcessEnv; signal?: AbortSignal } = {},
 ): Promise<CommandResult> {
   const maxOutputBytes = options.maxOutputBytes ?? MAX_PROCESS_OUTPUT_BYTES;
+  // A replaced pinned review folder is never analysed (repo-root-pins.ts).
+  const pinned = checkRepoCommandCwd(options.cwd);
+  if (!pinned.ok) {
+    return { exitCode: 1, stdout: "", stderr: pinned.message, timedOut: false, outputLimitExceeded: false, aborted: false };
+  }
   return await new Promise((resolvePromise) => {
     const child = spawn(executable, [...args], {
       cwd: options.cwd,

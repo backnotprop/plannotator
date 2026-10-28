@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { getPlannotatorDataDir } from "./data-dir";
+import { checkRepoCommandCwd } from "./repo-root-pins";
 import type {
   SemanticDiffAvailability,
   SemanticDiffBinaryChange,
@@ -57,6 +58,9 @@ function defaultRunCommand(
   args: string[],
   options: { cwd?: string; input?: string; timeoutMs?: number } = {},
 ): Promise<CommandResult> {
+  // A replaced pinned review folder is never analysed (repo-root-pins.ts).
+  const pinned = checkRepoCommandCwd(options.cwd);
+  if (!pinned.ok) return Promise.resolve({ stdout: "", stderr: pinned.message, exitCode: 1, error: pinned.message });
   return new Promise((resolveResult) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;

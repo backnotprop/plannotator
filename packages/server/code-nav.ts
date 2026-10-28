@@ -15,6 +15,7 @@ import {
   extractChangedFiles,
 } from "@plannotator/shared/code-nav";
 import { readRepoFile } from "@plannotator/shared/repo-file";
+import { checkRepoCommandCwd } from "@plannotator/shared/repo-root-pins";
 import { decodeBunText } from "./git";
 
 export type { CodeNavRequest, CodeNavResponse, CodeNavHoverResponse };
@@ -22,6 +23,9 @@ export type { CodeNavRequest, CodeNavResponse, CodeNavHoverResponse };
 /** Exported for tests: `readFile` is the hover's definition read. */
 export const bunCodeNavRuntime: CodeNavRuntime = {
   async runCommand(command, args, options) {
+    // A replaced pinned folder is never searched (repo-root-pins.ts).
+    const pinned = checkRepoCommandCwd(options?.cwd);
+    if (!pinned.ok) return { stdout: "", stderr: pinned.message, exitCode: 1 };
     let proc;
     try {
       proc = Bun.spawn([command, ...args], {

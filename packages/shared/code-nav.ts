@@ -597,10 +597,9 @@ export async function resolveCodeNav(
   const start = Date.now();
 
   if (rgAvailable === null) {
-    const check = await runtime.runCommand("rg", ["--version"], {
-      cwd,
-      timeoutMs: 2000,
-    });
+    // No cwd: the answer is cached for the process, so it must not depend
+    // on a review folder (one refused as replaced would read "no rg").
+    const check = await runtime.runCommand("rg", ["--version"], { timeoutMs: 2000 });
     rgAvailable = check.exitCode === 0;
   }
 

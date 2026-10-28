@@ -55,15 +55,14 @@
  * the parent's ctime alone) is out of scope: that needs the user's own
  * rights, which already read every file.
  *
- * The root itself is pinned per review session ({@link pinRepoRoots}): its
- * real path, dev and ino when the server started (or when a session first
+ * The root itself is pinned per review session (repo-root-pins.ts): its
+ * real path, dev and ino when the server started (or when the session first
  * read it). Someone who can write the root's parent (a worktree under
  * `.claude/worktrees`, a repo in /tmp, a nested repo) could otherwise
  * `mv repo repo.old; ln -s /elsewhere repo`, and every check above would pass
  * against the new "root". A pinned root that no longer resolves to the same
- * directory is refused; a racing swap of the root is caught like any other
- * directory on the way. A root legitimately replaced mid-review is refused
- * until the review ends; pins are dropped when the last session stops.
+ * directory is refused ("root-replaced"); a racing swap of the root is caught
+ * like any other directory on the way.
  *
  * Hard links: a hard link inside the repo to a file outside it is the same
  * inode at a contained path, so it cannot be told apart and is read. Git never
@@ -84,6 +83,7 @@ import {
 	statSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { checkPinnedRoot, ROOT_REPLACED_MESSAGE } from "./repo-root-pins";
 import { MAX_REVIEW_FILE_CONTENT_BYTES } from "./review-core";
 
 /**
@@ -99,7 +99,9 @@ export type RepoFileFailureReason =
 	| "not-a-file"
 	| "too-large"
 	/** A directory on the way kept changing during the read; trying again may work. */
-	| "changed";
+	| "changed"
+	/** The repository folder is no longer the one this review session pinned. */
+	| "root-replaced";
 
 export interface RepoFileSuccess {
 	ok: true;
@@ -176,6 +178,7 @@ export const REPO_FILE_ERROR_STATUS: Record<RepoFileFailureReason, number> = {
 	"not-a-file": 400,
 	"too-large": 413,
 	changed: 409,
+	"root-replaced": 409,
 };
 
 /** The JSON error body both servers send for a failed read. */
@@ -294,85 +297,16 @@ export function resolveRepoFilePath(
 // --- Pinning the root ---------------------------------------------------------
 
 /**
- * The root as it was when a review session first saw it. Without a pin every
- * read resolves the root path again, so someone who can write the root's
- * parent (a worktree under `.claude/worktrees`, a repo in /tmp, a nested
- * repo) can `mv repo repo.old; ln -s /elsewhere repo` and every check below
- * passes against the new "root".
- */
-interface RootPin {
-	real: string;
-	dev: bigint;
-	ino: bigint;
-}
-
-/** Keyed by the root as given (resolved lexically) and by its real path. */
-const rootPins = new Map<string, RootPin>();
-let pinSessions = 0;
-
-function pinKey(root: string): string {
-	return resolve(root);
-}
-
-function takePin(root: string): RootPin | null {
-	const real = realpathOrNull(root);
-	if (real === null) return null;
-	try {
-		const stats = lstatSync(real, { bigint: true });
-		if (!stats.isDirectory()) return null;
-		const pin = { real, dev: stats.dev, ino: stats.ino };
-		rootPins.set(pinKey(root), pin);
-		if (!rootPins.has(real)) rootPins.set(real, pin);
-		return pin;
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Start a review session's root pins: pin `roots` now (missing ones are
- * skipped), and pin any other root on its first read while a session is
- * running. Returns the release; when the last session ends every pin is
- * dropped, so a long-lived host (Pi, OpenCode) does not hold a root that was
- * legitimately replaced between reviews.
- */
-export function pinRepoRoots(roots: Iterable<string | null | undefined>): () => void {
-	pinSessions++;
-	for (const root of roots) {
-		if (root && !rootPins.has(pinKey(root))) takePin(root);
-	}
-	let released = false;
-	return () => {
-		if (released) return;
-		released = true;
-		pinSessions--;
-		if (pinSessions === 0) rootPins.clear();
-	};
-}
-
-/**
- * The root's real path, held to its pin: it must still resolve to the pinned
- * real path, which must still be a directory (not a link) with the pinned
- * dev and ino. Unpinned roots are pinned here while a session runs; with no
- * session (tests, the VS Code guide source) the root is only resolved.
+ * The root's real path, held to the current review session's pin
+ * (repo-root-pins.ts): it must still be the directory the session pinned.
+ * With no session the root is only resolved.
  */
 export function checkRepoRoot(root: string): { ok: true; realRoot: string } | RepoFileFailure {
-	const real = realpathOrNull(root);
-	if (real === null) return fail("not-found", "Repository root is unavailable");
-	const pin = rootPins.get(pinKey(root)) ?? rootPins.get(real);
-	if (!pin) {
-		if (pinSessions > 0 && takePin(root) === null) return fail("not-found", "Repository root is unavailable");
-		return { ok: true, realRoot: real };
-	}
-	const replaced = (): RepoFileFailure => fail("outside-root", "The repository root was replaced during the review");
-	if (real !== pin.real) return replaced();
-	try {
-		const stats = lstatSync(pin.real, { bigint: true });
-		if (!stats.isDirectory() || stats.dev !== pin.dev || stats.ino !== pin.ino) return replaced();
-	} catch {
-		return replaced();
-	}
-	return { ok: true, realRoot: pin.real };
+	const checked = checkPinnedRoot(root);
+	if (checked.ok) return checked;
+	return checked.reason === "root-replaced"
+		? fail("root-replaced", ROOT_REPLACED_MESSAGE)
+		: fail("not-found", "Repository root is unavailable");
 }
 
 // --- Proving the open is contained -------------------------------------------

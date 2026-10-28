@@ -34,6 +34,12 @@ export interface WorktreePool {
   ensure(runtime: ReviewGitRuntime, metadata: PRMetadata): Promise<PoolEntry>;
   entries(): IterableIterator<PoolEntry>;
   cleanup(runtime: ReviewGitRuntime): Promise<void>;
+  /**
+   * Call `listener` for every ready checkout: those ready now, then each one
+   * as soon as it is created. The review server pins them
+   * (repo-root-pins.ts). Returns the unsubscribe.
+   */
+  onEntryReady?(listener: (entry: PoolEntry) => void): () => void;
 }
 
 /** A PR checkout is ready, still warming up, or absent from the pool. */
@@ -67,7 +73,19 @@ export function createWorktreePool(
   // its own fetch and `git worktree add`. Serialize all creations through
   // this chain.
   let creationChain: Promise<unknown> = Promise.resolve();
-  if (initial) pool.set(initial.prUrl, initial);
+  const readyListeners = new Set<(entry: PoolEntry) => void>();
+  const setEntry = (key: string, entry: PoolEntry) => {
+    pool.set(key, entry);
+    if (!entry.ready) return;
+    for (const listener of readyListeners) {
+      try {
+        listener(entry);
+      } catch {
+        // A listener's failure must not fail the creation.
+      }
+    }
+  };
+  if (initial) setEntry(initial.prUrl, initial);
 
   // Seeded background warmup: the initial entry starts ready:false while the
   // caller builds its checkout (fetch/clone) off the request path. ensure()
@@ -78,7 +96,7 @@ export function createWorktreePool(
   if (initial && initialPending) {
     const tracked = initialPending.then(
       (entry) => {
-        pool.set(initial.prUrl, entry);
+        setEntry(initial.prUrl, entry);
         return entry;
       },
       (err) => {
@@ -129,7 +147,7 @@ export function createWorktreePool(
         });
 
         const entry: PoolEntry = { path: worktreePath, prUrl: metadata.url, number, ready: true };
-        pool.set(metadata.url, entry);
+        setEntry(metadata.url, entry);
         return entry;
       };
 
@@ -145,6 +163,12 @@ export function createWorktreePool(
     },
 
     entries() { return pool.values(); },
+
+    onEntryReady(listener) {
+      readyListeners.add(listener);
+      for (const entry of pool.values()) if (entry.ready) listener(entry);
+      return () => readyListeners.delete(listener);
+    },
 
     async cleanup(runtime) {
       // Wait out in-flight creations first: a warmup or queued ensure() that

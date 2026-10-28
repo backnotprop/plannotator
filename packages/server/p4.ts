@@ -6,6 +6,7 @@
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
+import { checkRepoCommandCwd } from "@plannotator/shared/repo-root-pins";
 import {
   type DiffResult,
   type DiffType,
@@ -21,6 +22,9 @@ async function runP4(
   args: string[],
   options?: { cwd?: string },
 ): Promise<GitCommandResult> {
+  // Same gate as git (repo-root-pins.ts): a replaced pinned folder never runs p4.
+  const pinned = checkRepoCommandCwd(options?.cwd);
+  if (!pinned.ok) return { stdout: "", stderr: pinned.message, exitCode: 1 };
   try {
     const proc = Bun.spawn(["p4", ...args], {
       cwd: options?.cwd,

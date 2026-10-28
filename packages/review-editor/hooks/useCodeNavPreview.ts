@@ -42,6 +42,8 @@ export function codeNavPreviewErrorMessage(body: CodeNavFileError | null): strin
       return 'This file was not found.';
     case 'changed':
       return 'This file changed while it was being read. Try again.';
+    case 'root-replaced':
+      return 'The repository folder was replaced after this review started, so its files are not shown. Reopen the review to read them.';
     default:
       return 'This file could not be previewed.';
   }
