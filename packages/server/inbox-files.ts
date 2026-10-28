@@ -27,7 +27,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
+import { readdirSync, realpathSync, statSync, type Dirent, type Stats } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_VIEW_MAX_BYTES, isInboxAnnotatableKind, isInboxTextBytes, isInboxTextKind, type InboxAttachmentKind, type InboxThread } from "@plannotator/core/inbox-types";
@@ -55,7 +56,8 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { sniffImageContentType } from "@plannotator/shared/review-image";
 import { contentDisposition } from "./inbox-attachments";
-import { readFilesFile, resolveFilesPath, type FilesGuardFailure } from "./inbox-files-guard";
+import { openFilesFile, reachesGit, readFilesFile, resolveFilesPath, type FilesGuardFailure } from "./inbox-files-guard";
+import { byteRangeResponse, decideByteRange } from "./inbox-byte-range";
 import { inboxProjectRootGitEnv, type InboxProjectRoot } from "./inbox-project-root";
 
 /** The raw route's cap: bigger files are refused (`too_large`). */
@@ -395,7 +397,7 @@ interface Candidate {
   git: boolean;
 }
 
-function candidateOf(dirent: Dirent, realDir: string): Candidate {
+function candidateOf(dirent: Dirent, realDir: string, realRoot: string): Candidate {
   const name = dirent.name;
   if (!dirent.isSymbolicLink()) return { name, kind: dirent.isDirectory() ? "dir" : "file", real: join(realDir, name), git: false };
   let real: string;
@@ -405,7 +407,7 @@ function candidateOf(dirent: Dirent, realDir: string): Candidate {
     // Dangling: a file that does not open.
     return { name, kind: "file", real: null, git: false };
   }
-  if (real.split(sep).includes(".git")) return { name, kind: "file", real, git: true };
+  if (reachesGit(realRoot, real)) return { name, kind: "file", real, git: true };
   try {
     return { name, kind: statSync(real).isDirectory() ? "dir" : "file", real, git: false };
   } catch {
@@ -428,9 +430,17 @@ function readLevel(root: string, rawDir: string | null): { dir: string; realDir:
   } catch {
     return { dir: resolved.rel, refused: "not_found" };
   }
-  const candidates = dirents.filter((d) => d.name !== ".git").map((d) => candidateOf(d, resolved.real));
+  // Cut at the cap BEFORE any symlink is resolved (a folder of 20k links must not cost 20k realpaths): ordered by what
+  // the entry says of itself (a link counts as a file), then only the kept links are followed and the kept rows
+  // ordered again by what they lead to. A linked folder past the cap in a huge folder stays cut, as a file would.
+  const all = dirents.filter((d) => d.name !== ".git");
+  const kept = all
+    .map((dirent) => ({ dirent, name: dirent.name, kind: (dirent.isDirectory() ? "dir" : "file") as ProjectEntryKind }))
+    .sort(compareProjectEntries)
+    .slice(0, PROJECT_LISTING_MAX_ENTRIES);
+  const candidates = kept.map((k) => candidateOf(k.dirent, resolved.real, resolved.realRoot));
   candidates.sort(compareProjectEntries);
-  return { dir: resolved.rel, realDir: resolved.real, candidates: candidates.slice(0, PROJECT_LISTING_MAX_ENTRIES), more: Math.max(0, candidates.length - PROJECT_LISTING_MAX_ENTRIES) };
+  return { dir: resolved.rel, realDir: resolved.real, candidates, more: Math.max(0, all.length - PROJECT_LISTING_MAX_ENTRIES) };
 }
 
 type Listing = { root: { name: string; branch: string | null; git: boolean }; levels: Level[] };
@@ -450,7 +460,23 @@ async function listFolders(root: string, rawDirs: readonly (string | null)[]): P
   }
   const state = await gitState(realRoot);
   const join2 = (a: string, b: string) => (a === "" ? b : `${a}/${b}`);
-  const read = rawDirs.map((dir) => readLevel(realRoot, dir));
+  // Each folder once, and at most INBOX_FILES_LEVELS_MAX_ENTRIES rows in one answer: the levels past it are not
+  // read (`too_large`; the window lists them again on its next refresh, or when opened).
+  const seen = new Set<string>();
+  let rows = 0;
+  const read: ReturnType<typeof readLevel>[] = [];
+  for (const dir of rawDirs) {
+    const key = normalizeProjectDir(dir) ?? `\u0000${dir ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (rows >= INBOX_FILES_LEVELS_MAX_ENTRIES) {
+      read.push({ dir: normalizeProjectDir(dir) ?? dir ?? "", refused: "too_large" });
+      continue;
+    }
+    const level = readLevel(realRoot, dir);
+    if (!("refused" in level)) rows += level.candidates.length;
+    read.push(level);
+  }
   // Every path git is asked about: each level's folders above it, and its entries, where they really are.
   const ask = new Set<string>();
   const plans = read.map((level) => {
@@ -493,6 +519,8 @@ async function listFolders(root: string, rawDirs: readonly (string | null)[]): P
 
 /** At most this many levels in one `levels` request. */
 export const INBOX_FILES_LEVELS_MAX = 300;
+/** At most this many rows in one `levels` answer (five full levels); the levels past it are refused `too_large`. */
+export const INBOX_FILES_LEVELS_MAX_ENTRIES = 25_000;
 
 // --- changes ------------------------------------------------------------------------
 
@@ -548,6 +576,34 @@ export interface InboxFilesRoutesContext {
   projectRootOf: (path: string) => Promise<InboxProjectRoot>;
   /** The person's home folder (the Inbox's agent environment's): never browsable, nor any folder holding it. */
   home: string | null;
+}
+
+/**
+ * A project file's raw type, decided from its bytes as the content route decides its kind, and remembered by file
+ * version (device, inode, size, mtime) so a player's range requests do not read the whole file again each time.
+ */
+const rawTypes = new Map<string, { contentType: string; etag: string }>();
+async function rawTypeOf(handle: FileHandle, stat: Stats, name: string): Promise<{ contentType: string; etag: string }> {
+  const key = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+  const known = rawTypes.get(key);
+  if (known) return known;
+  const bytes = Buffer.alloc(stat.size);
+  let read = 0;
+  while (read < stat.size) {
+    const { bytesRead } = await handle.read(bytes, read, stat.size - read, read);
+    if (bytesRead === 0) break;
+    read += bytesRead;
+  }
+  const body = bytes.subarray(0, read);
+  const head = body.subarray(0, INBOX_ATTACHMENT_HEAD_BYTES);
+  const { kind } = await decideKind(name, body, read);
+  const contentType =
+    (kind === "image" ? sniffImageContentType(head) : kind === "video" ? sniffInboxVideo(head) : kind === "pdf" && isPdfHead(head) ? "application/pdf" : null) ??
+    "application/octet-stream";
+  const answer = { contentType, etag: `"${createHash("sha256").update(key).digest("hex").slice(0, 32)}"` };
+  rawTypes.set(key, answer);
+  if (rawTypes.size > 200) rawTypes.delete(rawTypes.keys().next().value!);
+  return answer;
 }
 
 const ROUTE = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/files(?:\/(folder|levels|content|raw|changed|annotations))?$/;
@@ -660,29 +716,38 @@ export function createInboxFilesRoutes(context: InboxFilesRoutesContext) {
       });
     }
 
-    // raw
-    const read = await readFile(file, INBOX_FILES_RAW_MAX_BYTES);
-    if ("refused" in read) return refuse(read);
-    if (read.bytes === null) return refuse({ refused: "too_large", size: read.size });
-    const bytes = read.bytes;
-    const head = bytes.subarray(0, INBOX_ATTACHMENT_HEAD_BYTES);
-    // The kind as the content route decides it; the type from the bytes, sniffed now (never the name's).
-    const { kind } = await decideKind(basename(read.absolutePath), bytes, read.size);
-    const contentType =
-      (kind === "image" ? sniffImageContentType(head) : kind === "video" ? sniffInboxVideo(head) : kind === "pdf" && isPdfHead(head) ? "application/pdf" : null) ??
-      "application/octet-stream";
+    // raw: through the guard's open, answering Range (a player's probe and seeks, Safari's `bytes=0-1`) from the descriptor.
+    const opened = await openFilesFile(file.absolutePath);
+    if (!opened.ok) return refuse(fromGuard(opened));
+    const { handle, stat } = opened;
+    let contentType: string;
+    let etag: string;
+    try {
+      if (stat.size > INBOX_FILES_RAW_MAX_BYTES) {
+        await handle.close().catch(() => undefined);
+        return refuse({ refused: "too_large", size: stat.size });
+      }
+      ({ contentType, etag } = await rawTypeOf(handle, stat, basename(file.absolutePath)));
+    } catch {
+      await handle.close().catch(() => undefined);
+      return refuse({ refused: "not_found" });
+    }
     const inline = contentType !== "application/octet-stream" && url.searchParams.get("download") !== "1";
-    // A file read is backed by a plain ArrayBuffer (never shared), which is what a Response body takes.
-    return new Response(req.method === "HEAD" ? null : (bytes as Uint8Array<ArrayBuffer>), {
-      headers: {
+    const decision = decideByteRange(req.headers.get("range"), stat.size, { ifRange: req.headers.get("if-range"), etag });
+    return byteRangeResponse(
+      handle,
+      stat.size,
+      decision,
+      {
         "X-Content-Type-Options": "nosniff",
         "Cross-Origin-Resource-Policy": "same-origin",
         "Content-Type": contentType,
         "Content-Security-Policy": inline ? INBOX_MESSAGE_IMAGE_CSP : "sandbox",
-        "Content-Disposition": contentDisposition(inline ? "inline" : "attachment", basename(read.rel)),
-        "Content-Length": String(bytes.length),
+        "Content-Disposition": contentDisposition(inline ? "inline" : "attachment", basename(file.rel)),
         "Cache-Control": "private, no-cache",
+        ETag: etag,
       },
-    });
+      { head: req.method === "HEAD" },
+    );
   };
 }

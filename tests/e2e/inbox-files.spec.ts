@@ -18,10 +18,15 @@
  *   change nothing outside it.
  * - Full screen stays as it was: no tab row.
  * - Beside the thread the header's line stays ("from <agent> in <project>",
- *   "in <project>" for a file of the folder); Escape closes the file on
- *   screen; Close all goes back to the thread; the folder button keeps a
- *   panel the person closed closed; the panel's open folders survive a
- *   full-screen round trip; a project HTML file opens full screen.
+ *   "in <project>" for a file of the folder); Escape beside the thread does
+ *   not close a file (as before tabs: an open file owns Escape), and on an
+ *   HTML page in Annotate it leaves Annotate and keeps the page; Close all
+ *   goes back to the thread; the folder button keeps a panel the person
+ *   closed closed; the panel's open folders survive a full-screen round
+ *   trip; a project HTML file opens full screen.
+ * - The panel reads nothing while the pane is closed: stepping through
+ *   threads with the panel and the change marks left on sends no listing
+ *   and no change read, past a refresh's interval; opening the pane does.
  * - Which folder (PROJECT-FOLDER definition, owner 2026-10-27): a thread
  *   with no artifact in a project still has the button, named for the
  *   folder with no count, and it opens the pane on the folder; a thread
@@ -236,22 +241,18 @@ test('one file keeps its tools in the tab row; a second drops them to a bar', as
   await expect(projectRow('docs')).toHaveAttribute('aria-expanded', 'true');
 });
 
-test('Escape closes the file on screen; Close all goes back to the thread; the button keeps a closed panel closed', async () => {
+test('Escape keeps the file beside the thread; Close all goes back to the thread; the button keeps a closed panel closed', async () => {
   const { page } = world;
   await projectRow('README.md').click();
   await projectRow('docs/plan.md').click();
   await expect(fileTabs()).toHaveCount(2);
-  // Escape closes the file on screen by the tab's rule: its neighbour shows, then the last goes back to Artifacts.
+  // Escape beside the thread closes nothing, as before tabs (an open file owns Escape; no new Inbox key).
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Escape');
-  await expect(fileTabs()).toHaveCount(1);
-  await expect(fileTabs().first()).toContainText('README.md');
-  await page.keyboard.press('Escape');
-  await expect(fileTabs()).toHaveCount(0);
-  await expect(page.locator('[data-artifacts-tab]')).toHaveAttribute('aria-selected', 'true');
-  // Close all: back to the thread alone.
-  await projectRow('README.md').click();
-  await projectRow('docs/plan.md').click();
+  await page.waitForTimeout(300);
   await expect(fileTabs()).toHaveCount(2);
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('file=');
+  // Close all: back to the thread alone.
   await page.locator('[data-tabs-menu]').click();
   await page.getByRole('menuitem', { name: 'Close all' }).click();
   await expect(page.locator('[data-files-pane]')).toHaveCount(0);
@@ -363,6 +364,53 @@ test('the panel keeps its open folders through full screen; a project HTML file 
   await expect(view).not.toHaveClass(/ib-full/);
   await expect(projectRow('docs')).toHaveAttribute('aria-expanded', 'true');
   await expect(projectRow('docs/mock.html')).toBeVisible();
+  // Escape on the page in Annotate (focus outside its frame): Annotate turns off and the page stays, as before tabs.
+  const pen = view.locator('[data-html-annotate-toggle]');
+  await expect(pen).toHaveAttribute('aria-pressed', 'true');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Escape');
+  await expect(pen).toHaveAttribute('aria-pressed', 'false');
+  await expect(view).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('file=');
+  expect(world.errors).toEqual([]);
+});
+
+test('the panel reads nothing while the pane is closed; opening the pane reads the folder', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#thread=${world.threadId}`);
+  const door = page.locator('[data-artifacts-button]');
+  await door.click();
+  await expect(panel()).toBeVisible();
+  // The panel and the change marks both left on, then the pane closed.
+  const toggle = page.locator('[data-files-changes]');
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await door.click();
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  const reads: string[] = [];
+  const onRequest = (request: { url(): string }) => {
+    const path = new URL(request.url()).pathname;
+    if (/\/files(\/(levels|changed|content|raw))?$/.test(path)) reads.push(path);
+  };
+  page.on('request', onRequest);
+  try {
+    // Stepping through threads (the folder button's own question, `files/folder`, is the only Files request).
+    await page.goto(`${world.url}#thread=${world.plainThread}`);
+    await expect(page.locator('[data-artifacts-button]')).toBeVisible();
+    await page.goto(`${world.url}#thread=${world.threadId}`);
+    await expect(page.locator('[data-artifacts-button]')).toBeVisible();
+    // Past a relist (5 s) and the change read's first chance.
+    await page.waitForTimeout(6_500);
+    expect(reads).toEqual([]);
+    await page.locator('[data-artifacts-button]').click();
+    await expect(panel()).toBeVisible();
+    await expect.poll(() => reads.some((path) => path.endsWith('/files'))).toBe(true);
+    await expect.poll(() => reads.some((path) => path.endsWith('/files/changed'))).toBe(true);
+  } finally {
+    page.off('request', onRequest);
+    // The marks back off (only reachable with the pane open).
+    if (await toggle.isVisible()) await toggle.click();
+  }
   expect(world.errors).toEqual([]);
 });
 

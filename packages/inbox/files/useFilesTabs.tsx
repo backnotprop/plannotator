@@ -13,8 +13,6 @@ import { createPortal } from 'react-dom';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi, InboxApiError, type NoFolderReason, type ProjectFileContent, type ThreadFolder } from '../api';
-import { selectionToolbarShowing } from '../selectionToolbar';
-import { inOverlay, isComposingKey, isEditableTarget, modalOpen } from '../shortcuts/guards';
 import { attachmentLabel } from '../attachments';
 import type { Artifact } from '../artifacts';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
@@ -246,24 +244,6 @@ export function useFilesTabs(input: FilesTabsInput) {
       input.showArtifacts(true);
     }
   };
-
-  // Escape beside the thread closes the file on screen, by the tab's own rule (the next tab, else back), once
-  // nothing inside the window used the key: a field, a dialog or popover, a menu, a draft that closes itself.
-  const closeRef = useRef(close);
-  closeRef.current = close;
-  useEffect(() => {
-    if (!current) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event)) return;
-      const target = event.target instanceof Element ? event.target : null;
-      if (isEditableTarget(target) || inOverlay(target) || modalOpen() || selectionToolbarShowing()) return;
-      if (document.querySelector('[role="menu"], [data-comment-popover], [data-pn-annotation-toolbar-row], [data-quick-label-picker]')) return;
-      event.preventDefault();
-      closeRef.current(current);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [current]);
 
   /** `]` / `[` inside the tab on screen: the next file takes this tab's place. */
   const noteStep = (to: string) => {

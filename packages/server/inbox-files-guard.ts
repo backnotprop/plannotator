@@ -15,10 +15,15 @@
  *  - A read opens the resolved file without following a last symlink and
  *    without blocking (a FIFO or a device is refused, never waited on),
  *    checks the open descriptor is a regular file, and reads at most the cap.
+ *    After the open, the path is resolved again and must still be the same
+ *    file (device and inode) at the same real path: a folder above it swapped
+ *    for a link between the resolve and the open is refused.
+ *  - Names only, as VS Code: a hard link to a dotenv file under another name
+ *    is read (nothing on disk says which name is "the" file).
  */
-import { constants, realpathSync } from "node:fs";
-import { open } from "node:fs/promises";
-import { join } from "node:path";
+import { constants, realpathSync, statSync, type Stats } from "node:fs";
+import { open, type FileHandle } from "node:fs/promises";
+import { join, sep } from "node:path";
 import { hasGitSegment, normalizeProjectDir } from "@plannotator/shared/project-listing";
 
 export type FilesGuardReason = "invalid-path" | "not-found" | "not-a-file" | "not-a-dir" | "git";
@@ -45,6 +50,18 @@ function realHasGitSegment(real: string): boolean {
   return real.split(/[\\/]/).some((segment) => segment === ".git");
 }
 
+/**
+ * A real path reaches a repository's `.git`: by its segments below the
+ * folder when it is inside the folder (so a folder that itself sits under a
+ * `.git`, a worktree made there, still lists), by every segment when a link
+ * led it outside.
+ */
+export function reachesGit(realRoot: string, real: string): boolean {
+  if (real === realRoot) return false;
+  const prefix = realRoot.endsWith(sep) ? realRoot : `${realRoot}${sep}`;
+  return realHasGitSegment(real.startsWith(prefix) ? real.slice(prefix.length) : real);
+}
+
 /** A request's path, resolved under the folder: refused when it is not a plain relative path, is gone, or reaches `.git`. */
 export function resolveFilesPath(root: string, raw: string | null): ResolvedFilesPath | FilesGuardFailure {
   const rel = normalizeProjectDir(raw);
@@ -62,7 +79,7 @@ export function resolveFilesPath(root: string, raw: string | null): ResolvedFile
   } catch {
     return fail("not-found");
   }
-  if (realHasGitSegment(real) && !realHasGitSegment(realRoot)) return fail("git");
+  if (reachesGit(realRoot, real)) return fail("git");
   return { ok: true, rel, realRoot, real };
 }
 
@@ -72,13 +89,17 @@ export type FilesRead =
   | { ok: true; bytes: null; size: number; mtimeMs: number }
   | FilesGuardFailure;
 
+export type FilesOpen = { ok: true; handle: FileHandle; stat: Stats } | FilesGuardFailure;
+
 /**
- * A resolved file's bytes, at most `maxBytes`: opened without following a
- * last symlink (the real path has none; one swapped in since is refused) and
- * without blocking, then proved a regular file by the open descriptor.
+ * A resolved file, opened: without following a last symlink (the real path
+ * has none; one swapped in since is refused) and without blocking, proved a
+ * regular file by the open descriptor, and proved still to be the file at
+ * that real path (resolved again after the open: same path, same device and
+ * inode). The caller closes the handle.
  */
-export async function readFilesFile(real: string, maxBytes: number): Promise<FilesRead> {
-  let handle: Awaited<ReturnType<typeof open>>;
+export async function openFilesFile(real: string): Promise<FilesOpen> {
+  let handle: FileHandle;
   try {
     handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
@@ -87,7 +108,35 @@ export async function readFilesFile(real: string, maxBytes: number): Promise<Fil
   }
   try {
     const stat = await handle.stat();
-    if (!stat.isFile()) return fail("not-a-file");
+    if (!stat.isFile()) {
+      await handle.close().catch(() => undefined);
+      return fail("not-a-file");
+    }
+    let again: Stats;
+    try {
+      if (realpathSync(real) !== real) throw new Error("moved");
+      again = statSync(real);
+    } catch {
+      await handle.close().catch(() => undefined);
+      return fail("not-found");
+    }
+    if (again.dev !== stat.dev || again.ino !== stat.ino) {
+      await handle.close().catch(() => undefined);
+      return fail("not-found");
+    }
+    return { ok: true, handle, stat };
+  } catch {
+    await handle.close().catch(() => undefined);
+    return fail("not-found");
+  }
+}
+
+/** A resolved file's bytes, at most `maxBytes`, through `openFilesFile`. */
+export async function readFilesFile(real: string, maxBytes: number): Promise<FilesRead> {
+  const opened = await openFilesFile(real);
+  if (!opened.ok) return opened;
+  const { handle, stat } = opened;
+  try {
     if (stat.size > maxBytes) return { ok: true, bytes: null, size: stat.size, mtimeMs: stat.mtimeMs };
     const buffer = Buffer.alloc(stat.size);
     let read = 0;

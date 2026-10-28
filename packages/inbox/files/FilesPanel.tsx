@@ -169,13 +169,21 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
   }, [tree, counts, showChanges, changes]);
   applyRef.current = applyBadges;
 
-  // The root level, then every listed level again while the panel shows (what an agent writes appears).
+  // The root level, read the first time the panel is on screen for this thread (never while the pane is closed: the
+  // panel stays mounted then, and stepping through threads must not list each one's folder), then every listed level
+  // again while it shows (what an agent writes appears).
+  const [shownFor, setShownFor] = useState<string | null>(visible ? threadId : null);
+  useEffect(() => {
+    if (visible) setShownFor(threadId);
+  }, [visible, threadId]);
+  const loadFor = shownFor === threadId ? threadId : null;
   useEffect(() => {
     let gone = false;
     meta.current.clear();
     setCut(new Map());
     setState({ root: null, error: null, loaded: false });
-    inboxApi.files(threadId, '').then(
+    if (!loadFor) return;
+    inboxApi.files(loadFor, '').then(
       (listing) => {
         if (gone) return;
         take(listing);
@@ -191,7 +199,7 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
     return () => {
       gone = true;
     };
-  }, [threadId, tree, take]);
+  }, [loadFor, tree, take]);
 
   useEffect(() => {
     if (!visible || !state.root) return;
@@ -243,8 +251,8 @@ function useProjectTree(threadId: string, showChanges: boolean, counts: Readonly
     let busy = false;
     let first = true;
     const read = async () => {
-      // The first read once the toggle turns on; then only on screen with focus, and never two at once (a diff can be slow).
-      if (busy || (!first && !refreshing(visible))) return;
+      // Only while the panel is on screen: the first read at once, then with focus too; never two at once (a diff can be slow).
+      if (busy || !visible || (!first && !refreshing(visible))) return;
       first = false;
       busy = true;
       try {

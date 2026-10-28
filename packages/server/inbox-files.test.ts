@@ -9,15 +9,19 @@
  * their base (the commit the thread started on), the files root following a
  * linked worktree, which folder a thread has and why none (the home folder,
  * a folder holding it, a folder gone), and project-file comments riding a Send.
+ * Hardening: the cut comes before links are followed, `levels` lists each
+ * folder once and caps its rows, `raw` answers Range, `.git` is judged below
+ * the folder, and a read refuses a path swapped between resolve and open.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxAnnotationRecord } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import { readFilesFile } from "./inbox-files-guard";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 
 const roots: string[] = [];
@@ -509,6 +513,98 @@ test("several levels in one request: each listed or refused, one answer", async 
   // Marks as the single route gives them: ignored inside an ignored folder.
   expect(body.levels[2]!.entries!.find((e) => e.name === "pkg")).toMatchObject({ kind: "dir", ignored: true });
   expect(await code(await get(server, `/api/inbox/threads/${thread_id}/files/levels`))).toEqual([400, "invalid_path"]);
+});
+
+test("a big folder is cut before its links are followed: a linked folder past the cut stays cut", async () => {
+  const { root, project } = repo();
+  mkdirSync(join(project, "many"));
+  for (let i = 0; i < 5_000; i++) writeFileSync(join(project, "many", `f${i}.txt`), "");
+  // A link to a folder, named to sort last among files: had it been followed first it would list first, as a folder.
+  symlinkSync(join(project, "src"), join(project, "many", "zz-linked-folder"));
+  const server = await start(root);
+  const { thread_id } = await send(server, project);
+  const listing = await list(server, thread_id, "many");
+  expect(listing.entries).toHaveLength(5_000);
+  expect(listing.more).toBe(1);
+  expect(listing.entries.some((e) => e.name === "zz-linked-folder")).toBe(false);
+  // Under the cap the same link is followed and listed as a folder.
+  const top = await list(server, thread_id, "");
+  expect(top.entries.find((e) => e.name === "link-dir-in")).toMatchObject({ kind: "dir" });
+});
+
+test("levels: each folder once, and at most 25,000 rows an answer (the rest too_large, not read)", async () => {
+  const { root, project } = repo();
+  mkdirSync(join(project, "many"));
+  for (let i = 0; i < 5_000; i++) writeFileSync(join(project, "many", `f${i}.txt`), "");
+  for (let i = 1; i <= 5; i++) symlinkSync(join(project, "many"), join(project, `many${i}`));
+  const server = await start(root);
+  const { thread_id } = await send(server, project);
+  const base = `/api/inbox/threads/${thread_id}/files/levels`;
+  const twice = (await (await get(server, `${base}?dir=src&dir=src&dir=&dir=src`)).json()) as { levels: Array<{ dir: string }> };
+  expect(twice.levels.map((l) => l.dir)).toEqual(["src", ""]);
+  const dirs = ["many", "many1", "many2", "many3", "many4", "many5", "src"].map((d) => `dir=${d}`).join("&");
+  const capped = (await (await get(server, `${base}?${dirs}`)).json()) as { levels: Array<{ dir: string; entries?: Entry[]; refused?: string }> };
+  expect(capped.levels.map((l) => [l.dir, l.refused ?? l.entries!.length])).toEqual([
+    ["many", 5_000],
+    ["many1", 5_000],
+    ["many2", 5_000],
+    ["many3", 5_000],
+    ["many4", 5_000],
+    ["many5", "too_large"],
+    ["src", "too_large"],
+  ]);
+});
+
+test("raw answers Range from the guarded descriptor: a probe, a slice, past the end, If-Range", async () => {
+  const { root, project } = repo();
+  const server = await start(root);
+  const { thread_id } = await send(server, project);
+  const path = `/api/inbox/threads/${thread_id}/files/raw?path=logo.png`;
+  const whole = await get(server, path);
+  expect(whole.status).toBe(200);
+  expect(whole.headers.get("accept-ranges")).toBe("bytes");
+  const etag = whole.headers.get("etag")!;
+  expect(etag).toMatch(/^"[0-9a-f]{32}"$/);
+  const probe = await get(server, path, { Range: "bytes=0-1" });
+  expect(probe.status).toBe(206);
+  expect(probe.headers.get("content-range")).toBe(`bytes 0-1/${PNG.length}`);
+  expect(probe.headers.get("content-type")).toBe("image/png");
+  expect(Buffer.from(await probe.arrayBuffer()).equals(PNG.subarray(0, 2))).toBe(true);
+  const tail = await get(server, path, { Range: `bytes=${PNG.length - 4}-` });
+  expect(tail.status).toBe(206);
+  expect(Buffer.from(await tail.arrayBuffer()).equals(PNG.subarray(PNG.length - 4))).toBe(true);
+  expect((await get(server, path, { Range: `bytes=${PNG.length + 10}-` })).status).toBe(416);
+  // A version that is not this one: the whole file again.
+  expect((await get(server, path, { Range: "bytes=0-1", "If-Range": '"stale"' })).status).toBe(200);
+  expect((await get(server, path, { Range: "bytes=0-1", "If-Range": etag })).status).toBe(206);
+  // Range never opens what the guard refuses.
+  expect(await code(await get(server, `/api/inbox/threads/${thread_id}/files/raw?path=.env`, { Range: "bytes=0-1" }))).toEqual([403, "locked", "dotenv"]);
+});
+
+test("a folder that sits under a .git still lists and reads; a link out into another .git stays locked", async () => {
+  const root = scratch("plannotator-inbox-files-under-git-");
+  const project = join(root, "holder", ".git", "work");
+  write(join(project, "README.md"), "# Work\n");
+  write(join(root, "other", ".git", "config"), "[core]\n");
+  symlinkSync(join(root, "other", ".git", "config"), join(project, "escape"));
+  const server = await start(root);
+  const { thread_id } = await send(server, project);
+  const top = await list(server, thread_id, "");
+  expect(top.entries.find((e) => e.name === "README.md")).toMatchObject({ kind: "file", locked: null });
+  expect(top.entries.find((e) => e.name === "escape")).toMatchObject({ locked: "git" });
+  expect((await content(server, thread_id, "README.md")).status).toBe(200);
+  expect(await code(await content(server, thread_id, "escape"))).toEqual([404, "not_found"]);
+});
+
+test("a read refuses a path whose folder was swapped for a link between the resolve and the open", async () => {
+  const root = scratch("plannotator-inbox-files-swap-");
+  write(join(root, "a", "sub", "f.txt"), "the file that was resolved");
+  write(join(root, "b", "f.txt"), "somewhere else");
+  const real = realpathSync(join(root, "a", "sub", "f.txt"));
+  expect(await readFilesFile(real, 1024)).toMatchObject({ ok: true });
+  renameSync(join(root, "a", "sub"), join(root, "a", "sub-moved"));
+  symlinkSync(join(root, "b"), join(root, "a", "sub"));
+  expect(await readFilesFile(real, 1024)).toEqual({ ok: false, reason: "not-found" });
 });
 
 describe("over the tailnet", () => {
