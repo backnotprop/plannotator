@@ -28,10 +28,27 @@ This starts the Inbox and opens it in your browser. If it is already running, th
 | `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns at once. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
 | `plannotator inbox --tailscale` | Also publish it [over your tailnet](#over-your-tailnet) until it stops. Works with the forms above. If the Inbox is already running, it is asked to publish |
 | `plannotator inbox mcp` | The stdio MCP server for agents. It starts a stopped Inbox without opening a browser tab |
+| `plannotator inbox status` | Say whether the Inbox is running, with its address, process ID, version and data folder. Add `--json` for the same as JSON |
+| `plannotator inbox stop` | Stop the running Inbox |
+| `plannotator inbox restart` | Stop the Inbox, then start it again in the background and print its address |
 
 Run `plannotator inbox` once before you connect an agent. That first run writes the Inbox's registry file, and the connections look for that file when a session starts.
 
 You never need to keep the Inbox running yourself. When an agent calls it and it is stopped, it starts in the background, and no tab opens.
+
+### Status, stop and restart
+
+`plannotator inbox status` exits with 0 when the Inbox is running, 1 when it is not running, and 2 when its process holds the port but does not answer. Use it in scripts:
+
+```bash
+plannotator inbox status >/dev/null && echo "The Inbox is up"
+```
+
+`plannotator inbox stop` asks the Inbox to stop first, so it closes cleanly and takes its tailnet address down. If it does not stop, the command sends `SIGTERM`, then `SIGKILL`. Before each signal, the command makes sure the process is the Inbox of this data folder. A process ID can be reused by another program after the Inbox exits, and the command never signals that program. If this data folder is a copy of another one, its registry file names the other folder's Inbox: that Inbox refuses the stop and keeps running. The command exits with 0 when no Inbox runs afterwards. The registry file stays, so your agents still find the Inbox. The next time an agent calls the Inbox, the Inbox starts again in the background.
+
+`plannotator inbox restart` stops the Inbox, then starts it in the background with the `plannotator` you ran. No tab opens: reload the open tab. If the Inbox was published over your tailnet with `--tailscale` for that run, the new run is published again. Agents that wait for your replies connect again by themselves within a few seconds, and a reply that waited during the restart arrives once.
+
+On Windows, `stop` and `restart` can signal the Inbox only while it answers. If the Inbox hangs and does not answer, the command names its process ID: end it in Task Manager.
 
 ### Closed the tab?
 

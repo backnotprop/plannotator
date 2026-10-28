@@ -1,6 +1,7 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
+import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
@@ -167,7 +168,9 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator sessions",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
     "  plannotator inbox mcp",
+    "  plannotator inbox status [--json] | stop | restart",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
+    `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
@@ -225,6 +228,50 @@ export const CARD_COMMAND_USAGE = [
 ].join("\n");
 
 /**
+ * `plannotator feedback` (feedback-command.ts): sends the person's feedback
+ * about Plannotator to its maintainers. The Inbox's Feedback dialog copies a
+ * prompt that tells an agent to use it.
+ */
+export const FEEDBACK_COMMAND_USAGE = [
+  "Usage:",
+  `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<how to reach you>'] <<'${FEEDBACK_HEREDOC_END}'`,
+  "  <the message, exactly as the person approved it>",
+  `  ${FEEDBACK_HEREDOC_END}`,
+  "",
+  "Sends feedback about Plannotator to its maintainers and prints \"Sent\".",
+  "What is sent: the message, the category and contact if given, the Plannotator",
+  "version, the OS name (macOS, Linux, Windows) and that it came from the CLI.",
+  "Nothing else: no files, no paths, no session content, no machine id.",
+  "",
+  "Agents: send only the person's own feedback. Show them the exact text (and",
+  "category and contact) first, and run this only after they say yes. Pass the",
+  `message on stdin with a QUOTED heredoc (<<'${FEEDBACK_HEREDOC_END}', quotes included)`,
+  "so the shell changes nothing. Never put it inside double quotes, in any shell:",
+  "they expand $VAR, backticks and $(...). If a line of the message is exactly the",
+  "end word, pick another. Put a contact in single quotes, a ' in it written as '\\''.",
+  "",
+  "Example (bash, zsh, sh):",
+  `  plannotator feedback --stdin --category idea --contact 'ada@example.com' <<'${FEEDBACK_HEREDOC_END}'`,
+  "  The list jumps to the top after a reload.",
+  `  ${FEEDBACK_HEREDOC_END}`,
+  "",
+  "Example (PowerShell; UTF-8 so accents and emoji survive; a ' in the contact is ''):",
+  "  $OutputEncoding = [Text.UTF8Encoding]::new($false)",
+  "  @'",
+  "  The list jumps to the top after a reload.",
+  "  '@ | plannotator feedback --stdin --category idea",
+  "",
+  "Options:",
+  "  --stdin, -       Read the message from stdin (up to 4000 characters)",
+  "  --category <c>   bug, idea or other",
+  "  --contact <text> An email or handle the person chose to give (optional)",
+  "",
+  "A short message typed by hand can also be given as words: plannotator feedback 'it works'",
+  "",
+  "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
+].join("\n");
+
+/**
  * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
  * the full agent guide (inbox-help.ts), which carries this block as its
  * "Commands and flags" section; it is also the `inbox` entry of
@@ -235,6 +282,9 @@ export const INBOX_COMMAND_USAGE = [
   "Usage:",
   "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
   "  plannotator inbox mcp",
+  "  plannotator inbox status [--json]",
+  "  plannotator inbox stop",
+  "  plannotator inbox restart [--tailscale]",
   "  plannotator inbox --notes <ids>",
   "",
   "  plannotator inbox               Start the Inbox and open it in the browser,",
@@ -252,6 +302,17 @@ export const INBOX_COMMAND_USAGE = [
   "                                  an Inbox already running, asks it to publish.",
   "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
   "                                  Inbox in the background (no browser tab).",
+  "  plannotator inbox status        Whether the Inbox runs: URL, pid, version, data dir.",
+  "                                  Exit 0 running, 1 not running, 2 not answering.",
+  "                                  --json prints the same as one JSON object.",
+  "  plannotator inbox stop          Stop the Inbox of this data dir: asks it first, then",
+  "                                  SIGTERM, then SIGKILL, each only once the pid is",
+  "                                  proven to be that Inbox (never another program).",
+  "                                  Exit 0 when none runs afterwards. An agent's next",
+  "                                  call starts it again in the background.",
+  "  plannotator inbox restart       Stop it, then start it in the background (no",
+  "                                  browser tab) and print its URL. A run published by",
+  "                                  --tailscale is published again.",
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, pi, opencode,",
   "                                  comma-separated). Only with the person's yes;",
@@ -456,6 +517,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
+  feedback: FEEDBACK_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",
     "  plannotator t3-hook install --settings <settings.json> --executable <plannotator>",

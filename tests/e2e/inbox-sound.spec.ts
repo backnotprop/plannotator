@@ -127,6 +127,7 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
+    PLANNOTATOR_FEEDBACK_URL: 'http://127.0.0.1:9/feedback',
     PLANNOTATOR_INBOX_PHONES: '0',
   };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });

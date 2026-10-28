@@ -2053,7 +2053,19 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 
 /* the code pane: Pierre's File on the page's own background */
 .ib-codeview { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.ib-codehint { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 16px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); background: var(--card); }
+.ib-codehint { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 16px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); background: var(--card); }
+.ib-codehint-t { min-width: 0; padding-left: 10px; border-left: 1px solid color-mix(in oklch, var(--border) 80%, transparent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Copy file (approval "inbox-copy-file"): a quiet labelled button at the code's top left; a check and "Copied" for a moment after a press. */
+.pn-inbox .ib-copyfile { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 24px; padding: 0 8px; margin-left: -8px; border: 0; border-radius: 6px; background: transparent; color: color-mix(in oklch, var(--foreground) 82%, transparent); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+.pn-inbox .ib-copyfile:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-copyfile:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; }
+.pn-inbox .ib-copyfile.ib-copied { color: var(--success); }
+.pn-inbox .ib-copyfile.ib-copyfail { color: var(--destructive); }
+@media (prefers-reduced-motion: reduce) { .pn-inbox .ib-copyfile { transition: none; } }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-codehint { padding-top: 0; padding-bottom: 0; }
+  .pn-inbox .ib-copyfile { height: 44px; padding: 0 10px; margin-left: -10px; font-size: var(--ib-fs-14, 14px); }
+}
 .ib-codebody { flex: 1; min-height: 0; }
 .ib-att-t.ib-dlcard { max-width: 620px; width: 100%; padding: 14px 16px; gap: 14px; cursor: default; }
 .ib-att-t.ib-dlcard:hover, .ib-att-t.ib-dlcard:active { border-color: var(--border); background: var(--card); transform: none; }
@@ -5399,4 +5411,49 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .pm-acts .ib-btn.ib-pri { flex: 1; justify-content: center; }
   .pn-inbox .pm-disc, .pn-inbox .pm-fold { min-height: 44px; }
   .pm-ag .ib-desc a { display: inline-flex; align-items: center; min-height: 44px; margin: -12px 0; }
+}
+
+/* Sidebar → Feedback (components/FeedbackDialog.tsx): the message, an optional category and email, the line
+   saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. On a phone the
+   dialog is a bottom sheet (the sheet corner on top, the safe area below), 44 px targets. */
+dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
+.ib-fbk-form .ib-bfield { margin-top: 14px; }
+.ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
+.ib-fbk-count { margin: 6px 0 0; text-align: right; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-fbk-count.ib-fbk-over { color: var(--destructive); }
+.ib-fbk-optional { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-fbk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+.ib-fbk-cats { display: inline-flex; gap: 6px; flex: none; }
+.pn-inbox .ib-fbk-cat { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 500; cursor: pointer; transition: var(--ib-fade-s, var(--ib-ui-fade)); }
+.pn-inbox .ib-fbk-cat:hover:not(:disabled) { background: var(--muted); }
+.pn-inbox .ib-fbk-cat[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 13%, transparent); border-color: color-mix(in oklch, var(--primary) 42%, transparent); color: var(--primary); }
+.pn-inbox .ib-fbk-cat:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.pn-inbox .ib-fbk-cat:disabled { opacity: 0.5; }
+.ib-fbk-contact { flex: 1 1 180px; min-width: 0; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.ib-fbk-contact::placeholder, .ib-fbk-msg::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+.ib-fbk-contact:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+.ib-fbk-what { display: grid; grid-template-columns: 15px minmax(0, 1fr); column-gap: 8px; margin: 14px 0 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.pn-inbox .ib-fbk-what svg.ib-ic { width: 15px; height: 15px; margin-top: 1px; }
+.ib-callout.ib-fbk-err { margin: 12px 0 0; }
+.ib-fbk-acts { margin-top: 18px; }
+.pn-inbox .ib-fbk-acts .ib-left { padding-left: 8px; padding-right: 8px; }
+.pn-inbox .ib-fbk-acts .ib-left svg.ib-ic { width: 15px; height: 15px; }
+.ib-fbk-sent { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 8px 0 0; }
+.pn-inbox .ib-fbk-sent > svg.ib-ic { color: var(--success); }
+.ib-fbk-sent h2 { margin-top: 10px; }
+.ib-fbk-sent .ib-acts-row { justify-content: center; align-self: stretch; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox dialog.ib-dlg.ib-fbk.ib-fbk-phone, dialog.ib-dlg.ib-fbk.ib-fbk-phone {
+    inset: auto 0 0 0; margin: 0; width: 100vw; max-width: 100vw; max-height: calc(var(--ib-vvh, 100dvh) - 24px);
+    border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; border-bottom: 0;
+  }
+  .ib-fbk-phone .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .ib-fbk-row { flex-direction: column; align-items: stretch; }
+  .ib-fbk-cats { display: flex; }
+  .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }
+  .ib-fbk-contact { flex: none; height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-fbk-acts .ib-left { justify-content: center; }
+}
+@media (forced-colors: active) {
+  .pn-inbox .ib-fbk-cat[aria-pressed="true"] { border-color: Highlight; color: Highlight; }
 }

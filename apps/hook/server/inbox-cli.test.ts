@@ -817,4 +817,81 @@ describe("uninstall --purge and the Inbox", () => {
     expect(isPidAlive(registry.pid)).toBe(false);
     expect(existsSync(join(box.dataDir, "inbox"))).toBe(false);
   }, 60_000);
+
+  test.skipIf(process.platform === "win32")("purge of a copied data dir removes the copy and leaves the original's Inbox and both its tailnet mappings up", async () => {
+    const original = sandbox();
+    const registry = (await background(original)).registry!;
+    // The two mappings a record can name: "Reach from my tailnet" (8443 → the door) and "Over your tailnet" (the window's port → its proxy).
+    const DOOR = 47_001;
+    const WINDOW_HTTPS = 10_443;
+    const PROXY = 47_002;
+    const mappings = {
+      tailnet: { https_port: 8443, door_port: DOOR },
+      tailscale: { url: `https://box.example.ts.net:${WINDOW_HTTPS}/`, error: null, https_port: WINDOW_HTTPS, proxy_port: PROXY },
+    };
+
+    // A fake `tailscale` first on PATH (never the real one): it logs every call and reports both mappings as live.
+    const bin = join(original.root, "fake-bin");
+    mkdirSync(bin, { recursive: true });
+    const log = join(bin, "tailscale.log");
+    const statusFile = join(bin, "serve-status.json");
+    writeFileSync(
+      statusFile,
+      JSON.stringify({
+        TCP: { "8443": { HTTPS: true }, [String(WINDOW_HTTPS)]: { HTTPS: true } },
+        Web: {
+          "box.example.ts.net:8443": { Handlers: { "/": { Proxy: `http://127.0.0.1:${DOOR}` } } },
+          [`box.example.ts.net:${WINDOW_HTTPS}`]: { Handlers: { "/": { Proxy: `http://127.0.0.1:${PROXY}` } } },
+        },
+      }),
+    );
+    writeFileSync(join(bin, "tailscale"), `#!/bin/sh\necho "$*" >> '${log}'\nif [ "$1 $2" = "serve status" ]; then cat '${statusFile}'; fi\nexit 0\n`);
+    chmodSync(join(bin, "tailscale"), 0o755);
+    const offs = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((call) => call.includes("off")) : []);
+    const purge = (box: Sandbox) =>
+      runPlannotatorUninstall(
+        { purge: true, dryRun: false },
+        {
+          platform: process.platform,
+          homeDir: box.home,
+          tempDir: tmpdir(),
+          dataDir: box.dataDir,
+          execPath: join(box.root, "not-the-real-plannotator"),
+          env: {},
+          which: () => null,
+          runCommand: async () => ({ exitCode: 0, timedOut: false }),
+          scheduleWindowsSelfDelete: async () => true,
+        },
+      );
+
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path ?? "/usr/bin:/bin"}`;
+    try {
+      expect(Bun.which("tailscale", { PATH: process.env.PATH })).toBe(join(bin, "tailscale"));
+
+      const copy = sandbox();
+      mkdirSync(join(copy.dataDir, "inbox"), { recursive: true });
+      const record = JSON.parse(readFileSync(join(original.dataDir, "inbox", "inbox.json"), "utf8"));
+      writeFileSync(join(copy.dataDir, "inbox", "inbox.json"), JSON.stringify({ ...record, ...mappings }));
+      const result = await purge(copy);
+      expect(result.errors).toEqual([]);
+      expect(existsSync(join(copy.dataDir, "inbox"))).toBe(false);
+      // Neither mapping is taken down: both are the running original's.
+      expect(offs()).toEqual([]);
+      await Bun.sleep(300);
+      expect(isPidAlive(registry.pid)).toBe(true);
+      expect((await inboxStatus(original.dataDir)).state).toBe("running");
+
+      // The same record left by an Inbox that has exited (a crash): purge takes both mappings down,
+      // so the fake answers what the take-downs read and the check above is not empty by accident.
+      const crashed = sandbox();
+      const gone = Bun.spawn(["true"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+      await gone.exited;
+      writeInboxRegistry(crashed.dataDir, { ...readInboxRegistry(original.dataDir)!, pid: gone.pid, port: 1, ...mappings });
+      expect((await purge(crashed)).errors).toEqual([]);
+      expect(offs().sort()).toEqual([`serve --https=${WINDOW_HTTPS} off`, "serve --https=8443 off"].sort());
+    } finally {
+      process.env.PATH = path;
+    }
+  }, 60_000);
 });

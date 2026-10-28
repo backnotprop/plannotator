@@ -31,6 +31,7 @@ import type {
   InboxPromptsSettings,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { InboxRunAgentId, InboxRunAgentsModel, InboxRunStatus } from '@plannotator/core/inbox-acp';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import type { RecipientConnection } from './deliveryLine';
@@ -523,6 +524,36 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   );
 }
 
+/** The window waits this long for the Feedback send: the Inbox answers within FEEDBACK_TIMEOUT_MS (8 s), this only covers an Inbox that does not answer. */
+export const FEEDBACK_WINDOW_TIMEOUT_MS = 10_000;
+
+/**
+ * The Feedback dialog's Send. Fails with an Error whose message the dialog
+ * shows as it is: the Worker's refusal or a validation line from the Inbox,
+ * else (Inbox or service unreachable, too slow, failing) the one plain line
+ * FEEDBACK_UNAVAILABLE. Never a raw network or status message.
+ */
+async function sendFeedback(input: { message: string; category: 'bug' | 'idea' | 'other' | null; contact: string | null }): Promise<{ ok: true }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FEEDBACK_WINDOW_TIMEOUT_MS);
+  const body = { message: input.message, ...(input.category ? { category: input.category } : {}), ...(input.contact ? { contact: input.contact } : {}) };
+  try {
+    const response = await fetch('/api/inbox/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(pageSession ? { ...body, serverSession: pageSession } : body),
+      signal: controller.signal,
+    });
+    return await readJson<{ ok: true }>(response);
+  } catch (cause) {
+    // The Inbox's own words: a validation line (400) or the send's outcome (502 feedback_not_sent).
+    if (cause instanceof InboxApiError && (cause.status < 500 || cause.code === 'feedback_not_sent')) throw cause;
+    throw new Error(FEEDBACK_UNAVAILABLE);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** config.json `theme`: the mode and the palette for each half (ThemeConfig in @plannotator/core/config-types). */
 export interface InboxThemeConfig {
   mode?: 'light' | 'dark' | 'system';
@@ -809,6 +840,11 @@ export const inboxApi = {
   saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>('/api/inbox/settings', { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>('/api/inbox/sound/dialog', {}),
+  /**
+   * The sidebar's Feedback dialog: the person's words go to the feedback Worker through this Inbox's server
+   * (packages/server/inbox-feedback.ts), which adds the version and the OS name and nothing else.
+   */
+  sendFeedback: (input: { message: string; category: 'bug' | 'idea' | 'other' | null; contact: string | null }) => sendFeedback(input),
   /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */
   saveTheme: (theme: InboxThemeConfig) => post<{ theme: InboxThemeConfig | null }>('/api/inbox/settings', { theme }),
   /** The onboarding tour: each `true` stamps now (started, finished, skipped); `notify_again` sets the first thread's ask. */

@@ -9,6 +9,7 @@ import type { TokenHoverDelay } from '@plannotator/core/token-hover';
 import { configStore, useConfigValue, setReviewPanelView, setReviewDefaultDiffType, setReviewAutoViewed } from '../config';
 import { setWebMcpToolsEnabled, useWebMcpToolsEnabled } from '../webmcp/preference';
 import { DIAGRAM_SHADOW_OPTIONS } from '../utils/diagramShadow';
+import { markLookAndFeelChoiceResolved } from '../utils/lookAndFeelAnnouncement';
 import { DEFAULT_DOCUMENT_TEXT_SIZE, DOCUMENT_TEXT_SIZE_OPTIONS } from '../utils/documentTextSize';
 import {
   agentToolAppliesWhen,
@@ -2016,8 +2017,12 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         <div className="text-sm font-medium">Grid Background</div>
                         <div className="text-xs text-muted-foreground">Show the plan as a floating card on a grid</div>
                       </div>
-                      <button role="switch" aria-checked={gridEnabled}
-                        onClick={() => configStore.set('gridEnabled', !gridEnabled)}
+                      <button role="switch" aria-checked={gridEnabled} aria-label="Grid Background"
+                        onClick={() => {
+                          configStore.set('gridEnabled', !gridEnabled);
+                          // A Settings flip is a real choice: keep it across reloads.
+                          markLookAndFeelChoiceResolved();
+                        }}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${gridEnabled ? 'bg-primary' : 'bg-muted'}`}>
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${gridEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>

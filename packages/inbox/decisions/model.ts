@@ -10,6 +10,7 @@ import type { InboxDecision, InboxListRow, InboxMessageWire, InboxQuestion, Inbo
 import { readInboxQuestionKind, inboxAgentName } from '@plannotator/core/inbox-types';
 import { capQuestionPrompt, type QuestionAnswer } from '@plannotator/core/question-block';
 import { sendTargetsOf, type SendTarget } from '../sendTargets';
+import { plainLabel } from '../folding';
 
 /** Why a decision left the projection while the queue held it. */
 export type DecisionGone = 'sent' | 'replaced' | 'closed';
@@ -445,7 +446,8 @@ export function skipAnswer(question: InboxQuestion, note: string): QuestionAnswe
 export function answerWords(answer: QuestionAnswer | null): string {
   if (!answer) return 'No answer';
   if (answer.skipped) return 'Skipped';
-  const parts = [...answer.selected];
+  // A picked label as its plain words (`plainLabel`): "15% off", not its markdown.
+  const parts = answer.selected.map(plainLabel);
   if (answer.other?.trim()) parts.push(answer.other.trim());
   if (answer.text?.trim()) parts.push(answer.text.trim());
   const words = parts.join(', ') || (answer.note ? 'A note' : 'No answer');
@@ -460,6 +462,11 @@ export function swipeChoices(question: InboxQuestion): [string, string] | null {
   if (readInboxQuestionKind(question.kind) !== 'single' || question.choices.length !== 2) return null;
   if (question.reversible || question.choices.some((choice) => choice.image)) return null;
   return [question.choices[0]!.label, question.choices[1]!.label];
+}
+
+/** The swipe's hint under the card, the labels as their words; a swipe still commits the label as written. */
+export function swipeHint(choices: readonly [string, string]): string {
+  return `Swipe right for ${plainLabel(choices[0])}, left for ${plainLabel(choices[1])}.`;
 }
 
 /**

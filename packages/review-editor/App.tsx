@@ -62,7 +62,7 @@ import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActi
 import { isSessionBridgeProvider } from '@plannotator/ui/utils/aiProvider';
 import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
 import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
-import { markLookAndFeelChoiceResolved, needsLookAndFeelAnnouncement } from '@plannotator/ui/utils/lookAndFeelAnnouncement';
+import { usePlanLookDialog } from '@plannotator/ui/hooks/usePlanLookDialog';
 import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
 import {
   markTerminalToolsAnnouncementSeen,
@@ -1219,14 +1219,13 @@ const ReviewApp: React.FC = () => {
       setAiDefaultProvider(defaultProvider);
     },
   });
-  // The explicit choice marker is shared, so resolving this in either app
-  // suppresses the chooser everywhere without release-version milestones.
-  const [showLookAndFeel, setShowLookAndFeel] = useState(needsLookAndFeelAnnouncement);
-  const dismissLookAndFeel = useCallback(() => {
-    configStore.set('gridEnabled', gridEnabled);
-    markLookAndFeelChoiceResolved();
-    setShowLookAndFeel(false);
-  }, [gridEnabled]);
+  // The first-run chooser, or the one-time "moved to Clean" notice. Shared
+  // with the plan editor (one cookie marker), two-tab handling included.
+  const {
+    prompt: lookAndFeelPrompt,
+    open: showLookAndFeel,
+    dismiss: dismissLookAndFeel,
+  } = usePlanLookDialog(gridEnabled);
   // One-time guided-review intro dialog + header Guide-button hint. The hint
   // (shimmer + dot) is independent of the dialog: it runs until the first
   // Guide click, even for users who dismissed the dialog without reading.
@@ -6211,6 +6210,7 @@ const ReviewApp: React.FC = () => {
             setup → edit mode) — the chain dialogs never stack. */}
         <LookAndFeelAnnouncementDialog
           isOpen={showLookAndFeel && !guideIntroVisible}
+          variant={lookAndFeelPrompt === 'moved' ? 'moved' : 'first-run'}
           gridEnabled={gridEnabled}
           onToggleGrid={(v) => configStore.set('gridEnabled', v)}
           onDismiss={dismissLookAndFeel}

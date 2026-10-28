@@ -15,6 +15,16 @@
  *                                   Inbox is asked to publish), for the
  *                                   Tailscale login that owns this machine
  *   plannotator inbox mcp           the stdio MCP entry for any agent
+ *   plannotator inbox status        whether it runs, where, which pid and
+ *                                   version (--json too); exit 0 running
+ *   plannotator inbox stop          stop it: asked first, then signalled,
+ *                                   only once the pid is proven to be it
+ *   plannotator inbox restart       stop it, then start it detached; print
+ *                                   the URL
+ *
+ * The status, stop and restart commands follow rmohta's port
+ * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
+ * and start paths.
  *
  * On demand never pops a tab mid-work: only a person running `plannotator
  * inbox` opens one. The Inbox never registers in `sessions/` (it would hold
@@ -22,16 +32,22 @@
  */
 
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { isNewerStableVersion } from "@plannotator/shared/update-check";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import {
   acquireInboxStartLock,
+  INBOX_START_LOCK,
+  INBOX_START_LOCK_STALE_MS,
+  inboxRegistryPath,
   inboxStatus,
   readInboxRegistry,
+  stopInbox,
   waitForInbox,
   type InboxRegistryEntry,
+  type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
@@ -117,10 +133,18 @@ export async function ensureInboxRunning(dataDir: string, options: { tailscale?:
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
   if (status.state === "busy") return waitForBusyInbox(dataDir, status.entry.pid);
-  const release = acquireInboxStartLock(dataDir);
+  return startDetachedInbox(dataDir, acquireInboxStartLock(dataDir), options.tailscale === true);
+}
+
+/**
+ * The one detached start: with the start lock (`release`, which this
+ * releases) spawn the Inbox and wait for it; without it (another starter
+ * holds it) only wait for what that starter starts.
+ */
+async function startDetachedInbox(dataDir: string, release: (() => void) | null, tailscale: boolean): Promise<InboxRegistryEntry> {
   if (release) {
     try {
-      spawnDetachedInbox(dataDir, options.tailscale === true);
+      spawnDetachedInbox(dataDir, tailscale);
     } catch (error) {
       release();
       throw error;
@@ -363,6 +387,189 @@ async function writeNotes(dataDir: string, list: string): Promise<number> {
   return ok ? 0 : 1;
 }
 
+/**
+ * `plannotator inbox status [--json]`. Exit 0: running. 1: not running (it
+ * never ran with this data dir, or the process its record names is gone).
+ * 2: not answering (a live process holds its port but does not answer).
+ */
+async function statusCommand(dataDir: string, asJson: boolean): Promise<number> {
+  const status = await inboxStatus(dataDir);
+  const entry = status.state === "missing" ? null : status.entry;
+  const cliVersion = getCliVersion() ?? "dev";
+  const code = status.state === "running" ? 0 : status.state === "busy" ? 2 : 1;
+  if (asJson) {
+    const report = {
+      state: status.state === "busy" ? "not_answering" : status.state === "missing" ? "never_started" : status.state,
+      running: status.state === "running",
+      // Why a record names no running Inbox: the process exited, another Inbox has the port, or the pid is another program's.
+      reason: status.state === "stopped" ? status.reason : null,
+      url: entry?.url ?? null,
+      port: entry?.port ?? null,
+      pid: entry?.pid ?? null,
+      version: status.state === "running" ? status.health.version : (entry?.version ?? null),
+      started_at: entry?.startedAt ?? null,
+      tailnet_url: status.state === "running" ? (entry?.tailscale?.url ?? null) : null,
+      data_dir: dataDir,
+      record: inboxRegistryPath(dataDir),
+      cli_version: cliVersion,
+    };
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return code;
+  }
+  const out = (line: string) => process.stdout.write(`${line}\n`);
+  if (status.state === "missing") {
+    out("Plannotator Inbox: not running (it has never run with this data dir)");
+  } else if (status.state === "stopped") {
+    const why = { dead_pid: "that process has exited", other_session: "its port answers for another Inbox now", no_answer: `nothing answers on its port; pid ${status.entry.pid} may be another program now` }[status.reason];
+    out("Plannotator Inbox: not running");
+    out(`  last ran: pid ${status.entry.pid} on port ${status.entry.port}, version ${status.entry.version}, started ${status.entry.startedAt} (${why})`);
+  } else {
+    const live = status.entry;
+    out(status.state === "running" ? "Plannotator Inbox: running" : `Plannotator Inbox: not answering (pid ${live.pid} holds port ${live.port} but did not answer)`);
+    out(`  URL:      ${live.url}`);
+    if (status.state === "running" && live.tailscale?.url) out(`  tailnet:  ${live.tailscale.url}`);
+    out(`  pid:      ${live.pid}`);
+    out(`  version:  ${status.state === "running" ? status.health.version : live.version}`);
+    out(`  started:  ${live.startedAt}`);
+  }
+  out(`  data dir: ${dataDir}`);
+  if (status.state === "running" && status.health.version !== cliVersion) {
+    // Restart runs this binary, so it is advised only when that is an update, never a downgrade.
+    out(
+      isNewerStableVersion(cliVersion, status.health.version)
+        ? `This plannotator is ${cliVersion}; plannotator inbox restart starts it in the Inbox's place.`
+        : `This plannotator is ${cliVersion}; the Inbox runs ${status.health.version}.`,
+    );
+  }
+  return code;
+}
+
+/**
+ * A start lock another starter holds: wait for its start to finish (it
+ * releases the lock), so what it starts is the Inbox this command then
+ * stops. One older than the stale age (a starter that died) is removed.
+ * Answers whether a stale one was removed.
+ */
+async function waitOutStartLock(dataDir: string): Promise<boolean> {
+  const lock = join(inboxDir(dataDir), INBOX_START_LOCK);
+  // A lock kept fresh this long (a restart refreshes its own) is left to its holder; the stop goes on.
+  const deadline = Date.now() + 2 * INBOX_START_LOCK_STALE_MS;
+  for (;;) {
+    let age: number;
+    try {
+      age = Date.now() - statSync(lock).mtimeMs;
+    } catch {
+      return false;
+    }
+    if (age > INBOX_START_LOCK_STALE_MS) {
+      rmSync(lock, { recursive: true, force: true });
+      return true;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+/** The start lock for `restart`, waiting out a starter that holds it; null when it cannot be had. */
+async function takeStartLock(dataDir: string): Promise<(() => void) | null> {
+  const deadline = Date.now() + INBOX_START_LOCK_STALE_MS + 1_000;
+  for (;;) {
+    const release = acquireInboxStartLock(dataDir);
+    if (release || Date.now() >= deadline) return release;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+/** One line for what `stopInbox` did, and whether nothing of this data dir's runs now. */
+function stopReport(result: InboxStopResult, hadRecord: boolean): { ok: boolean; line: string } {
+  if (result.state === "stopped") {
+    const how = {
+      stop_route: "",
+      SIGTERM: ": it did not stop when asked, so it was sent SIGTERM",
+      SIGKILL: ": it outlived SIGTERM, so it was killed (SIGKILL)",
+    }[result.by];
+    return { ok: true, line: `Stopped the Plannotator Inbox (pid ${result.pid})${how}.` };
+  }
+  if (result.state === "not_running") {
+    if (!result.stale) return { ok: true, line: hadRecord ? "No Plannotator Inbox is running." : "No Plannotator Inbox is running (it has never run with this data dir)." };
+    const { pid, reason } = result.stale;
+    const why = {
+      dead_pid: `its record named pid ${pid}, which has already exited`,
+      other_session: `its port answers for another Inbox now, which was left alone`,
+      no_answer: `its record names pid ${pid}, which is another program now (pids are reused); it was left alone`,
+      not_ours: `its record names the Inbox of another data dir (pid ${pid}; this data dir looks copied from that one), which was left alone`,
+    }[reason];
+    return { ok: true, line: `No Plannotator Inbox is running: ${why}.` };
+  }
+  const why = {
+    busy: `is not answering, and pid ${result.pid} could not be proven to be the Inbox, so nothing was sent to it`,
+    unproven: `did not stop when asked, and pid ${result.pid} could not be proven to be the Inbox, so nothing was sent to it`,
+    survived: "is still running after SIGTERM and SIGKILL",
+  }[result.reason];
+  const end = process.platform === "win32" ? "end it in Task Manager" : `end it yourself (kill ${result.pid})`;
+  return { ok: false, line: `The Plannotator Inbox (pid ${result.pid}) ${why}. If it is the Inbox, ${end} and run this again.` };
+}
+
+/** `plannotator inbox stop`. Exit 0 when no Inbox of this data dir runs afterwards, 1 when one still does. */
+async function stopCommand(dataDir: string): Promise<number> {
+  if (await waitOutStartLock(dataDir)) process.stderr.write("Removed a stale start lock (a start that never finished).\n");
+  const hadRecord = readInboxRegistry(dataDir) !== null;
+  const report = stopReport(await stopInbox(dataDir, { escalate: true }), hadRecord);
+  if (!report.ok) {
+    process.stderr.write(`${report.line}\n`);
+    return 1;
+  }
+  process.stdout.write(`${report.line}\n`);
+  return 0;
+}
+
+/**
+ * `plannotator inbox restart [--tailscale]`: stop the Inbox (as `stop`
+ * does), then start it detached through the one detached start, never a
+ * browser tab, and print its URL on stdout. A run published only by
+ * `--tailscale` is published again. The start lock is held from before the
+ * stop until the new Inbox answers, so an agent that finds the Inbox stopped
+ * in between waits for this start instead of racing it.
+ */
+async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
+  const release = await takeStartLock(dataDir);
+  if (!release) {
+    process.stderr.write("Another Plannotator Inbox start holds the start lock and did not finish; try again.\n");
+    return 1;
+  }
+  let handedOver = false;
+  try {
+    const hadRecord = readInboxRegistry(dataDir) !== null;
+    const stopped = await stopInbox(dataDir, { escalate: true });
+    const report = stopReport(stopped, hadRecord);
+    process.stderr.write(`${report.line}\n`);
+    if (!report.ok) return 1;
+    if (stopped.state === "not_running" && stopped.stale?.reason === "not_ours") {
+      // A start would find that Inbox through this record and start nothing: say so instead of naming it as restarted.
+      process.stderr.write("Nothing was restarted: while that Inbox runs, this data dir's record names it.\n");
+      return 1;
+    }
+    // The stop can take a while; the lock's age starts again, so no starter takes it as stale meanwhile.
+    try {
+      const now = new Date();
+      utimesSync(join(inboxDir(dataDir), INBOX_START_LOCK), now, now);
+    } catch {
+      // Best effort.
+    }
+    handedOver = true;
+    const entry = await startDetachedInbox(dataDir, release, tailscale || (stopped.state === "stopped" && stopped.tailscaleRunOnly));
+    process.stderr.write(`Started the Plannotator Inbox (pid ${entry.pid}, version ${entry.version}).\n`);
+    reportTailnet(readInboxRegistry(dataDir)?.tailscale ?? entry.tailscale, tailscale);
+    process.stdout.write(`${entry.url}\n`);
+    return 0;
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  } finally {
+    if (!handedOver) release();
+  }
+}
+
 function usageError(message: string): never {
   process.stderr.write(`${message}\nRun 'plannotator inbox --help' for usage.\n`);
   process.exit(1);
@@ -371,6 +578,8 @@ function usageError(message: string): never {
 export interface InboxCommandAssets {
   /** The built window (`apps/hook/dist/inbox.html`), embedded by the binary. */
   htmlContent?: string;
+  /** The global `--json` flag (index.ts takes it out of the arguments first); `status` reads it, `stop` and `restart` refuse it. */
+  json?: boolean;
 }
 
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
@@ -394,6 +603,28 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       hostSession: inboxHostSessionFromEnv(process.env),
     });
     process.exit(0);
+  }
+
+  if (args[0] === "status") {
+    if (args.length > 1) usageError(`Unknown inbox status option: ${args[1]} (status takes only --json)`);
+    process.exit(await statusCommand(dataDir, assets.json === true));
+  }
+
+  // index.ts takes the global --json out of the arguments; only status prints JSON.
+  if ((args[0] === "stop" || args[0] === "restart") && assets.json === true) {
+    usageError(`inbox ${args[0]} has no --json output; plannotator inbox status --json reports the Inbox as JSON.`);
+  }
+
+  if (args[0] === "stop") {
+    if (args.length > 1) usageError(`Unknown inbox stop option: ${args[1]}`);
+    process.exit(await stopCommand(dataDir));
+  }
+
+  if (args[0] === "restart") {
+    const rest = args.slice(1);
+    const unknown = rest.find((arg) => arg !== "--tailscale");
+    if (unknown) usageError(`Unknown inbox restart option: ${unknown} (restart takes only --tailscale)`);
+    process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
   }
 
   if (args[0] === "--notes") {

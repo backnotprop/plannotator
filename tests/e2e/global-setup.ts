@@ -17,6 +17,9 @@ export default function globalSetup(): void {
   installAgentCliGuard(bin, log);
   process.env.PATH = agentCliGuardedPath(bin, process.env.PATH);
   process.env[AGENT_CLI_TRIPWIRE_LOG_ENV] = log;
+  // Never the live feedback Worker (its table is append-only): every spec and every binary started
+  // with this env sends feedback to a closed loopback port (tests/setup/feedback-archive-off.ts).
+  process.env.PLANNOTATOR_FEEDBACK_URL = 'http://127.0.0.1:9/feedback';
   // The guard is what the PATH finds, or the run does not start.
   for (const name of RUNNER_AGENT_COMMANDS) {
     const found = spawnSync('sh', ['-c', `command -v ${name}`], { env: process.env, encoding: 'utf8' }).stdout.trim();

@@ -102,6 +102,8 @@ export interface SidebarProps {
   mcpCommand?: readonly string[] | null;
   /** The foot's Copy prompt pill (default true). The onboarding tour's sidebar leaves it out: it is for the person's own agents. */
   connectPrompt?: boolean;
+  /** Opens the Feedback dialog (components/FeedbackDialog.tsx): the row above Settings. Absent: no row. */
+  onFeedback?: () => void;
 }
 
 /**
@@ -377,7 +379,7 @@ export function Sidebar(props: SidebarProps) {
         </div>
       </div>
       <div className="ib-side-foot">
-        {/* Copy prompt first, then the Update button or "What's new in X", then the Settings row. */}
+        {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
         {props.connectPrompt !== false && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
         <UpdateButton
           update={props.update}
@@ -390,6 +392,12 @@ export function Sidebar(props: SidebarProps) {
           <CheckFailingRow failing={props.checkFailing} onOpen={pick(props.onCheckFailing)} />
         )}
         {restartAgents.total > 0 && props.onRestartSessions && <RestartSessionsRow agents={restartAgents} onOpen={pick(props.onRestartSessions)} />}
+        {props.onFeedback && (
+          <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(props.onFeedback)}>
+            <Icon name="comment" />
+            Feedback
+          </button>
+        )}
         {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
         <div className="ib-setrow">
           <button

@@ -26,7 +26,7 @@ import { HostMark, Icon } from '../icons';
 import { inboxMessageImageUrl } from '../images';
 import { Tip } from '../components/Tip';
 import { ContextMarkdown } from '../components/ContextMarkdown';
-import { answerNeedsConfirm, answerWords, choiceAnswer, confirmLabel, otherAnswer, skipAnswer, swipeChoices, textAnswer } from './model';
+import { answerNeedsConfirm, answerWords, choiceAnswer, confirmLabel, otherAnswer, skipAnswer, swipeChoices, swipeHint, textAnswer } from './model';
 
 /**
  * The contract lines a card shows (the question's additive `stakes`, `why`,
@@ -724,7 +724,7 @@ export function DecisionCard(props: DecisionCardProps) {
           {/* Swipe is touch only, for a two-way choice, and always has its buttons (the choices above). */}
           {choices2 && props.touch && (
             <p className="ib-dm-swipehint" aria-hidden="true">
-              Swipe right for {choices2[0]}, left for {choices2[1]}.
+              {swipeHint(choices2)}
             </p>
           )}
         </div>

@@ -38,6 +38,7 @@ plannotator/
 │   ├── kiro-cli/                 # Kiro CLI integration source (consumed by scripts/install.sh; auto-detected via ~/.kiro)
 │   │   ├── agents/plannotator.json   # Example Kiro custom agent
 │   │   └── skills/               # Kiro-specific skill packages (review, annotate); setup-goal + visual-explainer install from apps/skills/extra
+│   ├── feedback-service/         # Product feedback: a Cloudflare Worker + D1 with one route, POST /feedback, that only inserts (no read route; the owner reads in the dashboard or with `bun run db:read`). Owner-deployed (never from CI; live at plannotator-feedback.plannotator.workers.dev, D1 `plannotator-feedback`); its tests (test/) run in the root `bun test` against an in-memory store
 │   ├── paste-service/            # Paste service for short URL sharing
 │   │   ├── core/                 # Platform-agnostic logic (handler, storage interface, cors)
 │   │   ├── stores/               # Storage backends (fs, kv, s3)

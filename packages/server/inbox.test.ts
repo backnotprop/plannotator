@@ -4,7 +4,7 @@
  * SDK client over streamable HTTP. Every test uses its own temp data dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -324,6 +324,50 @@ describe("security refusals, by real requests", () => {
     await Bun.sleep(300);
     expect(stopped).toBe(true);
     expect((await inboxStatus(dataDir)).state).toBe("stopped");
+  });
+
+  test("the stop route refuses a stop that names another data dir (a copied record) and takes its own under another spelling", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    let stopped = false;
+    const server = await start(dataDir, { onStopRequested: () => (stopped = true) });
+    const token = readInboxRegistry(dataDir)!.token;
+    const stop = (body: unknown) => post(server, "/api/inbox/control/stop", body, { Authorization: `Bearer ${token}` });
+    // A copy of this data dir: its inbox.json names this Inbox, its own folder is another.
+    const copy = join(root, "copy");
+    mkdirSync(join(copy, "inbox"), { recursive: true });
+    writeFileSync(join(copy, "inbox", "inbox.json"), readFileSync(join(dataDir, "inbox", "inbox.json")));
+    const refused = await stop({ data_dir: copy });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).code).toBe("not_ours");
+    await Bun.sleep(300);
+    expect(stopped).toBe(false);
+    expect((await inboxStatus(dataDir)).state).toBe("running");
+
+    // The same folder through a symlink is this Inbox's: it stops.
+    const link = join(root, "link");
+    symlinkSync(dataDir, link);
+    expect((await stop({ data_dir: link })).status).toBe(200);
+    await Bun.sleep(300);
+    expect(stopped).toBe(true);
+  });
+
+  test("the stop route never refuses on a folder it cannot read: a data dir that does not exist, or this one moved", async () => {
+    const root = tempRoot();
+    const stopVia = async (dataDir: string, named: () => string, before?: () => void) => {
+      let stopped = false;
+      const server = await start(dataDir, { onStopRequested: () => (stopped = true) });
+      const token = readInboxRegistry(dataDir)!.token;
+      before?.();
+      const response = await post(server, "/api/inbox/control/stop", { data_dir: named() }, { Authorization: `Bearer ${token}` });
+      await Bun.sleep(300);
+      return { status: response.status, stopped };
+    };
+    // The caller names a folder that is not there.
+    expect(await stopVia(join(root, "a"), () => join(root, "nowhere"))).toEqual({ status: 200, stopped: true });
+    // The data dir was renamed under the running Inbox: its own folder is gone, the caller names the new one.
+    const moved = join(root, "moved");
+    expect(await stopVia(join(root, "b"), () => moved, () => renameSync(join(root, "b"), moved))).toEqual({ status: 200, stopped: true });
   });
 
   test("the window ships its CSP (no framing, no other origin) and no CORS anywhere", async () => {

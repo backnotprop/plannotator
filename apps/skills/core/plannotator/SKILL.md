@@ -175,6 +175,7 @@ Lists active Plannotator server sessions, each with its full target (absolute pa
 ```bash
 plannotator inbox [--background | --no-open | --open] [--tailscale]
 plannotator inbox mcp
+plannotator inbox status [--json] | stop | restart
 ```
 
 The Plannotator Inbox is one local window per machine where you leave the person messages, `:::question` blocks they answer with a click, files to annotate and guided reviews. Nothing blocks: you send, then keep working or end your turn.
@@ -182,7 +183,7 @@ The Plannotator Inbox is one local window per machine where you leave the person
 - Use it for a decision only they can make (a `:::question` block, then go on with work that does not depend on it), long work you finished (one short summary, with the files to look at in `attachments`), or when they ask. A decision you sent to the Inbox stays there: when the person writes in the chat, say there what waits (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Ask in the chat only about something new they raised there that needs no pictures or files, or when they ask. Do not send routine progress. Use a review (plan review, `annotate`, `review`) when you need a decision on this document or diff before you go on.
 - If you have a `plannotator_inbox` tool, use it; otherwise use the stdio MCP server `plannotator inbox mcp`. With the tool, the person's reply arrives in your session by itself, so end your turn instead of waiting.
 - Run `plannotator inbox --help` once and read it before your first use: it is the full guide (tools and arguments, threads, where replies go, question syntax, replacing questions, connecting other agents).
-- Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it.
+- Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
 - When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
 
 ## plannotator card
@@ -197,12 +198,16 @@ Only while the person has turned the Inbox's Board on (Settings → Capabilities
 
 ```bash
 plannotator setup-goal <interview|facts> <bundle.json | -> [--json]
+plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'PLANNOTATOR_FEEDBACK_END'
+<the message, exactly as the person approved it>
+PLANNOTATOR_FEEDBACK_END
 plannotator update [--check]
 plannotator uninstall [--purge] [--yes] [--dry-run]
 plannotator improve-context
 ```
 
 - `setup-goal` opens the interview or facts-acceptance UI for /goal workflows; it is driven by the `plannotator-setup-goal` skill and takes a bundle JSON (`-` reads stdin). Do not hand-build bundles.
+- `feedback` sends the person's feedback about Plannotator to its maintainers and prints `Sent` (the message, the category and contact if given, the version, the OS name and that it came from the CLI; nothing else). Only when the person asks you to send feedback: show them the exact text first and run it only after they say yes. Pass the message on stdin with a quoted heredoc (`<<'PLANNOTATOR_FEEDBACK_END'`, quotes included; pick another end word if a line of the message is exactly that), never inside double quotes in any shell, where `$VAR`, backticks and `$(...)` are expanded and change the approved text. Fill in or leave out the bracketed options (`--category idea`), and put a contact in single quotes. In PowerShell, set `$OutputEncoding = [Text.UTF8Encoding]::new($false)` and pipe a single-quoted here-string (`@'` … `'@ | plannotator feedback --stdin`). Exit 0 sent, 1 not sent, 2 usage.
 - `update` installs the newest release now (the install script, with the choices from the last install); `--check` only reports whether one exists. Run it only when the person asks you to update Plannotator: it replaces the binary. Exit 0 up to date or updated, 1 failed, 2 usage, 130 interrupted.
 - `uninstall` removes Plannotator-installed components (`--purge` also deletes local data; `--yes` is required without a TTY; `--dry-run` previews).
 - `improve-context` and `install-runtime` are internal integration commands (hook plumbing and managed runtime install). Never run `improve-context` directly; `plannotator install-runtime agent-terminal` exists for reinstalling the optional annotate-terminal runtime and is normally run by the installer.

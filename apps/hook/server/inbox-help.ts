@@ -434,6 +434,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "`--tailscale` is the person's choice: never add it to a start you run. The MCP server and the agent tools answer only on this computer.",
     "",
+    "`plannotator inbox status` only reads; run it to check whether the Inbox is up (exit 0) or to find its address. Never run `plannotator inbox stop` or `restart` unless the person asks: other agents' sessions use the same Inbox. After a restart, connected sessions reconnect by themselves within seconds, and replies wait in the Inbox meanwhile.",
+    "",
     "## Data and removal",
     "",
     `- Everything lives in ${code(inboxPath)}: threads by project, the versions of the files you sent, and \`inbox.json\` (where the running Inbox is).`,
