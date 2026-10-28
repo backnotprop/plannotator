@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settleThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -349,6 +349,25 @@ describe('the open thread', () => {
     // No row for it in the list read: nothing changes.
     expect(ids(settleThread(before, bySection(q2), 'open'))).toEqual(ids(before));
   });
+
+  // The owner, 2026-10-27: "Why is this thread showing up in quiet? ... it has open questions". The questions
+  // arrived while the thread was open (or the list was held) and were seen, so `unseen` was 0 and Back left
+  // the row drawn in Quiet, its state Holding.
+  test('settlesOnBack (the list the thread covered): an unseen arrival moves the row; so does waiting on the person while drawn elsewhere; a row only read stays as left', () => {
+    const quietOpen = r('open', 'billing-svc', 1, 'quiet', 0);
+    const drawnQuiet = bySection(quietOpen, other);
+    const holdsSeen = r('open', 'billing-svc', 5, 'holding', 0);
+    expect(settlesOnBack(drawnQuiet, holdsSeen)).toBe(true);
+    expect(settlesOnBack(drawnQuiet, { ...holdsSeen, section: 'stopped' })).toBe(true);
+    expect(settlesOnBack(drawnQuiet, { ...holdsSeen, section: 'waiting' })).toBe(true);
+    expect(ids(settleThread(drawnQuiet, bySection(holdsSeen, other), 'open'))).toEqual(['holding:open', 'new:other']);
+    // Already drawn where it waits: it stays as left.
+    expect(settlesOnBack(bySection({ ...quietOpen, section: 'holding' }, other), holdsSeen)).toBe(false);
+    // Only read (no agent activity, state Quiet), drawn in New where it was opened: as left.
+    expect(settlesOnBack(shown, seen)).toBe(false);
+    // An arrival not seen: it comes back unread, as before.
+    expect(settlesOnBack(shown, arrived)).toBe(true);
+  });
 });
 
 // The failure this guards (the owner, 2026-10-16: "When I create a new thread
@@ -429,5 +448,33 @@ describe('adoptKeepingOpen', () => {
     expect(next[0]!.threads.map((r) => r.thread_id)).toEqual(['d', 'b', 'a', 'c']);
     expect(next[0]!.threads[2]).toBe(archivedRow);
     expect(next[0]!.threads[2]!.resolved_at).toBe('2026-10-20T10:05:00Z');
+  });
+});
+
+describe('putRowBack (Undo of Mark read on a seen update held in New)', () => {
+  const two = (newRows: InboxListRow[], quiet: InboxListRow[]): InboxListSection[] => [
+    { id: 'new', label: 'New since you looked', threads: newRows },
+    { id: 'quiet', label: 'Quiet', threads: quiet },
+  ];
+  const at = (id: string, time: string, section: 'new' | 'quiet') => ({ ...row(id, 'docs', time, 'agent'), section }) as InboxListRow;
+
+  test('Mark read moved it to Quiet; Undo puts it back between the same neighbours, the rest as on screen', () => {
+    // Held: a was read (its state says Quiet) and sits between x and y, out of time order.
+    const before = two([at('x', '2026-10-20T12:00:00Z', 'new'), at('a', '2026-10-20T08:00:00Z', 'quiet'), at('y', '2026-10-20T10:00:00Z', 'new')], []);
+    const latest = two([at('x', '2026-10-20T12:00:00Z', 'new'), at('y', '2026-10-20T10:00:00Z', 'new')], [at('a', '2026-10-20T08:00:00Z', 'quiet')]);
+    expect(drawnSection(before, 'a')).toBe('new');
+    const moved = settleThread(before, latest, 'a');
+    expect(drawnSection(moved, 'a')).toBe('quiet');
+    const back = putRowBack(moved, before, 'a');
+    expect(back[0]!.threads.map((r) => r.thread_id)).toEqual(['x', 'a', 'y']);
+    expect(back[1]!.threads).toEqual([]);
+  });
+
+  test('a row no longer on screen stays out', () => {
+    const before = two([at('a', '2026-10-20T08:00:00Z', 'quiet')], []);
+    const gone = two([], []);
+    expect(putRowBack(gone, before, 'a')).toEqual(gone);
+    expect(drawnSection(gone, 'a')).toBeNull();
+    expect(drawnSection(null, 'a')).toBeNull();
   });
 });

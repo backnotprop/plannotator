@@ -49,6 +49,14 @@ export function getPlanBrowserHtml(): string {
 	return content;
 }
 
+/**
+ * Code review's diagram engine (the folder `bun run build` copies from the
+ * CLI's dist): read on the first `/api/diff` of a review, null when the
+ * folder is missing so diagram fences show as code. The server hashes and
+ * serves the files (generated/diagram-engine-assets.ts).
+ */
+export const reviewDiagramEngineDirectory = resolve(moduleDirectory, "diagram-engine");
+
 /** Read and cache the built code-review UI on first use. */
 export function getReviewBrowserHtml(): string {
 	const content = readBrowserAsset(reviewHtmlPath, reviewHtmlContent);

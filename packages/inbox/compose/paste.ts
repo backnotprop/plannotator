@@ -101,15 +101,73 @@ function plainText(data: Partial<Pick<DataTransfer, 'getData'>> | null): string 
  * Pages carries a rendering of itself, which Chromium hands over as a file
  * named `image.png`. When the clipboard has plain text, only files with a
  * real name attach (a file copied in Finder brings its name as the text); a
- * screenshot or Chrome's "Copy image" carries no plain text and attaches.
+ * screenshot or Chrome's "Copy image" carries no plain text and attaches, and
+ * on a phone, an image copied from a page, whose text is only its own
+ * address (pastedImageOwnLink), attaches too.
  */
+/** One of the clipboard's string types, read synchronously ('' when absent or unreadable). */
+function stringOf(data: Partial<Pick<DataTransfer, 'getData'>> | null, type: string): string {
+  try {
+    return typeof data?.getData === 'function' ? data.getData(type) : '';
+  } catch {
+    return '';
+  }
+}
+
+const decodeAttribute = (value: string) =>
+  value.replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+/**
+ * An image copied from a page: the plain text is one http(s) address and the
+ * HTML beside it is an `<img>` whose `src` is that same address. That text is
+ * the picture's own link, not words the person meant to paste. Only a phone
+ * takes the picture over the text (`phone`): there iOS Safari and Chrome on
+ * Android carry the link beside the image; a desktop keeps today's rule, so a
+ * spreadsheet cell holding a URL (its text, an HTML table and a picture of the
+ * cell) still pastes as text everywhere.
+ */
+export function pastedImageOwnLink(data: Partial<Pick<DataTransfer, 'getData'>> | null, phone: boolean): boolean {
+  if (!phone) return false;
+  const link = plainText(data).trim();
+  if (!/^https?:\/\/\S+$/i.test(link)) return false;
+  const html = stringOf(data, 'text/html');
+  for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
+    const src = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+    const value = src ? decodeAttribute((src[1] ?? src[2] ?? src[3] ?? '').trim()) : '';
+    if (value === link) return true;
+  }
+  return false;
+}
+
+/**
+ * Files a person chose with the attach button, named as a paste names them: a
+ * photo the library hands over as `image.jpg` (iOS) gets `pasted-image-<stamp>.jpg`,
+ * a real name is kept. `taken`: the names already attached to this message.
+ */
+export function chosenFiles(list: Iterable<File>, taken: Iterable<string>, at = new Date()): File[] {
+  const files = [...list];
+  const names = chosenFileNames(files, taken, at);
+  return files.map((file, i) => (names[i] === file.name ? file : new File([file], names[i]!, { type: file.type, lastModified: file.lastModified })));
+}
+
+/** The names chosenFiles gives, in order. */
+export function chosenFileNames(files: readonly Pick<File, 'name' | 'type'>[], taken: Iterable<string>, at = new Date()): string[] {
+  const names = new Set(taken);
+  return files.map((file) => {
+    const name = pastedFileName(file, at, names);
+    names.add(name);
+    return name;
+  });
+}
+
 export function pastedFiles(
   data: (Pick<DataTransfer, 'files' | 'items'> & Partial<Pick<DataTransfer, 'getData'>>) | null,
   taken: Iterable<string>,
   at = new Date(),
+  { phone = false }: { phone?: boolean } = {},
 ): File[] {
   let files = clipboardFiles(data);
-  if (files.length > 0 && plainText(data).trim() !== '') files = files.filter((file) => !isGenericPasteName(file.name));
+  if (files.length > 0 && plainText(data).trim() !== '' && !pastedImageOwnLink(data, phone)) files = files.filter((file) => !isGenericPasteName(file.name));
   if (files.length === 0) return [];
   const names = new Set(taken);
   return files.map((file) => {

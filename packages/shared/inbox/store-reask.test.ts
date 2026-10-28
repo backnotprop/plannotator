@@ -61,6 +61,22 @@ describe("Re-ask", () => {
     expect(sectionOf(store, first.id)).toBe("sent");
   });
 
+  test("one open question: a note of its own, worded in the singular", () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-reask-"));
+    roots.push(dir);
+    const store = InboxStore.open(dir);
+    const project = store.ensureProject({ name: "billing", root: "/work/billing" });
+    const only = store.sendMessage({ project_id: project.id, author: A, body: `One call.\n\n${block("Backfill ledger first?")}` }).message;
+    const { reply } = store.sendReask(only.id, { idempotency_key: "k1" });
+    const [q] = qs(store, only.id);
+    expect(reply.reask).toEqual([`${only.id}/${q!.key}`]);
+    expect(reply.body.split("\n")[0]).toBe("Please ask your open question in this thread again, in one new message, so the person can answer it in one place.");
+    expect(reply.body).toContain("Check it against where the work is now:");
+    expect(reply.body).toContain("the old question stays open for the person.");
+    expect(reply.body).not.toMatch(/\b1 open question|questions stay|together/);
+    expect(sectionOf(store, only.id)).toBe("sent");
+  });
+
   test("picks not sent go with the note as answers; only the rest are asked again", () => {
     const { store, first, second } = setup();
     const [q1] = qs(store, first.id) as [InboxQuestion];

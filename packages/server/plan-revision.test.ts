@@ -8,7 +8,7 @@
  * `planRevision` and its tab polls for nothing.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startPlannotatorServer } from "./index";
@@ -63,9 +63,15 @@ describe("plan server revisions (Bun)", () => {
     const { v1, v2 } = planPair();
     const server = await startPlannotatorServer({ plan: v1, htmlContent: MINIMAL_HTML, origin: "pi", planRevisions: true });
     try {
+      // #1001: the history file holding the plan on screen, so Ask AI names it by path.
+      const before = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
+      expect(before.planPath.startsWith(process.env.PLANNOTATOR_DATA_DIR!)).toBe(true);
+      expect(readFileSync(before.planPath, "utf8")).toBe(v1);
       expect(server.updatePlan(v2)).toEqual({ revision: 1, version: 2, unchanged: false });
       const payload = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
       expect(payload).toMatchObject({ plan: v2, planRevision: 1, previousPlan: v1 });
+      expect(payload.planPath).not.toBe(before.planPath);
+      expect(readFileSync(payload.planPath, "utf8")).toBe(v2);
 
       const stale = await post(`${server.url}/api/approve`, { planRevision: 0, planSave: { enabled: false } });
       expect(stale.status).toBe(409);
@@ -73,6 +79,31 @@ describe("plan server revisions (Bun)", () => {
       expect(ok.status).toBe(200);
       expect(await server.waitForDecision()).toMatchObject({ approved: false, feedback: "Split it." });
       expect(server.updatePlan(`${v2}\nMore.\n`)).toBeNull();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("the plan's own file is advertised as planFilePath only while its text is the plan (#1001)", async () => {
+    const { v1, v2 } = planPair();
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-plan-own-file-")));
+    tempDirs.push(dir);
+    const own = join(dir, "rollout.md");
+    writeFileSync(own, v1);
+    const server = await startPlannotatorServer({ plan: v1, htmlContent: MINIMAL_HTML, origin: "claude-code", planRevisions: true, planFilePath: own });
+    try {
+      const first = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
+      expect(first.planFilePath).toBe(own);
+      // A revision whose text the file does not hold drops it.
+      server.updatePlan(v2);
+      const stale = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
+      expect("planFilePath" in stale).toBe(false);
+      // The agent rewrote its file with the next revision: advertised again.
+      const v3 = `${v2}\n- [ ] Third step.\n`;
+      writeFileSync(own, v3);
+      server.updatePlan(v3);
+      const fresh = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
+      expect(fresh.planFilePath).toBe(own);
     } finally {
       await server.stop();
     }

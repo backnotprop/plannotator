@@ -222,3 +222,39 @@ describe("POST /api/update answers only this computer, and only for a session no
   });
 });
 
+
+describe("updateCheckFailing on the payloads (checking has failed for hours)", () => {
+  test("plan, annotate and review say so, with the install command; never beside updateAvailable", async () => {
+    setCliNoticeVersionForTests("0.28.12");
+    const since = Date.now() - 4 * 60 * 60_000;
+    writeUpdateState(
+      { latestRelease: { tag: "0.28.12", fetchedAt: since - 60_000 }, releaseCheck: { attemptedAt: Date.now(), failedAt: Date.now(), failingSince: since, error: "page: HTTP 200" } },
+      dataDir,
+    );
+    const plan = await startPlannotatorServer({ plan: "# Plan", origin: "claude-code", htmlContent: MINIMAL_HTML });
+    const annotate = await startAnnotateServer({ markdown: "# T", filePath: join(dataDir, "t.md"), htmlContent: MINIMAL_HTML, origin: "claude-code" });
+    const review = await startReviewServer({ rawPatch: PATCH, gitRef: "HEAD", htmlContent: MINIMAL_HTML, origin: "claude-code" });
+    try {
+      const expected = { since: new Date(since).toISOString(), error: "release page didn't answer as expected", command: expect.stringContaining("plannotator.ai/install.") };
+      for (const url of [plan.url, annotate.url]) {
+        const payload = await planPayload(url);
+        expect(payload.updateCheckFailing).toMatchObject(expected);
+        expect(payload.updateAvailable).toBeUndefined();
+      }
+      expect(((await (await fetch(`${review.url}/api/diff`)).json()) as Record<string, unknown>).updateCheckFailing).toMatchObject(expected);
+      // A newer release known: the advert, not the failing line.
+      setCliNoticeVersionForTests("0.28.10");
+      const payload = await planPayload(plan.url);
+      expect(payload.updateAvailable).toMatchObject({ version: "0.28.12" });
+      expect(payload.updateCheckFailing).toBeUndefined();
+      // Checks off (the person's choice): nothing.
+      setCliNoticeVersionForTests("0.28.12");
+      process.env.PLANNOTATOR_UPDATE_CHECK = "0";
+      expect((await planPayload(plan.url)).updateCheckFailing).toBeUndefined();
+    } finally {
+      plan.stop();
+      annotate.stop();
+      review.stop();
+    }
+  });
+});

@@ -52,13 +52,16 @@ import type { Host, HttpResult, LoadedPluginInfo } from './host'
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
-  inboxReminderText,
+  inboxReminderFor,
   inboxToolCall,
   inboxToolCallParams,
   inboxToolResultText,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   inboxSentNowFollowUpText,
+  inboxHealthPeeks,
+  inboxSessionThreadsParams,
+  inboxSessionThreadsText,
   inboxWakeText,
   mcpAnswerOfResponse,
   parseInboxBridgeCommands,
@@ -113,13 +116,158 @@ export const INBOX_REMINDER_BLOCK = 'plannotatorInbox'
 
 /**
  * The first message's context blocks with the Inbox reminder last
- * (`inboxReminderText(toolName)`: fixed text naming the tool as the engine
- * registered it, so tool search finds the deferred tool). Never twice: a
- * block of that name already there (a hook above added it) is left as it is.
+ * (`inboxReminderFor(custom, toolName)`: the person's own text from
+ * config.json, else the fixed line, naming the tool as the engine registered
+ * it, so tool search finds the deferred tool). Never twice: a block of that
+ * name already there (a hook above added it) is left as it is.
  */
-export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[], toolName: string): Array<T | { name: string; text: string }> {
+export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[], toolName: string, custom: string | null = null): Array<T | { name: string; text: string }> {
   if (blocks.some((block) => block?.name === INBOX_REMINDER_BLOCK)) return [...blocks]
-  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: inboxReminderText(toolName) }]
+  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: inboxReminderFor(custom, toolName) }]
+}
+
+/**
+ * `$.store` key: whether this machine's Claude Code runs the mod's
+ * `prompt.context` hook. `true`: seen running (the block reaches the model);
+ * `false`: a conversation's first turn completed without it (a guard plugin
+ * seated above the mod, Claude Code's `cc-plugin-sec-default` on
+ * Team/Enterprise accounts, sent the event past it, #2159); absent: not
+ * learned yet. Read once per process.
+ */
+export const STORE_INBOX_REMINDER_CONTEXT_WORKS = 'inboxReminderContextWorks'
+
+/**
+ * The variable the mod sets to the reminder text (with the tool's full
+ * registered name) at session start, for the plugin's `SessionStart` command
+ * hook matched on `compact` (hooks.json): after a compaction that hook prints
+ * it, and the engine adds the line to the conversation. Unset when the
+ * reminder is off. Set again before each compaction installs, to the reminder
+ * plus the session's open threads (`inboxReminderWithThreads`). `$.env.set` needs the name spelled as a literal in
+ * register.ts; register.test.ts keeps that spelling equal to this constant.
+ */
+export const INBOX_REMINDER_ENV = 'PLANNOTATOR_INBOX_REMINDER'
+
+/**
+ * A session whose `$.session.usage().startedAt` is this much older than the
+ * process's first `session.start` was started by an earlier process (a
+ * `--resume` / `--continue`, an in-process `/resume`): its first turn here is
+ * not the conversation's first, so it teaches nothing about `prompt.context`.
+ */
+export const INBOX_REMINDER_RESUMED_SLACK_MS = 60_000
+
+/** The stored `inboxReminderContextWorks`: a boolean, or undefined for anything else. */
+export function readReminderContextWorks(value: unknown): boolean | undefined {
+  return value === true || value === false ? value : undefined
+}
+
+/**
+ * Whether a `prompt.submit` carries the reminder as `context` (the learned
+ * fallback for a machine where `prompt.context` is skipped). Only on a
+ * conversation that has not had it by either path, only while this machine
+ * has no evidence that `prompt.context` runs, and never on a meta prompt or a
+ * slash command (a command may run no model turn, and the copy would be
+ * marked delivered for nothing).
+ */
+export function inboxReminderSubmitCopy(input: {
+  delivered: boolean
+  contextWorks: boolean | undefined
+  isMeta: boolean
+  command: boolean
+}): boolean {
+  return !input.delivered && input.contextWorks !== true && !input.isMeta && !input.command
+}
+
+/**
+ * What the first main-loop `turn.complete` of a conversation teaches.
+ * `done: false`: not decided yet, look again at the next one (an aborted turn
+ * may end before the first request was built, before `prompt.context` had its
+ * chance). `write: false`: store `inboxReminderContextWorks = false` (the
+ * conversation's first request went out without the mod's `prompt.context`).
+ */
+export function inboxReminderFirstTurnLesson(input: {
+  contextRan: boolean
+  aborted: boolean
+  resumed: boolean
+  contextWorks: boolean | undefined
+}): { done: boolean; write: false | null } {
+  if (input.aborted) return { done: false, write: null }
+  if (input.contextRan || input.resumed || input.contextWorks === false) return { done: true, write: null }
+  return { done: true, write: false }
+}
+
+/**
+ * Whether the session was started by an earlier process: `startedAt` is the
+ * session's first launch (`$.session.usage()`), `processStartedAt` this
+ * process's first `session.start`, both in `$.clock.now()` milliseconds. An
+ * unreadable `startedAt` counts as not resumed.
+ */
+export function reminderSessionResumed(startedAt: unknown, processStartedAt: number | null): boolean {
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || processStartedAt === null) return false
+  return startedAt < processStartedAt - INBOX_REMINDER_RESUMED_SLACK_MS
+}
+
+/**
+ * The value of `PLANNOTATOR_INBOX_REMINDER`: the reminder naming the tool by
+ * its registered full name while the reminder is on, else undefined (unset,
+ * which also clears a value inherited from a parent Claude Code). The hook
+ * prints it with `printf "%s\n"` (hooks.json), so every byte comes out as it
+ * is, a custom text's backslashes, leading `-`, `%`, quotes and `$(...)`
+ * included, and nothing in it runs.
+ */
+export function inboxReminderEnvValue(on: boolean, toolName: string | null, custom: string | null = null): string | undefined {
+  if (!on || !toolName) return undefined
+  return inboxReminderFor(custom, toolName)
+}
+
+/**
+ * The longest the session's thread list may take (the registry, the health
+ * check and one read_thread list on a running Inbox; a local Inbox answers in
+ * milliseconds). Past it there is no list, never an error.
+ */
+export const INBOX_SESSION_THREADS_TIMEOUT_MS = 1_500
+
+/**
+ * The session's open Inbox threads as a few short lines
+ * (`inboxSessionThreadsText`), or null: no Inbox has run here, it is not
+ * running (it is never started for this), it did not answer within
+ * INBOX_SESSION_THREADS_TIMEOUT_MS, the session has no open thread, or the
+ * Inbox is older than the peek mark (its health has no `peek: true`: it would
+ * make a project for the folder). Read with the peek mark, so the Inbox makes
+ * no project and the rows do not count as the session having read the
+ * threads. Never throws.
+ */
+export async function readSessionThreads(host: Host, dataDir: string, sessionId: string, cwd: string, toolName: string): Promise<string | null> {
+  if (!sessionId || !cwd.startsWith('/')) return null
+  const work = (async () => {
+    const path = inboxRegistryPathOf(dataDir)
+    if (!(await host.exists(path))) return null
+    const registry = parseInboxRegistry(await host.readFile(path).catch(() => null))
+    if (!registry) return null
+    // Only the Inbox the registry names (its serverSession), never whatever else holds the port now,
+    // and only one that honours the peek mark.
+    const health = await host.fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, { method: 'GET', headers: {} }).catch(() => null)
+    if (!health || health.status !== 200) return null
+    try {
+      if (!inboxHealthPeeks(JSON.parse(health.text), registry.serverSession)) return null
+    } catch {
+      return null
+    }
+    const answer = await mcpCall(host, registry.port, 'tools/call', inboxSessionThreadsParams(cwd, sessionId)).catch(() => null)
+    if (!answer || !('result' in answer)) return null
+    const result = answer.result as { isError?: unknown } | undefined
+    return result?.isError === true ? null : inboxSessionThreadsText(result, toolName)
+  })().catch(() => null)
+  return (await within(host, INBOX_SESSION_THREADS_TIMEOUT_MS, work).catch(() => null)) ?? null
+}
+
+/**
+ * What the plugin's SessionStart `compact` command hook prints after a
+ * compaction: the reminder, then the session's open threads when it has any
+ * (a blank line between), so the thread ids the conversation needs come from
+ * the Inbox, not from the summary the model wrote for itself.
+ */
+export function inboxReminderWithThreads(reminder: string, threads: string | null): string {
+  return threads ? `${reminder}\n\n${threads}` : reminder
 }
 
 /** `$.store` key: the Inbox tool list last read live, used when the Inbox is stopped at session start. */
@@ -286,6 +434,11 @@ export interface InboxLinkOptions {
   dataDir: string
   sessionId: string
   tools: readonly InboxToolInfo[]
+  /**
+   * The name the engine registered the tool under (`mcp__<server>__plannotator_inbox`),
+   * named in the wake's closing line so the model can find the tool. Absent: `plannotator_inbox`.
+   */
+  toolName?: string
   /** A turn is running (or a question of Ask this session is in flight). */
   isBusy: () => boolean
   /**
@@ -769,7 +922,7 @@ export class InboxLink {
       if (turn) {
         // Send now while Claude works: a user row in the running turn, read at its next model request.
         try {
-          await this.host.appendUserRow!(inboxWakeText(command))
+          await this.host.appendUserRow!(inboxWakeText(command, this.options.toolName))
         } catch (error) {
           // Refused: nothing entered, so the claim is given back and it is delivered when the session is idle
           // (here or in the process the person moves to), the window reads it as queued again, and Send now
@@ -791,7 +944,7 @@ export class InboxLink {
           .catch(() => undefined)
       } else {
         // Resolves once Claude is idle and took the turn.
-        await this.host.submit(inboxWakeText(command))
+        await this.host.submit(inboxWakeText(command, this.options.toolName))
       }
     } catch (error) {
       this.submitting = null

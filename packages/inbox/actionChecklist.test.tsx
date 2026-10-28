@@ -13,7 +13,11 @@
  * done"); a double-click on the tick doing Done then Undo; the tick dropping
  * keyboard focus while it saves (disabled) or changing its name; the copy
  * result not announced; the row's count; an action item reaching the picks
- * or the Send (the api split).
+ * or the Send (the api split). In the reply draft (approval
+ * "inbox-action-items-in-reply"): a Done offering an Undo timer instead of
+ * "in your draft"; its note not saved (typing, leaving the field) or saved
+ * loud; the agent's own done hiding the person's note; the old "Add note…"
+ * and "10 s" words coming back.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
  */
@@ -23,9 +27,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection, InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import { parseInboxActionBlocks } from '@plannotator/core/inbox-actions';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 
 const hasDom = typeof document !== 'undefined';
-const { ActionChecklist } = (hasDom ? await import('./components/ActionChecklist') : {}) as typeof import('./components/ActionChecklist');
+const { ActionChecklist, taskMarkdown } = (hasDom ? await import('./components/ActionChecklist') : {}) as typeof import('./components/ActionChecklist');
 const { MessageBody } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
@@ -194,7 +200,21 @@ test.skipIf(!hasDom)('adjacent `:::action` blocks are one card; blocks separated
   expect(text).not.toContain('Run: ');
 });
 
-test.skipIf(!hasDom)('the header: how many, how many done, one badge (Holds up sums; Stopped wins); the watching line and the 10 s rule once', () => {
+test.skipIf(!hasDom)('refs in a task stay plain text in its toggle (a button); its why links them into the thread repo', () => {
+  const action = record(0, { prompt: 'Merge acme/web#12 and #3, not `acme/web#13`', context: 'Then team/app#4 can ship.' });
+  const el = mount(<ActionChecklist actions={[action]} agent="Claude Code" refRepo={{ display: 'group/web', host: 'gitlab.example.com' }} onMark={async () => true} />);
+  const toggle = el.querySelector('[data-action-toggle]')!;
+  expect(toggle.querySelector('a')).toBeNull();
+  expect(toggle.textContent).toContain('Merge acme/web#12 and #3, not acme/web#13');
+  const why = el.querySelector('[data-action-why]')!;
+  expect([...why.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'))).toContain('https://gitlab.example.com/team/app/-/issues/4');
+  // The task's text holds no link even where refs would link (a renderer given a repo).
+  const html = renderToStaticMarkup(<InlineMarkdown text={taskMarkdown(action.prompt)} githubRepo="group/web" repoHost="gitlab.example.com" />);
+  expect(html).not.toContain('acme/web/-/issues/12');
+  expect(html).not.toContain('`');
+});
+
+test.skipIf(!hasDom)('the header: how many, how many done, one badge (Holds up sums; Stopped wins); the watching line once, no timer words', () => {
   const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={async () => true} />);
   const card = el.querySelector('[data-action-group]')!;
   expect(card.getAttribute('role')).toBe('group');
@@ -203,11 +223,50 @@ test.skipIf(!hasDom)('the header: how many, how many done, one badge (Holds up s
   expect(card.querySelector('[data-action-badge]')!.textContent).toBe('Holds up 3');
   expect(card.querySelectorAll('[data-action-watching]')).toHaveLength(1);
   expect(card.querySelector('[data-action-watching]')!.textContent).toBe("Claude Code is watching: the staging secret list; I'll see it appear.");
-  expect(card.querySelector('[data-action-hint]')!.textContent).toBe('Done reaches Claude Code after 10 s, so you can undo.');
+  // A Done goes with the person's Send: there is no Undo window to explain.
+  expect(card.querySelector('[data-action-hint]')).toBeNull();
+  expect(card.textContent).not.toContain('10 s');
   act(() => root!.render(<ActionChecklist actions={[record(2), record(0)]} agent="Claude Code" onMark={async () => true} />));
   expect(el.querySelector('[data-action-badge]')!.textContent).toBe('Stopped');
   act(() => root!.render(<ActionChecklist actions={[record(2)]} agent="Claude Code" onMark={async () => true} />));
   expect(el.textContent).toContain('1 thing only you can do');
+});
+
+test.skipIf(!hasDom)("the why is markdown, as a question's context: bold, code, a list and a link (opened safely), never the raw marks", () => {
+  // The owner's report (0.28.31): `**App Manifest**` and `slack-app.yaml` in backticks came through literally.
+  const context = [
+    "Steps: api.slack.com/apps → **App Manifest** → replace it with the contents of `slack-app.yaml` → **Save**.",
+    '',
+    '- Run `pbpaste > /tmp/sfharness/slack-bot` on your Mac',
+    '- Then reinstall: see [the Slack docs](https://api.slack.com/authentication/basics)',
+  ].join('\n');
+  const el = mount(<ActionChecklist actions={[record(0, { context })]} agent="Claude Code" onMark={async () => true} />);
+  const why = panelOf(rowOf(el, 0)).querySelector<HTMLElement>('[data-action-why]')!;
+  expect(why).not.toBeNull();
+  expect(why.textContent).not.toContain('**');
+  expect(why.textContent).not.toContain('`');
+  expect([...why.querySelectorAll('strong')].map((b) => b.textContent)).toEqual(['App Manifest', 'Save']);
+  expect([...why.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['slack-app.yaml', 'pbpaste > /tmp/sfharness/slack-bot']);
+  expect(why.querySelectorAll('[data-rich-list-kind="ul"]')).toHaveLength(2);
+  const link = why.querySelector<HTMLAnchorElement>('a[href="https://api.slack.com/authentication/basics"]')!;
+  expect(link.textContent).toBe('the Slack docs');
+  expect(link.target).toBe('_blank');
+  expect(link.rel).toBe('noopener noreferrer');
+});
+
+test.skipIf(!hasDom)('the task line draws inline markdown, but never a link inside its toggle button', () => {
+  const el = mount(
+    <ActionChecklist
+      actions={[record(0, { prompt: 'Run `npm login` on **this machine**, see [the guide](https://docs.npmjs.com/) or https://npmjs.com/login' })]}
+      agent="Claude Code"
+      onMark={async () => true}
+    />,
+  );
+  const task = rowOf(el, 0).querySelector<HTMLElement>('.ib-chk-do')!;
+  expect(task.querySelector('code')!.textContent).toBe('npm login');
+  expect(task.querySelector('strong')!.textContent).toBe('this machine');
+  expect(task.querySelector('a')).toBeNull();
+  expect(task.textContent).toBe('Run npm login on this machine, see the guide or https://npmjs.com/login');
 });
 
 test.skipIf(!hasDom)('rows are disclosures, one open at a time; the first open item starts open', () => {
@@ -252,7 +311,7 @@ test.skipIf(!hasDom)('an open row: why, the Holds up words, Open for its link an
   expect(el.querySelector<HTMLAnchorElement>('[data-action-open]')!.textContent).toBe('Open Vercel');
 });
 
-test.skipIf(!hasDom)("the row's tick is Done; while the window runs the row is struck with its Undo; the next open item opens", async () => {
+test.skipIf(!hasDom)("the row's tick is Done into the reply draft: the row is struck, its note field and \"in your draft\", no Undo timer; the tick takes it back; the next open item opens", async () => {
   const marks: { key: string; mark: unknown }[] = [];
   const onMark = async (action: InboxQuestion, mark: unknown) => (marks.push({ key: action.key, mark }), true);
   const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={onMark} />);
@@ -264,22 +323,22 @@ test.skipIf(!hasDom)("the row's tick is Done; while the window runs the row is s
   expect(toggleOf(rowOf(el, 1)).getAttribute('aria-expanded')).toBe('true');
   expect(toggleOf(rowOf(el, 0)).getAttribute('aria-expanded')).toBe('false');
 
-  // The server's answer: picked, inside the Undo window.
-  const result = { outcome: 'done' as const, note: null, at: '2026-10-21T15:12:00.000Z', by: 'person' as const };
+  // The server's answer: picked and staged, waiting for the Send.
+  const result = { outcome: 'done' as const, note: null, at: '2026-10-21T15:12:00.000Z', by: 'person' as const, staged: true };
   rerender(<ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: result }), record(1)]} agent="Claude Code" onMark={onMark} />);
   const done = rowOf(el, 0);
   expect(done.getAttribute('data-action-state')).toBe('pending');
-  expect(done.querySelector('[data-action-settled]')!.textContent).toContain('Goes to Claude Code in a few seconds.');
+  expect(done.querySelector('[data-action-undo]')).toBeNull();
+  expect(done.textContent).not.toContain('in a few seconds');
+  expect(done.querySelector('[data-action-draft-line]')!.textContent).toMatch(/^Done \d{1,2}:\d{2}\s?[AP]M · in your draft$/);
+  expect(done.querySelector<HTMLTextAreaElement>('[data-action-draft-note]')!.placeholder).toBe('Add a note for Claude Code');
   expect(el.querySelector('[data-action-progress]')!.textContent).toBe('1 of 2 done');
   expect(el.querySelector('[data-action-badge]')!.textContent).toBe('Holds up 2');
   const undoTick = done.querySelector<HTMLButtonElement>('[data-action-tick]')!;
   // The same name; aria-pressed carries the state.
   expect(undoTick.getAttribute('aria-label')).toBe('Done: Set the GitHub App client secret on staging');
   expect(undoTick.getAttribute('aria-pressed')).toBe('true');
-  click(done.querySelector('[data-action-undo]')!);
-  await settle();
-  expect(marks.at(-1)).toEqual({ key: PARSED[0]!.key, mark: null });
-  // The tick undoes too, but not within half a second of Done (the second click of a fast double-click).
+  // The tick takes it back, but not within half a second of Done (the second click of a fast double-click).
   const before = marks.length;
   click(undoTick);
   await settle();
@@ -291,6 +350,148 @@ test.skipIf(!hasDom)("the row's tick is Done; while the window runs the row is s
   await settle();
   expect(marks.length).toBe(before + 1);
   expect(marks.at(-1)).toEqual({ key: PARSED[0]!.key, mark: null });
+});
+
+test.skipIf(!hasDom)('the note under a Done in the draft saves quietly as it is typed and on leaving the field; Can\'t do it\'s reason never empties', async () => {
+  const marks: unknown[] = [];
+  const onMark = async (_a: InboxQuestion, mark: unknown) => (marks.push(mark), true);
+  const at = '2026-10-21T15:12:00.000Z';
+  const type = (area: HTMLTextAreaElement, value: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, value);
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  const el = mount(
+    <ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: { outcome: 'done', note: null, at, by: 'person', staged: true } })]} agent="Claude Code" onMark={onMark} />,
+  );
+  const area = el.querySelector<HTMLTextAreaElement>('[data-action-draft-note]')!;
+  type(area, 'Rotated the old one too.');
+  expect(marks).toEqual([]);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 650));
+  });
+  expect(marks).toEqual([{ outcome: 'done', note: 'Rotated the old one too.', quiet: true }]);
+  // Leaving the field saves at once (a Send right after carries it); the same words twice save once.
+  type(area, 'Rotated the old one too. Staging only.');
+  act(() => area.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+  await settle();
+  expect(marks.at(-1)).toEqual({ outcome: 'done', note: 'Rotated the old one too. Staging only.', quiet: true });
+  const count = marks.length;
+  act(() => area.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+  await settle();
+  expect(marks).toHaveLength(count);
+
+  remount(
+    <ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: { outcome: 'cant', note: 'No access.', at, by: 'person', staged: true } })]} agent="Claude Code" onMark={onMark} />,
+  );
+  const reason = el.querySelector<HTMLTextAreaElement>('[data-action-draft-note]')!;
+  expect(reason.value).toBe('No access.');
+  expect(el.querySelector('[data-action-draft-line]')!.textContent).toMatch(/^Can't do it .* · in your draft$/);
+  type(reason, '');
+  act(() => reason.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+  await settle();
+  // An emptied reason is never saved, and the field never shows less than what goes: the saved reason comes back.
+  expect(marks).toHaveLength(count);
+  expect(reason.value).toBe('No access.');
+});
+
+test.skipIf(!hasDom)('a note still inside its typing pause goes as the page goes (a reload, a closed tab): one keepalive request, as a note save', async () => {
+  const marks: unknown[] = [];
+  const at = '2026-10-21T15:12:00.000Z';
+  const sent: { url: string; init: RequestInit }[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    sent.push({ url: String(url), init });
+    return new Response('{}');
+  }) as typeof fetch;
+  try {
+    const el = mount(
+      <ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: { outcome: 'done', note: null, at, by: 'person', staged: true } })]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />,
+    );
+    const area = el.querySelector<HTMLTextAreaElement>('[data-action-draft-note]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, 'Rotated the old one too.');
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.url).toMatch(/\/api\/inbox\/messages\/[^/]+\/actions\/a-/);
+    expect(sent[0]!.init.keepalive).toBe(true);
+    expect(JSON.parse(String(sent[0]!.init.body))).toMatchObject({ outcome: 'done', note: 'Rotated the old one too.', note_only: true, staged: true });
+    // Sent once: the pause's timer is gone, and the row going away has nothing left to save.
+    act(() => window.dispatchEvent(new Event('pagehide')));
+    act(() => root!.render(<></>));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 650));
+    });
+    expect(sent).toHaveLength(1);
+    expect(marks).toEqual([]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test.skipIf(!hasDom)('a note still inside its typing pause is saved when its row goes away (the pane closed), never dropped', async () => {
+  const marks: unknown[] = [];
+  const at = '2026-10-21T15:12:00.000Z';
+  const el = mount(
+    <ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: { outcome: 'done', note: null, at, by: 'person', staged: true } })]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />,
+  );
+  const area = el.querySelector<HTMLTextAreaElement>('[data-action-draft-note]')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, 'Rotated the old one too.');
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(marks).toEqual([]);
+  act(() => root!.render(<></>));
+  await settle();
+  expect(marks).toEqual([{ outcome: 'done', note: 'Rotated the old one too.', quiet: true }]);
+  // Nothing left waiting: the timer is gone, so no second save later.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 650));
+  });
+  expect(marks).toHaveLength(1);
+});
+
+test.skipIf(!hasDom)("the agent saw it done while the person's note waited in the draft: the note stays editable, and emptying it takes it out", async () => {
+  const marks: unknown[] = [];
+  const result = {
+    outcome: 'done' as const,
+    note: null,
+    at: '2026-10-21T15:14:00.000Z',
+    by: 'agent' as const,
+    message_id: 'msg_2',
+    person: { outcome: 'done' as const, note: 'Rotated the old one too.', at: '2026-10-21T15:12:00.000Z' },
+  };
+  const el = mount(<ActionChecklist actions={[record(0, { state: 'closed', revision: 2, sent_revision: 0, action_result: result })]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);
+  const row = rowOf(el, 0);
+  expect(row.getAttribute('data-action-state')).toBe('seen');
+  expect(row.querySelector('[data-action-settled]')!.textContent).toMatch(/^Claude Code saw it done, /);
+  expect(row.querySelector('[data-action-draft-line]')!.textContent).toBe('Your note · in your draft');
+  const area = row.querySelector<HTMLTextAreaElement>('[data-action-draft-note]')!;
+  expect(area.value).toBe('Rotated the old one too.');
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, '');
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  act(() => area.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+  await settle();
+  expect(marks).toEqual([null]);
+  // Sent: the note went; no field.
+  remount(<ActionChecklist actions={[record(0, { state: 'closed', revision: 2, sent_revision: 2, action_result: result })]} agent="Claude Code" onMark={async () => true} />);
+  expect(el.querySelector('[data-action-draft-note]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a Done through the timed path (decision mode, the phone door) keeps its "Goes to … in a few seconds" line and Undo', async () => {
+  const marks: unknown[] = [];
+  const result = { outcome: 'done' as const, note: null, at: '2026-10-21T15:12:00.000Z', by: 'person' as const };
+  const el = mount(<ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: result })]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);
+  const row = rowOf(el, 0);
+  expect(row.querySelector('[data-action-settled]')!.textContent).toContain('Goes to Claude Code in a few seconds.');
+  expect(row.querySelector('[data-action-draft-note]')).toBeNull();
+  click(row.querySelector('[data-action-undo]')!);
+  await settle();
+  expect(marks).toEqual([null]);
 });
 
 test.skipIf(!hasDom)('a double-click on the tick is Done once: its second click, after Done has landed, never undoes it', async () => {
@@ -358,9 +559,12 @@ test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one"
   const marks: unknown[] = [];
   const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);
   const panel = panelOf(rowOf(el, 0));
+  // Done and Can't do it…, no separate Add note… (the note goes under a marked row).
+  expect(panel.querySelector('[data-action-note]')).toBeNull();
   click(panel.querySelector('[data-action-cant]')!);
   const send = panel.querySelector<HTMLButtonElement>('[data-action-cant-send]')!;
   expect(send.disabled).toBe(true);
+  expect(send.textContent).toBe("Can't do it");
   expect(panel.querySelector('label')!.textContent).toBe("Why can't you? Claude Code gets this word for word.");
   const area = panel.querySelector<HTMLTextAreaElement>('textarea')!;
   act(() => {

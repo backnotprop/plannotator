@@ -18,6 +18,7 @@ import {
 } from "@plannotator/shared/goal-setup";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
 import { getRepoInfo } from "./repo";
 import {
@@ -106,7 +107,7 @@ export async function startGoalSetupServer(
 
   const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
-    Bun.serve({
+    Bun.serve(withPlannotatorServerHeader({
         hostname: getServerHostname(),
         port,
         // Bun's default 10s idleTimeout kills long-running requests.
@@ -169,8 +170,8 @@ export async function startGoalSetupServer(
               if (body.conventionalLabels !== undefined) {
                 toSave.conventionalLabels = body.conventionalLabels;
               }
-              if (Object.keys(toSave).length > 0) {
-                saveConfig(toSave as Parameters<typeof saveConfig>[0]);
+              if (Object.keys(toSave).length > 0 && !saveConfig(toSave as Parameters<typeof saveConfig>[0])) {
+                return Response.json({ error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, { status: 500 });
               }
               return Response.json({ ok: true });
             } catch {
@@ -219,7 +220,7 @@ export async function startGoalSetupServer(
             { status: 500, headers: { "Content-Type": "text/plain" } }
           );
         },
-    }),
+    })),
   );
 
   const port = server.port!;

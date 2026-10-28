@@ -135,6 +135,9 @@ describe("the source scan", () => {
     expect(agentHomeFindings('const file = join(homedir(), ".codex", "config.toml");')).toHaveLength(1);
     expect(agentHomeFindings('const home = os.homedir();\nconst file = join(home, ".config", "opencode", "AGENTS.md");')).toHaveLength(1);
     expect(agentHomeFindings('writeFileSync("~/.cursor/mcp.json", "{}");')).toHaveLength(1);
+    // Qwen Code's folder holds its settings, session registry and controller tokens.
+    expect(agentHomeFindings('const file = join(homedir(), ".qwen", "settings.json");')).toHaveLength(1);
+    expect(agentHomeFindings('const file = join(fake.home, ".qwen", "settings.json");')).toEqual([]);
     expect(agentHomeFindings('const file = join(fake.home, ".codex", "config.toml");')).toEqual([]);
     expect(agentConnectFindings('await fetch(`${url}/api/inbox/control/connect`, { method: "POST" });')).toHaveLength(1);
     expect(agentConnectFindings('startInboxServer({ dataDir, agentEnvironment: env });\nawait s.connectAgents();')).toEqual([]);

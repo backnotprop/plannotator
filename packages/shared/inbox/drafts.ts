@@ -17,7 +17,7 @@
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isInboxId, type InboxDraft, type InboxDraftTo, type InboxUpload } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_TITLE_MAX, isInboxId, type InboxDraft, type InboxDraftTo, type InboxUpload } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import { readInboxUpload } from "./uploads";
 
@@ -128,6 +128,16 @@ function checkProject(value: unknown): InboxDraft["project"] {
   return { id, root: short(project.root, "project.root", false)!, name: short(project.name, "project.name", false)! };
 }
 
+/** The Board card a draft was started for (Create thread): `{ id: crd_…, title }`, or null. */
+function checkCard(value: unknown): InboxDraft["card"] | null {
+  if (value === null || value === undefined) return null;
+  const card = value as Record<string, unknown>;
+  if (typeof value !== "object" || Array.isArray(value) || !isInboxId("crd", card.id) || typeof card.title !== "string" || [...card.title].length > INBOX_CARD_TITLE_MAX) {
+    throw new InboxError("validation_error", "card: { id: crd_…, title } or null.", { field: "card" });
+  }
+  return { id: card.id, title: card.title };
+}
+
 /**
  * Create or replace a draft. `input.files` are upload ids (or `{ upload_id }`),
  * each an upload still pending; the draft keeps the upload's facts.
@@ -136,7 +146,7 @@ function checkProject(value: unknown): InboxDraft["project"] {
 export function saveInboxDraft(
   inboxDirPath: string,
   id: unknown,
-  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown },
+  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown; card?: unknown; board_request?: unknown },
   at: string,
 ): InboxDraft {
   if (!isInboxId("drf", id)) throw new InboxError("validation_error", "id: a draft id (drf_…).", { field: "id" });
@@ -160,6 +170,7 @@ export function saveInboxDraft(
   });
   const to = checkTo(input.to);
   const project = checkProject(input.project);
+  const card = checkCard(input.card);
   const base = input.base === undefined ? null : input.base;
   if (base !== null && typeof base !== "string") throw new InboxError("validation_error", "base: the updated_at you read, or null to create.", { field: "base" });
   const existing = readInboxDraft(inboxDirPath, id);
@@ -183,6 +194,9 @@ export function saveInboxDraft(
     project,
     files,
     ...(threadName.trim() ? { thread_name: threadName } : {}),
+    ...(card ? { card } : {}),
+    // Compose's Board chip, kept as it was left (approval "inbox-compose-board-chip").
+    ...(input.board_request === true ? { board_request: true as const } : {}),
   };
   const dir = draftsDir(inboxDirPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });

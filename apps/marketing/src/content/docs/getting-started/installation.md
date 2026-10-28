@@ -95,15 +95,15 @@ For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the envir
 <details>
 <summary><strong>Skipping individual agent integrations</strong></summary>
 
-Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
+Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear; `--skip-qwen` skips the Qwen Code extension and skills. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex
 ```
 
-PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode`. Windows CMD: same `--skip-*` flags as bash.
+PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode` / `-SkipQwen`. Windows CMD: same `--skip-*` flags as bash.
 
-For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`) or persist the choice in `~/.plannotator/config.json`:
+For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`, `_QWEN_`) or persist the choice in `~/.plannotator/config.json`:
 
 ```json
 { "skipInstall": { "codex": true } }
@@ -147,10 +147,10 @@ The install script also updates the Claude Code plugin when it is already instal
 
 ### Update check
 
-Once a day, the machine (never your browser) asks GitHub for the latest stable release and caches the answer. When a newer one exists:
+Every few minutes (at most once every ten minutes, and when the Inbox starts or its page is reloaded), the machine (never your browser) asks GitHub which stable release is the latest and caches the answer. A new release shows within minutes. When a newer one exists:
 
 - the Inbox shows an **Update** button above Settings, which opens a dialog with what's new and **Update now** (see [the Inbox](/docs/reference/inbox/#update));
-- plan review, annotate and code review show a short toast at most once every three days, with **Update** (or the command to copy, on Pi: `pi update --extensions`), and the Options menu shows the right update command for your agent;
+- plan review, annotate and code review show a short toast at most once a day, with **Update** (or the command to copy, on Pi: `pi update --extensions`), and the Options menu shows the right update command for your agent;
 - a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
 
 Turn the check off with **Settings → General → Tell me when a new version is out** (the Inbox: **Settings → About**), with `{ "updateCheck": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_UPDATE_CHECK=0`. Off makes no automatic request to GitHub at all (and stops auto-update, which needs the check); `plannotator update` still checks when you run it.
@@ -165,7 +165,7 @@ Plannotator can do this for you. Turn on **Settings → General → Keep Plannot
 
 in `~/.plannotator/config.json`, or `PLANNOTATOR_AUTO_UPDATE=1` in your environment (the environment variable wins). It is off by default.
 
-When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-skills`, `--skip-claude-plugin`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
+When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-qwen`, `--skip-skills`, `--skip-claude-plugin`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
 
 Auto-update only applies to the binary the install script manages (`~/.local/bin/plannotator`, or `%LOCALAPPDATA%\plannotator\plannotator.exe` on Windows). A development build, a binary installed some other way, and the OpenCode and Pi plugins are never updated by it.
 
@@ -292,7 +292,7 @@ claude --plugin-dir ./apps/hook
 
 ### Slash commands
 
-Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
+Plannotator's slash commands (`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, `/plannotator-inbox`) are installed as Claude Code skills in `~/.claude/skills` by the install script — Claude Code skills are user-invocable by directory name, so the command names are unchanged. There is no separate `~/.claude/commands` step.
 
 Upgrading from an older version? The installer removes the legacy `~/.claude/commands/plannotator-*.md` files automatically, but the marketplace plugin's old namespaced `plannotator:*` command entries are managed by Claude Code. [Update the plugin](#updating) once so they disappear from the `/` menu.
 
@@ -349,6 +349,19 @@ On Windows the installer checks for `%USERPROFILE%\.kiro` (or `kiro-cli` on your
 
 See the [Kiro guide](/docs/guides/kiro-cli/) for the skill list and the Plannotator agent.
 
+## Qwen Code
+
+Qwen Code is auto-detected: `~/.qwen` (or the folder named by `QWEN_HOME`) must exist, with the `qwen` command on your PATH or Qwen's own files in it. Plan review needs Qwen Code 0.13.0 or newer; with an older one the installer installs nothing for it and asks you to update. Otherwise the installer:
+
+- copies the `/plannotator-review`, `/plannotator-annotate` and `/plannotator-last` skills to `~/.qwen/skills`;
+- installs the `plannotator` Qwen extension with `qwen extensions install`. The extension opens the plan in Plannotator when the agent calls `exit_plan_mode`.
+
+Re-running the installer leaves an unchanged extension alone. A new extension version is applied with `qwen extensions update`, which keeps your settings: if you turned the extension off, it stays off. An extension you linked or installed yourself is left as it is. If the `qwen` command is not on your PATH, the skills still install; re-run the installer once `qwen` is on your PATH to add the extension. A failed Qwen step never fails the install. Restart Qwen Code afterwards.
+
+After you approve a plan in Plannotator, Qwen Code asks you to confirm it once more in the terminal. Qwen Code does not let a hook approve a tool that needs the user, and `exit_plan_mode` is one. Feedback you send instead goes to the agent at once.
+
+To install the extension by hand from a Plannotator checkout: `qwen extensions install ./apps/qwen-code/extension --consent`. `plannotator uninstall` removes it.
+
 ## Kilo Code
 
 Coming soon.
@@ -401,7 +414,7 @@ Notes:
 - Codex hooks are currently experimental.
 - The current official Codex hooks docs say hooks are disabled on Windows, so this flow is currently macOS/Linux/WSL only.
 
-The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
+The installer also copies Plannotator's core skills (`plannotator-review`, `plannotator-annotate`, `plannotator-last`, `plannotator-inbox`) into `~/.agents/skills` — the official OpenAI agent skills path. Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default; add them with:
 
 ```bash
 npx skills add backnotprop/plannotator/apps/skills/extra --global

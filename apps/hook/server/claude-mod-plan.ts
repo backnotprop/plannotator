@@ -17,6 +17,13 @@ export interface ModPlanInput {
   planFilePath?: string;
   permissionMode?: string;
   revisionFile?: string;
+  /**
+   * The Claude Code session's root (`$.session.root()`): a plan whose chain
+   * its history project holds is continued there, so a shell `cd` between
+   * submits keeps one chain (#2197). New chains still start under the CLI's
+   * cwd's project. An older mod sends none: the cwd alone, as before.
+   */
+  projectRoot?: string;
 }
 
 export function parseModPlanInput(raw: string): ModPlanInput | null {
@@ -35,6 +42,7 @@ export function parseModPlanInput(raw: string): ModPlanInput | null {
     planFilePath: text("planFilePath"),
     permissionMode: text("permissionMode"),
     revisionFile: text("revisionFile"),
+    ...(text("projectRoot") ? { projectRoot: text("projectRoot") } : {}),
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { COMMANDS } from './launch'
+import { COMMANDS, INBOX_COMMAND } from './launch'
+import { PLAN_TOOL } from './plan'
 import { register } from './register'
 
 /** Every `on(...)` the module makes, as written: the event, then the matcher when there is one. */
@@ -22,7 +23,30 @@ describe('command.run registration', () => {
     expect(hooks).toHaveLength(1)
     const matcher = hooks[0]?.matcher as { command?: unknown } | undefined
     expect(Array.isArray(matcher?.command)).toBe(true)
-    expect([...(matcher?.command as string[])].sort()).toEqual(Object.keys(COMMANDS).sort())
+    expect([...(matcher?.command as string[])].sort()).toEqual([...Object.keys(COMMANDS), INBOX_COMMAND.name].sort())
     expect(Object.keys(COMMANDS).sort()).toEqual(['plannotator-annotate', 'plannotator-last', 'plannotator-review'])
+    expect(INBOX_COMMAND.name).toBe('plannotator-inbox')
+  })
+})
+
+// #2159: a guard plugin seated above the mod (cc-plugin-sec-default) sends
+// classic.PermissionRequest past it, and the engine prints "its
+// classic.PermissionRequest hook was skipped" for every event the hook is
+// selected for. Unmatched, that was the first permission prompt of any tool in
+// every session. Matched on ExitPlanMode, the engine selects it for plan
+// approvals alone, which the approval record plan.ts writes answers.
+describe('classic.PermissionRequest registration', () => {
+  test('is matched on ExitPlanMode alone', () => {
+    const hooks = registrations().filter((hook) => hook.event === 'classic.PermissionRequest')
+
+    expect(hooks).toHaveLength(1)
+    expect(hooks[0]?.matcher).toEqual({ tool_name: PLAN_TOOL })
+    expect(PLAN_TOOL).toBe('ExitPlanMode')
+  })
+
+  test('no classic.* glob or wildcard hook selects other tools\' permission prompts', () => {
+    const events = registrations().map((hook) => hook.event)
+
+    expect(events.filter((event) => event === '*' || event.endsWith('.*') || event.startsWith('!'))).toEqual([])
   })
 })

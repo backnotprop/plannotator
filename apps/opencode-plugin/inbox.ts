@@ -30,7 +30,9 @@
  * the other process defers while it is live.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig, resolveInboxTool } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import {
@@ -38,13 +40,70 @@ import {
   InboxAgentConnection,
   inboxRegistryFileOf,
   InboxWake,
+  type InboxLoadedPluginReport,
   type InboxWakeTarget,
 } from "@plannotator/shared/inbox/agent-link";
-import { INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
+import { INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME, inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import { createOpenCodeMessageId, isAskTurnActive } from "./opencode-session-bridge";
 import type { V2ContextLike } from "./v2-client";
 
 export const OPENCODE_INBOX_HOST = "opencode";
+
+/** The plugin's package.json: beside the source (a checkout), or one level up from the built `dist/server.js`. */
+function findPluginPackageJson(from: string): string | null {
+  for (const candidate of [path.join(from, "package.json"), path.join(from, "..", "package.json")]) {
+    try {
+      const pkg = JSON.parse(readFileSync(candidate, "utf8")) as { name?: unknown };
+      if (pkg.name === "@plannotator/opencode") return candidate;
+    } catch {
+      // Next.
+    }
+  }
+  return null;
+}
+
+/** The `version` in a package.json, or null when it cannot be read (the generation folder was deleted). */
+function readVersionAt(file: string | null): string | null {
+  if (!file) return null;
+  try {
+    const pkg = JSON.parse(readFileSync(file, "utf8")) as { version?: unknown };
+    return typeof pkg.version === "string" && pkg.version ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+const PLUGIN_PACKAGE_JSON = (() => {
+  try {
+    return findPluginPackageJson(path.dirname(fileURLToPath(import.meta.url)));
+  } catch {
+    return null;
+  }
+})();
+/** The plugin version this process loaded, read when the module was evaluated. */
+const LOADED_PLUGIN_VERSION = readVersionAt(PLUGIN_PACKAGE_JSON);
+/** How long a read of package.json on disk is reused: every poll asks. */
+const ON_DISK_FRESH_MS = 2_000;
+
+/**
+ * What this OpenCode 2 service loaded and what is on disk now (owner approval
+ * "reload-hosts"): OpenCode 2 installs a plugin into an immutable generation
+ * folder, so `on_disk` is the same version, or null once that folder was
+ * deleted under the running service (the install script clears the cache).
+ * The Inbox then says `opencode2 reload`. Null when the version is unknown.
+ */
+export function openCodePluginReporter(
+  file: string | null = PLUGIN_PACKAGE_JSON,
+  loaded: string | null = LOADED_PLUGIN_VERSION,
+  now: () => number = Date.now,
+): () => InboxLoadedPluginReport | null {
+  let cache: { at: number; value: string | null } | null = null;
+  return () => {
+    if (!loaded) return null;
+    if (!cache || now() - cache.at >= ON_DISK_FRESH_MS) cache = { at: now(), value: readVersionAt(file) };
+    return { version: loaded, on_disk: cache.value };
+  };
+}
 export const OPENCODE_INBOX_AGENT_NAME = "OpenCode";
 /** A session that reads running with no event for this long is checked against OpenCode. */
 export const RUNNING_CROSS_CHECK_MS = 20_000;
@@ -188,17 +247,35 @@ export async function findInboxConnection(): Promise<InboxAgentConnection | null
  * templates such as Qwen3's). The no-wake wording: OpenCode 1 cannot deliver
  * a reply as a turn. Never on a title request; never twice. The caller decides
  * whether the request's agent has the tool (`openCode1AgentHasInbox`).
+ *
+ * "Already there": the built-in lines keep the check they always had (found
+ * anywhere in the prompt); a person's own text (config.json prompts.inbox,
+ * #2194) counts only as the end of the last part, where this puts it, so a
+ * short text the prompt happens to contain ("Be concise.") is still added.
  */
-export function addInboxReminderOpenCode1(system: string[]): void {
+export function addInboxReminderOpenCode1(system: string[], reminder: string = INBOX_REMINDER_TEXT_NO_WAKE): void {
   const lower = system.join("\n").toLowerCase();
   if (lower.includes("title generator") || lower.includes("generate a title")) return;
-  if (system.some((part) => part.includes(INBOX_REMINDER_TEXT_NO_WAKE))) return;
+  if (inboxReminderAlreadyAdded(system, reminder)) return;
   const last = system.length - 1;
   if (last < 0) {
-    system.push(INBOX_REMINDER_TEXT_NO_WAKE);
+    system.push(reminder);
     return;
   }
-  system[last] = system[last] ? `${system[last]}\n\n${INBOX_REMINDER_TEXT_NO_WAKE}` : INBOX_REMINDER_TEXT_NO_WAKE;
+  system[last] = system[last] ? `${system[last]}\n\n${reminder}` : reminder;
+}
+
+/**
+ * Whether the system parts already carry this reminder. The built-in lines
+ * (long, fixed): anywhere, as before #2194. Any other text: only as the whole
+ * last part or its last `\n\n` block, exactly where a reminder is added.
+ */
+export function inboxReminderAlreadyAdded(system: readonly string[], reminder: string): boolean {
+  if (reminder === INBOX_REMINDER_TEXT || reminder === INBOX_REMINDER_TEXT_NO_WAKE) return system.some((part) => part.includes(reminder));
+  const last = system[system.length - 1];
+  if (last === undefined) return false;
+  const text = reminder.trim();
+  return last.trim() === text || last.trimEnd().endsWith(`\n\n${text}`);
 }
 
 /** A name against an OpenCode tool-switch key, which may hold `*` wildcards. */
@@ -244,12 +321,12 @@ export async function registerInboxOpenCode2(
   v2: V2ContextLike,
   connection: InboxAgentConnection,
   resolveRoot: (sessionID: string) => Promise<{ root: string }>,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; plugin?: () => InboxLoadedPluginReport | null } = {},
 ): Promise<boolean> {
   const transform = toolDomain?.transform;
   const spec = inboxAgentTool(connection.tools, { wakes: typeof v2.session?.prompt === "function" });
   if (typeof transform !== "function" || !spec) return false;
-  const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot) : null;
+  const wakes = typeof v2.session?.prompt === "function" ? new OpenCode2Wakes(v2, connection, resolveRoot, options.plugin ?? openCodePluginReporter()) : null;
   // `signal` ends the wakes (their event subscription and lease timers): the plugin's lifetime otherwise.
   if (wakes && options.signal) {
     if (options.signal.aborted) wakes.dispose();
@@ -320,6 +397,8 @@ class OpenCode2Wakes {
     private readonly v2: V2ContextLike,
     private readonly connection: InboxAgentConnection,
     private readonly resolveRoot: (sessionID: string) => Promise<{ root: string }>,
+    /** What this service loaded and what is on disk now (`plugin` on each poll). */
+    private readonly pluginReport: () => InboxLoadedPluginReport | null = () => null,
   ) {
     const subscribe = v2.event?.subscribe;
     if (typeof subscribe !== "function") return;
@@ -427,6 +506,8 @@ class OpenCode2Wakes {
 
   /** Start the wake for a root session, once; later calls say the session is in use here. */
   watch(sessionID: string): void {
+    // A disposed generation (OpenCode unloaded this plugin) starts no wake: its polls would report the old version.
+    if (this.controller.signal.aborted) return;
     this.seen.add(sessionID);
     const known = this.wakes.get(sessionID);
     if (known) {
@@ -490,7 +571,7 @@ class OpenCode2Wakes {
 
   /** A session ran here that this process has not seen: watch its root. */
   private discover(sessionID: string): void {
-    if (this.seen.has(sessionID)) return;
+    if (this.controller.signal.aborted || this.seen.has(sessionID)) return;
     this.seen.add(sessionID);
     void this.resolveRoot(sessionID).then(
       ({ root }) => this.watch(root),
@@ -568,6 +649,8 @@ class OpenCode2Wakes {
       },
       // The session's folder (its `location.directory`, looked up once), so the Inbox lists it under its project.
       projectPath: () => this.directory(sessionID),
+      // What this service loaded and what is on disk now: the Inbox says `opencode2 reload` when it is behind.
+      plugin: () => this.pluginReport(),
     };
   }
 

@@ -15,6 +15,7 @@
  * Kept free of process.exit / console so it is unit-testable; the CLI entry
  * prints `stdout`/`stderr` and exits with `code`.
  */
+import { childEnv } from "@plannotator/shared/child-env";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
@@ -143,7 +144,7 @@ export function runGuideList(): GuideCliResult {
 
 function git(args: string[], cwd: string): string | undefined {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+    return execFileSync("git", args, { cwd, env: childEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
   } catch {
     return undefined;
   }

@@ -49,6 +49,8 @@ const GEMINI = row('gemini', 'Gemini CLI', { path: '~/.gemini/GEMINI.md', create
 const CLAUDE = row('claude-code', 'Claude Code', { path: '~/.claude/rules/plannotator-inbox.md', create: true }, 'tool');
 const PI = row('pi', 'Pi', { path: '~/.pi/agent/AGENTS.md' }, 'tool');
 const OPENCODE = row('opencode', 'OpenCode', { path: '~/.config/opencode/AGENTS.md' }, 'tool');
+// Cursor keeps its rules in the app: nothing is written; its note is copied by hand.
+const CURSOR = row('cursor', 'Cursor', { state: 'manual', reason: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." });
 
 const REPORT: InboxConnectReport = {
   at: '2026-10-13T00:00:00.000Z',
@@ -155,6 +157,23 @@ test.skipIf(!hasDom)('unticking renames the primary; with nothing ticked it is "
   expect(seen.models).toHaveLength(1);
 });
 
+test.skipIf(!hasDom)('a run that made Plannotator a trusted sender in Qwen Code says so in the band, under what it connected', () => {
+  const qwen = row('qwen', 'Qwen Code', { path: '~/.qwen/QWEN.md', create: true });
+  const { el } = mount([qwen, CLAUDE], { ...REPORT, added: ['qwen'], manual_why: [], trusted: ['qwen'] });
+  const lines = [...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent ?? '');
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toBe('Connected Qwen Code to the Inbox.');
+  expect(el.querySelector('[data-anote-trusted]')?.textContent).toContain('Qwen Code');
+});
+
+test.skipIf(!hasDom)('a trusted sender removed in Qwen is a warning in the band, with the way to Settings', () => {
+  const qwen = row('qwen', 'Qwen Code', { path: '~/.qwen/QWEN.md', create: true });
+  const { el } = mount([qwen, CLAUDE], { ...REPORT, added: [], manual_why: [], trust_failed: [{ agent: 'qwen', reason: 'removed in Qwen' }] });
+  const warn = el.querySelector('.ib-anote-band .ib-anote-warn');
+  expect(warn?.textContent).toContain('removed in Qwen');
+  expect(warn?.querySelector('button')?.textContent).toBe('Settings → Agents');
+});
+
 test.skipIf(!hasDom)('four or more ticked: "Add to N agents"', () => {
   const { el } = mount([CODEX, GEMINI, PI, OPENCODE, CLAUDE]);
   expect(primary(el).textContent).toBe('Add to 5 agents');
@@ -248,6 +267,59 @@ test.skipIf(!hasDom)('the band\'s Settings → Agents link: the dialog closes as
   await flush();
   expect(calls[0]!.body).toEqual({ add: [], asked: ['codex'], seen: true });
   expect(seen).toMatchObject({ closed: 1, settings: 1 });
+});
+
+test.skipIf(!hasDom)('Cursor with another agent: the primary names only the agent a note is written for; Cursor\'s row says it is copied by hand; its copy has no markers', async () => {
+  const { el } = mount([CODEX, CURSOR]);
+  expect(rowsOf(el)).toEqual([
+    { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Adds to end', ticked: true },
+    { name: 'Cursor', path: undefined, state: 'Copy by hand', ticked: true },
+  ]);
+  expect(el.querySelector('[data-agent="cursor"] .ib-anote-sub')?.textContent).toBe('Nothing is written here: you paste the note into Customize → Rules.');
+  expect(primary(el).textContent).toBe('Add to Codex');
+  expect(el.querySelector('.ib-anote-desc')?.textContent).toContain("Cursor keeps its rules in the app, so you copy the note into Customize → Rules yourself; Plannotator can't see, update or remove that copy.");
+  // Unticking Codex leaves only the copy: the primary says so.
+  act(() => ([...el.querySelectorAll('.ib-anote-table input')][0] as HTMLInputElement).click());
+  expect(primary(el).textContent).toBe('Show the note to copy');
+  act(() => ([...el.querySelectorAll('.ib-anote-table input')][0] as HTMLInputElement).click());
+  recordFetch(() => ({
+    ...model(),
+    results: [
+      { ok: true, agent: 'codex', action: 'added', path: '~/.codex/AGENTS.md' },
+      { ok: true, agent: 'cursor', action: 'manual', path: null },
+    ],
+  }));
+  act(() => primary(el).click());
+  await flush();
+  expect(calls[0]!.body).toEqual({ add: ['codex', 'cursor'], asked: ['codex', 'cursor'], seen: false });
+  expect(title(el)).toBe('Added the note to Codex');
+  expect(rowsOf(el).map((r) => r.state)).toEqual(['Added', 'Copy by hand']);
+  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe("Each agent reads it from its next session. Copy the note below into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
+  const copy = el.querySelector('[data-anote-copy] pre')!;
+  expect(copy.textContent).toBe('## Plannotator Inbox');
+  expect(copy.textContent).not.toContain('plannotator-inbox:start');
+  expect(copy.getAttribute('aria-label')).toBe('The note to copy into Cursor');
+  expect(el.querySelector('.ib-anote-later')?.textContent).toBe('Remove the added notes any time in Settings → Agents; the copy in Cursor is yours to remove.');
+  expect(el.querySelector('[aria-live="polite"]')?.textContent).toBe('Added the note to Codex. The note for Cursor is shown below, to copy into Customize → Rules yourself.');
+});
+
+test.skipIf(!hasDom)('Cursor alone: worded as a copy, never as an add; the note shown has no markers', async () => {
+  const { el } = mount([CURSOR]);
+  expect(title(el)).toBe('Copy the note into Cursor?');
+  expect(el.querySelector('.ib-anote-desc')?.textContent).not.toContain('add');
+  expect(rowsOf(el)).toEqual([{ name: 'Cursor', path: undefined, state: 'Copy by hand', ticked: null }]);
+  expect(primary(el).textContent).toBe('Show the note to copy');
+  act(() => button(el, 'Show the note').click());
+  expect(el.querySelector('.ib-anote-note pre')?.textContent).toBe('## Plannotator Inbox');
+  recordFetch(() => ({ ...model(), results: [{ ok: true, agent: 'cursor', action: 'manual', path: null }] }));
+  act(() => primary(el).click());
+  await flush();
+  expect(title(el)).toBe('Copy the note into Cursor');
+  expect(rowsOf(el).map((r) => r.state)).toEqual(['Copy by hand']);
+  expect(el.querySelector('[data-anote-copy] pre')?.textContent).toBe('## Plannotator Inbox');
+  expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe("Copy the note below into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
+  expect(el.querySelector('.ib-anote-later')?.textContent).toBe('Remove the copy in Cursor yourself when you no longer want it.');
+  expect(el.textContent).not.toMatch(/Added the note|Settings → Rules/);
 });
 
 test.skipIf(!hasDom)('Show the note opens the exact block', () => {

@@ -131,5 +131,24 @@ describe.skipIf(process.platform === "win32")("OpenCode 1 ↔ Plannotator Inbox 
     const quiet = await loadPlugin(w, client("build"));
     expect(quiet.tool?.plannotator_inbox).toBeDefined();
     expect((await system(quiet)).join("\n")).not.toContain(INBOX_REMINDER_TEXT_NO_WAKE);
+
+    // #2194: other prompts in config.json, but no usable prompts.inbox: the very same bytes.
+    writeFileSync(
+      path.join(w.dataDir, "config.json"),
+      JSON.stringify({ inboxTool: { opencode: true }, prompts: { review: { denied: "Check." }, inbox: { reminder: "   ", runtimes: { pi: { reminder: "Pi only." } } } } }),
+    );
+    expect(await system(await loadPlugin(w, client("build")))).toEqual(first);
+    // OpenCode's own text replaces the line (no-wake host or not), the shared text otherwise.
+    writeFileSync(
+      path.join(w.dataDir, "config.json"),
+      JSON.stringify({ inboxTool: { opencode: true }, prompts: { inbox: { reminder: "Shared.", runtimes: { opencode: { reminder: "OpenCode: ask upstream, then plannotator_inbox." } } } } }),
+    );
+    const custom = await loadPlugin(w, client("build"));
+    const customFirst = await system(custom);
+    expect(customFirst).toEqual([`${HOST}\n\nOpenCode: ask upstream, then plannotator_inbox.`]);
+    expect(await system(custom)).toEqual(customFirst);
+    writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true }, prompts: { inbox: { reminder: "Shared." } } }));
+    expect(await system(await loadPlugin(w, client("build")))).toEqual([`${HOST}\n\nShared.`]);
+    w.proof(`OpenCode 1 with prompts.inbox: the person's line replaces the built-in one\n\n${JSON.stringify(customFirst, null, 2)}`);
   }, 60_000);
 });

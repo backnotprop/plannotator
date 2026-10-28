@@ -1,3 +1,4 @@
+import { LiveProxyPortError } from "@plannotator/shared/live-proxy-port";
 import { PortInUseError } from "@plannotator/server/remote";
 
 /**
@@ -5,7 +6,9 @@ import { PortInUseError } from "@plannotator/server/remote";
  * instead of an uncaught error and its stack trace. In remote mode the port is
  * fixed (19432 unless PLANNOTATOR_PORT says otherwise), so a second concurrent
  * session — easy to hit now that the Claude Code mod's servers outlive the
- * terminal — lands here. Any other error is rethrown untouched.
+ * terminal — lands here. So does a live app proxy that could not bind any
+ * port PLANNOTATOR_LIVE_PORT allows (in use, or EACCES on a low port). Any
+ * other error is rethrown untouched.
  */
 export function exitOnPortInUse<A extends unknown[], R>(
   start: (...args: A) => Promise<R>,
@@ -15,6 +18,7 @@ export function exitOnPortInUse<A extends unknown[], R>(
     try {
       return await start(...args);
     } catch (error) {
+      if (error instanceof LiveProxyPortError) exit(error.message);
       if (error instanceof PortInUseError) exit(error.cliMessage);
       throw error;
     }

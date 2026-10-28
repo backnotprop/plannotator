@@ -16,6 +16,7 @@
  * record go.
  */
 
+import { childPath } from "@plannotator/shared/child-env";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, X509Certificate } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -107,8 +108,8 @@ export function lanAddress(): string | null {
  */
 function publishBonjour(name: string, port: number, fingerprint: string): ChildProcess | null {
   const txt = ["v=1", `fp=${fingerprint}`];
-  const dnsSd = process.platform === "darwin" ? Bun.which("dns-sd") : null;
-  const avahi = dnsSd ? null : Bun.which("avahi-publish");
+  const dnsSd = process.platform === "darwin" ? Bun.which("dns-sd", { PATH: childPath() }) : null;
+  const avahi = dnsSd ? null : Bun.which("avahi-publish", { PATH: childPath() });
   const command = dnsSd
     ? [dnsSd, "-R", name, INBOX_BONJOUR_TYPE, "local", String(port), ...txt]
     : avahi

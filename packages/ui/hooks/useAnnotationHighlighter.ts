@@ -18,6 +18,7 @@ import {
 import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
+import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
 
 // --- Exported state types ---
 
@@ -25,6 +26,9 @@ export interface ToolbarState {
   element: HTMLElement;
   source: any;
   selectionText: string;
+  /** Builds the selection's rich-text copy when the toolbar button is pressed
+   *  (synchronous in the markdown Viewer, a bridge round trip on HTML surfaces). */
+  getRichCopy?: () => RichCopySource | Promise<RichCopySource>;
 }
 
 export interface CommentPopoverState {
@@ -1253,6 +1257,10 @@ export function useAnnotationHighlighter({
       // verdict, so it is neither attempted nor unanchored here (the same
       // rule the raw-HTML pinpoints follow on their surface).
       if (ann.diagramAnchor) return;
+      // A comment on part of an image has no text either: the image viewer
+      // draws its box, and the Viewer reports it unanchored when its image is
+      // gone from the document.
+      if (ann.imageRegion != null) return;
       // An answer to a `:::question` block quotes the prompt but is not a
       // selection: the question block draws it from the annotation, so it is
       // never painted as a highlight (and never reported as unanchored here).
@@ -1589,10 +1597,24 @@ export function useAnnotationHighlighter({
           } else {
             // Selection mode — show toolbar
             pendingSourceRef.current = source;
+            const marks = [...doms] as HTMLElement[];
+            const selectionText = source.text;
             setToolbarState({
               element: doms[0] as HTMLElement,
               source,
-              selectionText: source.text,
+              selectionText,
+              // Built only when Copy (rich text) is pressed: the pending
+              // highlight's marks still bound the selected words, and the
+              // sanitizer drops the marks themselves.
+              getRichCopy: () => {
+                const first = marks[0];
+                const last = marks[marks.length - 1];
+                if (!first?.isConnected || !last?.isConnected) return null;
+                const range = document.createRange();
+                range.setStartBefore(first);
+                range.setEndAfter(last);
+                return richCopySourceFromRange(range, selectionText);
+              },
             });
           }
         }

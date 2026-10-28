@@ -7,6 +7,9 @@ import {
   writeFileSync,
   openSync,
   closeSync,
+  readFileSync,
+  readdirSync,
+  chmodSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +23,8 @@ import {
   resolveGuideHistory,
   resolveReviewProgress,
   resolveAgentTool,
+  resolveExperimental,
+  parseExperimentalEnv,
   agentToolHostOf,
   agentToolSaveFailed,
   AGENT_TOOL_DEFAULTS,
@@ -575,6 +580,105 @@ describe("favicon config persistence", () => {
   });
 });
 
+describe("saveConfig never writes over a config.json it could not read", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+  let warnings: string[];
+  let savedWrite: typeof process.stderr.write;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-config-refuse-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+    warnings = [];
+    savedWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string) => {
+      warnings.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+  });
+
+  afterEach(() => {
+    process.stderr.write = savedWrite;
+    if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    else delete process.env.PLANNOTATOR_DATA_DIR;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const configPath = () => join(tempDir, "config.json");
+  const raw = () => readFileSync(configPath(), "utf-8");
+
+  test("a missing config.json is created, as before", () => {
+    expect(saveConfig({ displayName: "first" })).toBe(true);
+    expect(loadConfig().displayName).toBe("first");
+    expect(warnings).toEqual([]);
+  });
+
+  test("an empty config.json holds nothing to lose and is written", () => {
+    writeFileSync(configPath(), "  \n");
+    expect(saveConfig({ displayName: "x" })).toBe(true);
+    expect(loadConfig().displayName).toBe("x");
+  });
+
+  test("config.json that is not valid JSON is kept byte for byte, and the save says so", () => {
+    // A hand edit with a trailing comma: every setting in it would be lost if the save merged onto {}.
+    const bytes = '{\n  "theme": { "mode": "dark", "dark": "tokyo-night" },\n  "displayName": "Ada",\n}\n';
+    writeFileSync(configPath(), bytes);
+    expect(saveConfig({ inboxTour: { version: 1, seen_at: "2026-10-25T00:00:00.000Z", finished_at: null, skipped_at: null, notify_again: false } } as Partial<PlannotatorConfig>)).toBe(false);
+    expect(raw()).toBe(bytes);
+    expect(warnings.join("")).toContain("not valid JSON");
+    expect(warnings.join("")).toContain("Fix or remove");
+    // Nothing moved aside: the file stays where every reader looks.
+    expect(readdirSync(tempDir).filter((n) => n.startsWith("config.json"))).toEqual(["config.json"]);
+  });
+
+  test("config.json that is JSON but not an object is kept too", () => {
+    for (const bytes of ['["theme"]', '"dark"', "42", "null"]) {
+      writeFileSync(configPath(), bytes);
+      expect(saveConfig({ displayName: "x" })).toBe(false);
+      expect(raw()).toBe(bytes);
+    }
+  });
+
+  test("an unreadable config.json is kept", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const bytes = '{"theme":{"mode":"dark"}}';
+    writeFileSync(configPath(), bytes);
+    chmodSync(configPath(), 0o000);
+    try {
+      expect(saveConfig({ displayName: "x" })).toBe(false);
+      expect(warnings.join("")).toContain("could not be read");
+    } finally {
+      chmodSync(configPath(), 0o600);
+    }
+    expect(raw()).toBe(bytes);
+  });
+
+  test("a UTF-8 BOM (Notepad's “UTF-8 with BOM”) is read, and a save keeps every setting", () => {
+    writeFileSync(configPath(), '﻿{"displayName":"Ada","theme":{"mode":"dark"}}');
+    expect(loadConfig().displayName).toBe("Ada");
+    expect(saveConfig({ favicon: "classic" })).toBe(true);
+    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "classic" });
+  });
+
+  test("a hand-edited value a save does not name is kept verbatim, whatever it holds", () => {
+    writeFileSync(configPath(), JSON.stringify({ experimental: true, theme: "dark", diffOptions: "unified", prompts: 7 }));
+    expect(saveConfig({ displayName: "x" })).toBe(true);
+    expect(JSON.parse(raw())).toEqual({ experimental: true, theme: "dark", diffOptions: "unified", prompts: 7, displayName: "x" });
+  });
+
+  test("a save that names a key holding a non-object replaces it; it is never spread into characters", () => {
+    writeFileSync(configPath(), JSON.stringify({ theme: "dark", experimental: true, diffOptions: { diffStyle: "split", hideWhitespace: true } }));
+    expect(saveConfig({ theme: { mode: "light" }, experimental: { decisionMode: true }, diffOptions: { diffStyle: "unified" } } as Partial<PlannotatorConfig>)).toBe(true);
+    expect(JSON.parse(raw())).toEqual({ theme: { mode: "light" }, experimental: { decisionMode: true }, diffOptions: { diffStyle: "unified", hideWhitespace: true } });
+  });
+
+  test("a config.json that is a folder is refused, not replaced", () => {
+    mkdirSync(configPath());
+    expect(saveConfig({ displayName: "x" })).toBe(false);
+    expect(existsSync(join(configPath()))).toBe(true);
+  });
+});
+
 describe("saveConfig write serialization", () => {
   const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
   let tempDir: string;
@@ -826,5 +930,64 @@ describe("resolveGitRemoteCheck precedence", () => {
       if (original === undefined) delete process.env[ENV_VAR];
       else process.env[ENV_VAR] = original;
     }
+  });
+});
+
+// Experimental features (approval "inbox-decision-mode"): off unless switched on,
+// PLANNOTATOR_EXPERIMENTAL decides over config.json, and saving one flag keeps the others.
+describe("experimental features", () => {
+  const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "plannotator-experimental-"));
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+  });
+  afterEach(() => {
+    if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("off by default; config.json turns it on; the env var decides both ways", () => {
+    expect(resolveExperimental({}, "decision-mode", {})).toBe(false);
+    expect(resolveExperimental({ experimental: { decisionMode: true } }, "decision-mode", {})).toBe(true);
+    expect(resolveExperimental({ experimental: { decisionMode: "true" as unknown as boolean } }, "decision-mode", {})).toBe(true);
+    expect(resolveExperimental({ experimental: [] as unknown as { decisionMode?: boolean } }, "decision-mode", {})).toBe(false);
+    expect(resolveExperimental({}, "decision-mode", { PLANNOTATOR_EXPERIMENTAL: "x, Decision-Mode" })).toBe(true);
+    expect(resolveExperimental({ experimental: { decisionMode: true } }, "decision-mode", { PLANNOTATOR_EXPERIMENTAL: "-decision-mode" })).toBe(false);
+    expect(resolveExperimental({ experimental: { decisionMode: true } }, "decision-mode", { PLANNOTATOR_EXPERIMENTAL: "something-else" })).toBe(true);
+    expect(parseExperimentalEnv("decision-mode", { PLANNOTATOR_EXPERIMENTAL: "" })).toBeUndefined();
+  });
+
+  test("saving one flag keeps the other experimental keys", () => {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ experimental: { otherFlag: true } }));
+    saveConfig({ experimental: { decisionMode: true } });
+    expect(loadConfig().experimental).toEqual({ otherFlag: true, decisionMode: true } as unknown as { decisionMode?: boolean });
+    saveConfig({ inboxTextSize: 13 });
+    expect(loadConfig().experimental).toEqual({ otherFlag: true, decisionMode: true } as unknown as { decisionMode?: boolean });
+  });
+
+  test("a hand-edited experimental value that is not an object is replaced, never spread", () => {
+    for (const bad of ["on", ["decisionMode"], 7, null]) {
+      writeFileSync(join(dir, "config.json"), JSON.stringify({ experimental: bad }));
+      saveConfig({ experimental: { decisionMode: true } });
+      expect(loadConfig().experimental).toEqual({ decisionMode: true });
+    }
+  });
+
+  // The usage counts were removed (approval "remove-usage-counts"); v0.28.33's
+  // hidden `plannotator telemetry --off` could write `usageCounts`. Such a file
+  // still loads quietly, its flags still work, and a save leaves the old keys be.
+  test("a config.json with the removed usage-count keys loads with no warning and keeps them on save", () => {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ experimental: { decisionMode: true }, usageCounts: false, usageCountsNotice: { decisionMode: 1 } }));
+    const warn = spyOn(process.stderr, "write");
+    try {
+      expect(resolveExperimental(loadConfig(), "decision-mode", {})).toBe(true);
+      saveConfig({ inboxTextSize: 13 });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+    expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"))).toMatchObject({ usageCounts: false, usageCountsNotice: { decisionMode: 1 }, inboxTextSize: 13 });
   });
 });

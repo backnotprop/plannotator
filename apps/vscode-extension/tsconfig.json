@@ -14,9 +14,12 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
-      "vscode": ["./mocks/vscode.ts"]
+      "vscode": ["./mocks/vscode.ts"],
+      "@plannotator/core/*": ["../../packages/core/*"],
+      "@plannotator/shared/*": ["../../packages/shared/*"],
+      "@plannotator/acp-client/*": ["../../packages/acp-client/*"]
     }
   },
-  "include": ["src/**/*.ts", "mocks/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*.ts", "mocks/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/guides/vscode/**", "src/guides/webview/**"]
 }

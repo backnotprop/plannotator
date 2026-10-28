@@ -19,12 +19,12 @@
  *    type sniffed from the bytes, one 15 s deadline across its redirects and
  *    body. At most 12 images per release, the first 12 the notes show.
  *  - The release check's rules: no request while PLANNOTATOR_UPDATE_CHECK is
- *    off, the same user agent, and the same claim and back-off per version
+ *    off, the same user agent, and the notes' claim and back-off per version
  *    (`releaseImagesFetch` in update-state.json: claimed before the request,
  *    then 6 h after a failure and 24 h after an answer). A failed image is
  *    left out (logged to update.log); it never fails the notes.
  *  - Stored as `update-notes/<version>/<sha256>.<ext>`, with the src → file
- *    map in `update-notes/<version>/images.json` (its own file, so the daily
+ *    map in `update-notes/<version>/images.json` (its own file, so the release
  *    check rewriting `<version>.json` never drops it). `uninstall --purge`
  *    removes `update-notes/` whole.
  *
@@ -41,8 +41,8 @@ import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, MAX_REVIEW_IMAGE_PREVIEW_PIXELS } from 
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { isLfsPointer, readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import {
-  RELEASE_CHECK_INTERVAL_MS,
-  RELEASE_CHECK_RETRY_MS,
+  RELEASE_ASSETS_FETCH_INTERVAL_MS,
+  RELEASE_ASSETS_FETCH_RETRY_MS,
   hasReleaseNotesContent,
   normalizeStableVersion,
   patchUpdateState,
@@ -309,7 +309,7 @@ export function isReleaseImagesFetchDue(state: UpdateState, version: string, now
   const record = state.releaseImagesFetch?.[version];
   const at = record?.attemptedAt;
   if (!record || typeof at !== "number" || !Number.isFinite(at) || at > now) return true;
-  return now - at >= (record.failedAt ? RELEASE_CHECK_RETRY_MS : RELEASE_CHECK_INTERVAL_MS);
+  return now - at >= (record.failedAt ? RELEASE_ASSETS_FETCH_RETRY_MS : RELEASE_ASSETS_FETCH_INTERVAL_MS);
 }
 
 export interface ReleaseImagesFetchDeps {

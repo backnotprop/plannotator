@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { forgeRefLinks } from "@plannotator/core/forge-refs";
+import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
 import { useFenceTheme } from "../hooks/useFenceTheme";
 import { transformPlainText } from "../utils/inlineTransforms";
@@ -502,32 +502,50 @@ function emitPlainTextWithBareUrls(
   }
 }
 
-/** An image a host resolver chose; a load failure shows the placeholder. */
+/**
+ * An image a host resolver chose; a load failure shows the placeholder.
+ *
+ * The `<img>` element itself never leaves the document: on failure the
+ * placeholder is inserted BEFORE it (React's reference node is then the
+ * `<img>`, which it owns) and the `<img>` is hidden. Replacing the `<img>`
+ * would make React insert before the node that follows it, and when that is
+ * a text node the annotation highlighter already moved into a `<mark>` (a
+ * restored comment starting right after the image), `insertBefore` throws
+ * and the whole document unmounts. A loaded image's DOM is unchanged.
+ */
 const HostResolvedImage: React.FC<{
   src: string;
   alt: string;
+  /** The src as written in the markdown (`data-image-src`, read by the image viewer's region comments). */
+  writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
-}> = ({ src, alt, onImageClick }) => {
+}> = ({ src, alt, writtenSrc, onImageClick }) => {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  if (failedSrc === src) {
-    return (
-      <span className={UNAVAILABLE_IMAGE_CLASS} title="Image could not be loaded" data-image-unavailable="">
-        {alt || 'Image'}
-      </span>
-    );
-  }
+  const failed = failedSrc === src;
   return (
-    <img
-      src={src}
-      alt={alt}
-      className="max-w-full rounded my-2 cursor-zoom-in"
-      loading="lazy"
-      onError={() => setFailedSrc(src)}
-      onClick={(e) => {
-        e.stopPropagation();
-        onImageClick?.(src, alt);
-      }}
-    />
+    <>
+      {failed && (
+        <span key="unavailable" className={`${UNAVAILABLE_IMAGE_CLASS} annotation-exclude`} title="Image could not be loaded" data-image-unavailable="">
+          {alt || 'Image'}
+        </span>
+      )}
+      <img
+        key="image"
+        src={src}
+        alt={failed ? '' : alt}
+        data-image-src={writtenSrc}
+        data-image-failed={failed ? '' : undefined}
+        hidden={failed || undefined}
+        aria-hidden={failed || undefined}
+        className={failed ? undefined : 'max-w-full rounded my-2 cursor-zoom-in'}
+        loading="lazy"
+        onError={() => setFailedSrc(src)}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!failed) onImageClick?.(src, alt);
+        }}
+      />
+    </>
   );
 };
 
@@ -591,6 +609,13 @@ export const InlineMarkdown: React.FC<{
   const resolveLocalLink = useLocalLinkResolver();
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
+  // Cross-repo `owner/repo#123` refs: only for a caller that names its
+  // project's repo (it knows the forge); otherwise they stay plain text, never
+  // a guessed github.com link. With a code-file handler, an `owner/repo` that
+  // is a code path not known to be missing stays the file (`src/app.js#12`).
+  const crossRepoProject = githubRepo ? { host: repoHost } : null;
+  const crossRepoAccept = (ref: CrossRepoRef): boolean =>
+    !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -696,6 +721,32 @@ export const InlineMarkdown: React.FC<{
           continue;
         }
       }
+    }
+
+    // Cross-repo ref: owner/repo#123, shown as written, linked on the
+    // project's forge host. Read before file-path detection, so
+    // `vercel/next.js#1` is a ref, not a path (unless the viewer knows that
+    // file, see crossRepoAccept); `docs/guide.md#2` stays a path.
+    const crossRepoRef = crossRepoProject ? matchCrossRepoRef(remaining, previousChar, crossRepoProject) : null;
+    if (crossRepoRef && crossRepoAccept(crossRepoRef)) {
+      parts.push(
+        crossRepoRef.href ? (
+          <a
+            key={key++}
+            href={crossRepoRef.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary font-medium hover:underline"
+          >
+            {crossRepoRef.label}
+          </a>
+        ) : (
+          crossRepoRef.label
+        ),
+      );
+      remaining = remaining.slice(crossRepoRef.label.length);
+      previousChar = crossRepoRef.label[crossRepoRef.label.length - 1];
+      continue;
     }
 
     // Autolinks: <https://url> or <email@domain.com>
@@ -1085,12 +1136,13 @@ export const InlineMarkdown: React.FC<{
         resolveImage ? (
           // With a host resolver, an image that fails to load becomes the
           // same placeholder instead of a broken-image icon.
-          <HostResolvedImage key={key++} src={imgSrc} alt={alt} onImageClick={onImageClick} />
+          <HostResolvedImage key={key++} src={imgSrc} alt={alt} writtenSrc={src} onImageClick={onImageClick} />
         ) : (
           <img
             key={key++}
             src={imgSrc}
             alt={alt}
+            data-image-src={src}
             className="max-w-full rounded my-2 cursor-zoom-in"
             loading="lazy"
             onClick={(e) => {
@@ -1335,12 +1387,17 @@ export const InlineMarkdown: React.FC<{
     // chunk (`…/w/ws_01…` rendered a link to `…/w/ws`). Stop the chunk where
     // that URL starts instead, so the bare-URL branch above takes it whole.
     const chunkEnd = nextSpecial === -1 ? remaining.length : nextSpecial + 1;
-    const urlStart = bareUrlRunningPast(remaining, chunkEnd);
-    if (urlStart !== -1) {
-      const before = remaining.slice(0, urlStart);
+    // Same for an owner/repo#123 ref: `#` (and `_` in a name) ends a chunk, so
+    // stop before the ref and let the cross-repo branch above take it whole.
+    // A ref inside a URL never splits it: the URL starts first and wins.
+    const urlAt = bareUrlRunningPast(remaining, chunkEnd);
+    const refAt = crossRepoProject ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
+    const splitAt = refAt !== -1 ? refAt : urlAt;
+    if (splitAt !== -1) {
+      const before = remaining.slice(0, splitAt);
       emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
       previousChar = before[before.length - 1] || previousChar;
-      remaining = remaining.slice(urlStart);
+      remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);

@@ -356,6 +356,30 @@ describe("feedback archive: diagram anchors", () => {
   });
 });
 
+describe("feedback archive: image regions (#2100)", () => {
+  test("a region comment records its validated region; a malformed one is left out", () => {
+    // Regression: without the field a comment on part of a screenshot
+    // archives as the image's src and the index cannot say WHERE on it.
+    const dataDir = useTempDataDir();
+    const region = { v: 1, src: "figures/status-colors.png", sourceLine: 6, box: { x: 1820, y: 380, w: 420, h: 160 }, naturalWidth: 3664, naturalHeight: 1453 };
+    appendFeedbackRecord({
+      project: PROJECT,
+      origin: "claude-code",
+      surface: "plan",
+      decision: "deny",
+      target: { slug: "plan-2026-10-23" },
+      feedback: "grey",
+      annotations: [
+        { id: "r1", type: "COMMENT", text: "grey", originalText: region.src, blockId: "block-2", imageRegion: { ...region, extra: 1 } },
+        { id: "r2", type: "COMMENT", text: "junk", originalText: "x", imageRegion: { ...region, box: { x: 9999, y: 0, w: 1, h: 1 } } },
+      ],
+    });
+    const record = readIndex(dataDir)[0]!;
+    expect(record.annotations?.[0]?.imageRegion).toEqual(region);
+    expect(record.annotations?.[1]).not.toHaveProperty("imageRegion");
+  });
+});
+
 describe("feedback archive: question answers", () => {
   test("an answer records its validated questionAnswer; a malformed one and a plain comment stay answer-free", () => {
     // Regression: without the field an answer archives only as its one-line

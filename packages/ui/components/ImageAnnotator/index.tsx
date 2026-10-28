@@ -20,6 +20,14 @@ interface ImageAnnotatorProps {
   onClose: () => void;
   /** Pre-populated image name (derived from filename) */
   initialName?: string;
+  /**
+   * Optional: Escape cancels (closes without accepting) and a click outside
+   * closes only an empty drawing; Enter and the ✓ accept. Absent: Escape,
+   * Enter and a click outside all accept, exactly as before.
+   */
+  escapeCancels?: boolean;
+  /** Optional: the line under the image in place of "Press Esc or Enter or click outside to accept". */
+  hint?: React.ReactNode;
 }
 
 export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
@@ -28,6 +36,8 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   onAccept,
   onClose,
   initialName = '',
+  escapeCancels = false,
+  hint,
 }) => {
   const [state, setState] = useState<StrokeHistoryState>(DEFAULT_STROKE_HISTORY_STATE);
   const [saving, setSaving] = useState(false);
@@ -170,14 +180,19 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       },
       save: {
         when: (event) => isOpen && !saving && !keyboardTargetIsInput(event),
-        handle: () => { void handleAccept(); },
+        handle: (event) => {
+          if (escapeCancels && event.key === 'Escape') onClose();
+          else void handleAccept();
+        },
       },
     },
   });
 
   const handleBackdropClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
-      handleAccept();
+      // With escapeCancels, a click outside never takes a drawing away: it closes an empty one only.
+      if (!escapeCancels) handleAccept();
+      else if (state.strokes.length === 0) onClose();
     }
   };
 
@@ -209,6 +224,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           onRedo={handleRedo}
           onClear={handleClear}
           onSave={handleAccept}
+          saveKey={escapeCancels ? 'Enter' : 'Escape'}
         />
 
         <Canvas
@@ -250,8 +266,12 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
         )}
 
         {/* Accept hint */}
-        <div className="text-xs text-muted-foreground">
-          Press <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Esc</kbd> or <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Enter</kbd> or click outside to accept
+        <div className="text-xs text-muted-foreground" data-pn-image-annotator-hint>
+          {hint ?? (
+            <>
+              Press <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Esc</kbd> or <kbd className="px-1.5 py-0.5 bg-muted rounded text-foreground">Enter</kbd> or click outside to accept
+            </>
+          )}
         </div>
       </div>
 

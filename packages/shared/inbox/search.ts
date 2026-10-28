@@ -3,7 +3,8 @@
  * built lazily on the first search in slices that yield, and kept current
  * from the store's lines. The design of record is the approved "inbox-search"
  * brief (owner approval 2026-10-13; not in this repo); what a build here
- * needs from it is in CLAUDE.md ("Search" under "Plannotator Inbox").
+ * needs from it is in docs/agent-guides/inbox-notifications-and-agents.md
+ * ("Search").
  *
  * What is indexed, one document each:
  *   thread    its subject (the current one, following a replaced question's

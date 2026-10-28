@@ -19,7 +19,8 @@
 import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
 import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview } from "./pr-gitlab";
 import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList } from "./pr-bitbucket";
-import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem } from "./pr-types";
+import { ensureGhPRAccess, ghScopedRuntime } from "./pr-github-account";
+import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
 // pr-provider as a single facade. Browser code imports from pr-types
@@ -30,7 +31,11 @@ export * from "./pr-types";
 
 /** One PR platform's server implementation. */
 export interface PRProvider<R extends PRRef = PRRef> {
-  checkAuth(runtime: PRRuntime, ref: R): Promise<void>;
+  /**
+   * Fails (throws) when the review cannot start. May answer what it learned,
+   * e.g. GitHub's choice of another signed-in account (pr-github-account.ts).
+   */
+  checkAuth(runtime: PRRuntime, ref: R): Promise<PRAuthResult | void>;
   getUser(runtime: PRRuntime, ref: R): Promise<string | null>;
   fetchPR(runtime: PRRuntime, ref: R): Promise<{ metadata: PRMetadata; rawPatch: string; patchIncomplete?: boolean }>;
   fetchContext(runtime: PRRuntime, ref: R): Promise<PRContext>;
@@ -55,7 +60,12 @@ export interface PRProvider<R extends PRRef = PRRef> {
 }
 
 const githubProvider: PRProvider<GithubPRRef> = {
-  checkAuth: (runtime, ref) => checkGhAuth(runtime, ref.host),
+  // gh is signed in, then the account in use can see THIS PR (#2157): when it
+  // can't, another signed-in account that can is used for this review only.
+  checkAuth: async (runtime, ref) => {
+    await checkGhAuth(runtime, ref.host);
+    return ensureGhPRAccess(runtime, ref);
+  },
   getUser: (runtime, ref) => getGhUser(runtime, ref.host),
   fetchPR: fetchGhPR,
   fetchContext: fetchGhPRContext,
@@ -106,28 +116,37 @@ export function getPRProvider(ref: PRRef): PRProvider {
   return PROVIDERS[ref.platform] as PRProvider;
 }
 
+/**
+ * The runtime a ref's calls go through: for a GitHub PR whose active gh
+ * account could not see it, `gh` runs as the signed-in account that can
+ * (chosen by `checkAuth`); otherwise the runtime as given.
+ */
+function runtimeFor(runtime: PRRuntime, ref: PRRef): PRRuntime {
+  return ref.platform === "github" ? ghScopedRuntime(runtime, ref) : runtime;
+}
+
 // --- Dispatch Functions ---
 
-export async function checkAuth(runtime: PRRuntime, ref: PRRef): Promise<void> {
-  return getPRProvider(ref).checkAuth(runtime, ref);
+export async function checkAuth(runtime: PRRuntime, ref: PRRef): Promise<PRAuthResult> {
+  return (await getPRProvider(ref).checkAuth(runtime, ref)) ?? {};
 }
 
 export async function getUser(runtime: PRRuntime, ref: PRRef): Promise<string | null> {
-  return getPRProvider(ref).getUser(runtime, ref);
+  return getPRProvider(ref).getUser(runtimeFor(runtime, ref), ref);
 }
 
 export async function fetchPR(
   runtime: PRRuntime,
   ref: PRRef,
 ): Promise<{ metadata: PRMetadata; rawPatch: string; patchIncomplete?: boolean }> {
-  return getPRProvider(ref).fetchPR(runtime, ref);
+  return getPRProvider(ref).fetchPR(runtimeFor(runtime, ref), ref);
 }
 
 export async function fetchPRContext(
   runtime: PRRuntime,
   ref: PRRef,
 ): Promise<PRContext> {
-  return getPRProvider(ref).fetchContext(runtime, ref);
+  return getPRProvider(ref).fetchContext(runtimeFor(runtime, ref), ref);
 }
 
 export async function fetchPRFileContent(
@@ -136,7 +155,7 @@ export async function fetchPRFileContent(
   sha: string,
   filePath: string,
 ): Promise<string | null> {
-  return getPRProvider(ref).fetchFileContent(runtime, ref, sha, filePath);
+  return getPRProvider(ref).fetchFileContent(runtimeFor(runtime, ref), ref, sha, filePath);
 }
 
 /** One file at one commit as raw bytes (image preview), capped at `maxBytes`. */
@@ -147,7 +166,7 @@ export async function fetchPRFileBytes(
   filePath: string,
   maxBytes: number,
 ): Promise<PRFileBytesResult> {
-  return getPRProvider(ref).fetchFileBytes(runtime, ref, sha, filePath, maxBytes);
+  return getPRProvider(ref).fetchFileBytes(runtimeFor(runtime, ref), ref, sha, filePath, maxBytes);
 }
 
 /** Submit a platform review and preserve any provider-specific partial result. */
@@ -160,7 +179,7 @@ export async function submitPRReview(
   fileComments: PRReviewFileComment[],
   fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
-  return getPRProvider(ref).submitReview(runtime, ref, headSha, action, body, fileComments, fileLevelComments);
+  return getPRProvider(ref).submitReview(runtimeFor(runtime, ref), ref, headSha, action, body, fileComments, fileLevelComments);
 }
 
 /**
@@ -173,7 +192,7 @@ export async function fetchPRViewedFiles(
   ref: PRRef,
 ): Promise<Record<string, boolean>> {
   const provider = getPRProvider(ref);
-  return provider.fetchViewedFiles ? provider.fetchViewedFiles(runtime, ref) : {};
+  return provider.fetchViewedFiles ? provider.fetchViewedFiles(runtimeFor(runtime, ref), ref) : {};
 }
 
 /**
@@ -189,7 +208,7 @@ export async function markPRFilesViewed(
   viewed: boolean,
 ): Promise<void> {
   const provider = getPRProvider(ref);
-  if (provider.markFilesViewed) return provider.markFilesViewed(runtime, ref, prNodeId, filePaths, viewed);
+  if (provider.markFilesViewed) return provider.markFilesViewed(runtimeFor(runtime, ref), ref, prNodeId, filePaths, viewed);
 }
 
 /**
@@ -205,7 +224,7 @@ export async function fetchPRStack(
   metadata: PRMetadata,
 ): Promise<PRStackTree | null> {
   const provider = getPRProvider(ref);
-  return provider.fetchStack ? provider.fetchStack(runtime, ref, metadata) : null;
+  return provider.fetchStack ? provider.fetchStack(runtimeFor(runtime, ref), ref, metadata) : null;
 }
 
 export async function fetchPRList(
@@ -213,5 +232,5 @@ export async function fetchPRList(
   ref: PRRef,
 ): Promise<PRListItem[]> {
   const provider = getPRProvider(ref);
-  return provider.fetchList ? provider.fetchList(runtime, ref) : [];
+  return provider.fetchList ? provider.fetchList(runtimeFor(runtime, ref), ref) : [];
 }

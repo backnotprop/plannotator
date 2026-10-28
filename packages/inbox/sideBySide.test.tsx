@@ -6,7 +6,10 @@
  * "Side by side | Full screen" switch and full screen's "Side by side" save
  * the choice (with the window's toast and its Undo); Escape never does; the
  * choice opens every kind; the address (`view=`) wins over it; a tile's ⋯
- * opens one file one way without saving anything.
+ * opens one file one way without saving anything. Full screen's ×, Escape and
+ * Back go back where it was opened from (fullScreenOrigin.ts): the thread
+ * alone for the image preview under a message (the owner's path), beside the
+ * thread after the switch.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
  */
@@ -52,7 +55,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 8;
+const TESTS = 10;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -269,25 +272,115 @@ test.skipIf(!hasDom)("Side by side, once chosen, opens every kind beside the thr
   expect(addressView()).toBe('full');
 });
 
-test.skipIf(!hasDom)("Escape's last rung puts the file beside the thread without saving anything", async () => {
+test.skipIf(!hasDom)("Escape's last rung goes back where full screen was opened from, saving nothing: the thread alone, or the file beside it after the switch", async () => {
   await renderThread();
+  const threadOnly = window.location.hash;
   await openTile('page.html');
   await until(inFullScreen, 'the page full screen');
   expect(choice()).toBeNull();
-  // The pen first (Annotate → Interact), then the file goes beside the thread.
-  for (let i = 0; i < 4 && inFullScreen(); i++) await escapeOnPane();
-  await until(() => !inFullScreen(), 'beside the thread');
+  // The pen first (Annotate → Interact), then full screen ends: opened from the thread alone, the file closes.
+  for (let i = 0; i < 4 && view() !== null; i++) await escapeOnPane();
+  await until(() => view() === null, 'the thread as it was, no file beside it');
+  expect(window.location.hash).toBe(threadOnly);
   expect(choice()).toBeNull();
   expect(toast()).toBeNull();
-  expect(document.activeElement === sideButton()).toBe(true);
-  // The address carries it, so a reload keeps it beside.
-  expect(addressView()).toBe('side');
   // Nothing was saved, so the page opened again follows today's rule: full screen.
-  await close();
-  await until(() => view() === null, 'closed');
   await openTile('page.html');
   await until(inFullScreen, 'the page full screen by the rule');
   expect(choice()).toBeNull();
+  for (let i = 0; i < 4 && view() !== null; i++) await escapeOnPane();
+  await until(() => view() === null, 'closed again');
+
+  // Beside the thread first, then the switch: Escape puts it back beside the thread, focus on Side by side.
+  await openTile('plan.md');
+  expect(inFullScreen()).toBe(false);
+  await act(async () => fullButton()!.click());
+  await until(inFullScreen, 'plan.md full screen');
+  const picked = choice();
+  for (let i = 0; i < 4 && inFullScreen(); i++) await escapeOnPane();
+  await until(() => !inFullScreen() && view() !== null, 'beside the thread');
+  expect(view()!.getAttribute('data-attachment-pane')).toBe(world.openIn.ids['plan.md']!);
+  await until(() => document.activeElement === sideButton(), 'focus on Side by side');
+  // The address carries it, so a reload keeps it beside; Escape itself saved nothing.
+  expect(addressView()).toBe('side');
+  expect(choice()).toBe(picked);
+});
+
+test.skipIf(!hasDom)("the owner's path: the image preview under a message opens full screen; × goes back to the thread as it was, and so does Back", async () => {
+  // The person once chose Full screen, so an attached image opens full screen.
+  document.cookie = `${VIEW_COOKIE}=full; path=/`;
+  await renderThread();
+  const threadOnly = window.location.hash;
+  const preview = () => host!.querySelector<HTMLElement>(`[data-gallery-image="${world.openIn.ids['shot.png']}"]`);
+  await until(() => preview() !== null, 'the image preview under the message');
+  await act(async () => preview()!.click());
+  await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids['shot.png'] && inFullScreen(), 'the image full screen');
+  const exit = host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!;
+  // Named for where it goes: the thread, as on a phone; its tooltip keeps Esc.
+  expect(exit.getAttribute('aria-label')).toBe('Back to the thread');
+  await act(async () => exit.click());
+  await until(() => view() === null, 'the thread as it was');
+  expect(window.location.hash).toBe(threadOnly);
+  expect(host!.querySelector('[data-view-switch]')).toBeNull();
+
+  // The browser's Back from that full screen lands on the thread alone too.
+  await act(async () => preview()!.click());
+  await until(() => inFullScreen(), 'the image full screen again');
+  await act(async () => window.history.back());
+  await until(() => view() === null, 'Back: the thread as it was');
+
+  // Beside the thread first, then the switch: × goes back beside it, and so does Back.
+  document.cookie = `${VIEW_COOKIE}=side; path=/`;
+  await act(async () => preview()!.click());
+  await until(() => view() !== null && !inFullScreen(), 'the image beside the thread');
+  await act(async () => fullButton()!.click());
+  await until(inFullScreen, 'the switch: full screen');
+  expect(host!.querySelector('[data-full-view-close]')!.getAttribute('aria-label')).toBe('Exit full screen');
+  await act(async () => window.history.back());
+  await until(() => view() !== null && !inFullScreen(), 'Back: beside the thread, not the thread alone');
+  expect(view()!.getAttribute('data-attachment-pane')).toBe(world.openIn.ids['shot.png']!);
+  await act(async () => fullButton()!.click());
+  await until(inFullScreen, 'full screen again');
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!.click());
+  await until(() => view() !== null && !inFullScreen(), '×: beside the thread');
+  // One Back from there is the thread alone: full screen left no entry behind.
+  await act(async () => window.history.back());
+  await until(() => view() === null, 'Back: the thread');
+  expect(window.location.hash).toBe(threadOnly);
+});
+
+test.skipIf(!hasDom)("a file opened full screen over another one beside the thread: × and Escape go back to that one, and ask first about a comment not saved yet", async () => {
+  document.cookie = `${VIEW_COOKIE}=side; path=/`;
+  await renderThread();
+  await openTile('plan.md');
+  expect(inFullScreen()).toBe(false);
+  // The image full screen for this once, from its tile's ⋯, over plan.md beside the thread.
+  const menu = await tileMenu('shot.png');
+  await act(async () => menu.querySelector<HTMLElement>('[data-open-as="full"]')!.click());
+  await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids['shot.png'] && inFullScreen(), 'the image full screen');
+  const box = () => host!.querySelector<HTMLTextAreaElement>('[data-image-composer] textarea');
+  await until(() => box() !== null, "the image's comment box");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box()!, 'The total sits too low.');
+    box()!.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const question = () => host!.querySelector<HTMLElement>('[data-step-guard]');
+
+  // Escape's last rung would show plan.md: it asks first, and Keep writing stays on the image with the words.
+  for (let i = 0; i < 4 && question() === null && inFullScreen(); i++) await escapeOnPane();
+  await until(() => question() !== null, 'the question about the comment, after Escape');
+  expect(question()!.querySelector('[data-guard-discard]')!.textContent).toBe('Discard and go to plan.md');
+  await act(async () => question()!.querySelector<HTMLButtonElement>('[data-guard-keep]')!.click());
+  expect(inFullScreen()).toBe(true);
+  expect(view()!.getAttribute('data-attachment-pane')).toBe(world.openIn.ids['shot.png']!);
+  expect(box()!.value).toBe('The total sits too low.');
+
+  // × asks the same; Discard goes on to plan.md beside the thread.
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!.click());
+  await until(() => question() !== null, 'the question about the comment, after ×');
+  expect(inFullScreen()).toBe(true);
+  await act(async () => question()!.querySelector<HTMLButtonElement>('[data-guard-discard]')!.click());
+  await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids['plan.md'] && !inFullScreen(), 'plan.md beside the thread');
 });
 
 test.skipIf(!hasDom)("a comment card in the reply box opens its file in the view it is in: a one-off view from a tile's ⋯ stays", async () => {

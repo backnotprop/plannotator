@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -404,8 +404,30 @@ describe("Amp Plannotator registered commands", () => {
   });
 });
 
+describe("/plannotator-inbox", () => {
+  test("opens the Inbox with plannotator inbox --open and shows its address", async () => {
+    await withCommandHarness(async ({ run, argsPath }) => {
+      const opened = await run("plannotator-inbox", "http://localhost:61234/\n");
+      expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual(["inbox", "--open"]);
+      expect(opened.appended).toEqual([]);
+      expect(opened.notifications).toHaveLength(1);
+      expect(opened.notifications[0]).toContain("http://localhost:61234/");
+    });
+  });
+
+  test("an older CLI without --open is told to update", async () => {
+    await withCommandHarness(async ({ run }) => {
+      const opened = await run("plannotator-inbox", "", { stderr: "Unknown inbox option: --open\n", status: 1 });
+      expect(opened.notifications).toHaveLength(1);
+      expect(opened.notifications[0]).toContain("plannotator update");
+    });
+  });
+});
+
 interface CommandHarness {
   configPath: string;
+  /** The arguments the stand-in CLI got last (JSON). */
+  argsPath: string;
   run: (
     command: string,
     stdout: string,
@@ -429,10 +451,12 @@ async function withCommandHarness(run: (harness: CommandHarness) => Promise<void
     const pluginPath = join(root, "plannotator.ts");
     // A separate module instance keeps the cached CLI runtime local to this test.
     copyFileSync(join(import.meta.dir, "plannotator.ts"), pluginPath);
+    const argsPath = join(root, "args.json");
     writeFileSync(cliPath, `
+await Bun.write(${JSON.stringify(argsPath)}, JSON.stringify(process.argv.slice(2)));
 const result = await Bun.file(${JSON.stringify(resultPath)}).json();
 if (process.argv.includes("--stdin")) await Bun.stdin.text();
-process.stdout.write(process.argv.includes("--json") ? result.stdout : "CLI plaintext without --json");
+process.stdout.write(process.argv.includes("--json") || process.argv.includes("inbox") ? result.stdout : "CLI plaintext without --json");
 process.stderr.write(result.stderr ?? "");
 process.exit(result.status ?? 0);
 `);
@@ -462,6 +486,7 @@ process.exit(result.status ?? 0);
 
     await run({
       configPath: join(dataDir, "config.json"),
+      argsPath,
       async run(command, stdout, options = {}) {
         writeFileSync(resultPath, JSON.stringify({ stdout, stderr: options.stderr, status: options.status }));
         const appended: Array<{ type: string; content: string }> = [];

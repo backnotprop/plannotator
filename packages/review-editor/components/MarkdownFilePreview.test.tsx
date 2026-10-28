@@ -3,8 +3,9 @@
  * any rendered text, the composer opens, and the comment becomes a file
  * comment that carries the quote (and, in the rendered diff, the kind of
  * section it was in). The same comment shows in the other view by its text,
- * and says so when its text is not there. Mermaid and Graphviz fences render
- * as code (the review bundle carries no diagram engine).
+ * and says so when its text is not there. Mermaid and Graphviz fences draw
+ * through the diagram engine the server advertises (loaded on demand), and
+ * render as code without it or when it fails to load.
  *
  * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
  * "Run UI seam-contract + DOM tests" step.
@@ -16,6 +17,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { CodeAnnotation, MarkdownPreviewAnchor } from '@plannotator/ui/types';
 import type { ReviewState } from '../dock/ReviewStateContext';
 import type { MarkdownPreviewView } from '../hooks/useMarkdownPreview';
+import type { DiagramEngineUrls } from '../utils/diagramEngineContract';
+import { loadDiagramEngine, __resetDiagramEngineForTests } from '../utils/diagramEngine';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -46,11 +49,12 @@ let host: HTMLElement | null = null;
 let added: Array<{ filePath: string; text: string; anchor: MarkdownPreviewAnchor }> = [];
 let setViewFromTest: ((view: MarkdownPreviewView) => void) | null = null;
 
-function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH }: {
+function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH, holdRemote }: {
   initial?: CodeAnnotation[];
   oldText?: string;
   newText?: string;
   patch?: string;
+  holdRemote?: boolean;
 }) {
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>(initial);
   const [view, setView] = useState<MarkdownPreviewView>('diff');
@@ -85,6 +89,7 @@ function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH }: 
         patch={patch}
         contents={{ fileContents: { forPath: 'docs/guide.md', old: oldText, new: newText }, loading: false, stale: false }}
         variant="single"
+        holdRemoteImages={holdRemote}
       />
     </ReviewStateProvider>
   );
@@ -152,6 +157,7 @@ afterEach(async () => {
   added = [];
   setViewFromTest = null;
   window.getSelection()?.removeAllRanges();
+  __resetDiagramEngineForTests();
   document.body.innerHTML = '';
 });
 
@@ -322,28 +328,29 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=+img%2Fa.png&snapshot=snap-1']);
   });
 
-  test('Mermaid and Graphviz fences render as code, not diagrams', async () => {
-    const withDiagram = `${NEW}\n\`\`\`mermaid\nflowchart LR\n  A --> B\n\`\`\`\n\n\`\`\`dot\ndigraph { a -> b }\n\`\`\`\n`;
-    const patch = [
-      'diff --git a/docs/guide.md b/docs/guide.md',
-      'new file mode 100644',
-      '--- /dev/null',
-      '+++ b/docs/guide.md',
-      `@@ -0,0 +1,${withDiagram.split('\n').length - 1} @@`,
-      ...withDiagram.split('\n').slice(0, -1).map((line) => `+${line}`),
-      '',
-    ].join('\n');
+  const WITH_DIAGRAM = `${NEW}\n\`\`\`mermaid\nflowchart LR\n  A --> B\n\`\`\`\n\n\`\`\`dot\ndigraph { a -> b }\n\`\`\`\n`;
+  const DIAGRAM_PATCH = [
+    'diff --git a/docs/guide.md b/docs/guide.md',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/docs/guide.md',
+    `@@ -0,0 +1,${WITH_DIAGRAM.split('\n').length - 1} @@`,
+    ...WITH_DIAGRAM.split('\n').slice(0, -1).map((line) => `+${line}`),
+    '',
+  ].join('\n');
+
+  async function mountDiagrams(diagramEngine?: DiagramEngineUrls) {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
     await act(async () => {
       root!.render(
-        <ReviewStateProvider value={{ files: [], allAnnotations: [], selectedAnnotationId: null } as unknown as ReviewState}>
+        <ReviewStateProvider value={{ files: [], allAnnotations: [], selectedAnnotationId: null, diagramEngine } as unknown as ReviewState}>
           <MarkdownFilePreview
             filePath="docs/guide.md"
             status="added"
-            patch={patch}
-            contents={{ fileContents: { forPath: 'docs/guide.md', old: null, new: withDiagram }, loading: false, stale: false }}
+            patch={DIAGRAM_PATCH}
+            contents={{ fileContents: { forPath: 'docs/guide.md', old: null, new: WITH_DIAGRAM }, loading: false, stale: false }}
             variant="single"
           />
         </ReviewStateProvider>,
@@ -351,8 +358,104 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
       await new Promise((r) => setTimeout(r, 30));
     });
     await settle(60);
-    expect(host.querySelector('[data-diagram-block]')).toBeNull();
-    const fences = Array.from(host.querySelectorAll('pre > code')).map((code) => code.textContent);
-    expect(fences).toEqual(['flowchart LR\n  A --> B', 'digraph { a -> b }']);
+    return host;
+  }
+  const fenceTexts = (el: HTMLElement) => Array.from(el.querySelectorAll('pre > code')).map((code) => code.textContent);
+
+  test('without the engine advert, Mermaid and Graphviz fences render as code', async () => {
+    const el = await mountDiagrams(undefined);
+    expect(el.querySelector('[data-diagram-block], [data-review-diagram]')).toBeNull();
+    expect(fenceTexts(el)).toEqual(['flowchart LR\n  A --> B', 'digraph { a -> b }']);
+  });
+
+  test('with the engine advert, both fences draw through the engine, loaded once', async () => {
+    const urls = { engine: '/assets/diagram-engine/engine-preview-ok.js', mermaid: '/m.js', graphviz: '/g.js' };
+    let imports = 0;
+    // The engine the server would serve, as the stub the loader hands back.
+    await loadDiagramEngine(urls, async () => {
+      imports += 1;
+      return {
+        apiVersion: 1,
+        DiagramFence: ({ kind, block }: { kind: string; block: { content: string } }) => <div data-stub-diagram={kind}>{block.content}</div>,
+      };
+    });
+    const el = await mountDiagrams(urls);
+    const drawn = Array.from(el.querySelectorAll('[data-stub-diagram]')).map((node) => [node.getAttribute('data-stub-diagram'), node.textContent]);
+    expect(drawn).toEqual([['mermaid', 'flowchart LR\n  A --> B'], ['graphviz', 'digraph { a -> b }']]);
+    expect(fenceTexts(el)).toEqual([]);
+    expect(imports).toBe(1);
+    // The rest of the document is unchanged.
+    expect(el.textContent).toContain('Run the new installer from the website.');
+  });
+
+  test('when the engine does not load, the fences stay code with a note and a Retry', async () => {
+    // No server here: the URL import fails, as it would offline.
+    const el = await mountDiagrams({ engine: '/assets/diagram-engine/engine-preview-missing.js', mermaid: '/m.js', graphviz: '/g.js' });
+    await settle(120);
+    expect(fenceTexts(el)).toEqual(['flowchart LR\n  A --> B', 'digraph { a -> b }']);
+    expect(el.querySelectorAll('[data-review-diagram="failed"]').length).toBe(2);
+    expect(el.querySelectorAll('[data-review-diagram-note] button').length).toBe(2);
+  });
+
+  test('Retry imports the engine again under a new URL, and the fence draws', async () => {
+    // Chromium answers a failed import() of the same URL from its cache, so
+    // Retry must ask for a new one.
+    const { ReviewDiagramFence } = await import('./ReviewDiagramFence');
+    const urls = { engine: '/assets/diagram-engine/engine-retry.js', mermaid: '/m.js', graphviz: '/g.js' };
+    const imported: string[] = [];
+    const importer = async (url: string) => {
+      imported.push(url);
+      if (imported.length === 1) throw new Error('offline');
+      return {
+        apiVersion: 1,
+        DiagramFence: ({ block }: { block: { content: string } }) => <div data-stub-diagram="">{block.content}</div>,
+      };
+    };
+    const block = { id: 'b1', type: 'code', language: 'mermaid', content: 'flowchart LR\n  A --> B', order: 0, startLine: 1 } as const;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<ReviewDiagramFence block={block as never} kind="mermaid" urls={urls} importer={importer} fallback={<pre><code>{block.content}</code></pre>} />);
+    });
+    await settle(60);
+    const button = host.querySelector<HTMLButtonElement>('[data-review-diagram-note] button');
+    expect(button).not.toBeNull();
+    await act(async () => button!.click());
+    await settle(60);
+    expect(imported).toEqual([urls.engine, `${urls.engine}?r=1`]);
+    expect(host.querySelector('[data-stub-diagram]')?.textContent).toBe('flowchart LR\n  A --> B');
+    expect(host.querySelector('[data-review-diagram]')).toBeNull();
+  });
+});
+
+// Picture choices in a question block (approval "inbox-decision-mode"): a PR
+// preview holds their remote pictures like any other, so they are counted in
+// "N remote images are not loaded" and load with the button.
+describe('MarkdownFilePreview: held remote pictures in a question block', () => {
+  const PICTURES = [
+    '# Guide',
+    '',
+    ':::question',
+    'Which drawer?',
+    '- [ ] A — ![Drawer A](https://example.com/a.png)',
+    '- [ ] B — ![Drawer B](https://example.com/b.png)',
+    ':::',
+    '',
+  ].join('\n');
+
+  test.skipIf(!hasDom)('held pictures draw the held placeholder, are counted, and load', async () => {
+    const patch = ['diff --git a/docs/guide.md b/docs/guide.md', '--- a/docs/guide.md', '+++ b/docs/guide.md', '@@ -1 +1,7 @@', ' # Guide', ...PICTURES.split('\n').slice(1, -1).map((l) => `+${l}`), ''].join('\n');
+    const el = await mount({ oldText: '# Guide\n', newText: PICTURES, patch, holdRemote: true });
+    await settle();
+    const held = Array.from(el.querySelectorAll('fieldset [data-image-unavailable]'));
+    expect(held.length).toBe(2);
+    for (const placeholder of held) expect(placeholder.getAttribute('title')).toMatch(/^Remote image, not loaded/);
+    expect(el.textContent).toContain('2 remote images are not loaded');
+    const load = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Load remote images'))!;
+    await act(async () => { load.click(); });
+    await settle();
+    const pictures = Array.from(el.querySelectorAll<HTMLImageElement>('fieldset img[data-question-picture]'));
+    expect(pictures.map((img) => img.getAttribute('src'))).toEqual(['https://example.com/a.png', 'https://example.com/b.png']);
   });
 });

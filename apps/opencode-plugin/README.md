@@ -38,9 +38,9 @@ Install stable OpenCode 2 with `npm install -g @opencode/cli`, then add Plannota
 }
 ```
 
-Restart OpenCode 2 and verify that `plannotator` appears in `opencode2 plugin list`.
+Run `opencode2 reload` (or start OpenCode 2) and verify that `plannotator` appears in `opencode2 plugin list`.
 
-To update, run the [install script](https://plannotator.ai/docs/getting-started/installation/) again and restart OpenCode 2. The script clears OpenCode 2's cached copy of the plugin, so the restart loads the latest `@plannotator/opencode`.
+To update, run the [install script](https://plannotator.ai/docs/getting-started/installation/) again, then run `opencode2 reload`. The script clears OpenCode 2's cached copy of the plugin, so the reload installs and loads the latest `@plannotator/opencode` in every open session. A reload also cancels any permission prompt OpenCode is showing. Without the script, `opencode2 plugin list && opencode2 plugin update @plannotator/opencode@latest` updates and reloads in one step (the `plugin list` first is needed in a folder OpenCode has not opened yet, where `plugin update` alone fails with "Plugin is not configured"; give the spec exactly as your `opencode.json` has it; with no target it updates every plugin that has a newer version). A config that pins an exact version (`@plannotator/opencode@0.28.20`) never updates: change the pin to `@plannotator/opencode@latest`, then run `opencode2 reload` (not `opencode2 plugin add`, which adds a second entry). Quitting OpenCode 2 is not enough: its background server keeps the plugin it loaded until a reload (or `opencode2 service restart`, which also stops any running turn). The Inbox's Settings → Agents says when an open OpenCode 2 session runs an older plugin, with the command to copy; after a reload, an idle session shows there again after its next event.
 
 Plannotator builds against the stable `@opencode/plugin` API and checks its installed package against a real stable OpenCode 2 host in CI. The core `submit_plan` review flow and native slash commands are supported. Capability checks preserve fallbacks for older V2 builds:
 
@@ -64,11 +64,13 @@ Add to your `opencode.json`:
 
 Restart OpenCode. By default, the `submit_plan` tool is available to OpenCode's `plan` agent, not to `build` or other primary agents.
 
+In Bun-hosted OpenCode the embedded server runs on OpenCode's own Bun. Use an OpenCode build on **Bun 1.4.4 or later**: older Bun still trusts the compromised eMudhra certificate chain (October 2026). The package's `engines` field states this floor; it warns, it does not block.
+
 > **OpenCode 1 slash commands:** Run the install script to get `/plannotator-review`, `/plannotator-annotate`, and `/plannotator-last`:
 > ```bash
 > curl -fsSL https://plannotator.ai/install.sh | bash
 > ```
-> This also clears cached plugin versions for both OpenCode 1 and OpenCode 2. To update the plugin later, run the install script again and restart OpenCode.
+> This also clears cached plugin versions for both OpenCode 1 and OpenCode 2. To update the plugin later, run the install script again, then restart OpenCode 1 (on OpenCode 2, run `opencode2 reload`).
 
 ## Workflow Modes
 
@@ -178,6 +180,7 @@ Register the tool but manage prompts and permissions yourself:
 - **Legacy link sharing**: Small markdown shares use compressed, unencrypted URL fragments. Larger and raw HTML shares can use client-encrypted short links. Workspaces is the primary direction for team sharing.
 - **Plan Diff**: See what changed when the agent revises a plan after feedback
 - **Annotate last message**: Run `/plannotator-last` to annotate the agent's most recent response
+- **Open the Inbox**: Run `/plannotator-inbox` to open the Plannotator Inbox in the browser and see its address
 - **Annotate files, folders, and URLs**: Run `/plannotator-annotate` when you want manual review of an artifact
 - **The `plannotator` tool (OpenCode 2, off by default)**: ask the agent to "open notes.md in Plannotator" and it opens the review itself, without waiting on it. Your feedback comes back later as a message that names the review's session id (`pn-…`). The agent can also list the reviews it opened in this session and close one it no longer needs; your unsent comments stay saved as a draft. The tool is off by default: turn it on with `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` in `~/.plannotator/config.json` (the environment variable wins in both directions). OpenCode reads it when it starts.
 - **The `plannotator_inbox` tool (off by default)**: the agent writes to your Plannotator Inbox and reads your answers there: `send_message` (a question, a note, files to annotate as attachments), `read_thread`, `search` (messages by their words), `wait_for_reply`, the project's decisions and guided reviews, as your Inbox offers them when OpenCode starts. On OpenCode 2, pressing Send on a reply wakes the session that sent the message: the reply is queued as its own turn once the session is idle, never steered into a running one, and the thread shows "Delivered to OpenCode". On OpenCode 1 the agent has the tool but is not woken; it reads replies with `read_thread` or `wait_for_reply`. The tool appears only when an Inbox is installed (you ran `plannotator inbox` once) and the `inboxTool` setting is on for OpenCode. It is off by default, because OpenCode sends every tool's full definition with each request. Turn it on with `export PLANNOTATOR_INBOX_TOOL=1`, or with `{ "inboxTool": { "opencode": true } }` in `~/.plannotator/config.json` (the Inbox's Settings writes this key; the environment variable wins). OpenCode reads it when it starts.

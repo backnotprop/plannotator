@@ -4,7 +4,7 @@
  * SDK client over streamable HTTP. Every test uses its own temp data dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +14,8 @@ import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
-import { INBOX_AGENT_FIELD_DESCRIPTIONS, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
-import { INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
+import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
+import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -326,6 +326,50 @@ describe("security refusals, by real requests", () => {
     expect((await inboxStatus(dataDir)).state).toBe("stopped");
   });
 
+  test("the stop route refuses a stop that names another data dir (a copied record) and takes its own under another spelling", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    let stopped = false;
+    const server = await start(dataDir, { onStopRequested: () => (stopped = true) });
+    const token = readInboxRegistry(dataDir)!.token;
+    const stop = (body: unknown) => post(server, "/api/inbox/control/stop", body, { Authorization: `Bearer ${token}` });
+    // A copy of this data dir: its inbox.json names this Inbox, its own folder is another.
+    const copy = join(root, "copy");
+    mkdirSync(join(copy, "inbox"), { recursive: true });
+    writeFileSync(join(copy, "inbox", "inbox.json"), readFileSync(join(dataDir, "inbox", "inbox.json")));
+    const refused = await stop({ data_dir: copy });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).code).toBe("not_ours");
+    await Bun.sleep(300);
+    expect(stopped).toBe(false);
+    expect((await inboxStatus(dataDir)).state).toBe("running");
+
+    // The same folder through a symlink is this Inbox's: it stops.
+    const link = join(root, "link");
+    symlinkSync(dataDir, link);
+    expect((await stop({ data_dir: link })).status).toBe(200);
+    await Bun.sleep(300);
+    expect(stopped).toBe(true);
+  });
+
+  test("the stop route never refuses on a folder it cannot read: a data dir that does not exist, or this one moved", async () => {
+    const root = tempRoot();
+    const stopVia = async (dataDir: string, named: () => string, before?: () => void) => {
+      let stopped = false;
+      const server = await start(dataDir, { onStopRequested: () => (stopped = true) });
+      const token = readInboxRegistry(dataDir)!.token;
+      before?.();
+      const response = await post(server, "/api/inbox/control/stop", { data_dir: named() }, { Authorization: `Bearer ${token}` });
+      await Bun.sleep(300);
+      return { status: response.status, stopped };
+    };
+    // The caller names a folder that is not there.
+    expect(await stopVia(join(root, "a"), () => join(root, "nowhere"))).toEqual({ status: 200, stopped: true });
+    // The data dir was renamed under the running Inbox: its own folder is gone, the caller names the new one.
+    const moved = join(root, "moved");
+    expect(await stopVia(join(root, "b"), () => moved, () => renameSync(join(root, "b"), moved))).toEqual({ status: 200, stopped: true });
+  });
+
   test("the window ships its CSP (no framing, no other origin) and no CORS anywhere", async () => {
     const server = await start(join(tempRoot(), "data"), { htmlContent: "<!doctype html><div data-window-sentinel></div>" });
     const page = await fetch(`http://127.0.0.1:${server.port}/`, { headers: { Origin: "https://evil.example" } });
@@ -384,7 +428,8 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(client.getInstructions()).toBe(INBOX_MCP_INSTRUCTIONS);
     expect(INBOX_MCP_INSTRUCTIONS.length).toBeLessThan(2048);
     const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name).sort()).toEqual([...INBOX_SERVED_TOOLS].sort());
+    // The Board is off by default: no card tool.
+    expect(tools.tools.map((t) => t.name).sort()).toEqual([...INBOX_DEFAULT_SERVED_TOOLS].sort());
     // Claude Code hands a model an MCP description up to its first 2,048
     // characters ("… [truncated]" after). The question guide is longer than
     // that by itself, so what must survive the cut is pinned: the syntax, the
@@ -420,6 +465,12 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(example!.parsed.choices.map((choice) => choice.recommended)).toEqual([true, false]);
     expect(agentTool.description).toContain("plannotator inbox --help");
     expect(agentTool.description.length).toBeLessThan(2048);
+    // Where a ref links (a bare #104 meant for another repo once linked into the thread's project):
+    // in both `body` descriptions, which reach the model whole; the capped texts above stay as they were.
+    const refRule = INBOX_REF_LINK_RULE;
+    expect(bodySchema.description).toContain(refRule);
+    expect(agentBody).toContain(refRule);
+    expect(INBOX_MCP_INSTRUCTIONS).not.toContain(refRule);
 
     const sendResult = await client.callTool({
       name: "send_message",
@@ -785,6 +836,55 @@ describe("the window's routes: settings, restart, favicon", () => {
       const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" } });
       expect((await other.json()).text_size).toBe(13);
       expect(onDisk().inboxTextSize).toBe(13);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  test("the guided review's diff layout saves into config.json `diffOptions.diffStyle`, shared with code review", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      // Code review's other diff options are already there; a style no build writes reads as never chosen.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ diffOptions: { diffStyle: "sideways", overflow: "wrap", fontSize: "13" } }));
+      const server = await start(dataDir);
+      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).diff_style;
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown>; theme?: unknown };
+      expect(await read()).toBeNull();
+      for (const bad of ["", "Split", "both", 1, null, true, { style: "split" }]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, diff_style: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).field).toBe("diff_style");
+      }
+      // A refused part saves nothing, the valid parts beside it included.
+      const mixed = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" }, diff_style: "both" });
+      expect(mixed.status).toBe(422);
+      expect(onDisk().theme).toBeUndefined();
+      // Another site's page and a stale tab write nothing.
+      const cross = await post(server, "/api/inbox/settings", { diff_style: "unified" }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect((await cross.json()).code).toBe("cross_origin");
+      const crossSite = await post(server, "/api/inbox/settings", { diff_style: "unified" }, { "Sec-Fetch-Site": "same-site" });
+      expect(crossSite.status).toBe(403);
+      const stale = await post(server, "/api/inbox/settings", { serverSession: "not-this-one", diff_style: "unified" });
+      expect(stale.status).toBe(409);
+      expect(onDisk().diffOptions?.diffStyle).toBe("sideways");
+
+      for (const style of ["unified", "split", "unified"]) {
+        const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, diff_style: style });
+        expect(saved.status).toBe(200);
+        expect((await saved.json()).diff_style).toBe(style);
+        expect(onDisk().diffOptions).toEqual({ diffStyle: style, overflow: "wrap", fontSize: "13" });
+        expect(await read()).toBe(style);
+      }
+      // Another setting's save keeps the layout and answers it.
+      const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, text_size: 13 });
+      expect((await other.json()).diff_style).toBe("unified");
+      expect(onDisk().diffOptions?.diffStyle).toBe("unified");
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

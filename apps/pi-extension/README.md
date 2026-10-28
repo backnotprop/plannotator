@@ -31,13 +31,20 @@ pi -e npm:@plannotator/pi-extension
 pi update --extensions
 ```
 
-This updates your installed Pi packages, Plannotator included. `pi update npm:@plannotator/pi-extension` updates only Plannotator, and `pi update --all` updates Pi and every package. A plain `pi update` updates only Pi itself, not Plannotator. Restart Pi after updating.
+This updates your installed Pi packages, Plannotator included. `pi update npm:@plannotator/pi-extension` updates only Plannotator, and `pi update --all` updates Pi and every package. A plain `pi update` updates only Pi itself, not Plannotator. Then type `/reload` in each open Pi session to load the new version (Oh My Pi: `omp plugin upgrade @plannotator/pi-extension`, then `/restart`). With the Inbox tool on, a session says so once when the version on disk differs from the one it runs, and the Inbox's Settings → Agents lists it. A version pinned in Pi's settings (`npm:@plannotator/pi-extension@0.28.20`) is skipped by `pi update`: run `pi install npm:@plannotator/pi-extension` to move it to the latest.
 
 ## Pi version and project trust
 
 Plannotator requires **Pi 0.79.1 or newer**. Updating only the Plannotator
 extension does not repair the security behavior of an older Pi host; update Pi
 itself before loading the extension.
+
+Run Pi on **Node 22.23.4+, 24.22.1+ or 26.12.1+**. These October 2026 security
+releases stop trusting the compromised eMudhra certificate chain. On an older
+Node, HTTPS calls made inside Pi still trust it, and the extension says so once
+when Pi starts (on Bun: Bun 1.4.4+). The package declares no `engines` floor on
+purpose: npm passes over a release whose floor the running Node misses, which
+kept older-Node installs on an old Plannotator without a word.
 
 Pi 0.79 introduced project trust for repository-local inputs. In interactive
 sessions, Pi asks before loading project settings, instructions, resources, and
@@ -69,7 +76,8 @@ extension runs in OMP too. Install it, then restart OMP:
 omp plugin install @plannotator/pi-extension
 ```
 
-Update with `omp plugin upgrade @plannotator/pi-extension`. Remove with
+Update with `omp plugin upgrade @plannotator/pi-extension`, then type
+`/restart` in each open OMP session to load the new version. Remove with
 `omp plugin uninstall @plannotator/pi-extension`.
 
 Open reviews with the extension's commands: `/plannotator-review`,
@@ -402,6 +410,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | `/plannotator-review [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
+| `/plannotator-inbox` | Open the Plannotator Inbox in the browser and show its address (needs the `plannotator` CLI) |
 
 When the `plannotator` tool is turned on, the agent opens, lists and closes reviews with it (see above).
 

@@ -20,6 +20,7 @@ param(
     [switch]$SkipKiro,
     [switch]$SkipVibe,
     [switch]$SkipOpencode,
+    [switch]$SkipQwen,
     # Same shape as the per-agent switches, but scoped to the skills/slash
     # command sparse checkout rather than one agent's home: -SkipSkills turns
     # the whole fetch into a no-op for every scope it writes (Claude,
@@ -253,6 +254,7 @@ function Write-InstallFlags {
     if ($SkipKiro) { $ids += "skip-kiro" }
     if ($SkipVibe) { $ids += "skip-vibe" }
     if ($SkipOpencode) { $ids += "skip-opencode" }
+    if ($SkipQwen) { $ids += "skip-qwen" }
     if ($SkipSkills) { $ids += "skip-skills" }
     if ($SkipClaudePlugin) { $ids += "skip-claude-plugin" }
     $quoted = ($ids | ForEach-Object { '"' + $_ + '"' }) -join ","
@@ -299,13 +301,14 @@ function Install-SemSidecar {
     try {
         $semBaseUrl = "https://github.com/$semRepo/releases/download/$semVersion"
         $semArchive = Join-Path $tmpSemDir $semAsset
-        $semChecksums = Join-Path $tmpSemDir "checksums.txt"
         # Bounded so a slow/hung download of this optional sidecar can't wedge an
         # install where plannotator already landed; the catch below skips it.
         Invoke-WebRequest -Uri "$semBaseUrl/$semAsset" -OutFile $semArchive -UseBasicParsing -TimeoutSec 120
-        Invoke-WebRequest -Uri "$semBaseUrl/checksums.txt" -OutFile $semChecksums -UseBasicParsing -TimeoutSec 60
 
-        $expected = (Get-Content $semChecksums | Where-Object { $_ -match "\s$([regex]::Escape($semAsset))$" } | ForEach-Object { ($_ -split '\s+')[0] } | Select-Object -First 1)
+        # Pinned for $semVersion, not read from the release's checksums.txt
+        # (same connection as the archive). Keep in step with install.sh / install.cmd.
+        $semSha256 = @{ "sem-windows-x86_64.zip" = "2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06" }
+        $expected = $semSha256[$semAsset]
         if (-not $expected) {
             Write-Host "Skipping semantic diff sidecar install (checksum missing for $semAsset)"
             return
@@ -427,6 +430,7 @@ $skipGeminiResolved = $false; $skipGeminiSource = ""
 $skipKiroResolved = $false;   $skipKiroSource = ""
 $skipVibeResolved = $false;   $skipVibeSource = ""
 $skipOpencodeResolved = $false; $skipOpencodeSource = ""
+$skipQwenResolved = $false; $skipQwenSource = ""
 # skipInstall.skills is not an agent - it opts out of the skills/slash-command
 # checkout for every scope at once - but it shares the same three layers.
 $skipSkillsResolved = $false; $skipSkillsSource = ""
@@ -447,6 +451,9 @@ if ($cfg -and $cfg.skipInstall) {
     }
     if ($cfg.skipInstall.opencode -is [bool] -and $cfg.skipInstall.opencode) {
         $skipOpencodeResolved = $true; $skipOpencodeSource = "config skipInstall.opencode"
+    }
+    if ($cfg.skipInstall.qwen -is [bool] -and $cfg.skipInstall.qwen) {
+        $skipQwenResolved = $true; $skipQwenSource = "config skipInstall.qwen"
     }
     if ($cfg.skipInstall.skills -is [bool] -and $cfg.skipInstall.skills) {
         $skipSkillsResolved = $true; $skipSkillsSource = "config skipInstall.skills"
@@ -480,6 +487,11 @@ if ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(1|true|yes)$') {
 } elseif ($env:PLANNOTATOR_SKIP_OPENCODE_INSTALL -match '^(0|false|no)$') {
     $skipOpencodeResolved = $false; $skipOpencodeSource = ""
 }
+if ($env:PLANNOTATOR_SKIP_QWEN_INSTALL -match '^(1|true|yes)$') {
+    $skipQwenResolved = $true; $skipQwenSource = "PLANNOTATOR_SKIP_QWEN_INSTALL"
+} elseif ($env:PLANNOTATOR_SKIP_QWEN_INSTALL -match '^(0|false|no)$') {
+    $skipQwenResolved = $false; $skipQwenSource = ""
+}
 if ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(1|true|yes)$') {
     $skipSkillsResolved = $true; $skipSkillsSource = "PLANNOTATOR_SKIP_SKILLS_INSTALL"
 } elseif ($env:PLANNOTATOR_SKIP_SKILLS_INSTALL -match '^(0|false|no)$') {
@@ -495,6 +507,7 @@ if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini
 if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
 if ($SkipVibe)   { $skipVibeResolved = $true;   $skipVibeSource = "-SkipVibe" }
 if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
+if ($SkipQwen) { $skipQwenResolved = $true; $skipQwenSource = "-SkipQwen" }
 if ($SkipSkills) { $skipSkillsResolved = $true; $skipSkillsSource = "-SkipSkills" }
 if ($SkipClaudePlugin) { $skipClaudePluginResolved = $true; $skipClaudePluginSource = "-SkipClaudePlugin" }
 
@@ -1045,6 +1058,29 @@ $kiroAvailable = [bool](Get-Command kiro-cli -ErrorAction SilentlyContinue) -or 
 # the Claude Code transcript path, so it fails or reads the wrong session.
 $vibeHome = if ($env:VIBE_HOME) { $env:VIBE_HOME } else { Join-Path $env:USERPROFILE ".vibe" }
 $vibeAvailable = [bool](Test-Path $vibeHome)
+# Qwen Code keeps its user files in $QWEN_HOME when set, else ~/.qwen. As in
+# Qwen's Storage.getGlobalQwenDir, $QWEN_HOME is the Qwen folder itself, a
+# leading ~ is expanded and a relative path is taken from the current folder.
+# Detected as in install.sh: that folder must exist, and so must the qwen
+# command or a file only Qwen Code writes there (settings.json,
+# installation_id, projects\, extensions\). The `skills` CLI makes
+# ~/.qwen/skills for people who never installed Qwen Code, so the folder
+# alone is not enough. The extension step needs the qwen command.
+$qwenDir = if ($env:QWEN_HOME) { $env:QWEN_HOME } else { Join-Path $env:USERPROFILE ".qwen" }
+if ($qwenDir -eq "~") {
+    $qwenDir = $env:USERPROFILE
+} elseif ($qwenDir.StartsWith("~/") -or $qwenDir.StartsWith("~\")) {
+    $qwenDir = Join-Path $env:USERPROFILE $qwenDir.Substring(2)
+} elseif (-not [System.IO.Path]::IsPathRooted($qwenDir)) {
+    $qwenDir = Join-Path (Get-Location).Path $qwenDir
+}
+$qwenSkillsDir = Join-Path $qwenDir "skills"
+$qwenAvailable = [bool](Test-Path -LiteralPath $qwenDir -PathType Container) -and (
+    [bool](Get-Command qwen -CommandType Application -ErrorAction SilentlyContinue) -or
+    (Test-Path -LiteralPath (Join-Path $qwenDir "settings.json") -PathType Leaf) -or
+    (Test-Path -LiteralPath (Join-Path $qwenDir "installation_id") -PathType Leaf) -or
+    (Test-Path -LiteralPath (Join-Path $qwenDir "projects") -PathType Container) -or
+    (Test-Path -LiteralPath (Join-Path $qwenDir "extensions") -PathType Container))
 
 if ($codexAvailable -and $skipCodexResolved) {
     # HONEST three-state reporting (#1178): detected-but-skipped is its own
@@ -1155,17 +1191,140 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.bun\install\cache\@plannotator" -
 # Clear Pi jiti cache to force fresh download on next run
 Remove-Item -Recurse -Force "$env:TEMP\jiti" -ErrorAction SilentlyContinue
 
+# Pi extension (#902). `pi install npm:@plannotator/pi-extension` runs a bare
+# `npm install @plannotator/pi-extension` in <agent dir>\npm. npm may settle on
+# an older version and still exit 0 ("up to date"): it passes over a release
+# whose `engines` the running Node does not meet (0.28.32's Node floor), and a
+# registry mirror can lag. `pi update <source>` is Pi's own update: it asks the
+# registry for the newest version and installs `<name>@latest` by name (older
+# Pi reinstalls with `npm install -g`), and it leaves Pi's settings as they are.
+# So an existing install is updated with `pi update`, a first install that
+# landed on an older version gets the same `pi update`, the version on disk is
+# read back where Pi loads it from, and "installed"/"updated" is said only when
+# it reached this release; otherwise one line names the cause it can see and
+# the command to run. The step never pins a version in Pi's settings (a pinned
+# source is skipped by every later `pi update`). A source the person pinned
+# (npm:@plannotator/pi-extension@0.28.20) is left alone and the line says how
+# to move it. Nothing is removed first, so a failed step leaves the install as
+# it was. `pi update` shipped together with `pi install`, and it runs here only
+# when Pi's settings list the extension. Same logic in install.sh and
+# install.cmd's :UpdatePiExtension.
+$piExtensionSource = "npm:@plannotator/pi-extension"
+
+# Pi's agent dir: $env:PI_CODING_AGENT_DIR (~ expanded, as Pi does), else ~\.pi\agent.
+function Get-PiAgentDir {
+    $dir = $env:PI_CODING_AGENT_DIR
+    if (-not $dir) { return (Join-Path (Join-Path $env:USERPROFILE ".pi") "agent") }
+    if ($dir -eq "~") { return $env:USERPROFILE }
+    if ($dir.StartsWith("~/") -or $dir.StartsWith("~\")) { return (Join-Path $env:USERPROFILE $dir.Substring(2)) }
+    return $dir
+}
+
+# How Pi's user settings list the extension: "none", "unpinned", or
+# "pinned:<version>" for an exact version (what `pi update` skips).
+function Get-PiExtensionState {
+    $settings = Join-Path (Get-PiAgentDir) "settings.json"
+    if (-not (Test-Path -LiteralPath $settings -PathType Leaf)) { return "none" }
+    $text = ""
+    try { $text = [string](Get-Content -LiteralPath $settings -Raw -ErrorAction Stop) } catch { return "none" }
+    if ($text -notmatch '"npm:@plannotator/pi-extension(@[^"]*)?"') { return "none" }
+    if ($text -match '"npm:@plannotator/pi-extension@v?([0-9]+\.[0-9]+\.[0-9][0-9A-Za-z.+-]*)"') { return "pinned:" + $Matches[1] }
+    return "unpinned"
+}
+
+# The installed extension's version, read where Pi loads it from: the managed
+# <agent dir>\npm\node_modules copy when it exists, else the global npm root
+# (where older Pi installed user packages). Empty when it can't be read.
+function Get-PiExtensionVersion {
+    $local:ErrorActionPreference = 'Continue'
+    $pkg = Join-Path (Join-Path (Join-Path (Join-Path (Get-PiAgentDir) "npm") "node_modules") "@plannotator") "pi-extension"
+    if (-not (Test-Path -LiteralPath $pkg -PathType Container)) {
+        $pkg = $null
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            $root = $null
+            try { $root = & npm root -g 2>$null | Select-Object -First 1 } catch { }
+            if ($root) { $pkg = Join-Path (Join-Path ([string]$root).Trim() "@plannotator") "pi-extension" }
+        }
+    }
+    if (-not $pkg) { return "" }
+    $json = Join-Path $pkg "package.json"
+    if (-not (Test-Path -LiteralPath $json -PathType Leaf)) { return "" }
+    try { return [string](Get-Content -LiteralPath $json -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop).version } catch { return "" }
+}
+
+# Whether version $a is at least $b (major.minor.patch; any suffix ignored).
+function Test-PiVersionAtLeast($a, $b) {
+    $x = @(([string]$a -replace '^v', '' -replace '[-+].*$', '').Split('.'))
+    $y = @(([string]$b -replace '^v', '' -replace '[-+].*$', '').Split('.'))
+    for ($i = 0; $i -lt 3; $i++) {
+        $p = 0; $q = 0
+        if ($i -lt $x.Count) { [void][int]::TryParse($x[$i], [ref]$p) }
+        if ($i -lt $y.Count) { [void][int]::TryParse($y[$i], [ref]$q) }
+        if ($p -gt $q) { return $true }
+        if ($p -lt $q) { return $false }
+    }
+    return $true
+}
+
 function Update-PiExtensionIfPresent {
     if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
         return
     }
+    $local:ErrorActionPreference = 'Continue'
 
-    Write-Host "Updating Pi extension..."
-    pi install npm:@plannotator/pi-extension
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Pi extension updated."
+    $target = ([string]$latestTag) -replace '^v', ''
+    $state = Get-PiExtensionState
+    $fresh = $false
+    if ($state.StartsWith("pinned:")) {
+        Write-Host ("Pi extension: pinned to " + $state.Substring(7) + " in Pi's settings, left as is. To move it: pi install " + $piExtensionSource + "@" + $target)
+        return
+    }
+    if ($state -eq "none") {
+        $fresh = $true
+        Write-Host "Installing Pi extension..."
+        pi install $piExtensionSource
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Skipping Pi extension install (pi install failed)"
+            return
+        }
+        $before = Get-PiExtensionVersion
+        if (-not $before -or -not (Test-PiVersionAtLeast $before $target)) {
+            # npm settled on an older version (or it can't be read): Pi's own
+            # update asks for the newest one by name.
+            pi update $piExtensionSource
+        }
     } else {
-        Write-Host "Skipping Pi extension update (pi install failed)"
+        Write-Host "Updating Pi extension..."
+        $before = Get-PiExtensionVersion
+        pi update $piExtensionSource
+        if ($LASTEXITCODE -ne 0) {
+            # The update failed, or this Pi's update takes no source: the
+            # install command, as before. Neither removes anything first.
+            pi install $piExtensionSource
+        }
+    }
+
+    $after = Get-PiExtensionVersion
+    if (-not $after) {
+        Write-Host ("Pi extension: could not read its installed version. To update it: pi update " + $piExtensionSource)
+    } elseif (-not (Test-PiVersionAtLeast $after $target)) {
+        # The one cause visible from here: the registry npm uses does not have
+        # this release yet (a mirror catching up, or npm not published).
+        $view = ""
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            try { $view = (& npm view "@plannotator/pi-extension@$target" version --fetch-timeout=10000 --fetch-retries=0 2>&1 | Out-String) } catch { $view = "" }
+        }
+        if ($view -match 'E404') {
+            Write-Host ("Pi extension: still " + $after + " (" + $target + " is not on your npm registry yet). Run this later: pi update " + $piExtensionSource)
+        } else {
+            Write-Host ("Pi extension: still " + $after + " (this release is " + $target + "). To update it: pi update " + $piExtensionSource)
+        }
+    } elseif ($fresh) {
+        Write-Host "Pi extension installed ($after)."
+    } elseif ($before -eq $after) {
+        Write-Host "Pi extension already up to date ($after)."
+    } else {
+        Write-Host "Pi extension updated to $after."
     }
 }
 
@@ -1456,9 +1615,136 @@ function Copy-SkillIfPresent {
         # dir copies the source INSIDE it (dest\skill\skill); mirror
         # install.sh's `rm -rf` guard so upgrades stay clean.
         $dest = Join-Path $TargetDir (Split-Path $SourceDir -Leaf)
-        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+        $existing = Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
+        if ($existing -and ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            # A link (the `skills` CLI links ~/.qwen/skills/<name> into
+            # ~/.agents/skills). Remove the link itself: Windows PowerShell
+            # 5.1's Remove-Item -Recurse follows a directory link and deletes
+            # what it points to.
+            try { [System.IO.Directory]::Delete($existing.FullName, $false) } catch { [System.IO.File]::Delete($existing.FullName) }
+        } elseif ($existing) {
+            Remove-Item -Recurse -Force -LiteralPath $dest
+        }
         Copy-Item -Recurse -Force $SourceDir $TargetDir
     }
+}
+
+# --- Qwen Code commands (only when Qwen Code is detected) ---
+# Every qwen command runs with a time limit, no input, in an empty temporary
+# folder (so no project's .qwen/settings.json takes part), and its failure
+# never fails the install.
+$qwenSkillsInstalled = $false
+$qwenTooOld = $false
+$qwenVersion = ""
+$qwenMinVersion = "0.13.0"
+
+function Get-QwenPath {
+    $c = Get-Command qwen -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c) { return $c.Source }
+    return $null
+}
+
+function Get-QwenSeconds {
+    # Seconds per qwen command. Internal knob for the tests.
+    if ($env:PLANNOTATOR_QWEN_EXTENSION_TIMEOUT -match '^[1-9][0-9]*$') { return [int]$env:PLANNOTATOR_QWEN_EXTENSION_TIMEOUT }
+    return 120
+}
+
+# Run `qwen <args>` in $WorkDir. Returns @{ Why; Out; Err }: Why is "" when
+# it exited 0, else why it failed. Arguments are quoted one by one, so a path
+# with spaces stays one argument. npm installs qwen on Windows as qwen.cmd, a
+# batch file, which only cmd.exe runs: it goes through `cmd.exe /d /s /c` with
+# the whole command quoted once more (/s takes off that outer pair). A path
+# with a character cmd.exe would still change there (" % !) is refused.
+function Invoke-QwenCommand {
+    param([string]$QwenPath, [string[]]$Arguments, [int]$Seconds, [string]$WorkDir)
+    $q = [char]34
+    $quoted = ($Arguments | ForEach-Object { $q + $_ + $q }) -join " "
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    if ($QwenPath -match '\.(cmd|bat)$') {
+        if (($QwenPath + ($Arguments -join "")) -match '["%!]') {
+            return @{ Why = "could not run $(Split-Path $QwenPath -Leaf): a path has a character cmd.exe would change"; Out = ""; Err = "" }
+        }
+        $info.FileName = if ($env:ComSpec) { $env:ComSpec } else { "cmd.exe" }
+        $info.Arguments = "/d /s /c " + $q + $q + $QwenPath + $q + " " + $quoted + $q
+    } else {
+        $info.FileName = $QwenPath
+        $info.Arguments = $quoted
+    }
+    $info.WorkingDirectory = $WorkDir
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.CreateNoWindow = $true
+    try {
+        $p = [System.Diagnostics.Process]::Start($info)
+    } catch {
+        return @{ Why = "could not run qwen: $($_.Exception.Message)"; Out = ""; Err = "" }
+    }
+    try { $p.StandardInput.Close() } catch { }
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    if (-not $p.WaitForExit($Seconds * 1000)) {
+        try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }
+        return @{ Why = "timed out after ${Seconds}s"; Out = ""; Err = "" }
+    }
+    $p.WaitForExit()
+    $texts = @()
+    foreach ($task in @($outTask, $errTask)) {
+        $text = ""
+        try { if ($task.Wait(5000)) { $text = [string]$task.Result } } catch { }
+        $texts += $text
+    }
+    $last = $null
+    foreach ($text in @($texts[1], $texts[0])) {
+        $last = @($text -split "\r?\n") |
+            ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } |
+            Where-Object { $_ } | Select-Object -Last 1
+        if ($last) { break }
+    }
+    if ($last -and $last.Length -gt 200) { $last = $last.Substring(0, 200) }
+    $why = ""
+    if ($p.ExitCode -ne 0) { $why = if ($last) { "qwen exited $($p.ExitCode): $last" } else { "qwen exited $($p.ExitCode)" } }
+    return @{ Why = $why; Out = $texts[0]; Err = $texts[1]; Last = $last }
+}
+
+function New-QwenWorkDir {
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("plannotator-qwen-" + [System.Guid]::NewGuid().ToString("N"))
+    try {
+        New-Item -ItemType Directory -Force -Path (Join-Path $tmp "cwd") -ErrorAction Stop | Out-Null
+        return $tmp
+    } catch {
+        return $null
+    }
+}
+
+# Plan review needs extension hooks, which Qwen Code runs from 0.13.0 on.
+# Below that, nothing is installed for Qwen Code: no extension, no skills. A
+# version that cannot be read does not block the install.
+function Test-QwenVersion {
+    $local:ErrorActionPreference = 'Continue'
+    $qwen = Get-QwenPath
+    if (-not $qwen) { return }
+    $tmp = New-QwenWorkDir
+    if (-not $tmp) { return }
+    try {
+        $r = Invoke-QwenCommand -QwenPath $qwen -Arguments @("--version") -Seconds (Get-QwenSeconds) -WorkDir (Join-Path $tmp "cwd")
+        $m = [regex]::Match([string]$r.Out, '[0-9]+\.[0-9]+\.[0-9]+')
+        if ($m.Success) {
+            $script:qwenVersion = $m.Value
+            if ([version]$m.Value -lt [version]$qwenMinVersion) {
+                $script:qwenTooOld = $true
+                Write-Host ""
+                Write-Host "Qwen Code $($m.Value) is older than $qwenMinVersion, so nothing was installed for it. Update Qwen Code to use plan review."
+            }
+        }
+    } finally {
+        Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    }
+}
+if ($qwenAvailable -and -not $skipQwenResolved -and -not $skipSkillsResolved) {
+    try { Test-QwenVersion } catch { }
 }
 
 # Captured tail of git's stderr from the most recent failed clone attempt,
@@ -1530,7 +1816,7 @@ try {
             # plain-clone fallback (#1238): that git has no sparse-checkout
             # subcommand, and the full checkout needs no narrowing.
             if ($sparseClone) {
-                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands 2>$null }
+                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands apps/qwen-code 2>$null }
             }
 
             # Claude Code and Codex consume different skill bodies. Claude Code
@@ -1544,7 +1830,7 @@ try {
             # existing target dir) so re-runs replace rather than nest.
             if ((Test-Path "apps\skills\claude") -and (Get-ChildItem "apps\skills\claude" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $claudeSkillsDir | Out-Null
-                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-inbox")) {
                     Copy-SkillIfPresent "apps\skills\claude\$skill" $claudeSkillsDir
                 }
                 # The plannotator knowledge skill (CLI reference) has no
@@ -1557,7 +1843,7 @@ try {
             }
             if ((Test-Path "apps\skills\core") -and (Get-ChildItem "apps\skills\core" -ErrorAction SilentlyContinue)) {
                 New-Item -ItemType Directory -Force -Path $agentsSkillsDir | Out-Null
-                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-inbox")) {
                     Copy-SkillIfPresent "apps\skills\core\$skill" $agentsSkillsDir
                 }
                 Copy-SkillIfPresent "apps\skills\core\plannotator" $agentsSkillsDir
@@ -1574,6 +1860,8 @@ try {
                 # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-review" $kiroSkillsDir
                 Copy-SkillIfPresent "apps\kiro-cli\skills\plannotator-annotate" $kiroSkillsDir
+                # /plannotator-inbox needs no origin label: the shell-neutral core copy.
+                Copy-SkillIfPresent "apps\skills\core\plannotator-inbox" $kiroSkillsDir
                 # The plannotator knowledge skill (CLI reference) has no Kiro-specific
                 # form, so Kiro receives the single-sourced core copy like every other scope.
                 Copy-SkillIfPresent "apps\skills\core\plannotator" $kiroSkillsDir
@@ -1587,6 +1875,30 @@ try {
                     Copy-Item -Force "apps\kiro-cli\agents\plannotator.json" "$kiroAgentsDir\plannotator.json"
                 }
                 Write-Host "Installed Kiro skills to $kiroSkillsDir\ and agent to $kiroAgentsDir\plannotator.json"
+            }
+
+            # Qwen Code: its own copies of review, annotate and last (they run
+            # the command in the background, past the shell tool's time
+            # limit). Qwen reads $qwenDir\skills before ~/.agents/skills, so
+            # these take the place of the shared copies of the same name. The
+            # extension is copied out of the checkout here and installed after
+            # this block, so its failure never counts as a fetch failure. A
+            # Qwen opt-out, or a Qwen Code too old for plan review, leaves
+            # $qwenDir untouched.
+            if ($qwenAvailable -and -not $skipQwenResolved -and -not $qwenTooOld -and (Test-Path "apps\qwen-code\skills")) {
+                New-Item -ItemType Directory -Force -Path $qwenSkillsDir | Out-Null
+                foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-last")) {
+                    Copy-SkillIfPresent "apps\qwen-code\skills\$skill" $qwenSkillsDir
+                }
+                Write-Host "Installed Qwen Code skills to $qwenSkillsDir\"
+                $script:qwenSkillsInstalled = $true
+            }
+            if ($qwenAvailable -and -not $skipQwenResolved -and -not $qwenTooOld -and (Test-Path "apps\qwen-code\extension\qwen-extension.json")) {
+                try {
+                    Copy-Item -Recurse -Force "apps\qwen-code\extension" (Join-Path $skillsTmp "qwen-extension") -ErrorAction Stop
+                } catch {
+                    Remove-Item -Recurse -Force (Join-Path $skillsTmp "qwen-extension") -ErrorAction SilentlyContinue
+                }
             }
 
             # Vibe: no skills are copied to $VIBE_HOME on Windows. The
@@ -1629,6 +1941,177 @@ try {
 } catch {
     Write-Host "Command/skill install failed: $($_.Exception.Message)"
     $checkoutFailed = $true
+}
+
+# --- Qwen Code extension (only when Qwen Code is detected) ---
+# Same steps and promises as install.sh: the extension (apps/qwen-code/extension,
+# copied out of the skills checkout above) is kept at
+# <data dir>\qwen-code\extension, a path that does not change, because Qwen
+# records it as the extension's source, derives the extension's id from it,
+# and reads it on update. Not installed: `qwen extensions install <that path>
+# --consent`. Installed from that path in another version: `qwen extensions
+# update plannotator`, which keeps the id and the user's on/off choices, so an
+# extension turned off stays off (never uninstalled here). The same version:
+# no extension command runs. Linked (`qwen extensions link`) or installed
+# from another source: left as it is.
+$qwenExtensionState = ""
+$qwenExtensionOff = $false
+$qwenExtensionSource = ""
+
+function Get-QwenManifestVersion {
+    param([string]$Path)
+    try { return [string]((Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json).version) } catch { return "" }
+}
+
+# True when the plannotator extension is turned off anywhere: its default or
+# one project in Qwen's extension store (extension-store\state.json), or a "!"
+# rule in the older extensions\extension-enablement.json. Only used to say
+# so: the update keeps those choices either way.
+function Test-QwenExtensionOff {
+    $off = $false
+    try {
+        $s = Get-Content -LiteralPath (Join-Path (Join-Path $qwenDir "extension-store") "state.json") -Raw -ErrorAction Stop | ConvertFrom-Json
+        foreach ($p in @($s.extensions.PSObject.Properties)) {
+            $v = $p.Value
+            if ($v.name -ne "plannotator") { continue }
+            if ($v.defaultActivation -eq "disabled") { $off = $true }
+            if ($v.workspaceOverrides) {
+                foreach ($o in @($v.workspaceOverrides.PSObject.Properties)) { if ($o.Value -eq "disabled") { $off = $true } }
+            }
+        }
+    } catch { }
+    try {
+        $l = Get-Content -LiteralPath (Join-Path (Join-Path $qwenDir "extensions") "extension-enablement.json") -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($l.plannotator -and $l.plannotator.overrides) {
+            foreach ($r in @($l.plannotator.overrides)) { if (([string]$r).StartsWith("!")) { $off = $true } }
+        }
+    } catch { }
+    return $off
+}
+
+function Test-SameQwenPath {
+    param([string]$A, [string]$B)
+    if (-not $A -or -not $B) { return $false }
+    try {
+        $x = [System.IO.Path]::GetFullPath($A).TrimEnd('\', '/')
+        $y = [System.IO.Path]::GetFullPath($B).TrimEnd('\', '/')
+    } catch { return $false }
+    if ([System.IO.Path]::DirectorySeparatorChar -eq '\') { return $x -ieq $y }
+    return $x -ceq $y
+}
+
+function Install-QwenExtensionIfPresent {
+    param([string]$Source)
+    $local:ErrorActionPreference = 'Continue'
+    if (-not $qwenAvailable) { return }
+    if ($skipQwenResolved) {
+        # HONEST reporting (#1178): skip is do-not-write. Nothing under
+        # $qwenDir is installed, updated or removed on this run.
+        Write-Host ""
+        Write-Host "Qwen Code: detected, skipped ($skipQwenSource)."
+        if (Test-Path -LiteralPath (Join-Path (Join-Path (Join-Path $qwenDir "extensions") "plannotator") "qwen-extension.json") -PathType Leaf) {
+            Write-Host "The installed Qwen Code extension was left untouched."
+        }
+        return
+    }
+    if ($skipSkillsResolved) { return }
+    if ($qwenTooOld) { $script:qwenExtensionState = "too-old"; return }
+    if (-not (Test-Path -LiteralPath (Join-Path $Source "qwen-extension.json") -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path (Join-Path $Source "hooks") "hooks.json") -PathType Leaf)) {
+        # A pinned tag older than the Qwen Code integration.
+        $script:qwenExtensionState = "not-in-tag"
+        return
+    }
+    $dest = Join-Path (Join-Path $qwenDir "extensions") "plannotator"
+    $record = $null
+    try { $record = Get-Content -LiteralPath (Join-Path $dest ".qwen-extension-install.json") -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }
+    if ($record -and $record.type -eq "link") {
+        # A developer's `qwen extensions link`: Qwen loads their checkout.
+        $script:qwenExtensionState = "linked"
+        Write-Host "Qwen Code extension: linked from a local folder (qwen extensions link), left as it is."
+        return
+    }
+    $qwen = Get-QwenPath
+    if (-not $qwen) {
+        $script:qwenExtensionState = "no-cli"
+        Write-Host "Qwen Code extension: not installed (the qwen command is not on PATH)."
+        return
+    }
+    $dataDir = if ([System.IO.Path]::IsPathRooted($configDir)) { $configDir } else { Join-Path (Get-Location).Path $configDir }
+    $stable = Join-Path (Join-Path $dataDir "qwen-code") "extension"
+    $newVersion = Get-QwenManifestVersion (Join-Path $Source "qwen-extension.json")
+    $had = Test-Path -LiteralPath (Join-Path $dest "qwen-extension.json") -PathType Leaf
+    if ($had) {
+        $from = if ($record) { [string]$record.source } else { "" }
+        if (-not (Test-SameQwenPath $from $stable)) {
+            # Installed by hand, from a fork or another folder: not ours to change.
+            $script:qwenExtensionState = "foreign"
+            $script:qwenExtensionSource = if ($from) { $from } else { "an unknown source" }
+            Write-Host "Qwen Code extension: installed from $($script:qwenExtensionSource), not by this installer, so it was left as it is."
+            return
+        }
+    }
+    # Keep the new source at the stable path (Plannotator's own folder; Qwen
+    # reads it only to install or update).
+    $staged = "$stable.new"
+    try {
+        if (Test-Path -LiteralPath $staged) { Remove-Item -Recurse -Force -LiteralPath $staged -ErrorAction Stop }
+        New-Item -ItemType Directory -Force -Path (Split-Path $stable) -ErrorAction Stop | Out-Null
+        Copy-Item -Recurse -Force -LiteralPath $Source -Destination $staged -ErrorAction Stop
+        if (Test-Path -LiteralPath $stable) { Remove-Item -Recurse -Force -LiteralPath $stable -ErrorAction Stop }
+        Move-Item -LiteralPath $staged -Destination $stable -ErrorAction Stop
+    } catch {
+        Remove-Item -Recurse -Force -LiteralPath $staged -ErrorAction SilentlyContinue
+        $script:qwenExtensionState = "failed"
+        Write-Host "Qwen Code extension: could not write its source to $stable. The installed one was left as it was."
+        return
+    }
+    if ($had) { $script:qwenExtensionOff = [bool](Test-QwenExtensionOff) }
+    if ($had -and ((Get-QwenManifestVersion (Join-Path $dest "qwen-extension.json")) -eq $newVersion)) {
+        $script:qwenExtensionState = "current"
+        Write-Host "Qwen Code extension: already up to date."
+        return
+    }
+    $tmp = New-QwenWorkDir
+    if (-not $tmp) {
+        $script:qwenExtensionState = "failed"
+        Write-Host "Qwen Code extension: could not install it (no temporary directory)."
+        return
+    }
+    try {
+        $work = Join-Path $tmp "cwd"
+        if ($had) {
+            Write-Host "Updating the Qwen Code extension..."
+            # Qwen's update exits 0 even when it fails: read the installed manifest.
+            $r = Invoke-QwenCommand -QwenPath $qwen -Arguments @("extensions", "update", "plannotator") -Seconds (Get-QwenSeconds) -WorkDir $work
+            if ((Get-QwenManifestVersion (Join-Path $dest "qwen-extension.json")) -eq $newVersion) {
+                $script:qwenExtensionState = "updated"
+                Write-Host "Qwen Code extension: updated (restart Qwen Code to load it)."
+                if ($script:qwenExtensionOff) { Write-Host "It stays turned off where you turned it off in Qwen Code." }
+            } else {
+                $why = if ($r.Why) { $r.Why } elseif ($r.Last) { $r.Last } else { "qwen did not update it" }
+                $script:qwenExtensionState = "failed"
+                Write-Host "Qwen Code extension: could not update it ($why). The installed one was left as it was."
+                Write-Host "To try again by hand: qwen extensions update plannotator"
+            }
+        } else {
+            Write-Host "Installing the Qwen Code extension..."
+            $r = Invoke-QwenCommand -QwenPath $qwen -Arguments @("extensions", "install", $stable, "--consent") -Seconds (Get-QwenSeconds) -WorkDir $work
+            if (-not $r.Why) {
+                $script:qwenExtensionState = "installed"
+                Write-Host "Qwen Code extension: installed (restart Qwen Code to load it)."
+            } else {
+                $script:qwenExtensionState = "failed"
+                Write-Host "Qwen Code extension: could not install it ($($r.Why))."
+                Write-Host "To try again by hand: qwen extensions install `"$stable`""
+            }
+        }
+    } finally {
+        Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    }
+}
+if (-not $checkoutFailed) {
+    try { Install-QwenExtensionIfPresent (Join-Path $skillsTmp "qwen-extension") } catch { }
 }
 
 Remove-Item -Recurse -Force $skillsTmp -ErrorAction SilentlyContinue
@@ -1709,7 +2192,10 @@ foreach ($skill in @("plannotator-review", "plannotator-annotate", "plannotator-
 # promised not to make.
 if ((-not $skipSkillsResolved) -and $invocableChoice -and ($invocableChoice -ne "none")) {
     foreach ($skill in ($invocableChoice -split ",")) {
-        foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir)) {
+        foreach ($scope in @($claudeSkillsDir, $agentsSkillsDir, $qwenSkillsDir)) {
+            # A Qwen opt-out (or a Qwen Code too old for plan review) leaves
+            # $qwenDir untouched, a previous run's copies included.
+            if (($scope -eq $qwenSkillsDir) -and ((-not $qwenAvailable) -or $skipQwenResolved -or $qwenTooOld)) { continue }
             $skillMd = Join-Path $scope (Join-Path $skill "SKILL.md")
             if (Test-Path $skillMd) {
                 $content = Get-Content $skillMd
@@ -1841,7 +2327,7 @@ if ($skipOpencodeResolved) {
     Write-Host ""
     Write-Host '  "plugin": ["@plannotator/opencode@latest"]'
     Write-Host ""
-    Write-Host "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
+    Write-Host "Then restart OpenCode (OpenCode 2: run opencode2 reload). The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 }
 # Agent-specific closing sections print only for agents this run detected,
 # reusing the detection the integration steps above already ran (Pi: `pi` on
@@ -1857,9 +2343,13 @@ if ($piDetected) {
     Write-Host "  PI USERS"
     Write-Host "=========================================="
     Write-Host ""
-    Write-Host "Install or update the extension:"
+    Write-Host "Install the extension:"
     Write-Host ""
     Write-Host "  pi install npm:@plannotator/pi-extension"
+    Write-Host ""
+    Write-Host "Update it (pi install leaves an existing install as it is):"
+    Write-Host ""
+    Write-Host "  pi update npm:@plannotator/pi-extension"
 }
 # Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). This run
 # installs nothing into OMP: the section says how, because "Ask this session"
@@ -1915,6 +2405,72 @@ if ($vibeAvailable) {
         Write-Host "plan-review hook is macOS/Linux-only; see the manual setup instructions"
         Write-Host "printed above to wire plan review on a macOS/Linux box."
         Write-Host "Note: improve-context (plan-mode enrichment) is not wired for Vibe."
+    }
+}
+# The Qwen Code section prints only when Qwen Code was detected.
+if ($qwenAvailable) {
+    Write-Host ""
+    Write-Host "=========================================="
+    Write-Host "  QWEN CODE USERS"
+    Write-Host "=========================================="
+    Write-Host ""
+    if ($skipQwenResolved) {
+        Write-Host "Qwen Code was detected, but the integration was skipped ($skipQwenSource)."
+        Write-Host "No extension was installed or removed, and no files under $qwenDir were"
+        Write-Host "written. Re-run without the opt-out to add plan review and the skills."
+    } elseif ($skipSkillsResolved) {
+        Write-Host "Qwen Code was detected, but skills were skipped ($skipSkillsSource). The"
+        Write-Host "Qwen Code extension and skills come from the same download, so neither was"
+        Write-Host "installed or changed. Re-run without the opt-out to add them."
+    } elseif ($qwenTooOld) {
+        Write-Host "Qwen Code $qwenVersion is older than $qwenMinVersion, the first release that runs"
+        Write-Host "extension hooks, so nothing was installed for it. Update Qwen Code to use"
+        Write-Host "plan review, then re-run this installer."
+    } else {
+        switch ($qwenExtensionState) {
+            { $_ -in @("installed", "updated", "current") } {
+                if ($qwenExtensionOff) {
+                    Write-Host "The plannotator extension is turned off in Qwen Code (in some or all"
+                    Write-Host "projects), and it stays off. Where it is off, plan review is off. To"
+                    Write-Host "turn it on: qwen extensions enable plannotator"
+                } else {
+                    Write-Host "Plan review: when the agent calls exit_plan_mode, the plan opens in your"
+                    Write-Host "browser. After you approve it there, Qwen Code asks you to confirm the plan"
+                    Write-Host "once more in the terminal. Restart Qwen Code to load a new extension."
+                }
+                break
+            }
+            "linked" {
+                Write-Host "The plannotator extension is linked from a local folder (qwen extensions"
+                Write-Host "link), so this installer left it as it is."
+                break
+            }
+            "foreign" {
+                Write-Host "The plannotator extension was installed from $qwenExtensionSource,"
+                Write-Host "not by this installer, so it was left as it is. To let this installer"
+                Write-Host "manage it, run: qwen extensions uninstall plannotator"
+                Write-Host "and re-run this installer."
+                break
+            }
+            "no-cli" {
+                Write-Host "The qwen command was not found, so the plan-review extension was not"
+                Write-Host "installed. Put qwen on PATH and re-run this installer."
+                break
+            }
+            "not-in-tag" {
+                Write-Host "This release has no Qwen Code extension. Install a newer release for plan review."
+                break
+            }
+            default {
+                Write-Host "The plan-review extension could not be installed (see the message above)."
+                Write-Host "Re-run this installer to try again."
+            }
+        }
+        if ($qwenSkillsInstalled) {
+            Write-Host ""
+            Write-Host "Skills are installed to $qwenSkillsDir\:"
+            Write-Host "  /plannotator-review, /plannotator-annotate, /plannotator-last"
+        }
     }
 }
 Write-Host ""

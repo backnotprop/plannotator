@@ -23,6 +23,7 @@
  *   session.*         — Session lifecycle events
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, basename } from "node:path";
@@ -213,6 +214,7 @@ function isCopilotProcessName(command: string | null): boolean {
 function getProcessCommand(pid: number): string | null {
   try {
     const result = spawnSync("ps", ["-o", "comm=", "-p", String(pid)], {
+      env: childEnv(),
       encoding: "utf-8",
       timeout: 2000,
     });

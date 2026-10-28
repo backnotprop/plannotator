@@ -35,6 +35,7 @@ import {
 } from "./generated/checklist.ts";
 import { loadConfig, resolveAgentTool, resolveUseJina } from "./generated/config.ts";
 import { detectPiHost, setPiHost } from "./pi-host.ts";
+import { warnRuntimeTlsOnce } from "./runtime-tls.ts";
 import { importFresh, isPlannotatorUpdatedError, launchFailureText } from "./package-version.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
 import { composeImproveContext } from "./generated/pfm-reminder.ts";
@@ -139,6 +140,18 @@ function loadPlannotatorPrompts(): Promise<PlannotatorPromptsModule> {
 		});
 	}
 	return promptsModulePromise;
+}
+
+/**
+ * Load the prompts a decision is written with while the review is open, not
+ * when the decision arrives: an update that lands while the reviewer works
+ * would otherwise stop that lazy import (importFresh, #2085) and the
+ * feedback would never reach the session (5 of 5 times on a real Pi 0.84.4,
+ * `pi update --extensions` under an open annotate review). A failed preload
+ * is dropped: the decision tries again, as before.
+ */
+function preloadDecisionPrompts(): void {
+	void loadPlannotatorPrompts().catch(() => {});
 }
 
 async function loadAnnotateCommandModules() {
@@ -969,6 +982,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 		deliver: (result: T, review: PiOpenReview) => Promise<void>,
 	): PiOpenReview {
 		const review = openReviews.add({ kind, ...names, url: session.url, owner: ownerOf(ctx), hostControl: session.hostControl });
+		preloadDecisionPrompts();
 		const events = announceSessionOpened(review);
 		void session
 			.waitForDecision()
@@ -1262,10 +1276,12 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				LIVE_APP_REQUIRES_HTTP_MESSAGE,
 				LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
 				buildForceAppFailureMessage,
+				buildLivePlannotatorFallbackNotice,
 				buildLiveProbeFallbackNotice,
 				classifyLiveAppCandidate,
 				probeLiveAppTarget,
 			} = await importFresh(() => import("./generated/live-probe.ts"));
+			const { listPlannotatorServerPorts } = await importFresh(() => import("./generated/plannotator-ports.ts"));
 			const { parsed: parsedUrl, loopback } = classifyLiveAppCandidate(filePath);
 
 			if (appFlag && !loopback) {
@@ -1277,7 +1293,11 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			}
 
 			if (loopback && parsedUrl?.protocol === "http:" && !staticFlag) {
-				const probe = await probeLiveAppTarget(filePath, parsedUrl);
+				// Never a Plannotator server: the live proxy would give the
+				// proxied page same-origin writes on it (see live-proxy-core).
+				const probe = await probeLiveAppTarget(filePath, parsedUrl, fetch, {
+					plannotatorPorts: listPlannotatorServerPorts(),
+				});
 				if (probe.liveEligible) {
 					// Remote hard-off (layer 1 of 2; the server throw in
 					// serverAnnotate.ts backstops it): a live proxy relays
@@ -1288,9 +1308,10 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 					}
 					liveTargetUrl = filePath;
 					mode = "annotate-app";
-					ctx.ui.notify(`Live app: ${filePath}`, "info");
 				} else if (appFlag) {
 					return { ok: false, error: buildForceAppFailureMessage(filePath, probe) };
+				} else if (probe.plannotator) {
+					ctx.ui.notify(buildLivePlannotatorFallbackNotice(filePath), "info");
 				} else if (probe.probeError !== null) {
 					// A dev server still starting up probes as unreachable;
 					// say so instead of silently downgrading to static.
@@ -1598,6 +1619,27 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 				const { gate } = parseAnnotateArgs(args ?? "");
 				const launched = await launchLastMessage(ctx, gate);
 				if (!launched.ok) ctx.ui.notify(launched.error, "error");
+			} catch (err) {
+				if (!isPlannotatorUpdatedError(err)) throw err;
+				ctx.ui.notify(err.message, "error");
+			}
+		},
+	});
+
+	// The person closed the Inbox's tab, or asks where it is: open it again
+	// (`plannotator inbox --open` starts a stopped one detached, so the session
+	// never waits on it) and show its address. The Inbox is the CLI's, never
+	// this extension's: Pi is its client.
+	pi.registerCommand("plannotator-inbox", {
+		description: "Open the Plannotator Inbox in the browser and show its address",
+		handler: async (_args, ctx) => {
+			try {
+				const [{ inboxOpenedText, openInboxInBrowser }, { getPlannotatorDataDir }] = await importFresh(() =>
+					Promise.all([import("./generated/inbox/agent-link.ts"), import("./generated/data-dir.ts")]),
+				);
+				const opened = await openInboxInBrowser({ dataDir: getPlannotatorDataDir() });
+				if ("url" in opened) ctx.ui.notify(inboxOpenedText(opened.url), "info");
+				else ctx.ui.notify(opened.error, "error");
 			} catch (err) {
 				if (!isPlannotatorUpdatedError(err)) throw err;
 				ctx.ui.notify(err.message, "error");
@@ -2024,6 +2066,7 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 			// A previous review that is somehow still tracked loses to the new one.
 			if (pendingPlanReview && pendingPlanReview !== review) stopPendingPlanReview();
 			pendingPlanReview = review;
+			preloadDecisionPrompts();
 			// The history version the server saved this plan as: pushing the SAME
 			// text is a no-op that reports it (updatePlan's unchanged branch).
 			let planVersion: number | undefined;
@@ -2603,6 +2646,9 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		for (const warning of loadedConfig.warnings) {
 			ctx.ui.notify(`Plannotator config: ${warning}`, "warning");
 		}
+		// A runtime without the Oct 2026 TLS fixes: one line per Pi start. It
+		// replaces the package's engines floor, which kept updates from installing (#902).
+		warnRuntimeTlsOnce((message) => ctx.ui.notify(message, "warning"));
 
 		// Check --plan flag
 		if (pi.getFlag("plan") === true) {

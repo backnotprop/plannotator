@@ -128,6 +128,7 @@ export async function handleEmbeddedCommand(
     client: any;
     htmlContent: string;
     reviewHtmlContent: string;
+    reviewDiagramEngineDir?: string;
     getSharingEnabled: () => Promise<boolean>;
     getShareBaseUrl: () => string | undefined;
     getPasteApiUrl: () => string | undefined;

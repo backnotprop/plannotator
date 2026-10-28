@@ -26,9 +26,13 @@
  *   anti-framing headers and prevents hostile sites from framing the proxy.
  * - PLANNOTATOR_URL_HOST / buildAdvertisedUrl are never applied to the proxy
  *   origin.
+ * - A Plannotator server is never proxied (the editor's own port, any port a
+ *   Plannotator registry names, any response carrying the Plannotator
+ *   server header): the proxied page would get same-origin writes on it.
  */
 
 import { isLoopbackHostname } from "./loopback-host";
+import { hasPlannotatorServerHeader } from "./plannotator-server-marker";
 
 /** The literal loopback address every transport must bind. */
 export const LIVE_PROXY_LOOPBACK_HOST = "127.0.0.1";
@@ -116,6 +120,83 @@ export function isAllowedProxyOrigin(origin: string, port: number): boolean {
  */
 export function isAllowedWsUpgradeOrigin(origin: string | null, port: number): boolean {
   return origin === null || isAllowedProxyOrigin(origin, port);
+}
+
+// --- Never proxy a Plannotator server ---------------------------------------
+// The proxy mirrors its upstream's origin and passes the browser's own
+// Sec-Fetch-Site and Origin through unchanged: a mirrored app needs them as
+// they are (Go's CrossOriginProtection, for one, refuses a write whose
+// Sec-Fetch-Site is missing while Origin and Host differ, which is the shape
+// every proxied write has). Pointed at a Plannotator server, that would give
+// the proxied page same-origin writes on it, past the cross-origin write
+// guard. So a Plannotator upstream is refused: by port before any contact,
+// and by its response header on every response.
+
+/**
+ * Set on every request the proxy forwards upstream (HTTP and WebSocket).
+ * Every Plannotator server refuses a request carrying it before any route,
+ * so a write through the proxy never runs on one, whenever it took the port.
+ */
+export { PLANNOTATOR_LIVE_PROXY_HEADER } from "./plannotator-server-marker";
+
+/** Body of the proxy's refusal when the upstream answers as Plannotator. */
+export const LIVE_PROXY_PLANNOTATOR_UPSTREAM_MESSAGE =
+  "Live app proxy: the upstream is a Plannotator server, which live annotation never proxies.";
+
+/** True when an upstream response came from a Plannotator server. */
+export function isPlannotatorUpstreamResponse(headers: HeaderReader): boolean {
+  return hasPlannotatorServerHeader(headers);
+}
+
+/** The TCP port a live target URL names (80 when it names none). */
+export function liveTargetPort(target: URL): number {
+  return Number(target.port || "80");
+}
+
+/**
+ * True when the target is a loopback URL on one of `ports` (ports Plannotator
+ * servers on this machine hold: the editor's own, the Inbox's, the sessions
+ * registry's). Unparseable and non-loopback targets are false.
+ */
+export function isPlannotatorLiveTarget(targetUrl: string | URL, ports: Iterable<number>): boolean {
+  let target: URL;
+  try {
+    target = typeof targetUrl === "string" ? new URL(targetUrl) : targetUrl;
+  } catch {
+    return false;
+  }
+  if (!isLoopbackHostname(target.hostname)) return false;
+  const port = liveTargetPort(target);
+  for (const candidate of ports) {
+    if (candidate === port) return true;
+  }
+  return false;
+}
+
+/** The ports of loopback editor origins (http://localhost:<port>, ...). */
+export function editorOriginPorts(editorOrigins: readonly string[]): number[] {
+  const ports: number[] = [];
+  for (const origin of editorOrigins) {
+    try {
+      const url = new URL(origin);
+      if (isLoopbackHostname(url.hostname)) ports.push(liveTargetPort(url));
+    } catch {
+      // Not a URL: names no port.
+    }
+  }
+  return ports;
+}
+
+/**
+ * Throw when a proxy would front the editor's own server. Both transports
+ * call it at start: the editor origins carry the annotate server's port.
+ */
+export function assertLiveTargetNotEditor(targetUrl: string, editorOrigins: readonly string[]): void {
+  if (isPlannotatorLiveTarget(targetUrl, editorOriginPorts(editorOrigins))) {
+    throw new Error(
+      `${targetUrl} is this Plannotator server's own address; live annotation never proxies a Plannotator server.`,
+    );
+  }
 }
 
 /**

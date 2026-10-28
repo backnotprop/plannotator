@@ -1,18 +1,23 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, SettingsModel } from '../api';
+import type { AgentToolHost, InboxExperimentalSettings, SettingsModel } from '../api';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
+import { RunAgentsSettings } from './RunAgentsSettings';
+import { PromptsSection, promptsSummary } from './PromptsSettings';
+import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox-types';
 import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
 import { SidebarTrigger } from '../shell/sidebar';
-import { useInboxTheme } from '../theme';
+import { useInboxPalettes, useInboxTheme } from '../theme';
+import { PaletteRow } from './Palettes';
+import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 
@@ -25,10 +30,12 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   agents: 'chip',
+  prompts: 'prompt',
   devices: 'phone',
   archived: 'archive',
   storage: 'disk',
   about: 'info',
+  capabilities: 'puzzle',
 };
 
 /** Projects listed before the rest fold under "N more projects". */
@@ -36,9 +43,20 @@ const SHOWN_PROJECTS = 2;
 
 export interface SettingsPageProps {
   settings: SettingsModel | null;
+  /**
+   * Settings → General's first group, "Getting started" (approval
+   * "inbox-onboarding-tour", returning users): Take the tour. Absent: none.
+   */
+  onTakeTour?: () => void;
   context: ConnectContext | null;
   error: string | null;
   onToggleTool: (host: AgentToolHost, next: boolean) => void;
+  /** Settings → Capabilities → Experimental: decision mode's switch. Absent (or an Inbox that reports no experimental features): no Experimental group. */
+  onToggleExperimental?: (next: boolean) => void;
+  /** `#settings/experimental` (an old link): Capabilities scrolls to its Experimental group and focuses its heading. */
+  landOnExperimental?: boolean;
+  /** Settings → Capabilities → Board: the Board's switch. Absent (or an Inbox without the switch): no Board group. */
+  onToggleBoard?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -53,8 +71,14 @@ export interface SettingsPageProps {
   onDeleteProject: (projectId: string) => Promise<void>;
   /** Settings → About: the version, Check now and the two update switches (components/Updates.tsx). */
   about?: ReactNode;
-  /** The About nav row's dot: a new version is available, ready or failed. */
-  aboutDot?: boolean;
+  /** The About nav row's dot: a new version is available, ready or failed, or checking has failed for hours. */
+  aboutDot?: boolean | 'check-failing';
+  /**
+   * Settings → General's first row: the version and the sidebar's update
+   * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none
+   * (a page opened over the tailnet).
+   */
+  updateRow?: ReactNode;
   /** The question sound's row, under the notifications switch (sound.ts). */
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
@@ -77,6 +101,8 @@ export interface SettingsPageProps {
   /** Settings → Agents (components/AgentsSettings.tsx): the agents on this computer; null while unread. */
   agents?: InboxAgentsModel | null;
   onAgents?: (next: InboxAgentsModel) => void;
+  /** Settings → Prompts saved a change: the server's model of it. */
+  onPrompts?: (next: InboxPromptsSettings) => void;
 }
 
 /** A row's switch, named by its visible title. */
@@ -163,8 +189,9 @@ const THEME_CHOICES = [
 
 /**
  * General (design of record `.product/approved/inbox-settings-tabs/`):
- * Appearance (light, dark, or match this computer; Plannotator's one theme
- * preference, so plan review follows it too), and how the Inbox gets your
+ * Appearance (light, dark, or match this computer; the text size; and the
+ * palette for each half, Plannotator's one theme preference, so plan review
+ * follows it too), and how the Inbox gets your
  * attention when an agent asks: desktop notifications and the sound.
  */
 function GeneralSection({
@@ -174,7 +201,11 @@ function GeneralSection({
   notifyReach,
   onTestNotification,
   sound,
+  onTakeTour,
+  updateRow,
 }: {
+  onTakeTour?: () => void;
+  updateRow?: ReactNode;
   settings: SettingsModel;
   permission: NotificationPermission | 'unsupported';
   onToggleNotifications: (next: boolean) => void;
@@ -196,6 +227,26 @@ function GeneralSection({
       : reachText({ here: notificationsOn, enabled: settings.notifications.enabled, reach, origin: typeof window !== 'undefined' ? window.location.origin : '' });
   return (
     <>
+      {updateRow}
+      {onTakeTour && (
+        <section className="ib-sgroup" data-settings-tour="" aria-labelledby="ib-g-start">
+          <h2 id="ib-g-start">Getting started</h2>
+          <div className="ib-card">
+            <div className="ib-prow">
+              <span className="ib-txt">
+                <span className="ib-l">Tour</span>
+                <span className="ib-desc">See how the Inbox works through real threads from building Plannotator · 2 min</span>
+              </span>
+              <span className="ib-ctl">
+                <button type="button" className="ib-btn" onClick={onTakeTour} data-settings-take-tour="">
+                  <Icon name="play" size={14} />
+                  Take the tour
+                </button>
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
       <section className="ib-sgroup" data-settings-theme={mode} aria-labelledby="ib-g-appearance">
         <h2 id="ib-g-appearance">Appearance</h2>
         <div className="ib-card">
@@ -245,6 +296,7 @@ function GeneralSection({
               </span>
             </span>
           </div>
+          <PaletteRow />
         </div>
       </section>
       <section className="ib-sgroup" data-settings-notifications="" aria-labelledby="ib-g-attention">
@@ -328,6 +380,84 @@ function GeneralSection({
 }
 
 /**
+ * Capabilities (the owner, 2026-10-27): the switches that turn a whole
+ * feature on or off, moved out of General. First the main ones, today the
+ * Board (config.json `inboxBoard`, POST /api/inbox/settings `{ board: { on } }`),
+ * then the Experimental group ("Experimental just needs to be within
+ * Capabilities, under the main list"): each experimental feature's switch,
+ * off unless turned on, locked while PLANNOTATOR_EXPERIMENTAL decides; today
+ * decision mode. Same words as each had before.
+ */
+function CapabilitiesSection({
+  board,
+  onToggleBoard,
+  experimental,
+  onToggleExperimental,
+  experimentalHeading,
+}: {
+  board: { on: boolean } | null;
+  onToggleBoard?: (next: boolean) => void;
+  experimental: InboxExperimentalSettings | null;
+  onToggleExperimental?: (next: boolean) => void;
+  /** The Experimental group's heading, where `#settings/experimental` lands. */
+  experimentalHeading: RefObject<HTMLHeadingElement | null>;
+}) {
+  return (
+    <>
+      {board && onToggleBoard && (
+        <section className="ib-sgroup" data-settings-board="" aria-label="Capabilities">
+          <div className="ib-card">
+            <div className="ib-prow">
+              <span className="ib-txt">
+                <span className="ib-l" id="ib-board-label">
+                  Board
+                </span>
+                <span className="ib-desc">
+                  A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.
+                </span>
+              </span>
+              <span className="ib-ctl">
+                <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+      {experimental && onToggleExperimental && (
+        <section className="ib-sgroup" data-settings-experimental="" aria-labelledby="ib-g-experimental">
+          <h2 id="ib-g-experimental" ref={experimentalHeading} tabIndex={-1}>
+            Experimental
+          </h2>
+          <p>Features still being tried. Each stays off until you turn it on.</p>
+          <div className="ib-card">
+            <div className="ib-prow">
+              <span className="ib-txt">
+                <span className="ib-l" id="ib-decision-mode-label">
+                  Decision mode
+                </span>
+                <span className="ib-desc">
+                  {experimental.decision_mode.env !== null
+                    ? `PLANNOTATOR_EXPERIMENTAL turns it ${experimental.decision_mode.env ? 'on' : 'off'}.`
+                    : 'Answer what agents ask in a thread one decision at a time, from its open questions; each agent gets one reply.'}
+                </span>
+              </span>
+              <span className="ib-ctl">
+                <Switch
+                  on={experimental.decision_mode.on}
+                  labelledBy="ib-decision-mode-label"
+                  disabled={experimental.decision_mode.env !== null}
+                  onClick={() => onToggleExperimental(!experimental.decision_mode.on)}
+                />
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+/**
  * Agents (the approved "inbox-agent-awareness" design, 08-09): one group per
  * agent found, with its reach, reminder and note (components/AgentsSettings.tsx).
  * Until the agents are read (or on an Inbox that cannot list them), the
@@ -348,9 +478,12 @@ function AgentsSection({
 }) {
   if (agents && onAgents) {
     return (
-      <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} />
-      </section>
+      <>
+        <section className="ib-sgroup" aria-label="Agents">
+          <AgentsSettings model={agents} onModel={onAgents} context={context} />
+        </section>
+        <RunAgentsSettings />
+      </>
     );
   }
   const env = settings.inbox_tool.env;
@@ -495,18 +628,22 @@ function StoreTable({
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
+  capabilities: 'What the Inbox does beyond your messages. Each switch turns a whole feature on or off.',
 };
 
 /**
  * Settings (design of record `.product/approved/inbox-settings-tabs/`,
  * Workspaces' SettingsFrame in the Inbox's scale): a focused page with
- * "← Inbox" on top, a section nav (General, Agents, Devices, Archived,
- * Storage, About) and one section per page at `#settings/<section>`. On a
- * phone, a list of the sections, then one section with "‹ Settings".
+ * "← Inbox" on top, a section nav (General, Agents, Prompts, Devices,
+ * Capabilities, Archived, Storage, About) and one
+ * section per page at `#settings/<section>`. On a phone, a list of the
+ * sections, then one
+ * section with "‹ Settings".
  */
 export function SettingsPage(props: SettingsPageProps) {
   const {
@@ -539,6 +676,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const phones = usePhones(phonesOn);
   const via = settings?.via ?? 'local';
   const { mode } = useInboxTheme();
+  const palettes = useInboxPalettes();
   const heading = useRef<HTMLHeadingElement>(null);
   const firstSection = useRef(true);
 
@@ -560,6 +698,34 @@ export function SettingsPage(props: SettingsPageProps) {
     heading.current?.focus();
   }, [section]);
 
+  // `#settings/experimental` (an old link): once the group is drawn (the settings may still be loading), bring it into
+  // view and focus its heading, after the section's own heading took focus above. The landing is kept until it
+  // happens, even if the route is read again meanwhile, and dropped when another section opens.
+  const experimentalHeading = useRef<HTMLHeadingElement | null>(null);
+  const landing = useRef(false);
+  const landAsked = useRef(false);
+  if (props.landOnExperimental && !landAsked.current) landing.current = true;
+  landAsked.current = props.landOnExperimental === true;
+  if (section !== 'capabilities') landing.current = false;
+  const experimentalShown = section === 'capabilities' && !!settings?.experimental && !!props.onToggleExperimental;
+  useEffect(() => {
+    if (!landing.current || !experimentalShown || !experimentalHeading.current) return;
+    landing.current = false;
+    experimentalHeading.current.scrollIntoView?.({ block: 'start' });
+    experimentalHeading.current.focus({ preventScroll: true });
+  }, [props.landOnExperimental, experimentalShown]);
+
+  // Capabilities holds the Board and, below it, the Experimental group. Its row shows only while the Inbox has one
+  // of them (an older Inbox has neither, and an empty page is worse than no row); its address still opens.
+  const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
+  const board = settings?.board && props.onToggleBoard ? settings.board : null;
+  const sections = SETTINGS_SECTIONS.filter((id) => id !== 'capabilities' || board !== null || experimental !== null);
+  /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
+  const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
+    { label: 'Settings', ids: sections.filter((id) => SETTINGS_SECTIONS.indexOf(id) <= SETTINGS_SECTIONS.indexOf('capabilities')) },
+    { label: 'Your data and Plannotator', ids: sections.filter((id) => id === 'archived' || id === 'storage' || id === 'about') },
+  ].filter((group) => group.ids.length > 0);
+
   const devicesDot = devicesNeedAttention(phonesOn ? phones : null, settings?.tailscale);
   const loadFailed = !settings && error !== null;
 
@@ -571,7 +737,8 @@ export function SettingsPage(props: SettingsPageProps) {
 
   const badge = (id: SettingsSection): ReactNode => {
     if (id === 'archived' && archivedTotal) return <span className="ib-scount">{formatCount(archivedTotal)}</span>;
-    if (id === 'about' && aboutDot) return <span className="ib-dot" aria-label="A new version is available" role="img" />;
+    if (id === 'about' && aboutDot)
+      return <span className="ib-dot" aria-label={aboutDot === 'check-failing' ? 'Checking for updates is failing' : 'A new version is available'} role="img" />;
     if (id === 'devices' && devicesDot) return <span className="ib-dot ib-warn" aria-label="Something here is not working" role="img" />;
     if (id === 'agents' && agentsNeedRestart(props.agents)) return <span className="ib-dot ib-warn" aria-label="Sessions need a reload" role="img" data-agents-dot="" />;
     return null;
@@ -581,8 +748,13 @@ export function SettingsPage(props: SettingsPageProps) {
   const value = (id: SettingsSection): string => {
     if (!settings) return '';
     switch (id) {
-      case 'general':
-        return mode === 'system' ? 'Match system' : mode === 'light' ? 'Light' : 'Dark';
+      case 'general': {
+        const modeLabel = mode === 'system' ? 'Match system' : mode === 'light' ? 'Light' : 'Dark';
+        // The palette on screen, unless both halves are still the default one.
+        const shownPalette = palettes.pair[palettes.shown];
+        const defaults = palettes.pair.light === DEFAULT_COLOR_THEME && palettes.pair.dark === DEFAULT_COLOR_THEME;
+        return defaults ? modeLabel : `${modeLabel} · ${palettes.nameOf(shownPalette)}`;
+      }
       case 'agents': {
         if (props.agents) {
           const connected = props.agents.agents.filter((row) => row.detected && row.reach.on).map((row) => row.label);
@@ -591,6 +763,8 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'prompts':
+        return settings.prompts ? promptsSummary(settings.prompts) : '';
       case 'devices':
         if (phonesOn && phones.devices && phones.devices.length > 0) return plural(phones.devices.length, 'phone');
         return settings.tailscale?.on ? 'Over your tailnet' : '';
@@ -600,6 +774,11 @@ export function SettingsPage(props: SettingsPageProps) {
         return formatBytes(settings.store.bytes);
       case 'about':
         return settings.version;
+      case 'capabilities': {
+        // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
+        const on = [board?.on ? 'Board' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
+        return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
+      }
     }
   };
 
@@ -615,11 +794,23 @@ export function SettingsPage(props: SettingsPageProps) {
             notifyReach={notifyReach}
             onTestNotification={onTestNotification}
             sound={sound}
+            onTakeTour={props.onTakeTour}
+            updateRow={props.updateRow}
           />
         );
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
+        break;
+      case 'prompts':
+        body = settings.prompts ? (
+          <PromptsSection prompts={settings.prompts} onPrompts={props.onPrompts} configFile={`${settings.data_dir}/config.json`} home={settings.home} />
+        ) : (
+          <div className="ib-card ib-sempty">
+            <Icon name="prompt" />
+            This Inbox is older than Settings → Prompts. Restart it to update.
+          </div>
+        );
         break;
       case 'devices':
         body = (
@@ -663,6 +854,23 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'about':
         body = about;
         break;
+      case 'capabilities':
+        body =
+          (board && props.onToggleBoard) || experimental ? (
+            <CapabilitiesSection
+              board={board}
+              onToggleBoard={props.onToggleBoard}
+              experimental={experimental}
+              onToggleExperimental={props.onToggleExperimental}
+              experimentalHeading={experimentalHeading}
+            />
+          ) : (
+            <div className="ib-card ib-sempty" data-settings-capabilities-none="">
+              <Icon name="puzzle" />
+              This Inbox is older than Settings → Capabilities. Restart it to update.
+            </div>
+          );
+        break;
     }
   }
 
@@ -685,9 +893,9 @@ export function SettingsPage(props: SettingsPageProps) {
           <SidebarTrigger />
           <h1>Settings</h1>
         </div>
-        {[SETTINGS_SECTIONS.slice(0, 3), SETTINGS_SECTIONS.slice(3)].map((group, i) => (
-          <ul className="ib-card" key={i} aria-label={i === 0 ? 'Settings' : 'Your data and Plannotator'}>
-            {group.map((id) => (
+        {phoneGroups.map((group) => (
+          <ul className="ib-card" key={group.label} aria-label={group.label}>
+            {group.ids.map((id) => (
               <li key={id}>
                 <a href={`#${settingsHash({ section: id })}`} onClick={go(id)} data-settings-link={id}>
                   <span className="ib-tile">
@@ -758,7 +966,7 @@ export function SettingsPage(props: SettingsPageProps) {
                 Settings
               </div>
               <ul>
-                {SETTINGS_SECTIONS.map((id) => (
+                {sections.map((id) => (
                   <li key={id}>
                     <a href={`#${settingsHash({ section: id })}`} aria-current={id === section ? 'page' : undefined} onClick={go(id)} data-settings-link={id}>
                       <Icon name={SECTION_ICON[id]} />

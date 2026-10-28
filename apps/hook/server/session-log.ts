@@ -15,6 +15,7 @@
  * sees rendered in chat.
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import {
   accessSync,
   constants as fsConstants,
@@ -456,12 +457,13 @@ function snapshotProcessTable(): Map<number, number> {
           "-Command",
           "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Csv -NoTypeInformation",
         ],
-        { encoding: "utf-8", timeout: 2000 }
+        { env: childEnv(), encoding: "utf-8", timeout: 2000 }
       );
       if (result.status !== 0) return new Map();
       return parseProcessTableCsv(result.stdout);
     }
     const result = spawnSync("ps", ["-eo", "pid=,ppid="], {
+      env: childEnv(),
       encoding: "utf-8",
       timeout: 2000,
     });

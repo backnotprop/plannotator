@@ -26,7 +26,7 @@ describe('sendTargetsOf', () => {
     for (let i = 2; i <= 7; i++) messages.push(message(`msg_${i}`, 'ses_a', ['open']));
     messages.push(message('msg_8', 'ses_a', ['picked']));
     const targets = sendTargetsOf(thread(messages));
-    expect(targets).toEqual([{ message: messages[7], questions: [{ key: 'q-msg_8-0', revision: 1 }], skip: [] }]);
+    expect(targets).toEqual([{ message: messages[7], questions: [{ key: 'q-msg_8-0', revision: 1 }], skip: [], actions: [] }]);
   });
 
   test('picks on three of one session\'s messages: one reply to the latest of them, naming the others', () => {
@@ -71,6 +71,47 @@ describe('sendTargetsOf', () => {
   test('messages with no session are each a reply of their own', () => {
     const m = [message('msg_1', null, ['picked']), message('msg_2', null, ['picked'])];
     expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_1', 'msg_2']);
+  });
+});
+
+describe('action items whose Done waits in the draft go with the Send (approval "inbox-action-items-in-reply")', () => {
+  const withActions = (m: InboxMessageWire, actions: { key: string; staged?: boolean; by?: 'person' | 'agent'; note?: string | null; state?: string }[]) =>
+    ({
+      ...m,
+      actions: actions.map((a) => ({
+        key: a.key,
+        kind: 'action',
+        state: a.state ?? 'picked',
+        revision: 1,
+        sent_revision: null,
+        action_result:
+          a.by === 'agent'
+            ? { outcome: 'done', note: null, at: '2026-10-26T10:00:00.000Z', by: 'agent', message_id: 'msg_x', person: { outcome: 'done', note: a.note ?? null, at: '2026-10-26T09:00:00.000Z' } }
+            : { outcome: 'done', note: null, at: '2026-10-26T09:00:00.000Z', by: 'person', message_id: null, ...(a.staged ? { staged: true } : {}) },
+      })),
+    }) as unknown as InboxMessageWire;
+
+  test('with no pick, a Done alone makes a reply to its message', () => {
+    const m = [withActions(message('msg_1', 'ses_a', []), [{ key: 'a-1', staged: true }]), message('msg_2', 'ses_a', [])];
+    const targets = sendTargetsOf(thread(m));
+    expect(targets.map((t) => [t.message.id, t.actions])).toEqual([['msg_1', [{ key: 'a-1' }]]]);
+  });
+
+  test("a Done on an older message rides the same session's reply with the picks, by message id", () => {
+    const m = [withActions(message('msg_1', 'ses_a', []), [{ key: 'a-1', staged: true }]), message('msg_2', 'ses_a', ['picked'])];
+    const targets = sendTargetsOf(thread(m));
+    expect(targets.map((t) => [t.message.id, t.actions])).toEqual([['msg_2', [{ message_id: 'msg_1', key: 'a-1' }]]]);
+  });
+
+  test('a Done through the timed path (no staged) is not the Send\'s; the agent\'s own done goes only with a note to carry', () => {
+    const m = [
+      withActions(message('msg_1', 'ses_a', []), [
+        { key: 'a-timed' },
+        { key: 'a-seen', by: 'agent', state: 'closed' },
+        { key: 'a-noted', by: 'agent', state: 'closed', note: 'Rotated the key too.' },
+      ]),
+    ];
+    expect(sendTargetsOf(thread(m))[0]!.actions).toEqual([{ key: 'a-noted' }]);
   });
 });
 

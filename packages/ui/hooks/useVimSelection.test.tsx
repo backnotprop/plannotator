@@ -261,15 +261,26 @@ describe.if(hasDom)('useVimSelection', () => {
 
   test('copies a Visual selection, collapses it, and keeps document focus', async () => {
     const copied: string[] = [];
+    // Vim `y` copies plain text only, even where a rich clipboard is offered
+    // (rich copy is the selection toolbar's button, never a key).
+    const richWrites: unknown[] = [];
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(
       navigator,
       'clipboard',
     );
+    const clipboardItemDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'ClipboardItem');
+    Object.defineProperty(globalThis, 'ClipboardItem', {
+      configurable: true,
+      value: class { constructor(_items: unknown) {} },
+    });
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
         writeText: async (text: string) => {
           copied.push(text);
+        },
+        write: async (items: unknown) => {
+          richWrites.push(items);
         },
       },
     });
@@ -292,6 +303,7 @@ describe.if(hasDom)('useVimSelection', () => {
 
       expect(copyEvent?.defaultPrevented).toBe(true);
       expect(copied).toEqual(['Alpha ']);
+      expect(richWrites).toEqual([]);
       expect(article.dataset.phase).toBe('text');
       expect(document.activeElement).toBe(article);
       expect(window.getSelection()?.isCollapsed).toBe(true);
@@ -306,6 +318,8 @@ describe.if(hasDom)('useVimSelection', () => {
       } else {
         delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
       }
+      if (clipboardItemDescriptor) Object.defineProperty(globalThis, 'ClipboardItem', clipboardItemDescriptor);
+      else delete (globalThis as typeof globalThis & { ClipboardItem?: unknown }).ClipboardItem;
     }
   });
 

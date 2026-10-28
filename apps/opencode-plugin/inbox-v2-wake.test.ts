@@ -143,7 +143,7 @@ describe.skipIf(process.platform === "win32")("OpenCode 2's Inbox wake on a host
     const sessionID = "ses_events";
     events.emit({ type: "session.execution.started", data: { sessionID } });
     const sent = await tool!.execute({ action: "send_message", body: QUESTION }, { sessionID });
-    const structured = JSON.parse(sent.content.slice(sent.content.indexOf("{"))) as { message_id: string };
+    const structured = JSON.parse(sent.content.slice(sent.content.indexOf("{"))) as { message_id: string; thread_id: string };
     events.emit({ type: "session.execution.succeeded", data: { sessionID } });
     w.proof(`sent ${structured.message_id}; the session ran and ended (events only)`);
 
@@ -151,6 +151,8 @@ describe.skipIf(process.platform === "win32")("OpenCode 2's Inbox wake on a host
     const delivered = await waitFor("the reply to reach the session", () => prompts.find((prompt) => prompt.text.startsWith("Plannotator Inbox: ")), 20_000);
     expect(delivered.sessionID).toBe(sessionID);
     expect(delivered.text).toContain("Retry with the same key.");
+    // It closes with the thread and the tool OpenCode registered (plannotator_inbox).
+    expect(delivered.text.endsWith(`\n\n[thread ${structured.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`)).toBe(true);
     expect(events.aborted).toBe(0);
     w.proof(`delivered through the events alone:\n${delivered.text}`);
 

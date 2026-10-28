@@ -3,10 +3,10 @@
  * .product/approved/plannotator-updates/ §4.5, owner's answers 1 and 3).
  *
  * The server says whether a newer release exists (`updateAvailable` on
- * /api/plan and /api/diff, from the machine's once-a-day check): the browser
+ * /api/plan and /api/diff, from the machine's own check): the browser
  * never asks GitHub. This module parses that advert, decides whether the toast
- * may show now (once per version, and at most once every three days across
- * versions, remembered in a cookie that every localhost port shares), and
+ * may show now (once per version, and at most once a day across versions,
+ * remembered in a cookie that every localhost port shares), and
  * words the toast for the host that launched the session.
  */
 
@@ -25,8 +25,30 @@ export interface UpdateAdvert {
   publishedAt?: string;
 }
 
-/** The toast shows at most this often, across versions. */
-export const UPDATE_TOAST_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
+/**
+ * Checking for updates has failed for hours on this machine
+ * (`updateCheckFailing` on /api/plan and /api/diff, never beside
+ * `updateAvailable`): the Options menu says so quietly, with the command that
+ * updates without the check. No toast, no dot.
+ */
+export interface UpdateCheckFailingAdvert {
+  since: string;
+  error: string;
+  command: string;
+}
+
+/** The server's failing record, validated (anything malformed is none). */
+export function parseUpdateCheckFailing(value: unknown): UpdateCheckFailingAdvert | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.since !== 'string' || Number.isNaN(Date.parse(v.since))) return null;
+  if (typeof v.error !== 'string' || v.error.length > 200) return null;
+  if (typeof v.command !== 'string' || !v.command || v.command.length > 500) return null;
+  return { since: v.since, error: v.error, command: v.command };
+}
+
+/** The toast shows at most this often, across versions (owner's choice: once a day). */
+export const UPDATE_TOAST_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const TOAST_KEY = 'plannotator-update-toast';
 const VERSION = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
@@ -82,7 +104,7 @@ export function describeUpdateToast(advert: UpdateAdvert): { title: string; desc
     case 'script':
       return {
         title: `Plannotator ${advert.version} is available`,
-        description: `You have ${advert.current}. Update from the Inbox, or turn on automatic updates in Settings.`,
+        description: `You have ${advert.current}. Update installs it in the background; this review keeps working.`,
         primary: 'update',
       };
     case 'copy':
@@ -94,13 +116,13 @@ export function describeUpdateToast(advert: UpdateAdvert): { title: string; desc
     case 'pi':
       return {
         title: `Plannotator for Pi ${advert.version} is available`,
-        description: `Run ${advert.command}, then restart Pi.`,
+        description: `Run ${advert.command}, then type /reload in Pi.`,
         primary: 'copy',
       };
     case 'opencode':
       return {
         title: `Plannotator ${advert.version} is available`,
-        description: "Run the install script again, then restart OpenCode. It also clears OpenCode's cached plugin.",
+        description: "Run the install script again, then run opencode2 reload (OpenCode 1: restart it). It also clears OpenCode's cached plugin.",
         primary: 'copy',
       };
   }

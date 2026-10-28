@@ -464,4 +464,27 @@ describe('shortcuts', () => {
 
     expect(handled).toBe(false);
   });
+
+  // Rich-text copy is the toolbar's Copy button only (owner's decision on #2191):
+  // Cmd+Option+C is Chrome's Inspect Element key on a Mac, and new shortcuts
+  // need the owner's approval. No surface may bind Alt+C, and Mod+C stays the
+  // one copy binding, described as before.
+  it('registers no keyboard shortcut for rich-text copy', () => {
+    const registries = [
+      planReviewSettingsShortcutRegistry,
+      annotateSettingsShortcutRegistry,
+      reviewSettingsShortcutRegistry,
+    ];
+    const altC = { key: 'c', code: 'KeyC', ctrlKey: true, metaKey: false, shiftKey: false, altKey: true } as KeyboardEvent;
+    const macAltC = { key: 'ç', code: 'KeyC', ctrlKey: false, metaKey: true, shiftKey: false, altKey: true } as KeyboardEvent;
+    for (const registry of registries) {
+      for (const entry of listRegistryShortcuts(registry)) {
+        expect(entry.description.toLowerCase()).not.toContain('rich');
+        for (const binding of entry.bindings) {
+          expect(matchesShortcutBinding(altC, binding)).toBe(false);
+          expect(matchesShortcutBinding(macAltC, binding)).toBe(false);
+        }
+      }
+    }
+  });
 });

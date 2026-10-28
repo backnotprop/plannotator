@@ -44,6 +44,7 @@ function whichBin(bin: string): boolean {
 	try {
 		const finder = process.platform === "win32" ? "where" : "which";
 		execFileSync(finder, [bin], {
+			env: process.env,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		});

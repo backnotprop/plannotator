@@ -4,6 +4,7 @@
  * GitButler support was originally proposed by Dan Susman in PR #566.
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import type {
   GitCommandOptions,
   GitCommandResult,
@@ -20,7 +21,7 @@ async function runBut(
     const proc = Bun.spawn(["but", ...args], {
       cwd: options?.cwd,
       detached: true,
-      env: { ...process.env, NO_BG_TASKS: "1" },
+      env: childEnv({ NO_BG_TASKS: "1" }),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -40,7 +41,7 @@ async function runBut(
         } else {
           const killed = Bun.spawnSync(
             ["taskkill.exe", "/pid", String(proc.pid), "/t", "/f"],
-            { stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true },
+            { env: childEnv(), stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true },
           );
           if (killed.exitCode === 0) return;
         }

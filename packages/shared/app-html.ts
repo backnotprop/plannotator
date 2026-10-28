@@ -58,7 +58,7 @@ export const APP_HTML_BROTLI_QUALITY = 5;
 export const APP_HTML_GZIP_LEVEL = 6;
 
 /** Only a handful of distinct app bodies exist per process; bound it anyway. */
-const MAX_CACHED_BODIES = 4;
+const MAX_CACHED_BODIES = 8;
 
 interface Coding {
   name: string;
@@ -115,8 +115,9 @@ interface CacheEntry {
  * Module-level on purpose: one compression per body per process. In
  * long-lived hosts (the Pi extension, the OpenCode plugin) a module outlives
  * any one session, so the compressed bodies persist for the host process's
- * lifetime; the cache is bounded to MAX_CACHED_BODIES (4) distinct bodies,
- * oldest evicted first, and in practice holds the plan and review pages.
+ * lifetime; the cache is bounded to MAX_CACHED_BODIES (8) distinct bodies,
+ * oldest evicted first, and in practice holds the plan and review pages and
+ * code review's diagram engine files (./diagram-engine-assets).
  */
 const cache: CacheEntry[] = [];
 
@@ -193,15 +194,18 @@ const CONTENT_TYPE = "text/html";
 /**
  * Negotiate and produce the body + headers for one app-HTML response.
  * `compress: false` (a local-only session) returns exactly the pre-#1617
- * response: the original string with `Content-Type` only.
+ * response: the original string with `Content-Type` only. `contentType`
+ * lets another large text body the app loads (code review's diagram engine
+ * files) take the same negotiation and cache.
  */
 export async function prepareAppHtml(
   html: string,
   acceptEncoding: string | null | undefined,
   compress: boolean,
+  contentType: string = CONTENT_TYPE,
 ): Promise<PreparedAppHtml> {
   if (!compress) {
-    return { encoding: "identity", body: html, headers: { "Content-Type": CONTENT_TYPE } };
+    return { encoding: "identity", body: html, headers: { "Content-Type": contentType } };
   }
   const encoding = negotiateAppHtmlEncoding(acceptEncoding);
   if (encoding !== "identity") {
@@ -211,7 +215,7 @@ export async function prepareAppHtml(
         encoding,
         body,
         headers: {
-          "Content-Type": CONTENT_TYPE,
+          "Content-Type": contentType,
           "Content-Encoding": encoding,
           "Content-Length": String(body.length),
           Vary: "Accept-Encoding",
@@ -224,7 +228,7 @@ export async function prepareAppHtml(
   return {
     encoding: "identity",
     body: html,
-    headers: { "Content-Type": CONTENT_TYPE, Vary: "Accept-Encoding" },
+    headers: { "Content-Type": contentType, Vary: "Accept-Encoding" },
   };
 }
 

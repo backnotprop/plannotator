@@ -14,12 +14,13 @@
  * Plannotator — either prop leaking into the default toolbar, which passes
  * NEITHER and must stay exactly what it was.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import type { QuickLabel } from '../utils/quickLabels';
 import type { SelectionAction, SelectionActionContext } from '../utils/selectionActions';
+import type { RichCopySource } from '../utils/richClipboard';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -43,6 +44,10 @@ interface MountOptions {
   onQuickLabel?: (label: QuickLabel) => void;
   onClose?: () => void;
   copyText?: string;
+  /** Shorthand: a builder that returns this HTML with copyText. */
+  richCopyHtml?: string;
+  getRichCopy?: () => RichCopySource | Promise<RichCopySource>;
+  hideCopyButton?: boolean;
 }
 
 /** A paragraph inside a data-block-id block, the markdown surface's shape. */
@@ -69,6 +74,11 @@ async function mount(options: MountOptions = {}) {
           options.withQuickLabelHandler === false ? undefined : options.onQuickLabel ?? (() => {})
         }
         copyText={options.copyText ?? 'SELECTED'}
+        getRichCopy={options.getRichCopy ?? (options.richCopyHtml === undefined ? undefined : () => ({
+          html: options.richCopyHtml!,
+          text: options.copyText ?? 'SELECTED',
+        }))}
+        hideCopyButton={options.hideCopyButton}
         selectionActions={options.selectionActions}
         selectionActionsIcon={options.selectionActionsIcon}
         quickLabels={options.quickLabels}
@@ -124,6 +134,208 @@ describe.if(hasDom)('AnnotationToolbar host seams', () => {
     await mount({ selectionActions: [] });
     expect(wand()).toBeNull();
     expect(buttonTitles()).toEqual(['Copy', 'Delete', 'Comment', 'Quick label', 'Looks good', 'Cancel']);
+  });
+
+  test('rich copy is the one Copy button, shown also where the plain Copy is hidden; without it, unchanged', async () => {
+    const rich = ['Copy', 'Delete', 'Comment', 'Quick label', 'Looks good', 'Cancel'];
+    await mount({ richCopyHtml: '<p><strong>SELECTED</strong></p>' });
+    expect(buttonTitles()).toEqual(rich);
+
+    for (const options of [
+      { richCopyHtml: '<p>SELECTED</p>', hideCopyButton: true },
+      { hideCopyButton: true },
+    ]) {
+      await act(async () => root?.unmount());
+      root = null;
+      document.body.replaceChildren();
+      await mount(options);
+      expect(buttonTitles()).toEqual(options.richCopyHtml ? rich : rich.slice(1));
+    }
+  });
+
+  test('with rich copy off, Copy writes plain text exactly as before', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const clipboardItemDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'ClipboardItem');
+    const write = mock(async () => {});
+    const writeText = mock(async (_text: string) => {});
+    Object.defineProperty(globalThis, 'ClipboardItem', { configurable: true, value: class {} });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, writeText } });
+    try {
+      await mount({ copyText: 'SELECTED' });
+      const copy = Array.from(toolbar().querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.title === 'Copy')!;
+      await click(copy);
+      expect(writeText).toHaveBeenCalledWith('SELECTED');
+      expect(write).not.toHaveBeenCalled();
+      expect(buttonTitles()).toContain('Copied!');
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+      if (clipboardItemDescriptor) Object.defineProperty(globalThis, 'ClipboardItem', clipboardItemDescriptor);
+      else delete (globalThis as typeof globalThis & { ClipboardItem?: unknown }).ClipboardItem;
+    }
+  });
+
+  test('with rich copy on, Copy writes text/html and text/plain in one clipboard item', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const clipboardItemDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'ClipboardItem');
+    let items: Record<string, Blob> | undefined;
+    class TestClipboardItem {
+      constructor(value: Record<string, Blob>) { items = value; }
+    }
+    const write = mock(async () => {});
+    const writeText = mock(async (_text: string) => {});
+    Object.defineProperty(globalThis, 'ClipboardItem', { configurable: true, value: TestClipboardItem });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, writeText } });
+    try {
+      await mount({ copyText: 'SELECTED', richCopyHtml: '<p><strong>SELECTED</strong></p>', hideCopyButton: true });
+      const richCopy = Array.from(toolbar().querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.title === 'Copy');
+      if (!richCopy) throw new Error('rich-copy action missing');
+      await click(richCopy);
+
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(writeText).not.toHaveBeenCalled();
+      expect(Object.keys(items ?? {}).sort()).toEqual(['text/html', 'text/plain']);
+      expect(await items!['text/html'].text()).toBe('<p><strong>SELECTED</strong></p>');
+      expect(await items!['text/plain'].text()).toBe('SELECTED');
+      expect(buttonTitles()).toContain('Copied!');
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+      if (clipboardItemDescriptor) Object.defineProperty(globalThis, 'ClipboardItem', clipboardItemDescriptor);
+      else delete (globalThis as typeof globalThis & { ClipboardItem?: unknown }).ClipboardItem;
+    }
+  });
+
+  test('the rich HTML is built only when Copy is pressed, never for the selection itself', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = mock(async (_text: string) => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const build = mock(() => ({ html: '<p>SELECTED</p>', text: 'SELECTED' }));
+    try {
+      await mount({ getRichCopy: build });
+      await press('a');
+      expect(build).not.toHaveBeenCalled();
+      const richCopy = Array.from(toolbar().querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.title === 'Copy')!;
+      await click(richCopy);
+      expect(build).toHaveBeenCalledTimes(1);
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    }
+  });
+
+  test('a selection too large for rich text copies plain text and says why', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = mock(async (_text: string) => {});
+    const write = mock(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText, write } });
+    try {
+      await mount({ getRichCopy: () => ({ tooLarge: true, text: 'the whole selection' }) });
+      const richCopy = Array.from(toolbar().querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.title === 'Copy')!;
+      await click(richCopy);
+      expect(write).not.toHaveBeenCalled();
+      expect(writeText).toHaveBeenCalledWith('the whole selection');
+      expect(buttonTitles()).toContain('Copied as plain text (too large for rich text)');
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    }
+  });
+
+  test('reports plain fallback without claiming why rich copy was unavailable', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = mock(async (_text: string) => {});
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      await mount({ richCopyHtml: '<p><strong>SELECTED</strong></p>' });
+      const richCopy = Array.from(toolbar().querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.title === 'Copy');
+      if (!richCopy) throw new Error('rich-copy action missing');
+      await click(richCopy);
+      expect(writeText).toHaveBeenCalledWith('SELECTED');
+      expect(buttonTitles()).toContain('Copied as plain text (rich clipboard unavailable)');
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    }
+  });
+
+  test('rich copy has no keyboard shortcut: Ctrl+Alt+C and Cmd+Option+C do nothing', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const write = mock(async () => {});
+    const writeText = mock(async (_text: string) => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, writeText } });
+    try {
+      await mount({ richCopyHtml: '<p><strong>SELECTED</strong></p>' });
+      for (const init of [
+        { key: 'c', code: 'KeyC', ctrlKey: true, altKey: true },
+        { key: 'ç', code: 'KeyC', metaKey: true, altKey: true },
+      ]) {
+        const event = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
+        await act(async () => { window.dispatchEvent(event); });
+        expect(event.defaultPrevented).toBe(false);
+      }
+      expect(write).not.toHaveBeenCalled();
+      expect(writeText).not.toHaveBeenCalled();
+      expect(buttonTitles()).toContain('Copy');
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    }
+  });
+
+  test('a late rich-copy result does not update toolbar for a replacement selection', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const clipboardItemDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'ClipboardItem');
+    let resolveWrite!: () => void;
+    const write = mock(() => new Promise<void>((resolve) => { resolveWrite = resolve; }));
+    class TestClipboardItem {
+      constructor(_items: Record<string, Blob>) {}
+    }
+    Object.defineProperty(globalThis, 'ClipboardItem', { configurable: true, value: TestClipboardItem });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
+    try {
+      await mount({ copyText: 'FIRST', richCopyHtml: '<p>FIRST</p>' });
+      const richCopy = Array.from(toolbar().querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.title === 'Copy')!;
+      await click(richCopy);
+      expect(write).toHaveBeenCalledTimes(1);
+
+      const next = document.createElement('span');
+      next.textContent = 'SECOND';
+      block!.appendChild(next);
+      await act(async () => root?.render(
+        <AnnotationToolbar
+          element={next}
+          positionMode="center-above"
+          onAnnotate={() => {}}
+          onClose={() => {}}
+          onRequestComment={() => {}}
+          onQuickLabel={() => {}}
+          copyText="SECOND"
+          getRichCopy={() => ({ html: '<p>SECOND</p>', text: 'SECOND' })}
+        />,
+      ));
+      await act(async () => {
+        resolveWrite();
+        await Promise.resolve();
+      });
+
+      expect(buttonTitles()).toContain('Copy');
+      expect(buttonTitles()).not.toContain('Copied!');
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
+      else delete (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+      if (clipboardItemDescriptor) Object.defineProperty(globalThis, 'ClipboardItem', clipboardItemDescriptor);
+      else delete (globalThis as typeof globalThis & { ClipboardItem?: unknown }).ClipboardItem;
+    }
   });
 
   test('actions take the Zap slot; quickLabels:false hides the Zap and keeps the thumbs-up', async () => {

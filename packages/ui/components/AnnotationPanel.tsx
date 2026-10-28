@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useId } from 'react';
+import React, { createContext, useContext, useMemo, useState, useRef, useEffect, useId } from 'react';
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type EditorAnnotation } from '../types';
 import type { MentionSource } from '../utils/mentions';
 import { useMentionAutocomplete } from '../hooks/useMentionAutocomplete';
@@ -18,6 +18,13 @@ import { QuestionsPanelSection } from './QuestionsPanelSection';
 import { HostTitle } from './HostTitle';
 import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
+import { imageRegionNumbers, RegionCardInfo, RegionNumber, regionOf } from './ImageRegions';
+
+/** What a region card (#2100) needs from its panel: each region's number on
+ *  its image, and how to load the image for the crop thumbnail. */
+const RegionCardContext = createContext<{ numbers: ReadonlyMap<string, number>; thumbSrc?: (src: string) => string | null }>({
+  numbers: new Map(),
+});
 
 // Card type-word colors. Deletion uses `destructive` (reliably red on every
 // theme, matching the in-document .deletion highlight). Comment uses the
@@ -215,7 +222,23 @@ interface PanelProps {
    * the frame in `renderCardHeader`) turns them off per card. Absent: both
    * drawn, exactly as before.
    */
-  cardParts?: (annotation: Annotation) => { quote?: boolean; images?: boolean };
+  cardParts?: (annotation: Annotation) => { quote?: boolean; images?: boolean; text?: boolean };
+  /**
+   * Optional: the host's own body for a plan-annotation card, drawn where the
+   * comment text goes, inside the card (a click on it selects the card). The
+   * Inbox draws a drawing that has no words as its picture, with `cardParts`
+   * `text: false` (its stored text is a stand-in for the agent, not the
+   * person's words: not drawn, and the edit box starts empty). Absent:
+   * nothing extra, exactly as before.
+   */
+  renderCardBody?: (annotation: Annotation) => React.ReactNode;
+  /**
+   * Comments on part of an image (`imageRegion`, #2100) draw a crop of their
+   * box in place of the quote; this turns an image's src as written into a
+   * URL the browser can load (null: no crop, the file and size still show).
+   * Absent: no crop.
+   */
+  imageRegionSrc?: (src: string) => string | null;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -258,7 +281,13 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   title = 'Annotations',
   titleNote,
   cardParts,
+  renderCardBody,
+  imageRegionSrc,
 }) => {
+  const regionCards = useMemo(
+    () => ({ numbers: imageRegionNumbers(annotations), thumbSrc: imageRegionSrc }),
+    [annotations, imageRegionSrc],
+  );
   const isMobile = useIsMobile();
   const embedded = presentation === 'embedded';
   const mobilePanel = isMobile && !embedded;
@@ -519,6 +548,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                             footer={group.isCurrent ? renderCardFooter?.(annotation) : undefined}
                             header={group.isCurrent ? renderCardHeader?.(annotation) : undefined}
                             parts={group.isCurrent ? cardParts?.(annotation) : undefined}
+                            body={group.isCurrent ? renderCardBody?.(annotation) : undefined}
                             mentionSource={mentionSource}
                             unanchored={group.isCurrent ? (unanchoredIds?.has(annotation.id) ?? false) : false}
                           />
@@ -634,6 +664,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                       footer={renderCardFooter?.(entry.annotation)}
                       header={renderCardHeader?.(entry.annotation)}
                   parts={cardParts?.(entry.annotation)}
+                  body={renderCardBody?.(entry.annotation)}
                       mentionSource={mentionSource}
                       unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                     />
@@ -651,6 +682,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   footer={renderCardFooter?.(entry.annotation)}
                   header={renderCardHeader?.(entry.annotation)}
                   parts={cardParts?.(entry.annotation)}
+                  body={renderCardBody?.(entry.annotation)}
                   mentionSource={mentionSource}
                   unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                 />
@@ -693,7 +725,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
       </OverlayScrollArea>
 
       {/* Quick Actions Footer */}
-      {headerCount > 0 && (
+      {headerCount > 0 && (onQuickCopy || (sharingEnabled && onShare)) && (
         <div className="border-t border-border/50 px-3 py-2 flex gap-1.5">
           {onQuickCopy && (
             <button
@@ -747,12 +779,12 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
           className="fixed inset-0 z-[59] bg-background/60 backdrop-blur-sm"
           onClick={onClose}
         />
-        {panel}
+        <RegionCardContext.Provider value={regionCards}>{panel}</RegionCardContext.Provider>
       </>
     );
   }
 
-  return panel;
+  return <RegionCardContext.Provider value={regionCards}>{panel}</RegionCardContext.Provider>;
 };
 
 function formatTimestamp(ts: number): string {
@@ -999,21 +1031,30 @@ const AnnotationCard: React.FC<{
   /** The annotation has no live location in the document (host-reported). */
   unanchored?: boolean;
   /** Built-in parts to draw (see `cardParts`). */
-  parts?: { quote?: boolean; images?: boolean };
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false, parts }) => {
+  parts?: { quote?: boolean; images?: boolean; text?: boolean };
+  /** Host body, drawn where the comment text goes (see `renderCardBody`). */
+  body?: React.ReactNode;
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false, parts, body }) => {
+  // `text: false`: the stored text is the host's stand-in, never the person's words; the edit box starts empty.
+  const shownText = parts?.text === false ? '' : annotation.text || '';
   const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(annotation.text || '');
+  const [editText, setEditText] = useState(shownText);
+  // A comment on part of an image (#2100): numbered like its box, with the
+  // crop, file, size and line in place of the quote.
+  const regionCards = useContext(RegionCardContext);
+  const region = regionOf(annotation);
+  const regionNumber = region ? regionCards.numbers.get(annotation.id) : undefined;
 
   // Update editText when annotation.text changes
   useEffect(() => {
     if (!isEditing) {
-      setEditText(annotation.text || '');
+      setEditText(shownText);
     }
-  }, [annotation.text, isEditing]);
+  }, [shownText, isEditing]);
 
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setEditText(annotation.text || '');
+    setEditText(shownText);
     setIsEditing(true);
   };
 
@@ -1030,7 +1071,7 @@ const AnnotationCard: React.FC<{
   };
 
   const handleCancelEdit = () => {
-    setEditText(annotation.text || '');
+    setEditText(shownText);
     setIsEditing(false);
   };
 
@@ -1069,6 +1110,12 @@ const AnnotationCard: React.FC<{
       {/* Header: type word + author · time + actions */}
       <div className="mb-1.5 flex items-center gap-1.5">
         <span className={cn('text-[11px] font-medium', typeColor)}>{typeLabel}</span>
+        {region && regionNumber !== undefined && <RegionNumber n={regionNumber} selected={isSelected} />}
+        {region && (
+          <span data-annotation-region="true" className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground">
+            Region
+          </span>
+        )}
         {annotation.diffContext && (
           <span className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground">
             diff
@@ -1139,8 +1186,12 @@ const AnnotationCard: React.FC<{
         )
       ) : (
         <>
+          {/* A region shows its crop, file, size and line instead of a quote. */}
+          {region && parts?.quote !== false && (
+            <RegionCardInfo region={region} thumbSrc={regionCards.thumbSrc?.(region.src) ?? null} />
+          )}
           {/* Quote — the annotated text */}
-          {parts?.quote !== false && (
+          {!region && parts?.quote !== false && (
             <p className="mb-1.5 line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted-foreground/80">
               "{annotation.originalText}"
             </p>
@@ -1151,13 +1202,14 @@ const AnnotationCard: React.FC<{
             isEditing ? (
               editComposer
             ) : (
-              annotation.text && (
+              shownText && (
                 <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-relaxed text-foreground/90">
-                  {annotation.text}
+                  {shownText}
                 </p>
               )
             )
           )}
+          {body != null && body !== false && body}
         </>
       )}
 

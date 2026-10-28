@@ -482,6 +482,78 @@ describe("Pi annotate server with Ask this session", () => {
 		}
 	});
 
+	test("superseding an Ask answer leaves Pi running until the reviewer chooses to interrupt", async () => {
+		const host = fakePi();
+		const hub = createPiSessionBridgeHub(host.pi);
+		const server = await startAnnotateServer({
+			filePath: join(dir, "notes.md"),
+			markdown: "# Notes\n",
+			htmlContent: "<html></html>",
+			sessionBridge: hub.createBridge(host.ctx as never, {}),
+		});
+		const post = (path: string, body: unknown) => fetch(`${server.url}/api/ai/${path}`, {
+			method: "POST",
+			body: JSON.stringify(body),
+		});
+		try {
+			const { sessionId } = await (await post("session", {
+				providerId: "session-bridge",
+				context: { mode: "annotate", annotate: { content: "# Notes\n" } },
+			})).json() as { sessionId: string };
+			const first = post("query", { sessionId, prompt: "Correct the first passage" }).then(r => r.text());
+			for (let i = 0; host.sent.length === 0 && i < 100; i++) await Bun.sleep(5);
+			expect(host.sent).toHaveLength(1);
+			host.startTurn(host.sent[0].message.details!.askId!);
+			host.assistantText("Working on it.");
+
+			expect((await post("abort", { sessionId, reason: "supersede" })).status).toBe(200);
+			await first;
+			expect(host.aborts).toHaveLength(0);
+			expect(hub.hasActiveAsk).toBe(true);
+
+			const busy = await (await post("query", { sessionId, prompt: "And the next passage?" })).text();
+			expect(busy).toContain('"code":"agent_busy"');
+			expect(host.sent).toHaveLength(1);
+			expect(host.aborts).toHaveLength(0);
+
+			const waiting = post("query", { sessionId, prompt: "And the next passage?", busyPolicy: "wait" });
+			const reader = (await waiting).body!.getReader();
+			const status = new TextDecoder().decode((await reader.read()).value);
+			expect(status).toContain('"status":"waiting"');
+			expect(host.aborts).toHaveLength(0);
+			expect(host.sent).toHaveLength(1);
+			host.assistantText("First correction complete.");
+			host.endTurn();
+			for (let i = 0; host.sent.length === 1 && i < 100; i++) await Bun.sleep(5);
+			expect(host.sent).toHaveLength(2);
+			host.startTurn(host.sent[1].message.details!.askId!);
+			host.assistantText("Working on the second correction.");
+			await post("abort", { sessionId, reason: "supersede" });
+			while (!(await reader.read()).done) { /* Drain the superseded answer. */ }
+			expect(host.aborts).toHaveLength(0);
+
+			const interrupting = await post("query", { sessionId, prompt: "Do this instead", busyPolicy: "interrupt" });
+			const interruptedReader = interrupting.body!.getReader();
+			const interruptedStatus = new TextDecoder().decode((await interruptedReader.read()).value);
+			expect(interruptedStatus).toContain('"status":"interrupting"');
+			expect(host.aborts).toHaveLength(1);
+			host.endTurn("aborted");
+			for (let i = 0; host.sent.length === 2 && i < 100; i++) await Bun.sleep(5);
+			expect(host.sent).toHaveLength(3);
+			host.startTurn(host.sent[2].message.details!.askId!);
+			host.assistantText("Replacement answer.");
+
+			// The Stop button still cancels the question that is now running.
+			await post("abort", { sessionId });
+			expect(host.aborts).toHaveLength(2);
+			host.endTurn("aborted");
+			while (!(await interruptedReader.read()).done) { /* Drain the stopped answer. */ }
+		} finally {
+			host.endTurn();
+			server.stop();
+		}
+	});
+
 	test("serves the bridge on /api/ai/*, streams a real turn, and leaves the turn alone on shutdown", async () => {
 		const host = fakePi();
 		const bridge = createPiSessionBridgeHub(host.pi).createBridge(host.ctx as never, {});

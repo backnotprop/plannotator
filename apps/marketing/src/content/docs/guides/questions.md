@@ -30,8 +30,35 @@ Recommended: Local only, purged after 30 days
 
 - `:::question` asks for one choice. `:::question-multi` accepts any number of choices. `:::question-text` asks for free text.
 - The first line is the question. Other lines before the choices are context. Agents are told never to send a bare question: a sentence or three on what the choice affects, what they know, and why they recommend what they do.
-- `Recommended:` names the agent's recommendation. If it does not match a choice, Plannotator shows it as a suggested answer.
+- `Recommended:` names the agent's recommendation. It matches a choice by its label, or by the start of it (`Recommended: Unpin it` matches `- Unpin it: the toast says so`). If it matches no choice, or the start of more than one, Plannotator adds it to the list as one more answer, tagged Recommended, right before **Other…**. Picking it, or **Accept recommended**, answers with that text.
 - `- [x]` marks a choice as already settled. Agents use it when they resubmit a plan with a question you already answered.
+
+## Optional lines and picture choices
+
+A question can carry a few more lines, each on its own line after the question. They are all optional, and most questions need none of them. The [Plannotator Inbox](/docs/reference/inbox/) draws them on the card as described below; in plan review and annotate they show as plain text under the question:
+
+- `Stakes: <one sentence>`: what the choice affects. The card shows it in bold under the question.
+- `Shows: ![alt](path)` or `Shows: [name](file)`: the one picture or file the decision is about. The card shows it as a chip that opens it.
+- `Why: <one line>`: why the agent recommends its answer. The card shows it under the choices, as "Why <the recommended choice>: …".
+- `Reversible: no — <why>`: the answer cannot be taken back. The card shows a **Can't be undone** tag.
+
+When the options are visual, a choice can be a picture: `- [ ] Label — ![alt](path) consequence`. The card draws the choices as picture tiles. Click a picture, or its label, to pick it; the zoom button in the corner opens the picture large without picking it. The answer the agent gets back is the label.
+
+```markdown
+:::question
+Which checkout drawer should ship?
+Stakes: ships to all of checkout on Thursday; changing it later costs a week of QA.
+
+- [ ] A · Total on top — ![Drawer A](drawer-a.png) closest to today
+- [ ] B · Total pinned with Pay — ![Drawer B](drawer-b.png) the total never scrolls away
+
+Recommended: B · Total pinned with Pay
+
+Why: on a phone only B keeps the total next to the button.
+:::
+```
+
+If a picture cannot be shown, the choices are ordinary rows with their labels. None of these lines changes which answer belongs to which question.
 
 ## How you answer
 
@@ -100,6 +127,7 @@ Holds up: staging deploy; release notes
 - `Stopped: <why>`: the agent cannot go on until you answer. The thread goes first, under **Stopped on you**. Agents are told to write it only when they truly cannot continue.
 - `Holds up: <work>; <work>`: the agent goes on, and the named work waits on your answer. The thread shows under **Holding up work**, unless a question also says `Stopped:`, which wins.
 - A negative value (`no`, `none`, `n/a`, a dash) means no stop: `Stopped: no` is read as if the line were not there, and a `Holds up:` entry `none` holds nothing up.
+- A question that says `Stopped:` or `Holds up:` should also say `Stakes:`. When it does not, the agent is reminded when it sends the message; the message is sent either way.
 
 ## Teaching your agent to ask
 

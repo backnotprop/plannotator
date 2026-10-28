@@ -292,7 +292,7 @@ describe("what the agent sees", () => {
     expect(command).toMatchObject({ type: "reply", thread_id: threadId, reply_to: messageId, ack_of: messageId });
     expect(command.body).toBe(`The person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.`);
     expect(inboxWakeText(command)).toBe(
-      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.`,
+      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.\n\n[thread ${threadId}]`,
     );
     // Another session is never handed it.
     expect(await poll(server, "ses_other")).toEqual([]);
@@ -499,7 +499,7 @@ describe("the Pi and OpenCode wake (agent-link)", () => {
         for (let i = 0; i < 200 && delivered.length === 0; i++) await Bun.sleep(50);
         expect(delivered).toHaveLength(1);
         const subject = server.store.threadSubject(sent.thread_id);
-        expect(delivered[0]!.text).toBe(`Plannotator Inbox: ${subject} (${delivered[0]!.id})\n${inboxAckLine(sent.message_id)}`);
+        expect(delivered[0]!.text).toBe(`Plannotator Inbox: ${subject} (${delivered[0]!.id})\n${inboxAckLine(sent.message_id)}\n\n[thread ${sent.thread_id}]`);
         let shown: string | null = null;
         for (let i = 0; i < 100 && !shown; i++) {
           shown = (await windowMessage(server, sent.thread_id, sent.message_id)).ack?.delivered_at ?? null;

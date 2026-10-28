@@ -3,7 +3,8 @@
 What changed: every Inbox tab of one browser origin shares ONE event stream
 (`packages/inbox/sharedEvents.ts`). A Web Locks leader holds the EventSource
 and passes each frame on over a BroadcastChannel; followers only listen. See
-"One event stream per browser" in CLAUDE.md.
+"One event stream per browser" in
+docs/agent-guides/inbox-notifications-and-agents.md.
 
 All runs: macOS, the compiled binary built from this branch
 (`.local/plannotator`), scratch data dirs under the OS temp dir (never `/tmp`,

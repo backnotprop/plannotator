@@ -14,6 +14,7 @@
  * a shell and is injectable for tests.
  */
 
+import { childEnv } from "./child-env";
 import { spawnSync } from "node:child_process";
 import { isValidUrlHost } from "./config";
 
@@ -80,6 +81,7 @@ export type TailscaleRunner = (args: string[], timeoutMs: number) => TailscaleRu
 /** Run the `tailscale` CLI without a shell. */
 export const runTailscale: TailscaleRunner = (args, timeoutMs) => {
   const result = spawnSync("tailscale", args, {
+    env: childEnv(),
     encoding: "utf8",
     windowsHide: true,
     timeout: timeoutMs,

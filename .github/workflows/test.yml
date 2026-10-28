@@ -27,7 +27,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -97,11 +97,15 @@ jobs:
           packages/ui/markdownEditorFidelity.test.tsx
           packages/ui/annotationDraftPersistence.test.tsx
           packages/ui/codeAnnotationDraftPersistence.test.tsx
+          packages/ui/utils/richClipboard.test.ts
+          packages/ui/components/Viewer.richCopy.test.tsx
+          packages/ui/components/html-viewer/htmlRichCopy.test.tsx
           packages/ui/components/html-viewer/srcdoc.test.ts
           packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
           packages/ui/components/html-viewer/htmlLiveProtocol.test.tsx
           packages/ui/components/html-viewer/HtmlViewer.vimHud.test.tsx
           packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
+          packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
           packages/ui/components/Viewer.vimMode.integration.test.tsx
           packages/ui/components/CodeFilePopout.lineScroll.test.tsx
           packages/ui/hooks/useVimSelection.test.tsx
@@ -135,10 +139,15 @@ jobs:
           packages/ui/components/Viewer.askAISelectionLine.test.tsx
           packages/ui/components/Viewer.textComments.test.tsx
           packages/ui/components/ImageLightbox.test.tsx
+          packages/ui/components/ImageZoomStage.wheelHint.test.tsx
+          packages/ui/components/Viewer.imageRegions.test.tsx
           packages/ui/components/HostTitle.dom.test.tsx
+          packages/ui/components/RefHoverCard.dom.test.tsx
           packages/inbox/images.test.tsx
           packages/inbox/inlineImages.test.tsx
+          packages/inbox/refusedImages.test.tsx
           packages/inbox/codeAttachment.test.tsx
+          packages/inbox/copyFile.test.tsx
           packages/inbox/fileViewClean.test.tsx
           packages/inbox/links.test.tsx
           packages/inbox/issueRefs.test.tsx
@@ -150,14 +159,22 @@ jobs:
           packages/inbox/replaced.test.tsx
           packages/inbox/reask.test.tsx
           packages/inbox/openQuestions.test.tsx
+          packages/inbox/decisionMode.test.tsx
+          packages/inbox/decisionCardContract.test.tsx
           packages/inbox/threadFolding.test.tsx
+          packages/inbox/choiceLabels.test.tsx
           packages/inbox/pasteTarget.test.ts
           packages/inbox/seenOnSight.test.tsx
           packages/inbox/projectList.test.tsx
+          packages/inbox/rowBadges.test.tsx
           packages/inbox/softQuietRows.test.tsx
           packages/inbox/sidebarQuiet.test.tsx
           packages/inbox/leakedSubject.test.tsx
           packages/inbox/connectPromptRow.test.tsx
+          packages/inbox/boardPage.test.tsx
+          packages/inbox/boardProjectFilter.test.tsx
+          packages/inbox/boardSend.test.tsx
+          packages/inbox/boardOff.test.tsx
           packages/inbox/soundIntro.test.tsx
           packages/inbox/soundSettings.test.tsx
           packages/inbox/notifyHook.test.tsx
@@ -165,6 +182,7 @@ jobs:
           packages/inbox/attachmentStepping.test.tsx
           packages/inbox/imageZoom.test.tsx
           packages/inbox/fullView.test.tsx
+          packages/inbox/phoneStepping.test.tsx
           packages/inbox/fullScreenThread.test.tsx
           packages/inbox/sideBySide.test.tsx
           packages/inbox/attachmentSteppingSave.test.tsx
@@ -177,35 +195,52 @@ jobs:
           packages/inbox/undelivered.test.tsx
           packages/inbox/tagAgents.test.tsx
           packages/inbox/restartWarning.test.tsx
+          packages/inbox/reloadHosts.test.tsx
           packages/inbox/pasteFiles.test.tsx
+          packages/inbox/questionCardPhone.test.tsx
           packages/inbox/markRead.test.tsx
           packages/inbox/ack.test.tsx
           packages/inbox/actionChecklist.test.tsx
+          packages/inbox/actionDraftSend.test.tsx
+          packages/inbox/actionNoteRefusal.test.tsx
           packages/inbox/wordsOnlyTwoAsks.test.tsx
+          packages/inbox/firstRunNotifications.test.tsx
+          packages/inbox/tour.test.tsx
+          packages/inbox/sentReply.test.tsx
+          packages/inbox/skillHighlightSent.test.ts
           packages/inbox/threadFoot.test.tsx
           packages/inbox/replyDrafts.test.tsx
           packages/inbox/skipNote.test.tsx
           packages/inbox/picksWhileComposing.test.tsx
           packages/inbox/projectMenu.test.tsx
           packages/inbox/rowMenu.test.tsx
+          packages/inbox/pinnedThreads.test.tsx
           packages/inbox/fileBack.test.tsx
           packages/inbox/archived.test.tsx
           packages/inbox/openStaysPut.test.tsx
           packages/inbox/clickToRefresh.test.tsx
+          packages/inbox/pullToRefresh.test.tsx
           packages/inbox/threadReadRetry.test.tsx
           packages/inbox/tabCountWindow.test.tsx
           packages/inbox/phoneList.test.tsx
           packages/inbox/listLabels.test.tsx
           packages/inbox/listRowMemo.test.tsx
           packages/inbox/rowTicks.test.tsx
+          packages/inbox/guideDiffStyle.test.tsx
           packages/inbox/componentTooltips.test.tsx
           packages/inbox/toast.test.tsx
           packages/inbox/attachmentsHeader.test.tsx
+          packages/inbox/threadArtifacts.test.tsx
           packages/inbox/sentQuestionLocked.test.tsx
           packages/inbox/themeToggle.test.tsx
+          packages/inbox/sidebarUpdateDot.test.tsx
+          packages/inbox/updateStuck.test.tsx
+          packages/inbox/palettePicker.test.tsx
           packages/inbox/textSize.test.tsx
+          packages/inbox/runLine.test.tsx
           packages/inbox/agentNoteDialog.test.tsx
           packages/inbox/agentsSettings.test.tsx
+          packages/inbox/promptsSettings.test.tsx
           packages/inbox/connectNextStep.test.tsx
           packages/inbox/settingsSections.test.tsx
           packages/inbox/searchPalette.test.tsx
@@ -213,12 +248,15 @@ jobs:
           packages/inbox/openIn.test.tsx
           packages/inbox/htmlLinks.test.tsx
           packages/inbox/videoAttachment.test.tsx
+          packages/inbox/markupAddsToReply.test.tsx
           packages/inbox/commentSubmitKey.test.tsx
           packages/inbox/skillReferences.test.tsx
           packages/inbox/messageComments.test.tsx
+          packages/inbox/feedbackDialog.test.tsx
           packages/ui/components/HumanOnlySkillNotice.test.tsx
           packages/ui/components/MenuVersionSection.test.tsx
           packages/ui/components/blocks/QuestionBlock.test.tsx
+          packages/ui/components/blocks/QuestionBlock.pictures.test.tsx
           packages/ui/components/blocks/QuestionContext.lines.test.tsx
           packages/ui/components/blocks/QuestionBlock.host.test.tsx
           packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
@@ -250,6 +288,8 @@ jobs:
           packages/review-editor/App.agentTool.test.tsx
           packages/review-editor/App.guideViewed.test.tsx
           packages/review-editor/App.commitsJj.test.tsx
+          packages/review-editor/App.emptyDiffSwitch.test.tsx
+          packages/review-editor/App.planLookTwoTabs.test.tsx
           packages/review-editor/components/AnnotationToolbar.placement.test.tsx
           packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
           packages/review-editor/components/FileHeader.edit.test.tsx
@@ -263,6 +303,7 @@ jobs:
           packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
           packages/review-editor/components/AllFilesCodeView.changeNavigation.test.tsx
           packages/review-editor/components/MarkdownFilePreview.test.tsx
+          packages/review-editor/components/guide/overviewDiagram.test.tsx
           packages/review-editor/hooks/useMarkdownPreview.test.tsx
           packages/review-editor/components/MarkdownViewMenu.test.tsx
           packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
@@ -291,6 +332,7 @@ jobs:
           packages/review-editor/components/FileTree.search-placement.test.tsx
           packages/review-editor/components/FileTree.fileKinds.test.tsx
           packages/review-editor/components/FileHeader.fileKind.test.tsx
+          packages/review-editor/components/PackageChangesCard.test.tsx
           packages/review-editor/components/FileTreeNode.controls.test.tsx
           packages/ui/components/Settings.analysis.test.tsx
           packages/ui/components/AnnotationPanel.props.test.tsx
@@ -299,6 +341,7 @@ jobs:
           packages/ui/components/Viewer.consumer.test.tsx
           packages/ui/components/Viewer.documentHeader.test.tsx
           packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
+          packages/ui/components/ImageAnnotator/ImageAnnotator.escape.test.tsx
           packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
           packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
           packages/ui/utils/undoHistory.dom.test.ts
@@ -308,14 +351,17 @@ jobs:
           packages/ui/hooks/useAnnotationHighlighter.test.tsx
           packages/ui/hooks/annotationRestoreVerify.test.tsx
           packages/ui/hooks/useAnnotationDraft.seam.test.tsx
+          packages/ui/hooks/useAnnotationDraft.documents.test.tsx
           packages/ui/hooks/useExternalAnnotations.seam.test.tsx
           packages/ui/hooks/useAIChat.seam.test.tsx
+          packages/ui/hooks/useAIChat.supersede.test.tsx
           packages/ui/hooks/useFileBrowser.seam.test.tsx
           packages/ui/hooks/usePlanDiff.test.tsx
           packages/ui/hooks/useLinkedDoc.test.tsx
           packages/ui/components/DocBadges.test.tsx
           packages/editor/planDiffAutoExit.test.tsx
           packages/editor/App.archiveReadOnly.test.tsx
+          packages/editor/App.refCards.test.tsx
           packages/editor/App.htmlChrome.test.tsx
           packages/editor/App.sidebarTabsAgentTerminal.test.tsx
           packages/editor/App.htmlLinkDraft.test.tsx
@@ -324,11 +370,14 @@ jobs:
           packages/editor/App.planRevision.test.tsx
           packages/editor/App.liveVersion.test.tsx
           packages/editor/askSessionDrafts.test.tsx
+          packages/editor/askDocumentLatch.test.tsx
           packages/review-editor/App.decisionControl.test.tsx
           packages/ui/components/TerminalToolsAnnouncementDialog.test.tsx
           packages/editor/App.terminalToolsAnnouncement.test.tsx
           packages/ui/components/AskSessionAnnouncementDialog.test.tsx
           packages/editor/App.askSessionAnnouncement.test.tsx
+          packages/ui/components/InboxAnnouncementDialog.test.tsx
+          packages/editor/App.inboxAnnouncement.test.tsx
           packages/ui/components/AgentToolAnnouncementDialog.test.tsx
           packages/ui/components/ServerSessionReplacedBanner.test.tsx
           packages/editor/App.agentTool.test.tsx
@@ -366,7 +415,9 @@ jobs:
           packages/editor/App.markdownUnanchored.test.tsx
           packages/editor/App.restoreAcrossEdit.test.tsx
           packages/editor/App.documentDrafts.test.tsx
+          packages/editor/App.planLinkedDrafts.test.tsx
           packages/editor/App.bundle.test.tsx
+          packages/editor/App.bundleBackScroll.test.tsx
           packages/editor/annotationDraftStaleRetry.test.tsx
           packages/ui/components/blocks/AlertBlock.title.test.tsx
           packages/ui/components/blocks/AlertBlock.seam.test.tsx
@@ -375,6 +426,7 @@ jobs:
           packages/ui/components/Viewer.driftedRestore.test.tsx
           packages/ui/components/Viewer.crossBlockRestore.test.tsx
           packages/ui/components/Viewer.restoreMovedAnchors.test.tsx
+          packages/ui/components/Viewer.questionContract.test.tsx
           packages/ui/components/Viewer.alertDraftRestore.test.tsx
           packages/ui/components/Viewer.belowTitle.test.tsx
           packages/ui/utils/belowTitleSlot.test.ts
@@ -390,12 +442,16 @@ jobs:
           packages/ui/components/CommentPopover.multiTarget.test.tsx
           packages/ui/aiProviderConfigPersistence.test.tsx
           packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
+          packages/ui/components/sidebar/FileBrowser.fileLimit.test.tsx
           packages/ui/components/ui/mobile-foundation.test.tsx
           packages/ui/components/Settings.vim.test.tsx
           packages/ui/components/Settings.annotateParity.test.tsx
           packages/ui/components/Settings.compactDisplay.test.tsx
           packages/ui/components/Settings.customFont.test.tsx
           packages/ui/components/Settings.documentTextSize.test.tsx
+          packages/ui/components/Settings.experimental.test.tsx
+          packages/ui/components/Settings.gridChoice.test.tsx
+          packages/editor/App.planLookNotice.test.tsx
           packages/ui/config/documentTextSizeSetting.test.ts
           packages/ui/utils/diffFonts.test.ts
           packages/ui/components/Settings.agentTool.test.tsx
@@ -453,7 +509,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -564,7 +620,7 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         if: steps.gate.outputs.run == 'true'
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies
         if: steps.gate.outputs.run == 'true'
@@ -619,13 +675,39 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Run focused uninstall tests
         run: bun test packages/server/uninstall.test.ts apps/hook/server/cli.test.ts packages/server/auto-update.test.ts
+
+  qwen-installers-windows:
+    # The Windows installers' Qwen Code steps on real Windows: install.ps1's
+    # functions and install.cmd's PowerShell under pwsh and Windows PowerShell
+    # 5.1, and install.cmd's subroutines under cmd.exe. The fake qwen is a
+    # qwen.cmd, as npm installs it, and every folder name has a space. The
+    # tests use temporary homes and a PATH of system folders, so no real qwen
+    # runs and the runner's own user folders are never touched.
+    name: Qwen Code installer steps (Windows)
+    runs-on: windows-latest
+    # Windows PowerShell 5.1 starts slowly on the runner: about 20 minutes.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run the Qwen Code installer tests
+        run: bun test scripts/install.test.ts --test-name-pattern "Qwen Code"
 
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an
@@ -641,7 +723,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:

@@ -184,7 +184,11 @@ Install the CLI for slash command support:
 curl -fsSL https://plannotator.ai/install.sh | bash
 ```
 
-This also clears cached plugin versions for both OpenCode 1 and OpenCode 2. To update the plugin later, run the install script again and restart OpenCode.
+This also clears cached plugin versions for both OpenCode 1 and OpenCode 2. To update the plugin later, run the install script again, then restart OpenCode 1, or on OpenCode 2 run `opencode2 reload`. Quitting OpenCode 2 is not enough: its background server keeps the plugin it loaded until `opencode2 reload`. A reload also cancels any permission prompt OpenCode is showing.
+
+On OpenCode 2 you can also update without the script: `opencode2 plugin list && opencode2 plugin update @plannotator/opencode@latest` updates and reloads in one step. The `plugin list` first is needed in a folder OpenCode has not opened yet, where `plugin update` alone fails with "Plugin is not configured". Give the spec exactly as your `opencode.json` has it (the name alone is also refused as "not configured"). Without a target, `opencode2 plugin update` updates every plugin that has a newer version. If your config pins an exact version (`@plannotator/opencode@0.28.20`), `plugin update` does nothing: change the pin to `@plannotator/opencode@latest`, then run `opencode2 reload`. Do not use `opencode2 plugin add` for this, because it adds a second entry beside the pinned one.
+
+The Inbox's Settings → Agents says when an open session runs an older plugin, with the command to copy. After a reload, an idle OpenCode 2 session shows there again after its next event.
 
 ## The `plannotator` tool
 

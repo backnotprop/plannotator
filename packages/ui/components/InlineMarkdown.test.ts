@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import katex from 'katex';
 import { InlineMarkdown, resetDigitHexIssueRefs, setDigitHexIssueRefs, trimUrlTail } from './InlineMarkdown';
+import { CodePathValidationContext, type CodePathValidationContextValue } from './CodePathValidationContext';
 import { getMathRenderer, getMathRendererSource, resetMathRenderer, setMathRenderer } from '../utils/math';
 
 function renderInline(text: string): string {
@@ -342,5 +343,82 @@ describe('digit-only #refs vs hex swatches (#1932)', () => {
       expect(isSwatch(html)).toBe(true);
       expect(html).not.toContain('/issues/');
     }
+  });
+});
+
+describe('cross-repo owner/repo#N refs', () => {
+  type Opts = { githubRepo?: string; repoHost?: string; onOpenCodeFile?: (p: string) => void; validation?: CodePathValidationContextValue };
+  const render = (text: string, { validation, ...opts }: Opts = {}) => {
+    const el = createElement(InlineMarkdown, { text, ...opts });
+    return renderToStaticMarkup(validation ? createElement(CodePathValidationContext.Provider, { value: validation }, el) : el);
+  };
+  const hrefs = (html: string) => [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+  const GH = { githubRepo: 'acme/herdr', repoHost: 'github.com' };
+
+  test('links on GitHub with the label as written; a bare #N still goes to the project', () => {
+    const html = render('herdr#104 is backnotprop/plannotator-tui#104, not #104.', GH);
+    expect(html).toContain('>backnotprop/plannotator-tui#104</a>');
+    expect(hrefs(html)).toEqual([
+      'https://github.com/backnotprop/plannotator-tui/issues/104',
+      'https://github.com/acme/herdr/issues/104',
+    ]);
+  });
+
+  test("links on the project's GitLab host with /-/issues", () => {
+    const html = render('See group/project#7.', { githubRepo: 'team/app', repoHost: 'gitlab.example.com' });
+    expect(hrefs(html)).toEqual(['https://gitlab.example.com/group/project/-/issues/7']);
+  });
+
+  test('a caller that names no repo, or an unknown self-hosted host, leaves it plain text', () => {
+    expect(render('See owner/repo#5')).not.toContain('<a');
+    expect(hrefs(render('See owner/repo#5', { githubRepo: 'acme/web' }))).toEqual(['https://github.com/owner/repo/issues/5']);
+    const html = render('See owner/repo#5', { githubRepo: 'a/b', repoHost: 'git.internal.example' });
+    expect(html).not.toContain('<a');
+    expect(html).toContain('owner/repo#5');
+  });
+
+  test('a repo named like a .js file is a ref, not a code path, unless the viewer knows the file', () => {
+    // No file handler: a ref.
+    expect(hrefs(render('Fixed in vercel/next.js#1 and my_org/repo#2', GH))).toEqual([
+      'https://github.com/vercel/next.js/issues/1',
+      'https://github.com/my_org/repo/issues/2',
+    ]);
+    // A handler, and the validator says the path is not a file: still a ref.
+    const missing: CodePathValidationContextValue = { ready: true, validated: new Map([['vercel/next.js', { status: 'missing' }]]) as never };
+    expect(hrefs(render('Fixed in vercel/next.js#1', { ...GH, onOpenCodeFile: () => {}, validation: missing }))).toEqual(['https://github.com/vercel/next.js/issues/1']);
+    // A handler and a file it knows (or cannot check): the code-file chip, as before.
+    const found: CodePathValidationContextValue = { ready: true, validated: new Map([['src/app.js', { status: 'found', resolved: 'src/app.js' }]]) as never };
+    for (const validation of [found, undefined]) {
+      const html = render('See src/app.js#12 now', { ...GH, onOpenCodeFile: () => {}, validation });
+      expect(html).not.toContain('/issues/');
+      expect(html).toContain('src/app.js');
+    }
+  });
+
+  test('file paths with a fragment are not refs', () => {
+    for (const text of ['docs/guide.md#2', 'src/foo.ts#L10', 'src/foo.ts#10', 'packages/core/forge-refs.ts#12', '../repo#3', 'owner/repo.git#4']) {
+      expect(render(text, GH)).not.toContain('/issues/');
+    }
+  });
+
+  test('schemeless hosts, addresses, prose pairs and names starting with punctuation are not refs', () => {
+    for (const text of ['example.com/page#1', 'www.example.com/x#1', 'john@owner/repo#1', 'and/or#1', '-owner/repo#7', '1/2#3']) {
+      expect(hrefs(render(text, GH))).toEqual([]);
+    }
+  });
+
+  test('_owner/repo#1 is done_ stays italic', () => {
+    expect(render('_owner/repo#1 is done_', GH)).toMatch(/^<em>/);
+  });
+
+  test('a URL containing owner/repo#N is linked once, whole', () => {
+    const url = 'https://example.com/search?q=owner/repo#12';
+    expect(hrefs(render(`Open ${url} now`, GH))).toEqual([url]);
+  });
+
+  test('inside inline code it is not linked', () => {
+    const html = render('Run `gh pr view owner/repo#12`', GH);
+    expect(html).not.toContain('<a');
+    expect(html).toContain('<code');
   });
 });

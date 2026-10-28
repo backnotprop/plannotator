@@ -8,7 +8,7 @@ Decision record: `adr/decisions/007-portable-guided-reviews-20260815.md`; spec: 
 - `viewer/` — the browser entry that turns an exported guide (`<script id="plannotator-guided-review">`) into the same guide UI Plannotator renders: `@plannotator/guide-viewer` over `AllFilesCodeView` in `readOnly` mode. Multi-file Vite build (`vite.viewer.config.ts`): `viewer.<hash>.js/.css`, one chunk per Shiki grammar, the highlight worker as a file, fonts as files.
 - `worker/` — the Cloudflare Worker: serves `/v1/*` from the `guides-show-viewer` R2 bucket (immutable, CORS `*` so `file://` documents can load it), the landing page from static assets, and shared guides (`/g/<id>`, `/api/g*`) through the share handler over the `guides-show-guides` R2 bucket.
 - `share/` — the guide share service (contract: `adr/implementation/guide-share-hosting.md`): `core/handler.ts` is the pure request handler the Worker runs, `core/storage.ts` the store interface, `stores/` the R2 and in-memory stores.
-- `build/` — `manifest-plugin` (emits `manifest.json`: entry paths + SRI + grammar chunk map), `read-only-stubs-plugin` (keeps annotation UI out of the bundle), `deploy-viewer` (add-only R2 upload), `check-budgets`, `sync-manifest`, `export-sample`, `serve-local`.
+- `build/` — `manifest-plugin` (emits `manifest.json`: entry paths + SRI + grammar chunk map), `read-only-stubs-plugin` (keeps annotation UI out of the bundle), `deploy-viewer` (add-only R2 upload: chunks and assets first, then the entry CSS, then the entry JS, each upload retried; logic in `viewer-upload`), `verify-viewer` (HEADs every built file on the live site and compares its size), `run-command` (a process with a time limit), `check-budgets`, `sync-manifest`, `export-sample`, `serve-local`.
 - `packages/core/guide-viewer-manifest.ts` (generated here by `sync-manifest`) — checked in; what Plannotator embeds so exports pin the viewer this release publishes. Lists only the grammar chunks `detectGuideLanguages` can reference (every chunk is still built and published). Regenerate with `bun run build:viewer && bun run sync:manifest`; CI fails if stale.
 - `site/` — landing page.
 
@@ -42,6 +42,7 @@ Then publish the viewer build and the Worker (the domain in `wrangler.toml` `rou
 ```sh
 bun run build:viewer && bun run deploy:viewer     # add-only upload of dist/viewer to /v1/
 wrangler deploy
+bun run verify:viewer -- --base https://<your domain>/v1/   # every file answers, entry headers right
 ```
 
 Uploads are anonymous by design (the encrypted default means the host cannot read them). Two brakes exist in code: the size cap (25 MiB per guide) and a per-IP rate limit on **creation only**. `POST /api/g` runs through Cloudflare's native rate limiting binding, keyed on `CF-Connecting-IP`, and answers `429 { "error": "too many requests" }` with `Retry-After: 60` past 20 creates per minute. That ceiling is far above what a person does (a few shares an hour), so a compliant user never meets it and only a script does. Reads, `DELETE` (already gated by the delete token issued at create), preflights and the `/v1/` assets are never limited.

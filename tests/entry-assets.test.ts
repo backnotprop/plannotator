@@ -85,31 +85,50 @@ describe('review entry assets', () => {
   // through utils/mermaid's own import('mermaid'), so a plan with no diagram
   // never pays for it in a chunked build (the share portal). Re-adding the
   // eager entry to either app would put the whole runtime back into that
-  // entry chunk with no error anywhere; the review editor never renders a
-  // Mermaid block at all.
+  // entry chunk with no error anywhere; the review editor draws diagrams only
+  // through the separately served engine (below).
   test('neither app registers the eager Mermaid runtime', () => {
     expect(read('packages/editor/App.tsx')).not.toContain('mermaid-eager');
     expect(read('packages/review-editor/App.tsx')).not.toContain('mermaid-eager');
   });
 
-  // The review app renders Mermaid and Graphviz fences as code, never as
-  // diagrams (Markdown preview; approval record, 2026-10-12 amendment:
-  // performance wins). A lazy import does not help here: the single-file
-  // build inlines every dynamic import, so naming a diagram engine anywhere in
-  // the review app's graph puts ~6.7 MB of runtimes into every review page.
-  // The built-bundle markers below are the proof; this names the culprit.
+  // The review app draws Mermaid and Graphviz fences (Markdown preview, guide
+  // overviews) ONLY through the engine the review server serves as separate
+  // files (apps/review/diagram-engine; approval "review-diagrams-on-demand",
+  // honoring the 2026-10-12 rule that diagrams return to code review only
+  // through true lazy loading, never by bundling). A lazy import does not
+  // help here: the single-file build inlines every dynamic import, so naming
+  // a diagram engine anywhere in the review page's graph puts ~6.7 MB of
+  // runtimes into every review page. The built-bundle markers below are the
+  // proof; this names the culprit. The engine's own sources live in
+  // apps/review/diagram-engine and are reached only by its build script.
   test('the review app imports no diagram engine, not even lazily', () => {
     const diagramModule = /(?:from\s+|import\s*\(?\s*)['"](?:[^'"]*(?:components\/(?:MermaidBlock|GraphvizBlock|DiagramBlock|Viewer)|components\/diagram\/[^'"]*|utils\/(?:mermaid|graphviz|diagram-render)[^'"\/]*)|mermaid|@viz-js\/viz)['"]/;
+    const engineSources = /(?:from\s+|import\s*\(?\s*)['"][^'"]*diagram-engine\/(?:engine|runtime-[a-z]+)(?:\.tsx?)?['"]/;
     const walk = (dir: string): string[] =>
       readdirSync(resolve(root, dir), { withFileTypes: true }).flatMap((entry) =>
         entry.isDirectory()
           ? entry.name === 'node_modules' || entry.name === 'dist' ? [] : walk(`${dir}/${entry.name}`)
           : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
       );
-    const offenders = ['packages/review-editor', 'packages/guide-viewer', 'apps/review']
+    const pageSources = ['packages/review-editor', 'packages/guide-viewer', 'apps/review']
       .flatMap(walk)
-      .filter((path) => diagramModule.test(read(path)));
-    expect(offenders).toEqual([]);
+      .filter((path) => !path.startsWith('apps/review/diagram-engine/'));
+    expect(pageSources.filter((path) => diagramModule.test(read(path)))).toEqual([]);
+    expect(pageSources.filter((path) => engineSources.test(read(path)))).toEqual([]);
+    // The page reaches the engine only by URL, from the one loader, and only
+    // a diagram fence asks it to load (so a review without diagrams never
+    // requests it).
+    const urlImports = pageSources.filter((path) => /\bimport\(\s*\/\*\s*@vite-ignore\s*\*\/\s*url\s*\)/.test(read(path)));
+    expect(urlImports).toEqual(['packages/review-editor/utils/diagramEngine.ts']);
+    const loaders = pageSources.filter((path) => path !== 'packages/review-editor/utils/diagramEngine.ts' && /\bloadDiagramEngine\b/.test(read(path)));
+    expect(loaders).toEqual(['packages/review-editor/components/ReviewDiagramFence.tsx']);
+    // The engine build rewrites the renderer slots' runtime imports to the
+    // served URLs and fails unless it finds exactly one each.
+    const build = read('apps/review/diagram-engine/build.ts');
+    expect(build).toContain("path.join(uiRoot, 'utils/mermaid.ts')");
+    expect(build).toContain("path.join(uiRoot, 'utils/graphviz.ts')");
+    expect(read('apps/review/package.json')).toContain('"build": "vite build && bun diagram-engine/build.ts"');
   });
 
   // The other half of the optimization: the renderers must stay OFF the
@@ -221,8 +240,9 @@ describe('review entry assets', () => {
   //   12 the plan editor loads the runtime lazily by policy, and an eager
   //   import creeping back in would only show up as a bigger portal entry
   //   chunk. The review bundle carries no Mermaid and no Graphviz at all: its
-  //   Markdown preview shows diagram fences as code (see the import guard
-  //   above), so both presence markers are asserted absent there.
+  //   diagrams come from the separately served engine files (see the import
+  //   guard above, and the engine files checked below), so both presence
+  //   markers are asserted absent there.
   // - Presence markers (a KaTeX class name, a Mermaid diagram id, an
   //   Emscripten symbol from Graphviz, the bridge global), which only say the
   //   runtime is still inlined by inlineDynamicImports. KaTeX is inlined
@@ -244,6 +264,43 @@ describe('review entry assets', () => {
       const missing = present.filter((marker) => !html.includes(marker));
       const unexpected = absent.filter((marker) => html.includes(marker));
       expect({ path, missing, unexpected }).toEqual({ path, missing: [], unexpected: [] });
+    });
+  }
+
+  // The engine files the review server serves, built beside the page by
+  // `apps/review`'s build (diagram-engine/build.ts) and copied by build:hook.
+  // Each runtime lives in its own file, the engine carries neither, and the
+  // engine brings no React of its own: every module it shares with the page
+  // is read from the host the page installs (no bare import survives).
+  const ENGINE_DIRS = ['apps/review/dist/diagram-engine', 'apps/hook/dist/diagram-engine'];
+  for (const dir of ENGINE_DIRS) {
+    test.skipIf(!existsSync(resolve(root, dir)))(`${dir} holds the engine and both runtimes, apart`, () => {
+      const file = (name: string) => readFileSync(resolve(root, dir, `${name}.js`), 'utf8');
+      const engine = file('engine');
+      const mermaid = file('mermaid');
+      const graphviz = file('graphviz');
+      const facts = {
+        dir,
+        engineHasMermaid: engine.includes('flowchart-v2'),
+        engineHasGraphviz: engine.includes('viz_set_y_invert'),
+        engineReadsHost: engine.includes('__plannotatorDiagramEngineHost'),
+        // Every import the engine names (statements and literal dynamic
+        // imports); the runtimes are imported by URL from the host, never by name.
+        engineImports: new Bun.Transpiler({ loader: 'js' }).scanImports(engine).map((entry) => entry.path),
+        mermaidRuntime: mermaid.includes('flowchart-v2'),
+        graphvizRuntime: graphviz.includes('viz_set_y_invert'),
+        mermaidCarriesKatex: mermaid.includes('katex-display'),
+      };
+      expect(facts).toEqual({
+        dir,
+        engineHasMermaid: false,
+        engineHasGraphviz: false,
+        engineReadsHost: true,
+        engineImports: [],
+        mermaidRuntime: true,
+        graphvizRuntime: true,
+        mermaidCarriesKatex: false,
+      });
     });
   }
 

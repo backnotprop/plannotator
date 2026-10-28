@@ -26,7 +26,7 @@ beforeEach(() => {
 	process.env.PLANNOTATOR_REMOTE = "0";
 	delete process.env.PLANNOTATOR_PORT;
 	delete process.env.PLANNOTATOR_UPDATE_CHECK;
-	// A fresh cache: the scheduled daily check answers from it, so no request is made.
+	// A fresh cache: the scheduled release check answers from it, so no request is made.
 	writeUpdateState({ latestRelease: { tag: "99.0.0", fetchedAt: Date.now() } }, dataDir);
 });
 
@@ -69,6 +69,24 @@ describe("updateAvailable on the Pi servers", () => {
 			expect((await payload(plan.url)).updateAvailable).toBeUndefined();
 		} finally {
 			omp.stop();
+			plan.stop();
+		}
+	});
+});
+
+describe("updateCheckFailing on the Pi servers (checking has failed for hours)", () => {
+	test("says so with Pi's own command, which needs no GitHub", async () => {
+		const since = Date.now() - 4 * 60 * 60_000;
+		writeUpdateState(
+			{ latestRelease: { tag: "0.0.1", fetchedAt: since - 60_000 }, releaseCheck: { attemptedAt: Date.now(), failedAt: Date.now(), failingSince: since, error: "offline" } },
+			dataDir,
+		);
+		const plan = await startPlanReviewServer({ plan: "# Plan", origin: "pi", htmlContent: MINIMAL_HTML });
+		try {
+			const body = await payload(plan.url);
+			expect(body.updateCheckFailing).toEqual({ since: new Date(since).toISOString(), error: "couldn't reach GitHub", command: "pi update --extensions" });
+			expect(body.updateAvailable).toBeUndefined();
+		} finally {
 			plan.stop();
 		}
 	});

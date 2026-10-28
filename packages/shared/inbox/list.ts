@@ -69,9 +69,11 @@ import {
   type InboxListRow,
   type InboxListSection,
   inboxHasUnsent,
+  inboxRowArchived,
   type InboxRowUnsent,
   type InboxSectionId,
 } from "@plannotator/core/inbox-types";
+import { inboxUrgencyOf } from "@plannotator/core/inbox-questions";
 
 /** The facts a thread is placed by (all on its list row). */
 export type InboxSectionFacts = Pick<
@@ -89,9 +91,15 @@ export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
   // The person's Re-ask note is the last message: it waits on the agent (approval "inbox-reask").
   if (row.reask_pending === true) return "sent";
   if (row.questions.open > 0) {
-    if (row.questions.stopped) return "stopped";
-    if (row.questions.holds_up.length > 0) return "holding";
-    return "waiting";
+    // The urgency rule decision mode orders by (core inboxUrgencyOf).
+    const urgency = inboxUrgencyOf(row.questions);
+    return urgency === 0 ? "stopped" : urgency === 1 ? "holding" : "waiting";
+  }
+  // An action item's Done or Can't do it waits in the draft: the agent still waits on the person's Send, so the
+  // row stays where the item put it (approval "inbox-action-items-in-reply", Q2: a Stopped item keeps "Stopped on you").
+  if ((row.questions.staged ?? 0) > 0) {
+    const urgency = inboxUrgencyOf(row.questions);
+    return urgency === 0 ? "stopped" : urgency === 1 ? "holding" : "waiting";
   }
   if (row.answered_not_sent) return "new";
   if (row.sent !== null && row.sent.checked_at === null) return "sent";
@@ -126,14 +134,8 @@ export function inboxListSections(rows: readonly InboxListRow[]): InboxListSecti
   }));
 }
 
-/**
- * Archived: resolved, and not come back. Not shown in the window's list;
- * Settings lists it. A thread an agent wrote in after the archive is back in
- * the list while something there waits, and returns here once handled.
- */
-export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_from_archive">): boolean {
-  return row.resolved_at !== null && row.back_from_archive !== true;
-}
+/** Archived: resolved, and not come back (the rule lives in core, so the window shares it). */
+export { inboxRowArchived };
 
 /** Newest archived first (the Archived block's order); ties on the thread id. */
 function newestArchivedFirst(left: InboxListRow, right: InboxListRow): number {

@@ -32,6 +32,7 @@
  * certificate and a Bonjour record (inbox-lan.ts, contract section 3).
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { hostname } from "node:os";
@@ -117,6 +118,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
   { method: "GET", route: /^threads$/, window: () => "/api/inbox/threads" },
   { method: "GET", route: /^projects$/, window: () => "/api/inbox/projects" },
+  // The ACP runner (inbox-acp-runner.ts): a paired phone may start, watch, answer and stop an agent the Inbox runs (owner).
+  { method: "GET", route: /^acp$/, window: () => "/api/inbox/acp" },
+  { method: "GET", route: /^acp\/(run_[0-9A-HJKMNP-TV-Z]{26})$/, window: (m) => `/api/inbox/acp/${m[1]}` },
+  { method: "POST", route: /^acp\/start$/, window: () => "/api/inbox/acp/start" },
+  { method: "POST", route: /^acp\/(run_[0-9A-HJKMNP-TV-Z]{26})\/(permission|stop|retry)$/, window: (m) => `/api/inbox/acp/${m[1]}/${m[2]}` },
   // The archived threads (Settings' Archived block), read only; before threads/:id, which would also match it.
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
@@ -267,7 +273,7 @@ export interface InboxDevicesContext {
 function computerName(): string {
   if (process.platform === "darwin") {
     try {
-      const out = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000 });
+      const out = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000, env: childEnv() });
       const name = out.status === 0 ? out.stdout.trim() : "";
       if (name) return name;
     } catch {

@@ -35,6 +35,7 @@ import {
   type DocumentTextSize,
 } from '../utils/documentTextSize';
 import { storage } from '../utils/storage';
+import { isLookChoiceResolved } from '../utils/lookAndFeelAnnouncement';
 import { generateIdentity } from '../utils/generateIdentity';
 import {
   getDefaultThemePair,
@@ -192,10 +193,18 @@ export const SETTINGS = {
   },
 
   gridEnabled: {
-    // Default ON: plans open in the classic grid / floating-card look. The UI 2.0
-    // flat look is offered as an opt-in via the look-and-feel chooser dialog.
-    defaultValue: true as boolean,
+    // Default OFF: plans open in the Clean look (the document edge to edge).
+    // Grid (the classic floating card on grid paper) is a choice, made in the
+    // first-run chooser or in Settings.
+    defaultValue: false as boolean,
     fromCookie: () => {
+      // ConfigStore writes the default into this cookie on first load, so every
+      // browser that ran an older build stored 'true' (the old default) without
+      // anyone choosing it. The stored value counts only once the person has
+      // resolved the Grid/Clean choice under the Clean default (the v2 marker;
+      // a v1 marker with Grid stored is moved to Clean once, see
+      // utils/lookAndFeelAnnouncement); until then they get Clean.
+      if (!isLookChoiceResolved()) return undefined;
       const v = storage.getItem('plannotator-grid-enabled');
       return v === 'true' ? true : v === 'false' ? false : undefined;
     },

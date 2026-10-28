@@ -17,6 +17,11 @@
  * - A phone (WebKit, iPhone 15) and a stacked window (Chromium, 900 px):
  *   Back shows the list exactly as it was left, with focus on the row read;
  *   it settles while the next thread covers it.
+ * - A phone and a stacked window: questions an agent asked while the list was
+ *   held, read and left with Back, land in Holding up work, never in Quiet.
+ * - A stacked window: questions that arrive while the thread is open, seen on
+ *   sight, and a thread opened wide whose window narrows to stacked: Back puts
+ *   the row in Holding up work, never in Quiet (after Escape, focus on the row).
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * Proof (frames of the settle slowed tenfold, a video of it at full speed,
@@ -40,7 +45,7 @@ const BEAT_MS = 160;
 
 const NEWS = ['Search index built', 'Install page links fixed', 'Changelog drafted', 'Docs deploy finished'];
 
-type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight' | 'mouse' | 'held';
+type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight' | 'mouse' | 'held' | 'seen' | 'phoneAsks' | 'stackedAsks' | 'stackedSeen' | 'resized';
 
 interface World {
   root: string;
@@ -70,12 +75,16 @@ test.beforeAll(async () => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-staysput-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
+  // Never a real agent's CLI: no connection runs (PLANNOTATOR_INBOX_CONNECT=0), and stubs that refuse come first on PATH.
+  const stubs = join(root, 'bin');
+  mkdirSync(stubs, { recursive: true });
+  for (const name of ['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor-agent', 'amp']) writeFileSync(join(stubs, name), '#!/bin/sh\necho "this stub never runs" >&2\nexit 1\n', { mode: 0o755 });
+  const env = { PATH: `${stubs}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const projects = {} as World['projects'];
-  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight', 'mouse', 'held'] as const) {
+  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight', 'mouse', 'held', 'seen', 'phoneAsks', 'stackedAsks', 'stackedSeen', 'resized'] as const) {
     const path = scratchProject(join(root, 'src'), key === 'desk' ? 'docs-site' : `docs-${key}`);
     const threads = await seed(agent, path, key);
     if (key === 'held') {
@@ -349,6 +358,180 @@ for (const layout of [
   });
 }
 
+/** Four open questions, each with Stakes before its choices, then Recommended and Holds up after them (the shape the owner saw land in Quiet). */
+const HOLDING_QUESTIONS = [
+  'I read the channel code. Four decisions before I go on.',
+  ...[1, 2, 3, 4].flatMap((n) => [
+    '',
+    ':::question',
+    `Which wire format should shape ${n} use?`,
+    `Stakes: shape ${n} decides the format every client reads.`,
+    '',
+    '- [ ] JSON lines',
+    '- [ ] One JSON document',
+    'Recommended: JSON lines',
+    'Holds up: the channel, and with it shapes 2 and 3',
+    ':::',
+  ]),
+].join('\n');
+
+for (const layout of [
+  { name: 'phone (WebKit, iPhone 15)', key: 'phoneAsks' as const, back: '[data-phone-back]' },
+  { name: 'stacked window (Chromium, 900 px)', key: 'stackedAsks' as const, back: '[data-stack-back]' },
+]) {
+  test(`${layout.name}: questions an agent asked while the list was held, read and left with Back, put the row in Holding up work, never in Quiet`, async ({ browser }: { browser: Browser }) => {
+    let own: Browser | null = null;
+    let context: BrowserContext;
+    if (layout.key === 'phoneAsks') {
+      own = await webkit.launch({ args: [] });
+      context = await own.newContext({ ...devices['iPhone 15'], colorScheme: 'dark' });
+    } else {
+      context = await browser.newContext({ viewport: { width: 900, height: 900 }, colorScheme: 'dark' });
+    }
+    const open = async (page: Page, id: string) => {
+      if (layout.key === 'phoneAsks') await page.locator(`.ib-lbody [data-thread-id="${id}"]`).tap();
+      else await page.locator(`.ib-lbody [data-thread-id="${id}"]`).click();
+      await expect(page.locator('section.ib-pane')).toBeVisible();
+    };
+    const back = async (page: Page) => {
+      await page.locator(`section.ib-pane ${layout.back}`).click();
+      await expect(page.locator('section.ib-pane')).toHaveCount(0);
+      await page.waitForTimeout(BEAT_MS + 300);
+    };
+    try {
+      const page = await context.newPage();
+      const { id, path, threads } = world.projects[layout.key];
+      // The newest thread (the seed's last), top of New, and the session that wrote it.
+      const first = threads[threads.length - 1]!;
+      await page.goto(`${world.url}/#project=${id}`);
+      await expect(page.locator(`[data-section-id="new"] [data-thread-id="${first}"]`)).toBeVisible();
+      // Read, then Back: the list as left, the row in New, no longer bold.
+      await open(page, first);
+      await expect.poll(() => isBold(page, first)).toBe(false);
+      await back(page);
+      expect(await sectionOf(page, first)).toBe('new');
+      // The agent asks four questions there that hold up work: the list holds still, the news waits behind "1 new".
+      await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_${layout.key}_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
+      await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
+      expect(await sectionOf(page, first)).toBe('new');
+      // The person opens it and reads the questions (the look is recorded), then goes Back.
+      await open(page, first);
+      await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
+      await expect.poll(() => serverRow(first)).toEqual({ section: 'holding', unseen: 0 });
+      await back(page);
+      // Where its open questions put it: Holding up work, as the server says; not folded away in Quiet.
+      expect(await sectionOf(page, first)).toBe('holding');
+      // The stacked window's mouse Back hands focus to the row (#1866), which keeps it as the row moves; a phone's tap hands none.
+      if (layout.key === 'stackedAsks') expect(await focused(page)).toBe(first);
+      else expect(await focused(page)).not.toBe(first);
+      await shot(page, `08-${layout.key}-questions-read-after-back`);
+    } finally {
+      await context.close();
+      await own?.close();
+    }
+  });
+}
+
+/** The thread's row as the server reads it. */
+async function serverRow(id: string): Promise<{ section: string; unseen: number } | null> {
+  const list = (await (await fetch(`${world.url}/api/inbox/threads?archived=exclude`)).json()) as { sections: { id: string; threads: { thread_id: string; unseen: number }[] }[] };
+  for (const section of list.sections) for (const row of section.threads) if (row.thread_id === id) return { section: section.id, unseen: row.unseen };
+  return null;
+}
+
+/** The group a row is drawn in, unfolding Quiet first when the row is not drawn (folded Quiet draws no rows). */
+async function drawnIn(page: Page, id: string): Promise<string | null> {
+  const section = await sectionOf(page, id);
+  if (section) return section;
+  const band = page.locator('.ib-lbody [data-section-id="quiet"] button.ib-band');
+  if ((await band.count()) === 1 && (await band.getAttribute('aria-expanded')) !== 'true') await band.click();
+  return sectionOf(page, id);
+}
+
+// Chromium only: seen on sight needs the page focused and visible, which headless WebKit does not report.
+test('stacked window (Chromium, 900 px): questions that arrive while the thread is open, seen on sight, put the row in Holding up work on a keyboard Back, focus with it, never in Quiet', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 900, height: 900 }, colorScheme: 'dark' });
+  try {
+    const page = await context.newPage();
+    const { id, path, threads } = world.projects.stackedSeen;
+    const first = threads[threads.length - 1]!;
+    const second = threads[threads.length - 2]!;
+    const open = async (thread: string) => {
+      await page.locator(`.ib-lbody [data-thread-id="${thread}"]`).click();
+      await expect(page.locator('section.ib-pane')).toBeVisible();
+    };
+    const back = async () => {
+      await page.locator('section.ib-pane [data-stack-back]').click();
+      await expect(page.locator('section.ib-pane')).toHaveCount(0);
+      await page.waitForTimeout(BEAT_MS + 300);
+    };
+    await page.goto(`${world.url}/#project=${id}`);
+    await expect(page.locator(`[data-section-id="new"] [data-thread-id="${first}"]`)).toBeVisible();
+    // Read the first, Back; read the second (the first settles behind it, to Quiet), Back.
+    await open(first);
+    await expect.poll(() => serverRow(first)).toEqual({ section: 'quiet', unseen: 0 });
+    await back();
+    await open(second);
+    await expect.poll(() => serverRow(second)).toEqual({ section: 'quiet', unseen: 0 });
+    await back();
+    expect(await drawnIn(page, first)).toBe('quiet');
+    // Open the first from Quiet; the agent asks there while it is open; the questions are seen on sight.
+    await open(first);
+    await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_stackedSeen_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
+    await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
+    await page.locator('section.ib-pane fieldset[data-question-key]').first().scrollIntoViewIfNeeded();
+    await expect.poll(() => serverRow(first), { timeout: 15_000 }).toEqual({ section: 'holding', unseen: 0 });
+    // Back with the keyboard (Escape).
+    await page.keyboard.press('Escape');
+    await expect(page.locator('section.ib-pane')).toHaveCount(0);
+    await page.waitForTimeout(BEAT_MS + 300);
+    // Where its open questions put it, as the server says; not left drawn in Quiet. Focus moved with the row
+    // (redrawn in Holding up work), never dropped to the page.
+    expect(await sectionOf(page, first)).toBe('holding');
+    expect(await focused(page)).toBe(first);
+    await shot(page, '09-stackedSeen-arrival-while-open-after-back');
+  } finally {
+    await context.close();
+  }
+});
+
+test('a thread opened wide, its window narrowed to stacked while it is open: Back puts a row with questions in Holding up work, never in Quiet', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+  try {
+    const page = await context.newPage();
+    const { id, path, threads } = world.projects.resized;
+    const first = threads[threads.length - 1]!;
+    await page.goto(`${world.url}/#project=${id}`);
+    await expect(page.locator(`[data-section-id="new"] [data-thread-id="${first}"]`)).toBeVisible();
+    // Read it wide and close it: it settles to Quiet.
+    await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
+    await expect(page.locator('section.ib-pane')).toBeVisible();
+    await expect.poll(() => serverRow(first)).toEqual({ section: 'quiet', unseen: 0 });
+    await expect.poll(() => isBold(page, first)).toBe(false);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('section.ib-pane')).toHaveCount(0);
+    await page.waitForTimeout(BEAT_MS + 300);
+    expect(await drawnIn(page, first)).toBe('quiet');
+    // The agent asks there: held behind "1 new". The person opens it from Quiet, wide, and reads it.
+    await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_resized_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
+    await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
+    await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
+    await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
+    await expect.poll(() => serverRow(first)).toEqual({ section: 'holding', unseen: 0 });
+    // The window narrows: the thread now covers the list. Back.
+    await page.setViewportSize({ width: 900, height: 900 });
+    await page.locator('section.ib-pane [data-stack-back]').click();
+    await expect(page.locator('section.ib-pane')).toHaveCount(0);
+    await page.waitForTimeout(BEAT_MS + 300);
+    expect(await sectionOf(page, first)).toBe('holding');
+    // A mouse Back in a stacked window hands focus to the row (#1866); redrawn in Holding up work, it keeps it.
+    expect(await focused(page)).toBe(first);
+    await shot(page, '10-resized-after-back');
+  } finally {
+    await context.close();
+  }
+});
+
 test('desktop, the mouse: a close hands no row focus, no Mark read action shows, and E marks nothing', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
   const page = await context.newPage();
@@ -371,6 +554,72 @@ test('desktop, the mouse: a close hands no row focus, no Mark read action shows,
   await page.keyboard.press('e');
   await page.waitForTimeout(300);
   expect(marked).toEqual([]);
+  await context.close();
+});
+
+// A plain update the person opened: Quiet on the server (the look), still drawn in New while the thread is
+// open. Mark read stays on it (the header, the row's hover action, E) and moves the row to Quiet now.
+test('desktop: a seen update held in New keeps Mark read; it moves the row to Quiet now, and Undo puts it back', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const written: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/(read|unread)$/.test(request.url())) written.push(request.url());
+  });
+  const { id } = world.projects.seen;
+  await page.goto(`${world.url}/#project=${id}`);
+  await expect(page.locator('[data-section-id="new"] [data-thread-id]')).toHaveCount(4);
+  const before = await rowsOf(page);
+  const first = before[0]!;
+  const row = page.locator(`.ib-lbody [data-thread-id="${first}"]`);
+  const header = page.locator('section.ib-pane [data-mark-read]');
+  const quietCount = page.locator('[data-section-id="quiet"] .ib-n');
+  await openWithKeyboard(page, first);
+  expect(await sectionOf(page, first)).toBe('new');
+  await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
+  await shot(page, 'seen-held-01-opened');
+  await expect(header).toBeEnabled();
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toBeVisible();
+
+  // The header: the row moves to Quiet now, the toast says so with Undo.
+  await header.click();
+  await expect(row).toHaveCount(0);
+  await expect(quietCount).toHaveText('1');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Moved to Quiet');
+  await expect(page.locator('[data-toast-undo]')).toBeVisible();
+  await expect(header).toBeDisabled();
+  await shot(page, 'seen-held-02-moved');
+  // Undo: back between the same neighbours.
+  await page.locator('[data-toast-undo]').click();
+  await expect.poll(() => sectionOf(page, first)).toBe('new');
+  expect(await rowsOf(page)).toEqual(before);
+  await expect(header).toBeEnabled();
+  await shot(page, 'seen-held-03-undone');
+
+  // E, then Z.
+  await page.locator('section.ib-pane h2.ib-subject').click();
+  await page.keyboard.press('e');
+  await expect(row).toHaveCount(0);
+  await page.keyboard.press('z');
+  await expect.poll(() => sectionOf(page, first)).toBe('new');
+  expect(await rowsOf(page)).toEqual(before);
+
+  // The row's hover action.
+  await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
+  await page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`).click();
+  await expect(row).toHaveCount(0);
+  await expect(quietCount).toHaveText('1');
+
+  // Nothing was written (the thread was already Quiet), and the close settles it where it is.
+  expect(written).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  await page.waitForTimeout(BEAT_MS + 400);
+  await expect(row).toHaveCount(0);
+  await expect(quietCount).toHaveText('1');
+  expect(errors).toEqual([]);
   await context.close();
 });
 

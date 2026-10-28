@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readInboxAgents } from "@plannotator/server/inbox-agents";
+import { INBOX_NOTE_START } from "@plannotator/server/inbox-agent-notes";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -161,15 +162,27 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   mkdirSync(join(w.home, ".codex"), { recursive: true });
   writeFileSync(join(w.home, ".codex", "AGENTS.md"), "Mine.\n");
   mkdirSync(join(w.home, ".gemini"), { recursive: true });
-  const result = await cli(w, ["inbox", "--notes", "codex,gemini"]);
+  // Cursor is not on this computer yet: refused like any agent not found, and nothing is printed to copy.
+  const missing = await cli(w, ["inbox", "--notes", "cursor"]);
+  expect(missing.code).toBe(1);
+  expect(missing.stdout).toBe("");
+  expect(missing.stderr).toContain("Cursor: not added (Cursor was not found on this computer).");
+  expect(existsSync(join(w.home, ".plannotator", "config.json"))).toBe(false);
+  // Found through its CLI on PATH (never run by --notes).
+  w.install("cursor-agent");
+  const result = await cli(w, ["inbox", "--notes", "codex,gemini,cursor"]);
   expect(result.code).toBe(0);
-  expect(result.stdout).toBe("");
+  expect(result.stdout).toContain("## Plannotator Inbox");
+  expect(result.stdout).not.toContain("plannotator-inbox:start");
+  expect(result.stderr).toContain("Cursor: nothing written. Cursor keeps its rules in the app: copy the note above into Customize → Rules in Cursor.");
+  expect(result.stderr).toContain("Plannotator can't see, update or remove that copy.");
   expect(result.stderr).toContain("Codex: Added a marked section to ~/.codex/AGENTS.md.");
   expect(result.stderr).toContain("Gemini CLI: Created ~/.gemini/GEMINI.md.");
-  expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain("<!-- plannotator-inbox:start v1");
+  expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain(INBOX_NOTE_START);
   expect(existsSync(join(w.home, ".pi"))).toBe(false);
+  expect(existsSync(join(w.home, ".cursor"))).toBe(false);
   expect(existsSync(join(w.home, ".plannotator", "inbox", "inbox.json"))).toBe(false);
-  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini"] });
+  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini", "cursor"] });
 
   const bad = await cli(w, ["inbox", "--notes", "vscode"]);
   expect(bad.code).toBe(1);

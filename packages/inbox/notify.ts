@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxAuthor, InboxListRow, InboxMessage, InboxNotifyReach, InboxSectionId } from '@plannotator/core/inbox-types';
+import { inboxQuestionWaitsForList } from '@plannotator/core/inbox-questions';
 import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
 import { agentName, plural } from './format';
 import { pageInFront } from './sound';
@@ -122,8 +123,10 @@ export interface NotifyItem {
   asks: boolean;
   /** The thread itself is new. */
   fresh: boolean;
-  /** What brought it (`thread:<id>`, `<message id>/<question key>`): what tabs claim, so one tab raises each. */
+  /** What brought it (`thread:<id>`, `<message id>/<question key>`, `acp:<permission id>`): what tabs claim, so one tab raises each. */
   keys: string[];
+  /** Its own words (an agent the Inbox runs waiting on a permission): "<project>: Grok Build needs your OK", the tool. */
+  notice?: { title: string; body: string };
 }
 
 /** Several Inbox tabs: each item is raised by the first tab to claim it (`claimNotices`). */
@@ -232,7 +235,8 @@ function sameHost(a: string, b: string): boolean {
 }
 
 function supported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window;
+  // The constructor itself, not the name: a Notification property left undefined is no support.
+  return typeof window !== 'undefined' && typeof (window as { Notification?: unknown }).Notification === 'function';
 }
 
 function currentPermission(): NotificationPermission | 'unsupported' {
@@ -276,6 +280,13 @@ export interface InboxNotifications {
   permission: NotificationPermission | 'unsupported';
   /** The line to draw above the list, or null. */
   ask: AskKind | null;
+  /**
+   * The line to draw on the first-run screen ("No agent has written yet"),
+   * or null. The moment before the first question arrives, so it does not
+   * wait for a thread as `ask` does; every other rule (dismissed, off,
+   * per-origin, moved, blocked) is the same.
+   */
+  firstRunAsk: AskKind | null;
   /** Whether any open Inbox tab can show a notification (the server's report; null until known). */
   reach: InboxNotifyReach | null;
   setReach: (reach: InboxNotifyReach) => void;
@@ -300,7 +311,8 @@ export interface InboxNotifications {
 export function useInboxNotifications(options: {
   settings: NotificationSettings | null;
   onSettings: (next: NotificationSettings) => void;
-  openThread: (threadId: string) => void;
+  /** `questionId`: the question it notified about (`<message id>/<key>`), absent for a new thread. */
+  openThread: (threadId: string, questionId?: string) => void;
   openList: () => void;
   /** New questions arrived (before any notification rule): the sound decides for itself (sound.ts). */
   onQuestions?: () => void;
@@ -339,6 +351,8 @@ export function useInboxNotifications(options: {
   tabsRef.current = { onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront };
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
   const counted = useRef(new Set<string>());
+  /** The first list read only records the permissions already waiting (a reload raises nothing for them). */
+  const permissionsPrimed = useRef(false);
   /** Every thread a list read showed this page: a later line of one of those roots is never a new thread. */
   const known = useRef(new Set<string>());
   /** New questions (message id and claim key), waiting for the list read. */
@@ -450,8 +464,10 @@ export function useInboxNotifications(options: {
     } else if (event.kind === 'question') {
       const q = event.question;
       const id = `${q.message_id}/${q.key}`;
-      // A new question is open at revision 0; a pick or a Send of an old one is not an item.
-      if (q.state !== 'open' || q.revision !== 0 || counted.current.has(id)) return;
+      // A new question is open at revision 0; a pick or a Send of an old one is not an item. What
+      // waits is the list's own rule (core inboxQuestionWaitsForList), so a notice, the list and the
+      // Decide count agree: an orphaned record never notifies.
+      if (!inboxQuestionWaitsForList(q) || q.state !== 'open' || q.revision !== 0 || counted.current.has(id)) return;
       counted.current.add(id);
       pending.current.push({ messageId: q.message_id, key: id });
     }
@@ -479,14 +495,16 @@ export function useInboxNotifications(options: {
     if (burst.current.size <= 1) {
       const item = items.at(-1)!;
       const row = rows.get(item.threadId);
-      text = threadNotificationText({
+      text = item.notice ?? threadNotificationText({
         project: row?.project.name ?? 'Plannotator Inbox',
         agent: agentName(item.author),
         subject: row?.subject ?? '(no subject)',
         section: row?.section ?? null,
         asks: burst.current.get(item.threadId)?.asks ?? item.asks,
       });
-      open = () => openRef.current.thread(item.threadId);
+      // The question it notified about (`<message id>/<key>`). Unused since decision mode went thread only (2026-10-27).
+      const question = item.keys.filter((key) => !key.startsWith('thread:')).at(-1);
+      open = () => openRef.current.thread(item.threadId, question);
     } else {
       const entries = [...burst.current.values()];
       text = burstNotificationText(
@@ -520,9 +538,28 @@ export function useInboxNotifications(options: {
       const rowList = list.sections.flatMap((section) => section.threads);
       for (const row of rowList) known.current.add(row.thread_id);
       if (rowList.length > 0 || (list.projects ?? []).some((project) => project.threads > 0)) setHasThreads(true);
-      if (questions.length === 0 && fresh.length === 0) return;
+      // An agent the Inbox runs waits on a permission (the row's `run`): one notice per request, like a
+      // question that stops the agent. One already waiting when the page loads raises nothing.
+      const runItems: NotifyItem[] = [];
+      for (const row of rowList) {
+        const id = row.run?.state === 'permission' ? row.run.permission_id : null;
+        if (!id || counted.current.has(`acp:${id}`)) continue;
+        counted.current.add(`acp:${id}`);
+        if (!permissionsPrimed.current) continue;
+        runItems.push({
+          threadId: row.thread_id,
+          author: { kind: 'agent', host: row.run!.agent, session: row.run!.key, name: row.run!.label },
+          asks: true,
+          fresh: false,
+          keys: [`acp:${id}`],
+          notice: { title: `${row.project.name}: ${row.run!.label} needs your OK`, body: row.run!.permission_title ?? 'A tool' },
+        });
+      }
+      permissionsPrimed.current = true;
+      if (questions.length === 0 && fresh.length === 0 && runItems.length === 0) return;
       // The threads these items landed in, newest last, with the agent that wrote.
       const threads = new Map<string, NotifyItem>();
+      for (const item of runItems) threads.set(item.threadId, item);
       for (const threadId of fresh) {
         const root = messages.current.get(threadId);
         if (root) threads.set(threadId, { threadId, author: root.author, asks: false, fresh: true, keys: [`thread:${threadId}`] });
@@ -633,6 +670,7 @@ export function useInboxNotifications(options: {
   );
 
   const ask = options.settings && permission !== 'unsupported' ? askKind(options.settings, permission, window.location.origin, hasThreads) : null;
+  const firstRunAsk = options.settings && permission !== 'unsupported' ? askKind(options.settings, permission, window.location.origin, true) : null;
 
-  return { permission, ask, reach, setReach, windowReport, reportWindow, slept, dismissSlept, sendTest, observe, flush, turnOn, notNow, setEnabled };
+  return { permission, ask, firstRunAsk, reach, setReach, windowReport, reportWindow, slept, dismissSlept, sendTest, observe, flush, turnOn, notNow, setEnabled };
 }

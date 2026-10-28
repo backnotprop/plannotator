@@ -108,7 +108,7 @@ async function until<T>(read: () => T, check: (value: T) => boolean, ms = 5000):
  * the file. Bun then starts the streamed answer on a dead socket, never pulls
  * it to the end and never cancels it, so only the idle watchdog closes the
  * handle (measured on Bun 1.3.14: with the watchdog at 30 s, every one was
- * still open seconds later).
+ * still open seconds later; Bun 1.4.4 cancels them, and the test holds on both).
  */
 async function askAndVanish(port: number, path: string, range?: string): Promise<void> {
   const { connect } = await import("node:net");

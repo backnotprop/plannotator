@@ -76,6 +76,8 @@ describe("the send tools' next step follows the caller's wake", () => {
     const result = await client.callTool({ name: "send_message", arguments: { body: "Plain note", project_path: project, agent_session: "ses_shim" } });
     const text = (result.content as { text: string }[])[0]!.text;
     expect(text).toMatch(WAITS);
+    // It says plainly that nothing wakes it, not only what to call.
+    expect(text).toMatch(/reply won't arrive in this session by itself/);
     expect(text).not.toMatch(ARRIVES);
   });
 

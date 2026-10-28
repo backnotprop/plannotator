@@ -189,12 +189,12 @@ test.skipIf(!hasDom)('the foot is Reply and Looks good side by side; there is no
   expect(await tooltipOf(ackButton(el)!)).toContain('Tells Claude Code you read it');
 });
 
-test.skipIf(!hasDom)('hidden while a question waits: the foot is Reply alone', async () => {
+test.skipIf(!hasDom)('hidden while a question waits: the foot is Reply and the open question (Re-ask is in its list)', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelector('section.ib-pane .ib-pfoot') !== null, 'the thread');
   await settle();
   expect(ackButton(el)).toBeNull();
-  expect(footButtons(el)).toEqual(['Reply']);
+  expect(footButtons(el)).toEqual(['Reply', '1 open question']);
 });
 
 test.skipIf(!hasDom)('a click presses the button, the pill and the toast show, the row says Looks good; Z takes it back', async () => {

@@ -27,6 +27,7 @@ const noopViewerHandle: ViewerHandle = {
 };
 
 const ROOT_MARKDOWN = 'root';
+const LONG_MARKDOWN = '# Long';
 const ROOT_BLOCKS = 60;
 const LINKED_BLOCKS = 3;
 
@@ -115,7 +116,9 @@ function Harness(props: {
 
   // The root document renders as many blocks; a linked HTML document has none
   // (it scrolls inside its own frame), a linked markdown document a few.
-  const count = markdown === ROOT_MARKDOWN && renderAs === 'markdown'
+  // A long linked document (a file of a review of several files) renders as
+  // many blocks as the root.
+  const count = (markdown === ROOT_MARKDOWN || markdown.startsWith(LONG_MARKDOWN)) && renderAs === 'markdown'
     ? ROOT_BLOCKS
     : renderAs === 'html' ? 0 : LINKED_BLOCKS;
   return <Blocks viewport={props.viewport} count={count} />;
@@ -318,6 +321,64 @@ describe.if(hasDom)('useLinkedDoc back() scroll restore', () => {
     await act(async () => { get().back(); });
     await settle();
     expect(topBlock(vp)).toEqual({ id: 'block-23', top: -50 });
+  });
+
+  // A review of several files (#2128): each file is a linked document, and
+  // Back from a document it links to reopens that file instead of calling
+  // back(). The reader's place in it must come back the same way.
+  async function openLong(get: () => UseLinkedDocReturn, options?: { restoreScroll?: boolean }) {
+    await act(async () => {
+      get().openLoaded(
+        { filepath: '/site/review-alpha.md', markdown: `${LONG_MARKDOWN} alpha`, renderAs: 'markdown' },
+        undefined,
+        options,
+      );
+    });
+  }
+
+  test('reopening a linked document with restoreScroll returns to where the reader left it', async () => {
+    const { get, viewport: vp } = await mount();
+    await openLong(get);
+    vp.scrollTop = 2350;
+    expect(topBlock(vp)).toEqual({ id: 'block-23', top: -50 });
+    await openNotes(get, '/site/linked.md');
+    expect(vp.scrollTop).toBe(0);
+
+    blockHeight = 80; // the column reflowed meanwhile: anchored by block
+    await openLong(get, { restoreScroll: true });
+    expect(get().filepath).toBe('/site/review-alpha.md');
+    await settle();
+    expect(topBlock(vp)).toEqual({ id: 'block-23', top: -50 });
+  });
+
+  test('the same holds when the document left was a linked HTML page', async () => {
+    const { get, viewport: vp } = await mount();
+    await openLong(get);
+    vp.scrollTop = 2350;
+    await act(async () => {
+      get().openLoaded(
+        { filepath: '/site/module.html', rawHtml: '<h1>Module</h1>', renderAs: 'html' },
+        undefined,
+        { revealSidebar: false },
+      );
+    });
+    expect(vp.scrollTop).toBe(0);
+    await openLong(get, { restoreScroll: true });
+    await settle();
+    expect(topBlock(vp)).toEqual({ id: 'block-23', top: -50 });
+  });
+
+  test('reopening a linked document without restoreScroll leaves scrolling alone', async () => {
+    const { get, viewport: vp } = await mount();
+    await openLong(get);
+    vp.scrollTop = 2350;
+    await openNotes(get, '/site/linked.md');
+    expect(vp.scrollTop).toBe(0);
+    restoreWrites = 0;
+    await openLong(get);
+    await settle();
+    expect(restoreWrites).toBe(0);
+    expect(vp.scrollTop).toBe(0);
   });
 
   test('unmounting while the restore settles stops it', async () => {

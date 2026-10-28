@@ -16,6 +16,7 @@
  *
  * See ADR adr/implementation/annotate-agent-terminal.md for the full design.
  */
+import { childEnv, childPath } from "@plannotator/shared/child-env";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,7 +91,7 @@ export function shouldSkipAgentTerminalRuntimeInstall(env: NodeJS.ProcessEnv = p
 }
 
 export async function resolveAgentTerminalRuntime(): Promise<ResolvedAgentTerminalRuntime | UnresolvedAgentTerminalRuntime> {
-  const nodePath = Bun.which("node");
+  const nodePath = Bun.which("node", { PATH: childPath() });
   if (!nodePath) {
     return {
       ok: false,
@@ -191,7 +192,7 @@ export async function installAgentTerminalRuntime(): Promise<AgentTerminalRuntim
     };
   }
 
-  const nodePath = Bun.which("node");
+  const nodePath = Bun.which("node", { PATH: childPath() });
   if (!nodePath) {
     return fail(runtimeDir, "Skipping agent terminal runtime install (Node.js 20 or newer was not found).");
   }
@@ -199,7 +200,7 @@ export async function installAgentTerminalRuntime(): Promise<AgentTerminalRuntim
   const nodeCheck = await checkNodeVersion(nodePath);
   if (!nodeCheck.ok) return fail(runtimeDir, `Skipping agent terminal runtime install (${nodeCheck.message})`);
 
-  const npmPath = Bun.which("npm");
+  const npmPath = Bun.which("npm", { PATH: childPath() });
   if (!npmPath) {
     return fail(runtimeDir, "Skipping agent terminal runtime install (npm was not found).");
   }
@@ -454,6 +455,7 @@ async function runCommand(
   try {
     proc = Bun.spawn([command, ...args], {
       cwd: options.cwd,
+      env: childEnv(),
       stdout: "pipe",
       stderr: "pipe",
     });

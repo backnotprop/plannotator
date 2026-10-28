@@ -5,6 +5,7 @@
  * Pre-binds a Bun-based runtime so consumers get a clean API.
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import type {
   PRRef,
   PRMetadata,
@@ -16,6 +17,7 @@ import type {
   PRReviewSubmissionResult,
   PRStackTree,
   PRListItem,
+  PRAuthResult,
 } from "@plannotator/shared/pr-types";
 import {
   parsePRUrl as parsePRUrlCore,
@@ -43,13 +45,15 @@ import {
   fetchPRList as fetchPRListCore,
 } from "@plannotator/shared/pr-provider";
 
-export type { PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
+export type { PRAuthResult, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewSubmissionResult, PRStackTree, PRListItem } from "@plannotator/shared/pr-types";
 export { prRefFromMetadata, isSameProject, getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getCliName, getCliInstallUrl, getPRNumber, getPRPlatformCapabilities, getPRHeadFetchSpec, getPRCloneCommand } from "@plannotator/shared/pr-types";
 export type { GithubPRMetadata } from "@plannotator/shared/pr-types";
 
-const runtime: PRRuntime = {
-  async runCommand(cmd, args) {
+const bunCommandRuntime: PRRuntime = {
+  async runCommand(cmd, args, options) {
     const proc = Bun.spawn([cmd, ...args], {
+      // The live env, plus (never replacing it) another gh account's token (#2157).
+      env: childEnv(options?.env),
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -63,8 +67,9 @@ const runtime: PRRuntime = {
     return { stdout, stderr, exitCode };
   },
 
-  async runCommandWithInput(cmd, args, input) {
+  async runCommandWithInput(cmd, args, input, options) {
     const proc = Bun.spawn([cmd, ...args], {
+      env: childEnv(options?.env),
       stdout: "pipe",
       stderr: "pipe",
       stdin: "pipe",
@@ -83,6 +88,29 @@ const runtime: PRRuntime = {
   },
 };
 
+// Tests replace the command runner (setPRCommandRuntimeForTests) so no test
+// ever runs the real `gh` / `glab`: the review server calls these at startup
+// in PR mode (the platform user, viewed files, PR context).
+let testRuntime: PRRuntime | null = null;
+
+const runtime: PRRuntime = {
+  runCommand: (cmd, args, options) => (testRuntime ?? bunCommandRuntime).runCommand(cmd, args, options),
+  runCommandWithInput: (cmd, args, input, options) => {
+    const active = testRuntime ?? bunCommandRuntime;
+    if (!active.runCommandWithInput) return Promise.reject(new Error(`${cmd}: this runtime takes no input`));
+    return active.runCommandWithInput(cmd, args, input, options);
+  },
+};
+
+/**
+ * Tests only: run every PR platform command through `fake` instead of a real
+ * process (null puts the real runner back). Set it inside a test and restore
+ * it in afterEach: bun runs every test file in one process.
+ */
+export function setPRCommandRuntimeForTests(fake: PRRuntime | null): void {
+  testRuntime = fake;
+}
+
 /** The Bun command runner, exported for non-PR CLI consumers (commit avatars). */
 export const prCommandRuntime: PRRuntime = runtime;
 
@@ -90,7 +118,12 @@ export const parsePRUrl = parsePRUrlCore;
 export const parseFileLevelComments = parseFileLevelCommentsCore;
 export const parsePRReviewAction = parsePRReviewActionCore;
 
-export function checkPRAuth(ref: PRRef): Promise<void> {
+/**
+ * Fails when the review cannot start. For a GitHub PR the active gh account
+ * cannot see, answers the other signed-in account it will use (`notice`) and
+ * that account's token for this run's children (`childEnv`, never print it).
+ */
+export function checkPRAuth(ref: PRRef): Promise<PRAuthResult> {
   return checkAuthCore(runtime, ref);
 }
 

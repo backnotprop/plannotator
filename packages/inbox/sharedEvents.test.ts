@@ -18,6 +18,7 @@ import { afterEach, expect, test } from 'bun:test';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
 import { dispatchInboxFrame } from './api';
 import {
+  browserSharedEventsEnv,
   discardPreparedInboxEvents,
   EVENTS_CHANNEL,
   EVENTS_LOCK,
@@ -525,6 +526,27 @@ test('the leader tells the server when a follower is gone: a crash (its lock fre
   expect(w.gone.some((g) => g.by === a.id && g.window === a.win.id)).toBe(false);
 });
 
+test('a leader still running after its pagehide reports nothing more: the next leader\'s announcement and hello do not count it again', async () => {
+  // The page is not gone the moment pagehide fires: its scripts can still hear the next leader. A report
+  // then (served_by the next leader) could reach the server after every `gone` and count a closed tab.
+  const w = world();
+  const a = w.open();
+  await settle();
+  const b = w.open();
+  await settle(10);
+  expect(w.leader()).toBe(a.id);
+  const connects = a.connects;
+  const hide = new Event('pagehide');
+  Object.defineProperty(hide, 'persisted', { value: false });
+  a.win2.dispatchEvent(hide);
+  w.server.write(2);
+  await settle(16);
+  expect(w.leader()).toBe(b.id);
+  expect(w.gone).toContainEqual({ by: a.id, window: a.win.id, unloading: true });
+  expect(a.connects).toBe(connects);
+  w.kill(a);
+});
+
 test('a frozen leader steps down so another leads; it queues again when it resumes, as a follower', async () => {
   const w = world();
   const a = w.open();
@@ -577,12 +599,15 @@ test('the back/forward cache: pagehide (persisted) steps down and says gone; pag
   await settle();
   const b = w.open();
   await settle(8);
+  const hidden = a.connects;
   const hide = new Event('pagehide');
   Object.defineProperty(hide, 'persisted', { value: true });
   a.win2.dispatchEvent(hide);
   await settle(10);
   expect(w.leader()).toBe(b.id);
   expect(w.gone).toContainEqual({ by: a.id, window: a.win.id, unloading: true });
+  // Going into the cache, it heard B lead but did not report: it counts again only at pageshow.
+  expect(a.connects).toBe(hidden);
   const connects = a.connects;
   const show = new Event('pageshow');
   Object.defineProperty(show, 'persisted', { value: true });
@@ -592,6 +617,12 @@ test('the back/forward cache: pagehide (persisted) steps down and says gone; pag
   expect(a.connects).toBeGreaterThan(connects);
   expectAll(a, 0, 2);
   expect(w.server.streams.size).toBe(1);
+  // Back from the cache it is live: its later reports (a leader change, a hello) go out again.
+  const restored = a.connects;
+  w.kill(b);
+  await settle(16);
+  expect(w.leader()).toBe(a.id);
+  expect(a.connects).toBeGreaterThan(restored);
 });
 
 test('a sleeping follower behind a new leader that started past it fetches the lines between, once, in order', async () => {
@@ -890,6 +921,63 @@ test('discardPreparedInboxEvents closes the early channel when no subscription f
   } finally {
     g.BroadcastChannel = saved.BroadcastChannel;
     g.EventSource = saved.EventSource;
+    Object.defineProperty(globalThis, 'navigator', { value: saved.navigator, configurable: true });
+  }
+});
+
+test('a frame that reached the early channel before the subscription: the report it starts names the leader', async () => {
+  // A new tab listens on the channel before its first list read (prepareInboxEvents); a
+  // `reach` frame the leader passes on meanwhile (another tab just got counted) waits in
+  // the backlog. Handling it on subscribe tells this tab its leader and reports
+  // (`onConnect`). That report must carry `served_by`, or the server never counts the
+  // tab: the leader's answer to its join names the same leader and reports nothing new.
+  // (The browser proof saw "Expected: 8, Received: 7" in notify_reach.)
+  const w = world();
+  const a = w.open();
+  await settle();
+  expect(w.leader()).toBe(a.id);
+  const g = globalThis as unknown as Record<string, unknown>;
+  const saved = { BroadcastChannel: g.BroadcastChannel, EventSource: g.EventSource, navigator: g.navigator, document: g.document, window: g.window };
+  const tabId = 99;
+  const servedAtConnect: (string | null)[] = [];
+  let unsubscribe = () => {};
+  try {
+    g.BroadcastChannel = function (this: unknown) {
+      return w.hub.open(tabId);
+    };
+    g.EventSource = class {};
+    g.document = new EventTarget();
+    g.window = new EventTarget();
+    Object.defineProperty(globalThis, 'navigator', { value: { locks: w.locks.managerFor(tabId) }, configurable: true });
+    prepareInboxEvents();
+    w.server.broadcast('reach', JSON.stringify({ enabled: true, windows: 1, allowed: 1, allowed_origins: [] }));
+    await settle();
+    const win: InboxEventWindow = { id: 'w-tab-early-0099', permission: 'granted', origin: 'http://localhost:1' };
+    const env: SharedEventsEnv = {
+      // The page's own env, so the early channel and its backlog are the ones used.
+      ...browserSharedEventsEnv({ open: (c, onFrame) => w.server.open(tabId, c, onFrame), dispatch: dispatchInboxFrame }),
+      catchUp: async (c) => w.server.lines.filter((line) => line.seq > c).map((line) => w.server.frameOf(line)),
+      sendGone: () => {},
+      lifecycle: null,
+    };
+    unsubscribe = subscribeSharedInboxEvents(w.server.seq, {
+      onRecord: () => {},
+      onStatus: () => {},
+      onConnect: () => {
+        servedAtConnect.push(inboxEventsServedBy());
+      },
+    }, win, env);
+    await settle(12);
+    expect(servedAtConnect.length).toBeGreaterThanOrEqual(1);
+    expect(servedAtConnect).toEqual(servedAtConnect.map(() => a.win.id));
+    expect(w.server.streams.size).toBe(1);
+  } finally {
+    unsubscribe();
+    discardPreparedInboxEvents();
+    g.BroadcastChannel = saved.BroadcastChannel;
+    g.EventSource = saved.EventSource;
+    g.document = saved.document;
+    g.window = saved.window;
     Object.defineProperty(globalThis, 'navigator', { value: saved.navigator, configurable: true });
   }
 });

@@ -29,6 +29,7 @@ import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { fileKind } from '@plannotator/core/file-kind';
+import { packageFileKind } from '@plannotator/core/package-changes';
 import { getFileKindOrder } from '../utils/fileKindTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode, snapshotDiffSelection, rangeForGutterClick, type DiffSelectionSnapshot } from '../utils/diffSelection';
@@ -222,6 +223,12 @@ export interface AllFilesCodeViewProps {
     tooLargeFallback?: React.ReactNode;
     onHeightChange: () => void;
   }) => React.ReactNode;
+  /**
+   * Package changes under a package.json or lockfile header. A render prop
+   * like `renderImagePreview`, so read-only hosts (the guide chain,
+   * guides.show) that leave it unset never fetch or draw it.
+   */
+  renderPackageChanges?: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
   /**
    * Rendered Markdown previews. A previewed Markdown file shows its card in
    * the header slot (measured like an image preview) and its item's diff is
@@ -656,6 +663,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewSnapshotId,
   contextExpansionAvailable = true,
   renderImagePreview,
+  renderPackageChanges,
   markdownPreview,
   compactTouchLayout,
   onLineSelection,
@@ -899,12 +907,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // guides.show) the set is empty and nothing below runs.
   const imagePreviewItemIds = useMemo(() => {
     const ids = new Set<string>();
-    if (!renderImagePreview) return ids;
-    for (const [id, file] of itemIdToFile) {
-      if (isImagePreviewCandidate(file.patch, file.path, file.oldPath)) ids.add(id);
+    if (renderImagePreview) {
+      for (const [id, file] of itemIdToFile) {
+        if (isImagePreviewCandidate(file.patch, file.path, file.oldPath)) ids.add(id);
+      }
+    }
+    // Package changes cards are measured the same way.
+    if (renderPackageChanges) {
+      for (const [id, file] of itemIdToFile) if (packageFileKind(file.path)) ids.add(id);
     }
     return ids;
-  }, [itemIdToFile, renderImagePreview]);
+  }, [itemIdToFile, renderImagePreview, renderPackageChanges]);
 
   // Markdown files shown as a rendered preview (see the `markdownPreview` prop).
   const markdownPreviewRef = useRef(markdownPreview);
@@ -2981,6 +2994,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         {/* A hunkless image chunk previews its Before/After images (#1598)
             when the host opts in; the notices below are its fallback. */}
         {imagePreview}
+        {/* Package changes under a manifest's header. A lockfile's card stays
+            visible while the file is folded (lockfiles seed collapsed as
+            generated files): the card is the readable part of it. */}
+        {renderPackageChanges && (!collapsed || packageFileKind(filePath)?.role === 'lockfile') && packageFileKind(filePath)
+          ? renderPackageChanges({ file, onHeightChange: remeasure })
+          : null}
         {/* Files over the review size cap arrive as a contents-free stub, so
             Pierre renders nothing below the header. Explain why rather than
             leaving a bare header that reads as a broken diff. */}

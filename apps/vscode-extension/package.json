@@ -1,7 +1,7 @@
 {
   "name": "plannotator-webview",
   "displayName": "Plannotator",
-  "description": "Opens Plannotator plan reviews inside VS Code tabs instead of an external browser",
+  "description": "Opens Plannotator plan reviews inside VS Code tabs, and writes and reads Guided Reviews of your changes and pull requests",
   "version": "0.16.8",
   "publisher": "backnotprop",
   "license": "MIT",
@@ -19,12 +19,25 @@
     "color": "#1e1e2e",
     "theme": "dark"
   },
-  "categories": ["AI"],
-  "keywords": ["plannotator", "plan review", "claude", "ai", "webview"],
+  "categories": [
+    "AI"
+  ],
+  "keywords": [
+    "plannotator",
+    "plan review",
+    "guided review",
+    "code review",
+    "claude",
+    "ai",
+    "webview"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
-  "extensionKind": ["workspace", "ui"],
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
   "main": "./dist/extension.cjs",
   "activationEvents": [
     "onStartupFinished"
@@ -48,6 +61,203 @@
         "command": "plannotator-webview.deleteEditorAnnotation",
         "title": "Delete Annotation",
         "icon": "$(trash)"
+      },
+      {
+        "command": "plannotator.guides.newReview",
+        "title": "New Guided Review",
+        "category": "Guided Reviews",
+        "icon": "$(add)"
+      },
+      {
+        "command": "plannotator.guides.openHome",
+        "title": "Open Dashboard",
+        "category": "Guided Reviews",
+        "icon": "$(home)"
+      },
+      {
+        "command": "plannotator.guides.openPullRequest",
+        "title": "Open Pull Request",
+        "category": "Guided Reviews",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "plannotator.guides.openFolder",
+        "title": "Open a Folder…",
+        "category": "Guided Reviews",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "plannotator.guides.refresh",
+        "title": "Refresh",
+        "category": "Guided Reviews",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "plannotator.guides.guideLocal",
+        "title": "Guided Review: Local Changes",
+        "category": "Guided Reviews",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "plannotator.guides.guidePullRequest",
+        "title": "Guided Review: Pull Request…",
+        "category": "Guided Reviews",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "plannotator.guides.openGuide",
+        "title": "Open Guided Review",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.closeGuide",
+        "title": "Close Guided Review",
+        "category": "Guided Reviews",
+        "icon": "$(close)"
+      },
+      {
+        "command": "plannotator.guides.resumeDraft",
+        "title": "Resume Draft",
+        "category": "Guided Reviews",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "plannotator.guides.saveDraftAsIs",
+        "title": "Save Draft As Is",
+        "category": "Guided Reviews",
+        "icon": "$(save)"
+      },
+      {
+        "command": "plannotator.guides.deleteDraft",
+        "title": "Delete Draft",
+        "category": "Guided Reviews",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "plannotator.guides.deleteGuide",
+        "title": "Delete Guided Review",
+        "category": "Guided Reviews",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "plannotator.guides.exportGuide",
+        "title": "Download Portable Guided Review",
+        "category": "Guided Reviews",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "plannotator.guides.showGeneration",
+        "title": "Show Guided Review Being Built",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.cancelGeneration",
+        "title": "Cancel Guided Review Being Built",
+        "category": "Guided Reviews",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "plannotator.guides.openChapter",
+        "title": "Open Chapter",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.nextChapter",
+        "title": "Next Chapter",
+        "category": "Guided Reviews",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "plannotator.guides.markChapterReviewed",
+        "title": "Mark Chapter Reviewed",
+        "category": "Guided Reviews",
+        "icon": "$(check)"
+      },
+      {
+        "command": "plannotator.guides.openFile",
+        "title": "Open File",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.nextFile",
+        "title": "Next File",
+        "category": "Guided Reviews",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "plannotator.guides.toggleFileReviewed",
+        "title": "Mark File Reviewed",
+        "category": "Guided Reviews",
+        "icon": "$(check)"
+      },
+      {
+        "command": "plannotator.guides.askAboutSelection",
+        "title": "Ask the Agent About This…",
+        "category": "Guided Reviews",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "plannotator.guides.askAboutFile",
+        "title": "Ask the Agent About This File…",
+        "category": "Guided Reviews",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "plannotator.guides.openAnswer",
+        "title": "Open Answer",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadSubmit",
+        "title": "Ask",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadCancel",
+        "title": "Cancel",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadClose",
+        "title": "Close",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadSettings",
+        "title": "Change the Agent, Model and Effort",
+        "category": "Guided Reviews",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "plannotator.guides.askThreadPick",
+        "title": "Ask a Suggested Question",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadAgain",
+        "title": "Ask Again",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.askThreadStop",
+        "title": "Stop Answering",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.changeDefaults",
+        "title": "Change Defaults (Agent, Model, Effort)",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.updateAdapters",
+        "title": "Update Agent Adapters",
+        "category": "Guided Reviews"
+      },
+      {
+        "command": "plannotator.guides.openPullRequestOnGitHub",
+        "title": "Open on GitHub",
+        "category": "Guided Reviews",
+        "icon": "$(link-external)"
       }
     ],
     "keybindings": [
@@ -64,6 +274,11 @@
           "command": "plannotator-webview.addEditorAnnotation",
           "when": "editorHasSelection",
           "group": "plannotator"
+        },
+        {
+          "command": "plannotator.guides.askAboutSelection",
+          "when": "plannotator.guides.editorInGuide && editorHasSelection",
+          "group": "plannotator@1"
         }
       ],
       "comments/commentThread/title": [
@@ -71,6 +286,11 @@
           "command": "plannotator-webview.deleteEditorAnnotation",
           "group": "inline",
           "when": "commentController == plannotator && commentThread == plannotator-thread"
+        },
+        {
+          "command": "plannotator.guides.askThreadSettings",
+          "group": "inline",
+          "when": "commentController =~ /^plannotator-guides-ask/"
         }
       ],
       "comments/commentThread/context": [
@@ -78,6 +298,209 @@
           "command": "plannotator-webview.submitComment",
           "group": "inline",
           "when": "commentController == plannotator"
+        },
+        {
+          "command": "plannotator.guides.askThreadSubmit",
+          "group": "inline@1",
+          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread != plannotator-ask-asking"
+        },
+        {
+          "command": "plannotator.guides.askThreadCancel",
+          "group": "inline@2",
+          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread == plannotator-ask-compose"
+        },
+        {
+          "command": "plannotator.guides.askThreadClose",
+          "group": "inline@2",
+          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread == plannotator-ask-done"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "plannotator.guides.newReview",
+          "when": "view == plannotator.guides.tree",
+          "group": "navigation@1"
+        },
+        {
+          "command": "plannotator.guides.refresh",
+          "when": "view == plannotator.guides.tree",
+          "group": "navigation@2"
+        },
+        {
+          "command": "plannotator.guides.closeGuide",
+          "when": "view == plannotator.guides.tree && plannotator.guides.readerOpen",
+          "group": "navigation@3"
+        },
+        {
+          "command": "plannotator.guides.openHome",
+          "when": "view == plannotator.guides.tree",
+          "group": "navigation@0"
+        },
+        {
+          "command": "plannotator.guides.changeDefaults",
+          "when": "view == plannotator.guides.tree",
+          "group": "overflow@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "plannotator.guides.guideLocal",
+          "when": "view == plannotator.guides.tree && viewItem == pn.local",
+          "group": "inline"
+        },
+        {
+          "command": "plannotator.guides.guidePullRequest",
+          "when": "view == plannotator.guides.tree && viewItem =~ /^pn\\.(pr|waiting)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "plannotator.guides.openPullRequestOnGitHub",
+          "when": "view == plannotator.guides.tree && viewItem =~ /^pn\\.(pr|waiting)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "plannotator.guides.resumeDraft",
+          "when": "view == plannotator.guides.tree && viewItem == pn.draft",
+          "group": "inline@1"
+        },
+        {
+          "command": "plannotator.guides.saveDraftAsIs",
+          "when": "view == plannotator.guides.tree && viewItem == pn.draft",
+          "group": "inline@2"
+        },
+        {
+          "command": "plannotator.guides.deleteDraft",
+          "when": "view == plannotator.guides.tree && viewItem == pn.draft",
+          "group": "z@1"
+        },
+        {
+          "command": "plannotator.guides.exportGuide",
+          "when": "view == plannotator.guides.tree && viewItem == pn.guide",
+          "group": "a@1"
+        },
+        {
+          "command": "plannotator.guides.deleteGuide",
+          "when": "view == plannotator.guides.tree && viewItem == pn.guide",
+          "group": "z@1"
+        },
+        {
+          "command": "plannotator.guides.cancelGeneration",
+          "when": "view == plannotator.guides.tree && viewItem == pn.building",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "plannotator.guides.openGuide",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.openPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.openFolder",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.showGeneration",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.openChapter",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.openFile",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.resumeDraft",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.saveDraftAsIs",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.deleteDraft",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.deleteGuide",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.openPullRequestOnGitHub",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.cancelGeneration",
+          "when": "plannotator.guides.generating"
+        },
+        {
+          "command": "plannotator.guides.exportGuide",
+          "when": "plannotator.guides.readerOpen"
+        },
+        {
+          "command": "plannotator.guides.nextFile",
+          "when": "plannotator.guides.readerOpen"
+        },
+        {
+          "command": "plannotator.guides.nextChapter",
+          "when": "plannotator.guides.readerOpen"
+        },
+        {
+          "command": "plannotator.guides.markChapterReviewed",
+          "when": "plannotator.guides.readerOpen"
+        },
+        {
+          "command": "plannotator.guides.toggleFileReviewed",
+          "when": "plannotator.guides.readerOpen"
+        },
+        {
+          "command": "plannotator.guides.closeGuide",
+          "when": "plannotator.guides.readerOpen"
+        },
+        {
+          "command": "plannotator.guides.askAboutSelection",
+          "when": "plannotator.guides.editorInGuide"
+        },
+        {
+          "command": "plannotator.guides.askAboutFile",
+          "when": "plannotator.guides.editorInGuide"
+        },
+        {
+          "command": "plannotator.guides.openAnswer",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadSubmit",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadCancel",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadClose",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadSettings",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadPick",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadAgain",
+          "when": "false"
+        },
+        {
+          "command": "plannotator.guides.askThreadStop",
+          "when": "false"
         }
       ]
     },
@@ -88,22 +511,150 @@
           "type": "boolean",
           "default": true,
           "description": "Inject PLANNOTATOR_BROWSER env var into integrated terminals to redirect plannotator to VS Code."
+        },
+        "plannotator.guides.claudeCode.command": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The Claude Code ACP adapter to start for Guided Reviews. Empty means `claude-agent-acp` on PATH (install it with `npm install -g @agentclientprotocol/claude-agent-acp`). An entry for `claude-code` in `#plannotator.guides.agentCommands#` takes precedence."
+        },
+        "plannotator.guides.claudeCode.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "description": "Arguments for the Claude Code ACP adapter."
+        },
+        "plannotator.guides.agentCommands": {
+          "type": "object",
+          "default": {},
+          "scope": "machine",
+          "markdownDescription": "Override how Guided Reviews start a known agent, by its id (`claude-code`, `codex`, `opencode`, `pi`, `copilot`, `cursor`, `kiro`, `kilo`): `{ \"codex\": { \"command\": \"/opt/bin/codex-acp\", \"args\": [] } }`. `command` replaces the program found on PATH; `args`, when given, replace the agent's own ACP arguments.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "command"
+            ]
+          }
+        },
+        "plannotator.guides.customAgent.command": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Any other ACP agent for Guided Reviews: the program that starts it in ACP mode on stdio. When set, it is offered as a choice beside the known agents. Like every agent, it runs with its own settings and permissions."
+        },
+        "plannotator.guides.installAdapters": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Install a missing ACP adapter automatically. Claude Code, Codex and Pi speak ACP through a separate npm adapter (`@agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp`, `pi-acp`). When it is not set in `#plannotator.guides.agentCommands#` and not on PATH, Guided Reviews installs the exact pinned version into the extension's own storage with npm (no global install, no install scripts), and reuses it. Needs npm. Agents that are their own program (OpenCode, Copilot CLI, Cursor, Kiro CLI, Kilo Code) are never installed for you."
+        },
+        "plannotator.guides.useInstalledCli": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Run your own `claude` / `codex` (the one on PATH) through the Claude Code and Codex ACP adapters, by setting `CLAUDE_CODE_EXECUTABLE` / `CODEX_PATH` for them. Turn off to run the copy that comes with each adapter instead, for example when your CLI is older than the adapter expects. A `CLAUDE_CODE_EXECUTABLE` or `CODEX_PATH` already in your environment is always used as it is. On Windows only an `.exe` is used (an npm-installed `claude.cmd` cannot be started by the adapter)."
+        },
+        "plannotator.guides.autoApprove": {
+          "type": "string",
+          "enum": [
+            "off",
+            "allow-all"
+          ],
+          "enumDescriptions": [
+            "The agent runs with your own settings, and you approve each request it asks about.",
+            "Approve every request the agent asks about during a guide, and switch it to its own mode that does not ask (Claude Code: acceptEdits, Codex: agent) where it has one."
+          ],
+          "default": "off",
+          "scope": "machine",
+          "markdownDescription": "Whether Guided Reviews approve the agent's permission requests automatically. Off by default: what the agent may do is governed by its own settings, and you answer what it asks about (in the guide's view or a notification). You can also turn it on for one guide when you start it, or from the first request."
+        },
+        "plannotator.guides.customAgent.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "description": "Arguments for the custom ACP agent (for example [\"acp\"])."
+        },
+        "plannotator.guides.customAgent.label": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "The name the custom ACP agent is shown under. Empty means \"Custom agent\"."
+        },
+        "plannotator.guides.ghPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The GitHub CLI to use for pull requests. Empty means `gh` on PATH."
         }
       }
-    }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "plannotator-guides",
+          "title": "Guided Reviews",
+          "icon": "images/guides.svg"
+        }
+      ]
+    },
+    "views": {
+      "plannotator-guides": [
+        {
+          "id": "plannotator.guides.tree",
+          "name": "Reviews"
+        },
+        {
+          "type": "webview",
+          "id": "plannotator.guides.chapter",
+          "name": "Chapter",
+          "when": "plannotator.guides.readerOpen"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "plannotator.guides.tree",
+        "contents": "Loading guides…"
+      }
+    ]
   },
   "scripts": {
     "build": "bun run ./scripts/build.ts",
     "watch": "bun run ./scripts/watch.ts",
     "test": "bun test",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.guides.json && tsc --noEmit -p tsconfig.webview.json",
     "vsce-package": "vsce package --no-dependencies",
     "package": "bun run build && bun run vsce-package",
     "clean": "rm -rf ./dist"
   },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.9.0",
+    "@plannotator/acp-client": "workspace:*",
+    "@vscode/codicons": "0.0.45",
+    "dompurify": "3.4.17",
+    "marked": "17.0.6",
+    "zod": "4.6.7"
+  },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "1.85.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.2",
     "typescript": "^5.0.0"

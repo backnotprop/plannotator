@@ -150,3 +150,28 @@ describe.if(hasDom)('useAIChat — Ask this session', () => {
     expect(chat.current!.messages.map((m) => m.response.text)).toEqual(['from pi-sdk']);
   });
 });
+
+describe.if(hasDom)('useAIChat — onDelivered', () => {
+  test('called once when the question lands, never for a busy answer, and again on the retry that lands', async () => {
+    let calls = 0;
+    const queries: Array<Record<string, unknown>> = [];
+    setAITransport({
+      session: async () => Response.json({ sessionId: 's1' }),
+      query: async (body) => {
+        queries.push(body as Record<string, unknown>);
+        if (queries.length === 1) return sse({ type: 'error', code: 'agent_busy', error: 'busy' });
+        return sse({ type: 'text_delta', delta: 'a' }, { type: 'text_delta', delta: 'b' }, { type: 'result', result: 'ab' });
+      },
+      abort: async () => {},
+      permission: () => {},
+    } satisfies AITransport);
+    const chat = await mount();
+    await act(async () => { await chat.current!.ask({ prompt: 'q', onDelivered: () => { calls += 1; } }); });
+    expect(calls).toBe(0);
+    // The callback never reaches the wire.
+    expect(Object.keys(queries[0]!)).not.toContain('onDelivered');
+    const busyId = chat.current!.messages[0]!.question.id;
+    await act(async () => { await chat.current!.retry(busyId, { busyPolicy: 'wait' }); });
+    expect(calls).toBe(1);
+  });
+});

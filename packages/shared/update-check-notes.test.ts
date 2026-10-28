@@ -1,6 +1,6 @@
 /**
  * One release's notes fetched by its tag (fetchReleaseNotesFor), for a
- * version installed before the daily check saw it, against a fake release API
+ * version installed before the release check saw it, against a fake release API
  * on loopback (never GitHub): the request, the saved notes, the knob, the
  * per-version throttle, and stored notes without a "What's New" part.
  */
@@ -13,7 +13,8 @@ import {
   fetchReleaseNotesFor,
   readReleaseNotes,
   readUpdateState,
-  RELEASE_CHECK_INTERVAL_MS,
+  RELEASE_ASSETS_FETCH_INTERVAL_MS,
+  RELEASE_ASSETS_FETCH_RETRY_MS,
   RELEASE_CHECK_RETRY_MS,
   releaseTagApiUrl,
   writeReleaseNotes,
@@ -112,10 +113,12 @@ describe("fetchReleaseNotesFor", () => {
     expect(await fetchNotes("0.28.19")).toEqual({ outcome: "failed", error: "HTTP 403" });
     expect(readUpdateState(dataDir).notesFetch?.["0.28.19"]).toMatchObject({ attemptedAt: NOW, failedAt: NOW, error: "HTTP 403" });
     expect((await fetchNotes("0.28.19", { now: NOW + 60_000 })).outcome).toBe("not-due");
-    expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_CHECK_RETRY_MS - 1 })).outcome).toBe("not-due");
+    // Notes keep their own back-off, not the hourly release check's.
+    expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_CHECK_RETRY_MS })).outcome).toBe("not-due");
+    expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_ASSETS_FETCH_RETRY_MS - 1 })).outcome).toBe("not-due");
     expect(seen.length).toBe(1);
     answer = (path) => Response.json({ tag_name: "v0.28.19", body: bodyFor("0.28.19"), path });
-    expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_CHECK_RETRY_MS })).outcome).toBe("fetched");
+    expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_ASSETS_FETCH_RETRY_MS })).outcome).toBe("fetched");
     expect(seen.length).toBe(2);
   });
 
@@ -126,7 +129,7 @@ describe("fetchReleaseNotesFor", () => {
   });
 
   test("notes saved before the release body was edited (no What's New part) are fetched again, once a day at most", async () => {
-    // What the daily check saved from GitHub's generated notes, before the body was replaced.
+    // What the release check saved from GitHub's generated notes, before the body was replaced.
     writeReleaseNotes({ version: "0.28.19", notes: "", highlights: [] }, dataDir);
     expect((await fetchNotes("0.28.19")).outcome).toBe("fetched");
     expect(readReleaseNotes("0.28.19", dataDir)!.notes).toBe("Notes the person reads.");
@@ -136,7 +139,7 @@ describe("fetchReleaseNotesFor", () => {
     writeReleaseNotes({ version: "0.28.20", notes: "", highlights: [] }, dataDir);
     answer = () => Response.json({ tag_name: "v0.28.20", body: "## What's Changed\n\n* a PR" });
     expect((await fetchNotes("0.28.20")).outcome).toBe("fetched");
-    expect((await fetchNotes("0.28.20", { now: NOW + RELEASE_CHECK_INTERVAL_MS - 1 })).outcome).toBe("not-due");
+    expect((await fetchNotes("0.28.20", { now: NOW + RELEASE_ASSETS_FETCH_INTERVAL_MS - 1 })).outcome).toBe("not-due");
     expect(seen.length).toBe(2);
   });
 

@@ -22,6 +22,7 @@
  * state.
  */
 
+import { childPath } from "@plannotator/shared/child-env";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
@@ -102,7 +103,7 @@ const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
  * `close` waits for the pipes, so only the timer ends a lingering read.
  */
 export function runQuietly(command: string, args: string[], timeoutMs: number): Promise<TailscaleRunResult> {
-  const path = command.includes("/") ? (existsSync(command) ? command : null) : Bun.which(command);
+  const path = command.includes("/") ? (existsSync(command) ? command : null) : Bun.which(command, { PATH: childPath() });
   if (!path) return Promise.resolve({ error: Object.assign(new Error(`${command}: not found on PATH`), { code: "ENOENT" }), status: null, stdout: "", stderr: "" });
   const group = process.platform !== "win32";
   return new Promise((resolve) => {
@@ -252,7 +253,7 @@ export const defaultPairingProbes: PairingProbes = {
     }
     return null;
   },
-  which: (command) => Bun.which(command),
+  which: (command) => Bun.which(command, { PATH: childPath() }),
   firewall: async () => {
     if (process.platform !== "darwin" || !existsSync(SOCKETFILTERFW)) return "unknown";
     const [global, blockAll] = await Promise.all([stdoutOf(SOCKETFILTERFW, ["--getglobalstate"]), stdoutOf(SOCKETFILTERFW, ["--getblockall"])]);

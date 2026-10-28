@@ -27,6 +27,8 @@ test("a tagged session's wake: its own instruction, whose thread it is, read fir
       "The thread belongs to another session (Claude Code); you have not seen it. Read it first with read_thread (message_id msg_R). Answer only what is addressed to you, in the same thread: plannotator_inbox send_message with reply_to msg_R.",
       "",
       "@Pi raise it to 30 s.",
+      "",
+      "[thread msg_T · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]",
     ].join("\n"),
   );
   expect(text).not.toContain(INBOX_WAKE_INSTRUCTION);

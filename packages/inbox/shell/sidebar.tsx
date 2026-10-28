@@ -53,7 +53,18 @@ type SidebarContext = {
 	widthValue: MotionValue<number>;
 	/** The provider's wrapper, where the mobile sheet portals. */
 	container: HTMLDivElement | null;
+	/** Something the sidebar holds that the closed sidebar would hide (an update): a dot on the trigger. */
+	toggleNotice: SidebarToggleNotice | null;
 };
+
+/**
+ * A dot on the sidebar toggle while the sidebar is closed (docked closed, or
+ * the phone sheet closed), for something only the sidebar shows. `label`
+ * joins the toggle's accessible name ("update available"); the dot itself is
+ * hidden from screen readers. `tone`: `primary`, or `neutral` (a failure that
+ * is not an error, as the Update button draws it).
+ */
+export type SidebarToggleNotice = { tone: "primary" | "neutral"; label: string };
 
 const SidebarContext = React.createContext<SidebarContext | null>(null);
 
@@ -93,9 +104,12 @@ function SidebarProvider({
 	className,
 	style,
 	widthValue: widthValueProp,
+	toggleNotice = null,
 	children,
 	...props
 }: React.ComponentProps<"div"> & {
+	/** See SidebarToggleNotice. */
+	toggleNotice?: SidebarToggleNotice | null;
 	defaultOpen?: boolean;
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
@@ -164,8 +178,9 @@ function SidebarProvider({
 			toggleSidebar,
 			widthValue,
 			container,
+			toggleNotice,
 		}),
-		[state, open, setOpen, isMobile, openMobile, toggleSidebar, widthValue, container],
+		[state, open, setOpen, isMobile, openMobile, toggleSidebar, widthValue, container, toggleNotice],
 	);
 
 	return (
@@ -297,7 +312,9 @@ function Sidebar({ className, children, ...props }: React.ComponentProps<"div">)
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<"button">) {
-	const { toggleSidebar } = useSidebar();
+	const { toggleSidebar, toggleNotice, isMobile, open, openMobile } = useSidebar();
+	// Only while the sidebar is closed: open, it shows the thing itself.
+	const notice = toggleNotice && !(isMobile ? openMobile : open) ? toggleNotice : null;
 
 	return (
 		<button
@@ -305,7 +322,8 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<"
 			data-sidebar="trigger"
 			data-slot="sidebar-trigger"
 			className={className ? `ib-sb-trigger ${className}` : "ib-sb-trigger"}
-			aria-label="Toggle Sidebar"
+			aria-label={notice ? `Toggle Sidebar, ${notice.label}` : "Toggle Sidebar"}
+			data-notice={notice ? notice.tone : undefined}
 			onClick={(event) => {
 				onClick?.(event);
 				toggleSidebar();
@@ -313,6 +331,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<"
 			{...props}
 		>
 			<PanelLeftIcon />
+			{notice && <span className="ib-sb-trigger-dot" data-tone={notice.tone} aria-hidden="true" />}
 		</button>
 	);
 }

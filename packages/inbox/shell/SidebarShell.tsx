@@ -14,7 +14,7 @@ import { useMotionValue, type MotionValue } from "motion/react";
 
 import { CollapsibleEdge, ResizeHandle } from "./CollapsibleEdge";
 import { MotionStyleDiv } from "./motion-style-div";
-import { Sidebar, SidebarProvider, useSidebar } from "./sidebar";
+import { Sidebar, SidebarProvider, useSidebar, type SidebarToggleNotice } from "./sidebar";
 import { SidebarPeek } from "./SidebarPeek";
 import { useResizablePanel } from "./useResizablePanel";
 
@@ -30,9 +30,12 @@ export function SidebarShell({
 	onOpenChange,
 	navigation,
 	className,
+	toggleNotice = null,
 	children,
 }: {
 	open: boolean;
+	/** A dot on the sidebar toggle while the sidebar is closed (an update waiting). */
+	toggleNotice?: SidebarToggleNotice | null;
 	onOpenChange: (open: boolean) => void;
 	/** The sidebar's contents, drawn docked, in the peek and in the phone sheet. */
 	navigation: ReactNode;
@@ -75,6 +78,7 @@ export function SidebarShell({
 			open={open}
 			onOpenChange={onOpenChange}
 			widthValue={sidebarWidth}
+			toggleNotice={toggleNotice}
 			className={className}
 			style={{ "--sidebar-width": `${sidebarResize.width}px` } as CSSProperties}
 		>

@@ -48,6 +48,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { parseDiagramAnchor, type DiagramAnchor } from "@plannotator/core/diagram-anchor";
+import { parseImageRegion, type ImageRegion } from "@plannotator/core/image-region";
 import { parseQuestionAnswer, type QuestionAnswer } from "@plannotator/core/question-block";
 import { getPlannotatorDataDir } from "./data-dir";
 import { extractDirName, extractRepoName, sanitizeTag } from "./project";
@@ -203,6 +204,11 @@ export interface FeedbackAnnotationRecord {
    *  same parser the ui codec runs. Additive per the field contract above;
    *  absent for every other annotation kind. */
   diagramAnchor?: DiagramAnchor;
+  /** A comment on part of an image (#2100): the image's src as written, its
+   *  document line and the box in the image's own pixels, validated by the
+   *  same `parseImageRegion` the export runs. Additive per the field
+   *  contract above; absent for every other annotation kind. */
+  imageRegion?: ImageRegion;
   /** The reviewer's answer to a `:::question` block (the annotation's
    *  `questionAnswer`): picked choice labels, "Other" or free text, note,
    *  skipped, plus the question's key and prompt. Validated and capped by
@@ -365,6 +371,8 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (documentPath) record.documentPath = documentPath;
   const diagramAnchor = a.diagramAnchor === undefined ? null : parseDiagramAnchor(a.diagramAnchor);
   if (diagramAnchor !== null) record.diagramAnchor = diagramAnchor;
+  const imageRegion = a.imageRegion === undefined ? null : parseImageRegion(a.imageRegion);
+  if (imageRegion !== null) record.imageRegion = imageRegion;
   const questionAnswer = a.questionAnswer === undefined ? null : parseQuestionAnswer(a.questionAnswer);
   if (questionAnswer !== null) record.questionAnswer = questionAnswer;
   return record;

@@ -7,6 +7,7 @@
 import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
+import { listGhAccounts } from "./pr-github-account";
 
 // GitHub-specific PRRef shape (used internally)
 interface GhPRRef {
@@ -35,8 +36,23 @@ function hostnameArgs(host: string, args: string[]): string[] {
 
 // --- Auth ---
 
+/**
+ * gh is signed in on `host`. Only that decides here: which account the
+ * review runs as is `ensureGhPRAccess`'s call (pr-github-account.ts).
+ * Plain `gh auth status` exits 1 when ANY account on the host is broken, so
+ * a stale second account would block a review the active one can do (#2157):
+ * ask about the active account only (`--active`), and when that
+ * fails (an older gh, or the active login is broken), go on as long as some
+ * account on the host is usable.
+ */
 export async function checkGhAuth(runtime: PRRuntime, host: string): Promise<void> {
-  const result = await runtime.runCommand("gh", hostnameArgs(host, ["auth", "status"]));
+  const active = await runtime.runCommand("gh", ["auth", "status", "--active", "--hostname", host]);
+  if (active.exitCode === 0) return;
+  const accounts = await listGhAccounts(runtime, host);
+  if (accounts.some((a) => a.state === "success")) return;
+  const result = /unknown flag/i.test(active.stderr)
+    ? await runtime.runCommand("gh", hostnameArgs(host, ["auth", "status"]))
+    : active;
   if (result.exitCode !== 0) {
     const stderr = result.stderr.trim();
     const hostHint = host !== "github.com" ? ` --hostname ${host}` : "";

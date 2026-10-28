@@ -29,7 +29,8 @@
  * text alone; an older one appends this trimmed JSON as well.
  */
 
-import { INBOX_HOST_NAMES, inboxAgentName, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
@@ -121,6 +122,15 @@ export interface AgentMessage {
   to?: AgentAddressee;
   /** On a person's reply that tags agents (approval "inbox-tag-agents"): the sessions it tags, and whether one is the reader (`you`). */
   tagged?: AgentTagged[];
+  /**
+   * The person sent it with compose's Board chip on (approval
+   * "inbox-compose-board-chip"): the agent tracks the work on the Board.
+   * `messageText` puts `inboxBoardRequestBlock` after the body; `body` stays
+   * the person's words.
+   */
+  board_request?: true;
+  /** With `board_request`: the cards in flight that link this thread already (not shipped, not dropped), for `messageText`. */
+  board_cards?: { id: string; title: string }[];
 }
 
 /** One agent session a person's reply tags, as an agent reads it. */
@@ -152,6 +162,7 @@ export interface AgentMessageLine {
   ack?: true;
   to?: AgentAddressee;
   tagged?: AgentTagged[];
+  board_request?: true;
 }
 
 export interface ThreadReadInput {
@@ -310,8 +321,9 @@ function numbering(questions: readonly InboxQuestion[]): Map<string, number> {
 function actionResultWords(q: InboxQuestion): string | null {
   const result = q.action_result;
   if (q.kind !== "action" || !result) return null;
-  if (result.by === "agent") return "you saw it done";
-  const pending = q.state === "picked" ? " (not sent yet: the person can still undo it)" : "";
+  if (result.by === "agent") return result.person?.note && q.revision !== q.sent_revision ? "you saw it done (the person's note on it is in their reply draft, not sent yet)" : "you saw it done";
+  // In the person's reply draft (approval "inbox-action-items-in-reply"), or inside the timed path's Undo window.
+  const pending = q.state === "picked" ? (result.staged ? " (in the person's reply draft, not sent yet)" : " (not sent yet: the person can still undo it)") : "";
   if (result.outcome === "cant") return `can't do it: ${JSON.stringify(result.note ?? "")}${pending}`;
   return `done${result.note ? `, note: ${JSON.stringify(result.note)}` : ""}${pending}`;
 }
@@ -352,56 +364,6 @@ export function questionWords(q: AgentQuestionRef, withPrompt = false, withAnswe
 }
 
 /**
- * Where a reply's "Answers to your questions" section ends, read by the
- * grammar formatQuestionAnswersSection writes (packages/core/question-block.ts),
- * which composeInboxReplyBody puts last before the reply's feedback and skills
- * block: the heading, a blank line, the "N of M questions answered." line, a
- * blank line, then `### …` blocks of answer lines (`Answer…`, `- …`, `> …`,
- * `Note…`, `Skipped…`), each ended by a blank line. Returns the index of the
- * first line after it, or null when the text does not follow that grammar
- * exactly (then nothing is cut).
- */
-function answersSectionEnd(lines: readonly string[], at: number): number | null {
-  if (lines[at + 1] !== "") return null;
-  // One reply for one session (approval "inbox-explicit-skip"): a sub-section per message,
-  // `### Your message <id>`, each with the same grammar one level down.
-  if (/^### Your message msg_[A-Za-z0-9]+$/.test(lines[at + 2] ?? "")) {
-    let i = at + 2;
-    let groups = 0;
-    while (i < lines.length && /^### Your message msg_[A-Za-z0-9]+$/.test(lines[i]!)) {
-      if (lines[i + 1] !== "") return null;
-      const end = answerBlocksEnd(lines, i + 2, "####");
-      if (end === null) return null;
-      i = end;
-      groups += 1;
-    }
-    return groups > 0 ? i : null;
-  }
-  return answerBlocksEnd(lines, at + 2, "###");
-}
-
-/** The "N of M questions answered." line at `from`, a blank line, then `<h> …` blocks of answer lines; the index after them. */
-function answerBlocksEnd(lines: readonly string[], from: number, h: "###" | "####"): number | null {
-  if (!/^\d+ of \d+ questions? answered\./.test(lines[from] ?? "") || lines[from + 1] !== "") return null;
-  let i = from + 2;
-  let blocks = 0;
-  while (i < lines.length && lines[i]!.startsWith(`${h} `)) {
-    i += 1;
-    let body = 0;
-    while (i < lines.length && lines[i] !== "") {
-      if (!/^(Answer|Note|Skipped|- |> |>$)/.test(lines[i]!)) return null;
-      i += 1;
-      body += 1;
-    }
-    if (body === 0 && lines[i - 1] !== `${h} Unanswered`) return null;
-    blocks += 1;
-    // The block's closing blank line; the section ends at the end of the text.
-    if (i < lines.length) i += 1;
-  }
-  return blocks > 0 ? i : null;
-}
-
-/**
  * A reply's "Answers to your questions" section, left out: each answer is
  * already on its question (the asking message's line or its full form, or
  * the result's `thread.questions`), with its state. Only that section is cut,
@@ -413,7 +375,7 @@ export function withoutAnswersSection(message: InboxMessageWire): string {
   const lines = message.body.split("\n");
   for (let at = 0; at < lines.length; at++) {
     if (!ANSWERS_HEADING.test(lines[at]!) || (at > 0 && lines[at - 1] !== "")) continue;
-    const end = answersSectionEnd(lines, at);
+    const end = inboxAnswersSectionEnd(lines, at);
     if (end === null) continue;
     const marker = `[${QUESTION_ANSWERS_HEADING}: left out here; each answer is on its question above, and expand shows this reply as sent]`;
     const rest = lines.slice(end);
@@ -456,6 +418,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.board_request === true ? { board_request: true as const } : {}),
   };
 }
 
@@ -483,6 +446,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.ack ? { ack: true as const } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.board_request === true ? { board_request: true as const } : {}),
   };
 }
 
@@ -560,7 +524,18 @@ export function windowedThread(
   for (const id of full) shown.add(id);
   const formOf = (id: string): AgentMessageForm => (whole.has(id) ? "whole" : personEarlier.has(id) ? "earlier" : "window");
   const caller = input.caller ?? null;
-  const messages = all.filter((m) => full.has(m.id)).map((m) => agentMessage(m, formOf(m.id), caller));
+  // A Board request in full names the cards that link the thread already (review of #2249: no second card on a re-read).
+  // Only cards still in flight: a shipped card is done (new work in the thread gets a new card), and the card
+  // list op hides shipped and dropped cards by default, so the agent's list agrees with this line.
+  const linkedCards = () =>
+    store
+      .listCards({ projectIds: new Set([thread.project.id]) })
+      .filter((card) => card.column !== "dropped" && card.column !== "shipped" && card.threads.includes(threadId))
+      .map((card) => ({ id: card.id, title: card.title }));
+  const messages = all
+    .filter((m) => full.has(m.id))
+    .map((m) => agentMessage(m, formOf(m.id), caller))
+    .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
   const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller));
   const leftOut = all.filter((m) => !shown.has(m.id));
   // The questions of messages left out, without repeating what the reader has:
@@ -674,6 +649,8 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
   if (line.guide) parts.push(`guided review: ${line.guide}`);
   if (line.ack) parts.push("👍");
+  // Shown in full only: the line says it is there, so a reader that sees just the line expands it.
+  if (line.board_request) parts.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
   return parts.join(" · ");
 }
 
@@ -691,6 +668,14 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   }
   if (message.guide) lines.push(`Guided review: ${message.guide.title}`);
   if (message.ack) lines.push(`👍 ${message.ack.label} (${shortTime(message.ack.at)}): the person read it and needs nothing more.`);
+  // Compose's Board chip: the request, once, after the words and files (the wake's order), and the cards
+  // that link the thread already, so a second reader keeps those current instead of making more.
+  if (message.board_request) {
+    lines.push("", inboxBoardRequestBlock(message.id));
+    if (message.board_cards?.length) {
+      lines.push(`Already on the Board for this thread: ${message.board_cards.map((c) => `${c.id} (${c.title})`).join("; ")}. Keep ${message.board_cards.length === 1 ? "it" : "them"} current; make no other.`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -715,7 +700,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   } else {
     out.push(`Waiting on the person (${thread.open_questions.length}):`);
     for (const q of thread.open_questions) {
-      // An action item (key `a-…`): A1, A2…, "action item, open", or what the person marked inside its Undo window.
+      // An action item (key `a-…`): A1, A2…, "action item, open", or what the person marked and has not sent (in their reply draft, or inside its Undo window).
       const todo = q.key.startsWith("a-");
       const state = todo
         ? q.state === "picked"

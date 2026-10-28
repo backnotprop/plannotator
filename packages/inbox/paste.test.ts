@@ -3,16 +3,16 @@
  * the browser's text paste alone, and the name a clipboard image gets.
  */
 import { describe, expect, test } from 'bun:test';
-import { clipboardFiles, clipboardHasText, pastedFileName, pastedFiles, pasteStamp } from './compose/paste';
+import { chosenFileNames, clipboardFiles, clipboardHasText, pastedFileName, pastedImageOwnLink, pastedFiles, pasteStamp } from './compose/paste';
 
 const at = new Date(2026, 9, 16, 9, 12, 40);
 const file = (name: string, type: string) => new File(['x'], name, { type });
-const data = (items: { kind: string; type: string; file?: File }[], text = '') =>
+const data = (items: { kind: string; type: string; file?: File }[], text = '', html = '') =>
   ({
     items: items.map((item) => ({ kind: item.kind, type: item.type, getAsFile: () => item.file ?? null })),
     files: items.flatMap((item) => (item.file ? [item.file] : [])),
     types: items.map((item) => (item.kind === 'file' ? 'Files' : item.type)),
-    getData: (type: string) => (type === 'text/plain' ? text : ''),
+    getData: (type: string) => (type === 'text/plain' ? text : type === 'text/html' ? html : ''),
   }) as unknown as DataTransfer;
 
 describe('a pasted file name', () => {
@@ -65,5 +65,35 @@ describe('what a paste carries', () => {
     expect(clipboardFiles(fromPage)).toHaveLength(1);
     expect(clipboardHasText(fromPage)).toBe(true);
     expect(clipboardHasText(null)).toBe(false);
+  });
+
+  test('an image copied from a page attaches on a phone only when the HTML is an <img> whose src is the plain-text link', () => {
+    const picture = { kind: 'file', type: 'image/png', file: file('image.png', 'image/png') };
+    const text = { kind: 'string', type: 'text/plain' };
+    const html = { kind: 'string', type: 'text/html' };
+    const url = 'https://example.com/board/header.png?w=2&h=1';
+    const copied = data([text, html, picture], ` ${url}\n`, '<meta charset="utf-8"><img src="https://example.com/board/header.png?w=2&amp;h=1" alt="">');
+    expect(pastedImageOwnLink(copied, true)).toBe(true);
+    expect(pastedFiles(copied, [], at, { phone: true })).toHaveLength(1);
+    // A desktop keeps today's rule: text with an unnamed picture is text.
+    expect(pastedImageOwnLink(copied, false)).toBe(false);
+    expect(pastedFiles(copied, [], at)).toEqual([]);
+    // An Excel or Numbers cell whose value is a URL: its text, an HTML table and a picture of the cell. Text, on both.
+    const cell = data([text, html, picture], url, `<table><tr><td>${url.replace('&', '&amp;')}</td></tr></table>`);
+    expect(pastedFiles(cell, [], at, { phone: true })).toEqual([]);
+    expect(pastedFiles(cell, [], at)).toEqual([]);
+    // A link with no HTML, an <img> of another address, a sentence, a file:// link: text.
+    expect(pastedImageOwnLink(data([text, picture], url), true)).toBe(false);
+    expect(pastedImageOwnLink(data([text, html, picture], url, '<img src="https://example.com/other.png">'), true)).toBe(false);
+    expect(pastedImageOwnLink(data([text, html, picture], `See ${url}`, `<img src="${url}">`), true)).toBe(false);
+    expect(pastedImageOwnLink(data([text, html, picture], 'file:///tmp/a.png', '<img src="file:///tmp/a.png">'), true)).toBe(false);
+    expect(pastedImageOwnLink(null, true)).toBe(false);
+  });
+});
+
+describe('files chosen with the attach button', () => {
+  test('a photo the library names image.jpg gets a dated name, a second one kept apart; a real name is kept', () => {
+    const named = chosenFileNames([file('image.jpg', 'image/jpeg'), file('image.jpg', 'image/jpeg'), file('IMG_2041.HEIC', 'image/heic')], ['pasted-image-2026-10-16-0912.jpg'], at);
+    expect(named).toEqual(['pasted-image-2026-10-16-0912-2.jpg', 'pasted-image-2026-10-16-0912-3.jpg', 'IMG_2041.HEIC']);
   });
 });

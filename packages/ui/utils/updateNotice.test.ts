@@ -11,16 +11,22 @@ const advert = (over: Partial<UpdateAdvert> = {}): UpdateAdvert => ({
   ...over,
 });
 
-describe('the toast rhythm: once per version, at most every three days', () => {
+describe('the toast rhythm: once per version, at most once a day', () => {
+  // Pinned on purpose: the owner chose "once a day" across versions.
+  test('the spacing across versions is 24 hours', () => {
+    expect(UPDATE_TOAST_INTERVAL_MS).toBe(24 * 60 * 60 * 1000);
+  });
   test('first time: due', () => {
     expect(updateToastDue('0.28.12', NOW, null)).toBe(true);
   });
   test('the same version never again', () => {
     expect(updateToastDue('0.28.12', NOW + 30 * UPDATE_TOAST_INTERVAL_MS, { version: '0.28.12', at: NOW })).toBe(false);
   });
-  test('a newer version waits out the three days since the last toast', () => {
+  test('a newer version waits out the day since the last toast', () => {
+    const HOUR = 60 * 60 * 1000;
+    expect(updateToastDue('0.28.13', NOW + 23 * HOUR, { version: '0.28.12', at: NOW })).toBe(false);
     expect(updateToastDue('0.28.13', NOW + UPDATE_TOAST_INTERVAL_MS - 1, { version: '0.28.12', at: NOW })).toBe(false);
-    expect(updateToastDue('0.28.13', NOW + UPDATE_TOAST_INTERVAL_MS, { version: '0.28.12', at: NOW })).toBe(true);
+    expect(updateToastDue('0.28.13', NOW + 24 * HOUR, { version: '0.28.12', at: NOW })).toBe(true);
   });
   test('a clock that moved backwards does not hold it back for good', () => {
     expect(updateToastDue('0.28.13', NOW, { version: '0.28.12', at: NOW + 1000 })).toBe(true);

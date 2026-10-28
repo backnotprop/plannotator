@@ -21,7 +21,7 @@ export function markEditModeAnnouncementSeen(): void {
 }
 
 /**
- * "Turn it on": persist the real Settings > Editor "Edit Code to Suggest"
+ * "Turn it on": persist the real Settings > Experimental "Edit Code to Suggest"
  * setting, then mark the announcement seen. Either dialog action marks the
  * announcement seen; only this one changes the setting.
  */

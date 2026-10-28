@@ -2,6 +2,7 @@ import React, { useCallback, useMemo } from 'react';
 import { GuideHostProvider, type GuideDiffRendererContext, type GuideHostValue } from '@plannotator/guide-viewer/host';
 import { useReviewState } from '../../dock/ReviewStateContext';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '../AllFilesCodeView';
+import { overviewDiagramRenderer } from './overviewDiagram';
 
 /**
  * The review app's guide host: adapts ReviewState into the narrow contract the
@@ -82,6 +83,8 @@ export const ReviewGuideHost: React.FC<{ children: React.ReactNode }> = ({ child
     [state],
   );
 
+  const renderOverviewDiagram = useMemo(() => overviewDiagramRenderer(state.diagramEngine), [state.diagramEngine]);
+
   const value = useMemo<GuideHostValue<InAppRendererProps>>(
     () => ({
       files: state.files,
@@ -91,8 +94,9 @@ export const ReviewGuideHost: React.FC<{ children: React.ReactNode }> = ({ child
       onRevealFile: state.onGuideRevealFile,
       activeSearchMatch: state.allFilesActiveSearchMatch,
       generatedFiles: state.generatedFiles,
+      renderOverviewDiagram,
     }),
-    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles],
+    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles, renderOverviewDiagram],
   );
 
   return <GuideHostProvider value={value}>{children}</GuideHostProvider>;

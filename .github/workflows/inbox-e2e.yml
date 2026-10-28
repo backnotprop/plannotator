@@ -13,9 +13,15 @@ name: Inbox window e2e
 # listener there (a pinned phone over the runner's network address; no
 # Bonjour on the runner, so the typed-address path); surface.spec.ts drives
 # the surface a phone hosts (apps/hook/dist/surface.html) in WebKit, the
-# engine WKWebView is. Runs only when the
-# Inbox, the ui and the guide viewer it composes, the binary entry or the build
-# could have changed.
+# engine WKWebView is, and the VS Code Guides webview's sanitizer and Mermaid
+# path (vscode-guides-sanitize.spec.ts) and its answer frame
+# (vscode-guides-answer.spec.ts), no binary needed. Runs only when the
+# Inbox, the ui and the guide viewer it composes, the plan editor (the Grid
+# paper spec, grid-paper-fill.spec.ts), the plan and annotate servers and the
+# draft storage they share (annotate-*.spec.ts, plan-linked-doc-drafts.spec.ts),
+# the binary entry or the build could have changed. The Pi servers are not
+# listed: these specs drive only the compiled Bun binary, and test.yml runs the
+# Pi mirrors of the same scenarios.
 
 on:
   pull_request:
@@ -25,16 +31,29 @@ on:
       - 'packages/inbox/**'
       - 'apps/inbox/**'
       - 'packages/server/inbox*'
+      - 'packages/server/ref-cards*'
+      - 'packages/shared/ref-cards*'
+      - 'packages/editor/**'
+      - 'packages/core/forge-ref*'
       - 'packages/shared/inbox/**'
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
+      - 'packages/shared/update-check.ts'
+      - 'packages/server/auto-update.ts'
       - 'packages/server/html-assets.ts'
       - 'packages/server/tailscale-serve.ts'
       - 'packages/server/request-host-guard.ts'
+      - 'packages/server/index.ts'
+      - 'packages/server/annotate.ts'
+      - 'packages/shared/annotate*'
+      - 'packages/shared/draft.ts'
+      - 'packages/shared/review-draft.ts'
+      - 'packages/shared/doc-resolve.ts'
       - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/editor/**'
       - 'packages/guide-viewer/**'
       - 'packages/review-editor/**'
       - 'packages/server/guide/**'
@@ -54,6 +73,11 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
+      - 'apps/vscode-extension/src/guides/webview/**'
+      - 'apps/vscode-extension/src/guides/core/**'
+      - 'apps/vscode-extension/src/guides/webview-csp.ts'
+      - 'apps/vscode-extension/scripts/esbuild.config.ts'
+      - 'apps/vscode-extension/package.json'
       - '.github/workflows/inbox-e2e.yml'
   push:
     branches:
@@ -62,16 +86,29 @@ on:
       - 'packages/inbox/**'
       - 'apps/inbox/**'
       - 'packages/server/inbox*'
+      - 'packages/server/ref-cards*'
+      - 'packages/shared/ref-cards*'
+      - 'packages/editor/**'
+      - 'packages/core/forge-ref*'
       - 'packages/shared/inbox/**'
       - 'packages/core/inbox*'
       - 'packages/shared/config.ts'
+      - 'packages/shared/update-check.ts'
+      - 'packages/server/auto-update.ts'
       - 'packages/server/html-assets.ts'
       - 'packages/server/tailscale-serve.ts'
       - 'packages/server/request-host-guard.ts'
+      - 'packages/server/index.ts'
+      - 'packages/server/annotate.ts'
+      - 'packages/shared/annotate*'
+      - 'packages/shared/draft.ts'
+      - 'packages/shared/review-draft.ts'
+      - 'packages/shared/doc-resolve.ts'
       - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/editor/**'
       - 'packages/guide-viewer/**'
       - 'packages/review-editor/**'
       - 'packages/server/guide/**'
@@ -91,6 +128,11 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
+      - 'apps/vscode-extension/src/guides/webview/**'
+      - 'apps/vscode-extension/src/guides/core/**'
+      - 'apps/vscode-extension/src/guides/webview-csp.ts'
+      - 'apps/vscode-extension/scripts/esbuild.config.ts'
+      - 'apps/vscode-extension/package.json'
       - '.github/workflows/inbox-e2e.yml'
 
 permissions:
@@ -108,7 +150,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -140,6 +182,15 @@ jobs:
 
       - name: Run the Inbox window proof
         run: bun run test:e2e:inbox
+
+      # The update notices need a release-numbered binary (a 0.0.0-dev one has
+      # no update control): the same build with 0.28.10, against a fake GitHub.
+      - name: Run the update specs on a release-numbered binary
+        run: |
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
+            --define '__CLI_VERSION__="0.28.10"' --outfile .local/plannotator-0.28.10
+          PLANNOTATOR_E2E_RELEASE_BINARY="$PWD/.local/plannotator-0.28.10" \
+            bunx playwright test -c tests/e2e/playwright.config.ts inbox-update-notice inbox-updates.spec
 
       - name: Replay the phone door's contract exchanges and the Wi-Fi listener on the binary
         run: |

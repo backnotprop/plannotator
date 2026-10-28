@@ -6,8 +6,8 @@
  * stopped, exactly as `plannotator inbox mcp` reaches it. The rules live once,
  * in the server.
  *
- * Unreleased: `card` is in HIDDEN_SUBCOMMANDS (cli.ts), so it stays out of
- * `plannotator --help` and the plannotator skill until the Board ships.
+ * Listed in `plannotator --help` while the person has the Board on. Its own
+ * `--help` answers without config or an Inbox, Board on or off.
  *
  * The session: inside an agent host session (a Claude Code session's
  * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`) the card is
@@ -39,6 +39,7 @@ const VALUE_FLAGS: Record<string, string> = {
   "--you": "you",
   "--thread": "thread_id",
   "--pr": "pr",
+  "--ref": "ref",
   "--key": "idempotency_key",
   "--reason": "reason",
   "--title": "title",

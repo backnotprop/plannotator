@@ -5,7 +5,7 @@
  * person's edit), removal, and the uninstall scan.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_AGENT_LABELS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
@@ -14,6 +14,7 @@ import {
   INBOX_NOTE_BLOCK,
   INBOX_NOTE_END,
   INBOX_NOTE_START,
+  INBOX_NOTE_VERSION,
   inboxNotesDisabled,
   noteStatus,
   noteTarget,
@@ -45,7 +46,7 @@ const read = (path: string) => readFileSync(path, "utf8");
 test("the block: markers on their own lines around the note", () => {
   expect(INBOX_NOTE_BLOCK.startsWith(`${INBOX_NOTE_START}\n## Plannotator Inbox\n`)).toBe(true);
   expect(INBOX_NOTE_BLOCK.endsWith(`\n${INBOX_NOTE_END}`)).toBe(true);
-  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
+  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v4 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
 });
 
 describe("where each agent's note goes", () => {
@@ -85,6 +86,25 @@ describe("where each agent's note goes", () => {
     expect(noteTarget("gemini", e).path).toBe(file(".gemini", "GEMINI.md"));
     write(file(".gemini", "settings.json"), '{ // mine\n "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }');
     expect(noteTarget("gemini", e).path).toBe(file(".gemini", "AGENTS.md"));
+  });
+
+  test("Qwen Code: its context.fileName, QWEN.md by default, in $QWEN_HOME (the folder itself)", () => {
+    expect(noteTarget("qwen", e)).toEqual({ path: file(".qwen", "QWEN.md"), create: true, reason: null });
+    write(file(".qwen", "settings.json"), '{ // mine\n "context": { "fileName": "CONTEXT.md" } }');
+    expect(noteTarget("qwen", e).path).toBe(file(".qwen", "CONTEXT.md"));
+    // A name with a folder in it is not a file name: the default.
+    write(file(".qwen", "settings.json"), '{ "context": { "fileName": ["../escape.md"] } }');
+    expect(noteTarget("qwen", e).path).toBe(file(".qwen", "QWEN.md"));
+    // QWEN_HOME replaces ~/.qwen (Gemini's GEMINI_CLI_HOME is a parent folder; Qwen's is not).
+    const home = join(fake.root, "qwen-home");
+    const moved = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, QWEN_HOME: home } });
+    write(join(home, "settings.json"), '{ "context": { "fileName": ["AGENTS.md", "QWEN.md"] } }');
+    expect(noteTarget("qwen", moved).path).toBe(join(home, "AGENTS.md"));
+    expect(addInboxNote("qwen", dataDir, moved)).toMatchObject({ ok: true, action: "created" });
+    expect(read(join(home, "AGENTS.md"))).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    expect(existsSync(file(".qwen", "AGENTS.md"))).toBe(false);
+    expect(removeInboxNote("qwen", dataDir, moved)).toMatchObject({ ok: true, action: "deleted" });
+    expect(existsSync(join(home, "AGENTS.md"))).toBe(false);
   });
 });
 
@@ -154,6 +174,7 @@ describe("the marked section", () => {
     const targets: [InboxNoteAgentId, string][] = [
       ["codex", file(".codex", "AGENTS.md")],
       ["gemini", file(".gemini", "GEMINI.md")],
+      ["qwen", file(".qwen", "QWEN.md")],
       ["pi", file(".pi", "agent", "AGENTS.md")],
       ["opencode", file(".config", "opencode", "AGENTS.md")],
     ];
@@ -253,6 +274,79 @@ describe("the marked section", () => {
     expect(read(path)).toBe(`Mine.\n\n${INBOX_NOTE_BLOCK}\nAfter.\n`);
   });
 
+  // The v1 block exactly as 0.28.x wrote it, frozen on purpose: these are the bytes on users' disks today.
+  const V1_BLOCK = [
+    "<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->",
+    "## Plannotator Inbox",
+    "",
+    "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+    "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` when the person isn't here to answer in this chat: to ask a decision only they can make (as a `:::question` block), or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+    "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`. When they are here, ask in this chat instead.",
+    "<!-- plannotator-inbox:end -->",
+  ].join("\n");
+  const sha = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+  /** agent-notes.json as 0.28.x left it: one v1 record for `agent`, naming the file's resolved path. */
+  const v1Record = (agent: string, path: string) => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    const record = { path: realpathSync(path), created: true, version: 1, block_sha256: sha(V1_BLOCK), at: "2026-10-01T00:00:00.000Z" };
+    writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes: { [agent]: record } }));
+  };
+
+  test("updating from v1: an untouched v1 note (with its record) is still on, and re-adding it writes this version in place, every other byte kept", () => {
+    const path = file(".claude", "rules", "plannotator-inbox.md");
+    write(path, `${V1_BLOCK}\n`);
+    v1Record("claude-code", path);
+    expect(noteStatus("claude-code", dataDir, e).state).toBe("added");
+    expect(addInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
+    expect(read(path)).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    expect(readInboxAgentNotes(dataDir).notes["claude-code"]).toMatchObject({ version: INBOX_NOTE_VERSION, block_sha256: sha(INBOX_NOTE_BLOCK), created: true });
+    // Switching it off afterwards still deletes the file the note was all of.
+    expect(removeInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "deleted" });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test("updating from v1 with agent-notes.json lost: the v1 block still reads as Plannotator's, is updated in place, and uninstall does not call it edited", () => {
+    const path = file(".codex", "AGENTS.md");
+    write(path, `# Mine\n\n${V1_BLOCK}\nAfter.\n`);
+    expect(noteStatus("codex", dataDir, e).state).toBe("added");
+    const plan = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
+    expect(plan.items.map((item) => item.describe).join("\n")).not.toContain("you edited it");
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
+    expect(read(path)).toBe(`# Mine\n\n${INBOX_NOTE_BLOCK}\nAfter.\n`);
+  });
+
+  test("updating a v1 note in a file two agents share (Pi's AGENTS.md a link to Codex's): the other agent's note stays on, not 'edited'", () => {
+    const path = file(".codex", "AGENTS.md");
+    write(path, `Shared.\n\n${V1_BLOCK}\n`);
+    mkdirSync(file(".pi", "agent"), { recursive: true });
+    symlinkSync(path, file(".pi", "agent", "AGENTS.md"));
+    const record = { path: realpathSync(path), created: false, version: 1, block_sha256: sha(V1_BLOCK), at: "2026-10-01T00:00:00.000Z" };
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes: { codex: record, pi: record } }));
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
+    expect(read(path)).toBe(`Shared.\n\n${INBOX_NOTE_BLOCK}\n`);
+    expect(noteStatus("pi", dataDir, e).state).toBe("added");
+    expect(readInboxAgentNotes(dataDir).notes.pi).toMatchObject({ version: INBOX_NOTE_VERSION, block_sha256: sha(INBOX_NOTE_BLOCK) });
+    // And Off for both gives the file back as the person had it.
+    expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-shared" });
+    expect(removeInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+    expect(read(path)).toBe("Shared.\n");
+  });
+
+  test("a v1 note the person edited stays theirs after the update: never rewritten", () => {
+    const path = file(".codex", "AGENTS.md");
+    const edited = V1_BLOCK.replace("Then keep working.", "Then keep working. Never at night.");
+    write(path, `${edited}\n`);
+    v1Record("codex", path);
+    expect(noteStatus("codex", dataDir, e).state).toBe("edited");
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-edited" });
+    expect(read(path)).toBe(`${edited}\n`);
+    // With the record lost too.
+    rmSync(join(dataDir, "inbox", "agent-notes.json"));
+    expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-edited" });
+    expect(read(path)).toBe(`${edited}\n`);
+  });
+
   test("a file Plannotator created is deleted when the note was all it held", () => {
     addInboxNote("gemini", dataDir, e);
     expect(removeInboxNote("gemini", dataDir, e)).toMatchObject({ ok: true, action: "deleted" });
@@ -280,15 +374,19 @@ test("uninstall: every recorded note, plus a file with our markers whose record 
   write(file(".codex", "AGENTS.md"), "Mine.\n");
   addInboxNote("codex", dataDir, e);
   addInboxNote("gemini", dataDir, e);
+  // Qwen's note whose record is gone: found by its markers in the file Qwen reads.
+  write(file(".qwen", "QWEN.md"), `Qwen rules\n\n${INBOX_NOTE_BLOCK}\n`);
   write(file(".pi", "agent", "CLAUDE.md"), `Pi rules\n\n${INBOX_NOTE_BLOCK}\n`);
   const { items } = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
   expect(items.map((item) => item.describe)).toEqual([
     "Note for Codex (~/.codex/AGENTS.md, marked section only)",
     "Note for Gemini CLI (~/.gemini/GEMINI.md, created by Plannotator: file removed if empty)",
+    "Note for Qwen Code (~/.qwen/QWEN.md, marked section only)",
     "Note for Pi (~/.pi/agent/CLAUDE.md, marked section only)",
   ]);
   for (const item of items) expect(item.apply().ok).toBe(true);
   expect(read(file(".codex", "AGENTS.md"))).toBe("Mine.\n");
+  expect(read(file(".qwen", "QWEN.md"))).toBe("Qwen rules\n");
   expect(existsSync(file(".gemini", "GEMINI.md"))).toBe(false);
   expect(read(file(".pi", "agent", "CLAUDE.md"))).toBe("Pi rules\n");
 });
@@ -373,4 +471,13 @@ describe("review follow-ups", () => {
     expect(inboxNotesDisabled({ PLANNOTATOR_INBOX_NOTES: "0" })).toBe(true);
     expect(inboxNotesDisabled({})).toBe(false);
   });
+});
+
+test("Cursor keeps its rules in the app: its note is copied by hand, with no file, nothing written and no record", () => {
+  const status = noteStatus("cursor", dataDir, e);
+  expect(status).toMatchObject({ agent: "cursor", path: null, target: null, state: "manual", create: false, created: false, shared_with: [] });
+  expect(status.reason).toBe("Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy.");
+  expect(noteTarget("cursor", e).path).toBeNull();
+  expect(existsSync(file(".cursor"))).toBe(false);
+  expect(readInboxAgentNotes(dataDir).notes.cursor).toBeUndefined();
 });

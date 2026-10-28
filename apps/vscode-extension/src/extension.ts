@@ -6,6 +6,7 @@ import { createIpcServer } from "./ipc-server";
 import { createCookieProxy } from "./cookie-proxy";
 import { PanelManager } from "./panel-manager";
 import { setActiveProxyPort, registerEditorAnnotationCommand } from "./editor-annotations";
+import { registerGuidesLoader } from "./guides-loader";
 
 import { getPlannotatorDataDir } from "../../../packages/shared/data-dir";
 
@@ -141,6 +142,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   // Register editor annotation command
   registerEditorAnnotationCommand(context, log);
+
+  // The Guides view: its bundle loads the first time the view or a command is used.
+  registerGuidesLoader(context, log);
 }
 
 export function deactivate(): void {}

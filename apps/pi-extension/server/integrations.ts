@@ -42,6 +42,7 @@ export {
 function detectProjectNameSync(): string | null {
 	try {
 		const toplevel = execSync("git rev-parse --show-toplevel", {
+			env: process.env,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		}).trim();

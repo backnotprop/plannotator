@@ -118,4 +118,23 @@ describe.if(hasDom)('Tooltip (DOM)', () => {
     );
     await expectOpensBetween(button, 400, 1000);
   });
+
+  // The Inbox shows a row badge's card while the row (not the badge) has keyboard focus.
+  test('forceOpen shows it with no hover, and false hands it back to hover', async () => {
+    const draw = (forceOpen: boolean) => (
+      <Tooltip content="Label" forceOpen={forceOpen}>
+        <button type="button">Trigger</button>
+      </Tooltip>
+    );
+    const button = render(draw(true));
+    await wait(10);
+    expect(popup()?.textContent).toBe('Label');
+    act(() => root?.render(draw(false)));
+    await wait(10);
+    expect(popup() === null || popup()!.hasAttribute('data-closed')).toBe(true);
+    await rest(button);
+    await wait(400);
+    const open = [...document.querySelectorAll<HTMLElement>('[data-pn-tooltip]')].find((el) => !el.hasAttribute('data-closed'));
+    expect(open?.textContent).toBe('Label');
+  });
 });

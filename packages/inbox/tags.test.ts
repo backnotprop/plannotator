@@ -127,6 +127,11 @@ describe('a sent reply', () => {
     const codex = { host: 'codex', session: 'c', wakes: false };
     expect(tagDeliveryLine(codex, 'Codex', undefined, time).text).toBe('Saved for Codex. It sees it the next time it reads this thread.');
     expect(tagDeliveryLine({ ...codex, read_at: '2026-10-19T19:30:00.000Z' }, 'Codex', undefined, time).text).toBe('Codex read this thread, 19:30');
+    // A woken Codex tag whose `codex queue` ran out of time may not have gone: saved, not queued.
+    const woken = { host: 'codex', session: 'c', wakes: true };
+    const connection = { busy: null, idle_since: null, send_now: false, uncertain: ['msg_R'] };
+    expect(tagDeliveryLine(woken, 'Codex', connection, time, 'msg_R').text).toBe('Saved for Codex. It sees it the next time it reads this thread.');
+    expect(tagDeliveryLine(woken, 'Codex', connection, time, 'msg_other').text).toBe('Queued for Codex; it gets this as its next turn.');
   });
 
   test('a tag is named by the label it was sent with, else as another session of the owner agent', () => {

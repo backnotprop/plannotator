@@ -11,6 +11,7 @@ import {
   writeFileSync,
   readFileSync,
   readdirSync,
+  renameSync,
   unlinkSync,
   existsSync,
 } from "fs";
@@ -60,10 +61,30 @@ function isAlive(pid: number): boolean {
  * mount, disk full) must never take the server down with it.
  */
 export function registerSession(info: SessionInfo): void {
+  // Atomic (temp + rename): a reader never sees a half-written file, which
+  // listSessions would take for a corrupt one and delete. The temp name does
+  // not end in `.json`, so no lister reads it.
+  let tmp: string | null = null;
   try {
-    writeFileSync(sessionPath(info.pid), JSON.stringify(info, null, 2), "utf-8");
+    const path = sessionPath(info.pid);
+    const body = JSON.stringify(info, null, 2);
+    tmp = `${path}.${Math.random().toString(36).slice(2)}.tmp`;
+    writeFileSync(tmp, body, "utf-8");
+    try {
+      renameSync(tmp, path);
+    } catch {
+      // Windows refuses the rename while a reader holds the old file open:
+      // write it directly instead (the old, non-atomic behaviour).
+      writeFileSync(path, body, "utf-8");
+    }
   } catch {
     // Session discovery is unavailable; the session itself is unaffected.
+  } finally {
+    if (tmp) {
+      try {
+        if (existsSync(tmp)) unlinkSync(tmp);
+      } catch {}
+    }
   }
 }
 
@@ -121,4 +142,31 @@ export function listSessions(): SessionInfo[] {
   return active.sort(
     (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
   );
+}
+
+/**
+ * The live sessions, read only: never creates the folder and never deletes a
+ * file (a dead or unreadable entry is skipped, not removed). For hot paths
+ * that run on every page payload (isAutoUpdateActive), where cleaning up is
+ * not their business.
+ */
+export function listLiveSessions(): SessionInfo[] {
+  const dir = join(getPlannotatorDataDir(), "sessions");
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const live: SessionInfo[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    try {
+      const data = JSON.parse(readFileSync(join(dir, entry), "utf-8")) as SessionInfo;
+      if (typeof data?.pid === "number" && isAlive(data.pid)) live.push(data);
+    } catch {
+      // Unreadable or half-written: skipped, never removed here.
+    }
+  }
+  return live;
 }

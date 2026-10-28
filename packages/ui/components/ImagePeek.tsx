@@ -51,6 +51,14 @@ export interface ImagePeekProps {
   /** An id for the panel, for the opener's `aria-controls`. */
   id?: string;
   className?: string;
+  /**
+   * The sheet only: controls drawn above the grid, outside it (the Inbox's
+   * Previous / Next). Shift+Tab from the grid moves into them; Escape in them,
+   * or Shift+Tab out of the first, closes the sheet (`onClose('key')`), so
+   * focus never leaves it for the page behind. Absent (the default): the
+   * sheet is unchanged.
+   */
+  sheetHeader?: React.ReactNode;
 }
 
 const PaperclipIcon = () => (
@@ -94,8 +102,9 @@ export interface ImagePeekHandle {
   handleKey: (event: { key: string; isComposing?: boolean }) => boolean;
 }
 
-export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function ImagePeek({ rows, current, onPick, onClose, variant = 'popover', label, id, className = '' }, ref) {
+export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function ImagePeek({ rows, current, onPick, onClose, variant = 'popover', label, id, className = '', sheetHeader }, ref) {
   const sheet = variant === 'sheet';
+  const header = sheet && sheetHeader ? sheetHeader : null;
   const gridRef = useRef<HTMLDivElement>(null);
   const autoId = useId();
   const labelId = `${(id ?? `pn-peek-${autoId}`).replace(/:/g, '')}-label`;
@@ -162,6 +171,8 @@ export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function Im
   useImperativeHandle(ref, () => ({ handleKey: (event) => handleKeyRef.current(event) }), []);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // With a header above the grid, Shift+Tab moves up into it instead of closing the sheet.
+    if (header && event.key === 'Tab' && event.shiftKey) return;
     if (!handleKey({ key: event.key, isComposing: event.nativeEvent.isComposing })) return;
     event.preventDefault();
     event.stopPropagation();
@@ -177,14 +188,16 @@ export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function Im
       data-image-peek={variant}
       className={
         sheet
-          ? `pointer-events-auto max-h-[78vh] w-full overflow-y-auto rounded-t-[12px] border-t border-border bg-popover px-3 pb-[calc(16px+env(safe-area-inset-bottom))] pt-2 text-popover-foreground shadow-2xl ${className}`
+          ? header
+            ? `pointer-events-auto max-h-[70vh] w-full overflow-y-auto bg-popover px-3 pb-[calc(16px+env(safe-area-inset-bottom))] text-popover-foreground ${className}`
+            : `pointer-events-auto max-h-[78vh] w-full overflow-y-auto rounded-t-[12px] border-t border-border bg-popover px-3 pb-[calc(16px+env(safe-area-inset-bottom))] pt-2 text-popover-foreground shadow-2xl ${className}`
           : `max-h-[min(460px,62vh)] w-[min(600px,calc(100vw-24px))] overflow-y-auto rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-[0_14px_36px_rgba(0,0,0,0.28)] ${className}`
       }
     >
       <span id={labelId} className="sr-only">
         {label}
       </span>
-      {sheet && <div className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-muted-foreground/30" aria-hidden="true" />}
+      {sheet && !header && <div className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-muted-foreground/30" aria-hidden="true" />}
       {rows.map((row, r) => (
         <div
           key={row.key}
@@ -249,7 +262,28 @@ export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function Im
   return (
     <div className="fixed inset-0 z-[220] flex flex-col justify-end" data-image-peek-sheet="">
       <div className="absolute inset-0 bg-black/40" aria-hidden="true" onClick={() => onClose('outside')} data-peek-backdrop="" />
-      <div className="relative">{panel}</div>
+      <div className={header ? 'relative overflow-hidden rounded-t-[12px] border-t border-border bg-popover shadow-2xl' : 'relative'}>
+        {header && (
+          <div
+            className="px-3 pt-2 text-popover-foreground"
+            onKeyDown={(event) => {
+              // Escape closes the sheet; so does Shift+Tab out of its first control (focus leaving the sheet
+              // closes it, as Tab out of the grid does: the host puts focus back on its opener).
+              const first = event.currentTarget.querySelector<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+              const leaving = event.key === 'Tab' && event.shiftKey && event.target === first;
+              if (event.key !== 'Escape' && !leaving) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onClose('key');
+            }}
+            data-peek-sheet-header=""
+          >
+            <div className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+            {header}
+          </div>
+        )}
+        {panel}
+      </div>
     </div>
   );
 });

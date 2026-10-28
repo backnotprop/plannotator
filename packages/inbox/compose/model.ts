@@ -7,6 +7,7 @@
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import { checkInboxThreadName, INBOX_HOST_NAMES, type InboxComposeProject, type InboxComposeSession, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
+import type { InboxRunAgentInfo, InboxRunAgentsModel, InboxRunPlace } from '@plannotator/core/inbox-acp';
 
 /** One live session with the project it works in: what To names. */
 export interface ComposeTarget extends InboxComposeSession {
@@ -103,6 +104,49 @@ export function pickerRows(shown: readonly ComposeGroup[], all: readonly Compose
 export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null }): { chosen: string | null; focus: 'to' | 'message' } {
   const chosen = request.draft ? (request.draft.to?.session ?? null) : (request.session ?? null);
   return { chosen, focus: chosen ? 'message' : 'to' };
+}
+
+/**
+ * "New Grok Build session" (the ACP runner, packages/server/inbox-acp-runner.ts):
+ * a row per agent the Inbox can start and folder to start it in. Its id in To
+ * is `start:<agent>:<project id>`, never a live session's id.
+ */
+export interface StartChoice {
+  id: string;
+  agent: InboxRunAgentInfo;
+  place: InboxRunPlace;
+}
+
+export const startChoiceId = (agent: string, projectId: string): string => `start:${agent}:${projectId}`;
+export const isStartChoiceId = (id: string | null | undefined): boolean => typeof id === 'string' && id.startsWith('start:');
+
+/** How many folders the picker offers to start in before the person types: the current project first, then the most recent. */
+export const START_CHOICES_SHOWN = 4;
+
+/** The start rows the picker shows: agents that can start now, the current project first; a filter searches every folder. */
+export function startChoices(model: InboxRunAgentsModel | null, current: { id: string | null; root: string | null } | null, query = ''): StartChoice[] {
+  if (!model) return [];
+  const agents = model.agents.filter((agent) => agent.installed && agent.enabled);
+  if (agents.length === 0) return [];
+  const isHere = (place: InboxRunPlace) => !!current && ((current.id !== null && place.project_id === current.id) || (current.root !== null && place.root === current.root));
+  const places = [...model.places.filter(isHere), ...model.places.filter((p) => !isHere(p))];
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const all = agents.flatMap((agent) => places.map((place) => ({ id: startChoiceId(agent.id, place.project_id), agent, place })));
+  if (words.length === 0) return agents.flatMap((agent) => places.slice(0, START_CHOICES_SHOWN).map((place) => ({ id: startChoiceId(agent.id, place.project_id), agent, place })));
+  return all.filter((choice) => {
+    const hay = ['new', 'start', 'session', choice.agent.label, choice.agent.id, choice.place.name, choice.place.root].join(' ').toLowerCase();
+    return words.every((word) => hay.includes(word));
+  });
+}
+
+/** The start row To names, or null. */
+export function findStartChoice(model: InboxRunAgentsModel | null, id: string | null | undefined): StartChoice | null {
+  if (!model || !isStartChoiceId(id)) return null;
+  for (const agent of model.agents) {
+    if (!agent.installed || !agent.enabled) continue;
+    for (const place of model.places) if (startChoiceId(agent.id, place.project_id) === id) return { id: id!, agent, place };
+  }
+  return null;
 }
 
 /** "started 2:41 PM": when the session started, without its host. */
@@ -202,10 +246,40 @@ export interface ComposeSnapshot {
   files: readonly string[];
   /** The thread name the person typed in the chip (`draftThreadName`); absent counts as none. */
   threadName?: string;
+  /** The Board chip is on (approval "inbox-compose-board-chip"); absent counts as off. */
+  board?: boolean;
 }
 
-export function draftSnapshot(draft: Pick<InboxDraft, 'body' | 'to' | 'files' | 'thread_name'> | null): ComposeSnapshot {
-  return { body: draft?.body ?? '', session: draft?.to?.session ?? null, files: (draft?.files ?? []).map((file) => file.upload_id), threadName: draft?.thread_name ?? '' };
+export function draftSnapshot(draft: Pick<InboxDraft, 'body' | 'to' | 'files' | 'thread_name' | 'board_request'> | null): ComposeSnapshot {
+  return {
+    body: draft?.body ?? '',
+    session: draft?.to?.session ?? null,
+    files: (draft?.files ?? []).map((file) => file.upload_id),
+    threadName: draft?.thread_name ?? '',
+    board: draft?.board_request === true,
+  };
+}
+
+/** Where the browser keeps the Board chip's last choice (approval "inbox-compose-board-chip": remembered per browser). */
+export const COMPOSE_BOARD_CHOICE_KEY = 'plannotator-inbox-compose-board';
+
+/** The Board chip's last choice in this browser: off unless it was last turned on. */
+export function composeBoardChoice(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(COMPOSE_BOARD_CHOICE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Keep the Board chip's choice for the next compose in this browser. */
+export function rememberComposeBoardChoice(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(COMPOSE_BOARD_CHOICE_KEY, '1');
+    else localStorage.removeItem(COMPOSE_BOARD_CHOICE_KEY);
+  } catch {
+    // Storage refused (private mode, quota): the choice lasts this compose only.
+  }
 }
 
 /**
@@ -221,7 +295,8 @@ export function isDirty(now: ComposeSnapshot, saved: ComposeSnapshot, savedExist
     now.body !== saved.body ||
     now.session !== saved.session ||
     now.files.join('\n') !== saved.files.join('\n') ||
-    (now.threadName ?? '').trim() !== (saved.threadName ?? '').trim()
+    (now.threadName ?? '').trim() !== (saved.threadName ?? '').trim() ||
+    (now.board === true) !== (saved.board === true)
   );
 }
 

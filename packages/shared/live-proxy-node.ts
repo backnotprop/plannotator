@@ -33,6 +33,7 @@
  * proxy origin.
  */
 
+import { createLiveProxyPortAttempts, getLiveProxyPortSelection } from "./live-proxy-port";
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { connect as netConnect, type Socket } from "node:net";
@@ -40,8 +41,11 @@ import { Transform, pipeline } from "node:stream";
 import {
   HOP_BY_HOP_HEADERS,
   LIVE_PROXY_BRIDGE_PATH,
+  LIVE_PROXY_PLANNOTATOR_UPSTREAM_MESSAGE,
   LIVE_PROXY_RESERVED_PREFIX,
+  PLANNOTATOR_LIVE_PROXY_HEADER,
   applyHtmlFramingHeaders,
+  assertLiveTargetNotEditor,
   buildFrameAncestorsPolicy,
   createHtmlInjector,
   isAllowedBridgeFetchSite,
@@ -49,6 +53,7 @@ import {
   isAllowedWsUpgradeOrigin,
   isDocumentIntentRequest,
   isHtmlContentType,
+  isPlannotatorUpstreamResponse,
   rewriteLoopbackLocation,
   type HeaderReader,
   type LiveAppProxy,
@@ -115,11 +120,13 @@ function sendForbidden(res: ServerResponse): void {
  * sockets and closes the listener (plus its remaining keep-alive
  * connections).
  */
-export function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<LiveAppProxy> {
+export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<LiveAppProxy> {
   const target = new URL(opts.targetUrl);
   if (target.protocol !== "http:") {
     throw new Error("Live app proxy supports http upstreams only.");
   }
+  // Never front the editor's own server (see live-proxy-core).
+  assertLiveTargetNotEditor(opts.targetUrl, opts.editorOrigins);
   const targetHost = target.host;
   const targetHostname = target.hostname;
   const targetPort = Number(target.port || "80");
@@ -178,6 +185,7 @@ export function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<LiveAp
     upstreamHeaders["host"] = targetHost;
     upstreamHeaders["x-forwarded-host"] = hostHeader ?? "";
     upstreamHeaders["x-forwarded-proto"] = "http";
+    upstreamHeaders[PLANNOTATOR_LIVE_PROXY_HEADER] = "1";
     if (isDocumentIntentRequest(nodeHeaderReader(req.headers))) {
       // HTML must arrive decodable for injection; assets keep encoding.
       upstreamHeaders["accept-encoding"] = "identity";
@@ -192,6 +200,14 @@ export function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<LiveAp
         headers: upstreamHeaders,
       },
       (upstreamRes) => {
+        // A Plannotator server is never relayed, whatever answers on the
+        // target port now (see isPlannotatorUpstreamResponse in live-proxy-core).
+        if (isPlannotatorUpstreamResponse(nodeHeaderReader(upstreamRes.headers))) {
+          upstreamRes.resume();
+          res.writeHead(502, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+          res.end(LIVE_PROXY_PLANNOTATOR_UPSTREAM_MESSAGE);
+          return;
+        }
         const responseHeaders = copyWithoutHopByHop(upstreamRes.headers);
 
         const location = firstHeaderValue(upstreamRes.headers.location);
@@ -319,8 +335,11 @@ export function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<LiveAp
         continue;
       }
       if (lower === "origin") continue;
+      if (lower === PLANNOTATOR_LIVE_PROXY_HEADER) continue;
       handshake += `${name}: ${req.rawHeaders[i + 1]}\r\n`;
     }
+    // The live proxy header makes a Plannotator upstream refuse the upgrade.
+    handshake += `${PLANNOTATOR_LIVE_PROXY_HEADER}: 1\r\n`;
 
     const upstreamSocket = netConnect(targetPort, targetHostname);
     upgradeSockets.add(socket);
@@ -386,33 +405,53 @@ export function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<LiveAp
   // mirrors the Bun transport's idleTimeout: 0.
   server.requestTimeout = 0;
 
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    // The literal loopback address is the security contract (see header).
-    server.listen(0, LOOPBACK_HOST, () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("Live app proxy failed to bind a loopback port"));
-        return;
-      }
-      port = address.port;
-      resolve({
-        port,
-        // Always the literal loopback origin: PLANNOTATOR_URL_HOST and
-        // buildAdvertisedUrl are never applied here.
-        origin: `http://${LOOPBACK_HOST}:${port}`,
-        stop() {
-          for (const s of upgradeSockets) s.destroy();
-          upgradeSockets.clear();
-          server.close();
-          // close() only stops the listener; drain keep-alive connections so
-          // a stopped session's sockets die immediately (parity with Bun's
-          // server.stop(true)). Guarded: jiti can run under hosts whose
-          // node:http lacks closeAllConnections.
-          (server as { closeAllConnections?: () => void }).closeAllConnections?.();
-        },
+  const selection = getLiveProxyPortSelection();
+  const attempts = createLiveProxyPortAttempts(selection);
+  let listening = false;
+  for (const candidate of selection.ports) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+          server.removeListener("listening", onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.removeListener("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        // The literal loopback address is the security contract (see header).
+        server.listen(candidate, LOOPBACK_HOST);
       });
-    });
-  });
+      listening = true;
+      break;
+    } catch (error) {
+      attempts.failed(candidate, error);
+    }
+  }
+  if (!listening) throw attempts.exhausted();
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Live app proxy failed to bind a loopback port");
+  }
+  port = address.port;
+  return {
+    port,
+    // Always the literal loopback origin: PLANNOTATOR_URL_HOST and
+    // buildAdvertisedUrl are never applied here.
+    origin: `http://${LOOPBACK_HOST}:${port}`,
+    stop() {
+      for (const s of upgradeSockets) s.destroy();
+      upgradeSockets.clear();
+      server.close();
+      // close() only stops the listener; drain keep-alive connections so
+      // a stopped session's sockets die immediately (parity with Bun's
+      // server.stop(true)). Guarded: jiti can run under hosts whose
+      // node:http lacks closeAllConnections.
+      (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+    },
+  };
 }

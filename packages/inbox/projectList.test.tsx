@@ -101,12 +101,15 @@ describe.if(hasDom)('the wide list', () => {
     for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_sent']) {
       const r = rowEl(el, id);
       const cells = [...r.children];
-      expect(cells.length).toBe(5);
+      expect(cells.length).toBe(6);
       expect(cells[0]!.className).toBe('ib-p');
       expect(cells[0]!.textContent).toBe('billing-svc');
       expect(cells[2]!.className).toBe('ib-subj');
       // The badge sits in its own column, never inside the subject cell.
       expect(cells[2]!.querySelector('.ib-badge')).toBeNull();
+      // The agent's mark has its own column just before the time.
+      expect(cells.slice(3).map((c) => c.className)).toEqual(['ib-c', 'ib-mcol', 'ib-t']);
+      expect(cells[2]!.querySelector('.ib-mk')).toBeNull();
     }
     expect(rowEl(el, 'msg_stop').children[1]!.querySelector('.ib-badge')!.textContent).toBe('Stopped');
   });
@@ -117,17 +120,16 @@ describe.if(hasDom)('the wide list', () => {
     expect(el.querySelectorAll('.ib-row .ib-p').length).toBe(0);
     for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_sent']) {
       const cells = [...rowEl(el, id).children];
-      expect(cells.map((c) => c.className)).toEqual(['ib-subj', 'ib-c', 'ib-t']);
+      expect(cells.map((c) => c.className)).toEqual(['ib-subj', 'ib-c', 'ib-mcol', 'ib-t']);
     }
-    // No badge: the agent mark is the subject cell's first child.
-    expect(rowEl(el, 'msg_wait').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-mk');
-    expect(rowEl(el, 'msg_sent').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-mk');
-    // A badge leads the subject cell, the mark follows it.
+    // No badge: the subject cell starts with the thread chip or the subject; the mark is in its own column.
+    expect(rowEl(el, 'msg_wait').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-key');
+    expect(rowEl(el, 'msg_sent').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-s');
+    // A badge leads the subject cell; its words stay for a screen reader.
     for (const [id, badge] of [['msg_stop', 'Stopped'], ['msg_hold', 'Holds up 2']] as const) {
       const subj = rowEl(el, id).querySelector('.ib-subj')!;
       expect(subj.children[0]!.classList.contains('ib-badge')).toBe(true);
       expect(subj.children[0]!.textContent).toBe(badge);
-      expect(subj.children[1]!.className).toBe('ib-mk');
     }
     // The thread chip and the guided review mark stay in the subject cell.
     const wait = rowEl(el, 'msg_wait').querySelector('.ib-subj')!;
@@ -186,9 +188,14 @@ describe.if(hasDom)('the wide list', () => {
     const saved = globalThis.ResizeObserver;
     let resize: (width: number) => void = () => {};
     // happy-dom lays nothing out: the stub reports the widths a browser's observer would.
+    // Only the list's own observer (the first): a badge's card, shown while its row has keyboard focus,
+    // positions itself with observers of its own.
+    let listObserver = false;
     globalThis.ResizeObserver = class {
       constructor(private readonly callback: ResizeObserverCallback) {}
       observe() {
+        if (listObserver) return;
+        listObserver = true;
         resize = (width) =>
           this.callback([{ contentRect: { width: width - 1 }, borderBoxSize: [{ inlineSize: width, blockSize: 0 }] } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
         resize(1200);

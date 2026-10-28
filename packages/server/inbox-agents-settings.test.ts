@@ -201,6 +201,43 @@ test("reach off removes Plannotator's entry and stays off at the next run; on ad
   expect(row(on, "codex").reach.state).toBe("connected");
 });
 
+test("Qwen Code connected under another QWEN_HOME: Settings shows it off with where it is; turning it on into a settings.json Qwen would refuse keeps the old entry; fixed, it moves", async () => {
+  fake.install("qwen");
+  const mine = '{\n  // mine\n  "mcpServers": {}\n}\n';
+  mkdirSync(join(fake.home, ".qwen"), { recursive: true });
+  writeFileSync(join(fake.home, ".qwen", "settings.json"), mine);
+  const first = await start();
+  await first.connectAgents();
+  const connected = readFileSync(join(fake.home, ".qwen", "settings.json"), "utf8");
+  expect(connected).toContain("plannotator-inbox");
+  first.stop();
+
+  // The Inbox started from a shell with another QWEN_HOME, whose settings.json has a trailing comma.
+  const other = join(fake.root, "other-qwen");
+  mkdirSync(other, { recursive: true });
+  const trailing = '{\n  "mcpServers": { "x": { "command": "y" }, },\n}\n';
+  writeFileSync(join(other, "settings.json"), trailing);
+  const s = await start({ QWEN_HOME: other });
+  await s.connectAgents();
+  const shown = await get(s);
+  expect(row(shown, "qwen").reach).toMatchObject({ kind: "mcp", on: false, state: "elsewhere", path: "~/.qwen/settings.json" });
+
+  // The switch: on (as the UI sends it), refused, nothing changed anywhere.
+  const refused = (await (await post(s, "/api/inbox/agents", { agent: "qwen", reach: true })).json()) as Model;
+  expect(refused.error).toContain("stays connected in ~/.qwen/settings.json");
+  expect(readFileSync(join(fake.home, ".qwen", "settings.json"), "utf8")).toBe(connected);
+  expect(readFileSync(join(other, "settings.json"), "utf8")).toBe(trailing);
+  expect(row(refused, "qwen").reach.state).toBe("elsewhere");
+
+  // The person fixes it: on moves it, and the old file is theirs again, byte for byte.
+  writeFileSync(join(other, "settings.json"), '{\n  "mcpServers": { "x": { "command": "y" } }\n}\n');
+  const moved = (await (await post(s, "/api/inbox/agents", { agent: "qwen", reach: true })).json()) as Model;
+  expect(moved.error).toBeNull();
+  expect(row(moved, "qwen").reach).toMatchObject({ on: true, state: "connected" });
+  expect(readFileSync(join(fake.home, ".qwen", "settings.json"), "utf8")).toBe(mine);
+  expect(readFileSync(join(other, "settings.json"), "utf8")).toContain("plannotator-inbox");
+});
+
 test("the reminder switch per host, and the tool switch for Pi's extension", async () => {
   mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
   writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
@@ -525,4 +562,22 @@ test("the connect run replaces Pi's MCP entry once the extension is there and it
   await s.connectAgents();
   expect(JSON.parse(readFileSync(mcp, "utf8")).mcpServers["plannotator-inbox"]).toBeUndefined();
   expect(row(await get(s), "pi").reach).toMatchObject({ kind: "tool", on: true });
+});
+
+test("Cursor's note is copied by hand: the card answers it as shown to copy only when Cursor is here, and never writes a file; Settings has no switch for it", async () => {
+  const s = await start();
+  const missing = (await (await post(s, "/api/inbox/agents/notes", { add: ["cursor"] })).json()) as Model & { results: unknown[] };
+  expect(missing.results).toEqual([{ ok: false, agent: "cursor", reason: "Cursor was not found on this computer", path: null }]);
+  expect(existsSync(join(fake.home, ".cursor"))).toBe(false);
+  s.stop();
+  fake.install("cursor-agent");
+  const found = await start();
+  const answer = (await (await post(found, "/api/inbox/agents/notes", { add: ["cursor"] })).json()) as Model & { results: unknown[] };
+  expect(answer.results).toEqual([{ ok: true, agent: "cursor", action: "manual", path: null }]);
+  expect(existsSync(join(fake.home, ".cursor"))).toBe(false);
+  expect(existsSync(join(dataDir, "inbox", "agent-notes.json"))).toBe(false);
+  const note = row(answer, "cursor").note!;
+  expect(note).toMatchObject({ state: "manual", path: null, create: false });
+  expect(note.reason).toContain("Customize → Rules");
+  expect((await post(found, "/api/inbox/agents", { agent: "cursor", note: true })).status).toBe(422);
 });

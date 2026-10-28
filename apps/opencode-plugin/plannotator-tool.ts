@@ -637,7 +637,8 @@ async function closeLaunch(launch: TrackedLaunch, deps: PlannotatorToolDeps): Pr
     case "older": {
       // Proven an older Plannotator on the port of our own live child: stop
       // that child. A decision such a CLI is still publishing (it waits 1.5 s
-      // after the reviewer decides) is lost; see "Version skew" in AGENTS.md.
+      // after the reviewer decides) is lost; see "Version skew" in
+      // docs/agent-guides/claude-code-mod.md.
       if (launch.terminate?.()) {
         launch.closedByAgent = true;
         return { id, subject, closed: true, unsent: null };

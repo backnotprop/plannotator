@@ -332,10 +332,10 @@ test('an image opens beside the thread; it is marked up with the image annotator
   await page.mouse.up();
   await shot('4-image-annotator');
   await page.keyboard.press('Enter');
-  await expect(pane.locator('.ib-imgcompose .ib-markup img')).toBeVisible();
-  await pane.getByRole('textbox', { name: 'Comment on retry-policy-phone.png' }).fill('The on-call note wraps onto three lines on a phone. Can it sit under the field instead?');
+  await expect(pane.locator('[data-image-composer] [data-markup-kept] img')).toBeVisible();
+  await pane.getByRole('textbox', { name: 'A note with your drawing on retry-policy-phone.png' }).fill('The on-call note wraps onto three lines on a phone. Can it sit under the field instead?');
   await shot('5-image-comment-with-markup');
-  await pane.getByRole('button', { name: 'Comment', exact: true }).click();
+  await pane.getByRole('button', { name: 'Add note', exact: true }).click();
   await expect(pane.locator('.ib-apanel')).toContainText('The on-call note wraps');
   // Selecting the comment shows the marked-up copy on the stage.
   await pane.locator('.ib-apanel').getByText('The on-call note wraps').click();

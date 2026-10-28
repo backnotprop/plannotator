@@ -13,7 +13,9 @@
  * ship in inbox.html and its modules (the guide chain, the diff renderer) run
  * at page load; what waits for Open is the mount, the diff render and the
  * highlighter, as with every lazy runtime in Plannotator's single-file apps.
- * No new Tailwind classes here or in the chain. The comment cards, toolbar
+ * The first section card carries the Split | Unified tab (DiffStyleSwitch,
+ * through the chain's `renderSectionTab`); a phone draws every diff Unified
+ * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
  * and suggestion blocks are styled by packages/review-editor/comments.css,
  * which apps/inbox/index.css imports (guides.show gets it through
  * review-editor's index.css; its pinned manifest follows the viewer build).
@@ -37,6 +39,8 @@ import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
+import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
+import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
 type SelectedLineRange = NonNullable<AllFilesCodeViewProps['pendingSelection']>;
@@ -78,8 +82,16 @@ export interface GuideDiffComments {
  * `compactTouchLayout` is the review app's own phone header (the surface passes it): the full path, its ellipsis at the leading edge
  * only when it does not fit, and 44 pt targets. `comments` turns on line comments; without it the diff is read-only.
  */
-export const GuideDiff: FC<GuideDiffRendererProps & { compactTouchLayout?: boolean; comments?: GuideDiffComments }> = ({ comments, ...props }) => {
-  const diffStyle = useConfigValue('diffStyle');
+export const GuideDiff: FC<
+  GuideDiffRendererProps & {
+    compactTouchLayout?: boolean;
+    comments?: GuideDiffComments;
+    /** Draw this layout whatever the setting says, leaving the setting as it is (a phone: always Unified). */
+    diffStyleOverride?: 'split' | 'unified';
+  }
+> = ({ comments, diffStyleOverride, ...props }) => {
+  const savedDiffStyle = useConfigValue('diffStyle');
+  const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
   const diffIndicators = useConfigValue('diffIndicators');
   const lineDiffType = useConfigValue('diffLineDiffType');
@@ -208,9 +220,15 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollTarget]);
 
+  // A phone draws one column, always, and offers no switch (two ~130 px columns read as nothing);
+  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab.
+  const phone = usePhone();
+  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
+
   const getDiffRendererProps = useCallback(
-    ({ file, focused }: GuideDiffRendererContext): { comments?: GuideDiffComments } =>
-      comments
+    ({ file, focused }: GuideDiffRendererContext): { comments?: GuideDiffComments; diffStyleOverride?: 'unified' } => ({
+      ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(comments
         ? {
             comments: {
               annotations,
@@ -225,12 +243,19 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
               onDeleteAnnotation: deleteComment,
             },
           }
-        : {},
-    [comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment],
+        : {}),
+    }),
+    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment],
   );
   const host = useMemo(
-    () => ({ files, DiffRenderer: GuideDiff, getDiffRendererProps, ...(revealFile ? { revealFile } : {}) }),
-    [files, getDiffRendererProps, revealFile],
+    () => ({
+      files,
+      DiffRenderer: GuideDiff,
+      getDiffRendererProps,
+      ...(revealFile ? { revealFile } : {}),
+      ...(phone ? {} : { renderSectionTab }),
+    }),
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab],
   );
 
   return (

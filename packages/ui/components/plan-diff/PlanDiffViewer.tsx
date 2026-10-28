@@ -36,6 +36,12 @@ interface PlanDiffViewerProps {
   selectedAnnotationId?: string | null;
   mode?: EditorMode;
   onOpenVscodeDiff?: (baseVersion: number) => Promise<{ ok?: boolean; error?: string }>;
+  /**
+   * Grow the diff card to the full height the parent gives it, like Viewer's
+   * `fillHeight`, so a short diff's card still runs to the bottom of the view.
+   * Default false: the card sizes to its content.
+   */
+  fillHeight?: boolean;
 }
 
 const defaultOpenVscodeDiff = async (
@@ -77,6 +83,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   selectedAnnotationId,
   mode,
   onOpenVscodeDiff,
+  fillHeight = false,
 }) => {
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
   const [vscodeDiffError, setVscodeDiffError] = useState<string | null>(null);
@@ -102,8 +109,12 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   };
 
   return (
-    <div className="relative z-50 w-full" style={maxWidth ? { maxWidth } : { maxWidth: 832 }}>
-      <article className="w-full bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative" data-doc-text-root="">
+    <div
+      className={`relative z-50 w-full${fillHeight ? ' flex flex-col print:block' : ''}`}
+      data-viewer-fill-height={fillHeight ? '' : undefined}
+      style={maxWidth ? { maxWidth } : { maxWidth: 832 }}
+    >
+      <article className={`w-full ${fillHeight ? 'flex-1 ' : ''}bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative`} data-doc-text-root="">
         {/* Top-left: repo info + diff badge — matches Viewer layout (flex-col) so badge doesn't jump position */}
         <div className="absolute top-3 left-3 md:top-4 md:left-5 flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono">
           {repoInfo && (

@@ -11,19 +11,21 @@
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  */
 
-import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { appHtmlResponse, likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
+import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
 import { getRepoInfo } from "./repo";
+import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
 import { handleDoc, handleDocExists, handleFileBrowserFiles, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, resolveAllowedDocPath, type FolderAnnotateHistory } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash } from "./draft";
-import { annotateDraftFilePath, createAnnotateDraftSession } from "@plannotator/shared/annotate-draft";
+import { annotateDraftFilePath, annotateSessionHasRootlessDocuments, createAnnotateDraftSession } from "@plannotator/shared/annotate-draft";
 import { isPathAllowed } from "@plannotator/shared/doc-resolve";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
@@ -68,11 +70,12 @@ import { isWSL } from "./browser";
 import { handleOpenInApps, handleOpenIn } from "./open-in";
 import { agentToolHostForServer, createAIRuntime } from "./ai-runtime";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control";
+import { sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { createHtmlAssetRegistry, framedDocumentNotFound } from "./html-assets";
-import { createBunAgentTerminalBridge } from "./agent-terminal";
+import { createBunAgentTerminalBridge, type AgentTerminalSocketData } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
 import {
   buildLiveAppUrl,
@@ -198,6 +201,8 @@ export interface AnnotateServerOptions {
    * reachability.
    */
   tailnetPublished?: boolean;
+  /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
+  refRunner?: RefRunner;
   /** Project name for keying per-file version history (powers the annotate version diff). */
   project?: string;
   /** Called when server starts with the URL, remote status, and port */
@@ -207,6 +212,8 @@ export interface AnnotateServerOptions {
 export interface AnnotateServerResult {
   /** The port the server is running on */
   port: number;
+  /** The live proxy port, when annotating a running app. */
+  liveProxyPort?: number;
   /** The full URL to access the server */
   url: string;
   /** Whether running in remote mode */
@@ -339,6 +346,10 @@ export async function startAnnotateServer(
   }
 
   const isRemote = isRemoteSession();
+  // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for, and
+  // never in remote mode. In a `--tailscale` session only this machine's tabs and the tailnet owner's get
+  // them (`refCardsTailnetAllowed`): other devices must not drive the user's gh / glab.
+  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
   const compressAppHtml = isRemote || options.tailnetPublished === true;
@@ -452,13 +463,18 @@ export async function startAnnotateServer(
   // Drafts are crash recovery, not history, so PLANNOTATOR_ANNOTATE_HISTORY
   // does not govern them (it never governed the content-keyed draft either).
   const draftFilePath = annotateDraftFilePath({ mode, filePath });
+  // A URL or the last message has no file of its own, but its linked
+  // documents do: they get per-document copies plus the index that lets a
+  // reload offer them all, as in plan review (#1545).
+  const rootlessDocuments = annotateSessionHasRootlessDocuments({ mode, filePath });
   const annotateDrafts = createAnnotateDraftSession({
     contentKey: draftKey,
     filePath: draftFilePath,
     documents:
-      draftFilePath !== null || (mode === "annotate-folder" && folderPath) || bundleFiles
+      draftFilePath !== null || (mode === "annotate-folder" && folderPath) || bundleFiles || rootlessDocuments
         ? {
             isAllowed: (path) => isPathAllowed(path, getReferenceRootPaths()),
+            ...(rootlessDocuments ? { indexed: true } : {}),
           }
         : null,
   });
@@ -578,7 +594,7 @@ export async function startAnnotateServer(
   const externalAnnotations = createExternalAnnotationHandler("plan");
   // Set once bound: "Ask this session" answers only a loopback Host with this port.
   let boundPort: number | undefined;
-  const aiRuntime = resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort }) : null;
+  const aiRuntime = resolveAIEnabled() ? await createAIRuntime({ sessionBridge: options.sessionBridge, getServerPort: () => boundPort, ...(options.tailnetPublished === true ? { tailnet: sessionTailnetGate } : {}) }) : null;
   const htmlAssets = createHtmlAssetRegistry({ folderPath: mode === "annotate-folder" ? folderPath : undefined });
   const agentTerminal = await createBunAgentTerminalBridge({
     enabled: supportsAnnotateAgentTerminalMode(mode),
@@ -806,7 +822,7 @@ export async function startAnnotateServer(
   const serverSession = createServerSessionNonce();
   const sessionMismatch = () => Response.json(serverSessionMismatchBody(), { status: 409 });
   const alreadyDecided = () =>
-    Response.json({ error: "This review session has already been decided." }, { status: 409 });
+    Response.json({ error: "This review session has already been decided.", code: "already_decided" }, { status: 409 });
 
   // Last-client abandonment lease: once the tab's client-lease stream
   // disconnects (as reported by the transport) and stays disconnected for the
@@ -868,7 +884,7 @@ export async function startAnnotateServer(
 
   const requestHostGuard = createRequestHostGuard();
   const server = await startBunServerOnAvailablePort((port) =>
-    Bun.serve({
+    Bun.serve<AgentTerminalSocketData>(withPlannotatorServerHeader({
         hostname: getServerHostname(),
         port,
         // Bun's default 10s idleTimeout kills AI SSE streams that stall
@@ -889,6 +905,7 @@ export async function startAnnotateServer(
             token: hostControlToken,
             getServerPort: () => boundPort,
             control: hostControl,
+            ...(options.tailnetPublished === true ? { fromThisMachine: (r: Request) => sessionTailnetAudience(r) === "local" } : {}),
           });
           if (hostControlResponse) return hostControlResponse;
 
@@ -1152,6 +1169,13 @@ export async function startAnnotateServer(
 
           if (updateRoute) return updateRoute;
 
+          // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
+          const refRoute = await refCardRouteResponse(req, url, refCards, {
+            enabled: isRemote ? false : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
+            serverSession,
+          });
+          if (refRoute) return refRoute;
+
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
           if (url.pathname === "/api/config" && req.method === "POST") {
@@ -1177,7 +1201,7 @@ export async function startAnnotateServer(
               if (body.conventionalLabels !== undefined) toSave.conventionalLabels = body.conventionalLabels;
               if (isAgentTerminalSide(body.agentTerminalSide)) toSave.agentTerminalSide = body.agentTerminalSide;
               if (typeof body.agentTerminalDefaultAgent === "string") toSave.agentTerminalDefaultAgent = body.agentTerminalDefaultAgent;
-              if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
+              if (Object.keys(toSave).length > 0 && !saveConfig(toSave as Parameters<typeof saveConfig>[0])) return Response.json({ error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, { status: 500 });
               if (agentToolSaveFailed(toSave)) return Response.json({ error: "Could not save the setting to config.json." }, { status: 500 });
               return Response.json({ ok: true });
             } catch {
@@ -1383,6 +1407,12 @@ export async function startAnnotateServer(
           // document's saved comments; POST the session's documents.
           if (url.pathname === "/api/draft/document") {
             if (req.method === "GET") {
+              // A read marks the copy as this session's (and lists it in a
+              // rootless session's index): a decision then clears it, so it
+              // gets the writes' cross-site guard.
+              if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) {
+                return Response.json(crossOriginRefusalBody(), { status: 403 });
+              }
               const result = annotateDrafts.loadDocument(url.searchParams.get("path"));
               return Response.json(result.body, { status: result.status });
             }
@@ -1608,37 +1638,12 @@ export async function startAnnotateServer(
             { status: 500, headers: { "Content-Type": "text/plain" } },
           );
         },
-    }),
+    })),
   );
 
   const port = server.port!;
   boundPort = port;
   const serverUrl = buildAdvertisedUrl(port);
-
-  if (liveApp) {
-    // Compose the proxy-served bridge body via the shared assembly (config
-    // prelude with the token this server owns, both editor origin forms
-    // with the localhost one first to match the advertised URL, then the
-    // bootstrap that installs the CSS, then the bridge itself).
-    liveSessionToken = randomBytes(16).toString("hex");
-    const editorOrigins = buildLiveEditorOrigins(port);
-    liveProxy = startLiveAppProxy({
-      targetUrl: liveApp.targetUrl,
-      editorOrigins,
-      bridgeJs: composeLiveBridgeJs({
-        token: liveSessionToken,
-        editorOrigins,
-        annotationCss: liveApp.annotationCss,
-        bridgeBootstrap: liveApp.bridgeBootstrap,
-        bridgeScript: liveApp.bridgeScript,
-      }),
-    });
-    // Advertise the proxy under the LOCALHOST spelling, carrying the target
-    // URL's own path and query (see buildLiveAppUrl in live-proxy-core for
-    // the same-site/cookie rationale). PLANNOTATOR_URL_HOST is still never
-    // applied here.
-    liveAppUrl = buildLiveAppUrl(liveProxy.port, liveApp.targetUrl);
-  }
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.
@@ -1666,6 +1671,36 @@ export async function startAnnotateServer(
     );
   };
 
+  if (liveApp) {
+    // Compose the proxy-served bridge body via the shared assembly (config
+    // prelude with the token this server owns, both editor origin forms
+    // with the localhost one first to match the advertised URL, then the
+    // bootstrap that installs the CSS, then the bridge itself).
+    liveSessionToken = randomBytes(16).toString("hex");
+    const editorOrigins = buildLiveEditorOrigins(port);
+    try {
+      liveProxy = startLiveAppProxy({
+        targetUrl: liveApp.targetUrl,
+        editorOrigins,
+        bridgeJs: composeLiveBridgeJs({
+          token: liveSessionToken,
+          editorOrigins,
+          annotationCss: liveApp.annotationCss,
+          bridgeBootstrap: liveApp.bridgeBootstrap,
+          bridgeScript: liveApp.bridgeScript,
+        }),
+      });
+    } catch (error) {
+      stop();
+      throw error;
+    }
+    // Advertise the proxy under the LOCALHOST spelling, carrying the target
+    // URL's own path and query (see buildLiveAppUrl in live-proxy-core for
+    // the same-site/cookie rationale). PLANNOTATOR_URL_HOST is still never
+    // applied here.
+    liveAppUrl = buildLiveAppUrl(liveProxy.port, liveApp.targetUrl);
+  }
+
   // Start the likely encoding now (gzip for plain-http remote mode, brotli
   // behind tailscale serve) so the first load does not wait for it.
   if (compressAppHtml) {
@@ -1687,6 +1722,7 @@ export async function startAnnotateServer(
 
   return {
     port,
+    liveProxyPort: liveProxy?.port,
     url: serverUrl,
     isRemote,
     waitForDecision: () => decisionPromise,

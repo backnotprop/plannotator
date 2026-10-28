@@ -189,4 +189,65 @@ describe('GuideSectionCard', () => {
     expect(latest.hostSentinel).toBe('sentinel-42');
     expect(latest.allowScrollChaining).toBe(true);
   });
+
+  // The host's section tab (renderSectionTab): the Inbox's Split | Unified switch on the first card.
+  // A host that passes nothing (guides.show, the review app) gets the card exactly as before.
+  test.skipIf(!hasDom)('draws no tab and keeps the card as it was when the host has no renderSectionTab', async () => {
+    const file = makeFile();
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(renderCard(makeState({ files: [file] })));
+    });
+    expect(host.querySelector('[data-guide-section-tab]')).toBeNull();
+    expect(host.querySelector('[data-guide-section-tabbed]')).toBeNull();
+    const card = host.querySelector<HTMLElement>('[data-guide-section]')!;
+    expect(card.parentElement).not.toBeNull();
+    expect(card.getAttribute('style')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)("raises the host's control in a tab only on the cards it answers for, open or folded", async () => {
+    const file = makeFile();
+    const calls: number[] = [];
+    const withTab = (reviewed: boolean, index: number) => {
+      const state: GuideHostValue<Record<string, unknown>> = {
+        ...makeState({ files: [file] }),
+        renderSectionTab: (i) => {
+          calls.push(i);
+          return i === 0 ? <button type="button" data-host-control="">Layout</button> : null;
+        },
+      };
+      return renderCard(state, { index, reviewed });
+    };
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      root = createRoot(host!);
+      root.render(withTab(false, 0));
+    });
+    const tab = host.querySelector('[data-guide-section-tab]')!;
+    expect(tab).not.toBeNull();
+    // The host's control sits inside the tab, right above the card, whose top-right corner the tab carries.
+    expect(tab.querySelector('[data-host-control]')).not.toBeNull();
+    const card = host.querySelector<HTMLElement>('[data-guide-section]')!;
+    expect(tab.nextElementSibling).toBe(card);
+    expect(card.style.borderTopRightRadius).toBe('0px');
+    expect(calls).toContain(0);
+
+    // A folded (reviewed) first card keeps its tab, so the switch stays reachable.
+    await act(async () => {
+      root!.render(withTab(true, 0));
+    });
+    expect(host.querySelector('[data-guide-section-tab] [data-host-control]')).not.toBeNull();
+    expect(host.querySelector('[data-guide-file-shell]')).toBeNull();
+
+    // Another card, for which the host answers null: no tab, card untouched.
+    await act(async () => {
+      root!.render(withTab(false, 1));
+    });
+    expect(host.querySelector('[data-guide-section-tab]')).toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-guide-section]')!.getAttribute('style')).toBeNull();
+    expect(calls).toContain(1);
+  });
 });

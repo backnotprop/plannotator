@@ -4,7 +4,7 @@ import serverPlugin, {
   pushComposedSystemReminder,
   replacePlanningSystemParts,
 } from "./server";
-import { commandFailureNoticeText, createV2BridgeClient, dropSessionUrlNotices, formatCommandFailureNotice, formatSessionUrlNotice } from "./v2-client";
+import { commandFailureNoticeText, createV2BridgeClient, dropSessionUrlNotices, formatCommandFailureNotice, formatInboxNotice, formatSessionUrlNotice, inboxNoticeText } from "./v2-client";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -292,6 +292,7 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
       "plannotator-review",
       "plannotator-annotate",
       "plannotator-last",
+      "plannotator-inbox",
     ]);
 
     // No command domain: nothing registered, and the pre-existing submit_plan
@@ -351,7 +352,7 @@ You remain in Plan mode until the user switches agents. If the user asks you to 
     });
     await serverPlugin.setup(testContext.context as never);
 
-    expect(registered).toHaveLength(3);
+    expect(registered).toHaveLength(4);
     expect(testContext.getToolDefinition()).toBeUndefined();
   });
 
@@ -582,6 +583,17 @@ describe("session-URL notices stay out of the model context", () => {
     const messages: unknown[] = [user("q"), assistant("a"), failure, user("annotate notes.md instead")];
     expect(dropSessionUrlNotices(messages)).toBe(1);
     expect(messages).toEqual([user("q"), assistant("a"), user("annotate notes.md instead")]);
+  });
+
+  // Failure caught: /plannotator-inbox's notices (where the Inbox is, or why
+  // it did not open) read by the model as a request.
+  test("/plannotator-inbox's notice and failure notice are dropped; a pasted copy of the address line is not", () => {
+    const opened = user(inboxNoticeText("http://localhost:61234/", "No browser opened: this is a remote session."));
+    const failed = user(commandFailureNoticeText("plannotator-inbox", "The plannotator on PATH is older than /plannotator-inbox."));
+    const pasted = user(`${formatInboxNotice("http://localhost:61234/")} is this right?`);
+    const messages: unknown[] = [user("q"), assistant("a"), opened, failed, pasted];
+    expect(dropSessionUrlNotices(messages)).toBe(2);
+    expect(messages).toEqual([user("q"), assistant("a"), pasted]);
   });
 
   // Failure caught: the person pasting the failure line they SAW (the

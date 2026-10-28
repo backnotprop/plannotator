@@ -69,7 +69,54 @@
  * replied to; the world adds `restart: { thread, session, installPath }`. A
  * stdin line `{ "poll": { session, body } }` is that session's connection
  * polling the bridge with `body`'s fields (`plugin`, `busy`, `send_now`...);
- * the server answers `{ "polled": true }`.
+ * the server answers `{ "polled": true, commands }` (what the poll handed it). A
+ * stdin line `{ "card": { project, session, title, say?, thread? } }` is that
+ * agent making a card (in Backlog, linked to its thread); the server answers
+ * `{ "carded": <card id> }`.
+ * With `reload-hosts` (owner approval "reload-hosts"): the same Inbox 0.28.25
+ * and scratch registry as `restart`, and each project also gets three threads
+ * a waking Pi (`ses_pi<i>`), Oh My Pi (`ses_omp<i>`, host `pi`) and OpenCode
+ * (`ses_oc<i>`) session asked in and the person replied to; the world adds
+ * `hosts: { pi, omp, opencode }`, each `{ thread, session }`. A `poll` line's
+ * `body.host` names the host the connection polls as.
+ *
+ * With `guide` (approval "inbox-guide-diff-style"), each project also gets a
+ * thread whose agent sent a guided review of two sections (two files each
+ * side of a two-section patch) through the Inbox's own MCP (`submit_guide`);
+ * the world adds `guide` (`{ thread, message }`).
+ *
+ * With `artifacts` (approval "inbox-thread-artifacts"), each project also gets a
+ * thread of five messages through the Inbox's own MCP and routes: an agent's
+ * text showing `design/before.png` that also attaches it with `docs/spec.md`;
+ * the person's reply with `sketch.png` pasted in; an agent's `after.png` in the
+ * text with `traces.zip` attached; a guided review; and an agent's
+ * `flow.sql`. The world adds `artifacts` (`{ thread, ids: { <name>: <id> },
+ * guide }`: the inline image's id under `before.png`, the attached copy's under
+ * `before.png (attached)`).
+ *
+ * With `decisions` (decision mode, experimental; approval "inbox-decision-mode"):
+ * config.json turns decision mode on, and each project gets only this seed in
+ * place of the one above: Claude Code (`ses_da<i>`) asks two questions in one
+ * message (a Stopped pick-one of three, recommended, then a two-way), and
+ * Codex (`ses_db<i>`) asks one two-way question in the same thread (`reply_to`
+ * a: decision mode is thread only, so the thread holds both agents). The
+ * world is `{ project, root, decide: { a, b, sessionA, sessionB } }`. A `send`
+ * line on stdin may carry `supersedes` (and `host`).
+ *
+ * With `first-run`, nothing is seeded (no project: the window opens on the
+ * first-run screen) and the first line's `worlds` is empty. A stdin line
+ * `{ "first": { root, session, body } }` is an agent writing its first
+ * message from folder `root` (made if missing); the server answers
+ * `{ "sent": <message id>, "project": <project id> }`. Start one server per
+ * test: the first message ends the first run for good.
+ *
+ * With `sent-reply`, each project also gets a thread one Claude Code session
+ * (`ses_sr<i>`) asks in twice: message `a` with two questions, then `b` with
+ * one; the person sent ONE reply with words ("Go with the dense table.
+ * Thanks!") answering a's first and b's question and skipping a's second,
+ * plus a comment's feedback text. And a second thread whose one question the
+ * person answered with no words. The world adds `sentReply` (`{ thread, a, b,
+ * reply, simple, simpleReply }`).
  *
  * With `leaked-subject`, each project also gets a thread whose STORED subject
  * holds an agent's leaked tool-call text, as an Inbox older than the one-line
@@ -83,10 +130,12 @@ import { startInboxServer } from "../../packages/server/inbox";
 import type { InboxOpenInLauncher } from "../../packages/server/inbox-open-in";
 import { recordInboxAttachments } from "../../packages/shared/inbox/attachments";
 import { writeUpdateState } from "../../packages/shared/update-check";
+import { parseInboxBridgeCommands } from "../../packages/shared/inbox/connection";
 import { createAgentEnvironmentFor } from "../../packages/server/inbox-agents";
 import { isScratchDataDir, refuseRealDataDir } from "./real-data-dir";
 import { seedTagWorld, TAG_SESSIONS } from "./inbox-tag-world";
 import { seedLeakedSubjects } from "./inbox-leaked-subject";
+import { markTourDecided } from "./tour-decided";
 
 const [dataDir, projectsDir, countArg, extra] = process.argv.slice(2);
 const withNews = extra === "news";
@@ -108,6 +157,9 @@ process.env.HOME = scratchHome;
 process.env.CLAUDE_CONFIG_DIR = join(scratchHome, ".claude");
 process.env.CODEX_HOME = join(scratchHome, ".codex");
 process.env.XDG_CONFIG_HOME = join(scratchHome, ".config");
+// OpenCode 2's config (its plugin spec): the scratch one under XDG_CONFIG_HOME, never a real OPENCODE_CONFIG_DIR or OPENCODE_CONFIG.
+delete process.env.OPENCODE_CONFIG_DIR;
+delete process.env.OPENCODE_CONFIG;
 
 const STOPPED = [
   "Before I build the invoice list:",
@@ -200,7 +252,14 @@ if (whatsNewMode) {
   process.env.PLANNOTATOR_UPDATE_API_URL = `http://127.0.0.1:${releaseApi.port}/releases/latest`;
 }
 const openInMode = extra === "open-in";
-const restartMode = extra === "restart";
+const decisionsMode = extra === "decisions";
+// Decision mode is experimental and off by default: this mode turns it on in the scratch config.json.
+if (decisionsMode) {
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { decisionMode: true } }));
+}
+const reloadHostsMode = extra === "reload-hosts";
+const restartMode = extra === "restart" || reloadHostsMode;
 const claudeDir = join(dataDir, "claude");
 const pluginFolder = (version: string) => join(claudeDir, "plugins", "cache", "plannotator", "plannotator", version);
 if (restartMode) {
@@ -280,8 +339,29 @@ type World = {
   openIn?: { thread: string; ids: Record<string, string> };
   htmlLinks?: { thread: string; ids: Record<string, string> };
   restart?: { thread: string; session: string; project: string; installPath: string; oldPath: string };
+  hosts?: Record<"pi" | "omp" | "opencode", { thread: string; session: string }>;
   leaked?: string;
+  guide?: { thread: string; message: string };
+  artifacts?: { thread: string; ids: Record<string, string>; guide: string };
+  sentReply?: { thread: string; a: string; b: string; reply: string; simple: string; simpleReply: string };
   news: string[];
+};
+/** The guided review the `guide` mode sends: two sections, one file each, so the first card and the second differ. */
+const DOM_GUIDE = {
+  body: "I wrote a guided review of the token refresh change.",
+  guide: {
+    title: "Token refresh",
+    intent: "Refresh tokens before they expire.",
+    sections: [
+      { title: "The guard", overview: "Where the refresh happens.", diffs: [{ file: "src/auth.ts", summary: "Adds the refresh guard." }] },
+      { title: "The session", overview: "What the session remembers.", diffs: [{ file: "src/session.ts", summary: "Keeps the expiry." }] },
+    ],
+    review: { gitRef: "origin/main...HEAD", base: "origin/main" },
+    generator: { engine: "claude-code", model: "claude-opus-5" },
+  },
+  patch:
+    "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1,3 +1,3 @@\n export function refresh() {\n-  return old();\n+  return early();\n }\n" +
+    "diff --git a/src/session.ts b/src/session.ts\n--- a/src/session.ts\n+++ b/src/session.ts\n@@ -1,2 +1,3 @@\n export interface Session {\n+  expiresAt: number;\n }\n",
 };
 const SENT_MULTI = [
   "Two things before the release:",
@@ -306,11 +386,54 @@ const SENT_MULTI = [
   ":::",
 ].join("\n");
 const worlds: World[] = [];
-for (let i = 0; i < count; i++) {
+// `first-run-tour`: a first run whose window opens on the tour's entry screen (packages/inbox/tour.test.tsx).
+const firstRunMode = extra === "first-run" || extra === "first-run-tour";
+// Every other first run opens on the connect screen, as before the tour: the tour is marked skipped.
+if (extra === "first-run") markTourDecided(dataDir);
+for (let i = 0; i < (firstRunMode ? 0 : count); i++) {
   const root = join(projectsDir, `billing-${i}`);
   mkdirSync(root, { recursive: true });
   const project = store.ensureProject({ name: `billing-${i}`, root });
   const author = { kind: "agent" as const, host: "claude-code", session: `ses_a${i}`, name: "Claude Code" };
+  if (decisionsMode) {
+    const sessionA = `ses_da${i}`;
+    const sessionB = `ses_db${i}`;
+    const a = store.sendMessage({
+      project_id: project.id,
+      author: { ...author, session: sessionA },
+      body: [
+        "Two calls before the refund worker ships.",
+        "",
+        ":::question",
+        "Which way should the worker go on a Stripe 409?",
+        "",
+        "Stopped: the refund worker cannot ship without this.",
+        "",
+        "- [ ] Retry with the same key — Stripe charges once per key",
+        "- [ ] Fail to the dead-letter queue — today's behavior",
+        "- [ ] Retry with a new key — fastest, can refund twice",
+        "",
+        "Recommended: Retry with the same key",
+        ":::",
+        "",
+        ":::question",
+        "Page on-call after 5 tries?",
+        "",
+        "- [ ] Yes, page on-call",
+        "- [ ] No, a daily digest",
+        ":::",
+      ].join("\n"),
+    }).message;
+    const b = store.sendMessage({
+      project_id: project.id,
+      author: { kind: "agent", host: "codex", session: sessionB, name: "Codex" },
+      body: [":::question", "Ship the new flag off by default?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n"),
+      // In Claude Code's thread: decision mode is thread only, so one thread holds two agents' decisions.
+      reply_to: a.id,
+    }).message;
+    worlds.push({ project: project.id, root, decide: { a: a.id, b: b.id, sessionA, sessionB } } as unknown as World);
+    continue;
+  }
   const stopped = store.sendMessage({ project_id: project.id, author, body: STOPPED }).message;
   const waiting = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_b${i}` }, body: WAITING }).message;
   // One thread two sessions write in: A asks, then B posts a later update in it.
@@ -361,6 +484,54 @@ for (let i = 0; i < count; i++) {
     });
     sentMulti = message.id;
   }
+  let sentReply: World["sentReply"];
+  if (extra === "sent-reply") {
+    const replyAuthor = { ...author, session: `ses_sr${i}` };
+    const a = store.sendMessage({
+      project_id: project.id,
+      author: replyAuthor,
+      body: [
+        "Two calls on the invoice export:",
+        "",
+        ":::question",
+        "Which layout should the **export** use?",
+        "",
+        "- [ ] Cards",
+        "- [ ] A dense table",
+        ":::",
+        "",
+        ":::question",
+        "Should the export include voided invoices?",
+        "",
+        "- [ ] Yes",
+        "- [ ] No",
+        ":::",
+      ].join("\n"),
+    }).message;
+    const b = store.sendMessage({
+      project_id: project.id,
+      author: replyAuthor,
+      reply_to: a.id,
+      body: [":::question", "Ship it behind a flag?", "", "- [ ] Yes, behind a flag", "- [ ] No", ":::"].join("\n"),
+    }).message;
+    const [layout, voided] = store.questionsOf(a.id);
+    const [flag] = store.questionsOf(b.id);
+    const answer = (q: typeof layout, selected: string[]) => ({ v: 1 as const, key: q!.key, kind: q!.kind, prompt: q!.prompt, selected });
+    const reply = store.sendReply(b.id, {
+      idempotency_key: `sent-reply-${i}`,
+      words: "Go with the dense table. Thanks!",
+      questions: [
+        { message_id: a.id, key: layout!.key, revision: layout!.revision, answer: answer(layout, ["A dense table"]) },
+        { key: flag!.key, revision: flag!.revision, answer: answer(flag, ["Yes, behind a flag"]) },
+      ],
+      skip: [{ message_id: a.id, key: voided!.key }],
+      feedback: "# Feedback on the attached files\n\n## notes.md\n\n### 1. Feedback on: \"The plan\"\n> Say which plan.",
+    }).reply!;
+    const simple = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_sq${i}` }, body: WAITING.replace("docs site", "export page") }).message;
+    const [only] = store.questionsOf(simple.id);
+    const simpleReply = store.sendReply(simple.id, { idempotency_key: `sent-simple-${i}`, questions: [{ key: only!.key, revision: only!.revision, answer: answer(only, ["Pagefind"]) }] }).reply!;
+    sentReply = { thread: a.thread_id, a: a.id, b: b.id, reply: reply.id, simple: simple.thread_id, simpleReply: simpleReply.id };
+  }
   let openIn: World["openIn"];
   if (openInMode) {
     const names = ["page.html", "plan.md", "build.zip", "shot.png", "gone.md"];
@@ -407,13 +578,83 @@ for (let i = 0; i < count; i++) {
     store.sendReply(asked.id, { idempotency_key: `restart-${i}`, words: "Queue it. Cap retries at 5 and dead-letter after." });
     restart = { thread: asked.id, session, project: root, installPath: pluginFolder("0.28.25"), oldPath: pluginFolder("0.28.23") };
   }
+  let hosts: World["hosts"];
+  if (reloadHostsMode) {
+    const ask = (key: string, host: string, name: string) => {
+      const session = `ses_${key}${i}`;
+      const asked = store.sendMessage({ project_id: project.id, author: { kind: "agent", host, session, name }, body: `${name}: the export runs nightly now. Anything else?`, wakes: true }).message;
+      store.sendReply(asked.id, { idempotency_key: `reload-${key}-${i}`, words: "Add a dry run flag." });
+      return { thread: asked.id, session };
+    };
+    hosts = { pi: ask("pi", "pi", "Pi"), omp: ask("omp", "pi", "Oh My Pi"), opencode: ask("oc", "opencode", "OpenCode") };
+  }
+  let guide: World["guide"];
+  if (extra === "guide") {
+    const client = new Client({ name: "inbox-dom-server", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+    const result = (await client.callTool({
+      name: "submit_guide",
+      arguments: { project_path: root, ...DOM_GUIDE, agent_session: `ses_g${i}`, agent_name: "Claude Code", agent_host: "claude-code" },
+    })) as { isError?: boolean; content: { text: string }[]; structuredContent: { message_id: string; thread_id: string } };
+    await client.close();
+    if (result.isError) throw new Error(result.content[0]!.text);
+    guide = { thread: result.structuredContent.thread_id, message: result.structuredContent.message_id };
+  }
+  let artifacts: World["artifacts"];
+  if (extra === "artifacts") {
+    const png = Buffer.from(
+      "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f0005fe02fe0dd8a2c90000000049454e44ae426082",
+      "hex",
+    );
+    mkdirSync(join(root, "design"), { recursive: true });
+    mkdirSync(join(root, "docs"), { recursive: true });
+    writeFileSync(join(root, "design", "before.png"), png);
+    writeFileSync(join(root, "design", "after.png"), png);
+    writeFileSync(join(root, "docs", "spec.md"), "# Spec\n\nOne drawer.\n");
+    writeFileSync(join(root, "traces.zip"), Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0xff, 0xfe]));
+    writeFileSync(join(root, "flow.sql"), "CREATE TABLE checkout_sessions (id uuid);\n");
+    const client = new Client({ name: "inbox-dom-server", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+    const agentArgs = { project_path: root, agent_session: `ses_art${i}`, agent_name: "Claude Code", agent_host: "claude-code" };
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const result = (await client.callTool({ name, arguments: { ...agentArgs, ...args } })) as { isError?: boolean; content: { text: string }[]; structuredContent: Record<string, any> };
+      if (result.isError) throw new Error(result.content[0]!.text);
+      return result.structuredContent;
+    };
+    const first = await call("send_message", { subject: "Checkout drawer", body: "Today:\n\n![Today](design/before.png)\n\nThe spec is attached.", attachments: ["docs/spec.md", "design/before.png"] });
+    const firstId = (first.message?.id ?? first.message_id) as string;
+    const base = `http://127.0.0.1:${server.port}`;
+    const ss = server.serverSession;
+    const upload = (await (await fetch(`${base}/api/inbox/uploads?name=sketch.png&serverSession=${ss}`, { method: "POST", body: png })).json()) as { upload: { upload_id: string } };
+    const replied = await fetch(`${base}/api/inbox/messages/${firstId}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: ss, idempotency_key: `art-${i}`, words: "Sketch attached.", uploads: [upload.upload.upload_id] }),
+    });
+    if (!replied.ok) throw new Error(`reply ${replied.status} ${await replied.text()}`);
+    await call("send_message", { reply_to: firstId, body: "Built it:\n\n![After](design/after.png)", attachments: ["traces.zip"] });
+    const guideSent = await call("submit_guide", { ...DOM_GUIDE, reply_to: firstId });
+    await call("send_message", { reply_to: firstId, body: "The migration.", attachments: ["flow.sql"] });
+    await client.close();
+    const thread = store.thread(first.thread_id as string)!;
+    const ids: Record<string, string> = {};
+    for (const message of thread.messages) {
+      for (const image of message.inline_images ?? []) ids[image.name] = image.id;
+      for (const a of message.attachments ?? []) ids[ids[a.name] ? `${a.name} (attached)` : a.name] = a.id;
+    }
+    artifacts = { thread: first.thread_id as string, ids, guide: (guideSent.message?.id ?? guideSent.message_id) as string };
+  }
   worlds.push({
+    ...(artifacts ? { artifacts } : {}),
+    ...(guide ? { guide } : {}),
     ...(htmlLinks ? { htmlLinks } : {}),
     ...(restart ? { restart } : {}),
+    ...(hosts ? { hosts } : {}),
     ...(leakedIds[i] ? { leaked: leakedIds[i] } : {}),
     ...(openIn ? { openIn } : {}),
     ...(files ? { files } : {}),
     ...(sentMulti ? { sentMulti } : {}),
+    ...(sentReply ? { sentReply } : {}),
     project: project.id,
     stopped: stopped.id,
     waiting: waiting.id,
@@ -446,19 +687,42 @@ function tagHost(session: string): string {
 void (async () => {
   for await (const line of console) {
     const command = JSON.parse(line) as {
-      send?: { project: string; session: string; body: string; reply_to?: string };
+      send?: { project: string; session: string; body: string; reply_to?: string; supersedes?: string[]; host?: string };
       deliver?: { session: string };
       wait?: { thread: string; session: string };
       poll?: { session: string; body: Record<string, unknown> };
+      first?: { root: string; session: string; body: string };
+      card?: { project: string; session: string; title: string; say?: string; thread?: string };
     };
+    if (command.first) {
+      // An agent's first message: its folder becomes the Inbox's first project.
+      mkdirSync(command.first.root, { recursive: true });
+      const project = store.ensureProject({ name: command.first.root.split("/").pop()!, root: command.first.root });
+      const sent = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: command.first.session, name: "Claude Code" }, body: command.first.body });
+      process.stdout.write(`${JSON.stringify({ sent: sent.message.id, project: project.id })}\n`);
+      continue;
+    }
     if (command.poll) {
-      // That session's connection polling now: it is live, with what it loaded.
-      await fetch(`http://127.0.0.1:${server.port}/api/inbox/bridge/poll`, {
+      // That session's connection polling now: it is live, with what it loaded. `commands` is what
+      // the poll handed it (its wake: replies and messages the person sent it), never delivered here.
+      const polled = await fetch(`http://127.0.0.1:${server.port}/api/inbox/bridge/poll`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
         body: JSON.stringify({ session: command.poll.session, host: "claude-code", waitMs: 0, ...command.poll.body }),
       });
-      process.stdout.write(`${JSON.stringify({ polled: true })}\n`);
+      process.stdout.write(`${JSON.stringify({ polled: true, commands: parseInboxBridgeCommands(await polled.text()) })}\n`);
+      continue;
+    }
+    if (command.card) {
+      // An agent making a card through the store (the card action's rules), linked to its thread.
+      const made = store.createCard({
+        project_id: command.card.project,
+        by: { kind: "agent", host: "claude-code", session: command.card.session, name: "Claude Code" },
+        title: command.card.title,
+        say: command.card.say,
+        threads: command.card.thread ? [command.card.thread] : [],
+      });
+      process.stdout.write(`${JSON.stringify({ carded: made.card.id })}\n`);
       continue;
     }
     if (command.wait) {
@@ -477,8 +741,14 @@ void (async () => {
       continue;
     }
     if (!command.send) continue;
-    const { project, session, body, reply_to } = command.send;
-    const sent = store.sendMessage({ project_id: project, author: { kind: "agent", host: "claude-code", session, name: "Claude Code" }, body, ...(reply_to ? { reply_to } : {}) });
+    const { project, session, body, reply_to, supersedes, host } = command.send;
+    const sent = store.sendMessage({
+      project_id: project,
+      author: { kind: "agent", host: host ?? "claude-code", session, name: host === "codex" ? "Codex" : "Claude Code" },
+      body,
+      ...(reply_to ? { reply_to } : {}),
+      ...(supersedes ? { supersedes } : {}),
+    });
     process.stdout.write(`${JSON.stringify({ sent: sent.message.id })}\n`);
   }
 })();

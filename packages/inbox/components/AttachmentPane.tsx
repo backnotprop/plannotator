@@ -20,14 +20,15 @@ import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
-import { InboxApiError, inboxApi, type AttachmentView, type LinkedPageView } from '../api';
+import { InboxApiError, type AttachmentView, type LinkedPageView } from '../api';
+import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import {
   annotationOf,
   attachmentBlocks,
-  attachmentDownloadUrl,
+
   CODE_HIGHLIGHT_MAX_CHARS,
   CODE_WRAP_LINE_CHARS,
   hasLineLongerThan,
@@ -43,23 +44,30 @@ import {
 import { whenTime, formatBytes } from '../format';
 import { useRefRepo } from '../links';
 import { ImageAttachmentView } from './ImageAttachmentView';
+import type { WheelHintGate } from '@plannotator/ui/components/ImageZoomStage';
 import { VideoAttachmentView, type VideoAttachmentViewHandle } from './VideoAttachmentView';
 import { OpenInControl, type OpenInSurface } from './OpenIn';
 import { AttachmentStepper, type StepSource } from './AttachmentStepper';
-import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepKeyIntent, type AttachmentStep } from '../stepping';
+import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, type AttachmentStep } from '../stepping';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
 import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
 import { FullScreenMore } from './OpenIn';
+import { fileSwipeMode, useFileSwipe } from '../fileSwipe';
+import { FileSwipeCard } from './FileSwipeCard';
 import { createPortal } from 'react-dom';
+import type { Notice } from './Markup';
+import { MarkupPicture } from './Markup';
+import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
 import { escapeRung, type EscapeRung } from '../escapeLadder';
 import { storage } from '@plannotator/ui/utils/storage';
 import { Tip } from './Tip';
+import { CopyFileButton } from './CopyFileButton';
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -85,6 +93,9 @@ export function splitLinked(value: string): { relative: string; hash: string } {
   const at = value.indexOf('#');
   return at < 0 ? { relative: value, hash: '' } : { relative: value.slice(0, at), hash: value.slice(at + 1) };
 }
+
+/** The space between full screen's changed note and the code's top row, which grows under the note (Copy file stays clear of it). */
+export const CODE_ROW_BELOW_NOTE = 8;
 
 /** How long full screen's step chip names the new file. */
 export const FULL_VIEW_CHIP_MS = 1600;
@@ -150,6 +161,17 @@ export interface AttachmentPaneProps {
   full: boolean;
   /** Full screen is the only way the window can show the file (a phone, a narrow window: stack.ts): the toolbar leads with Back to the thread instead of Side by side. */
   fullLocked?: boolean;
+  /**
+   * × and Escape's last rung close the file, back to the thread (fullScreenOrigin.ts): a full screen opened from
+   * the thread alone, and wherever the file can only be full screen. False: they put the file back beside the
+   * thread, where it was before full screen. Absent: only where it can only be full screen.
+   */
+  exitCloses?: boolean;
+  /**
+   * The name of the file × and Escape's last rung go back to when it is another file than this one (a full screen
+   * opened over a file beside the thread): leaving this file, they ask first about a comment not saved yet.
+   */
+  exitLeavesFor?: string | null;
   /** `pick`: the person chose with a button (remembered); Escape's last rung is not a pick. */
   onToggleFull: (pick: boolean) => void;
   /** The view switch's pressed half: the view on screen becomes the remembered one; the frame stays. */
@@ -183,8 +205,10 @@ export interface AttachmentPaneProps {
   onStep?: (attachmentId: string, version: 'current' | 'sent') => void;
   /**
    * A phone (phone.ts): always full screen; the toolbar sits bottom right
-   * with 44 px targets and leads with Back to the thread, a swipe on a fitted
-   * image steps, and the comments open as a bottom sheet instead of a drawer.
+   * with 44 px targets and leads with Back to the thread, its `4/9 ⌄` pill
+   * opens every file of the thread, a sideways swipe on the file steps
+   * (fileSwipe.ts; a fitted image keeps its own), and the comments open as a
+   * bottom sheet instead of a drawer.
    */
   phone?: boolean;
   /**
@@ -205,6 +229,8 @@ export interface AttachmentPaneProps {
    * new-tab icon through the tailnet or on a phone (`tab`). Absent: neither.
    */
   openIn?: OpenInSurface;
+  /** The window's toast: a drawing added to the reply says so, with Undo. */
+  onToast?: Notice;
 }
 
 /**
@@ -257,6 +283,14 @@ function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
   return pane.querySelector<HTMLElement>('.ib-imgstage');
 }
 
+/**
+ * A comment box's suggestion (the tour's, FileSuggestion) for words selected in a text file: offered when
+ * the selection is on its phrase (selectionOnPhrase); a stray selection, a single word of it included, opens an empty box.
+ */
+export function suggestionFor(_text: string, suggestion: { phrase?: string; comment: string }, selected: string): string | undefined {
+  return suggestion.phrase && selectionOnPhrase(suggestion.phrase, selected) ? suggestion.comment : undefined;
+}
+
 /** What the pane keeps per file until it closes: the version chosen, where it was read to, and the image's size. */
 interface FileMemory {
   version?: 'current' | 'sent';
@@ -287,6 +321,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [armed, setArmed] = useState(true);
   const [scope, setScope] = useState<AnnotationScope>('all');
   const viewerRef = useRef<ViewerHandle>(null);
+  const source = useInboxFileSource();
+  const suggestion = source.suggestion?.(attachment) ?? null;
 
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
@@ -303,8 +339,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setError(null);
     setUnanchored(new Set());
     if (!readsText) return;
-    inboxApi
-      .view(attachment.id, effectiveVersion)
+    source
+      .view(attachment, effectiveVersion)
       .then((next) => {
         if (!cancelled) setView(next);
       })
@@ -317,7 +353,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       cancelled = true;
     };
     // A changed file on disk (a new hash) reads again.
-  }, [attachment.id, effectiveVersion, attachment.current?.sha256, readsText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachment.id, effectiveVersion, attachment.current?.sha256, readsText, source]);
 
   useEffect(() => setSelectedId(props.focusId), [props.focusId, attachment.id]);
 
@@ -329,7 +366,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   // ── Stepping (design record "inbox-attachment-stepping", v2) ──────────────
   const steps = props.steps ?? [];
-  const index = steps.findIndex((s) => s.attachment.id === attachment.id);
+  const index = stepIndexOf(steps, attachment.id);
   const multi = steps.length > 1 && index >= 0;
   const phone = props.phone === true;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -408,6 +445,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   const guardRef = useRef<HTMLDivElement>(null);
   const memory = useRef(new Map<string, FileMemory>());
+  // The image viewer's "⌘ + scroll to zoom" hint shows once while the pane is open, not once per file (#2127).
+  const wheelHint = useRef<WheelHintGate>({ shown: false }).current;
   const remember = (id: string, patch: FileMemory) => memory.current.set(id, { ...memory.current.get(id), ...patch });
   /** How the last step was asked for, so focus lands in the right place once the next file is in. */
   const pendingStep = useRef<StepSource | null>(null);
@@ -492,6 +531,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const fullViewPeekId = `ib-fvpeek-${useId().replace(/:/g, '')}`;
   /** A phone's position in the Comments sheet's foot: its peek is the bottom sheet, drawn in the Inbox's root. */
   const phonePosRef = useRef<HTMLButtonElement>(null);
+  /** What opened a phone's peek sheet (the toolbar's pill, or the position in the comments sheet's foot): focus goes back there. */
+  const peekOpener = useRef<'pill' | 'foot'>('pill');
+  /** Focus back on what opened a phone's peek sheet (the toolbar's pill, or the position in the comments sheet), else the toolbar's handle. */
+  const focusPeekOpener = () => {
+    const pill = sectionRef.current?.querySelector<HTMLElement>('[data-full-view-bar] [data-full-view-position]');
+    const usable = (el: HTMLElement | null | undefined) => !!el && el.isConnected && !el.closest('[inert]');
+    const opener = peekOpener.current === 'foot' && usable(phonePosRef.current) ? phonePosRef.current : usable(pill) ? pill : sectionRef.current?.querySelector<HTMLElement>('[data-full-view-handle]');
+    opener?.focus({ preventScroll: true });
+  };
+  /** A step was taken from the sheet's Previous / Next: once the next file is in, focus goes back to the sheet's opener. */
+  const steppedFromSheet = useRef(false);
   const phonePeekHost = phone && menuOpen ? peekSheetHost(sectionRef.current) : null;
   /** The person moved in or out of full screen with a button: focus follows once the frame is drawn. */
   const toggledFull = useRef(false);
@@ -560,18 +610,36 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const source = pendingStep.current;
     pendingStep.current = null;
     if (!source) return;
-    const at = stepsRef.current.findIndex((s) => s.attachment.id === attachment.id);
+    const at = stepIndexOf(stepsRef.current, attachment.id);
     if (at >= 0) announce(stepAnnouncement(stepsRef.current, at));
     // Full screen keeps on through a step; with no bar under the file, a chip names the file for a moment.
     if (fullRef.current) showChipRef.current(null);
     // A key pressed in the document (or the HTML page) leaves focus on the pane; a bar button keeps it.
     if (source === 'key') sectionRef.current?.focus({ preventScroll: true });
+    // The sheet's Previous / Next closed the sheet with the step: focus back on what opened it.
+    if (steppedFromSheet.current) {
+      steppedFromSheet.current = false;
+      requestAnimationFrame(focusPeekOpener);
+    }
   }, [attachment.id, announce]);
 
   // `]` `[` `→` `←` (stepping.ts has the rules for when they stand down).
   const blocked = guard !== null || menuOpen || moreOpen;
   const blockedRef = useRef(blocked);
   blockedRef.current = blocked;
+  // A phone's swipe over the file (fileSwipe.ts): documents, text, code, PDFs and the download card follow the finger; an image keeps its own at Fit.
+  const docAreaRef = useRef<HTMLDivElement>(null);
+  const swipeMode = fileSwipeMode(kind, tooLarge);
+  const swipe = useFileSwipe(docAreaRef, {
+    enabled: full && phone && multi && swipeMode === 'follow' && !blocked && !sheet,
+    canStep: (dir) => index + dir >= 0 && index + dir < steps.length,
+    onStep: (dir) => stepRef.current(dir, 'key'),
+    wouldAsk: () => !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null,
+  });
+  // A file a swipe cannot step (`swipeMode === 'none'`: HTML pages, diagrams, videos; and code that scrolls sideways)
+  // steps through the sheet the pill opens: its ‹ Previous and Next › (the owner's answer; no floating tabs), shown for
+  // every file so the sheet is the same everywhere (the phone's FilePeek below, `onStep`).
+
   const stepWhen = (dir: 1 | -1) => (event: KeyboardEvent) => {
     if (!multi) return false;
     const pane = sectionRef.current;
@@ -592,6 +660,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     }
   };
   const keepWriting = () => {
+    steppedFromSheet.current = false;
     setGuard(null);
     focusComposer();
   };
@@ -851,8 +920,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         keepWriting();
         return;
       case 'leave':
-        if (props.fullLocked) close();
-        else toggleFull(false);
+        if (exitCloses) close();
+        else exitFull();
         return;
     }
   }
@@ -932,8 +1001,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       return;
     }
     let cancelled = false;
-    inboxApi
-      .linkedPage(attachment.id, relative)
+    source
+      .linkedPage(attachment, relative)
       .then((page) => {
         if (cancelled) return;
         setLinkedStack((stack) => [...stack.filter((p) => p.attachmentId === attachment.id), { ...page, relative, hash, attachmentId: attachment.id }]);
@@ -1098,8 +1167,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     (annotation: Annotation): Promise<boolean> => {
       const answer = (async () => {
         try {
-          const result = await inboxApi.saveAnnotation(attachment.id, annotationVersion, annotation);
-          props.onSaved(result.annotation);
+          const record = await source.saveAnnotation(attachment, annotationVersion, annotation);
+          props.onSaved(record);
           return true;
         } catch (cause) {
           setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
@@ -1109,13 +1178,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       saves.current = { count: saves.current.count + 1, last: answer };
       return answer;
     },
-    [attachment.id, annotationVersion, props.onSaved],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attachment.id, annotationVersion, props.onSaved, source],
   );
 
   const remove = async (id: string) => {
     viewerRef.current?.removeHighlight(id);
     try {
-      await inboxApi.removeAnnotation(id);
+      await source.removeAnnotation(id);
       props.onRemoved(id);
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
@@ -1124,7 +1194,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
 
   const edit = (id: string, updates: Partial<Annotation>) => {
     const record = props.records.find((r) => r.id === id);
-    if (record) void save({ ...annotationOf(record), ...updates });
+    if (!record) return;
+    const annotation = annotationOf(record);
+    // A drawing's words emptied again: the agent's stand-in comes back.
+    const text = updates.text !== undefined && updates.text.trim() === '' && isWordlessMarkup(annotation) ? MARKUP_ONLY_TEXT : updates.text;
+    void save({ ...annotation, ...updates, ...(text !== undefined ? { text } : {}) });
   };
 
   // The panel lists the thread's other files too, each under its own name (record 2.4).
@@ -1163,6 +1237,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     props.onVersion(next);
   };
   const close = () => leave(null, props.onClose);
+  /** Where × and Escape's last rung go: the thread (the file closes), or back beside it. */
+  const exitCloses = props.exitCloses ?? props.fullLocked === true;
+  /** × and Escape's last rung back beside the thread: through `leave` when that shows another file (a typed comment is asked about). */
+  const exitFull = () => {
+    const to = props.exitLeavesFor ?? null;
+    if (to !== null) leave(to, () => toggleFull(false));
+    else toggleFull(false);
+  };
 
   const sentAt = whenTime(attachment.sent_at);
   /** An image the message's text shows (approval "inbox-image-viewer"). */
@@ -1245,6 +1327,36 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** The file changed since it was sent, or is gone: the tucked handle carries an amber dot. */
   const changedSinceSent = currentUnavailable || (view?.attachment ?? attachment).changed_since_sent;
 
+  /**
+   * Full screen's changed note floats at the file's top left, where a code file's top row starts (Copy file, the hint):
+   * the row grows under the note, measured, so the note never covers it. Null: nothing to clear.
+   */
+  const noteShown = full && versionChip !== null && !linkedTop;
+  const [codeClear, setCodeClear] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    const note = noteShown && isCode && view ? section?.querySelector<HTMLElement>('[data-full-view-changed]') : null;
+    const code = note ? section?.querySelector<HTMLElement>('[data-code-view]') : null;
+    if (!note || !code) {
+      setCodeClear(null);
+      return;
+    }
+    const place = () => {
+      const below = Math.ceil(note.getBoundingClientRect().bottom - code.getBoundingClientRect().top) + CODE_ROW_BELOW_NOTE;
+      setCodeClear(below > CODE_ROW_BELOW_NOTE ? below : null);
+    };
+    place();
+    // The note wraps onto more lines as the window narrows (a phone).
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(note);
+    observer?.observe(code);
+    window.addEventListener('resize', place);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', place);
+    };
+  }, [noteShown, isCode, view]);
+
   return (
     <section
       ref={sectionRef}
@@ -1279,7 +1391,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           handleCount={annotations.length}
           changed={changedSinceSent}
           position={
-            multi && !phone
+            multi
               ? {
                   index,
                   total: steps.length,
@@ -1287,10 +1399,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   open: menuOpen,
                   peekId: fullViewPeekId,
                   onOpenChange: (open) => {
-                    if (open) setSheet(false);
+                    if (open) {
+                      setSheet(false);
+                      setMoreOpen(false);
+                      peekOpener.current = 'pill';
+                    }
                     setMenuOpen(open);
                   },
-                  renderPeek: (closePeek) => (
+                  // A phone's pill opens the bottom sheet the pane draws (below), in one tap.
+                  renderPeek: phone ? undefined : (closePeek) => (
                     <FilePeek
                       id={fullViewPeekId}
                       steps={steps}
@@ -1316,21 +1433,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 setMoreOpen(open);
               }}
               versionAction={versionAction}
-              position={
-                phone && multi
-                  ? {
-                      label: `${index + 1} of ${steps.length} · Every file in this thread`,
-                      onOpen: () => {
-                        setSheet(false);
-                        setMenuOpen(true);
-                      },
-                    }
-                  : null
-              }
             />
           }
           moreOpen={moreOpen}
           leave={props.fullLocked ? { kind: 'back', onLeave: close } : { kind: 'exit', onLeave: () => toggleFull() }}
+          // × does what Escape's last step does, never a pick (Side by side is the pick): back where full screen
+          // was opened from, the thread alone (the file closes) or the file beside the thread.
+          onExitFull={props.fullLocked ? undefined : exitCloses ? close : exitFull}
+          exitCloses={exitCloses}
           chord={isHtml ? TOOLS_CHORD : null}
           shifted={drawerMode && drawer && hasPanel}
         />
@@ -1353,17 +1463,20 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           <span className="ib-sp" />
           {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
           {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
-          <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
-            <a
-              className="ib-btn ib-sm ib-ghost"
-              href={attachmentDownloadUrl(attachment, effectiveVersion)}
-              download={attachment.name}
-              data-attachment-download=""
-            >
-              <Icon name="download" size={14} />
-              Download
-            </a>
-          </Tip>
+          {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
+          {source.writes && (
+            <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
+              <a
+                className="ib-btn ib-sm ib-ghost"
+                href={source.downloadUrl(attachment, effectiveVersion)}
+                download={attachment.name}
+                data-attachment-download=""
+              >
+                <Icon name="download" size={14} />
+                Download
+              </a>
+            </Tip>
+          )}
           {folded && hasPanel && (
             <button
               type="button"
@@ -1433,7 +1546,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         <div />
       )}
       <div className="ib-vbody">
-        <div className={`ib-docarea${isHtml ? ' ib-html' : ''}`}>
+        <div ref={docAreaRef} className={`ib-docarea${isHtml ? ' ib-html' : ''}`} data-file-swipe={full && phone && multi ? swipeMode : undefined}>
           {error && (
             <div className="ib-error ib-view-error" role="alert">
               {error}
@@ -1552,6 +1665,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               initialFit={memory.current.get(attachment.id)?.fit}
               onFitChange={(fit) => remember(attachment.id, { fit })}
               onSwipe={multi ? (dir) => step(dir, 'key') : undefined}
+              wheelHint={wheelHint}
+              suggestion={suggestion?.comment}
+              onSelect={setSelectedId}
+              onRemove={remove}
+              onNotice={props.onToast}
             />
           )}
           {isVideo && (
@@ -1568,6 +1686,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onSave={save}
               onError={setError}
               phone={phone}
+              poster={source.posterUrl?.(attachment) ?? undefined}
+              suggestion={suggestion ?? undefined}
+              onRemove={remove}
+              onNotice={props.onToast}
             />
           )}
           {isDownload && (
@@ -1582,16 +1704,24 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                     {inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}, {formatBytes(attachment.current?.size ?? attachment.size)}. {tooLarge ? 'It is too large to show here; download it to open it.' : 'Plannotator does not show this kind of file; download it to open it.'}
                   </span>
                 </span>
-                <a className="ib-btn ib-pri" href={attachmentDownloadUrl(attachment, effectiveVersion)} download={attachment.name}>
-                  <Icon name="download" size={14} />
-                  Download
-                </a>
+                {source.writes && (
+                  <a className="ib-btn ib-pri" href={source.downloadUrl(attachment, effectiveVersion)} download={attachment.name}>
+                    <Icon name="download" size={14} />
+                    Download
+                  </a>
+                )}
               </div>
             </div>
           )}
           {view && isCode && (
             <div className="ib-codeview" data-code-view="">
-              {!props.readOnly && <div className="ib-codehint">Click a line number, drag across lines, or select code to comment.</div>}
+              {/* The code's top row: Copy file first (approval "inbox-copy-file"), then how to comment. */}
+              <div className="ib-codehint" style={codeClear === null ? undefined : { paddingTop: codeClear }} data-code-row="">
+                <CopyFileButton text={view.text} name={attachment.name} sent={view.version !== 'current'} announce={announce} />
+                {!props.readOnly && (
+                  <span className="ib-codehint-t">{phone ? 'Tap a line to comment.' : 'Click a line number, drag across lines, or select code to comment.'}</span>
+                )}
+              </div>
               <CodeFileView
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
                 filepath={attachment.name}
@@ -1648,6 +1778,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}
+                suggestComment={suggestion?.phrase ? (selected) => suggestionFor(view.text, suggestion, selected) : undefined}
               />
             </div>
           )}
@@ -1710,7 +1841,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                             {formatInboxVideoTime(time)}
                           </button>
                         </Tip>
-                        {frame && (
+                        {frame && !isWordlessMarkup(annotation) && (
                           <Tip content={frame.name}>
                           <span className="ib-vframe ib-vframe-sm" data-video-card-frame={annotation.id}>
                             <img src={getImageSrc(frame.path)} alt="" />
@@ -1728,7 +1859,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 : undefined
             }
             // The moment and the frame are in the card's header; the quote ("cut.mp4 at 1:42") and the image row would repeat them.
-            cardParts={isVideo ? (annotation) => (readInboxVideoTime(annotation) === null ? {} : { quote: false, images: false }) : undefined}
+            // A drawing with no words is drawn as its picture: no quote, no image row, not the stand-in words the agent gets.
+            cardParts={(annotation) => {
+              const wordless = isWordlessMarkup(annotation);
+              if (isVideo && readInboxVideoTime(annotation) !== null) return wordless ? { quote: false, images: false, text: false } : { quote: false, images: false };
+              return wordless ? { quote: false, images: false, text: false } : {};
+            }}
+            renderCardBody={(annotation) => (isWordlessMarkup(annotation) ? <MarkupPicture image={annotation.images![0]!} /> : null)}
             title={isVideo ? 'Comments' : undefined}
             // A linked page takes no comments: the panel lists the attached page's, and says so.
             titleNote={isVideo ? 'By time' : linkedTop ? `Off on ${linkedTop.name}` : undefined}
@@ -1765,7 +1902,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   aria-expanded={menuOpen}
                   aria-controls={menuOpen ? fullViewPeekId : undefined}
                   aria-label={`${index + 1} of ${steps.length}, ${attachment.name}. Show every file in this thread`}
-                  onClick={() => setMenuOpen((v) => !v)}
+                  onClick={() => {
+                    peekOpener.current = 'foot';
+                    setMenuOpen((v) => !v);
+                  }}
                   data-full-view-position=""
                   data-peek-opener=""
                 >
@@ -1860,6 +2000,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
         </div>
       )}
+      {full && phone && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} />}
       {full && phone && menuOpen && phonePeekHost
         ? createPortal(
             <div className="pn-inbox-peek">
@@ -1871,13 +2012,21 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 annotationCounts={annotationCounts}
                 onClose={() => {
                   setMenuOpen(false);
-                  // The sheet's backdrop covered everything: focus back on what opened it (the position in the comments sheet, else ⋯).
-                  requestAnimationFrame(() => {
-                    const opener = phonePosRef.current?.isConnected ? phonePosRef.current : sectionRef.current?.querySelector<HTMLElement>('[data-full-view-more]');
-                    opener?.focus({ preventScroll: true });
-                  });
+                  // The sheet's backdrop covered everything: focus back on what opened it (the toolbar's pill, or the position in the comments sheet).
+                  requestAnimationFrame(focusPeekOpener);
                 }}
                 onGo={(target) => goTo(target, 'menu')}
+                // The step for every file, swipeable or not (the owner's answer for HTML pages and code that scrolls
+                // sideways): one tap steps and closes the sheet, so the new file is what you see; at an end only the note.
+                onStep={(dir) => {
+                  const target = index + dir;
+                  if (target < 0 || target >= steps.length) {
+                    step(dir, 'button');
+                    return;
+                  }
+                  steppedFromSheet.current = true;
+                  goTo(target, 'button');
+                }}
               />
             </div>,
             phonePeekHost,

@@ -1,0 +1,10 @@
+description = "Open the Plannotator Inbox in the browser (starting it if needed) and show its address"
+prompt = """
+## Inbox address
+
+!{plannotator inbox --open}
+
+## Your task
+
+The output above is the Plannotator Inbox's address; it opened in the browser unless the output says why not. Tell the user the address in one sentence, with that reason when there is one, and stop. Do not begin any work. If the output is an error, tell the user what it says; `Unknown inbox option: --open` means their Plannotator is older than this command (update with `plannotator update`, or run `plannotator inbox` in a terminal).
+"""

@@ -55,6 +55,10 @@ export const NATIVE_COMMANDS: ReadonlyArray<{ name: string; description: string 
     name: "plannotator-last",
     description: "Annotate the last assistant message in Plannotator",
   },
+  {
+    name: "plannotator-inbox",
+    description: "Open your Plannotator Inbox in the browser and show its address",
+  },
 ];
 
 /**

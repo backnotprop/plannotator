@@ -154,7 +154,7 @@ test('a pick not sent: "Draft" on the card and the foot; the thread stays out of
   await expect(pane(page).getByRole('radio', { name: 'Pagefind' })).toBeVisible();
   await pane(page).getByText('Pagefind', { exact: true }).click();
   await expect(pane(page).getByText(/^Picked \d{1,2}:\d{2} [AP]M · in your draft$/)).toBeVisible();
-  await expect(pane(page).locator('[data-draft-foot]')).toHaveText('Draft 1 pick');
+  await expect(pane(page).locator('[data-draft-foot]')).toHaveText('Draft, 1 pick');
   await expect(pane(page).locator('.ib-pfoot')).not.toContainText('Not sent');
   await expect(row(page, threads.picks).locator('[data-draft-label]')).toHaveText('Draft · 1 pick');
   await page.setViewportSize({ width: 1280, height: 860 });

@@ -80,14 +80,54 @@ export function FilePeek(props: {
   annotationCounts: ReadonlyMap<string, number>;
   onClose: (reason: 'key' | 'outside') => void;
   onGo: (index: number) => void;
+  /**
+   * A phone's sheet: ‹ Previous and Next › above the files (the owner's answer
+   * for files a swipe cannot step; shown for every file, so the sheet is the
+   * same everywhere). `onStep` steps (the host closes the sheet); at an end the
+   * button is `aria-disabled`, keeps focus, and `onStep` only says the end.
+   */
+  onStep?: (dir: 1 | -1) => void;
 }) {
-  const { steps, phone } = props;
+  const { steps, phone, index } = props;
   const rows = useMemo(() => peekRows(steps, props.annotationCounts), [steps, props.annotationCounts]);
+  const onStep = props.onStep;
+  const prev = steps[index - 1];
+  const next = steps[index + 1];
+  const header =
+    phone && onStep ? (
+      <div className="ib-peekstep" role="group" aria-label="Step through the files" data-peek-step="">
+        <button
+          type="button"
+          className="ib-peekstep-b"
+          aria-label={prev ? `Previous file: ${prev.attachment.name}` : 'Previous file: this is the first'}
+          aria-disabled={prev ? undefined : true}
+          onClick={() => onStep(-1)}
+          data-peek-step-prev=""
+        >
+          <Icon name="chevL" size={18} />
+          <span>Previous</span>
+        </button>
+        <span className="ib-peekstep-n" aria-hidden="true">
+          {index + 1} of {steps.length}
+        </span>
+        <button
+          type="button"
+          className="ib-peekstep-b"
+          aria-label={next ? `Next file: ${next.attachment.name}` : 'Next file: this is the last'}
+          aria-disabled={next ? undefined : true}
+          onClick={() => onStep(1)}
+          data-peek-step-next=""
+        >
+          <span>Next</span>
+          <Icon name="chevR" size={18} />
+        </button>
+      </div>
+    ) : null;
   return (
     <ImagePeek
       id={props.id}
       rows={rows}
-      current={steps[props.index]?.attachment.id ?? null}
+      current={steps[index]?.attachment.id ?? null}
       label="Files in this thread"
       variant={phone ? 'sheet' : 'popover'}
       onClose={props.onClose}
@@ -96,6 +136,7 @@ export function FilePeek(props: {
         if (at >= 0) props.onGo(at);
       }}
       className={phone ? 'ib-peek-sheet' : ''}
+      sheetHeader={header}
     />
   );
 }

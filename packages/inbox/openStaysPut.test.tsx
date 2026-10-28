@@ -24,6 +24,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection } from '@plannotator/core/inbox-types';
+import { MARK_READ_LOOK_WAIT_MS } from './markRead';
 import { PHONE_QUERY } from './phone';
 import { rowInSlot, SETTLE_BEAT_MS, SHOW_LIT_AFTER_SLIDE_MS, SHOW_LIT_MS } from './settle';
 
@@ -49,6 +50,8 @@ let pokeStream: (() => void) | null = null;
 let posted: string[] = [];
 /** The JSON bodies the window posted, with their paths. */
 let postedBodies: { path: string; body: Record<string, unknown> }[] = [];
+/** While set, the window's looks (`POST …/seen`) wait for it before they reach the Inbox. */
+let seenGate: Promise<void> | null = null;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -85,7 +88,7 @@ async function agentSends(body: string, reply_to?: string): Promise<string> {
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-const TESTS = 10;
+const TESTS = 16;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -125,10 +128,12 @@ beforeEach(() => {
   savedFetch = globalThis.fetch;
   posted = [];
   postedBodies = [];
+  seenGate = null;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if ((init?.method ?? 'GET') === 'POST') {
       posted.push(String(input));
       postedBodies.push({ path: String(input), body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {} });
+      if (seenGate && String(input).endsWith('/seen')) await seenGate;
     }
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
@@ -448,7 +453,7 @@ test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row wi
   const el = await renderApp(`#project=${world.project}`);
   const first = world.news[0]!;
   await openRow(el, first);
-  // A New row once looked at waits on nobody (Mark read is off): a question from an agent does.
+  // A question from an agent waits on the person: Mark read writes, and the row waits for the settle.
   const asked = await agentSends('One question:\n\n:::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::');
   act(() => pokeStream!());
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
@@ -459,10 +464,178 @@ test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row wi
   act(() => (el.querySelector('[data-mark-read]') as HTMLButtonElement).click());
   await until(() => document.querySelector('[data-inbox-toast]') !== null, 'the toast');
   expect(document.querySelector('[data-inbox-toast]')!.textContent).toContain('Moves to Quiet');
+  // Unlike a seen update held in New (below), this one is written: its question closes on the server.
+  expect(posted).toContain(`/api/inbox/threads/${asked}/read`);
   expect(sectionOfRow(el, asked)).toBe('waiting');
   closeThread();
   await wait(SETTLE_BEAT_MS + 60);
   await until(() => rowOf(el, asked) === null, 'the settle');
+});
+
+// A plain update the person opened: the look puts it in Quiet on the server, but the list holds it in New
+// while a thread is open. Mark read stays on it there, everywhere, and moves the row to Quiet now.
+const header = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('section.ib-pane [data-mark-read]')!;
+const hoverAction = (el: HTMLElement, id: string) => el.querySelector<HTMLButtonElement>(`.ib-lbody [data-row="${id}"] [data-row-mark-read]`);
+const quietCount = (el: HTMLElement) => el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent ?? '0';
+const toastEl = () => document.querySelector<HTMLElement>('[data-inbox-toast]');
+const pressKey = (key: string) =>
+  act(() => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  });
+async function rowMenu(el: HTMLElement, id: string) {
+  await act(async () => {
+    rowOf(el, id)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
+  });
+  await until(() => document.querySelector('[data-row-menu]')?.getAttribute('data-row-menu') === id, 'the row menu');
+  return [...document.querySelectorAll<HTMLElement>('[data-row-menu] [data-row-action]')].map((item) => item.getAttribute('data-row-action'));
+}
+async function closeMenu() {
+  pressKey('Escape');
+  await until(() => document.querySelector('[data-row-menu]') === null, 'the menu closed');
+}
+/** The row went to Quiet (folded, so off screen) now, with the toast that says so and nothing written. */
+async function movedNow(el: HTMLElement, id: string, how: string) {
+  await until(() => rowOf(el, id) === null, `${how}: the row moved to Quiet`);
+  expect(quietCount(el)).toBe('1');
+  expect(toastEl()?.textContent).toContain('Moved to Quiet');
+  expect(toastEl()?.querySelector('[data-toast-undo]')).not.toBeNull();
+}
+
+test.skipIf(!hasDom)('a seen update held in New keeps Mark read in the header, the hover action, the row menu and E; each moves the row to Quiet now', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  const before = order(el);
+  await openRow(el, first);
+  // Quiet on the server, New on screen.
+  expect(sectionOfRow(el, first)).toBe('new');
+  expect(quietCount(el)).toBe('0');
+
+  // The header: enabled, not pressed.
+  expect(header(el).disabled).toBe(false);
+  expect(header(el).getAttribute('aria-pressed')).toBe('false');
+  act(() => header(el).click());
+  await movedNow(el, first, 'the header');
+  // In Quiet now: nothing here waits on the person, so the header is off.
+  expect(header(el).disabled).toBe(true);
+  act(() => toastEl()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click());
+  await until(() => sectionOfRow(el, first) === 'new', 'Undo');
+  expect(order(el)).toEqual(before);
+  expect(header(el).disabled).toBe(false);
+
+  // E, then Z.
+  pressKey('e');
+  await movedNow(el, first, 'E');
+  pressKey('z');
+  await until(() => sectionOfRow(el, first) === 'new', 'Z');
+  expect(order(el)).toEqual(before);
+
+  // The row's hover action.
+  expect(hoverAction(el, first)).not.toBeNull();
+  act(() => hoverAction(el, first)!.click());
+  await movedNow(el, first, 'the hover action');
+  pressKey('z');
+  await until(() => sectionOfRow(el, first) === 'new', 'Z after the hover action');
+
+  // The row menu.
+  expect(await rowMenu(el, first)).toContain('read');
+  await act(async () => {
+    document.querySelector<HTMLElement>('[data-row-menu] [data-row-action="read"]')!.click();
+  });
+  await movedNow(el, first, 'the row menu');
+
+  // Nothing was written: the thread was already Quiet on the server.
+  expect(posted.filter((path) => path.endsWith('/read') || path.endsWith('/unread'))).toEqual([]);
+  expect(await serverSection(first)).toBe('quiet');
+  // The close settles it where it already is.
+  closeThread();
+  await wait(SETTLE_BEAT_MS + 60);
+  expect(rowOf(el, first)).toBeNull();
+  expect(quietCount(el)).toBe('1');
+});
+
+test.skipIf(!hasDom)("the toast's Undo puts a held row back between the same neighbours, with another thread open", async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const [first, second] = world.news;
+  const before = order(el);
+  await openRow(el, first!);
+  await openRow(el, second!);
+  // The first row, read and held in New beside the second's thread, keeps its hover action.
+  expect(sectionOfRow(el, first!)).toBe('new');
+  act(() => hoverAction(el, first!)!.click());
+  await movedNow(el, first!, 'the hover action');
+  // The open thread's row did not move.
+  expect(sectionOfRow(el, second!)).toBe('new');
+  act(() => toastEl()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click());
+  await until(() => sectionOfRow(el, first!) === 'new', 'Undo');
+  expect(order(el)).toEqual(before);
+  expect(toastEl()).toBeNull();
+  // It came back to its place, not to the top.
+  await until(() => document.querySelector('[data-inbox-live]')?.textContent === 'Moved back.', 'the live region');
+  expect(quietCount(el)).toBe('0');
+  // Back where it was, it is offered again.
+  expect(hoverAction(el, first!)).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('E pressed before the look reaches the server takes the same way: it waits for the look, then moves the row now, writing nothing', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  let release: () => void = () => {};
+  seenGate = new Promise<void>((done) => (release = done));
+  await openRow(el, first, null);
+  await until(() => posted.some((path) => path.endsWith(`/threads/${first}/seen`)), 'the look sent');
+  // The look has not landed: the server still has it in New, unseen.
+  expect(await serverSection(first)).toBe('new');
+  expect(header(el).disabled).toBe(false);
+  pressKey('e');
+  await wait(150);
+  // Mark read waits for the look: nothing written, nothing moved yet.
+  expect(posted.filter((path) => path.endsWith('/read'))).toEqual([]);
+  expect(sectionOfRow(el, first)).toBe('new');
+  release();
+  seenGate = null;
+  await movedNow(el, first, 'E after the look landed');
+  expect(posted.filter((path) => path.endsWith('/read'))).toEqual([]);
+  expect(header(el).getAttribute('aria-pressed')).toBe('false');
+  expect(await serverSection(first)).toBe('quiet');
+});
+
+test.skipIf(!hasDom)('a look that never lands holds Mark read back only so long: past the wait, E writes as usual', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  // The look stalls: its request never answers.
+  seenGate = new Promise<void>(() => {});
+  await openRow(el, first, null);
+  await until(() => posted.some((path) => path.endsWith(`/threads/${first}/seen`)), 'the look sent');
+  pressKey('e');
+  await wait(MARK_READ_LOOK_WAIT_MS / 2);
+  expect(posted.filter((path) => path.endsWith('/read'))).toEqual([]);
+  // Past the wait the thread is still New on the server: Mark read writes, and the row waits for the settle.
+  await until(() => posted.includes(`/api/inbox/threads/${first}/read`), 'the Mark read write');
+  await until(() => toastEl()?.textContent?.includes('Marked read') === true, 'the toast');
+  expect(toastEl()!.textContent).toContain('Moves to Quiet');
+  expect(sectionOfRow(el, first)).toBe('new');
+  await until(() => header(el).getAttribute('aria-pressed') === 'true', 'the pressed header');
+}, 15_000);
+
+test.skipIf(!hasDom)('a row already in Quiet offers no Mark read: not in the header, on hover, in the menu, nor E', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  await openRow(el, first);
+  closeThread();
+  await wait(SETTLE_BEAT_MS + 60);
+  await until(() => rowOf(el, first) === null, 'the settle into Quiet');
+  act(() => el.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!.click());
+  await until(() => sectionOfRow(el, first) === 'quiet', 'Quiet unfolded');
+  await openRow(el, first, null);
+  expect(header(el).disabled).toBe(true);
+  expect(hoverAction(el, first)).toBeNull();
+  expect(await rowMenu(el, first)).not.toContain('read');
+  await closeMenu();
+  pressKey('e');
+  await wait(150);
+  expect(toastEl()).toBeNull();
+  expect(sectionOfRow(el, first)).toBe('quiet');
+  expect(posted.filter((path) => path.endsWith('/read'))).toEqual([]);
 });
 
 test.skipIf(!hasDom)('a screen reader closing the thread (a click with no pointer and no key before it) keeps focus on the row', async () => {
@@ -475,4 +648,26 @@ test.skipIf(!hasDom)('a screen reader closing the thread (a click with no pointe
   act(() => (el.querySelector('section.ib-pane [aria-label="Close the thread"]') as HTMLButtonElement).click());
   await until(() => el.querySelector('section.ib-pane') === null, 'the close');
   expect(document.activeElement).toBe(rowOf(el, first));
+});
+
+// Pins (approval "inbox-pinned-threads"): a pin is the person's own write on window furniture, so pinning
+// the open thread from its header leaves the held list exactly as it is: its rows in their order, and the
+// agent's news still waiting behind "N new".
+test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the "N new" line unchanged', async () => {
+  const el = await renderApp(`#project=${world.project}`);
+  const first = world.news[0]!;
+  await openRow(el, first);
+  const late = await agentSends('A late note while the thread is open.');
+  act(() => pokeStream!());
+  await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
+  const held = order(el);
+  const notice = el.querySelector('[data-inbox-notice]')!.textContent;
+  expect(notice).toContain('1 new in');
+  const toggle = el.querySelector<HTMLButtonElement>('[data-pin-toggle]')!;
+  act(() => toggle.click());
+  await until(() => el.querySelector(`[data-pinned-row="${first}"]`) !== null, 'the pinned row');
+  await wait(150);
+  expect(order(el)).toEqual(held);
+  expect(rowOf(el, late)).toBeNull();
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toBe(notice);
 });

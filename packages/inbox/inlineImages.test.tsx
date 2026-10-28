@@ -10,7 +10,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
  */
-import { afterEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxInlineImage, InboxMessageWire } from '@plannotator/core/inbox-types';
@@ -22,6 +22,25 @@ const { MessageBody } = (hasDom ? await import('./components/Thread') : {}) as t
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+
+// happy-dom fires `error` for an <img> whose URL it cannot reach, and the body
+// then draws a refused image as its alt text: a loopback server answers every
+// image path with a 1x1 GIF, and the page's URL points at it. A test that
+// wants a failure dispatches `error` itself.
+const GIF = Uint8Array.from(atob('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=='), (c) => c.charCodeAt(0));
+let images: ReturnType<typeof Bun.serve> | null = null;
+let savedUrl = '';
+beforeAll(() => {
+  if (!hasDom) return;
+  images = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response(GIF, { headers: { 'Content-Type': 'image/gif' } }) });
+  savedUrl = window.location.href;
+  (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL(`http://127.0.0.1:${images.port}/`);
+});
+afterAll(() => {
+  if (!hasDom) return;
+  if (savedUrl) (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL(savedUrl);
+  images?.stop(true);
+});
 
 afterEach(() => {
   act(() => root?.unmount());
@@ -143,18 +162,22 @@ test.skipIf(!hasDom)('a captured image opens in the viewer on a click, Enter or 
   expect(opened.map((i) => i.id)).toEqual([B.id, C.id, C.id, C.id]);
 });
 
-test.skipIf(!hasDom)('an image that fails to load is not a button and opens nothing; a data: image is not a button', async () => {
+test.skipIf(!hasDom)('an image that fails to load is its alt text and opens nothing, markdown and raw HTML alike; a data: image is not a button', async () => {
   const opened: InboxInlineImage[] = [];
-  const body = ['![gone](design/gone.png)', '', '![dot](data:image/gif;base64,R0lGODlhAQABAAAAACw=)'].join('\n');
+  const body = ['![gone](design/gone.png)', '', '<p><img src="design/raw.png" alt="raw gone"></p>', '', '![dot](data:image/gif;base64,R0lGODlhAQABAAAAACw=)'].join('\n');
   await render(body, [], opened);
-  const gone = host!.querySelector<HTMLImageElement>('img[alt="gone"]')!;
-  expect(gone.getAttribute('role')).toBe('button');
-  await act(async () => {
-    gone.dispatchEvent(new Event('error'));
-  });
-  expect(gone.getAttribute('role')).toBeNull();
-  expect(gone.hasAttribute('tabindex')).toBe(false);
-  await act(async () => gone.click());
+  for (const alt of ['gone', 'raw gone']) {
+    const failed = host!.querySelector<HTMLImageElement>(`img[alt="${alt}"]`)!;
+    expect(failed.getAttribute('role')).toBe('button');
+    await act(async () => {
+      failed.dispatchEvent(new Event('error'));
+    });
+    // No broken-image icon: the image is gone, and its alt text shows in a quiet chip.
+    expect(host!.querySelector(`img[alt="${alt}"]`)).toBeNull();
+  }
+  const chips = [...host!.querySelectorAll<HTMLElement>('[data-image-unavailable]')];
+  expect(chips.map((chip) => chip.textContent)).toEqual(['gone', 'raw gone']);
+  for (const chip of chips) await act(async () => chip.click());
   expect(document.querySelector('[data-image-lightbox]')).toBeNull();
   const dot = host!.querySelector<HTMLImageElement>('img[alt="dot"]')!;
   expect(dot.getAttribute('role')).toBeNull();

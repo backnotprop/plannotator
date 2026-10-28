@@ -1,3 +1,4 @@
+import { childEnv } from "@plannotator/shared/child-env";
 import { readCappedBytes } from "./git";
 import {
   type DiffResult,
@@ -74,6 +75,7 @@ async function runJj(
   try {
     const proc = Bun.spawn(["jj", ...JJ_COLOR_FREE_ARGS, ...args], {
       cwd: options?.cwd,
+      env: childEnv(),
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -110,6 +112,7 @@ async function runJjBytes(
   try {
     const proc = Bun.spawn(["jj", ...JJ_COLOR_FREE_ARGS, ...args], {
       cwd: options?.cwd,
+      env: childEnv(),
       stdout: "pipe",
       stderr: "pipe",
     });

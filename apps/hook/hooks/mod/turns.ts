@@ -78,6 +78,12 @@ export interface EnteredPrompt {
  * turn id).
  */
 const TAKEOVER_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge', 'slack-ping', 'channel'])
+/**
+ * `origin.kind` of a prompt another plugin submitted (`$.prompt.submit`). This
+ * plugin's own prompts carry it too, but the engine never raises our hooks for
+ * them, and `fromUs` drops the rest before they are recorded.
+ */
+const OTHER_PLUGIN_ORIGIN = 'plugin'
 /** Of those, the person typing into this session: the note says "You typed". */
 const PERSON_ORIGINS: ReadonlySet<string> = new Set(['composer', 'bridge'])
 
@@ -124,9 +130,17 @@ export class TurnTracker {
    * prompt the user typed can neither be streamed to Plannotator nor aborted
    * by a cancel.
    */
-  private foreign: string[] = []
+  private foreign: { text: string; originKind?: string }[] = []
   /** Turns that started as a question's and were taken over: Plannotator never aborts them. */
   private takenOverTurns = new Set<string>()
+  /**
+   * Main turns another plugin's prompt started (or was delivered into): that
+   * plugin may be reading the turn's answer as the answer to its own message,
+   * so Plannotator never puts anything into them and never aborts them.
+   * Known only from `prompt.submit` (origin `plugin`, not this plugin's name);
+   * a turn nothing attributes to another plugin is treated as today.
+   */
+  private otherPluginTurns = new Set<string>()
 
   /**
    * A prompt reached the mod's prompt.submit hook, before the hooks beneath it
@@ -143,9 +157,11 @@ export class TurnTracker {
     if (prompt.fromUs) return
     const value = prompt.text.trim()
     if (value) {
-      this.foreign.push(value)
+      this.foreign.push({ text: value, ...(prompt.originKind ? { originKind: prompt.originKind } : {}) })
       if (this.foreign.length > 16) this.foreign.shift()
     }
+    // Another plugin's prompt delivered into a running turn makes that turn partly its own.
+    if (prompt.turnId && prompt.originKind === OTHER_PLUGIN_ORIGIN) this.otherPluginTurns.add(prompt.turnId)
     const ask = this.askOn(takeoverTurn(prompt))
     if (!ask) return
     if (ask.pending > 0) ask.pending -= 1
@@ -173,17 +189,26 @@ export class TurnTracker {
     return ask.takenOver || ask.pending > 0
   }
 
-  /** Whether the turn is a prompt someone else submitted (consumed). */
-  private takeForeign(turnText: string): boolean {
+  /** The prompt someone else submitted that this turn runs (consumed), or null. */
+  private takeForeign(turnText: string): { text: string; originKind?: string } | null {
     const value = turnText.trim()
     // Another plugin's prompt reaches turn.start inside the engine's frame
     // ("The <name> plugin sent a message: ..."), while prompt.submit saw it bare.
     const unframed = value.replace(PLUGIN_FRAME, '').trim()
-    let index = this.foreign.lastIndexOf(value)
-    if (index < 0 && unframed !== value) index = this.foreign.lastIndexOf(unframed)
-    if (index < 0) return false
-    this.foreign.splice(index, 1)
-    return true
+    const find = (text: string) => this.foreign.findLastIndex((entry) => entry.text === text)
+    let index = find(value)
+    if (index < 0 && unframed !== value) index = find(unframed)
+    if (index < 0) return null
+    return this.foreign.splice(index, 1)[0]!
+  }
+
+  /**
+   * Whether another plugin's prompt started `turnId` (or entered it): its
+   * answer may be that plugin's, so Send now never goes into it and an
+   * interrupt never aborts it.
+   */
+  isOtherPluginTurn(turnId: string): boolean {
+    return this.otherPluginTurns.has(turnId)
   }
 
   /**
@@ -234,7 +259,11 @@ export class TurnTracker {
   /** A turn started. Returns the turn to abort at once (a cancelled question's). */
   onTurnStart(turnId: string, text: string): string | null {
     this.runningTurnId = turnId
-    if (this.takeForeign(text)) return null
+    const foreign = this.takeForeign(text)
+    if (foreign) {
+      if (foreign.originKind === OTHER_PLUGIN_ORIGIN) this.otherPluginTurns.add(turnId)
+      return null
+    }
     if (this.dropText !== null && sameQuestion(text, this.dropText)) {
       this.dropText = null
       return turnId
@@ -293,6 +322,7 @@ export class TurnTracker {
   onTurnComplete(turnId: string, answer: string, aborted: boolean): void {
     if (this.runningTurnId === turnId) this.runningTurnId = null
     this.takenOverTurns.delete(turnId)
+    this.otherPluginTurns.delete(turnId)
     const ask = this.ask
     if (!ask || ask.finished || ask.turnId !== turnId) return
     ask.finished = true
@@ -333,8 +363,9 @@ export class TurnTracker {
     const ask = this.ask
     if (!ask || ask.askId !== askId || ask.finished) return null
     ask.cancelled = true
-    if (ask.takenOver || ask.pending > 0) {
-      // The turn carries someone else's prompt now (or is about to): close the question, never the turn.
+    if (ask.takenOver || ask.pending > 0 || (ask.turnId !== null && this.otherPluginTurns.has(ask.turnId))) {
+      // The turn carries someone else's prompt now (or is about to), or another plugin's prompt joined it
+      // (that plugin may be waiting on the turn's answer): close the question, never the turn.
       ask.finished = true
       ask.held = []
       ask.sink.error('aborted')

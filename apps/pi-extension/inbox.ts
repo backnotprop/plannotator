@@ -37,7 +37,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
-import { loadConfig, resolveInboxReminder, resolveInboxTool } from "./generated/config.ts";
+import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
 	discoverInboxTools,
@@ -45,10 +45,22 @@ import {
 	inboxRegistryFileOf,
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
-import { INBOX_REMINDER_TEXT, inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
+import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
 import { isCtxAlive } from "./current-pi-session.ts";
-import { piExtensionVersion } from "./server/update-advert.ts";
+import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
 import { detectPiHost } from "./pi-host.ts";
+
+/** How long a read of package.json on disk is reused: every poll asks. */
+const ON_DISK_FRESH_MS = 2_000;
+let onDiskCache: { at: number; value: string | null } | null = null;
+
+/** The extension's version on disk now (null: unreadable or gone), read at most once per 2 s. */
+function readOnDiskVersion(): string | null {
+	if (onDiskCache && Date.now() - onDiskCache.at < ON_DISK_FRESH_MS) return onDiskCache.value;
+	const value = readPackageVersion();
+	onDiskCache = { at: Date.now(), value };
+	return value;
+}
 import { PI_INBOX_REMINDER_CUSTOM_TYPE } from "./pi-session-bridge.ts";
 
 /**
@@ -111,8 +123,10 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
 	const dataDir = getPlannotatorDataDir();
 	if (!existsSync(inboxRegistryFileOf(dataDir))) return undefined;
-	// Decided with the tool, once per extension instance (each session, /reload).
-	const reminder = resolveInboxReminder(config, process.env, "pi");
+	// Decided with the tool, once per extension instance (each session, /reload):
+	// the line (the person's own from config.json prompts.inbox, else
+	// INBOX_REMINDER_TEXT), or null when the reminder is off.
+	const reminder = resolveInboxReminder(config, process.env, "pi") ? resolveInboxReminderText(config, "pi") : null;
 	return discoverInboxTools(dataDir).then((tools) => {
 		if (!tools) return;
 		registerPiInbox(
@@ -143,6 +157,16 @@ export function entriesCarryReminder(entries: readonly BranchEntry[]): boolean {
 	return entries.slice(from).some((entry) => entry?.type === "custom_message" && entry.customType === PI_INBOX_REMINDER_CUSTOM_TYPE);
 }
 
+/** The session's open Inbox threads for the reminder after a compaction, or null (no context, no Inbox, nothing open). */
+async function sessionThreadsOf(connection: InboxAgentConnection, current: ExtensionContext | null): Promise<string | null> {
+	if (!current || !isCtxAlive(current)) return null;
+	try {
+		return await connection.sessionThreads({ sessionId: current.sessionManager.getSessionId(), cwd: current.cwd });
+	} catch {
+		return null;
+	}
+}
+
 function branchHasReminder(ctx: ExtensionContext): boolean {
 	try {
 		return entriesCarryReminder(ctx.sessionManager.getBranch() as BranchEntry[]);
@@ -161,7 +185,7 @@ function userText(message: { content?: unknown } | undefined): string {
 		.join("");
 }
 
-function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: boolean }): void {
+function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
 	const spec = inboxAgentTool(connection.tools);
 	const ohMyPi = detectPiHost(pi) === "oh-my-pi";
 	if (!spec) return;
@@ -183,6 +207,8 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 
 	let ctx: ExtensionContext | null = null;
 	let wake: InboxWake | null = null;
+	/** The on-disk version the session was last told about (#2085's message, once per version). */
+	let notifiedOnDisk: string | null = null;
 	let activationSettled = false;
 	/** The tool is active in this instance's session (an interactive UI): only then is there a reminder to give. */
 	let toolActive = false;
@@ -256,9 +282,24 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 				// The session is gone: the reply stays readable in the Inbox.
 			}
 		},
-		// The extension version this process loaded: the Inbox says when it is behind (`pi update --extensions`, then /reload).
-		// Not inside Oh My Pi, which updates the extension its own way (as update-advert.ts skips it).
-		pluginVersion: () => (ohMyPi ? null : piExtensionVersion()),
+		// What this process loaded and what is on disk now, and which host (owner approval "reload-hosts"):
+		// the Inbox says `/reload` (Oh My Pi `/restart`) when the package changed under the session, or
+		// the update and the reload when both are behind it. The first time the files on disk differ, the
+		// session hears it once, before a command fails (#2085).
+		plugin: () => {
+			const version = loadedPackageVersion();
+			if (!version) return null;
+			const onDisk = readOnDiskVersion();
+			if (onDisk && onDisk !== version && notifiedOnDisk !== onDisk) {
+				notifiedOnDisk = onDisk;
+				try {
+					ctx?.ui.notify(packageUpdatedMessage(version, onDisk, ohMyPi ? "oh-my-pi" : "pi"), "warning");
+				} catch {
+					// No UI: the Inbox still says it.
+				}
+			}
+			return { version, on_disk: onDisk, host: ohMyPi ? ("oh-my-pi" as const) : ("pi" as const) };
+		},
 		// The session's working folder, so the Inbox lists it under its project from its first poll.
 		projectPath: () => {
 			const current = ctx;
@@ -299,16 +340,30 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 	// moves no cached prefix. Not again after /reload or /resume (the branch
 	// already holds it); again after a compaction that summarized it away
 	// (which has invalidated the cache anyway, the plan framing's rule).
-	if (options.reminder) {
-		pi.on("before_agent_start", () => {
+	// After a compaction the same message also names the session's open Inbox
+	// threads (`sessionThreads`, bounded, never starting the Inbox), so the
+	// thread ids come from the Inbox, not from the summary: the Claude Code
+	// mod's compact hook, here.
+	const reminderText = options.reminder;
+	if (reminderText) {
+		/** A compaction summarized the reminder away: the next one carries the thread list too. */
+		let afterCompaction = false;
+		pi.on("before_agent_start", async (_event, agentCtx: ExtensionContext) => {
 			if (!toolActive || reminderDelivered) return undefined;
 			reminderDelivered = true;
+			let content = reminderText;
+			if (afterCompaction) {
+				afterCompaction = false;
+				const threads = await sessionThreadsOf(connection, agentCtx ?? ctx);
+				if (threads) content = `${reminderText}\n\n${threads}`;
+			}
 			return {
-				message: { customType: PI_INBOX_REMINDER_CUSTOM_TYPE, content: INBOX_REMINDER_TEXT, display: false },
+				message: { customType: PI_INBOX_REMINDER_CUSTOM_TYPE, content, display: false },
 			};
 		});
 		pi.on("session_compact", (_event, compactCtx: ExtensionContext) => {
 			reminderDelivered = compactCtx ? branchHasReminder(compactCtx) : false;
+			afterCompaction = !reminderDelivered;
 		});
 		pi.on("session_tree", (_event, treeCtx: ExtensionContext) => {
 			reminderDelivered = branchHasReminder(treeCtx);

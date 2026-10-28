@@ -5,6 +5,7 @@ Plannotator's Droid plugin ships the manual slash-command workflow only:
 - `/plannotator-review [--base <ref>] [--diff-type <type>] [DIRECTORY | PR_URL]` (no args reviews local changes; a directory selects another repository/worktree; the open-state flags pin the session's opening diff — session-only, git-only)
 - `/plannotator-annotate <file|folder|url>`
 - `/plannotator-last`
+- `/plannotator-inbox` (opens the Plannotator Inbox in the browser and prints its address)
 
 It does not attempt plan-mode interception or host-level planning integration.
 

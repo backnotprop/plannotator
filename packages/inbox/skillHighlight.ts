@@ -12,24 +12,33 @@
 import type { InboxSkillReference } from '@plannotator/core/skill-reference-block';
 import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
 import { findSkillReferenceTokens, type SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
-import { ATTACHMENT_FEEDBACK_HEADING, GUIDE_FEEDBACK_TITLE } from './attachments';
+import { ATTACHMENT_FEEDBACK_HEADING, GUIDE_FEEDBACK_TITLE, MESSAGE_FEEDBACK_HEADING } from './attachments';
 
 /** The highlights' names in `CSS.highlights` (inbox.css styles `::highlight(…)`). */
 export const SKILL_REF_HIGHLIGHT = 'ib-skill-ref';
 export const SKILL_REF_HUMAN_HIGHLIGHT = 'ib-skill-ref-human';
 
-/** Text the references are never found in: code, the folded block itself, a message's head row (folded or open), and form fields. */
-const SKIP = 'pre, code, [data-skills-line], [data-fold-head], [data-open-head], script, style, textarea';
+/**
+ * Text the references are never found in: code, the folded block itself, a
+ * message's head row (folded or open), form fields, and a sent reply's answers
+ * list (the agent's prompts and the choices, SentAnswers).
+ */
+const SKIP = 'pre, code, [data-skills-line], [data-fold-head], [data-open-head], [data-sent-answers], script, style, textarea';
 
 /**
  * Where the person's own words end: the first heading of what the Send wrote
- * after them (the answers section, the attached files' or a guided review's
- * feedback). Those quote agent text, so a `$name` there is not the person's.
+ * after them (the answers section, the feedback on the agent's messages, the
+ * attached files' or a guided review's). Those quote agent text, so a `$name`
+ * there is not the person's. A sent reply drawn in the person's words
+ * (sentReply.ts) ends them at its answers list or, without one, at the rest
+ * of the body (`[data-sent-rest]`, the feedback), whatever its headings say.
  */
-const SECTION_HEADINGS = [QUESTION_ANSWERS_HEADING, ATTACHMENT_FEEDBACK_HEADING.title, GUIDE_FEEDBACK_TITLE];
+const SECTION_HEADINGS = [QUESTION_ANSWERS_HEADING, MESSAGE_FEEDBACK_HEADING.title, ATTACHMENT_FEEDBACK_HEADING.title, GUIDE_FEEDBACK_TITLE];
 
 function wordsEnd(root: Node): Element | null {
   if (!(root instanceof Element)) return null;
+  const sent = root.querySelector('[data-sent-answers], [data-sent-rest]');
+  if (sent) return sent;
   for (const heading of root.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
     const text = heading.textContent?.trim() ?? '';
     if (SECTION_HEADINGS.some((title) => text.startsWith(title))) return heading;

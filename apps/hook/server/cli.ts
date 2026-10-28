@@ -1,6 +1,8 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
+import { INBOX_REF_LINK_RULE } from "@plannotator/shared/inbox/connection";
+import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
@@ -142,7 +144,12 @@ export function isInteractiveNoArgInvocation(
   return args.length === 0 && stdinIsTTY === true;
 }
 
-export function formatTopLevelHelp(): string {
+/**
+ * `plannotator --help`. `board`: the person turned the Inbox's Board on
+ * (config.json `inboxBoard`, read by the caller); off (the default), the
+ * `card` line is left out, so a person without the Board sees nothing of it.
+ */
+export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
   return [
     "Usage:",
     "  plannotator --help",
@@ -160,8 +167,11 @@ export function formatTopLevelHelp(): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
-    "  plannotator inbox [--background | --no-open] [--tailscale]",
+    "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
     "  plannotator inbox mcp",
+    "  plannotator inbox status [--json] | stop | restart",
+    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
+    `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
     "  plannotator improve-context",
@@ -191,19 +201,19 @@ export function formatTopLevelHelp(): string {
  * `card`, the Board's card call from a shell (approval "inbox-board", step 1),
  * hidden until the Board page ships.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook", "card"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
- * a thin client over the Inbox's `card` MCP tool. Unreleased (HIDDEN_SUBCOMMANDS).
+ * a thin client over the Inbox's `card` MCP tool.
  */
 export const CARD_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--key <key>]",
-  "  plannotator card create --thread <id> [...]      (the thread's subject is the title)",
-  "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--reason <text>]",
+  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>]",
+  "  plannotator card create --thread <id> [...]      (the thread's subject is the title; pass a short <title> too, as subjects run long)",
+  "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
   "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
-  "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--say <text>]",
+  "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
   "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]",
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
   "  plannotator card list [--anyone | --mine] [--all]",
@@ -212,7 +222,55 @@ export const CARD_COMMAND_USAGE = [
   `Columns: ${INBOX_CARD_COLUMNS.join(", ")} (icebox is the person's only).`,
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
-  "Run 'plannotator inbox --help' for the full guide (its card tool section).",
+  "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
+  "When a card waits on the person, link the Inbox thread where they make the call (--thread), so \"You: …\" opens it.",
+  `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
+  "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
+  "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
+].join("\n");
+
+/**
+ * `plannotator feedback` (feedback-command.ts): sends the person's feedback
+ * about Plannotator to its maintainers. The Inbox's Feedback dialog copies a
+ * prompt that tells an agent to use it.
+ */
+export const FEEDBACK_COMMAND_USAGE = [
+  "Usage:",
+  `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<how to reach you>'] <<'${FEEDBACK_HEREDOC_END}'`,
+  "  <the message, exactly as the person approved it>",
+  `  ${FEEDBACK_HEREDOC_END}`,
+  "",
+  "Sends feedback about Plannotator to its maintainers and prints \"Sent\".",
+  "What is sent: the message, the category and contact if given, the Plannotator",
+  "version, the OS name (macOS, Linux, Windows) and that it came from the CLI.",
+  "Nothing else: no files, no paths, no session content, no machine id.",
+  "",
+  "Agents: send only the person's own feedback. Show them the exact text (and",
+  "category and contact) first, and run this only after they say yes. Pass the",
+  `message on stdin with a QUOTED heredoc (<<'${FEEDBACK_HEREDOC_END}', quotes included)`,
+  "so the shell changes nothing. Never put it inside double quotes, in any shell:",
+  "they expand $VAR, backticks and $(...). If a line of the message is exactly the",
+  "end word, pick another. Put a contact in single quotes, a ' in it written as '\\''.",
+  "",
+  "Example (bash, zsh, sh):",
+  `  plannotator feedback --stdin --category idea --contact 'ada@example.com' <<'${FEEDBACK_HEREDOC_END}'`,
+  "  The list jumps to the top after a reload.",
+  `  ${FEEDBACK_HEREDOC_END}`,
+  "",
+  "Example (PowerShell; UTF-8 so accents and emoji survive; a ' in the contact is ''):",
+  "  $OutputEncoding = [Text.UTF8Encoding]::new($false)",
+  "  @'",
+  "  The list jumps to the top after a reload.",
+  "  '@ | plannotator feedback --stdin --category idea",
+  "",
+  "Options:",
+  "  --stdin, -       Read the message from stdin (up to 4000 characters)",
+  "  --category <c>   bug, idea or other",
+  "  --contact <text> An email or handle the person chose to give (optional)",
+  "",
+  "A short message typed by hand can also be given as words: plannotator feedback 'it works'",
+  "",
+  "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
 ].join("\n");
 
 /**
@@ -224,8 +282,11 @@ export const CARD_COMMAND_USAGE = [
  */
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator inbox [--background | --no-open] [--tailscale]",
+  "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
   "  plannotator inbox mcp",
+  "  plannotator inbox status [--json]",
+  "  plannotator inbox stop",
+  "  plannotator inbox restart [--tailscale]",
   "  plannotator inbox --notes <ids>",
   "",
   "  plannotator inbox               Start the Inbox and open it in the browser,",
@@ -233,16 +294,31 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox --background  Start it detached without opening a browser,",
   "                                  print its URL and exit",
   "  plannotator inbox --no-open     Run it here without opening a browser",
+  "  plannotator inbox --open        Open it in the browser and print its URL, starting it",
+  "                                  detached first when it is not running. Never blocks:",
+  "                                  what the /plannotator-inbox commands run, and how to",
+  "                                  find the Inbox's address for the person.",
   "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
   "                                  run (tailscale serve, HTTPS, never funnel), for the",
   "                                  Tailscale login that owns this machine only. With",
   "                                  an Inbox already running, asks it to publish.",
   "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
   "                                  Inbox in the background (no browser tab).",
+  "  plannotator inbox status        Whether the Inbox runs: URL, pid, version, data dir.",
+  "                                  Exit 0 running, 1 not running, 2 not answering.",
+  "                                  --json prints the same as one JSON object.",
+  "  plannotator inbox stop          Stop the Inbox of this data dir: asks it first, then",
+  "                                  SIGTERM, then SIGKILL, each only once the pid is",
+  "                                  proven to be that Inbox (never another program).",
+  "                                  Exit 0 when none runs afterwards. An agent's next",
+  "                                  call starts it again in the background.",
+  "  plannotator inbox restart       Stop it, then start it in the background (no",
+  "                                  browser tab) and print its URL. A run published by",
+  "                                  --tailscale is published again.",
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
-  "                                  files (claude-code, codex, gemini, pi, opencode,",
-  "                                  comma-separated). Only with the person's yes;",
-  "                                  starts nothing.",
+  "                                  files (claude-code, codex, gemini, qwen, pi,",
+  "                                  opencode, comma-separated). Only with the",
+  "                                  person's yes; starts nothing.",
   "",
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
@@ -440,9 +516,10 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Purge data is local-only: it is not stored on a Plannotator server and",
     "cannot be recovered after purge. Unrecognized custom files are preserved.",
   ].join("\n"),
-  // Unreleased (HIDDEN_SUBCOMMANDS): the opt-in T3 Code connection, and the Board's cards.
+  // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
+  feedback: FEEDBACK_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",
     "  plannotator t3-hook install --settings <settings.json> --executable <plannotator>",

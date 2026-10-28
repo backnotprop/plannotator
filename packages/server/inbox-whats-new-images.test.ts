@@ -9,7 +9,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readReleaseNotes, readUpdateState, writeReleaseNotes, writeUpdateState } from "@plannotator/shared/update-check";
+import {
+  RELEASE_CHECK_RETRY_MS,
+  readReleaseNotes,
+  readUpdateState,
+  writeReleaseNotes,
+  writeUpdateState,
+} from "@plannotator/shared/update-check";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   RELEASE_IMAGES_MAX,
@@ -238,6 +244,8 @@ describe("a release's images", () => {
     expect(readUpdateState(dataDir).releaseImagesFetch?.["0.28.12"]).toMatchObject({ failedAt: expect.any(Number), error: "HTTP 404" });
     const before = requests.length;
     expect(await fetchReleaseImagesFor(deps())).toEqual({ outcome: "not-due" });
+    // Images keep the notes' back-off, not the hourly release check's.
+    expect(await fetchReleaseImagesFor(deps({ now: () => Date.now() + RELEASE_CHECK_RETRY_MS }))).toEqual({ outcome: "not-due" });
     expect(requests.length).toBe(before);
     // Six hours later only the missing one is asked for again.
     expect(await fetchReleaseImagesFor(deps({ now: () => Date.now() + 6 * 60 * 60 * 1000 + 1 }))).toMatchObject({ outcome: "fetched", stored: [] });

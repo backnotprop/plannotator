@@ -15,6 +15,7 @@ import type { EditSelectionComment } from '../edit/useEditSession';
 import type { CallFlowAnalysisState } from '../hooks/useCallFlowAnalysis';
 import type { CallFlowInstallController } from '../hooks/useCallFlowInstall';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
+import type { DiagramEngineUrls } from '../utils/diagramEngineContract';
 
 /** One-shot request to open the native code-annotation composer on a source range. */
 export interface LineAnnotationComposeRequest {
@@ -85,6 +86,11 @@ export interface ReviewState {
    *  `markdownPreviewSupported` or has no full contents (static patch): no
    *  preview UI renders anywhere. */
   markdownPreview?: MarkdownPreviewController;
+  /** Where the review server serves the diagram engine (`diagramEngine` on
+   *  `/api/diff`). With it, Mermaid and Graphviz fences in Markdown previews
+   *  and guide overviews draw as diagrams, the engine imported on the first
+   *  such fence; absent, they show as code. */
+  diagramEngine?: DiagramEngineUrls | null;
   /** Commit a comment made by selecting text in a previewed Markdown file
    *  (file-scoped, carries the quote). */
   onAddMarkdownPreviewComment?: (

@@ -1,6 +1,7 @@
 /**
  * Re-ask (approval "inbox-reask") as the window draws and sends it: the
- * button beside Reply when two or more questions wait, one note per session,
+ * item at the foot of the "N open questions" list when a question waits
+ * (owner, 2026-10-23: no Re-ask button in the foot), one note per session,
  * the note's line and "Asked again" on the old cards while it waits, the
  * button gone while the note waits and right after the agent answered it,
  * and the ended-session choice ("Who should ask again?").
@@ -123,22 +124,37 @@ describe('the rules (reask.ts)', () => {
     expect(reaskTooltip([t!])).toBe(
       'Ask Claude Code to ask the 1 open question and 1 action item again, together in one message with fresh context. Those that no longer apply are closed; until then they stay open here.',
     );
-    // A marked action item waits on nobody: alone with one question, nothing to offer.
+    // A marked action item waits on nobody: beside one question it adds nothing, and alone there is nothing to offer.
     const marked = [agent(M1, `One.\n\n${block('Backfill ledger first?')}`, '2026-10-20T10:42:00.000Z'), agent(M3, 'Approve it.', '2026-10-20T10:46:00.000Z', A, { actions: [todo('a-00000002', 'picked', true)] })];
-    expect(reaskOffered(reaskTargets(marked), marked)).toBe(false);
+    expect(reaskTargets(marked)).toMatchObject([{ kind: 'reask', open: 1, actions: 0, picked: 0 }]);
+    expect(reaskOffered(reaskTargets(marked), marked)).toBe(true);
+    const markedOnly = [agent(M3, 'Approve it.', '2026-10-20T10:46:00.000Z', A, { actions: [todo('a-00000002', 'picked', true)] })];
+    expect(reaskOffered(reaskTargets(markedOnly), markedOnly)).toBe(false);
+    // One open action item alone: offered, in the singular.
+    const oneTodo = [agent(M3, 'Approve it.', '2026-10-20T10:46:00.000Z', A, { actions: [todo('a-00000001', 'open')] })];
+    expect(reaskOffered(reaskTargets(oneTodo), oneTodo)).toBe(true);
+    expect(reaskTooltip(reaskTargets(oneTodo))).toBe(
+      'Ask Claude Code to ask the open action item again, with fresh context. If it no longer applies, it is closed; until then it stays open here.',
+    );
     // The note's line names the action items it asked about.
     expect(reaskNoteSentence('Claude Code', 2, 0, 1)).toBe('You asked Claude Code to ask the 1 open question and 1 action item again, together in one message. They stay open here until it does.');
     expect(reaskNoteSentence('Pi', 1, 0, 1)).toBe('You asked Pi to ask the open action item again. It stays open here until it does.');
   });
 
-  test('one target per session, at its latest message with a question waiting; offered for two or more', () => {
+  test('one target per session, at its latest message with a question waiting; offered for one or more', () => {
     const one = reaskTargets(base());
     expect(one).toHaveLength(1);
     expect(one[0]).toMatchObject({ session: 'ses_a', open: 3, picked: 0, name: 'Claude Code' });
     expect(one[0]!.message.id).toBe(M2);
     expect(reaskOffered(one)).toBe(true);
-    // One question waiting: nothing to gather.
-    expect(reaskOffered(reaskTargets([agent(M2, BODY2, '2026-10-20T10:45:00.000Z')]))).toBe(false);
+    // One question waiting (owner, 2026-10-23): offered too, worded in the singular.
+    const single = reaskTargets([agent(M2, BODY2, '2026-10-20T10:45:00.000Z')]);
+    expect(reaskOffered(single)).toBe(true);
+    expect(reaskTooltip(single)).toBe(
+      'Ask Claude Code to ask the open question again, with fresh context. If it no longer applies, it is closed; until then it stays open here.',
+    );
+    // Nothing waiting: nothing to offer.
+    expect(reaskOffered(reaskTargets([agent(M2, 'Done with the refunds.', '2026-10-20T10:45:00.000Z')]))).toBe(false);
     const two = reaskTargets([...base(), agent(M3, block('Pin Node?'), '2026-10-20T10:47:00.000Z', B)]);
     expect(two.map((t) => [t.session, t.message.id, t.open])).toEqual([
       ['ses_a', M2, 3],
@@ -216,7 +232,7 @@ describe('the rules (reask.ts)', () => {
     let targets: ReturnType<typeof reaskTargets> = [];
     expect(() => (targets = reaskTargets(thread1))).not.toThrow();
     expect(targets.map((t) => [t.kind, t.message.id, t.open])).toEqual([['reask', M2, 1]]);
-    expect(reaskOffered(targets, thread1)).toBe(false);
+    expect(reaskOffered(targets, thread1)).toBe(true);
     // A stale `message_id` (another message's) is read the same way.
     expect(reaskTargets([thread1[0]!, strip(agent(M2, BODY2, '2026-10-20T10:45:00.000Z'), M3)]).map((t) => t.message.id)).toEqual([M2]);
     // Several open in that one message, answering a note: the session just answered it, so it is left out.
@@ -231,6 +247,7 @@ describe('the rules (reask.ts)', () => {
   });
 
   test("the note's line", () => {
+    expect(reaskNoteSentence('Claude Code', 1, 0)).toBe('You asked Claude Code to ask the open question again. It stays open here until it does.');
     expect(reaskNoteSentence('Claude Code', 3, 0)).toBe('You asked Claude Code to ask the 3 open questions again, together in one message. They stay open here until it does.');
     expect(reaskNoteSentence('Claude Code', 2, 1)).toBe('You asked Claude Code to ask the 2 open questions again, together in one message. They stay open here until it does. Your 1 pick went with it.');
   });
@@ -299,14 +316,37 @@ async function render(t: InboxThread) {
   return host;
 }
 
-const reaskButton = (el: HTMLElement) => el.querySelector('[data-reask]') as HTMLButtonElement | null;
+/** Base UI opens on the pointer's press, as a person's click does. */
+async function press(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    target.click();
+  });
+}
 
-test.skipIf(!hasDom)('Re-ask sits beside Reply, named by its text, and posts one note to the latest asking message', async () => {
+/**
+ * Re-ask lives at the foot of the "N open questions" list (owner, 2026-10-23):
+ * open the list and answer the item, or null when the list or the item is not there.
+ */
+async function reaskButton(el: HTMLElement): Promise<HTMLElement | null> {
+  expect(el.querySelector('[data-foot-buttons] [data-reask]')).toBeNull();
+  const trigger = el.querySelector<HTMLElement>('[data-open-questions]');
+  if (!trigger) return null;
+  if (trigger.getAttribute('aria-expanded') !== 'true') await press(trigger);
+  for (let i = 0; i < 30 && !document.querySelector('[data-open-questions-list]'); i += 1) await settle();
+  return document.querySelector<HTMLElement>('[data-open-questions-list] [data-reask]');
+}
+
+test.skipIf(!hasDom)('Re-ask sits at the foot of the open-questions list, named by its text, and posts one note to the latest asking message', async () => {
   const el = await render(thread(base()));
-  const button = reaskButton(el)!;
-  expect(button.textContent?.trim()).toBe('Re-ask');
   const foot = [...el.querySelectorAll('.ib-pfoot .ib-acts button')].map((b) => b.textContent?.trim());
-  expect(foot.slice(0, 2)).toEqual(['Reply', 'Re-ask']);
+  expect(foot.slice(0, 2)).toEqual(['Reply', '3 open questions']);
+  const button = (await reaskButton(el))!;
+  expect(button.getAttribute('role')).toBe('menuitem');
+  expect(button.textContent?.trim()).toBe('Re-ask in one new message');
   await act(async () => button.click());
   await settle();
   const reasks = posted.filter((p) => p.path.endsWith('/reask'));
@@ -317,7 +357,8 @@ test.skipIf(!hasDom)('Re-ask sits beside Reply, named by its text, and posts one
 
 test.skipIf(!hasDom)('two sessions asked: one note each, to each session\'s own message', async () => {
   const el = await render(thread([...base(), agent(M3, block('Pin Node?'), '2026-10-20T10:47:00.000Z', B)]));
-  await act(async () => reaskButton(el)!.click());
+  const item = (await reaskButton(el))!;
+  await act(async () => item.click());
   await settle();
   expect(posted.filter((p) => p.path.endsWith('/reask')).map((p) => p.path)).toEqual([`/api/inbox/messages/${M2}/reask`, `/api/inbox/messages/${M3}/reask`]);
 });
@@ -325,7 +366,7 @@ test.skipIf(!hasDom)('two sessions asked: one note each, to each session\'s own 
 test.skipIf(!hasDom)('while the note waits: no Re-ask, the note reads as one line, and the old cards say they were asked again', async () => {
   const msgs = base();
   const el = await render(thread([...msgs, note(openIds(msgs))]));
-  expect(reaskButton(el)).toBeNull();
+  expect(await reaskButton(el)).toBeNull();
   const line = el.querySelector('[data-reask-note] .ib-reask-l')!;
   expect(line.textContent).toBe('You asked Claude Code to ask the 3 open questions again, together in one message. They stay open here until it does.');
   expect(el.querySelector('[data-reask-note] summary')?.textContent).toBe('What Claude Code was sent');
@@ -337,17 +378,36 @@ test.skipIf(!hasDom)('A asks 2, B asks 1 and B is picked: one press sends A its 
   const qb = msgs[1]!.questions![0]!;
   msgs[1]!.questions![0] = { ...qb, state: 'picked', revision: 1, picked_at: '2026-10-20T10:48:00.000Z', answer: { v: 1, key: qb.key, kind: qb.kind as 'single', prompt: qb.prompt, selected: ['Yes'] } };
   const el = await render(thread(msgs));
-  await act(async () => reaskButton(el)!.click());
+  const item = (await reaskButton(el))!;
+  await act(async () => item.click());
   await settle();
   expect(posted.map((p) => p.path)).toEqual([`/api/inbox/messages/${M3}/reply`, `/api/inbox/messages/${M1}/reask`]);
   expect(posted[0]!.body).toMatchObject({ words: '', questions: [{ key: qb.key, revision: 1 }] });
   expect(typeof posted[0]!.body.idempotency_key).toBe('string');
 });
 
-test.skipIf(!hasDom)('one question waiting: no Re-ask', async () => {
-  const el = await render(thread([agent(M1, block('Move refunds now?'), '2026-10-20T10:45:00.000Z')]));
-  expect(el.querySelector('.ib-pfoot')?.textContent).toContain('Reply');
-  expect(reaskButton(el)).toBeNull();
+test.skipIf(!hasDom)('one question waiting, no pick: Re-ask shows and posts the note; the note reads in the singular', async () => {
+  const msgs = [agent(M1, block('Move refunds now?'), '2026-10-20T10:45:00.000Z')];
+  const el = await render(thread(msgs));
+  const button = (await reaskButton(el))!;
+  expect(button.textContent?.trim()).toBe('Re-ask in a new message');
+  await act(async () => button.click());
+  await settle();
+  expect(posted.filter((p) => p.path.endsWith('/reask')).map((p) => p.path)).toEqual([`/api/inbox/messages/${M1}/reask`]);
+  act(() => root?.unmount());
+  host?.remove();
+  const after = await render(thread([...msgs, note(openIds(msgs), M1)]));
+  expect(await reaskButton(after)).toBeNull();
+  expect(after.querySelector('[data-reask-note] .ib-reask-l')?.textContent).toBe('You asked Claude Code to ask the open question again. It stays open here until it does.');
+});
+
+test.skipIf(!hasDom)('one question already picked: no Re-ask (Send carries it)', async () => {
+  const msgs = [agent(M1, block('Move refunds now?'), '2026-10-20T10:45:00.000Z')];
+  const q = msgs[0]!.questions![0]!;
+  msgs[0]!.questions![0] = { ...q, state: 'picked', revision: 1, picked_at: '2026-10-20T10:46:00.000Z', answer: { v: 1, key: q.key, kind: q.kind as 'single', prompt: q.prompt, selected: ['Yes'] } };
+  const el = await render(thread(msgs));
+  expect(el.querySelector('.ib-pfoot')?.textContent).toContain('Send');
+  expect(await reaskButton(el)).toBeNull();
 });
 
 test.skipIf(!hasDom)('the session that asked has ended: Re-ask opens the choice, and the pick goes as `to`', async () => {
@@ -355,7 +415,8 @@ test.skipIf(!hasDom)('the session that asked has ended: Re-ask opens the choice,
   const el = await render(thread(base()));
   await settle();
   expect(el.querySelector('[data-asker-ended]')?.getAttribute('data-asker-ended')).toBe('live');
-  await act(async () => reaskButton(el)!.click());
+  const item = (await reaskButton(el))!;
+  await act(async () => item.click());
   await settle();
   const form = el.querySelector('[data-route-choice]') as HTMLElement;
   expect(form.querySelector('legend')?.textContent).toBe('Who should ask again?');

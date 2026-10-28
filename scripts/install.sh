@@ -72,9 +72,9 @@ RECONFIGURE=0
 # Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
 # no persistent state elsewhere — no sem sidecar, no CallDiff or agent-terminal runtime, no
 # skills, hooks, slash commands, or per-agent config (Claude, Codex, OpenCode,
-# Gemini, Kiro, Vibe). Set by --minimal (1) / --no-minimal (0); -1 = neither flag
-# given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved after arg
-# parsing so a flag overrides the env var in either direction.
+# Gemini, Kiro, Vibe, Qwen Code). Set by --minimal (1) / --no-minimal (0); -1 =
+# neither flag given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved
+# after arg parsing so a flag overrides the env var in either direction.
 MINIMAL_FLAG=-1
 # Per-agent integration opt-outs (#1178). Skip means do-not-write: when a
 # skipped agent is detected, the installer reports "detected, skipped" and
@@ -86,6 +86,7 @@ SKIP_GEMINI_FLAG=0
 SKIP_KIRO_FLAG=0
 SKIP_VIBE_FLAG=0
 SKIP_OPENCODE_FLAG=0
+SKIP_QWEN_FLAG=0
 # Same shape, but scoped to the skills/slash-command sparse checkout rather
 # than one agent's home: --skip-skills turns the whole fetch into a no-op for
 # every scope it writes (Claude, ~/.agents, OpenCode, Gemini, Kiro), including
@@ -106,7 +107,7 @@ Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
                   [--minimal | --no-minimal] [--skip-codex] [--skip-gemini]
                   [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]
-                  [--with-t3 | --without-t3]
+                  [--skip-qwen] [--with-t3 | --without-t3]
                   [--skip-claude-plugin] [--non-interactive] [--reconfigure] [--help]
        install.sh <tag>
 
@@ -173,10 +174,16 @@ Options:
                          so this is a plain do-not-write switch. Env var:
                          PLANNOTATOR_SKIP_OPENCODE_INSTALL; config key:
                          skipInstall.opencode.
+  --skip-qwen            Same opt-out for the Qwen Code integration (the
+                         plannotator extension installed with `qwen extensions
+                         install`, and the skills under ${QWEN_HOME:-~/.qwen}).
+                         Env var: PLANNOTATOR_SKIP_QWEN_INSTALL; config key:
+                         skipInstall.qwen.
   --skip-skills          Do not fetch or write the /plannotator-* skills and
                          slash commands (the sparse checkout that feeds Claude
-                         Code, ~/.agents, OpenCode, Gemini, Kiro, and Vibe), the
-                         extras, or the skill-scope cleanup sweeps. Nothing
+                         Code, ~/.agents, OpenCode, Gemini, Kiro, Vibe, and the
+                         Qwen Code extension), the extras, or the skill-scope
+                         cleanup sweeps. Nothing
                          already installed is removed. The binary, hooks, and
                          per-agent config still install. Use it where
                          github.com cannot serve the tag being installed. Env
@@ -373,6 +380,10 @@ while [ $# -gt 0 ]; do
             ;;
         --skip-opencode)
             SKIP_OPENCODE_FLAG=1
+            shift
+            ;;
+        --skip-qwen)
+            SKIP_QWEN_FLAG=1
             shift
             ;;
         --skip-skills)
@@ -602,6 +613,8 @@ skip_vibe=0
 skip_vibe_source=""
 skip_opencode=0
 skip_opencode_source=""
+skip_qwen=0
+skip_qwen_source=""
 # skipInstall.skills is not an agent — it opts out of the skills/slash-command
 # checkout for every scope at once — but it shares the same three layers and
 # the same key region, so it rides along in the loop below.
@@ -637,7 +650,7 @@ if [ -f "$_config_dir/config.json" ]; then
         }' "$_config_dir/config.json" 2>/dev/null) || _skip_install_block=""
 fi
 if [ -n "$_skip_install_block" ]; then
-    for _agent in codex gemini kiro vibe opencode skills claudePlugin; do
+    for _agent in codex gemini kiro vibe opencode qwen skills claudePlugin; do
         if printf '%s' "$_skip_install_block" | grep -q "\"$_agent\"[[:space:]]*:[[:space:]]*false"; then
             continue # explicit false is a veto, never a skip
         fi
@@ -662,6 +675,10 @@ if [ -n "$_skip_install_block" ]; then
                 opencode)
                     skip_opencode=1
                     skip_opencode_source="config skipInstall.opencode"
+                    ;;
+                qwen)
+                    skip_qwen=1
+                    skip_qwen_source="config skipInstall.qwen"
                     ;;
                 skills)
                     skip_skills=1
@@ -727,6 +744,16 @@ case "${PLANNOTATOR_SKIP_OPENCODE_INSTALL:-}" in
         skip_opencode_source=""
         ;;
 esac
+case "${PLANNOTATOR_SKIP_QWEN_INSTALL:-}" in
+    1|true|yes|TRUE|YES|True|Yes)
+        skip_qwen=1
+        skip_qwen_source="PLANNOTATOR_SKIP_QWEN_INSTALL"
+        ;;
+    0|false|no|FALSE|NO|False|No)
+        skip_qwen=0
+        skip_qwen_source=""
+        ;;
+esac
 case "${PLANNOTATOR_SKIP_SKILLS_INSTALL:-}" in
     1|true|yes|TRUE|YES|True|Yes)
         skip_skills=1
@@ -767,6 +794,10 @@ if [ "$SKIP_OPENCODE_FLAG" -eq 1 ]; then
     skip_opencode=1
     skip_opencode_source="--skip-opencode"
 fi
+if [ "$SKIP_QWEN_FLAG" -eq 1 ]; then
+    skip_qwen=1
+    skip_qwen_source="--skip-qwen"
+fi
 if [ "$SKIP_SKILLS_FLAG" -eq 1 ]; then
     skip_skills=1
     skip_skills_source="--skip-skills"
@@ -802,7 +833,38 @@ mkdir -p "$INSTALL_DIR"
 tmp_file=$(mktemp)
 curl -fsSL -o "$tmp_file" "$binary_url"
 
-expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+# Safe updates (step 1): `plannotator update`, Update now and auto-update run
+# this script after the running Plannotator downloaded it, and the .sha256 of
+# both binaries this OS may use, with its OWN connection (not this script's
+# curl, which on macOS still trusts the leaked eMudhra root keys). They arrive
+# as PLANNOTATOR_EXPECTED_SHA256="<asset>=<hex> [<asset>=<hex>]" (this machine's
+# CPU type, and the other one when it was available). A valid value for
+# ${binary_name} is the expected checksum, and the .sha256 is not fetched again.
+# A mismatch exits 113 before anything is replaced, after touching the marker
+# file the updater named in PLANNOTATOR_UPDATE_MISMATCH_FILE (the updater only
+# reports a mismatch when that marker exists). Without the variables (a
+# person running the script, an older Plannotator) nothing changes.
+pinned_checksum=""
+for _pin_pair in ${PLANNOTATOR_EXPECTED_SHA256:-}; do
+    case "$_pin_pair" in
+        "${binary_name}="*) pinned_checksum=$(printf '%s' "${_pin_pair#*=}" | tr 'ABCDEF' 'abcdef') ;;
+    esac
+done
+unset _pin_pair
+case "$pinned_checksum" in
+    *[!0123456789abcdef]*) pinned_checksum="" ;;
+esac
+[ "${#pinned_checksum}" -eq 64 ] || pinned_checksum=""
+if [ -n "$pinned_checksum" ]; then
+    expected_checksum="$pinned_checksum"
+else
+    if [ -n "${PLANNOTATOR_EXPECTED_SHA256:-}" ]; then
+        # Only our own bug can cause this (the value comes from the running
+        # Plannotator, never the network): check as before rather than block.
+        echo "Note: the update carried no checksum for ${binary_name}; checking the release's .sha256 instead."
+    fi
+    expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
     actual_checksum=$(shasum -a 256 "$tmp_file" | cut -d' ' -f1)
@@ -811,9 +873,21 @@ else
 fi
 
 if [ "$actual_checksum" != "$expected_checksum" ]; then
-    echo "Checksum verification failed!" >&2
     rm -f "$tmp_file"
+    if [ -n "$pinned_checksum" ]; then
+        echo "Stopped: the ${latest_tag} download doesn't match the checksum Plannotator fetched for it." >&2
+        echo "Nothing was changed; the Plannotator you have still works." >&2
+        echo "Something on the network may have changed the download. Try again later, or on another network." >&2
+        case "${PLANNOTATOR_UPDATE_MISMATCH_FILE:-}" in
+            /*/checksum-mismatch) : > "$PLANNOTATOR_UPDATE_MISMATCH_FILE" 2>/dev/null || true ;;
+        esac
+        exit 113
+    fi
+    echo "Checksum verification failed!" >&2
     exit 1
+fi
+if [ -n "$pinned_checksum" ]; then
+    echo "Checksum matches the one Plannotator fetched for ${latest_tag}."
 fi
 
 if [ "$verify_attestation" -eq 1 ]; then
@@ -1072,6 +1146,7 @@ write_install_flags() {
     [ "$SKIP_KIRO_FLAG" = "1" ] && _if_add skip-kiro
     [ "$SKIP_VIBE_FLAG" = "1" ] && _if_add skip-vibe
     [ "$SKIP_OPENCODE_FLAG" = "1" ] && _if_add skip-opencode
+    [ "$SKIP_QWEN_FLAG" = "1" ] && _if_add skip-qwen
     [ "$SKIP_SKILLS_FLAG" = "1" ] && _if_add skip-skills
     [ "$SKIP_CLAUDE_PLUGIN_FLAG" = "1" ] && _if_add skip-claude-plugin
     _if_path="$_config_dir/install-flags.json"
@@ -1115,6 +1190,18 @@ if [ "$T3_HOOK_FLAG" -ne -1 ]; then
     fi
 fi
 
+# The sem archives' SHA-256 for SEM_VERSION, pinned here instead of read from
+# the release's checksums.txt, which would come over the same connection as
+# the archive. Bump them with SEM_VERSION (keep install.ps1 / install.cmd in step).
+sem_sha256_for_asset() {
+    case "$1" in
+        sem-darwin-arm64.tar.gz) echo "a98235ac9f8fae93364ddb7c681036fbe33af756db40e067331ef2091ecc8e6a" ;;
+        sem-linux-arm64.tar.gz)  echo "c0d4ccede55e166481358013c397f2772e4d76b72df45d567c45792b8033aec9" ;;
+        sem-linux-x86_64.tar.gz) echo "d3476497d8e5648ddb4aa6f82f75ad1a21d0155a5941744c744f464109928707" ;;
+        *)                       return 1 ;;
+    esac
+}
+
 sem_asset_for_platform() {
     case "$platform" in
         darwin-arm64) echo "sem-darwin-arm64.tar.gz" ;;
@@ -1147,7 +1234,6 @@ install_sem_sidecar() {
 
     tmp_sem_dir="$(mktemp -d)"
     sem_archive="${tmp_sem_dir}/${sem_asset}"
-    sem_checksums="${tmp_sem_dir}/checksums.txt"
     sem_base_url="https://github.com/${SEM_REPO}/releases/download/${SEM_VERSION}"
 
     # Bounded so a slow/hung download of this optional sidecar can't wedge an
@@ -1158,13 +1244,8 @@ install_sem_sidecar() {
         rm -rf "$tmp_sem_dir"
         return 0
     fi
-    if ! curl -fsSL --connect-timeout 10 --max-time 60 -o "$sem_checksums" "${sem_base_url}/checksums.txt"; then
-        echo "Skipping semantic diff sidecar install (checksum download failed)"
-        rm -rf "$tmp_sem_dir"
-        return 0
-    fi
 
-    expected_sem_checksum="$(awk -v name="$sem_asset" '$2 == name { print $1 }' "$sem_checksums")"
+    expected_sem_checksum="$(sem_sha256_for_asset "$sem_asset" 2>/dev/null || true)"
     if [ -z "$expected_sem_checksum" ]; then
         echo "Skipping semantic diff sidecar install (checksum missing for ${sem_asset})"
         rm -rf "$tmp_sem_dir"
@@ -1281,6 +1362,32 @@ VIBE_HOME="${VIBE_HOME:-$HOME/.vibe}"
 vibe_available=0
 if [ -d "$VIBE_HOME" ]; then
     vibe_available=1
+fi
+
+# Qwen Code keeps its user files in $QWEN_HOME when set, else ~/.qwen
+# (Qwen's Storage.getGlobalQwenDir: $QWEN_HOME is the Qwen folder itself, a
+# leading ~ is expanded and a relative path is taken from the current folder).
+# Detection requires that folder, so an unrelated `qwen` on PATH never gains
+# a ~/.qwen. The folder alone is not enough: the `skills` CLI (npx skills add
+# -g) makes ~/.qwen/skills for people who never installed Qwen Code. So it
+# also needs the qwen command on PATH, or a file only Qwen Code writes there
+# (settings.json, installation_id, projects/, extensions/). The extension
+# step needs the qwen command.
+case "${QWEN_HOME:-}" in
+    "") QWEN_DIR="$HOME/.qwen" ;;
+    "~") QWEN_DIR="$HOME" ;;
+    "~/"*) QWEN_DIR="$HOME/${QWEN_HOME#??}" ;;
+    /*) QWEN_DIR="$QWEN_HOME" ;;
+    *) QWEN_DIR="$PWD/$QWEN_HOME" ;;
+esac
+QWEN_SKILLS_DIR="$QWEN_DIR/skills"
+qwen_available=0
+if [ -d "$QWEN_DIR" ]; then
+    if command -v qwen >/dev/null 2>&1 || [ -f "$QWEN_DIR/settings.json" ] ||
+        [ -f "$QWEN_DIR/installation_id" ] || [ -d "$QWEN_DIR/projects" ] ||
+        [ -d "$QWEN_DIR/extensions" ]; then
+        qwen_available=1
+    fi
 fi
 
 if [ "$codex_available" -eq 1 ] && [ "$skip_codex" -eq 1 ]; then
@@ -1757,16 +1864,138 @@ rm -rf "$HOME/.bun/install/cache/@plannotator" 2>/dev/null || true
 # Clear Pi jiti cache to force fresh download on next run
 rm -rf /tmp/jiti 2>/dev/null || true
 
+# Pi extension (#902). `pi install npm:@plannotator/pi-extension` runs a bare
+# `npm install @plannotator/pi-extension` in <agent dir>/npm. npm may settle on
+# an older version and still exit 0 ("up to date"): it passes over a release
+# whose `engines` the running Node does not meet (0.28.32's Node floor), and a
+# registry mirror can lag. `pi update <source>` is Pi's own update: it asks the
+# registry for the newest version and installs `<name>@latest` by name (older
+# Pi reinstalls with `npm install -g`), and it leaves Pi's settings as they are.
+# So an existing install is updated with `pi update`, a first install that
+# landed on an older version gets the same `pi update`, the version on disk is
+# read back where Pi loads it from, and "installed"/"updated" is said only when
+# it reached this release; otherwise one line names the cause it can see and
+# the command to run. The step never pins a version in Pi's settings (a pinned
+# source is skipped by every later `pi update`). A source the person pinned
+# (npm:@plannotator/pi-extension@0.28.20) is left alone and the line says how
+# to move it. Nothing is removed first, so a failed step leaves the install as
+# it was. `pi update` shipped together with `pi install`, and it runs here only
+# when Pi's settings list the extension. Same logic in install.ps1 and
+# install.cmd's :UpdatePiExtension.
+PI_EXTENSION_SOURCE="npm:@plannotator/pi-extension"
+
+# Pi's agent dir: $PI_CODING_AGENT_DIR (~ expanded, as Pi does), else ~/.pi/agent.
+pi_agent_dir() {
+    case "${PI_CODING_AGENT_DIR:-}" in
+        "") printf '%s\n' "$HOME/.pi/agent" ;;
+        "~") printf '%s\n' "$HOME" ;;
+        "~/"*) printf '%s\n' "$HOME/${PI_CODING_AGENT_DIR#\~/}" ;;
+        *) printf '%s\n' "$PI_CODING_AGENT_DIR" ;;
+    esac
+}
+
+# How Pi's user settings list the extension: "none", "unpinned", or
+# "pinned:<version>" for an exact version (what `pi update` skips).
+pi_extension_configured() {
+    _pi_settings="$(pi_agent_dir)/settings.json"
+    if [ ! -f "$_pi_settings" ] || ! grep -Eq '"npm:@plannotator/pi-extension(@[^"]*)?"' "$_pi_settings" 2>/dev/null; then
+        echo "none"
+        return 0
+    fi
+    _pi_pin=$(sed -n 's/.*"npm:@plannotator\/pi-extension@v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9A-Za-z.+-]*\)".*/\1/p' "$_pi_settings" 2>/dev/null | head -n 1)
+    if [ -n "$_pi_pin" ]; then
+        echo "pinned:$_pi_pin"
+    else
+        echo "unpinned"
+    fi
+}
+
+# The installed extension's version, read where Pi loads it from: the managed
+# <agent dir>/npm/node_modules copy when it exists, else the global npm root
+# (where older Pi installed user packages). Empty when it can't be read.
+pi_extension_installed_version() {
+    _pi_pkg="$(pi_agent_dir)/npm/node_modules/@plannotator/pi-extension"
+    if [ ! -d "$_pi_pkg" ]; then
+        _pi_pkg=""
+        if command -v npm >/dev/null 2>&1; then
+            _pi_root=$(npm root -g 2>/dev/null | head -n 1)
+            if [ -n "$_pi_root" ]; then
+                _pi_pkg="$_pi_root/@plannotator/pi-extension"
+            fi
+        fi
+    fi
+    [ -n "$_pi_pkg" ] && [ -f "$_pi_pkg/package.json" ] || return 0
+    sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_pi_pkg/package.json" 2>/dev/null | head -n 1
+}
+
+# Whether version $1 is at least $2 (major.minor.patch; any suffix ignored).
+pi_version_at_least() {
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        sub(/^v/, "", a); sub(/^v/, "", b); sub(/[-+].*/, "", a); sub(/[-+].*/, "", b)
+        split(a, x, "."); split(b, y, ".")
+        for (i = 1; i <= 3; i++) { p = x[i] + 0; q = y[i] + 0; if (p > q) exit 0; if (p < q) exit 1 }
+        exit 0
+    }'
+}
+
 update_pi_extension_if_present() {
     if ! command -v pi &>/dev/null; then
         return 0
     fi
 
-    echo "Updating Pi extension..."
-    if pi install npm:@plannotator/pi-extension; then
-        echo "Pi extension updated."
+    _pi_target="${latest_tag#v}"
+    _pi_state=$(pi_extension_configured)
+    _pi_fresh=0
+    case "$_pi_state" in
+        none)
+            _pi_fresh=1
+            echo "Installing Pi extension..."
+            if ! pi install "$PI_EXTENSION_SOURCE"; then
+                echo "Skipping Pi extension install (pi install failed)"
+                return 0
+            fi
+            _pi_before=$(pi_extension_installed_version)
+            if [ -z "$_pi_before" ] || ! pi_version_at_least "$_pi_before" "$_pi_target"; then
+                # npm settled on an older version (or it can't be read): Pi's
+                # own update asks for the newest one by name.
+                pi update "$PI_EXTENSION_SOURCE" || true
+            fi
+            ;;
+        pinned:*)
+            echo "Pi extension: pinned to ${_pi_state#pinned:} in Pi's settings, left as is. To move it: pi install ${PI_EXTENSION_SOURCE}@${_pi_target}"
+            return 0
+            ;;
+        *)
+            echo "Updating Pi extension..."
+            _pi_before=$(pi_extension_installed_version)
+            if ! pi update "$PI_EXTENSION_SOURCE"; then
+                # The update failed, or this Pi's update takes no source: the
+                # install command, as before. Neither removes anything first.
+                pi install "$PI_EXTENSION_SOURCE" || true
+            fi
+            ;;
+    esac
+
+    _pi_after=$(pi_extension_installed_version)
+    if [ -z "$_pi_after" ]; then
+        echo "Pi extension: could not read its installed version. To update it: pi update ${PI_EXTENSION_SOURCE}"
+    elif ! pi_version_at_least "$_pi_after" "$_pi_target"; then
+        # The one cause visible from here: the registry npm uses does not
+        # have this release yet (a mirror catching up, or npm not published).
+        _pi_view=""
+        if command -v npm >/dev/null 2>&1; then
+            _pi_view=$(npm view "@plannotator/pi-extension@${_pi_target}" version --fetch-timeout=10000 --fetch-retries=0 2>&1 || true)
+        fi
+        case "$_pi_view" in
+            *E404*) echo "Pi extension: still ${_pi_after} (${_pi_target} is not on your npm registry yet). Run this later: pi update ${PI_EXTENSION_SOURCE}" ;;
+            *) echo "Pi extension: still ${_pi_after} (this release is ${_pi_target}). To update it: pi update ${PI_EXTENSION_SOURCE}" ;;
+        esac
+    elif [ "$_pi_fresh" -eq 1 ]; then
+        echo "Pi extension installed (${_pi_after})."
+    elif [ "$_pi_before" = "$_pi_after" ]; then
+        echo "Pi extension already up to date (${_pi_after})."
     else
-        echo "Skipping Pi extension update (pi install failed)"
+        echo "Pi extension updated to ${_pi_after}."
     fi
 }
 
@@ -2087,6 +2316,31 @@ copy_commands_if_present() {
     fi
 }
 
+# --- Qwen Code version (only when Qwen Code is detected) ---
+# Plan review needs extension hooks, which Qwen Code runs from 0.13.0 on.
+# Below that, nothing is installed for Qwen Code: no extension, no skills.
+# `qwen --version` runs like every qwen command here: with a time limit, no
+# input, in an empty temporary folder. A version that cannot be read does not
+# block the install.
+QWEN_MIN_VERSION="0.13.0"
+qwen_too_old=0
+qwen_version=""
+if [ "$qwen_available" -eq 1 ] && [ "$skip_qwen" -eq 0 ] && [ "$skip_skills" -eq 0 ] && command -v qwen >/dev/null 2>&1; then
+    _qv_secs="${PLANNOTATOR_QWEN_EXTENSION_TIMEOUT:-120}"
+    case "$_qv_secs" in ''|*[!0-9]*|0) _qv_secs=120 ;; esac
+    _qv_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-qwen.XXXXXX" 2>/dev/null) || _qv_tmp=""
+    if [ -n "$_qv_tmp" ] && mkdir "$_qv_tmp/cwd" 2>/dev/null; then
+        (cd "$_qv_tmp/cwd" && run_with_time_limit "$_qv_secs" "$_qv_tmp/timed-out" qwen --version) >"$_qv_tmp/out" 2>/dev/null || true
+        qwen_version=$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' "$_qv_tmp/out" 2>/dev/null | head -n 1) || qwen_version=""
+    fi
+    if [ -n "$_qv_tmp" ]; then rm -rf "$_qv_tmp" 2>/dev/null || true; fi
+    if [ -n "$qwen_version" ] && ! version_ge "$qwen_version" "$QWEN_MIN_VERSION"; then
+        qwen_too_old=1
+        echo ""
+        echo "Qwen Code ${qwen_version} is older than ${QWEN_MIN_VERSION}, so nothing was installed for it. Update Qwen Code to use plan review."
+    fi
+fi
+
 # Wrap the cd-bearing block in a subshell so any `cd` is scoped to
 # the subshell and can't leave the parent script with a dangling CWD.
 # Previous version chained `cd` inside an `&&` condition, and if
@@ -2163,7 +2417,7 @@ checkout_failed=0
     fi
     cd repo || exit 1
     if [ "$sparse_clone" -eq 1 ]; then
-        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands 2>"$git_err"; then
+        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands apps/qwen-code 2>"$git_err"; then
             surface_git_error
             exit 1
         fi
@@ -2187,6 +2441,7 @@ checkout_failed=0
         copy_skill_if_present apps/skills/claude/plannotator-review "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-annotate "$CLAUDE_SKILLS_DIR"
         copy_skill_if_present apps/skills/claude/plannotator-last "$CLAUDE_SKILLS_DIR"
+        copy_skill_if_present apps/skills/claude/plannotator-inbox "$CLAUDE_SKILLS_DIR"
         # The plannotator knowledge skill (CLI reference) has no Claude-only
         # injection form — its body is pure prose — so Claude installs the
         # same single-sourced copy Codex gets from apps/skills/core.
@@ -2200,6 +2455,7 @@ checkout_failed=0
         copy_skill_if_present apps/skills/core/plannotator-review "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-annotate "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator-last "$AGENTS_SKILLS_DIR"
+        copy_skill_if_present apps/skills/core/plannotator-inbox "$AGENTS_SKILLS_DIR"
         copy_skill_if_present apps/skills/core/plannotator "$AGENTS_SKILLS_DIR"
         echo "Installed shared agent skills to ${AGENTS_SKILLS_DIR}/"
     else
@@ -2227,6 +2483,8 @@ checkout_failed=0
         # Kiro-specific skills (origin baked in) come from apps/kiro-cli/skills.
         copy_skill_if_present apps/kiro-cli/skills/plannotator-review "$KIRO_SKILLS_DIR"
         copy_skill_if_present apps/kiro-cli/skills/plannotator-annotate "$KIRO_SKILLS_DIR"
+        # /plannotator-inbox needs no origin label: the shell-neutral core copy.
+        copy_skill_if_present apps/skills/core/plannotator-inbox "$KIRO_SKILLS_DIR"
         # The plannotator knowledge skill (CLI reference) has no Kiro-specific
         # form, so Kiro receives the single-sourced core copy like every other
         # scope. Without it, Kiro users get the action skills but no reference.
@@ -2242,6 +2500,27 @@ checkout_failed=0
         echo "Installed Kiro skills to ${KIRO_SKILLS_DIR}/ and agent to ~/.kiro/agents/plannotator.json"
     fi
 
+    # Qwen Code: its own copies of review, annotate and last (they run the
+    # command in the background, past the shell tool's time limit). Qwen reads
+    # $QWEN_DIR/skills before ~/.agents/skills, so these take the place of the
+    # shared copies of the same name. The extension is copied out of the
+    # checkout here and installed after this block (it needs the qwen
+    # command, and its failure must never count as a fetch failure). A Qwen
+    # opt-out, or a Qwen Code too old for plan review, leaves $QWEN_DIR
+    # untouched. This block runs in a subshell, so a marker file tells the
+    # summary below that the skills were installed.
+    if [ "$qwen_available" -eq 1 ] && [ "$skip_qwen" -eq 0 ] && [ "$qwen_too_old" -eq 0 ] && [ -d "apps/qwen-code/skills" ] && [ -n "$(ls -A apps/qwen-code/skills 2>/dev/null)" ]; then
+        mkdir -p "$QWEN_SKILLS_DIR"
+        copy_skill_if_present apps/qwen-code/skills/plannotator-review "$QWEN_SKILLS_DIR"
+        copy_skill_if_present apps/qwen-code/skills/plannotator-annotate "$QWEN_SKILLS_DIR"
+        copy_skill_if_present apps/qwen-code/skills/plannotator-last "$QWEN_SKILLS_DIR"
+        echo "Installed Qwen Code skills to ${QWEN_SKILLS_DIR}/"
+        : > "$skills_tmp/qwen-skills-installed"
+    fi
+    if [ "$qwen_available" -eq 1 ] && [ "$skip_qwen" -eq 0 ] && [ "$qwen_too_old" -eq 0 ] && [ -f "apps/qwen-code/extension/qwen-extension.json" ]; then
+        cp -R apps/qwen-code/extension "$skills_tmp/qwen-extension" 2>/dev/null || rm -rf "$skills_tmp/qwen-extension"
+    fi
+
     # Vibe — hand-maintained skills (origin baked in) plus the single-sourced
     # knowledge skill. A Vibe opt-out (#1178) leaves $VIBE_HOME entirely
     # untouched. VIBE_HOME is resolved above alongside the Vibe detection.
@@ -2251,6 +2530,8 @@ checkout_failed=0
         copy_skill_if_present apps/vibe/skills/plannotator-review "$VIBE_SKILLS_DIR"
         copy_skill_if_present apps/vibe/skills/plannotator-annotate "$VIBE_SKILLS_DIR"
         copy_skill_if_present apps/vibe/skills/plannotator-last "$VIBE_SKILLS_DIR"
+        # /plannotator-inbox needs no origin label: the shell-neutral core copy.
+        copy_skill_if_present apps/skills/core/plannotator-inbox "$VIBE_SKILLS_DIR"
         # The plannotator knowledge skill (CLI reference) is agent-agnostic and
         # single-sourced in apps/skills/core; Vibe gets the same copy every
         # other scope does. Without it, Vibe users get launchers but no CLI
@@ -2259,6 +2540,209 @@ checkout_failed=0
         echo "Installed Vibe skills to ${VIBE_SKILLS_DIR}/"
     fi
 ) || checkout_failed=1
+
+# --- Qwen Code extension (only when Qwen Code is detected) ---
+# The extension (apps/qwen-code/extension: the plan-review hook on
+# exit_plan_mode) is installed and updated with Qwen's own commands, which
+# copy it into $QWEN_DIR/extensions/plannotator. Plannotator never writes into
+# that folder itself. The source comes from the skills checkout above (same
+# tag as the binary). It is kept at <data dir>/qwen-code/extension, one path
+# that does not change, because Qwen records the path as the extension's
+# source, derives the extension's id from it, and reads it on update.
+#
+# Never breaks or silently changes a working Qwen Code, and never fails the
+# install:
+# - Installed and the same version: no extension command runs.
+# - Installed and another version: `qwen extensions update plannotator`.
+#   Qwen keeps the extension's id and its on/off choices (global and per
+#   project), so an extension the user turned off stays off. The installer
+#   never uninstalls it. Qwen's update exits 0 even when it fails, so the
+#   result is read from the installed manifest.
+# - Linked with `qwen extensions link` (a developer's checkout), or installed
+#   from another source: left as it is.
+# - Not installed: `qwen extensions install <source> --consent`.
+# - Every qwen command has a time limit and reads no input (the consent
+#   prompt is answered by --consent). It runs in an empty temporary folder,
+#   so no project's .qwen/settings.json takes part.
+# - Any failure prints what happened and the command to run by hand.
+qwen_extension_state=""
+qwen_extension_off=0
+qwen_extension_source=""
+run_qwen_extension_command() {
+    _qx_rc=0
+    (cd "$_qx_tmp/cwd" && run_with_time_limit "$_qx_secs" "$_qx_tmp/timed-out" qwen extensions "$@") >"$_qx_log" 2>&1 || _qx_rc=$?
+    _qx_last=$(tr -cd '[:print:]\n' < "$_qx_log" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c 1-200) || _qx_last=""
+    if [ "$_qx_rc" -eq 124 ]; then
+        _qx_why="timed out after ${_qx_secs}s"
+    elif [ "$_qx_rc" -ne 0 ]; then
+        _qx_why="qwen exited ${_qx_rc}${_qx_last:+: ${_qx_last}}"
+    else
+        _qx_why=""
+    fi
+    return "$_qx_rc"
+}
+
+# The "version" of a qwen-extension.json, or nothing.
+qwen_manifest_version() {
+    [ -f "$1" ] || return 0
+    tr -d '\r\n' < "$1" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+# Succeeds when the plannotator extension is turned off anywhere: its default
+# or one project in Qwen's extension store (extension-store/state.json), or a
+# "!" rule in the older extensions/extension-enablement.json. Only used to
+# say so: the update keeps those choices either way.
+qwen_extension_turned_off() {
+    _qo_state="$QWEN_DIR/extension-store/state.json"
+    if [ -f "$_qo_state" ] && tr -d ' \t\r\n' < "$_qo_state" 2>/dev/null | awk '
+        {
+            s = $0; n = length(s); depth = 0; instr = 0; esc = 0
+            for (i = 1; i <= n; i++) {
+                c = substr(s, i, 1)
+                if (instr) {
+                    if (esc) esc = 0
+                    else if (c == "\\") esc = 1
+                    else if (c == "\"") instr = 0
+                    continue
+                }
+                if (c == "\"") { instr = 1; continue }
+                if (c == "{") { depth++; start[depth] = i; hit[depth] = 0 }
+                else if (c == "}" && depth > 0) {
+                    obj = substr(s, start[depth], i - start[depth] + 1)
+                    if (!hit[depth] && index(obj, "\"name\":\"plannotator\"") && index(obj, "\"defaultActivation\":")) {
+                        if (index(obj, "\"disabled\"")) found = 1
+                        if (depth > 1) hit[depth - 1] = 1
+                    } else if (hit[depth] && depth > 1) hit[depth - 1] = 1
+                    depth--
+                }
+            }
+        }
+        END { exit found ? 0 : 1 }'; then
+        return 0
+    fi
+    _qo_legacy="$QWEN_DIR/extensions/extension-enablement.json"
+    [ -f "$_qo_legacy" ] && tr -d ' \t\r\n' < "$_qo_legacy" 2>/dev/null | grep -q '"plannotator":{"overrides":\[[^]]*"!'
+}
+
+install_qwen_extension_if_present() {
+    [ "$qwen_available" -eq 1 ] || return 0
+    if [ "$skip_qwen" -eq 1 ]; then
+        # HONEST reporting (#1178): skip is do-not-write. Nothing under
+        # $QWEN_DIR is installed, updated or removed on this run.
+        echo ""
+        echo "Qwen Code: detected, skipped (${skip_qwen_source})."
+        if [ -f "$QWEN_DIR/extensions/plannotator/qwen-extension.json" ]; then
+            echo "The installed Qwen Code extension was left untouched."
+        fi
+        return 0
+    fi
+    [ "$skip_skills" -eq 0 ] || return 0
+    if [ "$qwen_too_old" -eq 1 ]; then
+        qwen_extension_state="too-old"
+        return 0
+    fi
+    _qx_src="$skills_tmp/qwen-extension"
+    if [ ! -f "$_qx_src/qwen-extension.json" ] || [ ! -f "$_qx_src/hooks/hooks.json" ]; then
+        # A pinned tag older than the Qwen Code integration.
+        qwen_extension_state="not-in-tag"
+        return 0
+    fi
+    _qx_dest="$QWEN_DIR/extensions/plannotator"
+    _qx_record="$_qx_dest/.qwen-extension-install.json"
+    if [ -f "$_qx_record" ] && tr -d ' \t\r\n' < "$_qx_record" 2>/dev/null | grep -q '"type":"link"'; then
+        # A developer's `qwen extensions link`: Qwen loads their checkout.
+        qwen_extension_state="linked"
+        echo "Qwen Code extension: linked from a local folder (qwen extensions link), left as it is."
+        return 0
+    fi
+    if ! command -v qwen >/dev/null 2>&1; then
+        qwen_extension_state="no-cli"
+        echo "Qwen Code extension: not installed (the qwen command is not on PATH)."
+        return 0
+    fi
+    case "$_config_dir" in
+        /*) _qx_stable="$_config_dir/qwen-code/extension" ;;
+        *) _qx_stable="$PWD/$_config_dir/qwen-code/extension" ;;
+    esac
+    _qx_new_version=$(qwen_manifest_version "$_qx_src/qwen-extension.json")
+    _qx_had=0
+    if [ -f "$_qx_dest/qwen-extension.json" ]; then
+        _qx_had=1
+        _qx_from=""
+        if [ -f "$_qx_record" ]; then
+            _qx_from=$(tr -d '\r\n' < "$_qx_record" 2>/dev/null | sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+        fi
+        if [ "$_qx_from" != "$_qx_stable" ]; then
+            # Installed by hand, from a fork or another folder: not ours to change.
+            qwen_extension_state="foreign"
+            qwen_extension_source="${_qx_from:-an unknown source}"
+            echo "Qwen Code extension: installed from ${qwen_extension_source}, not by this installer, so it was left as it is."
+            return 0
+        fi
+    fi
+    # Keep the new source at the stable path. It is Plannotator's own folder;
+    # Qwen reads it only to install or update.
+    rm -rf "$_qx_stable.new" 2>/dev/null || true
+    if ! mkdir -p "$(dirname "$_qx_stable")" 2>/dev/null || ! cp -R "$_qx_src" "$_qx_stable.new" 2>/dev/null ||
+        ! rm -rf "$_qx_stable" 2>/dev/null || ! mv "$_qx_stable.new" "$_qx_stable" 2>/dev/null; then
+        rm -rf "$_qx_stable.new" 2>/dev/null || true
+        qwen_extension_state="failed"
+        echo "Qwen Code extension: could not write its source to ${_qx_stable}. The installed one was left as it was."
+        return 0
+    fi
+    if [ "$_qx_had" -eq 1 ] && qwen_extension_turned_off; then
+        qwen_extension_off=1
+    fi
+    if [ "$_qx_had" -eq 1 ] && [ "$(qwen_manifest_version "$_qx_dest/qwen-extension.json")" = "$_qx_new_version" ]; then
+        qwen_extension_state="current"
+        echo "Qwen Code extension: already up to date."
+        return 0
+    fi
+    # Seconds per qwen command. Internal knob for the tests.
+    _qx_secs="${PLANNOTATOR_QWEN_EXTENSION_TIMEOUT:-120}"
+    case "$_qx_secs" in ''|*[!0-9]*|0) _qx_secs=120 ;; esac
+    _qx_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-qwen.XXXXXX" 2>/dev/null) || _qx_tmp=""
+    if [ -z "$_qx_tmp" ] || [ ! -d "$_qx_tmp" ] || ! mkdir "$_qx_tmp/cwd" 2>/dev/null; then
+        qwen_extension_state="failed"
+        echo "Qwen Code extension: could not install it (no temporary directory)."
+        return 0
+    fi
+    _qx_log="$_qx_tmp/qwen.log"
+    if [ "$_qx_had" -eq 1 ]; then
+        echo "Updating the Qwen Code extension..."
+        run_qwen_extension_command update plannotator || true
+        if [ "$(qwen_manifest_version "$_qx_dest/qwen-extension.json")" = "$_qx_new_version" ]; then
+            qwen_extension_state="updated"
+            echo "Qwen Code extension: updated (restart Qwen Code to load it)."
+            if [ "$qwen_extension_off" -eq 1 ]; then
+                echo "It stays turned off where you turned it off in Qwen Code."
+            fi
+        else
+            qwen_extension_state="failed"
+            echo "Qwen Code extension: could not update it (${_qx_why:-${_qx_last:-qwen did not update it}}). The installed one was left as it was."
+            echo "To try again by hand: qwen extensions update plannotator"
+        fi
+    else
+        echo "Installing the Qwen Code extension..."
+        if run_qwen_extension_command install "$_qx_stable" --consent; then
+            qwen_extension_state="installed"
+            echo "Qwen Code extension: installed (restart Qwen Code to load it)."
+        else
+            qwen_extension_state="failed"
+            echo "Qwen Code extension: could not install it (${_qx_why})."
+            echo "To try again by hand: qwen extensions install \"${_qx_stable}\""
+        fi
+    fi
+    rm -rf "$_qx_tmp" 2>/dev/null || true
+    return 0
+}
+if [ "${checkout_failed:-0}" -eq 0 ]; then
+    install_qwen_extension_if_present || true
+fi
+qwen_skills_installed=0
+if [ -f "$skills_tmp/qwen-skills-installed" ]; then
+    qwen_skills_installed=1
+fi
 
 rm -rf "$skills_tmp"
 
@@ -2346,7 +2830,12 @@ done
 # promised not to make.
 if [ "$skip_skills" -eq 0 ] && [ -n "$invocable_choice" ] && [ "$invocable_choice" != "none" ]; then
     for skill in $(echo "$invocable_choice" | tr ',' ' '); do
-        for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"; do
+        for scope in "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR" "$QWEN_SKILLS_DIR"; do
+            # A Qwen opt-out (or a Qwen Code too old for plan review) leaves
+            # $QWEN_DIR untouched, a previous run's copies included.
+            if [ "$scope" = "$QWEN_SKILLS_DIR" ] && { [ "$qwen_available" -eq 0 ] || [ "$skip_qwen" -eq 1 ] || [ "$qwen_too_old" -eq 1 ]; }; then
+                continue
+            fi
             skill_md="$scope/$skill/SKILL.md"
             if [ -f "$skill_md" ] && grep -q '^disable-model-invocation: true$' "$skill_md"; then
                 grep -v '^disable-model-invocation: true$' "$skill_md" > "$skill_md.tmp" && mv "$skill_md.tmp" "$skill_md"
@@ -2540,7 +3029,7 @@ else
     echo ""
     echo '  "plugin": ["@plannotator/opencode@latest"]'
     echo ""
-    echo "Then restart OpenCode. The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
+    echo "Then restart OpenCode (OpenCode 2: run opencode2 reload). The /plannotator-review, /plannotator-annotate, and /plannotator-last commands are ready!"
 fi
 # Agent-specific closing sections print only for agents this run detected,
 # reusing the detection each integration block above already ran (Pi: `pi` on
@@ -2559,9 +3048,13 @@ if [ "$pi_detected" -eq 1 ]; then
     echo "  PI USERS"
     echo "=========================================="
     echo ""
-    echo "Install or update the extension:"
+    echo "Install the extension:"
     echo ""
     echo "  pi install npm:@plannotator/pi-extension"
+    echo ""
+    echo "Update it (pi install leaves an existing install as it is):"
+    echo ""
+    echo "  pi update npm:@plannotator/pi-extension"
 fi
 # Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). This run
 # installs nothing into OMP: the section says how, because "Ask this session"
@@ -2669,6 +3162,67 @@ if [ "$vibe_available" -eq 1 ]; then
         echo "Vibe skills are installed to ${VIBE_SKILLS_DIR}/"
         echo "Note: improve-context (plan-mode enrichment) is not wired for Vibe —"
         echo "only the plan-review gate runs."
+    fi
+fi
+# The Qwen Code section prints only when Qwen Code was detected.
+if [ "$qwen_available" -eq 1 ]; then
+    echo ""
+    echo "=========================================="
+    echo "  QWEN CODE USERS"
+    echo "=========================================="
+    echo ""
+    if [ "$skip_qwen" -eq 1 ]; then
+        echo "Qwen Code was detected, but the integration was skipped (${skip_qwen_source})."
+        echo "No extension was installed or removed, and no files under ${QWEN_DIR} were"
+        echo "written. Re-run without the opt-out to add plan review and the skills."
+    elif [ "$skip_skills" -eq 1 ]; then
+        echo "Qwen Code was detected, but skills were skipped (${skip_skills_source}). The"
+        echo "Qwen Code extension and skills come from the same download, so neither was"
+        echo "installed or changed. Re-run without the opt-out to add them."
+    elif [ "$qwen_too_old" -eq 1 ]; then
+        echo "Qwen Code ${qwen_version} is older than ${QWEN_MIN_VERSION}, the first release that runs"
+        echo "extension hooks, so nothing was installed for it. Update Qwen Code to use"
+        echo "plan review, then re-run this installer."
+    else
+        case "$qwen_extension_state" in
+            installed|updated|current)
+                if [ "$qwen_extension_off" -eq 1 ]; then
+                    echo "The plannotator extension is turned off in Qwen Code (in some or all"
+                    echo "projects), and it stays off. Where it is off, plan review is off. To"
+                    echo "turn it on: qwen extensions enable plannotator"
+                else
+                    echo "Plan review: when the agent calls exit_plan_mode, the plan opens in your"
+                    echo "browser. After you approve it there, Qwen Code asks you to confirm the plan"
+                    echo "once more in the terminal. Restart Qwen Code to load a new extension."
+                fi
+                ;;
+            linked)
+                echo "The plannotator extension is linked from a local folder (qwen extensions"
+                echo "link), so this installer left it as it is."
+                ;;
+            foreign)
+                echo "The plannotator extension was installed from ${qwen_extension_source},"
+                echo "not by this installer, so it was left as it is. To let this installer"
+                echo "manage it, run: qwen extensions uninstall plannotator"
+                echo "and re-run this installer."
+                ;;
+            no-cli)
+                echo "The qwen command was not found, so the plan-review extension was not"
+                echo "installed. Put qwen on PATH and re-run this installer."
+                ;;
+            not-in-tag)
+                echo "This release has no Qwen Code extension. Install a newer release for plan review."
+                ;;
+            *)
+                echo "The plan-review extension could not be installed (see the message above)."
+                echo "Re-run this installer to try again."
+                ;;
+        esac
+        if [ "$qwen_skills_installed" -eq 1 ]; then
+            echo ""
+            echo "Skills are installed to ${QWEN_SKILLS_DIR}/:"
+            echo "  /plannotator-review, /plannotator-annotate, /plannotator-last"
+        fi
     fi
 fi
 echo ""

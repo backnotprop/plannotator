@@ -6,6 +6,7 @@
  * data. Purge removes the known Plannotator data inventory while preserving
  * unknown top-level entries rather than guessing that custom files are ours.
  */
+import { childPath } from "@plannotator/shared/child-env";
 import {
   existsSync,
   lstatSync,
@@ -33,7 +34,8 @@ import { runningT3Workers, stopT3Workers } from "@plannotator/shared/t3-workers"
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
 import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
-import { forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
+import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
+import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
 import { planInboxNoteRemoval } from "./inbox-agent-notes";
 import { INBOX_AGENT_LABELS, type InboxAgentId } from "@plannotator/core/inbox-types";
 import {
@@ -60,6 +62,13 @@ const KNOWLEDGE_SKILLS = [
   "plannotator",
 ] as const;
 
+// /plannotator-inbox (apps/skills/{claude,core}/plannotator-inbox): installed
+// to the Claude and shared-agent scopes, ~/.kiro/skills and $VIBE_HOME/skills,
+// plus an OpenCode command stub and a Gemini command. Kept out of
+// CORE_SKILLS for the same reason as the knowledge skill: it never had a
+// legacy ~/.claude/commands file or a Codex-home era.
+const INBOX_SKILL = "plannotator-inbox";
+
 const EXTRA_SKILLS = [
   "plannotator-compound",
   "plannotator-setup-goal",
@@ -74,6 +83,7 @@ const LEGACY_COMMAND_NAMES = [
 const KIRO_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
+  INBOX_SKILL,
   // The knowledge skill installs into ~/.kiro/skills like the action skills.
   // Safe to name here: this list only ever removes ~/.kiro/skills/<name>
   // directories, never a command file a user may own.
@@ -90,7 +100,17 @@ const VIBE_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
   "plannotator-last",
+  INBOX_SKILL,
   "plannotator",
+] as const;
+
+// Installed by the install scripts to $QWEN_HOME/skills (default ~/.qwen/skills)
+// from apps/qwen-code/skills. Removed by name, like the Vibe skills: only the
+// installer creates these folders there.
+const QWEN_SKILLS = [
+  "plannotator-review",
+  "plannotator-annotate",
+  "plannotator-last",
 ] as const;
 
 const STALE_CODEX_SKILLS = [
@@ -132,6 +152,7 @@ const PURGE_OWNED_TOP_LEVEL = [
   "update-result.json",
   "update.lock",
   "update.log",
+  "update.log.1",
   "update-notes",
   "install-flags.json",
 ] as const;
@@ -337,7 +358,7 @@ export function createDefaultUninstallEnvironment(): UninstallEnvironment {
     dataDir: getPlannotatorDataDir(),
     execPath: process.execPath,
     env,
-    which: (command) => Bun.which(command),
+    which: (command) => Bun.which(command, { PATH: childPath() }),
     runCommand: defaultRunCommand,
     scheduleWindowsSelfDelete: defaultScheduleWindowsSelfDelete,
   };
@@ -393,6 +414,7 @@ export async function runPlannotatorUninstall(
   // A running Inbox writes into inbox/ until it exits: purge stops it first,
   // over its own token-guarded stop route (registry pid as the fallback).
   let inboxBlocksPurge = false;
+  let othersInbox = false;
   if (request.purge && !dataDirSafetyIssue) {
     if (request.dryRun) {
       const status = await inboxStatus(state.dataDir);
@@ -403,6 +425,11 @@ export async function runPlannotatorUninstall(
       const stopped = await stopInbox(state.dataDir);
       if (stopped.state === "stopped") {
         state.removed.push(`Stopped the running Plannotator Inbox (pid ${stopped.pid})`);
+      } else if (stopped.state === "not_running" && stopped.stale?.reason === "not_ours") {
+        // A copied data dir: its record names another data dir's Inbox, which refused the stop and
+        // runs on. Both tailnet mappings the record names are that Inbox's, so they stay up too.
+        othersInbox = true;
+        state.warnings.push(`This data dir's record named the Plannotator Inbox of another data dir (pid ${stopped.stale.pid}); it was left running.`);
       } else if (stopped.state === "still_running") {
         inboxBlocksPurge = true;
         state.errors.push(
@@ -411,7 +438,7 @@ export async function runPlannotatorUninstall(
       }
     }
     // "Reach from my tailnet": a mapping a crashed Inbox left behind (a clean stop already took its own down).
-    if (!inboxBlocksPurge && readInboxRegistry(state.dataDir)?.tailnet) {
+    if (!inboxBlocksPurge && !othersInbox && readInboxRegistry(state.dataDir)?.tailnet) {
       if (request.dryRun) {
         state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
       } else {
@@ -421,7 +448,7 @@ export async function runPlannotatorUninstall(
       }
     }
     // "Over your tailnet": the window's mapping a crashed Inbox left behind (a clean stop, including the stop above, takes its own down).
-    const kept = inboxBlocksPurge ? undefined : readInboxRegistry(state.dataDir)?.tailscale;
+    const kept = inboxBlocksPurge || othersInbox ? undefined : readInboxRegistry(state.dataDir)?.tailscale;
     if (kept?.https_port && kept.proxy_port) {
       if (request.dryRun) {
         state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${kept.https_port})`);
@@ -562,11 +589,22 @@ async function removeInboxAgentConnections(
   const plan = planInboxAgentRemoval(state.dataDir, agents, [environment.execPath, "inbox", "mcp"]);
   // The notes (inbox-agent-notes.ts): only the marked section, as the person left it.
   const notes = planInboxNoteRemoval(state.dataDir, agents, INBOX_AGENT_LABELS);
+  // Plannotator's trusted-sender token in Qwen Code (inbox-qwen-trust.ts): revoked in Qwen, whoever added the MCP entry.
+  const trust = agentHomeAllowed(agents) ? qwenTrustRemoval(state.dataDir, agents) : null;
   for (const skipped of [...plan.skipped, ...notes.skipped]) state.warnings.push(`Skipped: ${skipped}.`);
   if (request.dryRun) {
     for (const item of plan.items) state.planned.push(item.describe);
     for (const note of notes.items) state.planned.push(note.describe);
+    if (trust?.runnable) state.planned.push(trust.describe);
+    else if (trust) state.warnings.push(`Skipped: ${trust.describe}: qwen is not on PATH; run \`${trust.manual}\`.`);
     return;
+  }
+  if (trust) {
+    // Never stops the uninstall: the entries and the binary go whatever happens to the grant.
+    const result = await trust.apply().catch((error: unknown): QwenRevokeResult => ({ kind: "failed", reason: error instanceof Error ? error.message : String(error), manual: trust.manual, held: true }));
+    if (result.kind === "revoked") state.removed.push(trust.describe);
+    else if (result.kind === "forgotten") state.warnings.push(`Plannotator forgot ${trust.describe}, but qwen is not on PATH, so the grant may still be in Qwen Code; run \`${result.manual}\`.`);
+    else state.warnings.push(`Could not remove ${trust.describe}: ${result.reason}.${result.held ? " Run" : " Plannotator no longer uses it; run"} \`${result.manual}\` to remove it.`);
   }
   for (const note of notes.items) {
     const result = note.apply();
@@ -574,17 +612,20 @@ async function removeInboxAgentConnections(
     else state.warnings.push(`Could not remove the note in ${note.path}: ${result.reason}.`);
   }
   const removed: InboxAgentId[] = [];
+  const kept = new Set<InboxAgentId>();
   for (const item of plan.items) {
     const problem = await item.apply();
     if (problem) {
       state.warnings.push(`Could not remove ${item.describe}: ${problem}.`);
+      kept.add(item.agent);
       continue;
     }
     state.removed.push(item.describe);
     removed.push(item.agent);
   }
-  // A plain uninstall keeps the data: forget these records so a reinstall connects them again.
-  if (!request.purge) forgetInboxAgents(state.dataDir, removed);
+  // A plain uninstall keeps the data: forget these records so a reinstall connects them again. An agent with an
+  // entry left (one of two a move left could not go) keeps its whole record, so the next uninstall tries again.
+  if (!request.purge) forgetInboxAgents(state.dataDir, removed.filter((id) => !kept.has(id)));
 }
 
 function formatUninstallRetryCommand(request: UninstallRequest): string {
@@ -612,6 +653,7 @@ function resolveOwnedPaths(environment: UninstallEnvironment) {
   const factoryDir = env.FACTORY_CONFIG_DIR || join(homeDir, ".factory");
   const copilotDir = env.COPILOT_HOME || join(homeDir, ".copilot");
   const vibeDir = env.VIBE_HOME || join(homeDir, ".vibe");
+  const qwenDir = resolveQwenDir(env.QWEN_HOME, homeDir);
   const xdgConfigDir = env.XDG_CONFIG_HOME || join(homeDir, ".config");
   const xdgCacheDir = env.XDG_CACHE_HOME || join(homeDir, ".cache");
   const configDirs = uniquePaths([
@@ -635,6 +677,7 @@ function resolveOwnedPaths(environment: UninstallEnvironment) {
     factoryDir,
     copilotDir,
     vibeDir,
+    qwenDir,
     configDirs,
     xdgCacheDir,
     windowsInstallDir,
@@ -715,6 +758,14 @@ async function removeHostPlugins(
           "settings.json",
         ),
       ),
+    },
+    {
+      // The installers add it with `qwen extensions install`; Qwen's own
+      // command removes it from its extension store.
+      label: "Qwen Code extension plannotator",
+      command: "qwen",
+      args: ["extensions", "uninstall", "plannotator"],
+      installed: existsSync(join(paths.qwenDir, "extensions", "plannotator", "qwen-extension.json")),
     },
     {
       label: "VS Code extension backnotprop.plannotator-webview",
@@ -829,7 +880,7 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
-  for (const skill of [...CORE_SKILLS, ...KNOWLEDGE_SKILLS]) {
+  for (const skill of [...CORE_SKILLS, INBOX_SKILL, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),
       request,
@@ -884,6 +935,10 @@ function removeInstalledFiles(
     );
   }
 
+  for (const skill of QWEN_SKILLS) {
+    removePath(join(paths.qwenDir, "skills", skill), request, state);
+  }
+
   for (const command of LEGACY_COMMAND_NAMES) {
     removePath(
       join(paths.claudeDir, "commands", `${command}.md`),
@@ -897,6 +952,10 @@ function removeInstalledFiles(
         state,
       );
     }
+  }
+  // The /plannotator-inbox OpenCode stub the installer writes (never a Claude command).
+  for (const configDir of paths.configDirs) {
+    removePath(join(configDir, "opencode", "commands", `${INBOX_SKILL}.md`), request, state);
   }
 
   // @plannotator/opencode's postinstall writes the knowledge skill here so
@@ -918,6 +977,7 @@ function removeInstalledFiles(
     "plannotator-review",
     "plannotator-annotate",
     "plannotator-last",
+    INBOX_SKILL,
   ]) {
     removePath(
       join(environment.homeDir, ".gemini", "commands", `${command}.toml`),
@@ -1027,6 +1087,16 @@ function removeInstallerData(
       state,
     );
   }
+  // `usage-counts/` is left over from the usage counts for experimental
+  // features, removed before they counted anything (approval
+  // "remove-usage-counts"); v0.28.33's hidden `plannotator telemetry` could
+  // still make it. Every uninstall removes it, purge or not. config.json keys
+  // that command wrote (`usageCounts`) stay with the config and are ignored.
+  removePath(join(state.dataDir, "usage-counts"), request, state);
+  // The installers keep the Qwen Code extension's source here (Qwen reads it
+  // only to install or update); the extension itself goes with `qwen
+  // extensions uninstall` above.
+  removePath(join(state.dataDir, "qwen-code"), request, state);
 }
 
 function purgeLocalData(
@@ -2170,6 +2240,19 @@ function hasInstalledPlugin(filePath: string, pluginId: string): boolean {
   return Array.isArray(installs) && installs.length > 0;
 }
 
+/**
+ * Qwen Code's user folder: $QWEN_HOME (the folder itself, a leading ~
+ * expanded, a relative path taken from the current folder) or ~/.qwen, as in
+ * Qwen's Storage.getGlobalQwenDir.
+ */
+function resolveQwenDir(qwenHome: string | undefined, homeDir: string): string {
+  const value = qwenHome?.trim();
+  if (!value) return join(homeDir, ".qwen");
+  if (value === "~") return homeDir;
+  if (value.startsWith("~/") || value.startsWith("~\\")) return join(homeDir, value.slice(2));
+  return resolve(value);
+}
+
 function hasPiPackage(filePath: string): boolean {
   const parsed = tryReadJsonRecord(filePath);
   const packages = parsed?.packages;
@@ -2472,7 +2555,7 @@ async function defaultScheduleWindowsSelfDelete(
   target: string,
   parent: string | null,
 ): Promise<boolean> {
-  const powershell = Bun.which("powershell.exe") || Bun.which("pwsh.exe");
+  const powershell = Bun.which("powershell.exe", { PATH: childPath() }) || Bun.which("pwsh.exe", { PATH: childPath() });
   if (!powershell) return false;
 
   try {

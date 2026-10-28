@@ -7,15 +7,18 @@
  * (and WebKit as an iPhone) drives the window.
  *
  * Proves: one full-screen mode. An HTML file opens full screen with its
- * toolbar showing (pen, count, N/M, ⋯, Side by side, » Hide tools), the
+ * toolbar showing (pen, count, N/M, ⋯, Side by side, » Hide tools, × Exit
+ * full screen), the
  * page filling the window, and plan review's shared hide-tools cookie neither
  * read nor written; a pin and a comment work and the count goes up without
  * opening the drawer; Hide tucks the toolbar into its corner handle, the
  * corner and the keyboard bring it back, the pin keeps it out; the count
  * opens the comments drawer and the page narrows beside it (remembered across
  * a reload); ⋯ holds Open in and Download; Side by side puts the file beside
- * the thread and Full screen brings the toolbar back showing; Escape climbs one
- * rung per press (a draft, typed words asked about, the drawer, Annotate, the
+ * the thread and Full screen brings the toolbar back showing; × leaves full
+ * screen as Escape's last step does (HTML, markdown and the image), its
+ * tooltip showing Esc, and the corner that reveals a tucked toolbar puts the
+ * pointer on the pin, never on ×; Escape climbs one rung per press (a draft, typed words asked about, the drawer, Annotate, the
  * page's own Escape left to the page) and only then leaves full screen;
  * ⌘⇧X from the window and the page tucks and shows; `]` keeps full screen
  * with the chip; N/M opens the peek; a changed file keeps its chip and dots
@@ -231,6 +234,9 @@ test('an HTML file opens full screen: the page fills the window, one toolbar is 
   await expect(bar().locator('[data-full-view-position]')).toHaveText('1/3');
   await expect(bar().getByRole('button', { name: 'Side by side' })).toBeVisible();
   await expect(hide()).toHaveAccessibleName('Hide tools');
+  // × sits just before », which keeps the corner. Opened from the thread alone, it goes back to the thread (fullScreenOrigin.ts).
+  await expect(bar().locator('button').nth(-2)).toHaveAccessibleName('Back to the thread');
+  await expect(bar().locator('button').last()).toHaveAccessibleName('Hide tools');
   await expect(pane().locator('[data-full-view-changed]')).toHaveCount(0);
   // The shared plan-review choice is neither read nor written.
   expect((await world.context.cookies(world.url)).find((c) => c.name === 'plannotator-html-chrome')).toBeUndefined();
@@ -335,6 +341,85 @@ test('⋯ holds Open in and Download; Side by side puts the file beside the thre
   await expect(bar().locator('[data-full-view-pen]')).toBeFocused();
 });
 
+/** The component tooltip open now (ui's Tooltip popup, portaled out of the window's root). */
+const tooltip = (page = world.page) => page.locator('[data-side].bg-popover');
+
+test('× Exit full screen, just before », leaves full screen as Escape\'s last step does (HTML, markdown, the image): beside the thread, focus on the view switch, nothing remembered', async () => {
+  const page = world.page;
+  for (const name of ['turnkey.html', 'rollout.md', 'landing.png'] as const) {
+    await expect(pane()).toHaveAttribute('data-attachment-pane', world.ids[name]!);
+    await expect(pane()).toHaveAttribute('data-full-view', '');
+    const close = bar().locator('[data-full-view-close]');
+    await expect(bar().locator('button').nth(-2)).toHaveAttribute('data-full-view-close', '');
+    await expect(close).toHaveAccessibleName('Exit full screen');
+    await expect(close).not.toHaveAttribute('title');
+    // Its component tooltip names it and shows the key that does the same: Esc.
+    await close.hover();
+    await expect(tooltip()).toContainText('Exit full screen');
+    await expect(tooltip().locator('kbd')).toHaveText('Esc');
+    if (name === 'turnkey.html') await shot(page, 'html-exit-tooltip');
+    await close.click();
+    await expect(pane()).not.toHaveClass(/ib-full/);
+    await expect(bar()).toHaveCount(0);
+    await expect(pane().locator('.ib-vhead [data-view-side]')).toBeFocused();
+    // Not a pick, as with Escape: no view is remembered.
+    expect((await world.context.cookies(world.url)).find((c) => c.name === 'plannotator-inbox-file-view')).toBeUndefined();
+    // Back to full screen, then on to the next file.
+    await pane().locator('.ib-vhead [data-full-screen-toggle]').click();
+    await expect(pane()).toHaveAttribute('data-full-view', '');
+    // That press was a pick: forgotten, so the next file's check starts clean.
+    await forgetFileViewChoice(page);
+    if (name === 'rollout.md') {
+      // One Escape with focus on × leaves too: its open tooltip does not keep the press.
+      await close.hover();
+      await close.focus();
+      await expect(tooltip()).toContainText('Exit full screen');
+      await page.keyboard.press('Escape');
+      await expect(bar()).toHaveCount(0);
+      await expect(pane().locator('.ib-vhead [data-view-side]')).toBeFocused();
+      await pane().locator('.ib-vhead [data-full-screen-toggle]').click();
+      await expect(pane()).toHaveAttribute('data-full-view', '');
+      await forgetFileViewChoice(page);
+    }
+    if (name !== 'landing.png') {
+      await bar().locator('[data-full-view-position]').focus();
+      await page.keyboard.press(']');
+    }
+  }
+  // The page again, for the next test.
+  await bar().locator('[data-full-view-position]').focus();
+  await page.keyboard.press('[');
+  await page.keyboard.press('[');
+  await expect(pane()).toHaveAttribute('data-attachment-pane', world.ids['turnkey.html']!);
+  await expect(pane()).toHaveAttribute('data-full-view', '');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+});
+
+test('the corner that reveals a tucked toolbar puts the pointer on the pin, never on ×: a habitual corner click keeps full screen', async () => {
+  const page = world.page;
+  await expect(pane()).toHaveAttribute('data-full-view', '');
+  await hide().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await pointerAway();
+  await page.waitForTimeout(400);
+  const tab = (await handle().boundingBox())!;
+  const corner = { x: tab.x + tab.width / 2, y: tab.y + tab.height / 2 };
+  await page.mouse.move(corner.x, corner.y);
+  await expect(dock()).toHaveAttribute('data-bar', 'revealed');
+  // Once the toolbar has slid out, what sits under the pointer is the pin.
+  await page.waitForTimeout(400);
+  const under = await page.evaluate(({ x, y }) => {
+    const button = document.elementFromPoint(x, y)?.closest('button');
+    return button ? { close: button.hasAttribute('data-full-view-close'), hide: button.getAttribute('data-full-view-hide') } : null;
+  }, corner);
+  expect(under).toEqual({ close: false, hide: 'pin' });
+  await shot(page, 'corner-revealed', ['light']);
+  await page.mouse.click(corner.x, corner.y);
+  await expect(pane()).toHaveAttribute('data-full-view', '');
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+});
+
 test('the approved states of an HTML page, in light and dark', async () => {
   await stateShots('html');
 });
@@ -345,9 +430,10 @@ test('the approved states of an HTML page, in light and dark', async () => {
  * draft closes by its own key; typed words are asked about (Discard it);
  * the drawer closes before Annotate (from inside the page); Annotate goes to
  * Interact; in Interact the page's own Escape (its menu, its text field) stays
- * the page's; one it does not use leaves full screen.
+ * the page's; one it does not use leaves full screen, back where it was opened
+ * from: beside the thread after the switch, else the thread alone.
  */
-async function climbTheLadder(page: Page) {
+async function climbTheLadder(page: Page, from: 'side' | 'thread' = 'side') {
   const pen = bar(page).locator('[data-full-view-pen]');
   const guard = pane(page).locator('[data-step-guard]');
   // An empty draft: its own Escape closes it; nothing else moves.
@@ -396,14 +482,20 @@ async function climbTheLadder(page: Page) {
   await frame(page).locator('#q').press('Escape');
   await page.waitForTimeout(200);
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
-  // One the page does not use: full screen ends (nothing remembered), the file is beside the thread, focus on the switch's Side by side.
+  // One the page does not use: full screen ends (nothing remembered), back where it was opened from: the file beside the
+  // thread, focus on the switch's Side by side; or, opened from the thread alone, the thread as it was.
   // (A click on the headline moves the page's focus out of its field; in Interact it pins nothing.)
   await frame(page).locator('#headline').click();
   await page.waitForTimeout(200);
   await page.keyboard.press('Escape');
-  await expect(pane(page)).not.toHaveAttribute('data-full-view', '');
-  await expect(pane(page).locator('.ib-vhead [data-view-side]')).toBeFocused();
-  await expect(page.locator('[data-step-live]')).toHaveText('Side by side: the file is beside the thread.');
+  if (from === 'side') {
+    await expect(pane(page)).not.toHaveAttribute('data-full-view', '');
+    await expect(pane(page).locator('.ib-vhead [data-view-side]')).toBeFocused();
+    await expect(page.locator('[data-step-live]')).toHaveText('Side by side: the file is beside the thread.');
+  } else {
+    await expect(pane(page)).toHaveCount(0);
+    expect(new URL(page.url()).hash).toBe(`#thread=${world.threadId}`);
+  }
   expect((await page.context().cookies()).find((c) => c.name === 'plannotator-inbox-file-view')).toBeUndefined();
 }
 
@@ -439,7 +531,8 @@ test('the same Escape ladder in WebKit (Safari), on a desktop window', async () 
     await page.getByRole('button', { name: 'Open turnkey.html' }).click();
     await expect(pane(page)).toHaveAttribute('data-full-view', '');
     await expect(frame(page).locator('#headline')).toBeVisible();
-    await climbTheLadder(page);
+    // Opened from the thread alone: the last rung goes back to the thread.
+    await climbTheLadder(page, 'thread');
     await context.close();
   } finally {
     await browser.close();
@@ -531,14 +624,16 @@ test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px 
       const barBox = (await bar(page).boundingBox())!;
       expect(barBox.x + barBox.width).toBeGreaterThan(viewport.width - 40);
       expect(barBox.y + barBox.height).toBeGreaterThan(viewport.height - 80);
-      for (const control of ['[data-full-view-exit="back"]', '[data-full-view-pen]', '[data-full-view-comments]', '[data-full-view-more]', '[data-full-view-hide]']) {
+      for (const control of ['[data-full-view-exit="back"]', '[data-full-view-pen]', '[data-full-view-comments]', '[data-full-view-position]', '[data-full-view-more]', '[data-full-view-hide]']) {
         const b = (await bar(page).locator(control).boundingBox())!;
         expect(b.width).toBeGreaterThanOrEqual(44);
         expect(b.height).toBeGreaterThanOrEqual(44);
       }
-      await expect(bar(page).locator('[data-full-view-position]')).toHaveCount(0);
+      // The position is the `1/3 ⌄` pill (one tap to every file); the whole toolbar stays on screen.
+      await expect(bar(page).locator('[data-full-view-position]')).toHaveAttribute('aria-label', '1/3: file 1 of 3, turnkey.html. Show every file');
+      expect(barBox.x).toBeGreaterThanOrEqual(0);
       await expect(bar(page).getByRole('button', { name: 'Side by side' })).toHaveCount(0);
-      // ⋯'s rows are 44 px targets on a phone too (the position, Download, the other version).
+      // ⋯'s rows are 44 px targets on a phone too (Download, the other version).
       await bar(page).locator('[data-full-view-more]').click();
       const rows = page.locator('[data-full-view-menu] [role="menuitem"]');
       await expect(rows.first()).toBeVisible();

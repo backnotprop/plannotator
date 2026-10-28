@@ -6,7 +6,8 @@
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
-import { SNIPPET_PROMPT_MAX, cleanInline, cutAtWord, firstWords, foldSnippet, lookBoundary, newSinceLook, planFolds, replyWords } from './folding';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import { SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
 
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -124,6 +125,80 @@ test('a long prompt is cut at a word near 40 characters, so the answer after it 
   expect(snippet.parts[0]!.prompt.length).toBeLessThanOrEqual(SNIPPET_PROMPT_MAX + 1);
   expect(snippet.parts[0]!.full).toBe('Which of the three options in the search table should the docs site use for its first release, given the deploy cost');
   expect(cutAtWord('short', 40)).toBe('short');
+});
+
+test("a picked label's markdown (a link, code, bold) reads as its words on the line; Other and free text stay as typed", () => {
+  const prompt = 'Which discount should the promo run?';
+  const message = msg('m1', AGENT, 2, {
+    body: `:::question-multi\n${prompt}\n\n- [ ] [15% off](forecast-15.html)\n- [ ] \`FLAT10\` code\n- [ ] **20%** for members\n- [ ] No discount\n:::`,
+    questions: [
+      {
+        key: 'q-1',
+        prompt,
+        state: 'sent',
+        orphaned: false,
+        answer: { v: 1, key: 'q-1', kind: 'multi', prompt, selected: ['[15% off](forecast-15.html)', '`FLAT10` code', '**20%** for members', 'No discount'], other: 'a **custom** deal' },
+      } as never,
+    ],
+  });
+  const snippet = foldSnippet(message);
+  expect(snippet).toEqual({
+    kind: 'answers',
+    parts: [{ prompt: 'Which discount should the promo run', full: 'Which discount should the promo run', answer: '15% off, FLAT10 code, 20% for members, No discount, a **custom** deal' }],
+  });
+  expect(snippetText(snippet)).toBe('Which discount should the promo run: 15% off, FLAT10 code, 20% for members, No discount, a **custom** deal');
+  // A label that is only a picture reads as its alt text, never as nothing.
+  expect(plainLabel('![The dark mock](dark.png)')).toBe('The dark mock');
+  expect(plainLabel('snake_case and 2 * 3')).toBe('snake_case and 2 * 3');
+});
+
+test('a picked label keeps <…> text, as the live card shows it; a prompt still drops tags', () => {
+  expect(plainLabel('Array<string> type')).toBe('Array<string> type');
+  expect(plainLabel('Use <Button> component')).toBe('Use <Button> component');
+  expect(plainLabel('Return Result<T, E>')).toBe('Return Result<T, E>');
+  expect(plainLabel('x<y>z')).toBe('x<y>z');
+  expect(cleanInline('Ship <b>now</b>?')).toBe('Ship now?');
+  // An autolink reads as its address.
+  expect(plainLabel('Mail <ops@example.com>')).toBe('Mail ops@example.com');
+  expect(plainLabel('See <https://example.com/a>')).toBe('See https://example.com/a');
+});
+
+test('a picked label reads a backslash escape as its character, as the live card does', () => {
+  expect(plainLabel('\\*literal stars\\*')).toBe('*literal stars*');
+  expect(plainLabel('C\\+\\+')).toBe('C++');
+  expect(plainLabel('a \\_b\\_ c')).toBe('a _b_ c');
+});
+
+test('a picked label that links to an address with parentheses reads as its link text', () => {
+  expect(plainLabel('[Wiki](https://en.wikipedia.org/wiki/Foo_(bar))')).toBe('Wiki');
+  expect(plainLabel('![Mock](shots/mock_(dark).png)')).toBe('Mock');
+});
+
+test('a picked label: a link with brackets in its text, and a picture with no alt text', () => {
+  expect(plainLabel('[a [nested] label](x.html)')).toBe('a [nested] label');
+  expect(plainLabel('![](shots/dark.png)')).toBe('dark.png');
+});
+
+test('a picked label keeps names and arithmetic whole', () => {
+  expect(plainLabel('snake_case')).toBe('snake_case');
+  expect(plainLabel('`__init__.py`')).toBe('__init__.py');
+  expect(plainLabel('__init__.py')).toBe('__init__.py');
+  expect(plainLabel('2*3*4')).toBe('2*3*4');
+  expect(plainLabel('`*args` and `**kwargs`')).toBe('*args and **kwargs');
+  expect(plainLabel('*args and **kwargs')).toBe('*args and **kwargs');
+  expect(plainLabel('Inline `a\\*b` code')).toBe('Inline a\\*b code');
+});
+
+test('a markdown label written with a (Recommended) marker answers as its plain words, with no marker', () => {
+  // The parser takes the marker out of the label it stores; the folded line shows that label's words.
+  for (const choice of ['[Pagefind](x.html) (Recommended)', '[Recommended] [Pagefind](x.html)']) {
+    for (const line of ['', '\nRecommended: Pagefind\n']) {
+      const body = `:::question\nWhich search?\n\n- [ ] ${choice}\n- [ ] [Algolia](y.html)\n${line}:::`;
+      const stored = parseInboxQuestionBlocks(body)[0]!.parsed.choices[0]!.label;
+      expect(stored).toBe('[Pagefind](x.html)');
+      expect(answerWords({ v: 1, key: 'q-1', kind: 'single', prompt: 'Which search?', selected: [stored] })).toBe('Pagefind');
+    }
+  }
 });
 
 test("a reply of skips or of answers and skips: the store's first line is dropped too", () => {

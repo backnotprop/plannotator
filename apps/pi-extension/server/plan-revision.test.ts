@@ -77,6 +77,9 @@ describe("pi plan server revisions", () => {
 			const before = await getJson(`${server.url}/api/plan`);
 			expect(before.planRevision).toBe(0);
 			expect(before.plan).toBe(v1);
+			// #1001: the history file holding the plan on screen, so Ask AI names it by path.
+			expect(before.planPath.startsWith(dataDir)).toBe(true);
+			expect(readFileSync(before.planPath, "utf8")).toBe(v1);
 
 			const result = server.updatePlan(v2);
 			expect(result).toEqual({ revision: 1, version: 2, unchanged: false });
@@ -87,6 +90,8 @@ describe("pi plan server revisions", () => {
 			expect(after.planRevision).toBe(1);
 			expect(after.previousPlan).toBe(v1);
 			expect(after.versionInfo.version).toBe(2);
+			expect(after.planPath).not.toBe(before.planPath);
+			expect(readFileSync(after.planPath, "utf8")).toBe(v2);
 			// History went to the sandbox, never the real data dir.
 			expect(getPlanVersionPath(detectProjectName(), generateSlug(v2), 2)?.startsWith(dataDir)).toBe(true);
 		} finally {

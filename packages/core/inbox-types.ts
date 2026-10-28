@@ -17,13 +17,18 @@
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
-import { INBOX_CARD_ACTION_ON, type InboxCard } from "./inbox-cards";
+import type { InboxRowRun } from "./inbox-acp";
+import type { InboxCard } from "./inbox-cards";
+import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
+import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
 export * from "./inbox-attachments";
 export * from "./inbox-open-in";
 export * from "./inbox-delivery";
+export * from "./inbox-codex";
+export * from "./inbox-qwen";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
@@ -55,7 +60,7 @@ export function ulid(now: number = Date.now()): string {
 }
 
 /** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card. */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "run";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -72,6 +77,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   drf: /^drf_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A Board card (approval "inbox-board"). */
   crd: /^crd_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A session the Inbox runs itself over ACP (packages/server/inbox-acp-runner.ts): its agent session id. */
+  run: /^run_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -259,7 +266,29 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   opencode: "OpenCode",
   codex: "Codex",
   cursor: "Cursor",
+  grok: "Grok Build",
+  qwen: "Qwen Code",
 };
+
+/**
+ * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
+ * Pi and OpenCode 2 through Plannotator's own connection (OpenCode 1 has the
+ * tool but no wake), and Codex through MCP alone, where the Inbox puts the
+ * reply into the Codex thread with `codex queue` (Codex CLI
+ * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts),
+ * and Qwen Code through MCP alone, where the Inbox sends the reply into the
+ * running session over Qwen's cross-session messaging (Qwen Code
+ * INBOX_QWEN_WAKE_MIN_VERSION or later, macOS and Linux;
+ * packages/server/inbox-qwen-wake.ts).
+ * The one list: wording that names which agents a reply wakes reads it.
+ */
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "codex", "qwen"] as const;
+
+/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex and Qwen Code. */
+export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen"];
+
+/** The first version of each agent MCP alone wakes that can be woken. */
+export const INBOX_MCP_WAKE_MIN_VERSIONS: Readonly<Record<string, string>> = { codex: INBOX_CODEX_QUEUE_MIN_VERSION, qwen: INBOX_QWEN_WAKE_MIN_VERSION };
 
 /** How the person sees an agent: the name it gave, else its host's name, else "An agent". */
 export function inboxAgentName(author: { kind: string; host?: string | null; name?: string | null } | null | undefined): string {
@@ -467,6 +496,15 @@ export interface InboxMessage {
    * agent's answer lands in it by `reply_to`. Absent on every other message.
    */
   started_by_person?: true;
+  /**
+   * On the root of a thread the person started with compose's Board chip on
+   * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
+   * agent to track the work on the Board. The body stays as typed; what the
+   * agent receives for this message (the delivered turn, wait_for_reply,
+   * read_thread) carries `inboxBoardRequestBlock` after it. Absent on every
+   * other message.
+   */
+  board_request?: true;
   /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
@@ -743,10 +781,34 @@ export interface InboxQuestionChoice {
   description: string | null;
   recommended: boolean;
   settled: boolean;
+  /**
+   * A picture choice (`- [ ] Label — ![alt](path)`): the image, its src as
+   * the body writes it (the message image route and the captured
+   * `inline_images` take that same src). Present only on a picture choice;
+   * absent from records written before picture choices.
+   */
+  image?: { alt: string; src: string };
+}
+
+/**
+ * The optional contract lines of a question block (approval
+ * "inbox-decision-mode", agent contract lines): read at send time, kept on
+ * the record and served with the question. Each is present only when the
+ * block carries it; absent from older records.
+ */
+export interface InboxQuestionContract {
+  /** `Stakes:` — what the choice affects. */
+  stakes?: string;
+  /** `Shows:` — the one picture (`image`) or file (`link`) the decision is about, its src as written. */
+  shows?: { kind: "image" | "link"; label: string; src: string };
+  /** `Why:` — why the recommendation. */
+  why?: string;
+  /** `Reversible: no — <why>`: the answer cannot be taken back. Absent means reversible. */
+  reversible?: { value: false; why: string | null };
 }
 
 /** The parsed facts of a question block, kept on its record. */
-export interface InboxQuestionFacts {
+export interface InboxQuestionFacts extends InboxQuestionContract {
   context: string | null;
   choices: InboxQuestionChoice[];
   /** Plannotator's older names per choice (core `aliases`), in choice order; never served. */
@@ -818,10 +880,13 @@ export interface InboxQuestionRecord {
   action?: InboxActionFacts | null;
   /**
    * On an action item: what came of it. The person's Done or Can't do it (`by:
-   * "person"`), sent to the agent once the Undo window passes (then
-   * `sent_revision === revision` and `sent_reply_id` names the reply), or
-   * the agent's own `done` (`by: "agent"`: it saw it happen; nothing is
-   * sent). Null while the action item is open, and after an Undo.
+   * "person"`), sent with their reply when `staged` (the window; approval
+   * "inbox-action-items-in-reply"), else once the Undo window passes; then
+   * `sent_revision === revision` and `sent_reply_id` names the reply. Or the
+   * agent's own `done` (`by: "agent"`: it saw it happen; nothing is sent by
+   * it), with the person's mark kept under `person` when it was waiting in
+   * their draft (its note still goes with their Send). Null while the action
+   * item is open, and after it is taken back.
    */
   action_result?: InboxActionResult | null;
 }
@@ -870,6 +935,42 @@ export interface InboxActionResult {
   by: "person" | "agent";
   /** With `by: "agent"`: the agent's message whose `done` named it. */
   message_id?: string | null;
+  /**
+   * The person's Done or Can't do it waits in their reply draft and goes with
+   * their next Send, never on a timer (approval "inbox-action-items-in-reply").
+   * Absent: marked through the timed path (decision mode, the phone door, an
+   * older window), sent once the Undo window passes.
+   */
+  staged?: boolean;
+  /**
+   * With `by: "agent"`: the person's staged mark the agent's `done` settled
+   * (approval "inbox-action-items-in-reply", Q3). When it carries a note, the
+   * note still goes with the person's next Send (`inboxActionInDraft`).
+   */
+  person?: { outcome: "done" | "cant"; note: string | null; at: string } | null;
+}
+
+/**
+ * An action item whose result waits in the person's reply draft (approval
+ * "inbox-action-items-in-reply"): their staged Done or Can't do it, not sent;
+ * or, once the agent saw it done itself, the note they wrote on it, not sent.
+ * The Send carries it (`actions`), under "Action items you asked for".
+ */
+export function inboxActionInDraft(
+  q: { kind: string; state: InboxQuestionState; action_result?: InboxActionResult | null; revision: number; sent_revision: number },
+): boolean {
+  const result = q.action_result;
+  if (q.kind !== "action" || !result) return false;
+  if (result.by === "person") return result.staged === true && q.state === "picked";
+  const note = result.person?.note?.trim() ?? "";
+  return note !== "" && q.state === "closed" && !(q.revision > 0 && q.sent_revision === q.revision);
+}
+
+/** The person's own mark on an action item in their draft or sent: their staged mark, or the one the agent's done settled. */
+export function inboxActionPersonMark(result: InboxActionResult | null | undefined): { outcome: "done" | "cant"; note: string | null; at: string } | null {
+  if (!result) return null;
+  if (result.by === "person") return { outcome: result.outcome, note: result.note, at: result.at };
+  return result.person ?? null;
 }
 
 /** A question Mark read closed (`InboxQuestionRecord.set_aside`). */
@@ -899,7 +1000,7 @@ export type InboxQuestionState = "open" | "picked" | "sent" | "closed" | "supers
  * exactly (`asked_by_checked_at` omitted, as Workspaces omits it outside its
  * two comment lists), plus the Inbox's `message_id`.
  */
-export interface InboxQuestion {
+export interface InboxQuestion extends InboxQuestionContract {
   key: string;
   position: number;
   /** `"action"` for an action item; read it with `readInboxQuestionKind` (fail-closed). */
@@ -934,6 +1035,52 @@ export interface InboxQuestion {
   action_result?: InboxActionResult | null;
 }
 
+/**
+ * Decision mode (approval "inbox-decision-mode", experimental): one open or
+ * picked question or action item, with what a card needs to be answered
+ * without opening its thread. `GET /api/inbox/decisions` lists them; a
+ * read-only projection over the store (no record of its own).
+ */
+export interface InboxDecision {
+  /** `<message id>/<key>`. */
+  id: string;
+  /** The question as `GET /api/inbox/threads/:id` serves it (its `revision` is what a pick sends). */
+  question: InboxQuestion;
+  message: {
+    id: string;
+    created_at: string;
+    author: InboxAuthor;
+    /** The body's prose before its first block, cut to about 280 characters; null when there is none. */
+    excerpt: string | null;
+  };
+  /**
+   * Pictures and files the decision can show, as references only (bytes come
+   * from the attachment and message-image routes): the message's captured
+   * images whose `ref` the question names (its context, its choices), and the
+   * message's attached files.
+   */
+  pictures: {
+    inline: { attachment_id: string; ref: string; name: string; media_type: string | null; width: number | null; height: number | null }[];
+    /** `paths` (additive): the file's real path, and the path it was named by when that was a link; a `Shows:` file is matched by them. */
+    attachments: { attachment_id: string; name: string; kind: string; size: number; media_type: string | null; paths?: string[] }[];
+  };
+  /** `project.repo` (additive, the window's read): its git origin, as on a thread; refs in the card link into it. */
+  thread: { id: string; subject: string | null; thread_name: string | null; project: { id: string; name: string; repo?: InboxProjectRepo | null }; section: InboxSectionId };
+  /**
+   * The agent session that asked: one reply per session per thread
+   * (`key`: `s:<host>\u0000<session>`, or `m:<message id>` for a message with
+   * no session, which is a reply of its own).
+   */
+  session: { key: string; host: string | null; session: string | null; name: string | null; wakes: boolean };
+}
+
+export interface InboxDecisionsModel {
+  serverSession: string;
+  cursor: number;
+  /** In queue order: each session's decisions together, a thread at a time, the most blocked session first, Stopped first. */
+  decisions: InboxDecision[];
+}
+
 /** Workspaces' `NotificationQuestionSummary`: a row's questions, summed. */
 export interface InboxQuestionSummary {
   /** Open questions and action items together: an action item counts like a question for every list rule. */
@@ -944,6 +1091,13 @@ export interface InboxQuestionSummary {
   prompt: string | null;
   /** How many of `open` are action items (`kind: "action"`): the row reads "1 action item". Absent from an older Inbox. */
   actions?: number;
+  /**
+   * Action items the person marked Done or Can't do it that wait in their
+   * reply draft, the agent still stopped on them (approval
+   * "inbox-action-items-in-reply", Q2): the row keeps its section by their
+   * Stopped / Holds up (`stopped` and `holds_up` count them). Absent: none.
+   */
+  staged?: number;
 }
 
 export interface InboxMessageWire extends InboxMessage {
@@ -1034,6 +1188,21 @@ export interface InboxListRow extends InboxThreadSummary {
   unsent?: InboxRowUnsent | null;
   /** When the oldest open question was asked, or null when none is open. */
   waiting_since: string | null;
+  /**
+   * When the person pinned the thread to the sidebar (approval
+   * "inbox-pinned-threads"), or null. Only on the list model the window and
+   * the phone read (`GET /api/inbox/threads`), never on anything an agent
+   * reads. Additive: absent from an older Inbox.
+   */
+  pinned_at?: string | null;
+  /**
+   * A session the Inbox runs over ACP works in this thread, or waits on a
+   * permission (packages/server/inbox-acp-runner.ts). Only on the list model
+   * the window and the phone read, never on anything an agent reads.
+   * Additive: absent from an older Inbox.
+   */
+  run?: InboxRowRun | null;
+
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
    * a look; the Inbox's own notes, `isInboxNote`, do not).
@@ -1128,7 +1297,37 @@ export interface InboxListRow extends InboxThreadSummary {
    * agent wrote last, a 👍 not sent). Absent from an older Inbox.
    */
   delivery?: InboxRowDelivery | null;
+  /**
+   * What the row's Stopped / Holds up badge holds (approval "inbox-row-badges",
+   * hover card A): each open question or action item that stops the agent or
+   * holds something up, in thread order, at most `INBOX_ROW_WAITS_MAX`, its
+   * words capped (`INBOX_ROW_WAIT_TEXT_MAX`, `INBOX_ROW_WAIT_HOLDS_MAX`). Absent
+   * when none does, and from an older Inbox (the card then lists
+   * `questions.holds_up`). The window's list only: agents' rows never carry it.
+   */
+  waits?: InboxRowWait[];
 }
+
+/** One question behind a row's badge (`InboxListRow.waits`). */
+export interface InboxRowWait {
+  message_id: string;
+  key: string;
+  /** Its place among its message's blocks of its kind: Q1 is 0 (A1 for an action item, `key` starts `a-`). */
+  position: number;
+  prompt: string;
+  /** Its `Stopped:` line, or null. */
+  stopped: string | null;
+  /** Its `Holds up:` entries. */
+  holds_up: string[];
+}
+
+/** At most this many questions on a row's `waits`. */
+export const INBOX_ROW_WAITS_MAX = 8;
+/** A wait's prompt and `Stopped:` line are cut to this many characters ("…"). */
+export const INBOX_ROW_WAIT_TEXT_MAX = 200;
+/** At most this many `Holds up:` entries per wait, each cut to `INBOX_ROW_WAIT_ENTRY_MAX`. */
+export const INBOX_ROW_WAIT_HOLDS_MAX = 8;
+export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
 export interface InboxListSection {
   id: InboxSectionId;
@@ -1218,6 +1417,14 @@ export interface InboxHealth {
    * Inbox tabs of one browser origin share one stream (packages/inbox/sharedEvents.ts).
    */
   event_streams?: number;
+  /**
+   * This Inbox honours the peek mark on a read_thread list
+   * (`INBOX_PEEK_META_KEY`): no project made for a folder it does not know,
+   * the rows not counted as read (additive). A connection reads the session's
+   * threads only from an Inbox that says so; an older one would make a
+   * project for every folder that compacts or resumes.
+   */
+  peek?: true;
 }
 
 /** What an Inbox window reports about its browser's notification permission for its own origin. */
@@ -1293,6 +1500,35 @@ export function isInboxSoundVolume(value: unknown): value is number {
 }
 
 /**
+ * The onboarding tour (approval "inbox-onboarding-tour"; config.json
+ * `inboxTour`, through GET and POST /api/inbox/settings `tour`), kept per
+ * machine and written by the server only. `seen_at`: the tour was started;
+ * `finished_at`: it reached the end; `skipped_at`: the person left it, or
+ * chose "Connect my agents" on the entry screen. Once finished or skipped the
+ * first-run screen no longer opens on the entry screen; a quiet "Take the
+ * tour" link stays. `notify_again`: the tour ended with notifications not on,
+ * so the person's first real thread offers them once more, inline.
+ */
+export interface InboxTourState {
+  version: number;
+  seen_at: string | null;
+  finished_at: string | null;
+  skipped_at: string | null;
+  notify_again: boolean;
+}
+
+/** What POST /api/inbox/settings `tour` takes: each `true` stamps now; `notify_again` sets the flag. */
+export interface InboxTourChange {
+  seen?: boolean;
+  finished?: boolean;
+  skipped?: boolean;
+  notify_again?: boolean;
+}
+
+/** The tour's content version: the fixture's `v`, recorded with each stamp. */
+export const INBOX_TOUR_VERSION = 2;
+
+/**
  * The Inbox window's text size (config.json `inboxTextSize`, through GET and
  * POST /api/inbox/settings `text_size`): the body size in px the whole type
  * ramp scales from (packages/inbox/inbox.css `--ib-type`). 14 is the window
@@ -1317,6 +1553,7 @@ export type InboxAgentId =
   | "claude-code"
   | "codex"
   | "gemini"
+  | "qwen"
   | "cursor"
   | "windsurf"
   | "amp"
@@ -1330,6 +1567,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "claude-code",
   "codex",
   "gemini",
+  "qwen",
   "cursor",
   "windsurf",
   "amp",
@@ -1344,6 +1582,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   gemini: "Gemini CLI",
+  qwen: "Qwen Code",
   cursor: "Cursor",
   windsurf: "Windsurf / Devin",
   amp: "Amp",
@@ -1359,6 +1598,13 @@ export function inboxAgentList(ids: readonly InboxAgentId[]): string {
   const names = ids.map((id) => INBOX_AGENT_LABELS[id]);
   if (names.length <= 1) return names.join("");
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** An agent connected in another file than this Inbox's environment names (`InboxConnectReport.elsewhere`): where, and how the person moves it. */
+export function inboxElsewhereText(moved: { agent: InboxAgentId; path: string | null; now: string | null }): string {
+  const label = INBOX_AGENT_LABELS[moved.agent];
+  const why = `${moved.agent === "qwen" ? "this Inbox has another QWEN_HOME, so it" : "this Inbox"} looks in ${moved.now ?? "another file"}`;
+  return `${label} is connected in ${moved.path ?? "another file"}, but ${why}. Plannotator left both as they are; Settings → Agents shows it off here, and turning it on moves it.`;
 }
 
 /** What one `plannotator inbox` run did to the agents on this computer. */
@@ -1380,15 +1626,29 @@ export interface InboxConnectReport {
   manual: InboxAgentId[];
   /** Why each manual agent needs a person, said once per reason (the terminal prints these). */
   manual_why?: { agent: InboxAgentId; why: string }[];
+  /**
+   * Connected in another file than this run's environment names (`QWEN_HOME`
+   * differs from when the entry was added): left where it is, said once;
+   * turning the agent on in Settings → Agents moves it.
+   */
+  elsewhere?: { agent: InboxAgentId; path: string | null; now: string | null }[];
   /** Did not finish within the time limits; tried again at the next run. */
   unfinished: InboxAgentId[];
   /** Claude Code's plugin gives it the `plannotator_inbox` tool already. */
   claude_code: boolean;
+  /**
+   * Agents this run registered Plannotator with as a trusted sender, so the
+   * person's replies go into their running sessions (Qwen Code:
+   * packages/server/inbox-qwen-trust.ts). Absent from older Inboxes.
+   */
+  trusted?: InboxAgentId[];
+  /** Why registering as a trusted sender failed this run, said once per reason. */
+  trust_failed?: { agent: InboxAgentId; reason: string }[];
 }
 
 /** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */
-export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini";
-export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode"];
+export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini" | "qwen" | "cursor";
+export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "qwen", "pi", "opencode", "cursor"];
 
 /**
  * Where an agent's note would go and how it stands:
@@ -1405,7 +1665,7 @@ export interface InboxAgentNoteStatus {
   path: string | null;
   /** The file is a link; `target` is where it leads (shown). */
   target: string | null;
-  state: "absent" | "added" | "edited" | "damaged" | "refused" | "unavailable";
+  state: "absent" | "added" | "edited" | "damaged" | "refused" | "unavailable" | "manual";
   /** Adding it creates the file. */
   create: boolean;
   /** Plannotator created the file (removing the note deletes it when nothing else is left). */
@@ -1425,7 +1685,7 @@ export interface InboxAgentRow {
   reach: {
     kind: "tool" | "mcp" | "manual" | "none";
     on: boolean;
-    state: "connected" | "off" | "removed" | "foreign" | "not_connected" | "manual" | "unreadable";
+    state: "connected" | "off" | "removed" | "foreign" | "not_connected" | "manual" | "unreadable" | "elsewhere";
     path: string | null;
     /** PLANNOTATOR_INBOX_TOOL decides it. */
     locked: boolean;
@@ -1451,6 +1711,14 @@ export interface InboxAgentRow {
    * alone: 1), for the plugin line that version reads.
    */
   plugin?: { installed: boolean; disabled?: boolean; managed?: boolean; generation?: "1" | "2" } | null;
+  /**
+   * An agent its MCP connection alone wakes (INBOX_MCP_WAKING_HOSTS: Codex,
+   * Qwen Code), connected through MCP: whether this Inbox can wake it now
+   * (Codex: a Codex CLI INBOX_CODEX_QUEUE_MIN_VERSION or later it can run;
+   * Qwen Code: a trusted-sender token, not on Windows). Absent for every
+   * other row and from an older Inbox.
+   */
+  wakes?: boolean;
 }
 
 export interface InboxAgentsModel {
@@ -1483,20 +1751,57 @@ export interface InboxAgentsModel {
 export type InboxToolHostId = "claude-code" | "pi" | "opencode";
 
 /**
+ * The runtime a polling session runs in, as the window names its fix: Claude
+ * Code, Pi, Oh My Pi (polls as host `pi`, says `plugin.host: "oh-my-pi"`), or
+ * OpenCode 2 (host `opencode`; OpenCode 1 does not poll).
+ */
+export type InboxReloadRuntime = "claude-code" | "pi" | "oh-my-pi" | "opencode";
+
+/**
  * A polling session runs an older Plannotator plugin than a restart would
- * load (`fix: "restart"`), or the installed plugin is itself behind this
- * Inbox's Plannotator, so a restart alone does not help (`fix:
- * "update_plugin"`; Pi: `"update_extension"`, `pi update --extensions` then
- * `/reload`). `loaded` is the version the session runs (null when its
- * connection predates reporting it), `installed` what a restart loads (Pi:
- * the Inbox's own version, which the extension should match).
+ * load (`fix: "restart"`, Claude Code), or the installed plugin is itself
+ * behind this Inbox's Plannotator, so a restart alone does not help (`fix:
+ * "update_plugin"`). Pi, Oh My Pi and OpenCode 2 (packages/server/inbox-restart.ts):
+ * `"reload"` when reloading the host loads newer code than the session runs
+ * (`reload_command`: Pi `/reload`, Oh My Pi `/restart`, OpenCode 2
+ * `opencode2 reload` or `opencode2 plugin update`), `"update_extension"` when
+ * the package on disk is itself behind this Inbox (`update_command`, then
+ * `reload_command`). `loaded` is the version the session runs (null when its
+ * connection predates reporting it), `installed` what a restart loads (Pi with
+ * an older connection: the Inbox's own version, which the extension should match).
  */
 export interface InboxSessionOutdated {
   loaded: string | null;
   installed: string | null;
-  fix: "restart" | "update_plugin" | "update_extension";
-  /** With `update_plugin`: the command that updates the plugin itself. */
+  fix: "restart" | "update_plugin" | "update_extension" | "reload";
+  /** With `update_plugin` / `update_extension`: the command that updates the plugin itself. */
   update_command?: string;
+  /** Which runtime the session runs in (absent from an older Inbox: Claude Code, or Pi for `update_extension`). */
+  runtime?: InboxReloadRuntime;
+  /** What loads the new code in that runtime: `/reload`, `/restart`, `opencode2 reload`. Absent for Claude Code (`/reload-plugins`). */
+  reload_command?: string;
+  /** Typed in the session (`/reload`, `/restart`) or run in a shell (`opencode2 reload`). */
+  reload_where?: "session" | "shell";
+  /** When the reload does not take: `opencode2 service restart`. */
+  fallback_command?: string;
+  /**
+   * OpenCode 2: the config pins this exact spec (`@plannotator/opencode@0.28.20`), so
+   * `opencode2 plugin update` does nothing: the person changes it to `pin_to`, then reloads.
+   */
+  pinned_spec?: string;
+  pin_to?: string;
+  /** OpenCode 2: `all` when the plugin's configured spec is unknown, so `opencode2 plugin update` names no target and updates every outdated plugin. */
+  update_scope?: "all";
+}
+
+/**
+ * The live sessions a reload alone brings up to date, per runtime: the
+ * sidebar's "Reload Claude Code N" ("Reload agents N" when more than one
+ * runtime has some). Additive beside `restart_claude_code`.
+ */
+export interface InboxRestartAgents {
+  total: number;
+  runtimes: Partial<Record<InboxReloadRuntime, number>>;
 }
 
 /** One open session as Settings → Agents lists it. */
@@ -1513,6 +1818,8 @@ export interface InboxOpenSession {
   outdated: InboxSessionOutdated | null;
   /** `cd <folder> && claude --resume <session>` (Claude Code, with a known folder); null otherwise. */
   restart_command: string | null;
+  /** The runtime it runs in (Pi's group holds Oh My Pi sessions too). Absent from an older Inbox. */
+  runtime?: InboxReloadRuntime;
 }
 
 export interface InboxHostSessions {
@@ -1557,15 +1864,90 @@ export type InboxToolCostHost = "pi" | "opencode";
  * card action and 9,364 (2,268) with it, estimated, not re-measured on Pi.
  * Renaming "to-do" to "action item" (owner, #2059) moved the entry by 5 bytes
  * (8,228; 1,962 tokens), and "Action items you asked for" by 5 more (8,233;
- * 1,963 tokens): the stated cost stands.
+ * 1,963 tokens): the stated cost stands. The question contract lines
+ * (approval "inbox-decision-mode": `Stakes:`, `Shows:`, `Why:`,
+ * `Reversible:`, picture choices) added one paragraph to `body`, measured on
+ * Pi with the cost test (INBOX_TOOL_COST_DUMP): 8,248 → 8,701 bytes, 1,964 →
+ * 2,086 tokens with o200k_base (+453 bytes, +122 tokens). So 8,701 bytes
+ * without the card action and 9,817 with it (9,364 + 453, estimated).
+ * The screenshot nudge in `attachments` ("For something visual, a screenshot
+ * or image usually reads fastest…") added one sentence, measured on Pi with
+ * the cost test: 8,701 → 8,841 bytes (+140; about +30 tokens, so the rounded
+ * token figure stands). So 8,841 without the card action and 9,957 with it
+ * (9,817 + 140, estimated).
+ * The Board's step 2 switched the card action on (INBOX_CARD_ACTION_ON), with
+ * its `ref` argument and the Backlog wording: measured on Pi with the cost
+ * test, 10,131 bytes; tokens scaled from the last o200k_base count (2,086 for
+ * 8,701 bytes, so about 2,430) and stated high, as always. The review then let
+ * `column` take `asked` (the old name of backlog, listed in the schema and
+ * its description): measured again, 10,171 bytes (+40).
+ * Then the Board became something the person turns on (config.json
+ * `inboxBoard`, off by default; approval "inbox-board" 2026-10-26): an Inbox
+ * lists `card` only while it is on, so what a user gets by default is the
+ * entry WITHOUT `card`, and that is the stated cost. With the Board on it is
+ * the 10,171 bytes above.
+ * The title rule (approval "inbox-board-amendments-2026-10-27": "2–5 words
+ * naming the work, never a sentence", and link the thread where the person
+ * decides) in the card description and its `title` and `thread_id`
+ * arguments: measured on Pi with the cost test and the Board on, 10,171 →
+ * 10,303 bytes (+132; about +35 tokens, so the rounded, high token figure
+ * stands).
+ * The reply_to check (INBOX_REPLY_TO_CHECK, the misfiled-thread AAR,
+ * 2026-10-27) added one sentence to the agent tool's `reply_to`: measured on
+ * Pi with the cost test, 8,841 → 8,964 bytes (+123; about +30 tokens, so the
+ * rounded token figure stands). With the Board on 10,294 (10,171 + 123,
+ * estimated).
+ * Then the rules agents must get with no setup (the owner, 2026-10-27): the
+ * wake note's "reply_to set to that reply id, never an id from memory",
+ * read_thread's and search's leads (listing every thread, older messages),
+ * `asked_by` and `include_resolved` described, and the Recommended: line in
+ * `body`: measured on Pi, 9,227 bytes (+263, about +70 tokens). With the
+ * Board on 10,557 (10,294 + 263, estimated).
+ * Then the chat-or-Inbox rule in the lead (the owner, 2026-10-27), with the
+ * wake note and get_guide_brief's lead shortened to fit: measured on Pi,
+ * 9,283 bytes (+56); its one wording ("when the person writes in the chat",
+ * "with a blocking question tool (AskUserQuestion or similar)"): 9,298 bytes
+ * (+15). With the Board on 10,760 (the Board title rule's 10,303 + this
+ * branch's 457, estimated).
+ * Then the Board-off line (INBOX_TOOL_BOARD_OFF_NOTE, the owner's answer of
+ * 2026-10-27: with the Board off, one short line that it exists and
+ * `plannotator card --help`): measured on Pi, 9,416 bytes (+118; about +25
+ * tokens, so the rounded, high token figure stands). With the Board on the
+ * line is left out: 10,760 stands.
+ * Then where refs link (INBOX_REF_LINK_RULE, 171 characters, on `body`):
+ * 9,591 bytes (+175, about +40 tokens, estimated). With the Board on, the
+ * card's `say` and `you` add a 36-character pointer each: 11,009 (+249,
+ * estimated).
+ * Then the follow-through rule in the lead (INBOX_FOLLOW_THROUGH_RULE, the
+ * owner's sentence, 2026-10-27: 252 bytes in place of "No routine
+ * progress.", 20), paid for in the description by shorter action leads
+ * (send_message, wait_for_reply, resolve_message, read_thread, whose detail
+ * moved to its `thread_id` field, get_guide_brief), the wake note's "A reply
+ * arrives" and the lead's last sentence; "Pass an idempotency_key so a retry
+ * never posts twice." moved from the server instructions into that field's
+ * description. Measured on Pi over the ref-link figure: 9,733 bytes (+142,
+ * 1.5%; about +35 tokens). The stated cost stands.
+ * Then the fences that draw in `body` (approval "inbox-inline-html",
+ * 2026-10-28: Mermaid and Graphviz diagrams, live HTML pages): one sentence,
+ * measured on Pi with the ref rule in, 9,848 bytes (+257, about +65 tokens).
+ * With the Board on 11,267 (11,009 + 258, estimated).
+ * Then T3 Code's height rule in that sentence ("Let content set its
+ * height: no vh units or height:100% on html or body"): measured on Pi, 9,920
+ * bytes (+72, about +18 tokens, so the rounded token figure stands). With the
+ * Board on 11,339 (11,267 + 72, estimated).
+ * With the follow-through rule merged in as well: measured on Pi, 10,062
+ * bytes (+142, about +35 tokens; the rounded token figure stands). With the
+ * Board on 11,481 (11,339 + 142, estimated).
  */
-const INBOX_TOOL_COST_NOW = INBOX_CARD_ACTION_ON ? { bytes: 9364, tokens: 2700 } : { bytes: 8189, tokens: 2300 };
+const INBOX_TOOL_COST_NOW = { bytes: 10062, tokens: 2700 };
+/** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11481, tokens: 3100 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
 };
 
-/** "about 8 KB, roughly 2,300 tokens" for a host's measured cost. */
+/** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
 export function inboxToolCostText(host: InboxToolCostHost): string {
   const cost = INBOX_TOOL_COST[host];
   return `about ${Math.round(cost.bytes / 1000)} KB, roughly ${cost.tokens.toLocaleString("en-US")} tokens`;
@@ -1617,11 +1999,26 @@ export interface InboxRowUnsent {
   picks: number;
   /** Comments (on attached files, the guided review, the messages) waiting for a Send. */
   comments: number;
+  /** Action items marked Done waiting in the reply draft ("Draft · 1 done"; approval "inbox-action-items-in-reply"). Absent: none. */
+  done?: number;
+  /** Action items marked Can't do it waiting in the reply draft ("Draft · 1 can't do"). Absent: none. */
+  cant?: number;
+}
+
+/**
+ * Archived: resolved, and not come back. Not shown in the window's list;
+ * Settings lists it. A thread an agent wrote in after the archive is back in
+ * the list while something there waits, and returns here once handled. One
+ * rule for the server's list (shared/inbox/list.ts re-exports it) and the
+ * window (a list row's count, a pinned row).
+ */
+export function inboxRowArchived(row: Pick<InboxListRow, "resolved_at" | "back_from_archive">): boolean {
+  return row.resolved_at !== null && row.back_from_archive !== true;
 }
 
 /** The thread holds something the person has not sent: reply words, picks or comments. */
 export function inboxHasUnsent(unsent: InboxRowUnsent | null | undefined): boolean {
-  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0);
+  return !!unsent && (unsent.reply_at !== null || unsent.picks > 0 || unsent.comments > 0 || (unsent.done ?? 0) > 0 || (unsent.cant ?? 0) > 0);
 }
 
 /**
@@ -1636,6 +2033,18 @@ export interface InboxReplyDraft {
   body: string;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
+ * window furniture only. Kept in `inbox/pins.json`, in pin order, outside the
+ * event log, so agents, the MCP, search and the phone's event stream never
+ * see it. A pin changes nothing about the thread: not its section, routing,
+ * questions or delivery.
+ */
+export interface InboxPin {
+  thread_id: string;
+  pinned_at: string;
 }
 
 /** A row on the Drafts page's "Replies not sent" (`GET /api/inbox/drafts` `replies`). */
@@ -1660,6 +2069,14 @@ export interface InboxDraft {
    * out again from the body when the draft opens).
    */
   thread_name?: string;
+  /**
+   * The Board card it was started for (the opened card's Create thread): the
+   * Send that sends the draft links the new thread to this card. Absent for
+   * any other draft.
+   */
+  card?: { id: string; title: string };
+  /** Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board. */
+  board_request?: true;
 }
 
 /** A draft's chip: its chosen session is live, has ended, or none was chosen. */
@@ -1735,4 +2152,69 @@ export function inboxEngineTooOldForSendNow(version: string | null | undefined):
     if (have[i]! !== min[i]!) return have[i]! < min[i]!;
   }
   return false;
+}
+
+/**
+ * Settings → Prompts (approval "inbox-prompts-page", #2194): what Plannotator
+ * tells agents, as `GET /api/inbox/settings` carries it in `prompts`.
+ */
+export const INBOX_PROMPT_HOSTS = ["claude-code", "pi", "opencode"] as const;
+export type InboxPromptHost = (typeof INBOX_PROMPT_HOSTS)[number];
+
+/** One of the plan, review and annotate prompts (config.json `prompts.<group>.<name>`), read-only in the window. */
+export interface InboxPromptItem {
+  /** `prompts.<group>.<name>`, the config.json key. */
+  key: string;
+  group: "plan" | "review" | "annotate";
+  /** The group's heading: Plan, Code review, Annotate. */
+  group_label: string;
+  label: string;
+  /** Plannotator's own text. */
+  default: string;
+  /** The text in effect for an agent without its own: config.json's, else the default. */
+  text: string;
+  /** config.json sets this prompt (the shared text, or one agent's own). */
+  custom: boolean;
+  /** The agents config.json gives their own text for this prompt (`prompts.<group>.runtimes.<agent>.<name>`). */
+  runtimes: string[];
+  /** A fact about the default, shown while it is in effect ("OpenCode has a shorter default."). */
+  note: string | null;
+}
+
+export interface InboxPromptsSettings {
+  /** The Inbox reminder at session start (config.json `prompts.inbox`). */
+  reminder: {
+    /** `prompts.inbox.reminder`: the person's shared text, or null (the default). */
+    shared: string | null;
+    /** `prompts.inbox.runtimes.<agent>.reminder`: an agent's own text (it wins), or null. */
+    runtimes: Record<InboxPromptHost, string | null>;
+    /** The built-in lines: for hosts whose reply comes back by itself, and for those without it (OpenCode 1). */
+    defaults: { wake: string; no_wake: string };
+    /** The most characters a custom reminder may hold; a longer one is refused. */
+    max: number;
+    /** Whether each agent gets a reminder at all (`inboxReminder`, with the Inbox tool). */
+    on: Record<InboxPromptHost, boolean>;
+    /**
+     * Whether each agent's reply comes back by itself, so its default is `defaults.wake`;
+     * false: the no-wake default (OpenCode 1). Absent from an older Inbox: all true.
+     */
+    wakes?: Record<InboxPromptHost, boolean>;
+    /**
+     * Text config.json holds that is over `max` and so is ignored (the agent gets the
+     * next text in line): its length, else null. Absent from an older Inbox.
+     */
+    over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
+    /** Whether this page may change it: false through the tailnet (it reaches every agent on this computer). */
+    editable: boolean;
+  };
+  /** The plan, review and annotate prompts, in the order the page lists them. */
+  others: InboxPromptItem[];
+}
+
+/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text, null (or blank) deletes the key. */
+export interface InboxPromptsChange {
+  inbox: {
+    reminder?: string | null;
+    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
+  };
 }

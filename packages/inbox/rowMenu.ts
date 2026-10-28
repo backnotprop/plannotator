@@ -4,10 +4,10 @@
  * row, and the link it copies. Pure.
  */
 
-import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
 import { canToggleRead, offersRowMarkRead } from './markRead';
 
-export type RowMenuAction = 'copy-link' | 'copy-id' | 'read' | 'unread' | 'archive';
+export type RowMenuAction = 'pin' | 'unpin' | 'copy-link' | 'copy-id' | 'read' | 'unread' | 'archive';
 
 /**
  * The thread's address: the Inbox's one address on this computer
@@ -23,18 +23,23 @@ export function threadLink(threadId: string, base: { url?: string | null; via?: 
 }
 
 /**
- * What the menu offers for a row, in order. Copy link and Copy thread ID
+ * What the menu offers for a row, in order. Pin thread (Unpin thread on a
+ * pinned row) first, in its own group, when the Inbox keeps pins (`pinned`
+ * is null on an older one: no item); then Copy link and Copy thread ID
  * always; then Mark read where the row's hover action offers it, or Move
  * back on a row marked read; then Archive on a row not archived already (a
  * row shown archived in place, or one that came back from the archive,
- * which Mark read sends back there).
+ * which Mark read sends back there). `drawn`: the group the row sits in on
+ * screen (a seen update the list still holds in New keeps Mark read).
  */
-export function rowMenuActions(row: InboxListRow, canMarkRead: boolean): RowMenuAction[] {
-  const actions: RowMenuAction[] = ['copy-link', 'copy-id'];
+export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxSectionId | null = null): RowMenuAction[] {
+  const actions: RowMenuAction[] = [];
+  if (pinned !== null) actions.push(pinned ? 'unpin' : 'pin');
+  actions.push('copy-link', 'copy-id');
   if (canMarkRead) {
     const read = (row.read_at ?? null) !== null;
     if (read && canToggleRead(row)) actions.push('unread');
-    else if (!read && offersRowMarkRead(row)) actions.push('read');
+    else if (!read && offersRowMarkRead(row, drawn)) actions.push('read');
   }
   if (row.resolved_at === null) actions.push('archive');
   return actions;

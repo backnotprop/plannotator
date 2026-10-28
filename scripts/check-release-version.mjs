@@ -11,6 +11,17 @@ const JSON_VERSION_PATHS = [
   "apps/copilot/plugin.json",
   "packages/server/package.json",
 ];
+// Copilot CLI reads .github/plugin/marketplace.json before .claude-plugin/. Its
+// plugin reference marks an entry's `version` optional but doesn't say how
+// `/plugin` decides a newer version is available upstream, so the field stays
+// and must match the release (it sat at 0.17.0 from 0.17.0 to 0.28.32).
+const MARKETPLACE_ENTRIES = [
+  { relativePath: ".github/plugin/marketplace.json", plugin: "plannotator-copilot" },
+];
+// Exempt: apps/droid-plugin/.factory-plugin/plugin.json. Droid tracks a
+// relative-path plugin in a git marketplace by the marketplace commit hash and
+// treats the manifest `version` as metadata only, so its value can neither hold
+// back nor trigger an update (https://docs.factory.com/cli/configuration/plugins).
 const OPENPACKAGE_PATH = "openpackage.yml";
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
 
@@ -51,6 +62,21 @@ function readJsonVersion(root, relativePath) {
   return version;
 }
 
+function readMarketplaceVersion(root, { relativePath, plugin }) {
+  const parsed = JSON.parse(readFileSync(resolve(root, relativePath), "utf8"));
+  const entries = Array.isArray(parsed?.plugins)
+    ? parsed.plugins.filter((entry) => entry?.name === plugin)
+    : [];
+  if (entries.length !== 1) {
+    throw new Error(`${relativePath} must list plugin ${plugin} exactly once`);
+  }
+  const version = Object.getOwnPropertyDescriptor(entries[0], "version")?.value;
+  if (typeof version !== "string") {
+    throw new Error(`${relativePath} must contain a string version for plugin ${plugin}`);
+  }
+  return version;
+}
+
 function readOpenpackageVersion(root) {
   const contents = readFileSync(resolve(root, OPENPACKAGE_PATH), "utf8");
   const matches = [...contents.matchAll(/^version:\s*([^\s#]+)\s*(?:#.*)?$/gm)];
@@ -65,6 +91,10 @@ function checkReleaseVersion({ root, tag }) {
     ...JSON_VERSION_PATHS.map((relativePath) => ({
       relativePath,
       version: readJsonVersion(root, relativePath),
+    })),
+    ...MARKETPLACE_ENTRIES.map((entry) => ({
+      relativePath: entry.relativePath,
+      version: readMarketplaceVersion(root, entry),
     })),
     {
       relativePath: OPENPACKAGE_PATH,

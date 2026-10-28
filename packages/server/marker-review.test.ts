@@ -84,9 +84,9 @@ const validReview: MarkerReviewOutput = {
 // ===========================================================================
 
 describe("buildMarkerCommand: cursor", () => {
-  test("uses the `agent` binary, read-only flags, prompt as trailing argv", () => {
+  test("uses the `cursor-agent` binary, read-only flags, prompt as trailing argv", () => {
     const { command } = buildMarkerCommand(cursor, "review this", "gpt-5", "/repo");
-    expect(command[0]).toBe("agent");
+    expect(command[0]).toBe("cursor-agent");
     expect(command).toContain("-p");
     expect(command[command.indexOf("--mode") + 1]).toBe("ask");
     expect(command[command.indexOf("--sandbox") + 1]).toBe("enabled");

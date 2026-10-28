@@ -34,7 +34,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { forgetFileViewChoice } from './file-view';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { FORCE_PLAIN_TEXT_PASTE_FLAG } from '../../packages/ui/utils/pasteInsert';
+import { chromiumPasteBugAffected, FORCE_PLAIN_TEXT_PASTE_FLAG } from '../../packages/ui/utils/pasteInsert';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -182,6 +182,44 @@ test('the reply box: after a pick, after a click on the message, after a chip', 
   await dictate(page, 'After a chip. ');
   await expectLanded(box, 'After a chip.');
   expect(await box.inputValue()).toBe('Focused dictation. After a pick. After reading. After a chip. ');
+});
+
+test('a press in the reply box beside its text (the row of chips) puts the caret in the reply: typing and a dictation with Option held first land', async () => {
+  const p = await context.newPage();
+  try {
+    await p.goto(`${url}#thread=${threadId}`);
+    // Earlier tests leave a reply draft, which reopens the box by itself (see openReply).
+    await openReply(p);
+    const rbox = p.locator('section.ib-pane .ib-rbox');
+    const box = rbox.locator('textarea');
+    await expect(box).toBeFocused();
+    // An earlier test's picks may have drafted a reply: start from the person's own words.
+    await box.fill('Typed first. ');
+    // The box is drawn as one field (its focus ring is always on); its lower part is the chips' row, not the textarea.
+    const outer = (await rbox.boundingBox())!;
+    const text = (await box.boundingBox())!;
+    const chips = (await rbox.locator('.ib-rfoot').boundingBox())!;
+    expect(chips.y).toBeGreaterThanOrEqual(text.y + text.height - 1);
+    // Leave the box (a click on the message), then press inside it, right of the chips, as a person clicks into a field.
+    await p.getByText('I checked the 409 row.').click();
+    await expect(box).not.toBeFocused();
+    await p.mouse.click(outer.x + outer.width - 24, chips.y + chips.height / 2);
+    await expect(box).toBeFocused();
+    await p.keyboard.type('Then typed. ');
+    // Hex starts on Option (held, then released), then pastes with ⌘V.
+    await p.keyboard.down('Alt');
+    await p.waitForTimeout(400);
+    await p.keyboard.up('Alt');
+    await dictate(p, 'Then dictated.');
+    await expect(box).toHaveValue('Typed first. Then typed. Then dictated.');
+    // A press on a control in the box keeps its own meaning: the chip's button is pressed, not stolen.
+    const chip = rbox.locator('[data-skip-chip]');
+    const before = await chip.getAttribute('data-skip-chip');
+    await rbox.locator('[data-skip-toggle]').click();
+    await expect(chip).toHaveAttribute('data-skip-chip', before === 'keep' ? 'skip' : 'keep');
+  } finally {
+    await p.close();
+  }
 });
 
 test('a word double-clicked in the message (selected, nothing to comment on) does not keep the dictation out of the reply box', async () => {
@@ -500,6 +538,16 @@ test('the workaround on, the bug not hit: a dictation is inserted exactly once (
 test('an engine without the bug (this Chromium is neither 155 nor 156): the browser pastes, the page does not', async () => {
   const p = await context.newPage();
   try {
+    // Playwright 1.64 ships Chromium 156: on macOS that engine HAS the bug, so
+    // the workaround is on and this premise does not hold. Linux (CI) and any
+    // other version keep the native path. The gate is the app's own.
+    const affected = chromiumPasteBugAffected(
+      await p.evaluate(() => {
+        const nav = navigator as Navigator & { userAgentData?: { brands?: { brand: string; version: string }[]; platform?: string } };
+        return { userAgent: nav.userAgent, platform: nav.platform, userAgentData: nav.userAgentData ? { brands: nav.userAgentData.brands, platform: nav.userAgentData.platform } : null };
+      }),
+    );
+    test.skip(affected, 'this Chromium is 155 or 156 on macOS, where the workaround is on by design');
     await recordPasteInputs(p, { drop: false, force: false });
     await p.goto(`${url}#thread=${threadId}`);
     await openReply(p);

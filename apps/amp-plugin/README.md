@@ -6,6 +6,7 @@ This is a native Amp plugin for the manual Plannotator workflows:
 - `Plannotator: Review changes or PR` (leave blank for local changes)
 - `Plannotator: Annotate file`
 - `Plannotator: Annotate last answer`
+- `Plannotator: Open Inbox` (opens the Plannotator Inbox in the browser and shows its address)
 
 Amp commands live in the command palette, not as slash commands. This plugin does
 not intercept Amp's planning flow.

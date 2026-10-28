@@ -79,6 +79,16 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * as text (Mermaid) or a note says the viewer does not draw it (HTML).
    */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => React.ReactNode | null;
+  /**
+   * A control the host raises in a small tab out of a section card's top-right
+   * edge (the Inbox: its Split | Unified switch on the first card). Called with
+   * each card's index (the "Everything else" card's is the number of
+   * sections); answering null (or absent) leaves that card exactly as it is.
+   * The card draws the tab in its own background and border, only as wide as
+   * the control; the host draws only the control. The tab assumes the guide
+   * sits on `--background`, as it does in every host.
+   */
+  renderSectionTab?: (index: number) => React.ReactNode | null;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

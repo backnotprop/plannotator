@@ -147,6 +147,13 @@ export function realHost(options: RealHostOptions): RealHost {
   return host
 }
 
+/**
+ * The name the engine gives the registered `plannotator_inbox` tool
+ * (`$.tool.register` answers `mcp__<server>__<name>`; the plugin's server is
+ * `plannotator`). register.ts hands it to the mod as `inboxToolName`.
+ */
+export const CLAUDE_INBOX_TOOL_NAME = 'mcp__plannotator__plannotator_inbox'
+
 /** One Claude Code process on one session, wired to the mod as register.ts wires it. */
 export class ClaudeSession {
   readonly host: RealHost
@@ -176,7 +183,7 @@ export class ClaudeSession {
       sessionId: options.sessionId,
       dataDir: options.dataDir,
       interactive: true,
-      ...(inboxTools ? { inboxTools, cwd: async () => options.cwd } : {}),
+      ...(inboxTools ? { inboxTools, inboxToolName: CLAUDE_INBOX_TOOL_NAME, cwd: async () => options.cwd } : {}),
     })
     return new ClaudeSession(host, mod, inboxTools, options.dataDir, options.cwd)
   }
@@ -192,7 +199,7 @@ export class ClaudeSession {
       sessionId: newSessionId,
       dataDir: this.dataDir,
       interactive: true,
-      ...(this.inboxTools ? { inboxTools: this.inboxTools, cwd: async () => this.cwd } : {}),
+      ...(this.inboxTools ? { inboxTools: this.inboxTools, inboxToolName: CLAUDE_INBOX_TOOL_NAME, cwd: async () => this.cwd } : {}),
     })
   }
 
@@ -236,6 +243,18 @@ export class ClaudeSession {
     this.mod.onPromptSubmitting(ref)
     this.mod.onPromptEntered({ ...ref, text })
     if (!this.running) await this.startTurn(text)
+  }
+
+  /**
+   * Another plugin's `$.prompt.submit` (a connector delivering its own message), at idle: our
+   * prompt.submit hook sees it bare with origin `plugin`, then its turn starts under that plugin's frame.
+   */
+  async otherPluginPrompt(name: string, text: string): Promise<string> {
+    if (this.running) throw new Error('another plugin prompts at idle')
+    const ref = { fromUs: false, originKind: 'plugin' }
+    this.mod.onPromptSubmitting(ref)
+    this.mod.onPromptEntered({ ...ref, text })
+    return this.startTurn(`The ${name} plugin sent a message: ${text}`)
   }
 
   /** `$.prompt.submit`: waits for idle, then its turn starts under the plugin's frame. */

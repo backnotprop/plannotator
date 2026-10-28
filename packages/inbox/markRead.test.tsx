@@ -319,8 +319,9 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
 });
 
-test.skipIf(!hasDom)('the header leads with Mark read; Archive sits beside the close at the right, with nothing between them', async () => {
+test.skipIf(!hasDom)('the header leads with Mark read; Archive sits beside the close at the right, only the hairline between them', async () => {
   // Owner, 2026-10-16: "the archive button needs to move next to the close button. Mark read should be the furthest."
+  // The hairline between them is approval "inbox-thread-artifacts" (2026-10-23): icons at the right, then | and the close.
   const el = await renderApp(`#thread=${ids.stopped}`);
   await until(() => el.querySelector('section.ib-pane .ib-phead [data-mark-read]') !== null, 'the header');
   const head = el.querySelector('section.ib-pane .ib-phead')!;
@@ -331,13 +332,15 @@ test.skipIf(!hasDom)('the header leads with Mark read; Archive sits beside the c
   // DOM order is the tab order: Mark read first, Archive then the close last.
   expect(buttons[0]).toBe(markRead as HTMLButtonElement);
   if (close) {
-    expect(buttons.at(-1)).toBe(close as HTMLButtonElement);
-    expect(archive.nextElementSibling).toBe(close);
+    expect(buttons.at(-1) === close).toBe(true);
+    expect(archive.nextElementSibling?.className).toBe('ib-vsep');
+    expect(archive.nextElementSibling?.nextElementSibling === close).toBe(true);
+    expect(head.querySelectorAll('.ib-vsep').length).toBe(1);
   } else {
-    expect(buttons.at(-1)).toBe(archive as HTMLButtonElement);
+    expect(buttons.at(-1) === archive).toBe(true);
+    expect(head.querySelectorAll('.ib-vsep').length).toBe(0);
   }
   expect(archive.getAttribute('aria-label')).toBe('Archive the thread');
-  expect(head.querySelectorAll('.ib-vsep').length).toBe(0);
 });
 
 test.skipIf(!hasDom)('the pressed button moves it back; the toast Undo does the same', async () => {

@@ -7,11 +7,12 @@
  * loaded at startup (generated/config.ts and others) stay the OLD ones in the
  * host's module registry. Bun then fails to link ("Export named 'x' not found
  * in module …"), and jiti hands back `undefined` for the missing export. The
- * package itself is fine; the host has to restart to load it whole.
+ * package itself is fine; the host has to reload it (Pi `/reload`, Oh My Pi
+ * `/restart`) to load it whole.
  *
  * So the version this module was loaded with is recorded once, and every lazy
  * import first reads package.json on disk again (one small synchronous read).
- * A different version stops the import with a message that says to restart.
+ * A different version stops the import with a message that names that command.
  * A link error that slips past the check (a read that raced the upgrade) gets
  * the same message.
  */
@@ -45,13 +46,24 @@ export function piHostDisplayName(host: PiAgentToolHost): string {
 	return host === "oh-my-pi" ? "Oh My Pi" : "Pi";
 }
 
+/**
+ * What loads the new version in the host, typed in the session: Pi's
+ * `/reload` re-imports the extension from disk (since 0.79.9); Oh My Pi
+ * imports an extension once per process, so `/restart` (restarts omp and
+ * resumes the session; its `/reload-plugins` does not reload extension code).
+ */
+export function piReloadCommand(host: PiAgentToolHost): string {
+	return host === "oh-my-pi" ? "/restart" : "/reload";
+}
+
 /** The message for an update under a running host; without versions, a plain "files changed". */
 export function packageUpdatedMessage(from: string | null, to: string | null, host: PiAgentToolHost): string {
 	const name = piHostDisplayName(host);
+	const fix = `Type ${piReloadCommand(host)} to load the new version.`;
 	if (from && to && from !== to) {
-		return `Plannotator was updated from ${from} to ${to} while ${name} was running. Restart ${name} to load the new version.`;
+		return `Plannotator was updated from ${from} to ${to} while ${name} was running. ${fix}`;
 	}
-	return `Plannotator's files changed on disk while ${name} was running. Restart ${name} to load the new version.`;
+	return `Plannotator's files changed on disk while ${name} was running. ${fix}`;
 }
 
 /**

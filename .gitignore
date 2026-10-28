@@ -22,6 +22,7 @@ dist-ssr
 # OpenCode plugin build artifacts (generated from hook/review dist)
 apps/opencode-plugin/plannotator.html
 apps/opencode-plugin/review-editor.html
+apps/opencode-plugin/diagram-engine/
 # The knowledge skill shipped in the npm package. Copied verbatim at build time
 # from apps/skills/core/plannotator; never committed, so it cannot drift.
 apps/opencode-plugin/skills/
@@ -29,6 +30,8 @@ apps/opencode-plugin/skills/
 # Pi extension build artifacts (generated from hook/review dist + shared packages)
 apps/pi-extension/plannotator.html
 apps/pi-extension/review-editor.html
+# Code review's diagram engine files (copied from apps/hook/dist/diagram-engine)
+apps/pi-extension/diagram-engine/
 # Same knowledge skill, vendored by vendor.sh; offered to Pi by bundled-skill.ts.
 apps/pi-extension/skills/
 apps/pi-extension/storage.ts

@@ -139,6 +139,8 @@ export function getTrustedBaseDir(base: string | null | undefined, roots: string
  * directory serves the documents the plan links, but is never an allowed root.
  */
 export interface PlanFile {
+	/** The plan file's real path (absolute). */
+	path: string;
 	dir: string;
 	/** The plan's link targets, computed once (`planLinkTargets`). */
 	targets: Set<string>;
@@ -158,7 +160,7 @@ export function readPlanFile(planFilePath: unknown, plan: string): PlanFile | nu
 		if (!stat.isFile() || stat.size > MAX_ANNOTATABLE_FILE_BYTES) return null;
 		if (readFileSync(path, "utf8").trimEnd() !== plan.trimEnd()) return null;
 		const real = realpathSync(path);
-		return { dir: dirname(real), targets: planLinkTargets(plan) };
+		return { path: real, dir: dirname(real), targets: planLinkTargets(plan) };
 	} catch {
 		return null;
 	}
@@ -258,6 +260,25 @@ export function resolvePlanLinkedDoc(
 	const candidate = resolveUserPath(key, planFile.dir);
 	if (!isPathAllowed(candidate, [planFile.dir])) return null;
 	return isReadableFile(candidate) ? candidate : null;
+}
+
+/**
+ * Whether a real (symlink-resolved) absolute path is one of the documents the
+ * plan links beside its own file, as `resolvePlanLinkedDoc` would serve it.
+ * Plan review's per-document drafts accept exactly what `/api/doc` serves.
+ */
+export function isPlanLinkedDocPath(realPath: string, planFile: PlanFile | null | undefined): boolean {
+	if (!planFile || !realPath) return false;
+	for (const target of planFile.targets) {
+		const served = resolvePlanLinkedDoc(target, planFile.dir, planFile);
+		if (!served) continue;
+		try {
+			if (realpathSync(served) === realPath) return true;
+		} catch {
+			// Gone since it was linked: not this path.
+		}
+	}
+	return false;
 }
 
 export type ResolveAllowedDocPathResult =

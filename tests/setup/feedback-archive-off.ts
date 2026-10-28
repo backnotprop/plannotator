@@ -49,16 +49,26 @@ delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
 // connect proofs turn it on in their own spawned env, with a PATH of fakes.
 process.env.PLANNOTATOR_INBOX_CONNECT = "0";
 
-// The update check asks GitHub once a day from a release build (the Inbox with
+// The update check asks GitHub about once an hour from a release build (the Inbox with
 // an X.Y.Z version, the compiled CLI). Tests never reach GitHub: a closed
 // loopback port refuses at once, so an unintended check fails fast and is
 // cached as a failure. Tests that need an answer inject `fetchRelease` or
 // serve a fake API and set this in their own bodies or spawned env.
 process.env.PLANNOTATOR_UPDATE_API_URL = "http://127.0.0.1:9/releases/latest";
 
+// Product feedback (the Inbox's Feedback dialog, `plannotator feedback`): never
+// the live Worker, whose table is append-only, so one stray row needs a trigger
+// dropped by hand. A closed loopback port refuses at once ("Couldn't send
+// feedback right now"). Overrides a contributor's own value too. Tests that
+// send point it (or the Inbox's `feedbackUrl` option) at a local fake in their
+// own bodies or spawned env. tests/feedback-live-url.test.ts guards both.
+process.env.PLANNOTATOR_FEEDBACK_URL = "http://127.0.0.1:9/feedback";
+
 // The install script the update wrapper downloads: never the real one. A closed
 // loopback port refuses at once, so an unintended Update now fails fast.
 process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = "http://127.0.0.1:9/install.sh";
+// The .sha256 files `update-prepare` downloads next to it: never GitHub's.
+process.env.PLANNOTATOR_RELEASE_DOWNLOAD_URL = "http://127.0.0.1:9/download";
 
 // Every session a test starts, in this process or in a child that inherits
 // this environment, runs a program that exits at once instead of a browser.

@@ -260,9 +260,22 @@ export interface ServerReadyMetadata {
    * decision. Additive; absent when the CLI did not set it.
    */
   target?: string | string[];
+  /**
+   * Present only for a session published with `--tailscale` (#2166): `ask`
+   * true when "Ask this session" answers the machine owner's tab over the
+   * tailnet. A host that asked for a tailnet session reads its absence as a
+   * CLI from before the bridge was kept there.
+   */
+  tailnet?: { ask: boolean };
 }
 
 let serverReadyTarget: string | string[] | undefined;
+let serverReadyTailnet: { ask: boolean } | undefined;
+
+/** The `tailnet` field the next ready line carries (`--tailscale` sessions only). */
+export function setServerReadyTailnet(tailnet: { ask: boolean } | undefined): void {
+  serverReadyTailnet = tailnet ? { ask: tailnet.ask } : undefined;
+}
 
 /**
  * The full target the next ready line names (`ServerReadyMetadata.target`).
@@ -303,7 +316,13 @@ export async function handleServerReady(
   const readyFile = options.readyFile ?? process.env.PLANNOTATOR_READY_FILE;
   if (readyFile) {
     try {
-      writeServerReadyMetadata(readyFile, { url, isRemote, port, ...(serverReadyTarget !== undefined && { target: serverReadyTarget }) });
+      writeServerReadyMetadata(readyFile, {
+        url,
+        isRemote,
+        port,
+        ...(serverReadyTarget !== undefined && { target: serverReadyTarget }),
+        ...(serverReadyTailnet !== undefined && { tailnet: serverReadyTailnet }),
+      });
     } catch (error) {
       if (options.readyFile) throw error;
       // Best effort: host plugins use this side channel to open the browser.

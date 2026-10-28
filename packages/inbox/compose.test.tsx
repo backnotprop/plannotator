@@ -41,6 +41,8 @@ let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 /** When set, the server's answer to a compose Send (POST /api/inbox/messages) is this instead. */
 let sendAnswer: { status: number; body: Record<string, unknown> } | null = null;
+/** When set, the runner's agents (GET /api/inbox/acp) are these, and its start (POST /api/inbox/acp/start) answers here: never a real agent. */
+let runAgents: { agents: unknown[]; places: unknown[] } | null = null;
 
 function loopback(path: string, method = 'GET', body?: string, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -110,6 +112,11 @@ beforeEach(() => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? String(init.body) : undefined;
     if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
+    const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    if (runAgents && method === 'GET' && path === '/api/inbox/acp') return json(runAgents);
+    if (runAgents && method === 'POST' && path === '/api/inbox/acp/start') {
+      return json({ thread_id: seeded!.waiting, message: {}, replayed: false, run: { key: 'run_01JZ0000000000000000000000', agent: 'grok' } });
+    }
     if (sendAnswer && method === 'POST' && path === '/api/inbox/messages') {
       return new Response(JSON.stringify(sendAnswer.body), { status: sendAnswer.status, headers: { 'Content-Type': 'application/json' } });
     }
@@ -131,6 +138,7 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
+  runAgents = null;
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
 });
@@ -222,7 +230,11 @@ test.skipIf(!hasDom)('no live agent: Send sends nothing and says so; Escape asks
   act(() => (dialog()!.querySelector('[data-compose-discard]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   expect(await drafts()).toEqual([]);
-  expect(el.querySelector('[data-drafts-nav]')).toBeNull();
+  // The Drafts row counts only the seeded world's unsent replies (a picked
+  // question waits there), never the discarded message. Bun 1.3 passed a
+  // failing `.toBeNull()` here when the element was too big to print.
+  const { replies } = JSON.parse((await loopback('/api/inbox/drafts')).text) as { replies?: unknown[] };
+  expect(el.querySelector('[data-drafts-nav] .ib-n')?.textContent ?? '0').toBe(String(replies?.length ?? 0));
 });
 
 test.skipIf(!hasDom)('Keep draft: the sidebar\'s Drafts row and the Drafts page list it with its chip; delete has Undo', async () => {
@@ -709,4 +721,199 @@ test.skipIf(!hasDom)('dictation or a paste into the chip that cannot be a name i
   // A dictated sentence of eight words or more is a sentence, not a name, even when it would fit.
   expect(paste('this is a sentence the person said out loud').defaultPrevented).toBe(true);
   expect(paste('Short').defaultPrevented).toBe(false);
+});
+
+// Create thread (owner, 2026-10-27: a card with no thread offers "Create thread": "create, create, create is
+// the idea"). What regresses: the thread not linked to the card after the Send (Open thread never appears),
+// compose addressed to nobody, or a card's title the person did not change counted as words to keep.
+test.skipIf(!hasDom)('Create thread on a card with no thread: compose to a live session in its project, starting with the title; the Send links the thread to the card', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  // The first-visit dialog is claimed here, so it never covers the card.
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  const project = (JSON.parse((await loopback('/api/inbox/projects')).text) as { projects: { id: string; root: string }[] }).projects[0]!;
+  const made = JSON.parse((await loopback('/api/inbox/cards', 'POST', JSON.stringify({ project: project.id, title: 'Settings search' }))).text) as { card: { id: string; threads: string[] } };
+  expect(made.card.threads).toEqual([]);
+  await poll('ses_create_thread', 'claude-code', project.root);
+  const el = await renderApp(`#board&card=${made.card.id}`);
+  await until(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]:not(:disabled)') !== null, 'Create thread');
+  expect(el.querySelector('[data-card-open-thread]')).toBeNull();
+  act(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]')!.click());
+  await until(() => dialog()?.querySelector('[data-compose-to="ses_create_thread"]') != null, 'compose to the live session');
+  expect(dialog()!.querySelector('[data-compose-card]')!.textContent).toContain('Settings search');
+  expect((dialog()!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Settings search\n\n');
+  // The card is the Board's already: no Board chip here, even with the Board on.
+  expect(dialog()!.querySelector('[data-compose-board]')).toBeNull();
+  // Untouched, it is nothing to keep: Escape closes without asking.
+  key('Escape');
+  await until(() => dialog() === null, 'closed without asking');
+  act(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]')!.click());
+  await until(() => dialog()?.querySelector('[data-compose-to="ses_create_thread"]') != null, 'compose again');
+  type('Settings search\n\nFuzzy or prefix matching? Say which and why.');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'sent');
+  const thread = await threadIdOf('Settings search');
+  await until(async () => (JSON.parse((await loopback(`/api/inbox/cards/${made.card.id}`)).text) as { card: { threads: string[] } }).card.threads.includes(thread), 'the thread linked to the card');
+  await until(() => el.querySelector(`[data-card-open-thread="${thread}"]`) !== null, 'Open thread on the card');
+  expect(el.querySelector('[data-card-create-thread]')).toBeNull();
+});
+
+// Owner's follow-up to Create thread (2026-10-27): a draft kept from it must still link the thread when it is
+// sent later, from Drafts. What regresses: the draft dropping the card, so the later Send starts an unlinked
+// thread and the card keeps offering Create thread.
+test.skipIf(!hasDom)('Create thread kept as a draft: the draft keeps the card; sent later from Drafts, the thread is linked to the card', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  const project = (JSON.parse((await loopback('/api/inbox/projects')).text) as { projects: { id: string; root: string }[] }).projects[0]!;
+  const made = JSON.parse((await loopback('/api/inbox/cards', 'POST', JSON.stringify({ project: project.id, title: 'Draft card link' }))).text) as { card: { id: string } };
+  await poll('ses_draft_card', 'claude-code', project.root);
+  const el = await renderApp(`#board&card=${made.card.id}`);
+  await until(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]:not(:disabled)') !== null, 'Create thread');
+  act(() => el.querySelector<HTMLButtonElement>('[data-card-create-thread]')!.click());
+  await until(() => dialog()?.querySelector('[data-compose-to="ses_draft_card"]') != null, 'compose to the live session');
+  type('Draft card link\n\nWhich of the two search modes?');
+  key('Escape');
+  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'kept as a draft');
+  const kept = (await drafts()).find((d) => d.body.startsWith('Draft card link')) as unknown as { id: string; card?: { id: string; title: string } };
+  expect(kept.card).toEqual({ id: made.card.id, title: 'Draft card link' });
+  // Nothing sent yet: the card still has no thread.
+  expect((JSON.parse((await loopback(`/api/inbox/cards/${made.card.id}`)).text) as { card: { threads: string[] } }).card.threads).toEqual([]);
+
+  // Deleted from Drafts and brought back with Undo: it still names the card (review of #2248).
+  act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) !== null, 'the draft row');
+  act(() => (el.querySelector(`[data-draft-id="${kept.id}"] [data-draft-delete]`) as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) === null, 'the row gone');
+  act(() => (document.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) !== null, 'the draft back');
+  const restored = (await drafts()).find((d) => d.id === kept.id) as unknown as { card?: { id: string; title: string } };
+  expect(restored.card).toEqual({ id: made.card.id, title: 'Draft card link' });
+
+  // Later, from Drafts: the draft reopens naming the card, and its Send links the thread.
+  act(() => (el.querySelector(`[data-draft-id="${kept.id}"] .ib-draft-open`) as HTMLButtonElement).click());
+  await until(() => dialog()?.querySelector(`[data-compose-card="${made.card.id}"]`) != null, 'the draft names the card');
+  await until(() => dialog()!.querySelector('[data-compose-to="ses_draft_card"]') !== null, 'To keeps the session');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'sent');
+  const thread = await threadIdOf('Draft card link');
+  await until(async () => (JSON.parse((await loopback(`/api/inbox/cards/${made.card.id}`)).text) as { card: { threads: string[] } }).card.threads.includes(thread), 'the thread linked to the card');
+  // A draft naming something that is not a card is refused, not kept with a broken link.
+  const refused = await loopback(`/api/inbox/drafts/drf_${'0'.repeat(26)}`, 'POST', JSON.stringify({ body: 'x', base: null, card: { id: 'msg_x', title: 'x' } }));
+  expect(refused.status).toBe(422);
+  expect(JSON.parse(refused.text)).toMatchObject({ code: 'validation_error', field: 'card' });
+});
+
+// The Board chip (approval "inbox-compose-board-chip"). What regresses: the chip shown while the Board is off
+// (it would ask an agent for cards the Board refuses), the request not reaching the server, the person's words
+// changed, the choice forgotten, or the sent message unmarked.
+const BOARD_CHOICE_KEY = 'plannotator-inbox-compose-board';
+const boardChip = () => dialog()!.querySelector<HTMLButtonElement>('[data-compose-board]');
+
+test.skipIf(!hasDom)('Board chip: none while the Board is off', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: false } }))).status).toBe(200);
+  // The browser's last choice is on: with the Board off, the chip is still not drawn.
+  localStorage.setItem(BOARD_CHOICE_KEY, '1');
+  try {
+    await poll('ses_chip_off', 'claude-code', projects[0]!);
+    const el = await renderApp();
+    await openCompose(el);
+    await until(() => dialog()!.querySelector('[data-compose-thread-row]') !== null, 'the Thread row');
+    expect(boardChip()).toBeNull();
+  } finally {
+    localStorage.removeItem(BOARD_CHOICE_KEY);
+  }
+});
+
+test.skipIf(!hasDom)('Board chip: off by default; on, the Send asks for the Board with the words as typed, the sent message is marked, and the next compose remembers it', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  localStorage.removeItem(BOARD_CHOICE_KEY);
+  await poll('ses_chip', 'claude-code', projects[0]!);
+  let el = await renderApp();
+  await openCompose(el);
+  await until(() => boardChip() !== null, 'the Board chip');
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('false');
+  // The accessible name, pinned on purpose: the approval's name for the control (it holds its visible word, WCAG 2.5.3).
+  expect(boardChip()!.getAttribute('aria-label')).toBe('Track on Board');
+  act(() => boardChip()!.click());
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
+  expect(localStorage.getItem(BOARD_CHOICE_KEY)).toBe('1');
+  await pickTo('ses_chip');
+  type('Chip tracked work\n\nMove the retry budget into config.');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'sent');
+  const sendBody = posted.find((p) => p.path === '/api/inbox/messages')!.body;
+  expect(sendBody.board_request).toBe(true);
+  const threadId = await threadIdOf('Chip tracked work');
+  const stored = JSON.parse((await loopback(`/api/inbox/threads/${threadId}`)).text) as { thread: { messages: { body: string; board_request?: boolean }[] } };
+  expect(stored.thread.messages[0]).toMatchObject({ body: 'Chip tracked work\n\nMove the retry budget into config.', board_request: true });
+
+  // The next compose starts on (this browser's last choice); turned off, it is remembered off.
+  await openCompose(el);
+  await until(() => boardChip() !== null, 'the Board chip again');
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
+  act(() => boardChip()!.click());
+  expect(localStorage.getItem(BOARD_CHOICE_KEY)).toBeNull();
+  key('Escape');
+  await until(() => dialog() === null, 'closed');
+
+  // The sent message carries the quiet mark, not the agent's block.
+  act(() => root?.unmount());
+  host?.remove();
+  el = await renderApp(`#thread=${threadId}`);
+  await until(() => el.querySelector(`[data-message-article] [data-board-request]`) !== null, 'the Board mark');
+  expect(el.textContent).not.toContain('plannotator-board-request');
+});
+
+test.skipIf(!hasDom)('Board chip: a new session the Inbox starts (New Grok Build session) asks for the Board too', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  localStorage.setItem(BOARD_CHOICE_KEY, '1');
+  runAgents = {
+    agents: [{ id: 'grok', label: 'Grok Build', installed: true, reason: null, enabled: true, install_command: '', self_updates: true }],
+    places: [{ project_id: 'prj_billing', name: 'billing', root: projects[0]!, root_display: projects[0]! }],
+  };
+  try {
+    const el = await renderApp();
+    await openCompose(el);
+    await until(() => dialog()!.querySelector('button[data-compose-to="choose"]') !== null, 'To offers the start');
+    const toButton = () => dialog()!.querySelector('button[data-compose-to]') as HTMLButtonElement;
+    for (let i = 0; i < 5 && toButton().getAttribute('aria-expanded') !== 'true'; i++) {
+      act(() => toButton().click());
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await until(() => dialog()!.querySelector('[role="option"][data-compose-start]') !== null, 'the start row');
+    act(() => (dialog()!.querySelector('[role="option"][data-compose-start]') as HTMLElement).click());
+    await until(() => boardChip() !== null, 'the Board chip');
+    expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
+    type('Grok tracked work\n\nLook at the refund retries.');
+    act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+    await until(() => posted.some((p) => p.path === '/api/inbox/acp/start'), 'the start');
+    expect(posted.find((p) => p.path === '/api/inbox/acp/start')!.body).toMatchObject({ agent: 'grok', project_id: 'prj_billing', board_request: true });
+  } finally {
+    localStorage.removeItem(BOARD_CHOICE_KEY);
+  }
+}, 20_000);
+
+test.skipIf(!hasDom)('Board chip: a draft keeps it, whatever the browser chose since', async () => {
+  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
+  await loopback('/api/inbox/board/intro', 'POST', '{}');
+  localStorage.removeItem(BOARD_CHOICE_KEY);
+  await poll('ses_chip_draft', 'claude-code', projects[0]!);
+  const el = await renderApp();
+  await openCompose(el);
+  await until(() => boardChip() !== null, 'the Board chip');
+  act(() => boardChip()!.click());
+  type('Chip draft kept\n\nLater.');
+  key('Escape');
+  act(() => (dialog()!.querySelector('[data-compose-keep]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'kept as a draft');
+  const kept = (await drafts()).find((d) => d.body.startsWith('Chip draft kept')) as unknown as { id: string; board_request?: boolean };
+  expect(kept.board_request).toBe(true);
+  localStorage.removeItem(BOARD_CHOICE_KEY);
+  act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
+  await until(() => el.querySelector(`[data-draft-id="${kept.id}"]`) !== null, 'the draft row');
+  act(() => (el.querySelector(`[data-draft-id="${kept.id}"] .ib-draft-open`) as HTMLButtonElement).click());
+  await until(() => boardChip() !== null, 'the draft opens with the chip');
+  expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
 });

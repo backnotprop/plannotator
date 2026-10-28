@@ -1,5 +1,5 @@
 import { piUpdateAdvert } from "./update-advert.ts";
-import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { annotateDiagramRenderKind } from "../generated/annotatable.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { createServer } from "node:http";
@@ -18,11 +18,12 @@ import { startLiveAppProxyNode } from "../generated/live-proxy-node.ts";
 import type { LiveAppProxy } from "../generated/live-proxy-core.ts";
 
 import { contentHash } from "../generated/draft.ts";
-import { annotateDraftFilePath, createAnnotateDraftSession } from "../generated/annotate-draft.ts";
+import { annotateDraftFilePath, annotateSessionHasRootlessDocuments, createAnnotateDraftSession } from "../generated/annotate-draft.ts";
 import { isPathAllowed } from "../generated/doc-resolve.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
+import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
 import { createRequestHostGuard } from "./request-host-guard.ts";
 import { refuseCrossOriginWrite } from "./request-origin-guard.ts";
 import { getPlanVersion, getVersionCount, listVersions } from "../generated/storage.ts";
@@ -114,6 +115,8 @@ import { createAnnotateDecisionSettler, isNothingToSendFeedbackBody } from "../g
 
 export interface AnnotateServerResult {
 	port: number;
+	/** The live proxy port, when annotating a running app. */
+	liveProxyPort?: number;
 	portSource: "env" | "remote-default" | "random";
 	url: string;
 	waitForDecision: () => Promise<{ feedback: string; annotations: unknown[]; exit?: boolean; approved?: boolean; selectedMessageId?: string; feedbackScope?: "message" | "messages"; closedBy?: "agent"; unsentAnnotations?: number }>;
@@ -270,6 +273,8 @@ function createHtmlAssetRegistry(folderPath?: string) {
 }
 
 export async function startAnnotateServer(options: {
+	/** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
+	refRunner?: RefRunner;
 	/** "Ask this session": the in-process bridge to the Pi session that opened this annotation. */
 	sessionBridge?: SessionBridge;
 	/** Turns on `/api/host/status` and `/api/host/close` for a caller in another process (never in remote mode). */
@@ -376,8 +381,10 @@ export async function startAnnotateServer(options: {
 	// /api/plan and echoed by every decision; a different nonce is refused
 	// with 409 session_mismatch before anything settles. Missing is accepted.
 	const serverSession = createServerSessionNonce();
+	// Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
+	const refCards = createPiRefCards(options.refRunner);
 	const sendAlreadyDecided = (res: import("node:http").ServerResponse): void => {
-		json(res, { error: "This review session has already been decided." }, 409);
+		json(res, { error: "This review session has already been decided.", code: "already_decided" }, 409);
 	};
 
 	// Last-client abandonment lease: once the tab's client-lease stream
@@ -429,13 +436,20 @@ export async function startAnnotateServer(options: {
 		mode: options.mode || "annotate",
 		filePath: options.filePath,
 	});
+	// A URL or the last message has no file of its own, but its linked
+	// documents do: per-document copies plus the index (#1545), as on Bun.
+	const rootlessDocuments = annotateSessionHasRootlessDocuments({
+		mode: options.mode || "annotate",
+		filePath: options.filePath,
+	});
 	const annotateDrafts = createAnnotateDraftSession({
 		contentKey: draftKey,
 		filePath: draftFilePath,
 		documents:
-			draftFilePath !== null || (options.mode === "annotate-folder" && options.folderPath) || bundleFiles
+			draftFilePath !== null || (options.mode === "annotate-folder" && options.folderPath) || bundleFiles || rootlessDocuments
 				? {
 						isAllowed: (path) => isPathAllowed(path, getReferenceRootPaths()),
+						...(rootlessDocuments ? { indexed: true } : {}),
 					}
 				: null,
 	});
@@ -865,6 +879,7 @@ export async function startAnnotateServer(options: {
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
+		if (await handleRefCards(req, res, url, refCards, serverSession)) return;
 		if (await externalAnnotations.handle(req, res, url)) return;
 		if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) return;
 
@@ -1134,7 +1149,7 @@ export async function startAnnotateServer(options: {
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;
 				if (isAgentTerminalSide(body.agentTerminalSide)) toSave.agentTerminalSide = body.agentTerminalSide;
 				if (typeof body.agentTerminalDefaultAgent === "string") toSave.agentTerminalDefaultAgent = body.agentTerminalDefaultAgent;
-				if (Object.keys(toSave).length > 0) saveConfig(toSave as Parameters<typeof saveConfig>[0]);
+				if (Object.keys(toSave).length > 0 && !saveConfig(toSave as Parameters<typeof saveConfig>[0])) return json(res, { error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, 500);
 				if (agentToolSaveFailed(toSave)) return json(res, { error: "Could not save the setting to config.json." }, 500);
 				json(res, { ok: true });
 			} catch {
@@ -1184,6 +1199,13 @@ export async function startAnnotateServer(options: {
 			}
 		} else if (url.pathname === "/api/draft/document") {
 			if (req.method === "GET") {
+				// A read marks the copy as this session's (and lists it in a
+				// rootless session's index): a decision then clears it, so it
+				// gets the writes' cross-site guard.
+				if (!isSameOriginOrNoOrigin(req.headers.origin ?? null, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
+					json(res, crossOriginRefusalBody(), 403);
+					return;
+				}
 				const result = annotateDrafts.loadDocument(url.searchParams.get("path"));
 				json(res, result.body, result.status);
 			} else if (req.method === "POST") {
@@ -1528,6 +1550,7 @@ export async function startAnnotateServer(options: {
 
 	return {
 		port,
+		liveProxyPort: liveProxy?.port,
 		portSource,
 		url: buildAdvertisedUrl(port),
 		waitForDecision: () => decisionPromise,
@@ -1565,6 +1588,8 @@ export async function startAnnotateServer(options: {
 					}
 				}
 			} finally {
+				// Before closeAllConnections, or a session-closed just sent is lost.
+				externalAnnotations.endStreams();
 				server.close();
 				// close() only stops the listener; drain browser keep-alive sockets so a
 				// stopped session's connections die immediately instead of at the

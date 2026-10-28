@@ -40,10 +40,12 @@ import {
   LIVE_APP_REQUIRES_LOOPBACK_MESSAGE,
   LIVE_APP_REQUIRES_URL_MESSAGE,
   buildForceAppFailureMessage,
+  buildLivePlannotatorFallbackNotice,
   buildLiveProbeFallbackNotice,
   classifyLiveAppCandidate,
   probeLiveAppTarget,
 } from "@plannotator/shared/live-probe";
+import { listPlannotatorServerPorts } from "@plannotator/shared/plannotator-ports";
 
 export interface AnnotateResolutionSuccess {
   ok: true;
@@ -152,9 +154,12 @@ export async function resolveAnnotateTarget(options: {
     }
 
     if (loopback && parsedUrl?.protocol === "http:" && !forceStatic) {
-      const probe = await probeLiveAppTarget(filePath, parsedUrl);
+      // Never a Plannotator server: the live proxy would give the proxied
+      // page same-origin writes on it (see live-proxy-core).
+      const probe = await probeLiveAppTarget(filePath, parsedUrl, fetch, {
+        plannotatorPorts: listPlannotatorServerPorts(),
+      });
       if (probe.liveEligible) {
-        log(`Live app: ${filePath}`);
         return {
           ok: true,
           markdown: "",
@@ -178,7 +183,9 @@ export async function resolveAnnotateTarget(options: {
       // behavior for dead URLs and JSON endpoints). A failed probe says so
       // first: a dev server still starting up probes as unreachable, and a
       // silent downgrade to static conversion reads as a broken live session.
-      if (probe.probeError !== null) {
+      if (probe.plannotator) {
+        log(buildLivePlannotatorFallbackNotice(filePath));
+      } else if (probe.probeError !== null) {
         log(buildLiveProbeFallbackNotice(filePath, probe.probeError));
       }
     }

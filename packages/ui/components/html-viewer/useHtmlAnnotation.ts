@@ -10,6 +10,12 @@ import type {
 } from "../../hooks/useAnnotationHighlighter";
 import { BRIDGE_PROTOCOL_VERSION } from "./bridge-script";
 import {
+  MAX_RICH_CLIPBOARD_HTML_LENGTH,
+  MAX_RICH_CLIPBOARD_OUTPUT_LENGTH,
+  sanitizeRichHtml,
+  type RichCopySource,
+} from "../../utils/richClipboard";
+import {
   parseHtmlElementContext,
   MAX_ELEMENT_CONTEXT_BYTES,
   MAX_PAGE_URL_LENGTH,
@@ -90,7 +96,26 @@ interface BridgeSelectionMessage {
   targetLabel?: string;
   /** Agent-facing element description (pinpoint clicks) — validated, size-capped. */
   context?: HtmlElementContext;
+  /** The bridge answers `rich-copy-request` for this text selection. */
+  richCopy?: boolean;
+  /** `text` was cut to MAX_SELECTION_TEXT_LENGTH (the page's selection is longer). */
+  textCut?: boolean;
 }
+
+/** The bridge's answer to `rich-copy-request`: the pending range's markup
+ *  (sanitized again here) and its text up to 256 KiB (`truncated` past it),
+ *  or too large for rich text. */
+interface BridgeRichCopyMessage {
+  type: `${typeof PREFIX}rich-copy`;
+  id: string;
+  html: string;
+  text: string;
+  truncated: boolean;
+  tooLarge: boolean;
+}
+
+/** How long the rich-text Copy waits for the bridge before copying the quote as plain text. */
+export const RICH_COPY_TIMEOUT_MS = 1500;
 
 /** One draft target in an in-flight multi-select comment. Index 0 is primary. */
 export interface HtmlDraftTarget {
@@ -119,10 +144,12 @@ interface BridgeRect {
 
 type BridgeMessage =
   | BridgeSelectionMessage
+  | BridgeRichCopyMessage
   | BridgeMultiTargetAddedMessage
   | { type: `${typeof PREFIX}multi-target-removed`; key: string }
   | { type: `${typeof PREFIX}pointer`; x: number; y: number; shift: boolean }
   | { type: `${typeof PREFIX}selection-clear` }
+  | { type: `${typeof PREFIX}pin-visibility`; visible: boolean }
   | { type: `${typeof PREFIX}selection-rect`; rect: BridgeRect }
   | { type: `${typeof PREFIX}keytype`; key: string }
   | { type: `${typeof PREFIX}mark-click`; id: string }
@@ -363,6 +390,8 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
       return {
         type: value.type,
         text: capSelectionText(value.text),
+        ...(value.richCopy === true ? { richCopy: true } : {}),
+        ...(value.textCut === true ? { textCut: true } : {}),
         rect,
         modeOverride: parseEditorMode(value.modeOverride),
         anchor: parseHtmlElementAnchor(value.anchor) ?? undefined,
@@ -395,6 +424,24 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         : null;
     case `${PREFIX}selection-clear`:
       return { type: value.type };
+    case `${PREFIX}rich-copy`: {
+      // Oversized or malformed markup reads as none (plain text is copied).
+      if (typeof value.id !== "string" || value.id.length === 0 || value.id.length > 64) return null;
+      const text = typeof value.text === "string" && value.text.length <= MAX_RICH_CLIPBOARD_HTML_LENGTH
+        ? value.text : "";
+      const html = typeof value.html === "string" && value.html.length <= MAX_RICH_CLIPBOARD_HTML_LENGTH
+        ? value.html : "";
+      return {
+        type: value.type,
+        id: value.id,
+        html,
+        text,
+        truncated: value.truncated === true,
+        tooLarge: value.tooLarge === true,
+      };
+    }
+    case `${PREFIX}pin-visibility`:
+      return typeof value.visible === 'boolean' ? { type: value.type, visible: value.visible } : null;
     case `${PREFIX}selection-rect`: {
       const rect = parseBridgeRect(value.rect);
       return rect ? { type: value.type, rect } : null;
@@ -474,6 +521,12 @@ export function useHtmlAnnotation({
   UseAnnotationHighlighterReturn,
   "highlighterRef" | "highlightRange" | "highlightMathElement"
 > & {
+  /** Whether any pinned draft target is still displayed by the page. Always
+   *  true while no composer is open. */
+  pinVisible: boolean;
+  /** False once this draft's composer was hidden with its target: shown
+   *  again, it must not take focus from where the person is. */
+  composerAutoFocus: boolean;
   /** In-flight multi-select targets (index 0 = primary); empty outside pinpoint drafts. */
   draftTargets: HtmlDraftTarget[];
   /** Remove one draft target (chip X). Removing the last cancels the draft. */
@@ -495,6 +548,17 @@ export function useHtmlAnnotation({
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
   const [draftTargets, setDraftTargets] = useState<HtmlDraftTarget[]>([]);
   const [composerFocusToken, setComposerFocusToken] = useState(0);
+  const [pinVisible, setPinVisible] = useState(true);
+  const [composerWasHidden, setComposerWasHidden] = useState(false);
+  const pinVisibleRef = useRef(pinVisible);
+  pinVisibleRef.current = pinVisible;
+  // Visibility belongs to one draft: whatever closes the composer (save, 👍,
+  // close, Escape, a cancelled multi-select, disabling) resets it.
+  useEffect(() => {
+    if (commentPopover) return;
+    setPinVisible(true);
+    setComposerWasHidden(false);
+  }, [commentPopover]);
 
   const pendingTextRef = useRef<string>("");
   // Element anchor for the pending pinpoint selection — committed onto the
@@ -553,6 +617,9 @@ export function useHtmlAnnotation({
   hostCapRef.current = maxAdditionalTargets !== undefined;
 
   const anchorRef = useRef<HTMLDivElement | null>(null);
+  /** Rich-text Copy requests waiting for the bridge's markup, by id. An
+   *  answer with an id not in here (unsolicited, or after its timeout) is ignored. */
+  const richCopyRequestsRef = useRef(new Map<string, (answer: BridgeRichCopyMessage) => void>());
 
   /** Post into the iframe with the live token + targetOrigin when a live
    *  session is active; srcdoc posts keep targetOrigin "*" and no token. */
@@ -665,7 +732,22 @@ export function useHtmlAnnotation({
         return;
       }
 
+      if (type === `${PREFIX}rich-copy`) {
+        const answer = richCopyRequestsRef.current.get(message.id);
+        if (!answer) return;
+        richCopyRequestsRef.current.delete(message.id);
+        answer(message);
+        return;
+      }
+
+      if (type === `${PREFIX}pin-visibility`) {
+        setPinVisible(message.visible);
+        if (!message.visible && commentPopoverRef.current) setComposerWasHidden(true);
+      }
+
       if (type === `${PREFIX}selection`) {
+        setPinVisible(true);
+        setComposerWasHidden(false);
         pendingTextRef.current = message.text;
         pendingAnchorRef.current = message.anchor ?? null;
         pendingContextRef.current = message.context ?? null;
@@ -760,6 +842,35 @@ export function useHtmlAnnotation({
             element: anchor,
             source: null,
             selectionText: message.text,
+            // The markup is built only when Copy is pressed: ask
+            // the bridge for the pending range's HTML and wait a moment.
+            ...(message.richCopy ? {
+              getRichCopy: () => new Promise<RichCopySource>((resolve) => {
+                const id = `rc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+                const requests = richCopyRequestsRef.current;
+                // Without an answer only the quote is here: plain text, marked
+                // as cut when the bridge cut it.
+                const quote = { html: "", text: message.text, truncated: message.textCut === true };
+                requests.set(id, (answer) => {
+                  const text = answer.text || quote.text;
+                  const truncated = answer.text ? answer.truncated : quote.truncated;
+                  if (answer.tooLarge) {
+                    resolve({ tooLarge: true, text, truncated });
+                    return;
+                  }
+                  const html = answer.html ? sanitizeRichHtml(answer.html) : null;
+                  if (html && html.length > MAX_RICH_CLIPBOARD_OUTPUT_LENGTH) {
+                    resolve({ tooLarge: true, text, truncated });
+                    return;
+                  }
+                  resolve({ html: html ?? "", text, truncated });
+                });
+                window.setTimeout(() => {
+                  if (requests.delete(id)) resolve(quote);
+                }, RICH_COPY_TIMEOUT_MS);
+                post({ type: `${PREFIX}rich-copy-request`, id });
+              }),
+            } : {}),
           });
         }
       }
@@ -803,6 +914,18 @@ export function useHtmlAnnotation({
           onHostDraftRef.current(null);
         }
         setToolbarState(null);
+        // The bridge closed the draft (its Escape rung) while the composer was
+        // hidden with its target: close the hidden composer too, or nothing on
+        // screen could ever close it. Its text stays in the draft store.
+        if (commentPopoverRef.current && !pinVisibleRef.current) {
+          post({ type: `${PREFIX}cancel-selection` });
+          setCommentPopover(null);
+          setDraftTargets([]);
+          pendingTextRef.current = "";
+          pendingAnchorRef.current = null;
+          pendingContextRef.current = null;
+          return;
+        }
         // Keep the captured text alive while a comment/quick-label is open: the user
         // is composing, and the selection collapsing or scrolling out of view must
         // not drop the annotation on submit. It's overwritten on the next selection.
@@ -1157,6 +1280,8 @@ export function useHtmlAnnotation({
 
   return {
     toolbarState,
+    pinVisible: pinVisible || !commentPopover,
+    composerAutoFocus: !composerWasHidden,
     commentPopover,
     quickLabelPicker,
     handleAnnotate,

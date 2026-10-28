@@ -32,10 +32,10 @@ async function expectLoaded(img: Locator): Promise<void> {
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth)).toBe(1);
 }
 
-/** The image was asked for and refused: complete, with nothing drawn. */
-async function expectRefused(img: Locator): Promise<void> {
-  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete)).toBe(true);
-  expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(0);
+/** The image was asked for and refused: no broken image is left, its alt text shows in a quiet chip instead. */
+async function expectRefused(scope: Locator, alt: string): Promise<void> {
+  await expect(scope.locator('[data-image-unavailable]', { hasText: alt })).toBeVisible();
+  await expect(scope.locator(`img[alt="${alt}"]`)).toHaveCount(0);
 }
 
 test('an agent message shows images from its project and from outside it; the person reply only from the project; home hides its hidden folders', async ({ browser }) => {
@@ -113,11 +113,11 @@ test('an agent message shows images from its project and from outside it; the pe
     // The person's reply: the project's image loads, the outside one does not.
     const reply = page.locator(`[data-message-id="${replyId}"]`);
     await expectLoaded(reply.locator('img[alt="mine inside"]'));
-    await expectRefused(reply.locator('img[alt="mine outside"]'));
+    await expectRefused(reply, 'mine outside');
 
     // A project at the home folder: its hidden folder never shows.
     await page.goto(`${url}#thread=${atHome.thread_id}`);
-    await expectRefused(page.locator(`[data-message-id="${atHome.message_id as string}"] img[alt="home hidden"]`));
+    await expectRefused(page.locator(`[data-message-id="${atHome.message_id as string}"]`), 'home hidden');
   } finally {
     await agent.close().catch(() => {});
     await context.close().catch(() => {});

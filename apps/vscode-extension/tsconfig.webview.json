@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@plannotator/core/*": ["../../packages/core/*"],
+      "@plannotator/shared/*": ["../../packages/shared/*"]
+    }
+  },
+  "include": ["src/guides/webview/**/*.ts", "src/guides/webview-protocol.ts"],
+  "exclude": ["node_modules", "dist"]
+}
