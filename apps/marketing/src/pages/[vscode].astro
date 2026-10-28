@@ -132,7 +132,7 @@ const copyIcon =
 
         <GuidesShot
           name="guide-overview"
-          alt="A guide open in VS Code with its overview diagram and five chapters in reading order"
+          alt="A guide open in a VS Code tab with its overview diagram and its five chapters in the side bar"
           large
           eager
           class="gv-hero-shot"
@@ -170,18 +170,18 @@ const copyIcon =
       <section class="gv-arc gv-arc-gap" id="editor">
         <h2 class="font-display gv-arc-title">In the editor</h2>
         <p class="gv-body">
-          The guide is a VS Code view, and each file opens in the diff editor you already review in. Hover a name in the
-          overview and you get its signature, where it's defined and which chapter changed it. Follow a call out of the
-          diff into the rest of the repo, then pick the guide back up where you left it.
+          The guide opens in one editor tab, each chapter's text beside the diffs of its files. Hover a name in a diff
+          and you get its signature, where it's defined and which chapter changed it. Follow a call out of the diff into
+          the rest of the repo, then pick the guide back up where you left it.
         </p>
       </section>
       <GuidesShot
-        name="overview-hover"
-        alt="A hover card on deliverWebhook in the guide's diagram with its signature and the chapter that changed it"
+        name="diff-hover"
+        alt="A hover card on computeBackoff in a diff with its signature and the chapter that changed it"
       />
       <GuidesShot
         name="chapter-diff"
-        alt="A file from chapter two in VS Code's diff editor with Chapter 2 of 5 at the top and the chapter overview beside it"
+        alt="Chapter two's text beside the diff of its file in the Guide tab with the guide's outline in the side bar"
         class="gv-after"
       />
 
@@ -228,7 +228,7 @@ const copyIcon =
                 <button type="button" class="copy-btn" data-copy={adapterInstall} aria-label="Copy the command" set:html={copyIcon} />
               </div>
               <p>
-                The Guides view lists the agents it finds and how to add the others. Pull requests also need
+                The Guided Reviews view lists the agents it finds and how to add the others. Pull requests also need
                 <code>gh</code>.
               </p>
             </div>
@@ -237,7 +237,7 @@ const copyIcon =
           <div class="gv-step">
             <span class="gv-step-n" aria-hidden="true">03</span>
             <div>
-              <h3>Open the Guides view</h3>
+              <h3>Open Guided Reviews</h3>
               <p>Its icon is in the activity bar.</p>
               <p class="gv-step-note">VS Code 1.90 or newer.</p>
             </div>
