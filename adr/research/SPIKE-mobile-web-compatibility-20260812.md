@@ -193,7 +193,7 @@ The published documentation was checked on 2026-08-12: `https://docs.plannotator
 
 | Circumstance | Frontend | Reachability | Mobile implication |
 |---|---|---|---|
-| Claude/Gemini plan hook | plan/editor HTML | local browser by default | existing automatic plan flow is not tailnet-published by the flag |
+| Claude plan hook | plan/editor HTML | local browser by default | existing automatic plan flow is not tailnet-published by the flag |
 | `annotate --tailscale` | plan/editor HTML in annotate mode | Tailscale Serve HTTPS | primary mobile document/plan path; folder, HTML, versions, edit, and gate variants matter |
 | `review --tailscale` | review-editor HTML | Tailscale Serve HTTPS | full code-review workspace reaches phone unchanged |
 | SSH/remote mode | same HTML | wide bind / advertised HTTP host | secure-context behavior differs; responsiveness is unchanged |

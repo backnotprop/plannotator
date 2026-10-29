@@ -172,7 +172,6 @@ export function Icon({ name, size, className }: { name: IconName; size?: number;
 const TAB_GLYPHS: Partial<Record<string, string>> = {
   cursor: 'M12 2.5 20.5 7.25v9.5L12 21.5 3.5 16.75v-9.5Z M12 12l8.5-4.75 M12 12v9.5 M12 12 3.5 7.25',
   vscode: 'M17 3.5 7.5 12l9.5 8.5 3.5-1.7V5.2Z M17 3.5v17 M7.5 12 3.5 9 M7.5 12 3.5 15',
-  gemini: 'M12 2.5c.9 5 3.6 8.6 9.5 9.5-5.9.9-8.6 4.5-9.5 9.5-.9-5-3.6-8.6-9.5-9.5 5.9-.9 8.6-4.5 9.5-9.5Z',
   // Qwen Code: its hexagon around a turned triangle, three bands as one pinwheel.
   qwen: 'M12 2.5 20.23 7.25v9.5L12 21.5 3.77 16.75v-9.5Z M8.97 10.25h6.06L12 15.5Z M8.97 10.25 12 2.5 M15.03 10.25l5.2 6.5 M12 15.5l-8.23 1.25',
   zed: 'M4 4h16v16H4Z M8 8.5h8l-8 7h8',
@@ -198,7 +197,7 @@ export function HostMark({ host, big }: { host: string | null | undefined; big?:
     case 'claude-app':
       mark = <ClaudeIcon />;
       break;
-    case 'gemini':
+    // A retired host (Gemini CLI) falls to the generic mark below, so its old threads still render.
     case 'qwen':
     case 'zed':
     case 'vscode':

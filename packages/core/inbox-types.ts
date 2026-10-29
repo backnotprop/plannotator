@@ -1623,6 +1623,19 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "claude-app",
 ];
 
+/**
+ * Agents the Inbox no longer offers: never detected, connected, listed or
+ * named in a window (Settings → Agents, onboarding, the connect screen, the
+ * note question, the help). Their id stays in INBOX_AGENT_IDS only so a
+ * record an earlier Plannotator wrote in inbox/agents.json still reads, and
+ * `plannotator uninstall` still removes the entry or note it added. Gemini
+ * CLI: Google retired it for individuals in favor of Antigravity CLI.
+ */
+export const INBOX_RETIRED_AGENT_IDS: readonly InboxAgentId[] = ["gemini"];
+
+/** The agents the Inbox offers: every list a person or an agent reads. */
+export const INBOX_OFFERED_AGENT_IDS: readonly InboxAgentId[] = INBOX_AGENT_IDS.filter((id) => !INBOX_RETIRED_AGENT_IDS.includes(id));
+
 export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   "claude-code": "Claude Code",
   codex: "Codex",
@@ -1691,9 +1704,34 @@ export interface InboxConnectReport {
   trust_failed?: { agent: InboxAgentId; reason: string }[];
 }
 
+/**
+ * A connect report without the retired agents (INBOX_RETIRED_AGENT_IDS): a
+ * report an earlier Plannotator saved may name one ("Connected Codex and
+ * Gemini CLI"); the window never shows it.
+ */
+export function offeredConnectReport<T extends InboxConnectReport>(report: T): T {
+  const offered = (id: InboxAgentId) => !INBOX_RETIRED_AGENT_IDS.includes(id);
+  const byAgent = <E extends { agent: InboxAgentId }>(list: E[] | undefined) => list?.filter((entry) => offered(entry.agent));
+  return {
+    ...report,
+    added: report.added.filter(offered),
+    already: report.already.filter(offered),
+    failed: byAgent(report.failed) ?? [],
+    foreign: byAgent(report.foreign) ?? [],
+    manual: report.manual.filter(offered),
+    unfinished: report.unfinished.filter(offered),
+    ...(report.manual_why ? { manual_why: byAgent(report.manual_why) } : {}),
+    ...(report.elsewhere ? { elsewhere: byAgent(report.elsewhere) } : {}),
+    ...(report.trusted ? { trusted: report.trusted.filter(offered) } : {}),
+    ...(report.trust_failed ? { trust_failed: byAgent(report.trust_failed) } : {}),
+  };
+}
+
 /** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */
 export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini" | "qwen" | "cursor";
 export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "qwen", "pi", "opencode", "cursor"];
+/** The note agents the Inbox offers (INBOX_RETIRED_AGENT_IDS left out): the window, the help and `--notes`. */
+export const INBOX_OFFERED_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = INBOX_NOTE_AGENT_IDS.filter((id) => !INBOX_RETIRED_AGENT_IDS.includes(id));
 
 /**
  * Where an agent's note would go and how it stands:
@@ -1998,7 +2036,7 @@ export function inboxToolCostText(host: InboxToolCostHost): string {
   return `about ${Math.round(cost.bytes / 1000)} KB, roughly ${cost.tokens.toLocaleString("en-US")} tokens`;
 }
 
-/** "Codex, Gemini CLI and Pi" for note agents. */
+/** "Codex, Qwen Code and Pi" for note agents. */
 export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
   return inboxAgentList(ids);
 }

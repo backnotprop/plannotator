@@ -83,6 +83,17 @@ describe("what is found", () => {
     expect(fake.calls()).toEqual([]);
   });
 
+  test("Gemini CLI is no longer offered: found on PATH and with its folder, it is never asked, connected or reported", async () => {
+    fake.install("gemini");
+    mkdirSync(join(fake.home, ".gemini"), { recursive: true });
+    const report = await connect();
+    expect(report.added).toEqual([]);
+    expect(report.manual).toEqual([]);
+    expect(fake.calls()).toEqual([]);
+    expect(existsSync(join(fake.home, ".gemini", "settings.json"))).toBe(false);
+    expect(readInboxAgents(dataDir).agents.gemini).toBeUndefined();
+  });
+
   test("a test run whose home is not a scratch folder never touches it", () => {
     expect(agentHomeAllowed({ homeDir: "/Users/somebody-real", env: { PLANNOTATOR_TEST_SANDBOX: "/tmp/x" } })).toBe(false);
     expect(agentHomeAllowed({ homeDir: fake.home, env: { PLANNOTATOR_TEST_SANDBOX: "/tmp/x" } })).toBe(true);
@@ -105,12 +116,11 @@ describe("agents with their own `mcp add`", () => {
     expect(formatConnectReport(again)).toEqual([]);
   });
 
-  test("Gemini, Windsurf/Devin, Amp and Pi (no extension) each get their own command", async () => {
-    fake.install("gemini", "devin", "amp", "pi");
+  test("Windsurf/Devin, Amp and Pi (no extension) each get their own command", async () => {
+    fake.install("devin", "amp", "pi");
     const report = await connect();
-    expect(report.added.sort()).toEqual(["amp", "gemini", "pi", "windsurf"]);
+    expect(report.added.sort()).toEqual(["amp", "pi", "windsurf"]);
     const byName = Object.fromEntries(adds().map((call) => [call.name, call.args]));
-    expect(byName.gemini).toEqual(["mcp", "add", "-s", "user", "plannotator-inbox", ...SELF, "inbox", "mcp"]);
     expect(byName.devin).toEqual(["mcp", "add", "-s", "user", "plannotator-inbox", "--", ...SELF, "inbox", "mcp"]);
     expect(byName.amp).toEqual(["mcp", "add", "plannotator-inbox", "--", ...SELF, "inbox", "mcp"]);
     expect(byName.pi).toEqual(["mcp", "add", "plannotator-inbox", "--", ...SELF, "inbox", "mcp"]);
@@ -401,6 +411,20 @@ describe("uninstall", () => {
     expect(JSON.parse(readFileSync(join(fake.home, ".cursor", "mcp.json"), "utf8")).mcpServers).toEqual({ other: { command: "x" } });
   });
 
+  test("an entry an earlier Plannotator added to Gemini CLI (no longer offered) is still removed, that entry only", async () => {
+    fake.install("gemini");
+    const settings = join(fake.home, ".gemini", "settings.json");
+    mkdirSync(join(fake.home, ".gemini"), { recursive: true });
+    writeFileSync(settings, JSON.stringify({ mcpServers: { other: { command: "x" }, "plannotator-inbox": { command: SELF[0], args: ["inbox", "mcp"] } } }, null, 2));
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "agents.json"), JSON.stringify({ v: 1, agents: { gemini: { state: "added", reach: "mcp", path: settings, command: OURS, at: "2026-06-01T00:00:00.000Z" } } }));
+    const plan = planInboxAgentRemoval(dataDir, environment(), OURS);
+    expect(plan.items.map((item) => item.describe)).toEqual(["MCP server plannotator-inbox from Gemini CLI (gemini mcp remove -s user plannotator-inbox)"]);
+    expect(await plan.items[0]!.apply()).toBeNull();
+    expect(fake.calls().at(-1)).toEqual({ name: "gemini", args: ["mcp", "remove", "-s", "user", "plannotator-inbox"] });
+    expect(JSON.parse(readFileSync(settings, "utf8")).mcpServers).toEqual({ other: { command: "x" } });
+  });
+
   test("an entry changed by hand to run something else is the person's: skipped and named", async () => {
     mkdirSync(join(fake.home, ".cursor"), { recursive: true });
     await connect();
@@ -462,18 +486,16 @@ describe("a CLI is asked what it is before it is handed an mcp add", () => {
     expect(formatConnectReport(again)).toEqual([]);
   });
 
-  test("Codex CLI before 0.35 and Gemini CLI before 0.1.19 (no `mcp add` yet) are left to the person, with why", async () => {
-    fake.install("codex", "gemini");
-    mkdirSync(join(fake.home, ".gemini"), { recursive: true });
-    const report = await connect({ FAKE_CODEX_VERSION: "codex-cli 0.34.0", FAKE_GEMINI_VERSION: "0.1.18" });
-    expect(report.manual.sort()).toEqual(["codex", "gemini"]);
+  test("Codex CLI before 0.35 (no `mcp add` yet) is left to the person, with why", async () => {
+    fake.install("codex");
+    const report = await connect({ FAKE_CODEX_VERSION: "codex-cli 0.34.0" });
+    expect(report.manual).toEqual(["codex"]);
     expect(fake.calls()).toEqual([]);
     const lines = formatConnectReport(report);
     expect(lines).toContain("Codex needs connecting by hand: Codex CLI before 0.35 has no `codex mcp add`; update Codex, or add plannotator-inbox to its config.toml by hand.");
-    expect(lines).toContain("Gemini CLI needs connecting by hand: Gemini CLI before 0.1.19 has no `gemini mcp add`; update Gemini CLI, or add plannotator-inbox to its settings.json by hand.");
-    // The first builds that have it are connected.
-    const later = await connect({ FAKE_CODEX_VERSION: "codex-cli 0.35.0", FAKE_GEMINI_VERSION: "0.1.19" });
-    expect(later.added.sort()).toEqual(["codex", "gemini"]);
+    // The first build that has it is connected.
+    const later = await connect({ FAKE_CODEX_VERSION: "codex-cli 0.35.0" });
+    expect(later.added).toEqual(["codex"]);
   });
 
   test("a program that only shares the name (cln's `pi` printing digits, amp.rs, another codex) is never handed an mcp add", async () => {

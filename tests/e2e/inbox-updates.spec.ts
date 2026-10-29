@@ -52,7 +52,8 @@ test.beforeAll(async () => {
     join(dataDir, 'update-notes', '0.28.12.json'),
     JSON.stringify({ version: '0.28.12', notes: 'A patch release for the Inbox.\n\n### Update notices\n\nOne click.', highlights: [] }),
   );
-  writeFileSync(join(dataDir, 'install-flags.json'), '{"v":1,"flags":["skip-gemini"]}');
+  // skip-gemini: an earlier installer's id for Gemini CLI (no longer offered), dropped silently: never shown or passed on.
+  writeFileSync(join(dataDir, 'install-flags.json'), '{"v":1,"flags":["skip-gemini","skip-codex"]}');
 
   // The fake release (safe updates): the install script, which records its
   // arguments and takes a moment so Updating… shows, and the .sha256 files the
@@ -180,7 +181,8 @@ test('an available release shows Update; the dialog runs the install script once
   await expect(dialog).toContainText('Update to Plannotator 0.28.12');
   await expect(dialog).toContainText('You have 0.28.10');
   await expect(dialog).toContainText('A patch release for the Inbox.');
-  await expect(dialog).toContainText('--skip-gemini');
+  await expect(dialog).toContainText('--skip-codex');
+  await expect(dialog).not.toContainText('gemini');
   await page.screenshot({ path: join(proofDir, '2-dialog.png') });
 
   await dialog.getByRole('button', { name: 'Update now' }).click();
@@ -193,7 +195,7 @@ test('an available release shows Update; the dialog runs the install script once
     '--version',
     'v0.28.12',
     '--non-interactive',
-    '--skip-gemini',
+    '--skip-codex',
   ]);
   // It finished: the lock is released and the result recorded.
   await expect.poll(() => existsSync(join(dataDir, 'update.lock')), { timeout: 20_000 }).toBe(false);

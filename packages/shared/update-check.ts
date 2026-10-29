@@ -1154,7 +1154,6 @@ export const INSTALL_FLAG_SPELLINGS = {
   "with-t3": { posix: "--with-t3", powershell: null },
   "without-t3": { posix: "--without-t3", powershell: null },
   "skip-codex": { posix: "--skip-codex", powershell: "-SkipCodex" },
-  "skip-gemini": { posix: "--skip-gemini", powershell: "-SkipGemini" },
   "skip-kiro": { posix: "--skip-kiro", powershell: "-SkipKiro" },
   "skip-vibe": { posix: "--skip-vibe", powershell: "-SkipVibe" },
   "skip-opencode": { posix: "--skip-opencode", powershell: "-SkipOpencode" },
@@ -1170,6 +1169,15 @@ const MUTUALLY_EXCLUSIVE: Array<[InstallFlagId, InstallFlagId]> = [
   ["verify-attestation", "skip-attestation"],
   ["with-t3", "without-t3"],
 ];
+
+/**
+ * Ids an earlier installer remembered for an integration that is gone (Gemini
+ * CLI): dropped silently, never passed to the installer or shown in an update
+ * command, and not counted as a problem. The installers still accept the
+ * flags themselves as no-ops, so an older `plannotator update` that passes
+ * one never breaks.
+ */
+const RETIRED_INSTALL_FLAG_IDS: ReadonlySet<string> = new Set(["skip-gemini"]);
 
 function isInstallFlagId(value: unknown): value is InstallFlagId {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(INSTALL_FLAG_SPELLINGS, value);
@@ -1195,7 +1203,7 @@ export function parseInstallFlags(raw: unknown): InstallFlagsRead {
   let dropped = 0;
   for (const entry of entries) {
     if (isInstallFlagId(entry)) present.add(entry);
-    else dropped++;
+    else if (typeof entry !== "string" || !RETIRED_INSTALL_FLAG_IDS.has(entry)) dropped++;
   }
   for (const [a, b] of MUTUALLY_EXCLUSIVE) {
     if (present.has(a) && present.has(b)) {

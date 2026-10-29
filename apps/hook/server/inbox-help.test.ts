@@ -144,7 +144,9 @@ describe("the guide against what it describes", () => {
   test("lists where each agent's note would go on this computer, and how --notes adds it", () => {
     expect(help).toContain("`plannotator inbox --notes <ids>`");
     expect(help).toContain("- Codex (`codex`): `~/.codex/AGENTS.md`, adds a marked section.");
-    expect(help).toContain("- Gemini CLI (`gemini`): `~/.gemini/GEMINI.md`, creates the file.");
+    expect(help).toContain("- Qwen Code (`qwen`): `~/.qwen/QWEN.md`, creates the file.");
+    // Gemini CLI is no longer offered.
+    expect(help).not.toContain("Gemini");
     expect(help).toContain("- Claude Code (`claude-code`): `~/.claude/rules/plannotator-inbox.md`, creates the file.");
     expect(help).toMatch(/- OpenCode \(`opencode`\): none\. Creating this file would stop OpenCode 1/);
   });

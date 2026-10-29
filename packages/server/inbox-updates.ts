@@ -114,7 +114,7 @@ export interface InboxUpdateDetails {
   auto_update: { on: boolean; env: boolean | null; supported: boolean };
   /** The first paragraph of the release notes. */
   summary: string;
-  /** The remembered install flags as the installer spells them (`--skip-gemini`). */
+  /** The remembered install flags as the installer spells them (`--skip-codex`). */
   flags: string[];
   /** The install command a person runs by hand, with those flags. */
   command: string;

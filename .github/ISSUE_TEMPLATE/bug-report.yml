@@ -40,7 +40,6 @@ body:
         - Amp
         - Droid
         - Copilot CLI
-        - Gemini CLI
         - Kiro CLI
         - None / standalone CLI
         - Other

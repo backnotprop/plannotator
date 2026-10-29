@@ -3172,7 +3172,9 @@ if (args[0] === "sessions") {
   // Qwen Code: PermissionRequest on exit_plan_mode, the plan inline (qwen-plan.ts).
   const isQwen = isQwenPlanPermissionRequest(event);
 
-  // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
+  // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline).
+  // Gemini CLI is no longer offered (no installer sets it up, no UI names it); this path stays so a
+  // hook an earlier install put in ~/.gemini/settings.json keeps working. Its origin has no badge.
   planFilename = isQwen ? "" : event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
   isGemini = !!planFilename;
 

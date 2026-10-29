@@ -76,13 +76,15 @@ test("--background never connects; a person's run on that Inbox does; a later ru
   const person = await cli(w, ["inbox", "--no-open"]);
   expect(person.code).toBe(0);
   expect(person.stdout).toBe("");
-  expect(person.stderr).toContain("Connected Codex and Gemini CLI to the Inbox.");
+  // Gemini CLI is no longer offered: found on PATH, it is never connected or named.
+  expect(person.stderr).toContain("Connected Codex to the Inbox.");
+  expect(person.stderr).not.toContain("Gemini");
   expect(person.stderr).toContain("Agents use it from their next session.");
-  expect(adds(w).sort()).toEqual(["codex", "gemini"]);
+  expect(adds(w)).toEqual(["codex"]);
 
   const quiet = await cli(w, ["inbox", "--no-open"]);
   expect(quiet.stderr).not.toContain("Connected");
-  expect(adds(w)).toHaveLength(2);
+  expect(adds(w)).toHaveLength(1);
 
   w.install("amp");
   const later = await cli(w, ["inbox", "--no-open"]);
@@ -153,7 +155,7 @@ test("an older Inbox's detached start (its Restart into this binary: only the lo
   // The same computer and Inbox: a person's run does connect them.
   const person = await cli(w, ["inbox", "--no-open"]);
   expect(person.stderr).toContain("Connected");
-  expect(adds(w).sort()).toEqual(["codex", "gemini"]);
+  expect(adds(w)).toEqual(["codex"]);
   expect(existsSync(join(w.home, ".cursor", "mcp.json"))).toBe(true);
 }, 90_000);
 
@@ -161,7 +163,7 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   const w = world();
   mkdirSync(join(w.home, ".codex"), { recursive: true });
   writeFileSync(join(w.home, ".codex", "AGENTS.md"), "Mine.\n");
-  mkdirSync(join(w.home, ".gemini"), { recursive: true });
+  mkdirSync(join(w.home, ".qwen"), { recursive: true });
   // Cursor is not on this computer yet: refused like any agent not found, and nothing is printed to copy.
   const missing = await cli(w, ["inbox", "--notes", "cursor"]);
   expect(missing.code).toBe(1);
@@ -170,21 +172,25 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   expect(existsSync(join(w.home, ".plannotator", "config.json"))).toBe(false);
   // Found through its CLI on PATH (never run by --notes).
   w.install("cursor-agent");
-  const result = await cli(w, ["inbox", "--notes", "codex,gemini,cursor"]);
+  const result = await cli(w, ["inbox", "--notes", "codex,qwen,cursor"]);
   expect(result.code).toBe(0);
   expect(result.stdout).toContain("## Plannotator Inbox");
   expect(result.stdout).not.toContain("plannotator-inbox:start");
   expect(result.stderr).toContain("Cursor: nothing written. Cursor keeps its rules in the app: copy the note above into Customize → Rules in Cursor.");
   expect(result.stderr).toContain("Plannotator can't see, update or remove that copy.");
   expect(result.stderr).toContain("Codex: Added a marked section to ~/.codex/AGENTS.md.");
-  expect(result.stderr).toContain("Gemini CLI: Created ~/.gemini/GEMINI.md.");
+  expect(result.stderr).toContain("Qwen Code: Created ~/.qwen/QWEN.md.");
   expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain(INBOX_NOTE_START);
   expect(existsSync(join(w.home, ".pi"))).toBe(false);
   expect(existsSync(join(w.home, ".cursor"))).toBe(false);
   expect(existsSync(join(w.home, ".plannotator", "inbox", "inbox.json"))).toBe(false);
-  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini", "cursor"] });
+  expect(JSON.parse(readFileSync(join(w.home, ".plannotator", "config.json"), "utf8")).inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "qwen", "cursor"] });
 
   const bad = await cli(w, ["inbox", "--notes", "vscode"]);
   expect(bad.code).toBe(1);
   expect(bad.stderr).toContain("Unknown agent for --notes: vscode");
+  // Gemini CLI is no longer offered: no new note goes to it.
+  const retired = await cli(w, ["inbox", "--notes", "gemini"]);
+  expect(retired.code).toBe(1);
+  expect(retired.stderr).toContain("Unknown agent for --notes: gemini");
 }, 60_000);

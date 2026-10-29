@@ -54,7 +54,9 @@ describe("plannotator update (seams)", () => {
     expect(await run([])).toBe(0);
     expect(installs).toEqual(["v0.28.11"]);
     expect(out).toContain("Plannotator 0.28.11 is available (you have 0.28.10).");
-    expect(out).toContain("Installing v0.28.11 with your last install's choices: --skip-gemini --skip-claude-plugin");
+    // skip-gemini (Gemini CLI is no longer offered) is accepted and dropped: never passed to the installer.
+    expect(out).toContain("Installing v0.28.11 with your last install's choices: --skip-claude-plugin");
+    expect(out).not.toContain("--skip-gemini");
     expect(out).toContain("installer output");
     expect(out).toContain("Updated to 0.28.11.");
     // The plugin opt-out was remembered, so the plugin is the person's to update.

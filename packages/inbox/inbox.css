@@ -2956,7 +2956,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
   .ib-anote-st { justify-content: flex-start; }
   .ib-anote-foot { flex-direction: column-reverse; align-items: stretch; }
   .ib-anote-later { margin: 6px 0 0; text-align: center; }
-  /* A long primary ("Add to Codex, Gemini CLI and Claude Code") wraps rather than being cut. */
+  /* A long primary ("Add to Codex, Qwen Code and Claude Code") wraps rather than being cut. */
   .pn-inbox .ib-anote-foot .ib-btn { height: auto; min-height: 44px; padding: 8px 10px; justify-content: center; white-space: normal; text-align: center; font-size: var(--ib-fs-13-5, 13.5px); }
 }
 .ib-try { display: flex; flex-direction: column; gap: 10px; }

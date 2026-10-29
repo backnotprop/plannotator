@@ -51,8 +51,8 @@ const details = (over: Partial<UpdateDetails> = {}): UpdateDetails => ({
   check: { on: true, env: null, last_attempt_at: '2026-10-10T09:14:00Z', error: null },
   auto_update: { on: false, env: null, supported: true },
   summary: 'A patch release for the Inbox.',
-  flags: ['--skip-gemini'],
-  command: 'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini',
+  flags: ['--skip-codex'],
+  command: 'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex',
   plugin_command: null,
   sessions: [{ mode: 'review', project: 'billing-svc', label: 'review-billing-svc', started_at: '2026-10-10T09:02:00Z' }],
   failure: null,
@@ -116,7 +116,7 @@ test.skipIf(!hasDom)('the update dialog: Update now in the first step, the remem
     />,
   );
   expect(el.textContent).toContain('Update to Plannotator 0.28.12');
-  expect(el.textContent).toContain('--skip-gemini');
+  expect(el.textContent).toContain('--skip-codex');
   expect(el.textContent).toContain('billing-svc · code review');
   act(() => (el.querySelector('[data-update-now]') as HTMLButtonElement).click());
   expect(now).toBe(1);
@@ -175,7 +175,7 @@ test.skipIf(!hasDom)('a binary the install script does not manage: the command, 
   );
   expect(el.querySelector('[data-update-now]')).toBeNull();
   expect(el.querySelector('[data-auto-update-checkbox]')).toBeNull();
-  expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini');
+  expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex');
 });
 
 test.skipIf(!hasDom)('the failure dialog names the exit code and the log, and offers Try Again', () => {
@@ -244,7 +244,7 @@ for (const tls of [undefined, 'untrusted'] as const) {
     );
     expect(el.textContent).toContain('Plannotator 0.28.10 still works');
     expect(el.textContent).toContain('If this keeps happening, install it yourself');
-    expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini');
+    expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex');
     expect(el.querySelector('[data-failed-release]')?.getAttribute('href')).toBe('https://github.com/backnotprop/plannotator/releases/tag/v0.28.12');
     expect(el.textContent.includes('NODE_EXTRA_CA_CERTS=/path/to/its-root.pem plannotator update')).toBe(tls === 'untrusted');
   });
@@ -324,5 +324,5 @@ test.skipIf(!hasDom)('any other failure still offers the install script to run b
       onClose={() => {}}
     />,
   );
-  expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini');
+  expect(el.textContent).toContain('curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex');
 });

@@ -9,7 +9,7 @@
  * `<this CLI> inbox mcp`:
  *
  *  - through the agent's own `mcp add` command where it has one (Codex,
- *    Gemini CLI, Windsurf/Devin, Amp, Cline, Pi without Plannotator's
+ *    Windsurf/Devin, Amp, Cline, Pi without Plannotator's
  *    extension), so Plannotator never edits TOML or JSONC itself;
  *  - else as one key in a plain-JSON file, after a strict parse (Cursor,
  *    Kiro, the Claude desktop app);
@@ -699,8 +699,7 @@ export function claudeCodeInboxToolOn(e: AgentEnvironment): boolean {
  * (cln's `pi` printing digits, amp.rs) is never handed an `mcp add`, and a
  * build older than its `mcp add` is left to the person: Pi before 0.99 (no
  * `pi mcp`: it would read the words as a chat prompt and run a model turn),
- * Codex CLI before 0.35.0 (`codex mcp add` landed in rust-v0.35.0, Sep 2025)
- * and Gemini CLI before 0.1.19 (`gemini mcp add`, Aug 2025). Qwen Code's
+ * and Codex CLI before 0.35.0 (`codex mcp add` landed in rust-v0.35.0, Sep 2025). Qwen Code's
  * settings.json is edited by Plannotator itself, so any Qwen Code version
  * will do; the line only tells Qwen Code from another `qwen`. Read with no
  * stdin, under the limit.
@@ -711,12 +710,6 @@ const VERSION_SHAPES: Record<string, { line: RegExp; min?: [number, number, numb
     min: [0, 35, 0],
     older: "Codex CLI before 0.35 has no `codex mcp add`; update Codex, or add plannotator-inbox to its config.toml by hand",
     manual: "this codex did not answer like Codex CLI",
-  },
-  gemini: {
-    line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/,
-    min: [0, 1, 19],
-    older: "Gemini CLI before 0.1.19 has no `gemini mcp add`; update Gemini CLI, or add plannotator-inbox to its settings.json by hand",
-    manual: "this gemini did not answer like Gemini CLI",
   },
   qwen: {
     line: /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/,
@@ -842,9 +835,11 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     remove: { bin: "codex", args: ["mcp", "remove", NAME] },
   },
   {
+    // Gemini CLI: no longer offered (INBOX_RETIRED_AGENT_IDS). Never detected, so no run connects it and no
+    // window lists it; kept so uninstall still removes an entry an earlier Plannotator added and recorded.
     id: "gemini",
-    detect: (e) => !!e.which("gemini") || isDir(geminiDir(e)),
-    way: (e, probe) => cliWay(e, "gemini", (cmd) => ["mcp", "add", "-s", "user", NAME, ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
+    detect: () => false,
+    way: async () => ({ kind: "manual", why: "Plannotator no longer connects Gemini CLI" }),
     file: (e) => join(geminiDir(e), "settings.json"),
     raw: (e) => rawJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true),
     remove: { bin: "gemini", args: ["mcp", "remove", "-s", "user", NAME] },

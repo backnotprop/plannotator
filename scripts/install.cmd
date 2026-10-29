@@ -32,14 +32,13 @@ REM agent's home is neither written to nor cleaned up, and detected-but-skipped
 REM is reported honestly. Resolution (flag > env var > config skipInstall.<agent>
 REM > default off) happens after _CONFIG_DIR is known.
 set "SKIP_CODEX_FLAG=0"
-set "SKIP_GEMINI_FLAG=0"
 set "SKIP_KIRO_FLAG=0"
 set "SKIP_VIBE_FLAG=0"
 set "SKIP_OPENCODE_FLAG=0"
 set "SKIP_QWEN_FLAG=0"
 REM Same shape, but scoped to the skills/slash-command sparse checkout rather
 REM than one agent's home: --skip-skills turns the whole fetch into a no-op for
-REM every scope it writes (Claude, .agents, OpenCode, Gemini, Kiro), including
+REM every scope it writes (Claude, .agents, OpenCode, Kiro), including
 REM the extras and the skill-scope cleanup sweeps.
 set "SKIP_SKILLS_FLAG=0"
 REM Do not update an installed Claude Code plugin (see :UpdateClaudePlugin).
@@ -156,8 +155,10 @@ if /i "%~1"=="--skip-codex" (
     shift
     goto parse_args
 )
+REM --skip-gemini is retired with Gemini CLI support: still accepted, silently,
+REM so an older remembered flag never fails an install. It does nothing and is
+REM never recorded in install-flags.json.
 if /i "%~1"=="--skip-gemini" (
-    set "SKIP_GEMINI_FLAG=1"
     shift
     goto parse_args
 )
@@ -205,7 +206,7 @@ REM unquoted arg containing `&` would re-trigger metacharacter interpretation.
 set "CURRENT_ARG=%~1"
 if "!CURRENT_ARG:~0,1!"=="-" (
     echo Unknown option: "%~1" >&2
-    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-gemini] [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills] [--skip-qwen] [--skip-claude-plugin] [--non-interactive] [--reconfigure] >&2
+    echo Usage: install.cmd [--version ^<tag^>] [--verify-attestation ^| --skip-attestation] [--with-call-flow] [--extras ^| --no-extras] [--model-invocable ^<list^>] [--minimal ^| --no-minimal] [--skip-codex] [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills] [--skip-qwen] [--skip-claude-plugin] [--non-interactive] [--reconfigure] >&2
     exit /b 1
 )
 REM Positional form: install.cmd vX.Y.Z (legacy interface).
@@ -549,8 +550,6 @@ REM re-parsed as code. Each resolved skip remembers its source so the
 REM detected-but-skipped report can name what the user set.
 set "SKIP_CODEX=0"
 set "SKIP_CODEX_SOURCE="
-set "SKIP_GEMINI=0"
-set "SKIP_GEMINI_SOURCE="
 set "SKIP_KIRO=0"
 set "SKIP_KIRO_SOURCE="
 set "SKIP_VIBE=0"
@@ -568,14 +567,10 @@ set "SKIP_CLAUDE_PLUGIN=0"
 set "SKIP_CLAUDE_PLUGIN_SOURCE="
 if exist "!_CONFIG_DIR!\config.json" (
     set "PLN_CONFIG_JSON=!_CONFIG_DIR!\config.json"
-    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','gemini','kiro','vibe','opencode','qwen','skills','claudePlugin')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
+    for /f "usebackq delims=" %%K in (`powershell -NoProfile -Command "try { $c = Get-Content $env:PLN_CONFIG_JSON -Raw | ConvertFrom-Json } catch { exit 0 }; if (-not $c.skipInstall) { exit 0 }; foreach ($k in @('codex','kiro','vibe','opencode','qwen','skills','claudePlugin')) { $v = $c.skipInstall.$k; if ($v -is [bool] -and $v) { $k } }"`) do (
         if /i "%%K"=="codex" (
             set "SKIP_CODEX=1"
             set "SKIP_CODEX_SOURCE=config skipInstall.codex"
-        )
-        if /i "%%K"=="gemini" (
-            set "SKIP_GEMINI=1"
-            set "SKIP_GEMINI_SOURCE=config skipInstall.gemini"
         )
         if /i "%%K"=="kiro" (
             set "SKIP_KIRO=1"
@@ -611,14 +606,6 @@ for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_CODEX_INSTALL!"=="%%V" (
 for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_CODEX_INSTALL!"=="%%V" (
     set "SKIP_CODEX=0"
     set "SKIP_CODEX_SOURCE="
-)
-for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_GEMINI_INSTALL!"=="%%V" (
-    set "SKIP_GEMINI=1"
-    set "SKIP_GEMINI_SOURCE=PLANNOTATOR_SKIP_GEMINI_INSTALL"
-)
-for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_GEMINI_INSTALL!"=="%%V" (
-    set "SKIP_GEMINI=0"
-    set "SKIP_GEMINI_SOURCE="
 )
 for %%V in (1 true yes) do if /i "!PLANNOTATOR_SKIP_KIRO_INSTALL!"=="%%V" (
     set "SKIP_KIRO=1"
@@ -671,10 +658,6 @@ for %%V in (0 false no) do if /i "!PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE!"=="%%V
 if "!SKIP_CODEX_FLAG!"=="1" (
     set "SKIP_CODEX=1"
     set "SKIP_CODEX_SOURCE=--skip-codex"
-)
-if "!SKIP_GEMINI_FLAG!"=="1" (
-    set "SKIP_GEMINI=1"
-    set "SKIP_GEMINI_SOURCE=--skip-gemini"
 )
 if "!SKIP_KIRO_FLAG!"=="1" (
     set "SKIP_KIRO=1"
@@ -1038,7 +1021,7 @@ if exist "!CODEX_DIR!" (
         if /i not "%%C"=="skills" if /i not "%%C"==".DS_Store" set "CODEX_AVAILABLE=1"
     )
 )
-REM Kiro is auto-detected like Codex/Gemini: PATH executable or an existing %USERPROFILE%\.kiro.
+REM Kiro is auto-detected like Codex: PATH executable or an existing %USERPROFILE%\.kiro.
 set "KIRO_AVAILABLE=0"
 where kiro-cli >nul 2>&1
 if !ERRORLEVEL! equ 0 set "KIRO_AVAILABLE=1"
@@ -1200,7 +1183,6 @@ REM   %%USERPROFILE%%\.claude\skills            <- apps\skills\core\* (all 4)
 REM   %%USERPROFILE%%\.agents\skills            <- apps\skills\core\* (all 4)
 REM   %%USERPROFILE%%\.kiro\skills              <- apps\kiro-cli\skills\* (3) + 2 extras (when kiro detected)
 REM   %%USERPROFILE%%\.config\opencode\commands <- apps\opencode-plugin\commands\*.md (always)
-REM   %%USERPROFILE%%\.gemini\commands          <- apps\gemini\commands\*.toml (when ~/.gemini exists)
 REM Nothing goes to the Codex home (CODEX_DIR\skills) anymore.
 REM ----------------------------------------------------------------------
 
@@ -1351,8 +1333,8 @@ if "!SKIP_SKILLS!"=="0" if "!EXTRAS_CHOICE!"=="yes" if "!EXTRAS_PRESENT!"=="0" (
 REM File-copy installs require git (sparse checkout). Hard requirement: without
 REM git we cannot install the /plannotator-* skills, so fail loudly instead of
 REM leaving a partial install. Hook/config writing above has already run; the
-REM Pi update and Gemini config below are skipped on failure and complete when
-REM the user re-runs the installer.
+REM Pi update below is skipped on failure and completes when the user re-runs
+REM the installer.
 REM
 REM Skills/commands opt-out (--skip-skills / PLANNOTATOR_SKIP_SKILLS_INSTALL /
 REM skipInstall.skills). HONEST reporting like the per-agent family: the skipped
@@ -1380,7 +1362,6 @@ set "CHECKOUT_FAILED=0"
 set "KIRO_SKILLS_DIR=%USERPROFILE%\.kiro\skills"
 set "KIRO_AGENTS_DIR=%USERPROFILE%\.kiro\agents"
 set "OPENCODE_COMMANDS_DIR=%USERPROFILE%\.config\opencode\commands"
-set "GEMINI_COMMANDS_DIR=%USERPROFILE%\.gemini\commands"
 set "SKILLS_TMP=%TEMP%\plannotator-skills-%RANDOM%"
 REM git's stderr is captured OUTSIDE SKILLS_TMP (which is removed before the
 REM failure message prints) so a failed clone can show the real git error
@@ -1428,7 +1409,7 @@ if "!SPARSE_UNSUPPORTED!"=="1" (
 
 if "!CLONE_OK!"=="1" (
     pushd "!SKILLS_TMP!\repo"
-    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands apps/qwen-code >nul 2>&1
+    if "!SPARSE_CLONE!"=="1" git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/qwen-code >nul 2>&1
 
     REM Claude Code reads apps\skills\claude\* (injection `!`plannotator ... $ARGUMENTS``
     REM + allowed-tools, so /plannotator-* run with no permission prompt); Codex
@@ -1470,14 +1451,6 @@ if "!CLONE_OK!"=="1" (
         if not exist "!OPENCODE_COMMANDS_DIR!" mkdir "!OPENCODE_COMMANDS_DIR!"
         xcopy /y /q "apps\opencode-plugin\commands\*.md" "!OPENCODE_COMMANDS_DIR!\" >nul 2>&1
         echo Installed OpenCode commands to !OPENCODE_COMMANDS_DIR!\
-    )
-
-    REM Gemini TOML commands -> only when ~/.gemini exists (Gemini's native
-    REM format) and not opted out (#1178).
-    if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" if exist "apps\gemini\commands" (
-        if not exist "!GEMINI_COMMANDS_DIR!" mkdir "!GEMINI_COMMANDS_DIR!"
-        xcopy /y /q "apps\gemini\commands\*.toml" "!GEMINI_COMMANDS_DIR!\" >nul 2>&1
-        echo Installed Gemini commands to !GEMINI_COMMANDS_DIR!\
     )
 
     REM Kiro -> hand-maintained kiro skills (3) + 2 extras, only when detected
@@ -1658,82 +1631,6 @@ REM and the plannotator_submit_plan tool; it no longer bundles skills, so there
 REM is no settings.json package-skills filter to configure. See :UpdatePiExtension.
 where pi >nul 2>&1
 if !ERRORLEVEL! equ 0 call :UpdatePiExtension
-
-REM --- Gemini CLI support (only if Gemini is installed) ---
-REM HONEST three-state reporting (#1178): detected-but-skipped is its own
-REM state. A Gemini opt-out leaves ~/.gemini entirely untouched.
-if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="1" (
-    echo.
-    echo Gemini: detected, skipped ^(!SKIP_GEMINI_SOURCE!^).
-    if exist "%USERPROFILE%\.gemini\settings.json" (
-        findstr /c:"plannotator" "%USERPROFILE%\.gemini\settings.json" >nul 2>&1
-        if !ERRORLEVEL! equ 0 echo An existing Gemini integration at %USERPROFILE%\.gemini\settings.json was left untouched.
-    )
-)
-if exist "%USERPROFILE%\.gemini" if "!SKIP_GEMINI!"=="0" (
-    REM Install policy file
-    if not exist "%USERPROFILE%\.gemini\policies" mkdir "%USERPROFILE%\.gemini\policies"
-    (
-echo # Plannotator policy for Gemini CLI
-echo # Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
-echo [[rule]]
-echo toolName = "exit_plan_mode"
-echo decision = "allow"
-echo priority = 100
-    ) > "%USERPROFILE%\.gemini\policies\plannotator.toml"
-    echo Installed Gemini policy to %USERPROFILE%\.gemini\policies\plannotator.toml
-
-    REM Configure hook in settings.json
-    if not exist "%USERPROFILE%\.gemini\settings.json" (
-        (
-echo {
-echo   "hooks": {
-echo     "BeforeTool": [
-echo       {
-echo         "matcher": "exit_plan_mode",
-echo         "hooks": [
-echo           {
-echo             "type": "command",
-echo             "command": "plannotator",
-echo             "timeout": 345600
-echo           }
-echo         ]
-echo       }
-echo     ]
-echo   },
-echo   "experimental": {
-echo     "plan": true
-echo   }
-echo }
-        ) > "%USERPROFILE%\.gemini\settings.json"
-        echo Created Gemini settings at %USERPROFILE%\.gemini\settings.json
-    ) else (
-        findstr /c:"plannotator" "%USERPROFILE%\.gemini\settings.json" >nul 2>&1
-        if !ERRORLEVEL! neq 0 (
-            REM Merge hook into existing settings.json using node (ships with Gemini CLI)
-            where node >nul 2>&1
-            if !ERRORLEVEL! equ 0 (
-                set "GEMINI_SETTINGS_PATH=%USERPROFILE%\.gemini\settings.json"
-                set "GEMINI_SETTINGS_FWD=!GEMINI_SETTINGS_PATH:\=/!"
-                node -e "const fs=require('fs');const s=JSON.parse(fs.readFileSync('!GEMINI_SETTINGS_FWD!','utf8'));s.hooks=s.hooks||{};s.hooks.BeforeTool=s.hooks.BeforeTool||[];s.hooks.BeforeTool.push({matcher:'exit_plan_mode',hooks:[{type:'command',command:'plannotator',timeout:345600}]});fs.writeFileSync('!GEMINI_SETTINGS_FWD!',JSON.stringify(s,null,2)+'\n');"
-                echo Added plannotator hook to !GEMINI_SETTINGS_PATH!
-            ) else (
-                echo.
-                echo Add the following to your ~/.gemini/settings.json hooks:
-                echo.
-                echo   "hooks": {
-                echo     "BeforeTool": [{
-                echo       "matcher": "exit_plan_mode",
-                echo       "hooks": [{"type": "command", "command": "plannotator", "timeout": 345600}]
-                echo     }]
-                echo   }
-            )
-        )
-    )
-
-    REM Gemini slash commands (plannotator-*.toml) are copied from the sparse
-    REM checkout in the git-gated skills/commands block above, not written here.
-)
 
 if "!SKIP_OPENCODE!"=="1" (
     echo.
@@ -1928,7 +1825,6 @@ if "!VERIFY_ATTESTATION_FLAG!"=="1" call :AddInstallFlag verify-attestation
 if "!VERIFY_ATTESTATION_FLAG!"=="0" call :AddInstallFlag skip-attestation
 if "!WITH_CALL_FLOW_FLAG!"=="1" call :AddInstallFlag with-call-flow
 if "!SKIP_CODEX_FLAG!"=="1" call :AddInstallFlag skip-codex
-if "!SKIP_GEMINI_FLAG!"=="1" call :AddInstallFlag skip-gemini
 if "!SKIP_KIRO_FLAG!"=="1" call :AddInstallFlag skip-kiro
 if "!SKIP_VIBE_FLAG!"=="1" call :AddInstallFlag skip-vibe
 if "!SKIP_OPENCODE_FLAG!"=="1" call :AddInstallFlag skip-opencode

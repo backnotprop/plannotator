@@ -5,7 +5,7 @@
  */
 import {
   INBOX_AGENT_LABELS,
-  INBOX_NOTE_AGENT_IDS,
+  INBOX_OFFERED_NOTE_AGENT_IDS,
   inboxElsewhereText,
   type InboxAgentId,
   type InboxAgentRow,
@@ -25,13 +25,13 @@ export function noteCandidates(model: InboxAgentsModel): InboxAgentRow[] {
 /** The agents already asked about the note. An Inbox of 0.28.18 or older says only whether it asked (once, in all). */
 export function notesAskedOf(model: InboxAgentsModel): readonly InboxNoteAgentId[] {
   if (model.notes_asked) return model.notes_asked;
-  return model.notes_offered ? INBOX_NOTE_AGENT_IDS : [];
+  return model.notes_offered ? INBOX_OFFERED_NOTE_AGENT_IDS : [];
 }
 
 /**
  * Who the dialog asks about: the candidates not asked yet (each agent is
  * asked once), Claude Code last as in the approved dialog ("Add to Codex,
- * Gemini CLI and Claude Code"). None with PLANNOTATOR_INBOX_NOTES=0.
+ * Qwen Code and Claude Code"). None with PLANNOTATOR_INBOX_NOTES=0.
  */
 export function noteQuestionRows(model: InboxAgentsModel): InboxAgentRow[] {
   if (model.notes_env_off) return [];
@@ -115,7 +115,7 @@ export function sentence(text: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
-/** "Codex", "Codex and Gemini CLI", "Codex, Gemini CLI and Claude Code". */
+/** "Codex", "Codex and Qwen Code", "Codex, Qwen Code and Claude Code". */
 export function joinNames(names: readonly string[]): string {
   if (names.length <= 1) return names.join('');
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;

@@ -74,7 +74,7 @@ For scripted or headless installs, `--with-call-flow` (PowerShell: `-WithCallFlo
 <details>
 <summary><strong>Binary-only install (nothing but the CLI)</strong></summary>
 
-Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no CallDiff runtime, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, Gemini, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.
+Pass `--minimal` (aliased `--binary-only`) to install **only** the `plannotator` binary — no sem semantic-diff sidecar, no CallDiff runtime, no agent-terminal runtime, and none of the per-agent skills, hooks, slash commands, or config for Claude, Codex, OpenCode, or Kiro. The only thing installed is the binary (the Windows PowerShell installer also adds the install directory to your user `PATH`), and because it skips the sparse checkout, **minimal mode does not require `git`**.
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --minimal
@@ -95,15 +95,15 @@ For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the envir
 <details>
 <summary><strong>Skipping individual agent integrations</strong></summary>
 
-Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear; `--skip-qwen` skips the Qwen Code extension and skills. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
+Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-kiro` does the same for `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear; `--skip-qwen` skips the Qwen Code extension and skills. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex
 ```
 
-PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode` / `-SkipQwen`. Windows CMD: same `--skip-*` flags as bash.
+PowerShell: `-SkipCodex` / `-SkipKiro` / `-SkipOpencode` / `-SkipQwen`. Windows CMD: same `--skip-*` flags as bash.
 
-For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`, `_QWEN_`) or persist the choice in `~/.plannotator/config.json`:
+For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_KIRO_`, `_OPENCODE_`, `_QWEN_`) or persist the choice in `~/.plannotator/config.json`:
 
 ```json
 { "skipInstall": { "codex": true } }
@@ -116,7 +116,7 @@ Precedence: flag over environment variable over config file.
 <details>
 <summary><strong>Skipping the skills and slash commands</strong></summary>
 
-The `/plannotator-*` skills and slash commands are fetched with a sparse `git clone` of the release tag. `--skip-skills` turns that fetch into a no-op: nothing is written to `~/.claude/skills`, `~/.agents/skills`, the OpenCode or Gemini command directories, or `~/.kiro`, the extras are not offered, and the skill-scope cleanup sweeps stay suspended. The binary, hooks, and per-agent config still install, and git stops being a hard requirement. Use it where the tag being installed cannot be fetched from GitHub, or where you manage the skills yourself.
+The `/plannotator-*` skills and slash commands are fetched with a sparse `git clone` of the release tag. `--skip-skills` turns that fetch into a no-op: nothing is written to `~/.claude/skills`, `~/.agents/skills`, the OpenCode command directory, or `~/.kiro`, the extras are not offered, and the skill-scope cleanup sweeps stay suspended. The binary, hooks, and per-agent config still install, and git stops being a hard requirement. Use it where the tag being installed cannot be fetched from GitHub, or where you manage the skills yourself.
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-skills
@@ -165,7 +165,7 @@ Plannotator can do this for you. Turn on **Settings → General → Keep Plannot
 
 in `~/.plannotator/config.json`, or `PLANNOTATOR_AUTO_UPDATE=1` in your environment (the environment variable wins). It is off by default.
 
-When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-qwen`, `--skip-skills`, `--skip-claude-plugin`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
+When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-qwen`, `--skip-skills`, `--skip-claude-plugin`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
 
 Auto-update only applies to the binary the install script manages (`~/.local/bin/plannotator`, or `%LOCALAPPDATA%\plannotator\plannotator.exe` on Windows). A development build, a binary installed some other way, and the OpenCode and Pi plugins are never updated by it.
 
@@ -325,7 +325,7 @@ This also clears any cached plugin versions.
 
 ## Kiro CLI
 
-Kiro is auto-detected — no extra flag or step. If `~/.kiro` exists (or `kiro-cli` is on your PATH) when you run the installer, Plannotator's Kiro skills install automatically, the same way Codex and Gemini are handled. This works on every platform; use the installer for your OS:
+Kiro is auto-detected — no extra flag or step. If `~/.kiro` exists (or `kiro-cli` is on your PATH) when you run the installer, Plannotator's Kiro skills install automatically, the same way Codex is handled. This works on every platform; use the installer for your OS:
 
 **macOS / Linux / WSL:**
 

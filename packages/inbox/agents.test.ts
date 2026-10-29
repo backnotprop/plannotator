@@ -23,7 +23,7 @@ function row(id: InboxAgentRow['id'], over: Partial<InboxAgentRow> = {}): InboxA
 
 function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
   return {
-    agents: [row('claude-code'), row('codex'), row('gemini'), row('pi', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null } }), row('cursor', { note: null })],
+    agents: [row('claude-code'), row('codex'), row('qwen'), row('pi', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null } }), row('cursor', { note: null })],
     last_report: null,
     connecting: false,
     connect_env_off: false,
@@ -38,19 +38,19 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
 const ids = (m: InboxAgentsModel) => noteQuestionRows(m).map((r) => r.id);
 
 test('every candidate not asked yet, Claude Code last; not reaching, no file, or failed this run: not a candidate', () => {
-  expect(ids(model())).toEqual(['codex', 'gemini', 'claude-code']);
-  const failed = model({ last_report: { at: '', first: true, added: [], already: [], failed: [{ agent: 'gemini', reason: 'x', path: null }], foreign: [], manual: [], unfinished: [], claude_code: false } });
+  expect(ids(model())).toEqual(['codex', 'qwen', 'claude-code']);
+  const failed = model({ last_report: { at: '', first: true, added: [], already: [], failed: [{ agent: 'qwen', reason: 'x', path: null }], foreign: [], manual: [], unfinished: [], claude_code: false } });
   expect(ids(failed)).toEqual(['codex', 'claude-code']);
 });
 
 test('each agent is asked once: an agent asked before is left out, one that connects later is asked alone', () => {
-  expect(ids(model({ notes_offered: true, notes_asked: ['claude-code', 'codex'] }))).toEqual(['gemini']);
-  expect(ids(model({ notes_offered: true, notes_asked: ['claude-code', 'codex', 'gemini'] }))).toEqual([]);
+  expect(ids(model({ notes_offered: true, notes_asked: ['claude-code', 'codex'] }))).toEqual(['qwen']);
+  expect(ids(model({ notes_offered: true, notes_asked: ['claude-code', 'codex', 'qwen'] }))).toEqual([]);
 });
 
 test('an Inbox of 0.28.18 or older (no notes_asked): answered means nobody is asked; never answered means everyone', () => {
   expect(ids(model({ notes_asked: undefined, notes_offered: true }))).toEqual([]);
-  expect(ids(model({ notes_asked: undefined, notes_offered: false }))).toEqual(['codex', 'gemini', 'claude-code']);
+  expect(ids(model({ notes_asked: undefined, notes_offered: false }))).toEqual(['codex', 'qwen', 'claude-code']);
 });
 
 test('PLANNOTATOR_INBOX_NOTES=0: nobody is asked', () => {
@@ -99,7 +99,7 @@ test('an agent connected in another QWEN_HOME is news for the band: where it is,
 
 test('the primary: up to three names, then a count; nothing ticked closes without adding', () => {
   expect(primaryAction(['Codex'])).toEqual({ label: 'Add to Codex', add: true });
-  expect(primaryAction(['Codex', 'Gemini CLI', 'Claude Code'])).toEqual({ label: 'Add to Codex, Gemini CLI and Claude Code', add: true });
+  expect(primaryAction(['Codex', 'Qwen Code', 'Claude Code'])).toEqual({ label: 'Add to Codex, Qwen Code and Claude Code', add: true });
   expect(primaryAction(['a', 'b', 'c', 'd']).label).toBe('Add to 4 agents');
   expect(primaryAction([])).toEqual({ label: "Don't add a note", add: false });
 });

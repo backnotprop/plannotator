@@ -10,15 +10,15 @@
  *  - the `plannotator_inbox` tool: Claude Code (the mod's contract copy and
  *    bundled tool list), Pi and OpenCode 2 (the shared contract, wake form),
  *    OpenCode 1 (no wake);
- *  - the Inbox's MCP server instructions: Codex, Gemini CLI, Cursor, Grok
+ *  - the Inbox's MCP server instructions: Codex, Cursor, Grok
  *    Build run by the Inbox, the Claude app, any MCP client;
  *  - the session reminder (Claude Code's session start and compaction hook,
  *    Pi, OpenCode 2; the no-wake form on OpenCode 1);
- *  - the opt-in note (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Cursor);
+ *  - the opt-in note (Claude Code, Codex, OpenCode, Pi, Qwen Code, Cursor);
  *  - `plannotator inbox --help` and the `plannotator` skill (everyone);
  *  - `/plannotator-inbox`'s Inbox briefing: the copies an agent reads itself
  *    (the Claude skill without the mod, the core skill for Codex, Kiro, Vibe
- *    and the rest, OpenCode's stub without the plugin, Gemini's command,
+ *    and the rest, OpenCode's stub without the plugin,
  *    Droid's script output, run here against a stand-in CLI), and the shared
  *    INBOX_COMMAND_BRIEFING the hosts that answer the command themselves give
  *    the model unseen (the Claude Code mod, Pi, OpenCode 2; OpenCode 1 in the
@@ -77,7 +77,6 @@ const COMMAND_FILES = [
   "apps/skills/claude/plannotator-inbox/SKILL.md",
   "apps/skills/core/plannotator-inbox/SKILL.md",
   "apps/opencode-plugin/commands/plannotator-inbox.md",
-  "apps/gemini/commands/plannotator-inbox.toml",
 ] as const;
 const DROID_OUTPUT = "/plannotator-inbox: Droid's script output";
 const INBOX_COMMANDS: Record<string, string> = {
@@ -90,13 +89,13 @@ const inboxCommands = Object.keys(INBOX_COMMANDS);
 /** The copies the person's command answers in the agent's own turn: they end by passing the address on. */
 const inboxCommandTurns = inboxCommands.filter((name) => name !== "/plannotator-inbox briefing: Claude Code mod, Pi, OpenCode 2");
 /** Where the agent may have no `plannotator_inbox` tool at all, so the send line names the MCP server alone. */
-const MCP_ONLY_SEND = ["/plannotator-inbox: apps/gemini/commands/plannotator-inbox.toml", DROID_OUTPUT];
+const MCP_ONLY_SEND = [DROID_OUTPUT];
 
 const SURFACES: Record<string, string> = {
   "tool: Claude Code (mod copy, bundled list)": entryText(modAgentTool(INBOX_DEFAULT_TOOLS)),
   "tool: Pi, OpenCode 2 (wake)": entryText(inboxAgentTool(INBOX_DEFAULT_TOOLS)),
   "tool: OpenCode 1 (no wake)": entryText(inboxAgentTool(INBOX_DEFAULT_TOOLS, { wakes: false })),
-  "MCP instructions: Codex, Gemini, Cursor, Grok, MCP clients": INBOX_MCP_INSTRUCTIONS,
+  "MCP instructions: Codex, Cursor, Grok, MCP clients": INBOX_MCP_INSTRUCTIONS,
   "reminder: Claude Code (session start, compaction hook)": modReminderText(CLAUDE_CODE_TOOL),
   "reminder: Pi, OpenCode 2": inboxReminderText(),
   "reminder: OpenCode 1 (no wake)": inboxReminderText(undefined, { wakes: false }),
@@ -143,7 +142,7 @@ const EXCEPTIONS: Record<Sentence, Record<string, string>> = {
   },
   "reply_to check": {
     ...Object.fromEntries(reminders.map((s) => [s, "the post-compaction thread list carries it instead"])),
-    "MCP instructions: Codex, Gemini, Cursor, Grok, MCP clients": "MCP clients read it on the reply_to and read_thread descriptions (inbox-mcp.ts)",
+    "MCP instructions: Codex, Cursor, Grok, MCP clients": "MCP clients read it on the reply_to and read_thread descriptions (inbox-mcp.ts)",
     "plannotator skill": "the skill defers the reply_to rules to --help",
     ...Object.fromEntries(inboxCommands.map((s) => [s, "the briefing defers the reply_to rules to --help"])),
   },
@@ -168,7 +167,7 @@ describe("Inbox guidance parity across harnesses", () => {
   test("the agent tool and the MCP instructions carry the same rules in the same order", () => {
     const rules = `${INBOX_USE_RULE} ${INBOX_CHANNEL_RULE} ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_SUBAGENT_RULE}`;
     expect(SURFACES["tool: Pi, OpenCode 2 (wake)"]).toContain(rules);
-    expect(SURFACES["MCP instructions: Codex, Gemini, Cursor, Grok, MCP clients"]).toContain(rules);
+    expect(SURFACES["MCP instructions: Codex, Cursor, Grok, MCP clients"]).toContain(rules);
   });
 
   test("Claude Code's tool is the one Pi and OpenCode 2 get: the mod's contract copy builds the same entry", () => {
@@ -212,7 +211,7 @@ describe("Inbox guidance parity across harnesses", () => {
     expect(field.description).toContain("Pass an idempotency_key so a retry never posts twice.");
   });
 
-  test("every /plannotator-inbox copy carries the shared briefing's lines word for word (Gemini and Droid name the MCP server alone)", () => {
+  test("every /plannotator-inbox copy carries the shared briefing's lines word for word (Droid names the MCP server alone)", () => {
     const bullets = INBOX_COMMAND_BRIEFING.split("\n").filter((line) => line.startsWith("- "));
     const send = bullets.find((line) => line.startsWith("- Send with"))!;
     expect(bullets.length).toBeGreaterThan(5);

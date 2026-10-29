@@ -316,7 +316,7 @@ export const INBOX_COMMAND_USAGE = [
   "                                  browser tab) and print its URL. A run published by",
   "                                  --tailscale is published again.",
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
-  "                                  files (claude-code, codex, gemini, qwen, pi,",
+  "                                  files (claude-code, codex, qwen, pi,",
   "                                  opencode, comma-separated). Only with the",
   "                                  person's yes; starts nothing.",
   "",

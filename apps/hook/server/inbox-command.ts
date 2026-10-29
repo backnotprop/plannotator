@@ -56,7 +56,7 @@ import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
-import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
+import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_OFFERED_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
@@ -328,16 +328,16 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
 }
 
 /**
- * `plannotator inbox --notes codex,gemini`: add the Inbox note to these
+ * `plannotator inbox --notes codex,qwen`: add the Inbox note to these
  * agents' instructions files (inbox-agent-notes.ts), for the install prompt
  * once the person agreed in chat, and mark the window's one-time question as
  * answered. Starts nothing. Exit 0 when every note is there, 1 otherwise.
  */
 async function writeNotes(dataDir: string, list: string): Promise<number> {
   const ids = [...new Set(list.split(",").map((id) => id.trim()).filter(Boolean))];
-  const unknown = ids.filter((id) => !(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id));
+  const unknown = ids.filter((id) => !(INBOX_OFFERED_NOTE_AGENT_IDS as readonly string[]).includes(id));
   if (ids.length === 0 || unknown.length > 0) {
-    process.stderr.write(`Unknown agent${unknown.length === 1 ? "" : "s"} for --notes: ${unknown.join(", ") || "(none)"}. Use any of: ${INBOX_NOTE_AGENT_IDS.join(", ")}.\n`);
+    process.stderr.write(`Unknown agent${unknown.length === 1 ? "" : "s"} for --notes: ${unknown.join(", ") || "(none)"}. Use any of: ${INBOX_OFFERED_NOTE_AGENT_IDS.join(", ")}.\n`);
     return 1;
   }
   const environment = createAgentEnvironment();
@@ -630,7 +630,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   }
 
   if (args[0] === "--notes") {
-    if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,gemini, and no other option.");
+    if (args.length !== 2) usageError("--notes takes one list of agents, e.g. --notes codex,qwen, and no other option.");
     process.exit(await writeNotes(dataDir, args[1]!));
   }
 
@@ -643,7 +643,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     else if (arg === "--no-open") noOpen = true;
     else if (arg === "--open") open = true;
     else if (arg === "--tailscale") tailscale = true;
-    else if (arg === "--notes") usageError("--notes goes first and alone: plannotator inbox --notes codex,gemini");
+    else if (arg === "--notes") usageError("--notes goes first and alone: plannotator inbox --notes codex,qwen");
     else usageError(`Unknown inbox option: ${arg}`);
   }
 

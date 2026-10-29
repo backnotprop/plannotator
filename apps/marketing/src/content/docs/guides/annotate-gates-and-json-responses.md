@@ -14,7 +14,7 @@ section: "Guides"
 - **`--json`** emits every decision as a structured JSON object on stdout so hooks and plugins can route on the outcome without parsing free text.
 - **`--hook`** emits hook-native JSON that works directly with Claude Code and Codex PostToolUse/Stop hook protocols. Implies `--gate`. Recommended for hook integrations.
 - The flags compose. Use any alone or together.
-- Identical semantics across every supported harness: Claude Code, Copilot CLI, Gemini CLI, OpenCode, Pi, and Codex.
+- Identical semantics across every supported harness: Claude Code, Copilot CLI, OpenCode, Pi, and Codex.
 
 ## Stdout contract
 

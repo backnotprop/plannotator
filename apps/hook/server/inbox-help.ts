@@ -35,7 +35,7 @@ import { INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_REF_LINK_RULE,
 import { INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
 import { noteTarget } from "@plannotator/server/inbox-agent-notes";
-import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS } from "@plannotator/core/inbox-types";
+import { INBOX_AGENT_LABELS, INBOX_OFFERED_NOTE_AGENT_IDS } from "@plannotator/core/inbox-types";
 
 export type InboxMcpToolName = (typeof INBOX_MCP_TOOLS)[number];
 
@@ -257,7 +257,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
   const inboxPath = join(options.dataDir, "inbox");
   const configPath = join(options.dataDir, "config.json");
   const agents = options.agentEnvironment ?? createAgentEnvironment();
-  const noteLines = INBOX_NOTE_AGENT_IDS.map((id) => {
+  const noteLines = INBOX_OFFERED_NOTE_AGENT_IDS.map((id) => {
     const target = noteTarget(id, agents);
     const shown = displayPath(target.path, agents);
     if (id === "cursor") return `- ${INBOX_AGENT_LABELS[id]} (\`${id}\`): copied by hand into Customize → Rules in Cursor (Cursor keeps its rules in the app, so nothing is written). \`plannotator inbox --notes cursor\` prints the note to copy; Plannotator can't see, update or remove that copy.`;
@@ -328,7 +328,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `- **Pi** with the Plannotator extension (\`pi install npm:@plannotator/pi-extension\` if it is missing), or **OpenCode** with the Plannotator plugin (\`@plannotator/opencode@latest\` in opencode.json: \`"plugin": [...]\` on OpenCode 1, \`"plugins": [{ "package": ... }]\` on OpenCode 2): the inbox tool is off by default there. Turn it on for your host by merging ${code(`{ "inboxTool": { "pi": true } }`)} (or \`"opencode"\`) into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. Then start a new Pi session (or \`/reload\`), or restart OpenCode. Pi and OpenCode send the tool with every request: ${inboxToolCostText("pi")} each (the size measured on both; the token count depends on the model), so tell the person before you turn it on.`,
     "- **Anything else**: register the stdio server; \"Connecting other agents\" below has the line for your host.",
     "",
-    "When the person runs `plannotator inbox` themselves, it already connects the terminal agents it finds (Codex, Gemini CLI, Qwen Code, Cursor, Windsurf/Devin, Amp, Kiro, Pi 0.99+, OpenCode with its plugin) and the Claude app, so check before adding a second entry: a `plannotator-inbox` server that runs this binary is already the connection.",
+    "When the person runs `plannotator inbox` themselves, it already connects the terminal agents it finds (Codex, Qwen Code, Cursor, Windsurf/Devin, Amp, Kiro, Pi 0.99+, OpenCode with its plugin) and the Claude app, so check before adding a second entry: a `plannotator-inbox` server that runs this binary is already the connection.",
     "",
     `A connection takes effect in the next session, never in the one already running. Until then, send through the stdio server directly: ${code(mcp)}.`,
     "",

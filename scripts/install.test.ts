@@ -79,7 +79,7 @@ describe("install.sh", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     // Sparse set extended to also fetch the command stubs from the checkout.
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -151,7 +151,7 @@ describe("install.sh", () => {
   test("old pinned tags soft-skip core skills without aborting command installs", () => {
     // Regression guard: a --version tag that predates apps/skills/core must
     // skip the core-skill copy with an accurate message — NOT abort the whole
-    // sparse-checkout subshell, which would also skip the OpenCode/Gemini
+    // sparse-checkout subshell, which would also skip the OpenCode
     // command installs that follow it (and ps1/cmd would diverge).
     expect(script).toContain("predates the core/extra skill layout");
     expect(script).not.toMatch(/^\s*\[ -d "apps\/skills\/core" \]\s*$/m);
@@ -160,20 +160,16 @@ describe("install.sh", () => {
     expect(script).toContain("network or git error");
   });
 
-  test("installs OpenCode and Gemini commands from the checkout, not heredocs", () => {
-    // Command stubs/TOMLs are copied verbatim from the sparse checkout.
+  test("installs OpenCode commands from the checkout, not heredocs", () => {
+    // Command stubs are copied verbatim from the sparse checkout.
     expect(script).toContain("copy_commands_if_present");
     expect(script).toContain('copy_commands_if_present apps/opencode-plugin/commands "$OPENCODE_COMMANDS_DIR"');
-    expect(script).toContain('copy_commands_if_present apps/gemini/commands "$GEMINI_COMMANDS_DIR"');
-    // Gemini commands only when ~/.gemini exists.
-    expect(script).toContain('if [ -d "$HOME/.gemini" ]; then');
     // The old command heredocs must be gone entirely.
     expect(script).not.toContain("COMMAND_EOF");
-    expect(script).not.toContain("GEMINI_CMD_EOF");
   });
 
   test("auto-installs Kiro skills when ~/.kiro is detected (no flag)", () => {
-    // Auto-detected like Codex/Gemini — never gated behind a bespoke flag.
+    // Auto-detected like Codex — never gated behind a bespoke flag.
     expect(script).toContain("kiro_available=0");
     expect(script).toContain('[ -d "$HOME/.kiro" ]');
     expect(script).toContain("KIRO_SKILLS_DIR");
@@ -340,10 +336,6 @@ describe("install.sh", () => {
     expect(pluginHooksIndex).toBeLessThan(gitGateIndex);
     expect(codexHooksIndex).toBeGreaterThan(0);
     expect(codexHooksIndex).toBeLessThan(gitGateIndex);
-    // Gemini policy/settings config heredocs are still present (after the
-    // skills section, unaffected by the git requirement once git exists).
-    expect(script).toContain('GEMINI_POLICY_EOF');
-    expect(script).toContain('GEMINI_SETTINGS_EOF');
   });
 
   test("--minimal flag and PLANNOTATOR_MINIMAL env var are documented", () => {
@@ -405,15 +397,14 @@ describe("install.sh", () => {
   });
 
   test("per-agent skip opt-outs: flags, env vars, config keys, precedence (#1178)", () => {
-    // Flags exist for Codex plus the two integrations where the mechanism
-    // generalizes identically (detect -> write): Gemini and Kiro. OpenCode
+    // Flags exist for Codex plus the integrations where the mechanism
+    // generalizes identically (detect -> write): Kiro and Vibe. OpenCode
     // gets a plain do-not-write switch (no detection leg).
-    for (const flag of ["--skip-codex)", "--skip-gemini)", "--skip-kiro)", "--skip-vibe)", "--skip-opencode)"]) {
+    for (const flag of ["--skip-codex)", "--skip-kiro)", "--skip-vibe)", "--skip-opencode)"]) {
       expect(script).toContain(flag);
     }
     // Env vars follow the existing PLANNOTATOR_SKIP_*_INSTALL naming.
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
-    expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
@@ -433,7 +424,7 @@ describe("install.sh", () => {
     expect(script).toContain("continue # explicit false is a veto, never a skip");
     // skills rides the same loop: not an agent, but the same three layers
     // and the same skipInstall key region.
-    expect(script).toContain("for _agent in codex gemini kiro vibe opencode qwen skills claudePlugin; do");
+    expect(script).toContain("for _agent in codex kiro vibe opencode qwen skills claudePlugin; do");
     // The old whole-file grep form is gone.
     expect(script).not.toContain('grep -q \'"codex"[[:space:]]*:[[:space:]]*true\' "$_config_dir/config.json"');
     // Precedence by textual layering (later assignment wins): config grep,
@@ -460,7 +451,6 @@ describe("install.sh", () => {
     // existing integration alone.
     expect(script).toContain("An existing Codex integration at ${CODEX_DIR}/hooks.json was left untouched.");
     // Same honest reporting for the mirrored opt-outs.
-    expect(script).toContain('Gemini: detected, skipped (${skip_gemini_source}).');
     expect(script).toContain("Kiro was detected, but the integration was skipped");
     // Skip means do-not-write, never remove: even plannotator's own
     // stale-skill cleanup in the skipped agent's home is suspended.
@@ -609,7 +599,7 @@ describe("install.ps1", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands",
     );
     expect(script).toContain("claudeSkillsDir");
     expect(script).toContain("agentsSkillsDir");
@@ -636,11 +626,8 @@ describe("install.ps1", () => {
     expect(script).toContain("checkoutFailed");
   });
 
-  test("installs OpenCode and Gemini commands from the checkout", () => {
+  test("installs OpenCode commands from the checkout", () => {
     expect(script).toContain('Copy-Item -Force "apps\\opencode-plugin\\commands\\*.md" $opencodeCommandsDir');
-    expect(script).toContain('Copy-Item -Force "apps\\gemini\\commands\\*.toml" $geminiCommandsDir');
-    // No Gemini command heredocs remain.
-    expect(script).not.toContain("GEMINI_CMD_EOF");
   });
 
   test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
@@ -736,19 +723,16 @@ describe("install.ps1", () => {
 
   test("per-agent skip opt-outs: switches, env vars, config keys, precedence (#1178)", () => {
     expect(script).toContain("[switch]$SkipCodex");
-    expect(script).toContain("[switch]$SkipGemini");
     expect(script).toContain("[switch]$SkipKiro");
     expect(script).toContain("[switch]$SkipVibe");
     expect(script).toContain("[switch]$SkipOpencode");
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
-    expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
     // Config layer parses the real nested JSON (strict boolean check, like
     // verifyAttestation).
     expect(script).toContain("$cfg.skipInstall.codex -is [bool]");
-    expect(script).toContain("$cfg.skipInstall.gemini -is [bool]");
     expect(script).toContain("$cfg.skipInstall.kiro -is [bool]");
     expect(script).toContain("$cfg.skipInstall.vibe -is [bool]");
     expect(script).toContain("$cfg.skipInstall.opencode -is [bool]");
@@ -775,7 +759,6 @@ describe("install.ps1", () => {
     expect(script).toContain('$codexHooksContent -match "plannotator"');
     expect(script).toContain("Your existing Codex Stop hook at $codexDir\\hooks.json is unaffected.");
     expect(script).not.toContain("An existing Codex integration at $codexDir\\hooks.json was left untouched.");
-    expect(script).toContain('Gemini: detected, skipped ($skipGeminiSource)."');
     expect(script).toContain("Kiro was detected, but the integration was skipped");
     // Skip suspends even plannotator's own cleanup inside the skipped
     // agent's home (do-not-write, never remove).
@@ -784,7 +767,6 @@ describe("install.ps1", () => {
     expect(script).toContain('if ($skipKiroResolved -and ($scope -eq "$env:USERPROFILE\\.kiro\\skills")) { continue }');
     // Gated install sites for the mirrored opt-outs.
     expect(script).toContain("-not $skipKiroResolved");
-    expect(script).toContain("-not $skipGeminiResolved");
   });
 
   test("-SkipSkills: switch, env var, config key, precedence (#1201)", () => {
@@ -882,7 +864,7 @@ describe("install.cmd", () => {
   test("installs core skills via git sparse-checkout to claude + agents", () => {
     expect(script).toContain("git clone --depth 1 --filter=blob:none --sparse");
     expect(script).toContain(
-      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands",
+      "git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands",
     );
     expect(script).toContain("CLAUDE_SKILLS_DIR");
     expect(script).toContain("AGENTS_SKILLS_DIR");
@@ -903,9 +885,8 @@ describe("install.cmd", () => {
     expect(script).toContain("CHECKOUT_FAILED");
   });
 
-  test("installs OpenCode and Gemini commands from the checkout", () => {
+  test("installs OpenCode commands from the checkout", () => {
     expect(script).toContain('xcopy /y /q "apps\\opencode-plugin\\commands\\*.md" "!OPENCODE_COMMANDS_DIR!\\"');
-    expect(script).toContain('xcopy /y /q "apps\\gemini\\commands\\*.toml" "!GEMINI_COMMANDS_DIR!\\"');
   });
 
   test("aggressively cleans up deprecated commands and stale skills on upgrade", () => {
@@ -950,17 +931,6 @@ describe("install.cmd", () => {
   test("suggests installing extras via npx skills add", () => {
     expect(script).toContain("Optional skills");
     expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global");
-  });
-
-  test("Gemini settings merge uses || idiom (issue #506 regression)", () => {
-    // cmd's delayed expansion parser eats `!` operators in `node -e "..."`
-    // blocks, turning `if(!s.hooks)` into a broken variable expansion and
-    // crashing node. The merge script must use `x = x || {}` instead, which
-    // contains no `!` chars. See backnotprop/plannotator#506.
-    expect(script).toContain("s.hooks=s.hooks||{}");
-    expect(script).toContain("s.hooks.BeforeTool=s.hooks.BeforeTool||[]");
-    expect(script).not.toContain("if(!s.hooks)");
-    expect(script).not.toContain("if(!s.hooks.BeforeTool)");
   });
 
   test("Pi extension update keeps no settings.json package-skills filter", () => {
@@ -1105,12 +1075,10 @@ describe("install.cmd", () => {
 
   test("per-agent skip opt-outs: flags, env vars, config keys, precedence (#1178)", () => {
     expect(script).toContain('if /i "%~1"=="--skip-codex"');
-    expect(script).toContain('if /i "%~1"=="--skip-gemini"');
     expect(script).toContain('if /i "%~1"=="--skip-kiro"');
     expect(script).toContain('if /i "%~1"=="--skip-vibe"');
     expect(script).toContain('if /i "%~1"=="--skip-opencode"');
     expect(script).toContain("PLANNOTATOR_SKIP_CODEX_INSTALL");
-    expect(script).toContain("PLANNOTATOR_SKIP_GEMINI_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_KIRO_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_VIBE_INSTALL");
     expect(script).toContain("PLANNOTATOR_SKIP_OPENCODE_INSTALL");
@@ -1119,11 +1087,10 @@ describe("install.cmd", () => {
     // findstr - so a "codex": true under some OTHER key can never opt
     // anyone out and an explicit false inside skipInstall is honored.
     expect(script).toContain("$c.skipInstall.$k");
-    expect(script).toContain("@('codex','gemini','kiro','vibe','opencode','qwen','skills','claudePlugin')");
+    expect(script).toContain("@('codex','kiro','vibe','opencode','qwen','skills','claudePlugin')");
     expect(script).toContain("$v -is [bool] -and $v");
     expect(script).toContain("PLN_CONFIG_JSON");
     expect(script).toContain("skipInstall.codex");
-    expect(script).toContain("skipInstall.gemini");
     expect(script).toContain("skipInstall.kiro");
     expect(script).toContain("skipInstall.vibe");
     expect(script).toContain("skipInstall.opencode");
@@ -1152,7 +1119,6 @@ describe("install.cmd", () => {
     expect(script).toContain('findstr /c:"plannotator" "!CODEX_DIR!\\hooks.json"');
     expect(script).toContain("Your existing Codex Stop hook at !CODEX_DIR!\\hooks.json is unaffected.");
     expect(script).not.toContain("An existing Codex integration at !CODEX_DIR!\\hooks.json was left untouched.");
-    expect(script).toContain("Gemini: detected, skipped ^(!SKIP_GEMINI_SOURCE!^).");
     expect(script).toContain("Kiro was detected, but the integration was skipped");
     // Skip suspends even plannotator's own cleanup inside the skipped
     // agent's home (do-not-write, never remove).
@@ -1163,7 +1129,6 @@ describe("install.cmd", () => {
     expect(script).toContain('if /i "%%~D"=="!KIRO_SKILLS_DIR!" if "!SKIP_KIRO!"=="1" set "SCOPE_OK=0"');
     // Gated install sites for the mirrored opt-outs.
     expect(script).toContain('if "!KIRO_AVAILABLE!"=="1" if "!SKIP_KIRO!"=="0" if exist "apps\\kiro-cli\\skills"');
-    expect(script).toContain('if exist "%USERPROFILE%\\.gemini" if "!SKIP_GEMINI!"=="0"');
   });
 
   test("--skip-skills: flag, env var, config key, precedence (#1201)", () => {
@@ -1835,7 +1800,7 @@ describe("install shared behavior", () => {
 
   test("no installer generates slash command files via heredoc/echo", () => {
     // Commands are now copied verbatim from the sparse checkout
-    // (apps/opencode-plugin/commands, apps/gemini/commands) instead of being
+    // (apps/opencode-plugin/commands) instead of being
     // emitted by heredocs/echoes. This retires the old `^^!` cmd-escaping
     // regression entirely — the fragile echo lines no longer exist.
     const cmdScript = readScript("install.cmd");
@@ -1846,8 +1811,6 @@ describe("install shared behavior", () => {
     expect(cmdScript).not.toMatch(/^echo \^!{plannotator/m);
     // install.sh / install.ps1 no longer carry command heredocs.
     expect(sh).not.toContain("COMMAND_EOF");
-    expect(sh).not.toContain("GEMINI_CMD_EOF");
-    expect(ps).not.toContain("GEMINI_CMD_EOF");
   });
 
   test("install.cmd uses substring test (not echo|findstr) for v-prefix normalization", () => {
@@ -2188,7 +2151,6 @@ describe("PlannotatorConfig schema", () => {
     expect(match).toBeTruthy();
     expect(match![1]).toContain("skipInstall?: {");
     expect(match![1]).toContain("codex?: boolean");
-    expect(match![1]).toContain("gemini?: boolean");
     expect(match![1]).toContain("kiro?: boolean");
     expect(match![1]).toContain("opencode?: boolean");
     expect(match![1]).toContain("claudePlugin?: boolean");
@@ -2241,6 +2203,10 @@ if [ "$1" = "clone" ]; then
   printf 'name: plannotator\\n' > "$dest/apps/skills/core/plannotator/SKILL.md"
   mkdir -p "$dest/apps/opencode-plugin/commands"
   printf 'stub\\n' > "$dest/apps/opencode-plugin/commands/plannotator-review.md"
+  # A release tag from before Gemini CLI support was removed still carries
+  # apps/gemini/commands; the installer must not copy it anywhere.
+  mkdir -p "$dest/apps/gemini/commands"
+  printf 'prompt = "!{plannotator review}"\\n' > "$dest/apps/gemini/commands/plannotator-review.toml"
   exit 0
 fi
 if [ "$1" = "sparse-checkout" ]; then
@@ -2912,28 +2878,32 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
 
 // ---------------------------------------------------------------------------
 // Closing summary: agent-specific sections print only for agents the run
-// detected (existing detection legs: `pi` on PATH, ~/.gemini, Codex home or
-// CLI, ~/.kiro or kiro-cli). OpenCode (no detection leg) and Claude Code stay
+// detected (existing detection legs: `pi` on PATH, Codex home or CLI, ~/.kiro
+// or kiro-cli). OpenCode (no detection leg) and Claude Code stay
 // universal. Every run is a full install into a temp HOME with a stubbed PATH;
 // the git shim supplies a local checkout, so nothing reaches the network.
 // ---------------------------------------------------------------------------
-type SummaryAgent = "pi" | "omp" | "gemini" | "codex" | "kiro";
+type SummaryAgent = "pi" | "omp" | "codex" | "kiro";
 
 const SUMMARY_HEADERS: Record<SummaryAgent, string> = {
   pi: "  PI USERS",
   omp: "  OH MY PI (OMP) USERS",
-  gemini: "  GEMINI CLI USERS",
   codex: "  CODEX USERS",
   kiro: "  KIRO CLI USERS",
 };
 
-function runSummaryInstall(detected: SummaryAgent[], extraArgs: string[] = []) {
+function runSummaryInstall(
+  detected: SummaryAgent[],
+  extraArgs: string[] = [],
+  opts: { extraEnv?: Record<string, string>; plannotatorConfig?: string; seed?: (home: string) => void } = {},
+) {
   const sandbox = setupInstallSandbox({
     gh: "pass-all",
     git: "sparse-unsupported",
     codexHome: detected.includes("codex"),
+    plannotatorConfig: opts.plannotatorConfig,
   });
-  if (detected.includes("gemini")) mkdirSync(join(sandbox.home, ".gemini"), { recursive: true });
+  opts.seed?.(sandbox.home);
   if (detected.includes("kiro")) mkdirSync(join(sandbox.home, ".kiro"), { recursive: true });
   // A no-op `pi` on PATH is exactly what the Pi detection leg checks; the
   // installer's `pi install` call against it succeeds without doing anything.
@@ -2941,7 +2911,11 @@ function runSummaryInstall(detected: SummaryAgent[], extraArgs: string[] = []) {
   // OMP is detected by `omp` on PATH. The installer never runs it (the stub
   // exits 1 so a call would show up as a failure), it only prints how to install.
   if (detected.includes("omp")) writeFileSync(join(sandbox.stub, "omp"), "#!/bin/bash\nexit 1\n", { mode: 0o755 });
-  const r = runInstallSh(sandbox, ["--version", "v99.9.9", "--non-interactive", "--no-extras", ...extraArgs]);
+  const r = runInstallSh(
+    sandbox,
+    ["--version", "v99.9.9", "--non-interactive", "--no-extras", ...extraArgs],
+    opts.extraEnv,
+  );
   return { ...r, home: sandbox.home };
 }
 
@@ -2978,7 +2952,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     }
 
     test("all detected: every agent section prints, in the original order", () => {
-      const all: SummaryAgent[] = ["pi", "omp", "gemini", "codex", "kiro"];
+      const all: SummaryAgent[] = ["pi", "omp", "codex", "kiro"];
       const { code, out } = runSummaryInstall(all);
       expect(code).toBe(0);
       expectOnlySections(out, all);
@@ -2993,11 +2967,10 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     });
 
     test("a detected-but-skipped agent keeps its honest skipped section", () => {
-      const { code, out } = runSummaryInstall(["codex", "gemini"], ["--skip-codex", "--skip-gemini"]);
+      const { code, out } = runSummaryInstall(["codex"], ["--skip-codex"]);
       expect(code).toBe(0);
-      expectOnlySections(out, ["codex", "gemini"]);
+      expectOnlySections(out, ["codex"]);
       expect(out).toContain("Codex was detected, but the integration was skipped (--skip-codex).");
-      expect(out).toContain("Gemini was detected, but the integration was skipped (--skip-gemini).");
     });
 
     test("--skip-skills: detected sections report the skip, undetected ones stay hidden", () => {
@@ -3009,13 +2982,129 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     });
 
     test("--minimal prints no agent sections at all, detected or not", () => {
-      const { code, out } = runSummaryInstall(["pi", "omp", "gemini", "codex", "kiro"], ["--minimal"]);
+      const { code, out } = runSummaryInstall(["pi", "omp", "codex", "kiro"], ["--minimal"]);
       expect(code).toBe(0);
       expect(out).toContain("Minimal install complete");
       expect(out).not.toContain(" USERS");
     });
   },
 );
+
+// ---------------------------------------------------------------------------
+// Gemini CLI support was removed. An install must write nothing under
+// ~/.gemini (even from a release tag whose checkout still has
+// apps/gemini/commands), and the retired opt-outs (--skip-gemini,
+// PLANNOTATOR_SKIP_GEMINI_INSTALL, skipInstall.gemini) must still be accepted:
+// a background auto-update replays remembered flags, and an unknown flag
+// would fail it. The retired flag is never recorded again.
+// ---------------------------------------------------------------------------
+function listTree(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (d: string, rel: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        out[`${r}/`] = "";
+        walk(join(d, e.name), r);
+      } else {
+        out[r] = readFileSync(join(d, e.name), "utf-8");
+      }
+    }
+  };
+  walk(dir, "");
+  return out;
+}
+
+function seedGeminiHome(home: string) {
+  const gemini = join(home, ".gemini");
+  mkdirSync(gemini, { recursive: true });
+  // The person's own settings, with no plannotator hook: the old installer
+  // merged one in here.
+  writeFileSync(join(gemini, "settings.json"), '{\n  "theme": "fixture"\n}\n');
+}
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh no longer installs anything for Gemini CLI",
+  () => {
+    test("a detected ~/.gemini is left exactly as it was", () => {
+      let before: Record<string, string> = {};
+      const { code, out, home } = runSummaryInstall([], [], {
+        seed: (h) => {
+          seedGeminiHome(h);
+          before = listTree(join(h, ".gemini"));
+        },
+      });
+      expect(code).toBe(0);
+      expect(listTree(join(home, ".gemini"))).toEqual(before);
+      expect(out).not.toMatch(/gemini/i);
+    });
+
+    test("an empty ~/.gemini stays empty", () => {
+      const { code, home } = runSummaryInstall([], [], {
+        seed: (h) => mkdirSync(join(h, ".gemini"), { recursive: true }),
+      });
+      expect(code).toBe(0);
+      expect(readdirSync(join(home, ".gemini"))).toEqual([]);
+    });
+
+    test("--skip-gemini is still accepted, silently, and never recorded", () => {
+      const { code, out, home } = runSummaryInstall([], ["--skip-gemini", "--skip-codex"], { seed: seedGeminiHome });
+      expect(code).toBe(0);
+      expect(out).not.toMatch(/gemini/i);
+      expect(JSON.parse(readFileSync(join(home, ".plannotator", "install-flags.json"), "utf-8"))).toEqual({
+        v: 1,
+        flags: ["skip-codex"],
+      });
+    });
+
+    test("PLANNOTATOR_SKIP_GEMINI_INSTALL and skipInstall.gemini are harmless", () => {
+      for (const value of ["1", "0", "not-a-boolean"]) {
+        const { code, out, home } = runSummaryInstall([], [], {
+          extraEnv: { PLANNOTATOR_SKIP_GEMINI_INSTALL: value },
+          plannotatorConfig: '{ "skipInstall": { "gemini": true } }\n',
+          seed: seedGeminiHome,
+        });
+        expect({ value, code }).toEqual({ value, code: 0 });
+        expect(out).not.toMatch(/gemini/i);
+        expect(existsSync(join(home, ".gemini", "commands"))).toBe(false);
+        expect(existsSync(join(home, ".gemini", "policies"))).toBe(false);
+      }
+    });
+  },
+);
+
+describe("Windows installers still accept the retired Gemini opt-out", () => {
+  // An older `plannotator update` replays -SkipGemini / --skip-gemini from
+  // install-flags.json. PowerShell rejects an undeclared switch ("A parameter
+  // cannot be found"), and install.cmd rejects an unknown option, so both
+  // must keep accepting it while doing nothing with it.
+  test("install.ps1 keeps -SkipGemini declared in its param block", () => {
+    const ps = readScript("install.ps1");
+    const paramBlock = ps.slice(ps.indexOf("param("), ps.indexOf("\n)\n", ps.indexOf("param(")));
+    expect(paramBlock).toContain("[switch]$SkipGemini,");
+  });
+
+  test("install.cmd still parses --skip-gemini as a known option", () => {
+    const cmd = readScript("install.cmd");
+    const parse = cmd.indexOf('if /i "%~1"=="--skip-gemini" (');
+    expect(parse).toBeGreaterThan(0);
+    expect(cmd.slice(parse, parse + 120)).toContain("goto parse_args");
+  });
+
+  test("no installer writes under ~/.gemini or fetches apps/gemini", () => {
+    for (const name of ["install.sh", "install.ps1", "install.cmd"]) {
+      const script = readScript(name);
+      expect({ name, writes: /[.\\/]gemini[\\/](settings\.json|policies|commands)/.test(script) }).toEqual({
+        name,
+        writes: false,
+      });
+      expect({ name, fetches: script.includes("apps/gemini") || script.includes("apps\\gemini") }).toEqual({
+        name,
+        fetches: false,
+      });
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // install-flags.json (#1634): each successful run records the install-affecting
@@ -3034,9 +3123,9 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     });
 
     test("a minimal install records --minimal (the binary-only early exit writes it too)", () => {
-      const { code, home } = runSummaryInstall([], ["--minimal", "--skip-gemini"]);
+      const { code, home } = runSummaryInstall([], ["--minimal", "--skip-codex"]);
       expect(code).toBe(0);
-      expect(readFlags(home)).toEqual({ v: 1, flags: ["minimal", "skip-gemini"] });
+      expect(readFlags(home)).toEqual({ v: 1, flags: ["minimal", "skip-codex"] });
     });
 
     test("a run with no flags records an empty set; non-install flags are never recorded", () => {
@@ -3078,10 +3167,13 @@ describe("install-flags.json is written by every installer", () => {
   test("install.ps1 and install.cmd record the same neutral ids after both exits", () => {
     const ps = readScript("install.ps1");
     const cmd = readScript("install.cmd");
-    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-gemini", "skip-kiro", "skip-vibe", "skip-opencode", "skip-qwen", "skip-skills", "skip-claude-plugin"]) {
+    for (const id of ["minimal", "no-minimal", "verify-attestation", "skip-attestation", "with-call-flow", "skip-codex", "skip-kiro", "skip-vibe", "skip-opencode", "skip-qwen", "skip-skills", "skip-claude-plugin"]) {
       expect(ps).toContain(`$ids += "${id}"`);
       expect(cmd).toContain(`call :AddInstallFlag ${id}`);
     }
+    // The retired Gemini opt-out is accepted but never recorded again.
+    expect(ps).not.toContain("skip-gemini");
+    expect(cmd).not.toContain("AddInstallFlag skip-gemini");
     // Called in the minimal gate and once at the end of the full install.
     expect(ps.split("\n").filter((l) => l.trim() === "Write-InstallFlags")).toHaveLength(2);
     expect(cmd.split("\n").filter((l) => l.trim() === "call :WriteInstallFlags")).toHaveLength(2);
@@ -3279,7 +3371,6 @@ function runPs1SkillsCheckout(git: GitBehavior): { code: number; out: string; ho
     `$skipSkillsResolved = $false`,
     `$skipKiroResolved = $true`,
     `$skipOpencodeResolved = $true`,
-    `$skipGeminiResolved = $true`,
     `$kiroAvailable = $false`,
     `$claudeSkillsDir = Join-Path "${home}" ".claude/skills"`,
     `$agentsSkillsDir = Join-Path "${home}" ".agents/skills"`,
@@ -3335,8 +3426,7 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
 
 // ---------------------------------------------------------------------------
 // Closing summary on Windows: install.ps1 prints PI USERS / KIRO CLI USERS
-// only for a detected agent (install.ps1 has no Gemini or Codex closing
-// section), and install.cmd prints KIRO CLI USERS only when KIRO_AVAILABLE.
+// only for a detected agent (install.ps1 has no Codex closing section), and install.cmd prints KIRO CLI USERS only when KIRO_AVAILABLE.
 // The ps1 region is driven under pwsh when available; both are source-scanned.
 // ---------------------------------------------------------------------------
 
@@ -4222,7 +4312,7 @@ describe("Claude Code plugin update: every installer (source scan)", () => {
     const cmd = readScript("install.cmd");
     expect(sh).toContain("        --skip-claude-plugin)");
     expect(sh).toContain('case "${PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE:-}" in');
-    expect(sh).toContain("for _agent in codex gemini kiro vibe opencode qwen skills claudePlugin; do");
+    expect(sh).toContain("for _agent in codex kiro vibe opencode qwen skills claudePlugin; do");
     expect(ps).toContain("[switch]$SkipClaudePlugin");
     expect(ps).toContain("$env:PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE -match");
     expect(ps).toContain("$cfg.skipInstall.claudePlugin -is [bool]");

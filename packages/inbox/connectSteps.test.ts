@@ -65,7 +65,7 @@ test('locked: a tool PLANNOTATOR_INBOX_TOOL keeps off is never a step, and says 
 test('MCP agents come after every Plannotator host; one the person turned off or removed is not nagged about', () => {
   const model = agentsModel({
     codex: { detected: true, reach: { kind: 'mcp', on: false, state: 'not_connected', path: null, locked: false, reason: null } },
-    gemini: { detected: true, reach: { kind: 'mcp', on: false, state: 'off', path: null, locked: false, reason: null } },
+    amp: { detected: true, reach: { kind: 'mcp', on: false, state: 'off', path: null, locked: false, reason: null } },
     cursor: { detected: true, reach: { kind: 'mcp', on: false, state: 'removed', path: null, locked: false, reason: null } },
     cline: { detected: true, reach: { kind: 'manual', on: false, state: 'manual', path: null, locked: false, reason: "Cline's MCP command is not verified" } },
     opencode: missing('opencode'),
@@ -83,13 +83,13 @@ test('MCP agents come after every Plannotator host; one the person turned off or
 test('Codex through MCP gets your replies back in the session by itself (Codex 0.149+); other MCP agents check themselves', () => {
   const model = agentsModel({
     codex: { detected: true, reach: { kind: 'mcp', on: false, state: 'not_connected', path: null, locked: false, reason: null } },
-    gemini: { detected: true, reach: { kind: 'mcp', on: false, state: 'not_connected', path: null, locked: false, reason: null } },
+    amp: { detected: true, reach: { kind: 'mcp', on: false, state: 'not_connected', path: null, locked: false, reason: null } },
   });
   const plan = connectPlan(model);
   expect(stepText(plan.steps.find((row) => row.id === 'codex')!).text).toBe(
     "Adds the Inbox's MCP server to Codex. Codex 0.149 or later: your replies arrive as a new turn on their own.",
   );
-  expect(stepText(plan.steps.find((row) => row.id === 'gemini')!).text).toBe("Adds the Inbox's MCP server to Gemini CLI. Gemini CLI sees your replies when it checks the Inbox; it can't be woken.");
+  expect(stepText(plan.steps.find((row) => row.id === 'amp')!).text).toBe("Adds the Inbox's MCP server to Amp. Amp sees your replies when it checks the Inbox; it can't be woken.");
 });
 
 test('an older Inbox without the plugin field: the tool means the plugin is installed', () => {
@@ -214,7 +214,7 @@ test('the wake line names the hosts a reply wakes, and what other agents do inst
 });
 
 test('a Connect step for an MCP agent says it is not woken (Codex 0.149+ is: the Inbox queues the reply into its thread)', () => {
-  const plan = connectPlan(agentsModel({ gemini: { detected: true, reach: { kind: 'mcp', on: false, state: 'not_connected', path: null, locked: false, reason: null } } }));
-  expect(plan.next?.id).toBe('gemini');
-  expect(stepText(plan.next!).text).toBe("Adds the Inbox's MCP server to Gemini CLI. Gemini CLI sees your replies when it checks the Inbox; it can't be woken.");
+  const plan = connectPlan(agentsModel({ amp: { detected: true, reach: { kind: 'mcp', on: false, state: 'not_connected', path: null, locked: false, reason: null } } }));
+  expect(plan.next?.id).toBe('amp');
+  expect(stepText(plan.next!).text).toBe("Adds the Inbox's MCP server to Amp. Amp sees your replies when it checks the Inbox; it can't be woken.");
 });

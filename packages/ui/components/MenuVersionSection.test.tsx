@@ -27,7 +27,7 @@ const info = (over: Partial<UpdateInfo>): UpdateInfo => ({
   dismissed: false,
   releaseUrl: 'https://github.com/backnotprop/plannotator/releases/tag/v0.28.12',
   action: 'script',
-  command: 'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini',
+  command: 'curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex',
   dismiss: () => {},
   ...over,
 });
@@ -47,7 +47,7 @@ const buttonNamed = (el: HTMLElement, name: string) => [...el.querySelectorAll('
 test.skipIf(!hasDom)('the managed binary: its command with the remembered flags, and Update now', () => {
   const el = render(info({}));
   expect(el.textContent).toContain('0.28.12 is available');
-  expect(el.textContent).toContain('bash -s -- --skip-gemini');
+  expect(el.textContent).toContain('bash -s -- --skip-codex');
   expect(buttonNamed(el, 'Update now')).toBeDefined();
 });
 
