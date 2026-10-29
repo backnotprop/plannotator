@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^5.20261022.1",
     "@plannotator/core": "workspace:*",
     "typescript": "~5.8.2",
     "wrangler": "^4.151.2"
