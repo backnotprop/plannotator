@@ -403,6 +403,12 @@ describe("remembered install flags", () => {
     expect(r.problem).toContain("dropped");
   });
 
+  test("skip-gemini, remembered by an earlier installer for Gemini CLI (no longer offered), is dropped silently: never passed on, not a problem", () => {
+    expect(parseInstallFlags({ flags: ["skip-gemini", "skip-codex"] })).toEqual({ flags: ["skip-codex"] });
+    writeFlags('{"v":1,"flags":["skip-gemini"]}\n');
+    expect(readInstallFlags(dataDir)).toEqual({ flags: [] });
+  });
+
   test("a mutually-exclusive pair drops both sides", () => {
     expect(parseInstallFlags({ flags: ["minimal", "no-minimal", "skip-kiro"] }).flags).toEqual(["skip-kiro"]);
     expect(parseInstallFlags({ flags: ["verify-attestation", "skip-attestation"] }).flags).toEqual([]);

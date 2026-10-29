@@ -13,7 +13,7 @@ and Copilot CLI.
 ## Setup
 
 Kiro is auto-detected. If `~/.kiro` exists (or `kiro-cli` is on your PATH) when you run the
-installer, the Kiro skills install automatically — the same convention used for Codex and Gemini.
+installer, the Kiro skills install automatically — the same convention used for Codex.
 No extra flags or steps. Auto-detection works on every platform; use the installer for your OS:
 
 **macOS / Linux / WSL:**

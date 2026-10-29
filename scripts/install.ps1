@@ -16,6 +16,9 @@ param(
     # --with-call-flow.
     [switch]$WithCallFlow,
     [switch]$SkipCodex,
+    # Retired with Gemini CLI support. Still declared so an older remembered
+    # switch (an older `plannotator update`) never fails with "parameter cannot
+    # be found"; it does nothing and is never recorded in install-flags.json.
     [switch]$SkipGemini,
     [switch]$SkipKiro,
     [switch]$SkipVibe,
@@ -24,7 +27,7 @@ param(
     # Same shape as the per-agent switches, but scoped to the skills/slash
     # command sparse checkout rather than one agent's home: -SkipSkills turns
     # the whole fetch into a no-op for every scope it writes (Claude,
-    # ~/.agents, OpenCode, Gemini, Kiro), including the extras and the
+    # ~/.agents, OpenCode, Kiro), including the extras and the
     # skill-scope cleanup sweeps. Mirrors install.sh's --skip-skills.
     [switch]$SkipSkills,
     # Do not update an installed Claude Code plugin (see
@@ -250,7 +253,6 @@ function Write-InstallFlags {
     if ($SkipAttestation) { $ids += "skip-attestation" }
     if ($WithCallFlow) { $ids += "with-call-flow" }
     if ($SkipCodex) { $ids += "skip-codex" }
-    if ($SkipGemini) { $ids += "skip-gemini" }
     if ($SkipKiro) { $ids += "skip-kiro" }
     if ($SkipVibe) { $ids += "skip-vibe" }
     if ($SkipOpencode) { $ids += "skip-opencode" }
@@ -426,7 +428,6 @@ if ($WithCallFlow) { $installCallFlowResolved = $true }
 # as its own state. Each resolved skip remembers its source so the report
 # can name what the user set.
 $skipCodexResolved = $false;  $skipCodexSource = ""
-$skipGeminiResolved = $false; $skipGeminiSource = ""
 $skipKiroResolved = $false;   $skipKiroSource = ""
 $skipVibeResolved = $false;   $skipVibeSource = ""
 $skipOpencodeResolved = $false; $skipOpencodeSource = ""
@@ -439,9 +440,6 @@ $skipClaudePluginResolved = $false; $skipClaudePluginSource = ""
 if ($cfg -and $cfg.skipInstall) {
     if ($cfg.skipInstall.codex -is [bool] -and $cfg.skipInstall.codex) {
         $skipCodexResolved = $true; $skipCodexSource = "config skipInstall.codex"
-    }
-    if ($cfg.skipInstall.gemini -is [bool] -and $cfg.skipInstall.gemini) {
-        $skipGeminiResolved = $true; $skipGeminiSource = "config skipInstall.gemini"
     }
     if ($cfg.skipInstall.kiro -is [bool] -and $cfg.skipInstall.kiro) {
         $skipKiroResolved = $true; $skipKiroSource = "config skipInstall.kiro"
@@ -466,11 +464,6 @@ if ($env:PLANNOTATOR_SKIP_CODEX_INSTALL -match '^(1|true|yes)$') {
     $skipCodexResolved = $true; $skipCodexSource = "PLANNOTATOR_SKIP_CODEX_INSTALL"
 } elseif ($env:PLANNOTATOR_SKIP_CODEX_INSTALL -match '^(0|false|no)$') {
     $skipCodexResolved = $false; $skipCodexSource = ""
-}
-if ($env:PLANNOTATOR_SKIP_GEMINI_INSTALL -match '^(1|true|yes)$') {
-    $skipGeminiResolved = $true; $skipGeminiSource = "PLANNOTATOR_SKIP_GEMINI_INSTALL"
-} elseif ($env:PLANNOTATOR_SKIP_GEMINI_INSTALL -match '^(0|false|no)$') {
-    $skipGeminiResolved = $false; $skipGeminiSource = ""
 }
 if ($env:PLANNOTATOR_SKIP_KIRO_INSTALL -match '^(1|true|yes)$') {
     $skipKiroResolved = $true; $skipKiroSource = "PLANNOTATOR_SKIP_KIRO_INSTALL"
@@ -503,7 +496,6 @@ if ($env:PLANNOTATOR_SKIP_CLAUDE_PLUGIN_UPDATE -match '^(1|true|yes)$') {
     $skipClaudePluginResolved = $false; $skipClaudePluginSource = ""
 }
 if ($SkipCodex)  { $skipCodexResolved = $true;  $skipCodexSource = "-SkipCodex" }
-if ($SkipGemini) { $skipGeminiResolved = $true; $skipGeminiSource = "-SkipGemini" }
 if ($SkipKiro)   { $skipKiroResolved = $true;   $skipKiroSource = "-SkipKiro" }
 if ($SkipVibe)   { $skipVibeResolved = $true;   $skipVibeSource = "-SkipVibe" }
 if ($SkipOpencode) { $skipOpencodeResolved = $true; $skipOpencodeSource = "-SkipOpencode" }
@@ -1041,7 +1033,7 @@ if (Test-Path $codexDir) {
         Select-Object -First 1)
 }
 $codexAvailable = [bool](Get-Command codex -ErrorAction SilentlyContinue) -or $codexHomeHasUserConfig
-# Kiro is auto-detected like Codex/Gemini: PATH executable or an existing ~/.kiro.
+# Kiro is auto-detected like Codex: PATH executable or an existing ~/.kiro.
 $kiroAvailable = [bool](Get-Command kiro-cli -ErrorAction SilentlyContinue) -or (Test-Path "$env:USERPROFILE\.kiro")
 # Vibe (Mistral's TUI coding agent) stores everything under $VIBE_HOME when set,
 # falling back to ~/.vibe. Detected only when that home exists, matching
@@ -1573,13 +1565,13 @@ if ((-not $skipSkillsResolved) -and ($extrasChoice -eq "yes") -and (-not $extras
 
 # Install skills and command stubs (requires git).
 #
-# Core skills, Kiro skills/extras, OpenCode command stubs, and Gemini TOML
-# commands are all copied verbatim from a sparse checkout of the release tag.
+# Core skills, Kiro skills/extras and OpenCode command stubs are all copied
+# verbatim from a sparse checkout of the release tag.
 # copy-if-present means older pinned tags that lack a given path simply skip it
 # rather than failing. Hard requirement: without git we cannot install the
 # /plannotator-* skills, so fail loudly instead of leaving a partial install.
-# Hook/config writing above has already run; the Pi update and Gemini config
-# below are skipped on failure and complete when the user re-runs.
+# Hook/config writing above has already run; the Pi update below is skipped
+# on failure and completes when the user re-runs.
 #
 # Skills/commands opt-out (-SkipSkills / PLANNOTATOR_SKIP_SKILLS_INSTALL /
 # skipInstall.skills). HONEST reporting like the per-agent family: the skipped
@@ -1816,7 +1808,7 @@ try {
             # plain-clone fallback (#1238): that git has no sparse-checkout
             # subcommand, and the full checkout needs no narrowing.
             if ($sparseClone) {
-                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands apps/qwen-code 2>$null }
+                & { $local:ErrorActionPreference = 'Continue'; git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/qwen-code 2>$null }
             }
 
             # Claude Code and Codex consume different skill bodies. Claude Code
@@ -1917,19 +1909,6 @@ try {
                     New-Item -ItemType Directory -Force -Path $opencodeCommandsDir | Out-Null
                     Copy-Item -Force "apps\opencode-plugin\commands\*.md" $opencodeCommandsDir
                     Write-Host "Installed OpenCode commands to $opencodeCommandsDir\"
-                }
-            }
-
-            # Gemini TOML commands -> ~/.gemini/commands (only when ~/.gemini exists).
-            # These are Gemini's native command format. A Gemini opt-out
-            # (#1178) leaves ~/.gemini entirely untouched.
-            if ((Test-Path "$env:USERPROFILE\.gemini") -and -not $skipGeminiResolved -and (Test-Path "apps\gemini\commands")) {
-                $geminiCommandsDir = "$env:USERPROFILE\.gemini\commands"
-                $geminiCmds = Get-ChildItem "apps\gemini\commands\*.toml" -ErrorAction SilentlyContinue
-                if ($geminiCmds) {
-                    New-Item -ItemType Directory -Force -Path $geminiCommandsDir | Out-Null
-                    Copy-Item -Force "apps\gemini\commands\*.toml" $geminiCommandsDir
-                    Write-Host "Installed Gemini slash commands to $geminiCommandsDir\"
                 }
             }
         } finally {
@@ -2218,92 +2197,6 @@ if ((-not $skipSkillsResolved) -and $invocableChoice -and ($invocableChoice -ne 
 # Update Pi extension if pi is installed. Pi keeps its extension commands and
 # the plannotator_submit_plan tool; it no longer bundles skills.
 Update-PiExtensionIfPresent
-
-# --- Gemini CLI support (only if Gemini is installed) ---
-$geminiDir = "$env:USERPROFILE\.gemini"
-if ((Test-Path $geminiDir) -and $skipGeminiResolved) {
-    # HONEST three-state reporting (#1178): detected-but-skipped is its own
-    # state. Nothing under ~/.gemini is created, updated, or removed.
-    Write-Host ""
-    Write-Host "Gemini: detected, skipped ($skipGeminiSource)."
-    $geminiSettingsProbe = "$geminiDir\settings.json"
-    if (Test-Path $geminiSettingsProbe) {
-        $geminiProbeContent = Get-Content -Path $geminiSettingsProbe -Raw -ErrorAction SilentlyContinue
-        if ($geminiProbeContent -match '"plannotator"') {
-            Write-Host "An existing Gemini integration at $geminiSettingsProbe was left untouched."
-        }
-    }
-} elseif (Test-Path $geminiDir) {
-    # Install policy file
-    $geminiPoliciesDir = "$geminiDir\policies"
-    New-Item -ItemType Directory -Force -Path $geminiPoliciesDir | Out-Null
-    @'
-# Plannotator policy for Gemini CLI
-# Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
-[[rule]]
-toolName = "exit_plan_mode"
-decision = "allow"
-priority = 100
-'@ | Set-Content -Path "$geminiPoliciesDir\plannotator.toml"
-    Write-Host "Installed Gemini policy to $geminiPoliciesDir\plannotator.toml"
-
-    # Configure hook in settings.json
-    $geminiSettings = "$geminiDir\settings.json"
-    if (Test-Path $geminiSettings) {
-        $content = Get-Content -Path $geminiSettings -Raw -ErrorAction SilentlyContinue
-        if ($content -notmatch '"plannotator"') {
-            # Merge hook into existing settings.json using node (ships with Gemini CLI)
-            if (Get-Command node -ErrorAction SilentlyContinue) {
-                $mergeScript = @"
-const fs = require('fs');
-const settings = JSON.parse(fs.readFileSync('$($geminiSettings.Replace('\','/'))', 'utf8'));
-if (!settings.hooks) settings.hooks = {};
-if (!settings.hooks.BeforeTool) settings.hooks.BeforeTool = [];
-settings.hooks.BeforeTool.push({"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]});
-fs.writeFileSync('$($geminiSettings.Replace('\','/'))', JSON.stringify(settings, null, 2) + '\n');
-"@
-                node -e $mergeScript
-                Write-Host "Added plannotator hook to $geminiSettings"
-            } else {
-                Write-Host ""
-                Write-Host "Add the following to your ~/.gemini/settings.json hooks:"
-                Write-Host ""
-                Write-Host '  "hooks": {'
-                Write-Host '    "BeforeTool": [{'
-                Write-Host '      "matcher": "exit_plan_mode",'
-                Write-Host '      "hooks": [{"type": "command", "command": "plannotator", "timeout": 345600}]'
-                Write-Host '    }]'
-                Write-Host '  }'
-            }
-        }
-    } else {
-        @'
-{
-  "hooks": {
-    "BeforeTool": [
-      {
-        "matcher": "exit_plan_mode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "plannotator",
-            "timeout": 345600
-          }
-        ]
-      }
-    ]
-  },
-  "experimental": {
-    "plan": true
-  }
-}
-'@ | Set-Content -Path $geminiSettings
-        Write-Host "Created Gemini settings at $geminiSettings"
-    }
-
-    # Gemini slash command TOMLs are copied from the sparse checkout
-    # (apps/gemini/commands) in the git-gated skills/commands install above.
-}
 
 Write-Host ""
 Write-Host "=========================================="

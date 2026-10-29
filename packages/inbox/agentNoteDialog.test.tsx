@@ -45,7 +45,7 @@ function row(id: InboxAgentRow['id'], label: string, note: Partial<NonNullable<I
 }
 
 const CODEX = row('codex', 'Codex', { path: '~/.codex/AGENTS.md' });
-const GEMINI = row('gemini', 'Gemini CLI', { path: '~/.gemini/GEMINI.md', create: true });
+const QWEN = row('qwen', 'Qwen Code', { path: '~/.qwen/QWEN.md', create: true });
 const CLAUDE = row('claude-code', 'Claude Code', { path: '~/.claude/rules/plannotator-inbox.md', create: true }, 'tool');
 const PI = row('pi', 'Pi', { path: '~/.pi/agent/AGENTS.md' }, 'tool');
 const OPENCODE = row('opencode', 'OpenCode', { path: '~/.config/opencode/AGENTS.md' }, 'tool');
@@ -55,7 +55,7 @@ const CURSOR = row('cursor', 'Cursor', { state: 'manual', reason: "Cursor keeps 
 const REPORT: InboxConnectReport = {
   at: '2026-10-13T00:00:00.000Z',
   first: true,
-  added: ['codex', 'gemini'],
+  added: ['codex', 'qwen'],
   already: [],
   failed: [],
   foreign: [],
@@ -66,7 +66,7 @@ const REPORT: InboxConnectReport = {
 };
 
 function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
-  return { agents: [CLAUDE, CODEX, GEMINI], last_report: null, connecting: false, connect_env_off: false, tool_env: null, notes_offered: true, notes_asked: [], note_text: NOTE, ...over };
+  return { agents: [CLAUDE, CODEX, QWEN], last_report: null, connecting: false, connect_env_off: false, tool_env: null, notes_offered: true, notes_asked: [], note_text: NOTE, ...over };
 }
 
 const calls: { path: string; body: Record<string, unknown> }[] = [];
@@ -116,19 +116,19 @@ const rowsOf = (el: Element) =>
 const title = (el: Element) => el.querySelector('.ib-anote-head h2')?.textContent;
 
 test.skipIf(!hasDom)('several agents: the band, every agent ticked (Claude Code too), each exact file, and a primary that names them', () => {
-  const { el, dialog } = mount([CODEX, GEMINI, CLAUDE], REPORT);
+  const { el, dialog } = mount([CODEX, QWEN, CLAUDE], REPORT);
   expect(dialog().getAttribute('aria-labelledby')).toBe(el.querySelector('.ib-anote-head h2')!.id);
   expect([...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent)).toEqual([
-    'Connected Codex and Gemini CLI to the Inbox.',
+    'Connected Codex and Qwen Code to the Inbox.',
     'Pi needs connecting by hand: Settings → Agents',
   ]);
   expect(title(el)).toBe('Tell your agents about the Inbox');
   expect(rowsOf(el)).toEqual([
     { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Adds to end', ticked: true },
-    { name: 'Gemini CLI', path: '~/.gemini/GEMINI.md', state: 'New file', ticked: true },
+    { name: 'Qwen Code', path: '~/.qwen/QWEN.md', state: 'New file', ticked: true },
     { name: 'Claude Code', path: '~/.claude/rules/plannotator-inbox.md', state: 'New file', ticked: true },
   ]);
-  expect(primary(el).textContent).toBe('Add to Codex, Gemini CLI and Claude Code');
+  expect(primary(el).textContent).toBe('Add to Codex, Qwen Code and Claude Code');
   expect(document.activeElement).toBe(primary(el));
   // Each checkbox is named by its whole row (name, path, pill), so the path is read once: no second description.
   const box = el.querySelector('.ib-anote-table input') as HTMLInputElement;
@@ -139,20 +139,20 @@ test.skipIf(!hasDom)('several agents: the band, every agent ticked (Claude Code 
 });
 
 test.skipIf(!hasDom)('unticking renames the primary; with nothing ticked it is "Don\'t add a note", Not now goes, and pressing it writes nothing', async () => {
-  const { el, seen } = mount([CODEX, GEMINI, CLAUDE], REPORT);
+  const { el, seen } = mount([CODEX, QWEN, CLAUDE], REPORT);
   const boxes = () => [...el.querySelectorAll('.ib-anote-table input')] as HTMLInputElement[];
   act(() => boxes()[2]!.click());
-  expect(primary(el).textContent).toBe('Add to Codex and Gemini CLI');
+  expect(primary(el).textContent).toBe('Add to Codex and Qwen Code');
   expect(el.querySelectorAll('.ib-anote-unpicked')).toHaveLength(1);
   act(() => boxes()[0]!.click());
   act(() => boxes()[1]!.click());
   expect(primary(el).textContent).toBe("Don't add a note");
   expect(primary(el).hasAttribute('disabled')).toBe(false);
   expect(el.querySelector('[data-anote-notnow]')).toBeNull();
-  recordFetch(() => model({ notes_asked: ['claude-code', 'codex', 'gemini'] }));
+  recordFetch(() => model({ notes_asked: ['claude-code', 'codex', 'qwen'] }));
   act(() => primary(el).click());
   await flush();
-  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: [], asked: ['codex', 'gemini', 'claude-code'], seen: true } }]);
+  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: [], asked: ['codex', 'qwen', 'claude-code'], seen: true } }]);
   expect(seen.closed).toBe(1);
   expect(seen.models).toHaveLength(1);
 });
@@ -175,7 +175,7 @@ test.skipIf(!hasDom)('a trusted sender removed in Qwen is a warning in the band,
 });
 
 test.skipIf(!hasDom)('four or more ticked: "Add to N agents"', () => {
-  const { el } = mount([CODEX, GEMINI, PI, OPENCODE, CLAUDE]);
+  const { el } = mount([CODEX, QWEN, PI, OPENCODE, CLAUDE]);
   expect(primary(el).textContent).toBe('Add to 5 agents');
   expect(el.querySelector('.ib-anote-band')).toBeNull();
 });
@@ -190,7 +190,7 @@ test.skipIf(!hasDom)('one agent: no checkbox; the two buttons are the choice', (
 });
 
 test.skipIf(!hasDom)('Add: only the ticked notes are sent; results in the same rows, a failure with its reason and Try again; Done closes', async () => {
-  const { el, seen } = mount([CODEX, GEMINI, CLAUDE], REPORT);
+  const { el, seen } = mount([CODEX, QWEN, CLAUDE], REPORT);
   act(() => ([...el.querySelectorAll('.ib-anote-table input')][2] as HTMLInputElement).click());
   recordFetch((_path, body) =>
     (body.add as string[]).length === 2
@@ -198,31 +198,31 @@ test.skipIf(!hasDom)('Add: only the ticked notes are sent; results in the same r
           ...model(),
           results: [
             { ok: true, agent: 'codex', action: 'added', path: '~/.codex/AGENTS.md' },
-            { ok: false, agent: 'gemini', reason: '~/.gemini/GEMINI.md can\'t be written: permission denied', path: '~/.gemini/GEMINI.md' },
+            { ok: false, agent: 'qwen', reason: '~/.qwen/QWEN.md can\'t be written: permission denied', path: '~/.qwen/QWEN.md' },
           ],
         }
-      : { ...model(), results: [{ ok: true, agent: 'gemini', action: 'created', path: '~/.gemini/GEMINI.md' }] },
+      : { ...model(), results: [{ ok: true, agent: 'qwen', action: 'created', path: '~/.qwen/QWEN.md' }] },
   );
   act(() => primary(el).click());
   await flush();
-  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: ['codex', 'gemini'], asked: ['codex', 'gemini', 'claude-code'], seen: true } }]);
+  expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: ['codex', 'qwen'], asked: ['codex', 'qwen', 'claude-code'], seen: true } }]);
   expect(title(el)).toBe('Added the note to Codex');
   expect(rowsOf(el)).toEqual([
     { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Added', ticked: null },
-    { name: 'Gemini CLI', path: '~/.gemini/GEMINI.md', state: 'Not added', ticked: null },
+    { name: 'Qwen Code', path: '~/.qwen/QWEN.md', state: 'Not added', ticked: null },
   ]);
-  expect(el.querySelector('.ib-anote-err')?.textContent).toBe("~/.gemini/GEMINI.md can't be written: permission denied. Try again");
+  expect(el.querySelector('.ib-anote-err')?.textContent).toBe("~/.qwen/QWEN.md can't be written: permission denied. Try again");
   // The results view: focus on Done, the live region says what was written, the band is gone.
   expect(document.activeElement).toBe(button(el, 'Done'));
   expect(el.querySelector('[data-anote-band]')).toBeNull();
   expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe('Each agent reads it from its next session. Fix the file, then try again here or in Settings → Agents.');
-  expect(el.querySelector('[aria-live="polite"]')?.textContent).toBe("Added the note to Codex. Couldn't add the note to Gemini CLI.");
+  expect(el.querySelector('[aria-live="polite"]')?.textContent).toBe("Added the note to Codex. Couldn't add the note to Qwen Code.");
 
   act(() => button(el, 'Try again').click());
   await flush();
-  expect(calls[1]).toEqual({ path: '/api/inbox/agents/notes', body: { add: ['gemini'], asked: ['gemini'], seen: false } });
+  expect(calls[1]).toEqual({ path: '/api/inbox/agents/notes', body: { add: ['qwen'], asked: ['qwen'], seen: false } });
   expect(rowsOf(el).map((r) => r.state)).toEqual(['Added', 'Created']);
-  expect(title(el)).toBe('Added the note to Codex and Gemini CLI');
+  expect(title(el)).toBe('Added the note to Codex and Qwen Code');
   expect(el.querySelector('.ib-anote-err')).toBeNull();
   expect(document.activeElement).toBe(button(el, 'Done'));
 
@@ -323,7 +323,7 @@ test.skipIf(!hasDom)('Cursor alone: worded as a copy, never as an add; the note 
 });
 
 test.skipIf(!hasDom)('Show the note opens the exact block', () => {
-  const { el } = mount([CODEX, GEMINI]);
+  const { el } = mount([CODEX, QWEN]);
   act(() => button(el, 'Show the note').click());
   expect(el.querySelector('.ib-anote-note pre')?.textContent).toBe(NOTE);
   expect(button(el, 'Hide the note').getAttribute('aria-expanded')).toBe('true');
@@ -352,14 +352,14 @@ test.skipIf(!hasDom)('a failure and a foreign entry in the band; "new on this co
     manual_why: [],
     failed: [
       { agent: 'amp', reason: 'amp mcp add exited with code 3', path: null },
-      { agent: 'gemini', reason: 'gemini mcp add exited with code 3 (boom: gemini could not write its config (permission denied))', path: null },
+      { agent: 'qwen', reason: 'qwen mcp add exited with code 3 (boom: qwen could not write its config (permission denied))', path: null },
     ],
     foreign: [{ agent: 'cursor', path: '~/.cursor/mcp.json' }],
   });
   expect([...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent)).toEqual([
     'Connected Codex to the Inbox (new on this computer).',
     "Couldn't connect Amp: amp mcp add exited with code 3. Settings → Agents",
-    "Couldn't connect Gemini CLI: gemini mcp add exited with code 3: boom: gemini could not write its config (permission denied). Settings → Agents",
+    "Couldn't connect Qwen Code: qwen mcp add exited with code 3: boom: qwen could not write its config (permission denied). Settings → Agents",
     'Cursor has its own plannotator-inbox entry in ~/.cursor/mcp.json; Plannotator left it alone.',
   ]);
 });

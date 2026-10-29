@@ -10,7 +10,9 @@ import { inboxHostSessionFromEnv } from "./inbox-mcp-shim";
  *   > Codex (CODEX_THREAD_ID)
  *   > Copilot CLI (COPILOT_CLI)
  *   > OpenCode (OPENCODE)
- *   > Gemini CLI (GEMINI_CLI)
+ *   > Gemini CLI (GEMINI_CLI): no longer offered, kept so an existing install's
+ *     hook and commands keep working; the origin has no AGENT_CONFIG entry,
+ *     so no UI names it (RetiredOrigin in packages/core/agents.ts)
  *   > Qwen Code (QWEN_CODE_SESSION_ID, which Qwen sets for its hooks and its
  *     shell tool; QWEN_CODE=1 is set for the shell tool only). The plan hook
  *     also knows Qwen from its payload (PermissionRequest + exit_plan_mode),

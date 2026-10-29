@@ -208,6 +208,9 @@ import {
   INBOX_AUTO_SEND_AFTER_MS,
   INBOX_CARD_ACTION_ON,
   INBOX_NOTE_AGENT_IDS,
+  INBOX_OFFERED_AGENT_IDS,
+  INBOX_RETIRED_AGENT_IDS,
+  offeredConnectReport,
   type InboxAgentId,
   type InboxConnectReport,
   type InboxNoteAgentId,
@@ -1148,8 +1151,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** What the window reads about the agents: the records (paths shown with ~), the last run's report, and whether a run is going. */
   const agentsModel = async () => {
     const file = readInboxAgents(dataDir);
+    // A retired agent's record (INBOX_RETIRED_AGENT_IDS) stays on disk for uninstall; the window never sees it.
     const records = Object.fromEntries(
-      Object.entries(file.agents).map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
+      Object.entries(file.agents)
+        .filter(([id]) => !INBOX_RETIRED_AGENT_IDS.includes(id as InboxAgentId))
+        .map(([id, record]) => [id, { ...record, path: displayPath(record!.path, agentEnvironment) }]),
     );
     const config = loadConfig();
     const env = agentEnvironment.env as NodeJS.ProcessEnv;
@@ -1157,7 +1163,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const notesOff = inboxNotesDisabled(agentEnvironment.env);
     const options = { dataDir, selfCommand, environment: agentEnvironment };
     const agents = await Promise.all(
-      INBOX_AGENT_IDS.map(async (id) => {
+      INBOX_OFFERED_AGENT_IDS.map(async (id) => {
         const detected = agentSpec(id).detect(agentEnvironment);
         const reach = await inboxAgentReach(id, options);
         const host = (INBOX_TOOL_HOSTS as readonly string[]).includes(id) ? (id as InboxToolHost) : null;
@@ -1191,7 +1197,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return {
       agents,
       records,
-      last_report: file.last_report ?? null,
+      last_report: file.last_report ? offeredConnectReport(file.last_report) : null,
       connecting: connecting !== null,
       connect_env_off: inboxConnectDisabled(agentEnvironment.env),
       notes_env_off: notesOff,

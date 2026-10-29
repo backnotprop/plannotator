@@ -76,6 +76,24 @@ test("each agent's reach, reminder and note, read without writing anything", asy
   expect(fake.calls()).toEqual([]);
 });
 
+test("Gemini CLI is no longer offered: never a row, and a record or a saved report from an earlier Plannotator never reaches the window", async () => {
+  fake.install("gemini", "codex");
+  mkdirSync(join(fake.home, ".gemini"), { recursive: true });
+  mkdirSync(join(dataDir, "inbox"), { recursive: true });
+  const record = { state: "added", reach: "mcp", path: join(fake.home, ".gemini", "settings.json"), command: ["/opt/plannotator", "inbox", "mcp"], at: "2026-06-01T00:00:00.000Z" };
+  const report = { at: "2026-06-01T00:00:00.000Z", first: true, added: ["codex", "gemini"], already: [], failed: [{ agent: "gemini", reason: "x", path: null }], foreign: [], manual: [], unfinished: [], claude_code: false };
+  writeFileSync(join(dataDir, "inbox", "agents.json"), JSON.stringify({ v: 1, agents: { gemini: record }, last_report: report }));
+  const s = await start();
+  const model = (await get(s)) as Model & { records: Record<string, unknown>; last_report: { added: string[]; failed: { agent: string }[] } };
+  expect(model.agents.map((agent) => agent.id)).not.toContain("gemini");
+  expect(Object.keys(model.records)).not.toContain("gemini");
+  expect(model.last_report.added).toEqual(["codex"]);
+  expect(model.last_report.failed).toEqual([]);
+  // The record stays on disk, so uninstall can still remove the entry it names.
+  expect(JSON.parse(readFileSync(join(dataDir, "inbox", "agents.json"), "utf8")).agents.gemini).toEqual(record);
+  expect(fake.calls()).toEqual([]);
+});
+
 test("the first-run screen's plugin field: Claude Code found on PATH without the plugin is left to the person; with the plugin it is the tool; Pi and OpenCode say whether theirs is installed", async () => {
   // A `claude` on PATH that is never run (reading the model runs no agent CLI).
   writeFileSync(join(fake.bin, "claude"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
@@ -263,16 +281,16 @@ test("PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches", async () => 
 test("the card's question: the ticked notes are added, Not now adds none, and it is never asked again", async () => {
   mkdirSync(join(fake.home, ".codex"), { recursive: true });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
-  mkdirSync(join(fake.home, ".gemini"), { recursive: true });
+  mkdirSync(join(fake.home, ".qwen"), { recursive: true });
   const s = await start();
-  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["codex", "gemini"] })).json()) as Model & { results: { ok: boolean; action: string }[] };
+  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["codex", "qwen"] })).json()) as Model & { results: { ok: boolean; action: string }[] };
   expect(answer.results.map((r) => r.action)).toEqual(["added", "created"]);
   expect(answer.notes_offered).toBe(true);
   expect(readFileSync(join(fake.home, ".codex", "AGENTS.md"), "utf8")).toContain(INBOX_NOTE_START);
-  expect(existsSync(join(fake.home, ".gemini", "GEMINI.md"))).toBe(true);
-  const off = (await (await post(s, "/api/inbox/agents", { agent: "gemini", note: false })).json()) as Model;
-  expect(row(off, "gemini").note?.state).toBe("absent");
-  expect(existsSync(join(fake.home, ".gemini", "GEMINI.md"))).toBe(false);
+  expect(existsSync(join(fake.home, ".qwen", "QWEN.md"))).toBe(true);
+  const off = (await (await post(s, "/api/inbox/agents", { agent: "qwen", note: false })).json()) as Model;
+  expect(row(off, "qwen").note?.state).toBe("absent");
+  expect(existsSync(join(fake.home, ".qwen", "QWEN.md"))).toBe(false);
   expect((await post(s, "/api/inbox/agents/notes", { add: ["vscode"] })).status).toBe(422);
 });
 
@@ -329,40 +347,40 @@ test("the Inbox tool switch of Claude Code, Pi and OpenCode stays in reach when 
 
 test("the card never writes a note for an agent not found here, and a question whose every add failed stays open", async () => {
   const s = await start();
-  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["gemini"] })).json()) as Model & { results: { ok: boolean; reason?: string }[] };
-  expect(answer.results).toEqual([{ ok: false, agent: "gemini", reason: "Gemini CLI was not found on this computer", path: null }] as never);
+  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["qwen"] })).json()) as Model & { results: { ok: boolean; reason?: string }[] };
+  expect(answer.results).toEqual([{ ok: false, agent: "qwen", reason: "Qwen Code was not found on this computer", path: null }] as never);
   expect(answer.notes_offered).toBe(false);
-  expect(existsSync(join(fake.home, ".gemini"))).toBe(false);
+  expect(existsSync(join(fake.home, ".qwen"))).toBe(false);
 });
 
 test("Settings' note switch refuses an agent not found here too, and writes nothing", async () => {
   const s = await start();
-  const refused = (await (await post(s, "/api/inbox/agents", { agent: "gemini", note: true })).json()) as Model & { error: string | null };
-  expect(refused.error).toBe("Gemini CLI was not found on this computer");
-  expect(existsSync(join(fake.home, ".gemini"))).toBe(false);
+  const refused = (await (await post(s, "/api/inbox/agents", { agent: "qwen", note: true })).json()) as Model & { error: string | null };
+  expect(refused.error).toBe("Qwen Code was not found on this computer");
+  expect(existsSync(join(fake.home, ".qwen"))).toBe(false);
   expect(existsSync(join(dataDir, "inbox", "agent-notes.json"))).toBe(false);
 });
 
 test("PLANNOTATOR_INBOX_NOTES=0: no offer, no row for an agent without a note, a note cannot be added, and one already written is listed so it can be turned off", async () => {
   mkdirSync(join(fake.home, ".codex"), { recursive: true });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
-  mkdirSync(join(fake.home, ".gemini"), { recursive: true });
+  mkdirSync(join(fake.home, ".qwen"), { recursive: true });
   // A note written before the variable was set.
   const before = await start();
-  await post(before, "/api/inbox/agents", { agent: "gemini", note: true });
+  await post(before, "/api/inbox/agents", { agent: "qwen", note: true });
   await before.stop();
   const s = await start({ PLANNOTATOR_INBOX_NOTES: "0" });
   const model = await get(s);
   expect(row(model, "codex").note).toBeNull();
-  expect(row(model, "gemini").note?.state).toBe("added");
+  expect(row(model, "qwen").note?.state).toBe("added");
   expect((model as unknown as { notes_env_off: boolean }).notes_env_off).toBe(true);
   const refused = await post(s, "/api/inbox/agents", { agent: "codex", note: true });
   expect([refused.status, ((await refused.json()) as { code: string }).code]).toEqual([400, "notes_disabled"]);
   expect(readFileSync(join(fake.home, ".codex", "AGENTS.md"), "utf8")).toBe("Mine.\n");
-  const off = (await (await post(s, "/api/inbox/agents", { agent: "gemini", note: false })).json()) as Model;
-  expect(row(off, "gemini").note).toBeNull();
-  // Plannotator created GEMINI.md for the note, so turning it off removes the file.
-  expect(existsSync(join(fake.home, ".gemini", "GEMINI.md"))).toBe(false);
+  const off = (await (await post(s, "/api/inbox/agents", { agent: "qwen", note: false })).json()) as Model;
+  expect(row(off, "qwen").note).toBeNull();
+  // Plannotator created QWEN.md for the note, so turning it off removes the file.
+  expect(existsSync(join(fake.home, ".qwen", "QWEN.md"))).toBe(false);
 });
 
 // The approved "inbox-agent-note-dialog" design: the question is asked once PER AGENT.
@@ -382,24 +400,24 @@ test("asked once per agent: Not now answers only for the agents the dialog showe
   // Nothing written without a yes.
   expect(existsSync(join(fake.home, ".codex", "AGENTS.md"))).toBe(false);
 
-  fake.install("codex", "gemini");
+  fake.install("codex", "qwen");
   await s.connectAgents();
   const later = (await get(s)) as Asked;
   expect(later.notes_asked).toEqual(["codex"]);
-  expect(row(later, "gemini")).toMatchObject({ detected: true, reach: { on: true }, note: { state: "absent" } });
-  const add = (await (await post(s, "/api/inbox/agents/notes", { add: ["gemini"], asked: ["gemini"], seen: true })).json()) as Asked;
-  expect(add.results?.map((r) => [r.agent, r.ok])).toEqual([["gemini", true]]);
-  expect(add.notes_asked).toEqual(["codex", "gemini"]);
-  expect(loadConfig().inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "gemini"] });
+  expect(row(later, "qwen")).toMatchObject({ detected: true, reach: { on: true }, note: { state: "absent" } });
+  const add = (await (await post(s, "/api/inbox/agents/notes", { add: ["qwen"], asked: ["qwen"], seen: true })).json()) as Asked;
+  expect(add.results?.map((r) => [r.agent, r.ok])).toEqual([["qwen", true]]);
+  expect(add.notes_asked).toEqual(["codex", "qwen"]);
+  expect(loadConfig().inboxAgentNotes).toEqual({ offered: true, asked: ["codex", "qwen"] });
 });
 
 test("an add that failed leaves that agent unasked (it is asked again); the others shown are answered", async () => {
   mkdirSync(join(fake.home, ".codex"), { recursive: true });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
   const s = await start();
-  // Gemini is not on this computer: its add fails.
-  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["codex", "gemini"], asked: ["codex", "gemini", "claude-code"] })).json()) as Asked;
-  expect(answer.results?.map((r) => [r.agent, r.ok])).toEqual([["codex", true], ["gemini", false]]);
+  // Qwen Code is not on this computer: its add fails.
+  const answer = (await (await post(s, "/api/inbox/agents/notes", { add: ["codex", "qwen"], asked: ["codex", "qwen", "claude-code"] })).json()) as Asked;
+  expect(answer.results?.map((r) => [r.agent, r.ok])).toEqual([["codex", true], ["qwen", false]]);
   expect(answer.notes_asked).toEqual(["claude-code", "codex"]);
 });
 
@@ -414,15 +432,15 @@ test("a config from 0.28.18 (offered, no list): the agents that could take a not
   expect(migrated.notes_asked).toEqual(["claude-code", "codex"]);
   expect(loadConfig().inboxAgentNotes).toEqual({ offered: true, asked: ["claude-code", "codex"] });
 
-  fake.install("codex", "gemini");
+  fake.install("codex", "qwen");
   await s.connectAgents();
   const later = (await get(s)) as Asked;
   expect(later.notes_asked).toEqual(["claude-code", "codex"]);
-  expect(row(later, "gemini").note?.state).toBe("absent");
+  expect(row(later, "qwen").note?.state).toBe("absent");
 });
 
 test("a config from 0.28.18 whose person said yes: an agent with the note counts as asked, so removing the note never asks again", async () => {
-  fake.install("codex", "gemini");
+  fake.install("codex", "qwen");
   mkdirSync(join(fake.home, ".codex"), { recursive: true });
   writeFileSync(join(fake.home, ".codex", "AGENTS.md"), "Mine.\n");
   const s = await start();
@@ -431,11 +449,11 @@ test("a config from 0.28.18 whose person said yes: an agent with the note counts
   await post(s, "/api/inbox/agents/notes", { add: ["codex"], asked: ["codex"] });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxAgentNotes: { offered: true } }));
   const migrated = (await get(s)) as Asked;
-  expect(migrated.notes_asked).toEqual(["codex", "gemini"]);
+  expect(migrated.notes_asked).toEqual(["codex", "qwen"]);
   const removed = (await (await post(s, "/api/inbox/agents", { agent: "codex", note: false })).json()) as Asked;
   expect(row(removed, "codex").note?.state).toBe("absent");
-  expect(removed.notes_asked).toEqual(["codex", "gemini"]);
-  expect(loadConfig().inboxAgentNotes?.asked).toEqual(["codex", "gemini"]);
+  expect(removed.notes_asked).toEqual(["codex", "qwen"]);
+  expect(loadConfig().inboxAgentNotes?.asked).toEqual(["codex", "qwen"]);
 });
 
 test("a yes in Settings → Agents answers the dialog for that agent: removing the note later never asks again", async () => {

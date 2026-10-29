@@ -241,8 +241,11 @@ function isAgentTerminalRemoteEnabled(env: NodeJS.ProcessEnv = process.env): boo
 	return /^(1|true|yes)$/i.test(env.PLANNOTATOR_AGENT_TERMINAL_REMOTE ?? "");
 }
 
+/** webtui's built-in agents Plannotator no longer offers (Gemini CLI): never listed. The Bun server's agent-terminal.ts keeps the same list. */
+const RETIRED_TERMINAL_AGENTS: ReadonlySet<string> = new Set(["gemini"]);
+
 function listAgents(core: WebTuiCore): AgentTerminalAgent[] {
-	return core.listBuiltInAgents().map((id) => {
+	return core.listBuiltInAgents().filter((id) => !RETIRED_TERMINAL_AGENTS.has(id)).map((id) => {
 		const config = core.BUILT_IN_AGENTS[id];
 		return {
 			id,
@@ -279,7 +282,6 @@ function formatAgentName(id: string): string {
 		claude: "Claude",
 		codex: "Codex",
 		copilot: "GitHub Copilot",
-		gemini: "Gemini",
 		opencode: "OpenCode",
 		pi: "Pi",
 	};

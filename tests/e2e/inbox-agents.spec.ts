@@ -7,13 +7,14 @@
  * home is never touched.
  *
  *  1. An agent starts the Inbox (`--background`): nothing is connected.
- *  2. The person runs `plannotator inbox`: it connects Codex and Gemini CLI.
+ *  2. The person runs `plannotator inbox`: it connects Codex and Qwen Code
+ *     (Gemini CLI, found too, is no longer offered: never connected or listed).
  *     The window's first load shows the sound dialog (due), and never the note
  *     dialog on the same load. The next load opens the note dialog: the
- *     "Connected …" band, Codex, Gemini CLI and Claude Code all ticked with
+ *     "Connected …" band, Codex, Qwen Code and Claude Code all ticked with
  *     their exact files; Add writes the ticked notes and shows the results in
  *     the same rows. Every agent shown is answered: no dialog again.
- *  3. Gemini's switch goes off in Settings → Agents; a later run never adds
+ *  3. Qwen Code's switch goes off in Settings → Agents; a later run never adds
  *     it back, connects Pi and Amp (installed since), and the next load asks
  *     about Pi alone ("Add the note to Pi?"); Not now writes nothing and Pi is
  *     not asked again. A run that connects only Cursor (its rules live in the app)
@@ -95,7 +96,8 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-agents-e2e-');
   const fake = createFakeAgents();
-  fake.install('codex', 'gemini');
+  fake.install('codex', 'qwen', 'gemini');
+  mkdirSync(join(fake.home, '.gemini'), { recursive: true });
   mkdirSync(join(fake.home, '.codex'), { recursive: true });
   writeFileSync(join(fake.home, '.codex', 'AGENTS.md'), '# My rules\n\nBe brief.\n');
   // Plannotator's Claude Code plugin: Claude Code is offered and ticked like every other agent.
@@ -118,8 +120,12 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
 
     const person = run(['--no-open']);
     expect(person.status, person.stderr).toBe(0);
-    expect(person.stderr).toContain('Connected Codex and Gemini CLI to the Inbox');
-    expect(adds().sort()).toEqual(['codex', 'gemini']);
+    expect(person.stderr).toContain('Connected Codex and Qwen Code to the Inbox');
+    expect(person.stderr).not.toContain('Gemini');
+    // Codex through its own `mcp add`; Qwen Code's settings.json is written by Plannotator itself.
+    expect(adds()).toEqual(['codex']);
+    expect(JSON.parse(readFileSync(join(fake.home, '.qwen', 'settings.json'), 'utf8')).mcpServers).toHaveProperty('plannotator-inbox');
+    expect(existsSync(join(fake.home, '.gemini', 'settings.json'))).toBe(false);
 
     const page = await context.newPage();
     await page.goto(url);
@@ -133,15 +139,16 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await page.reload();
     const dialog = dialogOf(page);
     await expect(dialog).toBeVisible({ timeout: 15_000 });
-    await expect(dialog.locator('[data-anote-band] p')).toHaveText(['Connected Codex and Gemini CLI to the Inbox.']);
+    // The first line; Qwen Code's trusted-sender line follows it (inbox-qwen-trust.ts).
+    await expect(dialog.locator('[data-anote-band] p').first()).toHaveText('Connected Codex and Qwen Code to the Inbox.');
     await expect(dialog.getByRole('heading', { name: 'Tell your agents about the Inbox' })).toBeVisible();
     await expect(rowsOf(page)).toHaveCount(3);
-    await expect(rowsOf(page).locator('.ib-anote-name')).toHaveText(['Codex', 'Gemini CLI', 'Claude Code']);
-    await expect(rowsOf(page).locator('.ib-anote-path')).toHaveText(['~/.codex/AGENTS.md', '~/.gemini/GEMINI.md', '~/.claude/rules/plannotator-inbox.md']);
+    await expect(rowsOf(page).locator('.ib-anote-name')).toHaveText(['Codex', 'Qwen Code', 'Claude Code']);
+    await expect(rowsOf(page).locator('.ib-anote-path')).toHaveText(['~/.codex/AGENTS.md', '~/.qwen/QWEN.md', '~/.claude/rules/plannotator-inbox.md']);
     await expect(rowsOf(page).locator('.ib-anote-pill')).toHaveText(['Adds to end', 'New file', 'New file']);
     for (const box of await rowsOf(page).locator('input[type="checkbox"]').all()) await expect(box).toBeChecked();
     const primary = dialog.locator('[data-anote-primary]');
-    await expect(primary).toHaveText('Add to Codex, Gemini CLI and Claude Code');
+    await expect(primary).toHaveText('Add to Codex, Qwen Code and Claude Code');
     await expect(primary).toBeFocused();
     await shot(page, 'checklist-01-several', ['desktop', 'narrow']);
     await dialog.getByRole('button', { name: 'Show the note' }).click();
@@ -151,7 +158,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
 
     // Untick Claude Code: the primary follows; nothing ticked reads "Don't add a note" without Not now.
     await rowsOf(page).nth(2).locator('input').uncheck();
-    await expect(primary).toHaveText('Add to Codex and Gemini CLI');
+    await expect(primary).toHaveText('Add to Codex and Qwen Code');
     await rowsOf(page).nth(0).locator('input').uncheck();
     await rowsOf(page).nth(1).locator('input').uncheck();
     await expect(primary).toHaveText("Don't add a note");
@@ -160,21 +167,21 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await rowsOf(page).nth(0).locator('input').check();
     await rowsOf(page).nth(1).locator('input').check();
 
-    // Gemini's folder cannot be written (a permission a root runner would ignore): its row says why, with Try again.
-    const failGemini = process.getuid?.() !== 0;
-    if (failGemini) chmodSync(join(fake.home, '.gemini'), 0o555);
+    // Qwen Code's folder cannot be written (a permission a root runner would ignore): its row says why, with Try again.
+    const failQwen = process.getuid?.() !== 0;
+    if (failQwen) chmodSync(join(fake.home, '.qwen'), 0o555);
     await primary.click();
-    if (failGemini) {
+    if (failQwen) {
       await expect(dialog.getByRole('heading', { name: 'Added the note to Codex' })).toBeVisible();
       await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText(['Added', 'Not added']);
       await expect(rowsOf(page).nth(1).locator('.ib-anote-err')).toContainText('Try again');
       await expect(dialog.locator('[data-anote-band]')).toHaveCount(0);
       await expect(dialog.getByRole('button', { name: 'Done' })).toBeFocused();
       await shot(page, 'checklist-08-error', ['desktop', 'narrow']);
-      chmodSync(join(fake.home, '.gemini'), 0o755);
+      chmodSync(join(fake.home, '.qwen'), 0o755);
       await rowsOf(page).nth(1).getByRole('button', { name: 'Try again' }).click();
     }
-    await expect(dialog.getByRole('heading', { name: 'Added the note to Codex and Gemini CLI' })).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Added the note to Codex and Qwen Code' })).toBeVisible();
     await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText(['Added', 'Created']);
     // The results view: the band is gone and Done has the focus.
     await expect(dialog.locator('[data-anote-band]')).toHaveCount(0);
@@ -183,10 +190,10 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await dialog.getByRole('button', { name: 'Done' }).click();
     await expect(dialog).toHaveCount(0);
     expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8').startsWith(`# My rules\n\nBe brief.\n\n${INBOX_NOTE_START}\n`)).toBe(true);
-    expect(readFileSync(join(fake.home, '.gemini', 'GEMINI.md'), 'utf8')).toContain('## Plannotator Inbox');
+    expect(readFileSync(join(fake.home, '.qwen', 'QWEN.md'), 'utf8')).toContain('## Plannotator Inbox');
     // Claude Code was unticked: no file, and it is answered (asked once).
     expect(existsSync(join(fake.home, '.claude', 'rules', 'plannotator-inbox.md'))).toBe(false);
-    expect(config(root).inboxAgentNotes).toEqual({ offered: true, asked: ['claude-code', 'codex', 'gemini'] });
+    expect(config(root).inboxAgentNotes).toEqual({ offered: true, asked: ['claude-code', 'codex', 'qwen'] });
     await shot(page, 'list-after-dialog');
 
     // Every agent shown was answered: no dialog on the next load.
@@ -203,23 +210,25 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     expect(readFileSync(join(fake.home, '.codex', 'AGENTS.md'), 'utf8')).toBe('# My rules\n\nBe brief.\n');
     await page.reload();
     await expectNoDialog(page);
-    expect(config(root).inboxAgentNotes.asked).toEqual(['claude-code', 'codex', 'gemini']);
+    expect(config(root).inboxAgentNotes.asked).toEqual(['claude-code', 'codex', 'qwen']);
 
-    // The person turns Gemini off (the same route Settings → Agents uses): its entry goes, and stays gone.
+    // The person turns Qwen Code off (the same route Settings → Agents uses): its entry goes, and stays gone.
     const off = await page.evaluate(async () => {
       const settings = await (await fetch('/api/inbox/settings')).json();
-      const answer = await fetch('/api/inbox/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: settings.serverSession, agent: 'gemini', reach: false }) });
+      const answer = await fetch('/api/inbox/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: settings.serverSession, agent: 'qwen', reach: false }) });
       return answer.status;
     });
     expect(off).toBe(200);
-    expect(JSON.parse(readFileSync(join(fake.home, '.gemini', 'settings.json'), 'utf8')).mcpServers).toEqual({});
+    const qwenSettings = join(fake.home, '.qwen', 'settings.json');
+    expect(existsSync(qwenSettings) ? JSON.parse(readFileSync(qwenSettings, 'utf8')).mcpServers?.['plannotator-inbox'] : undefined).toBeUndefined();
 
-    // Settings → Agents: Codex connected, its note off (removed above), Gemini off (never re-added).
+    // Settings → Agents: Codex connected, its note off (removed above), Qwen Code off (never re-added), no Gemini CLI row.
     await page.goto(`${url}#settings/agents`);
     const codex = page.locator('[data-agent="codex"]');
     await expect(codex.getByRole('switch', { name: 'Reaches the Inbox: Codex' })).toHaveAttribute('aria-checked', 'true');
     await expect(codex.getByRole('switch', { name: 'Note in its instructions: Codex' })).toHaveAttribute('aria-checked', 'false');
-    await expect(page.locator('[data-agent="gemini"]').getByRole('switch', { name: 'Reaches the Inbox: Gemini CLI' })).toHaveAttribute('aria-checked', 'false');
+    await expect(page.locator('[data-agent="qwen"]').getByRole('switch', { name: 'Reaches the Inbox: Qwen Code' })).toHaveAttribute('aria-checked', 'false');
+    await expect(page.locator('[data-agent="gemini"]')).toHaveCount(0);
     await page.goto(url);
 
     // A later run connects Pi and Amp (installed since): the next load asks about Pi alone.
@@ -227,7 +236,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     const later = run(['--no-open']);
     expect(later.status, later.stderr).toBe(0);
     expect(later.stderr).toContain('to the Inbox (new on this computer).');
-    expect(adds().sort()).toEqual(['amp', 'codex', 'gemini', 'pi']);
+    expect(adds().sort()).toEqual(['amp', 'codex', 'pi']);
     await page.reload();
     await expect(dialog).toBeVisible({ timeout: 15_000 });
     await expect(dialog.getByRole('heading', { name: 'Add the note to Pi?' })).toBeVisible();
@@ -239,7 +248,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await shot(page, 'checklist-02-later-one-agent', ['desktop', 'narrow']);
     await dialog.getByRole('button', { name: 'Not now' }).click();
     await expect(dialog).toHaveCount(0);
-    await expect.poll(() => config(root).inboxAgentNotes.asked).toEqual(['claude-code', 'codex', 'gemini', 'pi']);
+    await expect.poll(() => config(root).inboxAgentNotes.asked).toEqual(['claude-code', 'codex', 'qwen', 'pi']);
     expect(existsSync(join(fake.home, '.pi', 'agent', 'AGENTS.md'))).toBe(false);
     await page.reload();
     await expectNoDialog(page);
@@ -281,7 +290,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await removeInboxScratch(root);
     // A failure halfway must not leave a folder the cleanup cannot empty.
     try {
-      chmodSync(join(fake.home, '.gemini'), 0o755);
+      chmodSync(join(fake.home, '.qwen'), 0o755);
     } catch {}
     fake.remove();
   }
@@ -292,12 +301,12 @@ test('stress: every note agent at once, long and non-Latin paths, at 1280 and 37
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-agents-stress-');
   const fake = createFakeAgents();
-  fake.install('codex', 'gemini', 'pi');
+  fake.install('codex', 'qwen', 'pi');
   const codexHome = join(fake.home, 'Library', 'Application Support', 'com.openai.codex', 'profiles', 'work-laptop-2026-q4');
   mkdirSync(codexHome, { recursive: true });
   writeFileSync(join(codexHome, 'AGENTS.override.md'), '# Work rules\n');
-  mkdirSync(join(fake.home, '.gemini'), { recursive: true });
-  writeFileSync(join(fake.home, '.gemini', 'settings.json'), JSON.stringify({ context: { fileName: 'instructions-for-every-gemini-session-on-this-machine.md' } }));
+  mkdirSync(join(fake.home, '.qwen'), { recursive: true });
+  writeFileSync(join(fake.home, '.qwen', 'settings.json'), JSON.stringify({ context: { fileName: 'instructions-for-every-qwen-session-on-this-machine.md' } }));
   const piDir = join(fake.home, 'ジョン・スミス', '.config', 'pi', 'agent');
   mkdirSync(piDir, { recursive: true });
   const claudeDir = join(fake.home, 'Documents', 'مشاريع', 'وكلاء', '.claude');
@@ -319,7 +328,7 @@ test('stress: every note agent at once, long and non-Latin paths, at 1280 and 37
     await page.goto(started.stdout.trim());
     const dialog = dialogOf(page);
     await expect(dialog).toBeVisible({ timeout: 15_000 });
-    await expect(rowsOf(page).locator('.ib-anote-name')).toHaveText(['Codex', 'Gemini CLI', 'Pi', 'OpenCode', 'Claude Code']);
+    await expect(rowsOf(page).locator('.ib-anote-name')).toHaveText(['Codex', 'Qwen Code', 'Pi', 'OpenCode', 'Claude Code']);
     await expect(dialog.locator('[data-anote-primary]')).toHaveText('Add to 5 agents');
     // The whole path is in the DOM (and the title), however it is cut on screen.
     await expect(rowsOf(page).nth(0).locator('.ib-anote-path')).toHaveText('~/Library/Application Support/com.openai.codex/profiles/work-laptop-2026-q4/AGENTS.override.md');

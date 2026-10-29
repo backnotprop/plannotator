@@ -228,10 +228,10 @@ export interface PlannotatorConfig {
    * integration even when the agent is detected, reports the detected state
    * honestly ("detected, skipped"), and never removes an integration a
    * previous install already wired. Overridden by the
-   * PLANNOTATOR_SKIP_CODEX_INSTALL / PLANNOTATOR_SKIP_GEMINI_INSTALL /
+   * PLANNOTATOR_SKIP_CODEX_INSTALL /
    * PLANNOTATOR_SKIP_KIRO_INSTALL / PLANNOTATOR_SKIP_VIBE_INSTALL /
    * PLANNOTATOR_SKIP_OPENCODE_INSTALL / PLANNOTATOR_SKIP_QWEN_INSTALL env
-   * vars, which are in turn overridden by the --skip-codex / --skip-gemini /
+   * vars, which are in turn overridden by the --skip-codex /
    * --skip-kiro / --skip-vibe / --skip-opencode / --skip-qwen flags.
    * OpenCode has no detection leg, so its entry is a plain do-not-write
    * switch. `skills` skips the skills/slash-command
@@ -244,6 +244,7 @@ export interface PlannotatorConfig {
    */
   skipInstall?: {
     codex?: boolean;
+    /** No longer read: Gemini CLI is not offered. Kept so an older config.json still type-checks; ignored. */
     gemini?: boolean;
     kiro?: boolean;
     vibe?: boolean;

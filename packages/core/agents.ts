@@ -25,32 +25,41 @@ export const AGENT_CONFIG = {
   'copilot-cli': { name: 'GitHub Copilot', badge: 'bg-blue-500/15 text-blue-400' },
   'pi':          { name: 'Pi',          badge: 'bg-violet-500/15 text-violet-400', aiProviderTypes: ['pi-sdk'] },
   'codex':       { name: 'Codex',       badge: 'bg-purple-500/15 text-purple-400', aiProviderTypes: ['codex-sdk'] },
-  'gemini-cli':  { name: 'Gemini CLI', badge: 'bg-sky-500/15 text-sky-400' },
   'oh-my-pi':    { name: 'Oh My Pi',    badge: 'bg-fuchsia-500/15 text-fuchsia-400' },
   'mistral-vibe': { name: 'Mistral Vibe', badge: 'bg-rose-500/15 text-rose-400' },
   'qwen-code':   { name: 'Qwen Code',   badge: 'bg-indigo-500/15 text-indigo-400', aiProviderTypes: ['qwen-sdk'] },
   'dsh':         { name: 'DeepSeek Harness', badge: 'bg-teal-500/15 text-teal-400' },
 } as const satisfies Record<string, AgentConfigEntry>;
 
-/** All recognized origin values. */
-export type Origin = keyof typeof AGENT_CONFIG;
+/**
+ * Origins the plan hook still reports for installs set up before their agent
+ * stopped being offered, so those installs keep working. They have no
+ * AGENT_CONFIG entry: no UI names them (the generic "Coding Agent" badge), and
+ * PLANNOTATOR_ORIGIN does not accept them. Gemini CLI: no longer offered
+ * (Google retired it for individuals in favor of Antigravity CLI); an existing
+ * ~/.gemini hook still sends its BeforeTool payload (apps/hook/server/index.ts).
+ */
+export type RetiredOrigin = 'gemini-cli';
+
+/** All origin values a server may carry: the configured agents, plus the retired ones. */
+export type Origin = keyof typeof AGENT_CONFIG | RetiredOrigin;
 
 /** Resolve an origin to a human-readable agent name. */
 export function getAgentName(origin: Origin | null | undefined): string {
-  if (origin && origin in AGENT_CONFIG) return AGENT_CONFIG[origin as Origin].name;
+  if (origin && origin in AGENT_CONFIG) return AGENT_CONFIG[origin as keyof typeof AGENT_CONFIG].name;
   return 'Coding Agent';
 }
 
 /** Resolve an origin to Tailwind badge classes. */
 export function getAgentBadge(origin: Origin | null | undefined): string {
-  if (origin && origin in AGENT_CONFIG) return AGENT_CONFIG[origin as Origin].badge;
+  if (origin && origin in AGENT_CONFIG) return AGENT_CONFIG[origin as keyof typeof AGENT_CONFIG].badge;
   return 'bg-zinc-500/20 text-zinc-400';
 }
 
 /** Resolve an origin to matching AI provider types, in preference order. */
 export function getAgentAIProviderTypes(origin: Origin | null | undefined): readonly string[] {
   if (origin && origin in AGENT_CONFIG) {
-    const config = AGENT_CONFIG[origin as Origin];
+    const config = AGENT_CONFIG[origin as keyof typeof AGENT_CONFIG];
     return 'aiProviderTypes' in config ? config.aiProviderTypes : [];
   }
   return [];

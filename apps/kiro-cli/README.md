@@ -18,7 +18,7 @@ one-liner as everyone else.
 ## How it installs
 
 `scripts/install.sh` auto-detects Kiro (if `~/.kiro` exists or `kiro-cli` is on PATH — the same
-convention used for Codex and Gemini) and installs:
+convention used for Codex) and installs:
 
 - the 2 Kiro-specific skills above → `~/.kiro/skills`
 - the 2 shared skills `plannotator-setup-goal` and `plannotator-visual-explainer` (pulled from

@@ -72,7 +72,7 @@ RECONFIGURE=0
 # Binary-only mode. Installs just the plannotator binary (to $INSTALL_DIR) and
 # no persistent state elsewhere — no sem sidecar, no CallDiff or agent-terminal runtime, no
 # skills, hooks, slash commands, or per-agent config (Claude, Codex, OpenCode,
-# Gemini, Kiro, Vibe, Qwen Code). Set by --minimal (1) / --no-minimal (0); -1 =
+# Kiro, Vibe, Qwen Code). Set by --minimal (1) / --no-minimal (0); -1 =
 # neither flag given (fall through to the PLANNOTATOR_MINIMAL env var). Resolved
 # after arg parsing so a flag overrides the env var in either direction.
 MINIMAL_FLAG=-1
@@ -82,14 +82,13 @@ MINIMAL_FLAG=-1
 # previous install already wired. 1 = flag passed. Resolution (flag > env >
 # config skipInstall.<agent> > default off) happens after _config_dir is known.
 SKIP_CODEX_FLAG=0
-SKIP_GEMINI_FLAG=0
 SKIP_KIRO_FLAG=0
 SKIP_VIBE_FLAG=0
 SKIP_OPENCODE_FLAG=0
 SKIP_QWEN_FLAG=0
 # Same shape, but scoped to the skills/slash-command sparse checkout rather
 # than one agent's home: --skip-skills turns the whole fetch into a no-op for
-# every scope it writes (Claude, ~/.agents, OpenCode, Gemini, Kiro), including
+# every scope it writes (Claude, ~/.agents, OpenCode, Kiro), including
 # the extras and the skill-scope cleanup sweeps. Needed by any environment that
 # cannot reach github.com for the tag being installed — the release smoke test
 # installs a synthetic v9.9.9 whose tag has no GitHub counterpart.
@@ -105,7 +104,7 @@ usage() {
     cat <<'USAGE'
 Usage: install.sh [--version <tag>] [--verify-attestation | --skip-attestation]
                   [--extras | --no-extras] [--model-invocable <list>|none]
-                  [--minimal | --no-minimal] [--skip-codex] [--skip-gemini]
+                  [--minimal | --no-minimal] [--skip-codex]
                   [--skip-kiro] [--skip-vibe] [--skip-opencode] [--skip-skills]
                   [--skip-qwen] [--with-t3 | --without-t3]
                   [--skip-claude-plugin] [--non-interactive] [--reconfigure] [--help]
@@ -143,7 +142,7 @@ Options:
                          --binary-only). Skips the sem semantic-diff sidecar,
                          the CallDiff runtime, the agent-terminal runtime, and every per-agent
                          integration (skills, hooks, slash commands, and config
-                         for Claude, Codex, OpenCode, Gemini, Kiro, and Vibe). No
+                         for Claude, Codex, OpenCode, Kiro, and Vibe). No
                          persistent state is written outside $HOME/.local/bin
                          (a temp download file is still used and removed). Also
                          enabled by exporting PLANNOTATOR_MINIMAL=1.
@@ -155,10 +154,6 @@ Options:
                          Also enabled by PLANNOTATOR_SKIP_CODEX_INSTALL=1 or
                          { "skipInstall": { "codex": true } } in
                          ~/.plannotator/config.json (flag > env var > config).
-  --skip-gemini          Same opt-out for the Gemini CLI integration
-                         (~/.gemini policy, settings hook, commands). Env var:
-                         PLANNOTATOR_SKIP_GEMINI_INSTALL; config key:
-                         skipInstall.gemini.
   --skip-kiro            Same opt-out for the Kiro CLI integration
                          (~/.kiro skills and agent). Env var:
                          PLANNOTATOR_SKIP_KIRO_INSTALL; config key:
@@ -181,7 +176,7 @@ Options:
                          skipInstall.qwen.
   --skip-skills          Do not fetch or write the /plannotator-* skills and
                          slash commands (the sparse checkout that feeds Claude
-                         Code, ~/.agents, OpenCode, Gemini, Kiro, Vibe, and the
+                         Code, ~/.agents, OpenCode, Kiro, Vibe, and the
                          Qwen Code extension), the extras, or the skill-scope
                          cleanup sweeps. Nothing
                          already installed is removed. The binary, hooks, and
@@ -367,7 +362,9 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --skip-gemini)
-            SKIP_GEMINI_FLAG=1
+            # Retired with Gemini CLI support: still accepted, silently, so an
+            # older remembered flag (install-flags.json, an old update) never
+            # fails an install. It does nothing and is never recorded.
             shift
             ;;
         --skip-kiro)
@@ -605,8 +602,6 @@ fi
 # what the user set.
 skip_codex=0
 skip_codex_source=""
-skip_gemini=0
-skip_gemini_source=""
 skip_kiro=0
 skip_kiro_source=""
 skip_vibe=0
@@ -650,7 +645,8 @@ if [ -f "$_config_dir/config.json" ]; then
         }' "$_config_dir/config.json" 2>/dev/null) || _skip_install_block=""
 fi
 if [ -n "$_skip_install_block" ]; then
-    for _agent in codex gemini kiro vibe opencode qwen skills claudePlugin; do
+    # skipInstall.gemini (Gemini CLI support was removed) is ignored.
+    for _agent in codex kiro vibe opencode qwen skills claudePlugin; do
         if printf '%s' "$_skip_install_block" | grep -q "\"$_agent\"[[:space:]]*:[[:space:]]*false"; then
             continue # explicit false is a veto, never a skip
         fi
@@ -659,10 +655,6 @@ if [ -n "$_skip_install_block" ]; then
                 codex)
                     skip_codex=1
                     skip_codex_source="config skipInstall.codex"
-                    ;;
-                gemini)
-                    skip_gemini=1
-                    skip_gemini_source="config skipInstall.gemini"
                     ;;
                 kiro)
                     skip_kiro=1
@@ -702,16 +694,6 @@ case "${PLANNOTATOR_SKIP_CODEX_INSTALL:-}" in
     0|false|no|FALSE|NO|False|No)
         skip_codex=0
         skip_codex_source=""
-        ;;
-esac
-case "${PLANNOTATOR_SKIP_GEMINI_INSTALL:-}" in
-    1|true|yes|TRUE|YES|True|Yes)
-        skip_gemini=1
-        skip_gemini_source="PLANNOTATOR_SKIP_GEMINI_INSTALL"
-        ;;
-    0|false|no|FALSE|NO|False|No)
-        skip_gemini=0
-        skip_gemini_source=""
         ;;
 esac
 case "${PLANNOTATOR_SKIP_KIRO_INSTALL:-}" in
@@ -777,10 +759,6 @@ esac
 if [ "$SKIP_CODEX_FLAG" -eq 1 ]; then
     skip_codex=1
     skip_codex_source="--skip-codex"
-fi
-if [ "$SKIP_GEMINI_FLAG" -eq 1 ]; then
-    skip_gemini=1
-    skip_gemini_source="--skip-gemini"
 fi
 if [ "$SKIP_KIRO_FLAG" -eq 1 ]; then
     skip_kiro=1
@@ -1142,7 +1120,6 @@ write_install_flags() {
     [ "$T3_HOOK_FLAG" = "1" ] && _if_add with-t3
     [ "$T3_HOOK_FLAG" = "0" ] && _if_add without-t3
     [ "$SKIP_CODEX_FLAG" = "1" ] && _if_add skip-codex
-    [ "$SKIP_GEMINI_FLAG" = "1" ] && _if_add skip-gemini
     [ "$SKIP_KIRO_FLAG" = "1" ] && _if_add skip-kiro
     [ "$SKIP_VIBE_FLAG" = "1" ] && _if_add skip-vibe
     [ "$SKIP_OPENCODE_FLAG" = "1" ] && _if_add skip-opencode
@@ -2274,8 +2251,8 @@ fi
 # Install skills and slash commands from a sparse checkout (requires git).
 # Hard requirement: without git we cannot install the /plannotator-* skills,
 # so fail loudly instead of leaving a partial install. Hook/config writing
-# above has already run by this point; the Pi update and Gemini config below
-# are skipped on failure and complete when the user re-runs the installer.
+# above has already run by this point; the Pi update below is skipped on
+# failure and complete when the user re-runs the installer.
 # Nothing is fetched under --skip-skills, so git stops being a requirement
 # there — a git-less machine must still get the binary, hooks, and config.
 if [ "$skip_skills" -eq 0 ] && ! command -v git &>/dev/null; then
@@ -2288,7 +2265,6 @@ fi
 KIRO_SKILLS_DIR="$HOME/.kiro/skills"
 VIBE_SKILLS_DIR="$VIBE_HOME/skills"
 OPENCODE_COMMANDS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/commands"
-GEMINI_COMMANDS_DIR="$HOME/.gemini/commands"
 skills_tmp=$(mktemp -d)
 
 copy_skill_if_present() {
@@ -2304,8 +2280,8 @@ copy_skill_if_present() {
 }
 
 # Copy every command file in a directory if the source dir exists.
-# Used for OpenCode (.md stubs) and Gemini (.toml) commands, both of
-# which are checked out from the repo rather than generated by heredocs.
+# Used for the OpenCode (.md stub) commands, which are checked out from the
+# repo rather than generated by heredocs.
 copy_commands_if_present() {
     local source_dir="$1"
     local target_dir="$2"
@@ -2417,7 +2393,7 @@ checkout_failed=0
     fi
     cd repo || exit 1
     if [ "$sparse_clone" -eq 1 ]; then
-        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/gemini/commands apps/qwen-code 2>"$git_err"; then
+        if ! git sparse-checkout set apps/skills apps/kiro-cli apps/vibe apps/opencode-plugin/commands apps/qwen-code 2>"$git_err"; then
             surface_git_error
             exit 1
         fi
@@ -2469,13 +2445,6 @@ checkout_failed=0
     if [ "$skip_opencode" -eq 0 ] && [ -d "apps/opencode-plugin/commands" ] && [ -n "$(ls -A apps/opencode-plugin/commands 2>/dev/null)" ]; then
         copy_commands_if_present apps/opencode-plugin/commands "$OPENCODE_COMMANDS_DIR"
         echo "Installed OpenCode commands to ${OPENCODE_COMMANDS_DIR}/"
-    fi
-
-    # Gemini native TOML commands — only when Gemini is present and not
-    # opted out (#1178; skip_gemini is inherited by this subshell).
-    if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 0 ] && [ -d "apps/gemini/commands" ] && [ -n "$(ls -A apps/gemini/commands 2>/dev/null)" ]; then
-        copy_commands_if_present apps/gemini/commands "$GEMINI_COMMANDS_DIR"
-        echo "Installed Gemini commands to ${GEMINI_COMMANDS_DIR}/"
     fi
 
     if [ "$kiro_available" -eq 1 ] && [ "$skip_kiro" -eq 0 ] && [ -d "apps/kiro-cli/skills" ] && [ -n "$(ls -A apps/kiro-cli/skills 2>/dev/null)" ]; then
@@ -2856,87 +2825,6 @@ fi
 # anyone on an older extension that declared the skill in its manifest.
 update_pi_extension_if_present
 
-# --- Gemini CLI support (only if Gemini is installed) ---
-if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 1 ]; then
-    # HONEST three-state reporting (#1178): detected-but-skipped is its own
-    # state. Nothing under ~/.gemini is created, updated, or removed.
-    echo ""
-    echo "Gemini: detected, skipped (${skip_gemini_source})."
-    if [ -f "$HOME/.gemini/settings.json" ] && grep -q '"plannotator"' "$HOME/.gemini/settings.json" 2>/dev/null; then
-        echo "An existing Gemini integration at ~/.gemini/settings.json was left untouched."
-    fi
-elif [ -d "$HOME/.gemini" ]; then
-    # Install policy file
-    GEMINI_POLICIES_DIR="$HOME/.gemini/policies"
-    mkdir -p "$GEMINI_POLICIES_DIR"
-    cat > "$GEMINI_POLICIES_DIR/plannotator.toml" << 'GEMINI_POLICY_EOF'
-# Plannotator policy for Gemini CLI
-# Allows exit_plan_mode without TUI confirmation so the browser UI is the sole gate.
-[[rule]]
-toolName = "exit_plan_mode"
-decision = "allow"
-priority = 100
-GEMINI_POLICY_EOF
-    echo "Installed Gemini policy to ${GEMINI_POLICIES_DIR}/plannotator.toml"
-
-    # Configure hook in settings.json
-    GEMINI_SETTINGS="$HOME/.gemini/settings.json"
-    PLANNOTATOR_HOOK='{"matcher":"exit_plan_mode","hooks":[{"type":"command","command":"plannotator","timeout":345600}]}'
-
-    if [ -f "$GEMINI_SETTINGS" ]; then
-        if ! grep -q '"plannotator"' "$GEMINI_SETTINGS" 2>/dev/null; then
-            # Merge hook into existing settings.json using node (ships with Gemini CLI)
-            if command -v node &>/dev/null; then
-                node -e "
-                  const fs = require('fs');
-                  const settings = JSON.parse(fs.readFileSync('$GEMINI_SETTINGS', 'utf8'));
-                  if (!settings.hooks) settings.hooks = {};
-                  if (!settings.hooks.BeforeTool) settings.hooks.BeforeTool = [];
-                  settings.hooks.BeforeTool.push($PLANNOTATOR_HOOK);
-                  fs.writeFileSync('$GEMINI_SETTINGS', JSON.stringify(settings, null, 2) + '\n');
-                "
-                echo "Added plannotator hook to ${GEMINI_SETTINGS}"
-            else
-                echo ""
-                echo "Add the following to your ~/.gemini/settings.json hooks:"
-                echo ""
-                echo '  "hooks": {'
-                echo '    "BeforeTool": [{'
-                echo '      "matcher": "exit_plan_mode",'
-                echo '      "hooks": [{"type": "command", "command": "plannotator", "timeout": 345600}]'
-                echo '    }]'
-                echo '  }'
-            fi
-        fi
-    else
-        cat > "$GEMINI_SETTINGS" << 'GEMINI_SETTINGS_EOF'
-{
-  "hooks": {
-    "BeforeTool": [
-      {
-        "matcher": "exit_plan_mode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "plannotator",
-            "timeout": 345600
-          }
-        ]
-      }
-    ]
-  },
-  "experimental": {
-    "plan": true
-  }
-}
-GEMINI_SETTINGS_EOF
-        echo "Created Gemini settings at ${GEMINI_SETTINGS}"
-    fi
-
-    # Gemini slash commands (.toml) are installed from the sparse checkout in
-    # the skills/commands install block above (apps/gemini/commands).
-fi
-
 # --- Mistral Vibe support (only if Vibe is installed or configured) ---
 # Vibe (Mistral's TUI coding agent) hooks are [[hooks]] TOML blocks in
 # $VIBE_HOME/hooks.toml (stable since Vibe 2.25; no config flag needed).
@@ -3033,8 +2921,8 @@ else
 fi
 # Agent-specific closing sections print only for agents this run detected,
 # reusing the detection each integration block above already ran (Pi: `pi` on
-# PATH, as update_pi_extension_if_present checks; Gemini: ~/.gemini; Codex:
-# codex_available; Kiro: kiro_available). A detected-but-skipped agent keeps its
+# PATH, as update_pi_extension_if_present checks; Codex: codex_available;
+# Kiro: kiro_available). A detected-but-skipped agent keeps its
 # honest "detected, skipped" section. OpenCode has no detection leg and its
 # command stubs are written for everyone, so its section stays universal, as
 # does the Claude Code block. Output only: nothing here decides what installs.
@@ -3071,27 +2959,6 @@ if command -v omp >/dev/null 2>&1; then
     echo ""
     echo "Then restart OMP and open reviews with /plannotator-review, /plannotator-annotate and"
     echo "/plannotator-last. Reviews opened that way can use Ask this session."
-fi
-if [ -d "$HOME/.gemini" ]; then
-    echo ""
-    echo "=========================================="
-    echo "  GEMINI CLI USERS"
-    echo "=========================================="
-    echo ""
-    if [ "$skip_gemini" -eq 1 ]; then
-        echo "Gemini was detected, but the integration was skipped (${skip_gemini_source})."
-        echo "No files under ~/.gemini were written or removed. Re-run without the"
-        echo "opt-out to configure plan mode."
-    else
-        echo "Enable plan mode in Gemini settings, then run:"
-        echo ""
-        echo "  gemini"
-        echo "  /plan"
-        echo ""
-        echo "Plans will open in your browser for review."
-        echo "If settings.json was not auto-configured, see:"
-        echo "  ~/.gemini/settings.json (add BeforeTool hook)"
-    fi
 fi
 if [ "$codex_available" -eq 1 ]; then
     echo ""

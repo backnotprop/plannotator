@@ -72,7 +72,7 @@ Requires the `qwen` CLI installed and signed in. Each question runs `qwen` once 
 
 Provider and model selection is available in **Settings > AI**. In a session where Ask AI is answered by the session itself, Settings > AI shows only that session. These persist via cookies across sessions.
 
-By default, Plannotator prefers the provider that matches the detected agent origin: Claude Code uses Claude, Codex uses Codex, OpenCode uses OpenCode, Pi uses Pi, and Qwen Code uses Qwen Code when those providers are available. GitHub Copilot CLI and Gemini CLI do not have dedicated Ask AI providers yet, so they fall back to your saved provider or the server default.
+By default, Plannotator prefers the provider that matches the detected agent origin: Claude Code uses Claude, Codex uses Codex, OpenCode uses OpenCode, Pi uses Pi, and Qwen Code uses Qwen Code when those providers are available. GitHub Copilot CLI does not have a dedicated Ask AI provider yet, so it falls back to your saved provider or the server default.
 
 You can also override the provider and model per-session using the config bar at the bottom of the AI sidebar. Changing the provider or model starts a new session — old messages stay visible but the conversation resets.
 

@@ -85,7 +85,7 @@ If you use a `{{variable}}` that doesn't exist for that message type, it stays i
 
 ## Runtime-specific overrides
 
-Different agent runtimes (Claude Code, OpenCode, Pi, Gemini CLI, etc.) sometimes need different messages. For example, OpenCode's plan approval is shorter because the agent already knows it has tool access.
+Different agent runtimes (Claude Code, OpenCode, Pi, Codex, etc.) sometimes need different messages. For example, OpenCode's plan approval is shorter because the agent already knows it has tool access.
 
 You can override a message for a specific runtime using the `runtimes` key:
 
@@ -115,7 +115,7 @@ The resolution order is:
 
 Blank or whitespace-only values are treated as "not set" and fall through to the next level. This means you can clear a runtime override by setting it to `""` without affecting others.
 
-Valid runtime keys: `claude-code`, `amp`, `droid`, `opencode`, `copilot-cli`, `pi`, `codex`, `gemini-cli`.
+Valid runtime keys: `claude-code`, `amp`, `droid`, `opencode`, `copilot-cli`, `pi`, `codex`.
 
 The Plannotator Inbox's reminder at session start has its own section, `prompts.inbox`, with the same rule (`prompts.inbox.runtimes.<agent>.reminder` wins over `prompts.inbox.reminder`). The Inbox's **Settings → Prompts** edits it and shows these prompts read-only. See [the Inbox reference](/docs/reference/inbox/#your-own-reminder).
 

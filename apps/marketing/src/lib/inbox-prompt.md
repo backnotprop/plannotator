@@ -27,7 +27,7 @@ Note the absolute path of the binary: `command -v plannotator` (PowerShell: `(Ge
 ## 2. Start the Inbox and open it
 
 1. Run `plannotator inbox --background`. It starts the Inbox without a browser (or finds the running one), prints its URL and exits.
-2. Run `plannotator inbox`. With the Inbox running, it opens the window in the browser, connects the agents it finds on this computer that are not connected yet, and exits. Its stderr names them ("Connected Codex and Gemini CLI to the Inbox"). Keep that line for step 3. If no browser opens (SSH, container, headless), give the person the URL from step 2.1 and tell them to open it on this machine.
+2. Run `plannotator inbox`. With the Inbox running, it opens the window in the browser, connects the agents it finds on this computer that are not connected yet, and exits. Its stderr names them ("Connected Codex and Cursor to the Inbox"). Keep that line for step 3. If no browser opens (SSH, container, headless), give the person the URL from step 2.1 and tell them to open it on this machine.
 
 ## 3. Read the guide and connect yourself
 
@@ -46,7 +46,7 @@ Tell the person when a restart is needed. A connection takes effect when a sessi
 Plannotator can add a short note about the Inbox to each agent's own instructions file, so agents send decisions and finished work there while the person is away. The guide's "A note in each agent's instructions" section lists every file it would write on this computer and whether it adds a marked section or creates the file.
 
 1. Show the person that list (agent and exact path) and ask which agents should get the note.
-2. Only with their yes in this chat, run `plannotator inbox --notes <ids>` with only the agents they agreed to, comma-separated (for example `plannotator inbox --notes codex,gemini`). It prints what it wrote.
+2. Only with their yes in this chat, run `plannotator inbox --notes <ids>` with only the agents they agreed to, comma-separated (for example `plannotator inbox --notes codex,qwen`). It prints what it wrote.
 3. Without a yes, run nothing. The Inbox window asks the person once itself.
 
 ## 4. Send the first message

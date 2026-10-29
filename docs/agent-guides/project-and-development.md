@@ -160,6 +160,19 @@ When adding or modifying server endpoints, both implementations must be updated.
 claude --plugin-dir ./apps/hook
 ```
 
+## Gemini CLI is no longer offered
+
+Plannotator does not offer Gemini CLI. The installers do not install it, the Inbox does not connect it or list it, and no product UI or user doc names it. Do not add it back to a product surface.
+
+The runtime compatibility code stays, so an existing install keeps working. Do not advertise it:
+
+- The plan hook still handles a Gemini `BeforeTool` payload (`apps/hook/server/index.ts`, `GEMINI_CLI` in `detect-origin.ts`, the `exit_plan_mode` tool name in `packages/shared/prompts.ts`). Its origin `gemini-cli` is a `RetiredOrigin` in `packages/core/agents.ts`: it has no `AGENT_CONFIG` entry, so the plan, review and annotate UIs show the generic "Coding Agent" badge.
+- The Inbox keeps the `gemini` id in `INBOX_AGENT_IDS` and its agent spec (never detected, so no run connects it) only so `plannotator uninstall` can remove an MCP entry or a note that an earlier Plannotator recorded. `INBOX_RETIRED_AGENT_IDS` keeps it out of every list a person or an agent reads: Settings → Agents, onboarding, the note question, a saved connect report, `plannotator inbox --help` and `--notes`. A thread whose author host is `gemini` shows the generic agent mark.
+- `plannotator uninstall` still removes what earlier installers wrote under `~/.gemini` (the hook, the policy, the commands), as before. Nothing else removes anything there.
+- The agent terminal does not list webtui's built-in `gemini` agent (`RETIRED_TERMINAL_AGENTS` in both runtimes).
+- `apps/gemini` is gone: the installers check out the release tag they install, so an older installer still finds it in its own tag.
+- The old opt-outs (`--skip-gemini`, `-SkipGemini`, `PLANNOTATOR_SKIP_GEMINI_INSTALL`, `skipInstall.gemini`) are accepted and ignored. See [`environment.md`](environment.md).
+
 ## Requirements
 
 - Bun runtime (>= 1.4.4 to compile binaries; `scripts/require-bun.ts` checks it)

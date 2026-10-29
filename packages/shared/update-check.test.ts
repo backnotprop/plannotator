@@ -516,12 +516,12 @@ describe("the advert and the commands", () => {
     expect(buildUpdateAdvert({ state, current: "0.28.11", action: "script", platform: "darwin" })).toBeNull();
     expect(buildUpdateAdvert({ state, current: "0.29.0", action: "script", platform: "darwin" })).toBeNull();
     expect(buildUpdateAdvert({ state, current: undefined, action: "script", platform: "darwin" })).toBeNull();
-    expect(buildUpdateAdvert({ state, current: "0.28.10", action: "script", platform: "darwin", flags: ["skip-gemini"] })).toEqual({
+    expect(buildUpdateAdvert({ state, current: "0.28.10", action: "script", platform: "darwin", flags: ["skip-codex"] })).toEqual({
       version: "0.28.11",
       current: "0.28.10",
       releaseUrl: "https://github.com/backnotprop/plannotator/releases/tag/v0.28.11",
       action: "script",
-      command: "curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini",
+      command: "curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex",
       publishedAt: "2026-10-10T15:49:28Z",
     });
     expect(buildUpdateAdvert({ state, current: "0.28.10", action: "pi", platform: "darwin" })?.command).toBe("pi update --extensions");

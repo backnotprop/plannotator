@@ -228,7 +228,7 @@ OpenCode 2 native commands) reads the additive `nothingToSend: true` the CLI
 adds to its `--json` / `opencode-annotate-last` record in that case only, as do
 the Amp plugin (`formatAnnotationFeedback`) and the Droid plugin
 (`emitAnnotateDecision`), which also read `annotate --json`. Skill-run hosts
-(the classic Claude Code skill, Codex, Gemini, Copilot, Vibe, Kiro) still hand
+(the classic Claude Code skill, Codex, Copilot, Vibe, Kiro) still hand
 the model the plain-stdout sentence, which is the unchanged stdout contract. The
 feedback archive still records a bare Done as `feedback` with the sentence.
 Multi-message annotate-last merges SSE external (agent / WebMCP) comments into

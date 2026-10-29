@@ -38,7 +38,6 @@ export interface GuideViewerProps<P extends object> {
 const AUTHORED_ENGINE_LABEL: Record<string, string> = {
   'claude-code': 'Claude Code',
   'codex-cli': 'Codex CLI',
-  'gemini-cli': 'Gemini CLI',
   'copilot-cli': 'Copilot CLI',
   'kiro-cli': 'Kiro CLI',
   amp: 'Amp',
