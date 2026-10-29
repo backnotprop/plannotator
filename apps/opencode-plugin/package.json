@@ -47,8 +47,8 @@
     "prepublishOnly": "bun run --cwd ../.. build:viewer-pin && bun run build"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.19.3",
-    "@opencode/plugin": "2.0.32",
+    "@opencode-ai/plugin": "1.19.4",
+    "@opencode/plugin": "2.1.3",
     "@plannotator/ai": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*"

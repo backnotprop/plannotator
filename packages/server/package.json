@@ -48,7 +48,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.1",
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.1",
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",

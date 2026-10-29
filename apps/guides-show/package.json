@@ -20,7 +20,7 @@
     "sync:manifest": "bun run build/sync-manifest.ts"
   },
   "dependencies": {
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.1",
     "@plannotator/core": "workspace:*",
     "@plannotator/guide-viewer": "workspace:*",
     "@plannotator/review-editor": "workspace:*",
@@ -36,6 +36,6 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "@cloudflare/workers-types": "^4.20241218.0",
-    "wrangler": "^4.151.2"
+    "wrangler": "^4.152.0"
   }
 }
