@@ -4216,6 +4216,272 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
   },
 );
 
+// ---------------------------------------------------------------------------
+// OpenCode 2: a running service keeps the plugin it loaded, so the installer
+// asks it for the new one with `opencode2 plugin update <spec>` (measured on
+// OpenCode 2.0.22: nothing restarted or cancelled). Every run uses a FAKE
+// `opencode2` that logs its cwd and argv; nothing reaches the real CLI, a
+// real service, ~/.config/opencode, ~/.cache/opencode or the network. The
+// stub curl says the latest release is v99.9.9.
+// ---------------------------------------------------------------------------
+
+// State lives in files under $FAKE_OC2_DIR: `version` (what the service has
+// loaded), `misses` ("No plugins found" answers before the row shows, as in a
+// folder the service has not opened yet), `pending` / `pending_left` (a
+// version the service loads after that many more `plugin list` calls).
+// FAKE_OC2_STATUS: running | stopped | fail | hang. FAKE_OC2_SPEC: the SOURCE
+// column. FAKE_OC2_LIST=hang. FAKE_OC2_UPDATE: ok | noop (registry down:
+// "No plugin updates available", exit 0) | broken ("Updated", exit 0, old
+// plugin still active, a "- -" row) | fail (exit 1) | hang.
+const FAKE_OPENCODE2 = `#!/bin/bash
+st="$FAKE_OC2_DIR"
+printf '%s|%s\\n' "$PWD" "$*" >> "$st/calls.log"
+get() { cat "$st/$1" 2>/dev/null; }
+case "$1 $2" in
+  "service status")
+    case "\${FAKE_OC2_STATUS:-running}" in
+      running) echo "http://127.0.0.1:4096" ;;
+      stopped) echo "stopped" ;;
+      fail) echo "Error: no service" >&2; exit 2 ;;
+      hang) exec sleep 30 ;;
+    esac ;;
+  "plugin list")
+    [ "$FAKE_OC2_LIST" = "hang" ] && exec sleep 30
+    misses=$(get misses); misses=\${misses:-0}
+    if [ "$misses" -gt 0 ]; then echo $((misses - 1)) > "$st/misses"; echo "No plugins found"; exit 0; fi
+    pending=$(get pending)
+    if [ -n "$pending" ]; then
+      left=$(get pending_left); left=\${left:-0}
+      if [ "$left" -le 0 ]; then echo "$pending" > "$st/version"; rm -f "$st/pending"; else echo $((left - 1)) > "$st/pending_left"; fi
+    fi
+    echo "ID           VERSION   SOURCE"
+    echo "other-plugin 1.2.3     other-plugin@latest"
+    [ -n "$FAKE_OC2_NO_ROW" ] || echo "plannotator  $(get version)   \${FAKE_OC2_SPEC:-@plannotator/opencode@latest}"
+    [ -f "$st/broken" ] && echo "plannotator  -   -"
+    exit 0 ;;
+  "plugin update")
+    case "\${FAKE_OC2_UPDATE:-ok}" in
+      ok) echo "\${FAKE_OC2_NEW:-99.9.9}" > "$st/pending"; echo "\${FAKE_OC2_LOAD_AFTER:-0}" > "$st/pending_left"; echo 'Updated Server plugin "plannotator"' ;;
+      noop) echo "No plugin updates available" ;;
+      broken) : > "$st/broken"; echo 'Updated Server plugin "plannotator"' ;;
+      fail) echo "Error: Plugin is not configured: $3" >&2; exit 1 ;;
+      hang) exec sleep 30 ;;
+    esac ;;
+  *) echo "fake opencode2: unexpected $*" >&2; exit 64 ;;
+esac
+`;
+
+function setupOpenCode2Sandbox(opts: { version?: string; misses?: number; opencode2?: boolean } = {}) {
+  const sandbox = setupInstallSandbox({ gh: "pass-all" });
+  const state = join(sandbox.home, "fake-oc2");
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, "version"), `${opts.version ?? "0.29.0"}\n`);
+  if (opts.misses) writeFileSync(join(state, "misses"), `${opts.misses}\n`);
+  if (opts.opencode2 !== false) writeFileSync(join(sandbox.stub, "opencode2"), FAKE_OPENCODE2, { mode: 0o755 });
+  // The generation the service loaded, where OpenCode 2 caches it.
+  const generation = join(sandbox.home, ".cache", "opencode", "npm", "@plannotator", "opencode@latest", "1793048509721");
+  mkdirSync(generation, { recursive: true });
+  writeFileSync(join(generation, "package.json"), '{"name":"@plannotator/opencode","version":"0.29.0"}\n');
+  const calls = () =>
+    existsSync(join(state, "calls.log"))
+      ? readFileSync(join(state, "calls.log"), "utf-8").split("\n").filter(Boolean).map((line) => {
+          const [cwd, args] = line.split("|");
+          return { cwd, args };
+        })
+      : [];
+  return {
+    sandbox,
+    generation,
+    calls,
+    args: () => calls().map((c) => c.args),
+    loaded: () => readFileSync(join(state, "version"), "utf-8").trim(),
+    env: { FAKE_OC2_DIR: state, PLANNOTATOR_OPENCODE2_WAIT: "3" } as Record<string, string>,
+  };
+}
+
+const OC2_UPDATE_ARGS = ["--non-interactive", "--no-extras", "--skip-skills"];
+const ocLines = (out: string) => out.split("\n").filter((line) => line.startsWith("OpenCode 2:"));
+const MANUAL_OC2 = "To load 99.9.9, run: opencode2 models && opencode2 plugin update @plannotator/opencode@latest";
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh updates a running OpenCode 2 service's plugin (fake opencode2, sandbox HOME)",
+  () => {
+    test("running, unpinned, older: plugin update with the configured spec, read back, one line; the cache stays", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list", "plugin update @plannotator/opencode@latest", "plugin list"]);
+      // `plugin list` / `plugin update` answer for the folder they run in: always $HOME.
+      for (const call of s.calls()) expect(call.cwd).toBe(s.sandbox.home);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service now uses Plannotator 99.9.9. Nothing was restarted."]);
+      expect(s.loaded()).toBe("99.9.9");
+      // With the entry gone the service would answer "No plugin updates available" next time.
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("the bare spec is passed as it is configured", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_SPEC: "@plannotator/opencode" });
+      expect(code).toBe(0);
+      expect(s.args()).toContain("plugin update @plannotator/opencode");
+    });
+
+    test("the service loads the new plugin a moment after the update returns: it waits for it", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_LOAD_AFTER: "2" });
+      expect(code).toBe(0);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service now uses Plannotator 99.9.9. Nothing was restarted."]);
+    });
+
+    test("a folder the service has not opened yet answers 'No plugins found' at first: it asks again", () => {
+      const s = setupOpenCode2Sandbox({ misses: 2 });
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.args().filter((a) => a === "plugin list").length).toBeGreaterThanOrEqual(3);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service now uses Plannotator 99.9.9. Nothing was restarted."]);
+    });
+
+    test("already current: says so, no update", () => {
+      const s = setupOpenCode2Sandbox({ version: "99.9.9" });
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list"]);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the running service already uses Plannotator 99.9.9."]);
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("a spec pinned to an exact version is left alone, and says so", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_SPEC: "@plannotator/opencode@0.29.0" });
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list"]);
+      expect(ocLines(out)).toEqual(["OpenCode 2: the Plannotator plugin is pinned to 0.29.0; left as it is."]);
+      expect(s.loaded()).toBe("0.29.0");
+    });
+
+    test("any other spec (a range, a path): nothing runs, nothing said, the cache is cleared as before", () => {
+      for (const spec of ["@plannotator/opencode@^0.29.0", "file:///work/plannotator"]) {
+        const s = setupOpenCode2Sandbox();
+        const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_SPEC: spec });
+        expect(code).toBe(0);
+        expect(s.args()).toEqual(["service status", "plugin list"]);
+        expect(ocLines(out)).toEqual([]);
+        expect(existsSync(s.generation)).toBe(false);
+      }
+    });
+
+    test("the service is not running: only `service status`, nothing said, the cache cleared as before (the next start loads the newest)", () => {
+      for (const status of ["stopped", "fail"]) {
+        const s = setupOpenCode2Sandbox();
+        const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_STATUS: status });
+        expect(code).toBe(0);
+        expect(s.args()).toEqual(["service status"]);
+        expect(ocLines(out)).toEqual([]);
+        expect(out).not.toContain("Updating the Plannotator plugin in the running OpenCode 2 service");
+        expect(existsSync(s.generation)).toBe(false);
+      }
+    });
+
+    test("the service has no Plannotator plugin: no update, nothing said", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_NO_ROW: "1", PLANNOTATOR_OPENCODE2_WAIT: "1" });
+      expect(code).toBe(0);
+      expect(s.args().every((a) => a === "service status" || a === "plugin list")).toBe(true);
+      expect(ocLines(out)).toEqual([]);
+      expect(existsSync(s.generation)).toBe(false);
+    });
+
+    test("registry down (exit 0, 'No plugin updates available'): read back, the old version named, the command to run; the cache stays", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "noop", PLANNOTATOR_OPENCODE2_WAIT: "1" });
+      expect(code).toBe(0);
+      expect(ocLines(out)).toEqual([`OpenCode 2: the running service still uses Plannotator 0.29.0. ${MANUAL_OC2}`]);
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("a broken new package ('Updated', exit 0, old plugin still active): never reported as updated", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "broken", PLANNOTATOR_OPENCODE2_WAIT: "1" });
+      expect(code).toBe(0);
+      expect(out).not.toContain("now uses Plannotator");
+      expect(ocLines(out)).toEqual([`OpenCode 2: the running service still uses Plannotator 0.29.0. ${MANUAL_OC2}`]);
+    });
+
+    test("plugin update exits non-zero: its reason and the command, no wait", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "fail" });
+      expect(code).toBe(0);
+      expect(s.args()).toEqual(["service status", "plugin list", "plugin update @plannotator/opencode@latest"]);
+      expect(ocLines(out)).toEqual([
+        `OpenCode 2: the running service still uses Plannotator 0.29.0 (opencode2 exited 1: Error: Plugin is not configured: @plannotator/opencode@latest). ${MANUAL_OC2}`,
+      ]);
+    });
+
+    test("plugin update hangs: stopped at the time limit, the install goes on and succeeds", () => {
+      const s = setupOpenCode2Sandbox();
+      const started = Date.now();
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, FAKE_OC2_UPDATE: "hang", PLANNOTATOR_OPENCODE2_TIMEOUT: "1" });
+      expect(code).toBe(0);
+      expect(Date.now() - started).toBeLessThan(25_000);
+      expect(ocLines(out)).toEqual([`OpenCode 2: the running service still uses Plannotator 0.29.0 (timed out after 1s). ${MANUAL_OC2}`]);
+      // The install carried on past the step.
+      expect(out).toContain("OPENCODE USERS");
+    });
+
+    test("service status or plugin list hangs: stopped at the time limit, nothing said", () => {
+      for (const env of [{ FAKE_OC2_STATUS: "hang" }, { FAKE_OC2_LIST: "hang" }]) {
+        const s = setupOpenCode2Sandbox();
+        const started = Date.now();
+        const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, { ...s.env, ...env, PLANNOTATOR_OPENCODE2_TIMEOUT: "1" });
+        expect(code).toBe(0);
+        expect(Date.now() - started).toBeLessThan(25_000);
+        expect(s.args()).not.toContain("plugin update @plannotator/opencode@latest");
+        expect(ocLines(out)).toEqual([]);
+      }
+    });
+
+    test("a pinned install (--version) never touches the service; an auto-update run does", () => {
+      const pinned = setupOpenCode2Sandbox();
+      const r1 = runInstallSh(pinned.sandbox, [...OC2_UPDATE_ARGS, "--version", "v0.27.0"], pinned.env);
+      expect(r1.code).toBe(0);
+      expect(pinned.calls()).toEqual([]);
+      const auto = setupOpenCode2Sandbox();
+      const r2 = runInstallSh(auto.sandbox, [...OC2_UPDATE_ARGS, "--version", "v99.9.9"], { ...auto.env, PLANNOTATOR_UPDATE_VERSION: "v99.9.9" });
+      expect(r2.code).toBe(0);
+      expect(auto.args()).toContain("plugin update @plannotator/opencode@latest");
+    });
+
+    test("the OpenCode opt-out never runs opencode2", () => {
+      const s = setupOpenCode2Sandbox();
+      const { code } = runInstallSh(s.sandbox, [...OC2_UPDATE_ARGS, "--skip-opencode"], s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(existsSync(s.generation)).toBe(true);
+    });
+
+    test("no opencode2 on PATH: the OpenCode 2 cache is cleared as before", () => {
+      const s = setupOpenCode2Sandbox({ opencode2: false });
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(ocLines(out)).toEqual([]);
+      expect(existsSync(s.generation)).toBe(false);
+    });
+
+    test("no temporary directory: nothing runs", () => {
+      const s = setupOpenCode2Sandbox();
+      writeFileSync(
+        join(s.sandbox.stub, "mktemp"),
+        `#!/bin/bash\ncase "$*" in *plannotator-opencode2*) exit 1 ;; esac\nexec /usr/bin/mktemp "$@"\n`,
+        { mode: 0o755 },
+      );
+      const { code, out } = runInstallSh(s.sandbox, OC2_UPDATE_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(ocLines(out)).toEqual([]);
+    });
+  },
+);
+
 describe("Claude Code plugin update: every installer (source scan)", () => {
   test("each installer takes the opt-out flag, env var and config key", () => {
     const sh = readScript("install.sh");

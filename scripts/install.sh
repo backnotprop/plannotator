@@ -1841,6 +1841,163 @@ update_claude_plugin_if_installed() {
 }
 update_claude_plugin_if_installed || true
 
+# OpenCode 2 runs as a background service that keeps the plugin it loaded.
+# When that service is running, ask it for the new plugin now:
+# `opencode2 plugin update <spec>` loads it without stopping a running turn, a
+# pending permission or question, or an open Plannotator review (measured on
+# OpenCode 2.0.22; `opencode2 reload` would cancel the permission and the
+# question). The step only asks the service: it writes nothing itself, and
+# any failure (no service, a hang, an exit code, the old version still
+# loaded) leaves the install as it was and prints the command to run.
+#   - Only when `opencode2` is on PATH, the run is not pinned (the same rule as
+#     the Claude Code plugin above), `opencode2 service status` prints a URL,
+#     and `opencode2 plugin list` has a `plannotator` row whose SOURCE is
+#     `@plannotator/opencode` or `@plannotator/opencode@latest`. A pinned spec
+#     (`@plannotator/opencode@0.28.31`) is left alone.
+#   - Every opencode2 call has a time limit, stdin from /dev/null, and its
+#     exit code checked.
+#   - A broken download or a registry that is down still exits 0 with the old
+#     plugin active, so the result is read back from `plugin list`, never
+#     trusted from the exit code.
+#   - It runs BEFORE the cache clearing below, and the OpenCode 2 cache is
+#     kept while the service has the plugin: with that entry gone the service
+#     answers "No plugin updates available", and the Inbox would read the
+#     loaded generation as deleted.
+# PLANNOTATOR_OPENCODE2_TIMEOUT (seconds for the update) and
+# PLANNOTATOR_OPENCODE2_WAIT (seconds to wait for the plugin to show in
+# `plugin list`, before and after the update) are internal knobs for the tests.
+opencode2_service_has_plugin=0
+oc2_version_at_least() {
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        if (a !~ /^v?[0-9]+\.[0-9]+\.[0-9]+/ || b !~ /^v?[0-9]+\.[0-9]+\.[0-9]+/) exit 1
+        sub(/^v/, "", a); sub(/^v/, "", b); sub(/[-+].*/, "", a); sub(/[-+].*/, "", b)
+        split(a, x, "."); split(b, y, ".")
+        for (i = 1; i <= 3; i++) { p = x[i] + 0; q = y[i] + 0; if (p > q) exit 0; if (p < q) exit 1 }
+        exit 0
+    }'
+}
+# "<version> <source>" of the plannotator row of `opencode2 plugin list`, run
+# from $HOME. `plugin list` answers for the folder it runs in, and a folder
+# the service has not opened yet answers "No plugins found" for about a
+# second, so it asks again, once a second, up to $2 more times. A call that
+# runs out of time stops the asking. $1 is the private temp directory; the
+# time limit per call is $_oc_short (set by the caller).
+opencode2_plannotator_row() {
+    _ocr_tmp="$1"
+    _ocr_left="$2"
+    while :; do
+        _ocr_rc=0
+        (cd "$HOME" && run_with_time_limit "$_oc_short" "$_ocr_tmp/list-timed-out" opencode2 plugin list) >"$_ocr_tmp/list.out" 2>&1 || _ocr_rc=$?
+        [ "$_ocr_rc" -eq 124 ] && return 1
+        _ocr_row=$(tr -d '\r' < "$_ocr_tmp/list.out" 2>/dev/null | awk '$1 == "plannotator" { print $2 " " $3; exit }')
+        if [ "$_ocr_rc" -eq 0 ] && [ -n "$_ocr_row" ]; then
+            printf '%s\n' "$_ocr_row"
+            return 0
+        fi
+        [ "$_ocr_left" -gt 0 ] || return 1
+        _ocr_left=$((_ocr_left - 1))
+        sleep 1
+    done
+}
+update_opencode2_service_plugin() {
+    command -v opencode2 >/dev/null 2>&1 || return 0
+    if [ "$VERSION_EXPLICIT" -eq 1 ] && [ "${PLANNOTATOR_UPDATE_VERSION:-}" != "$latest_tag" ]; then
+        return 0
+    fi
+    _oc_want="${latest_tag#v}"
+    oc2_version_at_least "$_oc_want" "0.0.0" || return 0
+    _oc_secs="${PLANNOTATOR_OPENCODE2_TIMEOUT:-90}"
+    case "$_oc_secs" in ''|*[!0-9]*|0) _oc_secs=90 ;; esac
+    _oc_wait="${PLANNOTATOR_OPENCODE2_WAIT:-15}"
+    case "$_oc_wait" in ''|*[!0-9]*) _oc_wait=15 ;; esac
+    # `service status` and `plugin list` answer at once; 15 s is a hang.
+    _oc_short=15
+    if [ "$_oc_secs" -lt "$_oc_short" ]; then
+        _oc_short="$_oc_secs"
+    fi
+    _oc_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-opencode2.XXXXXX" 2>/dev/null) || _oc_tmp=""
+    if [ -z "$_oc_tmp" ] || [ ! -d "$_oc_tmp" ]; then
+        return 0
+    fi
+    _oc_rc=0
+    (cd "$HOME" && run_with_time_limit "$_oc_short" "$_oc_tmp/status-timed-out" opencode2 service status) >"$_oc_tmp/status.out" 2>&1 || _oc_rc=$?
+    if [ "$_oc_rc" -ne 0 ] || ! grep -Eq '^[[:space:]]*https?://' "$_oc_tmp/status.out" 2>/dev/null; then
+        # Not running (or no answer): the next start loads the newest plugin.
+        rm -rf "$_oc_tmp" 2>/dev/null || true
+        return 0
+    fi
+    _oc_row=$(opencode2_plannotator_row "$_oc_tmp" "$_oc_wait") || _oc_row=""
+    if [ -z "$_oc_row" ]; then
+        rm -rf "$_oc_tmp" 2>/dev/null || true
+        return 0
+    fi
+    _oc_have="${_oc_row%% *}"
+    _oc_spec="${_oc_row#* }"
+    case "$_oc_spec" in
+        @plannotator/opencode|@plannotator/opencode@latest) ;;
+        @plannotator/opencode@[0-9]*.[0-9]*.[0-9]*|@plannotator/opencode@v[0-9]*.[0-9]*.[0-9]*)
+            opencode2_service_has_plugin=1
+            rm -rf "$_oc_tmp" 2>/dev/null || true
+            echo "OpenCode 2: the Plannotator plugin is pinned to ${_oc_spec#@plannotator/opencode@}; left as it is."
+            return 0
+            ;;
+        *)
+            rm -rf "$_oc_tmp" 2>/dev/null || true
+            return 0
+            ;;
+    esac
+    opencode2_service_has_plugin=1
+    if oc2_version_at_least "$_oc_have" "$_oc_want"; then
+        rm -rf "$_oc_tmp" 2>/dev/null || true
+        echo "OpenCode 2: the running service already uses Plannotator ${_oc_have}."
+        return 0
+    fi
+    echo "Updating the Plannotator plugin in the running OpenCode 2 service..."
+    _oc_rc=0
+    (cd "$HOME" && run_with_time_limit "$_oc_secs" "$_oc_tmp/update-timed-out" opencode2 plugin update "$_oc_spec") >"$_oc_tmp/update.out" 2>&1 || _oc_rc=$?
+    _oc_failed=""
+    if [ "$_oc_rc" -eq 124 ]; then
+        _oc_failed="timed out after ${_oc_secs}s"
+    elif [ "$_oc_rc" -ne 0 ]; then
+        _oc_last=$(tr -cd '[:print:]\n' < "$_oc_tmp/update.out" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c 1-200)
+        _oc_failed="opencode2 exited ${_oc_rc}${_oc_last:+: ${_oc_last}}"
+    fi
+    _oc_now="$_oc_have"
+    if [ -z "$_oc_failed" ]; then
+        # The service loads the new plugin a moment after the update returns.
+        _oc_left="$_oc_wait"
+        while :; do
+            _oc_row=$(opencode2_plannotator_row "$_oc_tmp" 0) || _oc_row=""
+            if [ -n "$_oc_row" ]; then
+                _oc_now="${_oc_row%% *}"
+            fi
+            if oc2_version_at_least "$_oc_now" "$_oc_want"; then
+                break
+            fi
+            [ "$_oc_left" -gt 0 ] || break
+            _oc_left=$((_oc_left - 1))
+            sleep 1
+        done
+    fi
+    rm -rf "$_oc_tmp" 2>/dev/null || true
+    if [ -z "$_oc_failed" ] && oc2_version_at_least "$_oc_now" "$_oc_want"; then
+        echo "OpenCode 2: the running service now uses Plannotator ${_oc_now}. Nothing was restarted."
+        return 0
+    fi
+    # `models` first waits for the plugin in a folder the service has not
+    # opened yet, where `plugin update` alone can fail (the Inbox's command).
+    # A plugin that failed to load is listed as "-".
+    if oc2_version_at_least "$_oc_now" "0.0.0"; then
+        _oc_state="still uses Plannotator ${_oc_now}"
+    else
+        _oc_state="has not loaded Plannotator ${_oc_want}"
+    fi
+    echo "OpenCode 2: the running service ${_oc_state}${_oc_failed:+ (${_oc_failed})}. To load ${_oc_want}, run: opencode2 models && opencode2 plugin update ${_oc_spec}"
+}
+if [ "$skip_opencode" -eq 0 ]; then
+    update_opencode2_service_plugin || true
+fi
+
 # Clear any cached OpenCode plugin to force fresh download on next run.
 # Both OpenCode generations root their cache at ${XDG_CACHE_HOME:-~/.cache}/opencode:
 #   OpenCode 1: node_modules/@plannotator and packages/@plannotator
@@ -1853,10 +2010,13 @@ update_claude_plugin_if_installed || true
 if [ "$skip_opencode" -eq 0 ]; then
     OPENCODE_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/opencode"
     rm -rf "$OPENCODE_CACHE_DIR/node_modules/@plannotator" "$OPENCODE_CACHE_DIR/packages/@plannotator" 2>/dev/null || true
-    for _oc_entry in "$OPENCODE_CACHE_DIR"/npm/@plannotator/opencode@*; do
-        [ -e "$_oc_entry" ] || [ -L "$_oc_entry" ] || continue
-        rm -rf "$_oc_entry" 2>/dev/null || true
-    done
+    # A running OpenCode 2 service that has the plugin was asked above and keeps its cache.
+    if [ "$opencode2_service_has_plugin" -eq 0 ]; then
+        for _oc_entry in "$OPENCODE_CACHE_DIR"/npm/@plannotator/opencode@*; do
+            [ -e "$_oc_entry" ] || [ -L "$_oc_entry" ] || continue
+            rm -rf "$_oc_entry" 2>/dev/null || true
+        done
+    fi
     # The scope directory goes only when nothing else is left in it.
     rmdir "$OPENCODE_CACHE_DIR/npm/@plannotator" 2>/dev/null || true
 fi

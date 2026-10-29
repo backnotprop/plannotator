@@ -305,6 +305,22 @@ a decision path needs the same preload. Proof:
 `apps/pi-extension/review-survives-update.test.ts` (annotate and code review
 over a copy of the extension whose `package.json` changes mid-review).
 
+**Pi reloads itself after an update (`apps/pi-extension/auto-reload.ts`).**
+When the version on disk differs from the loaded one, Pi 0.84.2+ reloads
+through the extension's own `/plannotator-reload auto` command once the same
+version has been on disk for 10 s and nothing can be lost: no run, queued
+message or compaction, no submitted prompt that has not started its run, no
+extension dialog, no open review, plan review or Ask question (the
+`plannotatorBusy` callback in `index.ts`), nothing typed for 15 s and an
+empty editor. The command checks it all again before `ctx.reload()`. One try
+per version; the new instance shows `Plannotator updated to X. Pi reloaded
+while idle.` (a `globalThis` marker carries the versions across the reload).
+Turned off (`PLANNOTATOR_AUTO_RELOAD`, config `autoReload`), on an older Pi
+and in Oh My Pi it is the `/reload` (`/restart`) note, once per version, and
+never a pre-filled editor. A new kind of open Plannotator work must be added
+to `plannotatorBusy`. See `PLANNOTATOR_AUTO_RELOAD` in
+[environment.md](environment.md); tests: `auto-reload.test.ts`.
+
 **The checklist widget scrolls (#1412).** Pi draws at most 10 lines of a
 widget (`InteractiveMode.MAX_WIDGET_LINES`), so `updateWidget` sends
 `checklistWindow(checklistItems)` (`apps/pi-extension/checklist-window.ts`):
