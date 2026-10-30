@@ -202,7 +202,7 @@ export function createLaunchPermissions(options: {
    * person recorded Claude Code's bypass consent (`bypass_available`, so it started with
    * --allow-dangerously-skip-permissions). Claude ignores a switch to bypass without it; an older launch has no flag.
    */
-  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: root.launch!.bypass_available === true && root.launch!.full_permissions !== true });
+  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: root.launch!.bypass_available === true && root.launch!.full_permissions !== true, full: root.launch!.full_permissions === true });
 
   /** What the Inbox found at a file tool's path: a Write's file exists, does not, or is not known; where a link points. */
   type Target = Pick<InboxPermissionOptions, "overwrite" | "linksTo">;

@@ -389,6 +389,10 @@ describe("the answer and the decision", () => {
     // person allowed; never a switch, never a Deny.
     expect(inboxPermissionAnswer(answer(["Allow and switch to Full permissions"]), e).choice).toBe("once");
     expect(inboxPermissionAnswer(answer(["Allow and switch to Full permissions"]), e, { fullPermissions: true }).choice).toBe("full");
+    // A session already in Full permissions: no switch offered; a stale Auto pick there only allows.
+    expect(inboxPermissionChoices(e, { full: true, fullPermissions: true })).toEqual(inboxPermissionChoices(e).filter((l) => l !== "Allow and switch to Auto mode"));
+    expect(inboxPermissionChoices(e, { full: true }).at(-1)).toBe("Deny");
+    expect(inboxPermissionAnswer(answer(["Allow and switch to Auto mode"]), e, { full: true }).choice).toBe("once");
   });
 
   test("a mode switch allows this tool input and sets the session's mode, for this session only", () => {

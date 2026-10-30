@@ -5,9 +5,9 @@
  * The Inbox may itself have been started by an agent session, so its own env
  * carries that session's markers. A launched agent instead gets the person's
  * LOGIN shell env: `$SHELL -ilc`, printed with `env -0` between markers, 5 s
- * at most, read once per launch (when it is made; its first start reuses
- * it) and for Settings → Agents while the switch was never set, never for a
- * status read, a stop or a respawn. The shell starts from the Inbox's env through
+ * at most: once when the Inbox starts, ahead when the composer picks "Start
+ * Claude Code", for Settings → Agents while the switch was never set, and by
+ * each start for its own env; never for a status read, a stop or a respawn. The shell starts from the Inbox's env through
  * `launchSpawnEnv`, so what launchd and the session give (SSH_AUTH_SOCK,
  * `launchctl setenv` proxies, LC_*) stays, and the Inbox's markers do not.
  *

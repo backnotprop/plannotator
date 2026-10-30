@@ -28,10 +28,11 @@
  * person's reply to a launched session that is not live respawns it
  * (`claude respawn`), once per reply; one that does not take reads failed.
  *
- * The person's login shell is read once when the Inbox starts, for Settings →
- * Agents and the composer while the switch was never set (what it follows; a
- * Send waits on it only when no read is under a minute old), and by each
- * start for its own env, after the Send answered. Every other `claude`
+ * The person's login shell is read once when the Inbox starts, ahead each
+ * time the composer picks "Start Claude Code" and for Settings → Agents when
+ * stale (while the switch was never set: what it follows), and by each start
+ * for its own env, after the Send answered. A Send decides from the last
+ * finished read and waits only for one under way, or when none ever finished. Every other `claude`
  * call runs with the Inbox's own env through the launch filter
  * (`launchPlainEnv`), and none of them kills a process group.
  *
@@ -169,7 +170,7 @@ export function createInboxLaunch(options: {
    * are kept; the env itself is never held for a launch.
    */
   let shell: { skips: boolean; configDir: string | undefined; at: number } | null = null;
-  /** A shell read this recent decides a launch's start without reading again. */
+  /** Settings → Agents reads the shell again only when its last read is older than this. */
   const SHELL_READ_FRESH_MS = 60_000;
   const shellFresh = () => shell !== null && now() - shell.at < SHELL_READ_FRESH_MS;
   let reading: Promise<LaunchEnv> | null = null;
@@ -543,7 +544,8 @@ export function createInboxLaunch(options: {
   /**
    * Settings → Agents' switch: the person's choice once set; never set, what their own setup says
    * (`follows`: on because their Claude settings or their shell run Claude in bypass mode). `own_mode`: a
-   * launch starts in their own default mode; `needs_consent`: they want full permissions, and Claude Code's
+   * launch starts in their own default mode; `bypass_off`: they want full permissions, and Claude Code's
+   * settings turn bypass mode off (`disableBypassPermissionsMode`); `needs_consent`: they want them, and Claude Code's
    * bypass notice is not accepted on this computer, so a launch starts without them. `settingsState` uses
    * the last shell read; the window's GET reads the shell again when that read is older than a minute.
    */
@@ -557,7 +559,8 @@ export function createInboxLaunch(options: {
       full_permissions: setting ?? start.wantsFull,
       follows,
       own_mode: start.ownMode,
-      needs_consent: start.wantsFull && !start.bypass,
+      bypass_off: start.wantsFull && setup.disabled,
+      needs_consent: start.wantsFull && !setup.disabled && !setup.consent,
     };
   };
   const route = async (req: Request, path: string, via: "local" | "tailnet" | string): Promise<Response | null> => {
@@ -711,10 +714,10 @@ export function createInboxLaunch(options: {
       if (!ok.ok) throw new InboxError("agent_unavailable", `${AGENT_NAME} can't be started here: ${ok.reason}. Nothing was sent.`);
       const id = inboxId("lch");
       // How it starts, fixed for this launch (`launchStartOf`): the switch, the person's own Claude setup (with
-      // this folder's settings) and the last shell read. Send waits on the shell only to finish a read already
-      // under way (the composer's, read ahead), when the switch was never set and no read is under a minute
-      // old, or when no read ever finished (`warm` reads one at Inbox start).
-      if (reading || shell === null || (config().fullPermissions === null && !shellFresh())) await readLogin();
+      // this folder's settings) and the last finished shell read, however old (the start reads the shell again
+      // for its own env). Send waits on the shell only to finish a read already under way (the composer's read
+      // ahead, or another launch's start), or when no read ever finished (`warm` reads one at Inbox start).
+      if (reading || shell === null) await readLogin();
       const start = startNow(claudeSetup(project.root));
       const launch: InboxLaunchRecord = {
         id,

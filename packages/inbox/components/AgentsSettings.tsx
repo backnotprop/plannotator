@@ -543,7 +543,7 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.own_mode]);
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode]);
   // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
   useEffect(() => {
     if (!launch?.enabled) return;
@@ -571,13 +571,18 @@ export function AgentsSettings({
   const launchRow = launchState?.enabled ? (
     <Row
       k="Sessions you start"
-      v={launchState.full_permissions && !launchState.needs_consent ? 'Full permissions' : launchState.own_mode ? 'Your default mode' : 'Auto mode'}
+      v={launchState.full_permissions && !launchState.needs_consent && !launchState.bypass_off ? 'Full permissions' : launchState.own_mode ? 'Your default mode' : 'Auto mode'}
       sub={
         <>
-          Start new sessions with full permissions: Claude Code you start from New message never stops to ask (bypass mode). Otherwise it starts in your default mode, or auto mode. Applies to the next session you start.
+          Start new sessions with full permissions: Claude Code you start from New message runs without asking (bypass mode); only a safety check, such as deleting files, still comes to you here. Otherwise it starts in your default mode, or auto mode. Applies to the next session you start.
           {launchState.follows && (
             <span className="block" data-launch-follows={launchState.follows}>
               {launchState.follows === 'shell' ? "Follows your shell's setting until you change it." : 'Follows your Claude Code settings until you change it.'}
+            </span>
+          )}
+          {launchState.full_permissions && launchState.bypass_off && (
+            <span className="block" data-launch-bypass-off="">
+              Bypass mode is turned off in your Claude Code settings, so sessions start without it.
             </span>
           )}
           {launchState.full_permissions && launchState.needs_consent && (

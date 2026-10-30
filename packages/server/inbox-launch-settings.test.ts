@@ -111,13 +111,20 @@ describe("GET /api/inbox/launch/settings", () => {
     }
   });
 
-  test("consent and a bypass disable count from Claude's own sources only: never consent from settings.local.json; a user-level disable turns bypass off", async () => {
+  test("consent and a bypass disable count from Claude's own sources only, and Settings names which stops full permissions", async () => {
+    // Consent only in ~/.claude/settings.local.json (Claude never reads it for a session elsewhere): not accepted.
     const localOnly = setup({ fullPermissions: true, claudeLocal: { skipDangerousModePermissionPrompt: true } });
-    expect((await localOnly.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true });
+    expect((await localOnly.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true, bypass_off: false });
+    // Turned off in the user's settings: said as such, never as a notice to accept (consent or not).
     const disabled = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true, permissions: { disableBypassPermissionsMode: "disable" } } });
-    expect((await disabled.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true });
-    const disabledLocal = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true }, claudeLocal: { permissions: { disableBypassPermissionsMode: "disable" } } });
-    expect((await disabledLocal.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true });
+    expect((await disabled.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: false, bypass_off: true });
+    const disabledNoConsent = setup({ fullPermissions: true, claude: { permissions: { disableBypassPermissionsMode: "disable" } } });
+    expect((await disabledNoConsent.get()).body.launch).toMatchObject({ needs_consent: false, bypass_off: true });
+    // What Claude ignores does not count: ~/.claude/settings.local.json, and any value but "disable".
+    const ignoredLocal = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true }, claudeLocal: { permissions: { disableBypassPermissionsMode: "disable" } } });
+    expect((await ignoredLocal.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: false, bypass_off: false });
+    const ignoredTrue = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true, permissions: { disableBypassPermissionsMode: true } } });
+    expect((await ignoredTrue.get()).body.launch).toMatchObject({ needs_consent: false, bypass_off: false });
   });
 
   test("a launch folder's own settings: its disable turns bypass off; its default mode counts, but never its bypass", () => {

@@ -326,6 +326,8 @@ export interface InboxLaunchSettings {
   own_mode?: boolean;
   /** Full permissions wanted, but Claude Code's bypass notice is not accepted on this computer: a launch starts without them. */
   needs_consent?: boolean;
+  /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
+  bypass_off?: boolean;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */

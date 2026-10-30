@@ -621,8 +621,9 @@ export function claudePluginStateFromScopes(
  * - consent: `skipDangerousModePermissionPrompt` in managed or user `settings.json`, or
  *   `bypassPermissionsModeAccepted` in the global config (`~/.claude.json`, `$CLAUDE_CONFIG_DIR/.claude.json`).
  *   Never a project's or a `--settings` file's (Claude says those do not count), and the Inbox never writes it.
- * - disabled: `permissions.disableBypassPermissionsMode: "disable"` in any settings Claude merges: managed,
- *   user `settings.json` and `settings.local.json`, and the launch folder's `.claude/settings{,.local}.json`.
+ * - disabled: `permissions.disableBypassPermissionsMode: "disable"` (that value only) in any settings Claude
+ *   merges: managed, the user's `settings.json`, and the launch folder's `.claude/settings{,.local}.json`
+ *   (Claude never reads `~/.claude/settings.local.json` for a session in another folder).
  * - defaultMode: `permissions.defaultMode`, the strongest scope that sets one (managed, the folder's local and
  *   shared settings, then the user's); a folder's `bypassPermissions` is skipped, as Claude ignores it.
  * `folder` is the launch's folder; Settings → Agents passes none (the person's own files only).
@@ -633,13 +634,9 @@ export function claudeBypassSetup(e: AgentEnvironment, folder: string | null = n
   const managedPath = claudeManagedSettingsPath(e);
   const managed = managedPath ? readClaudeSettings(managedPath) : null;
   const user = readClaudeSettings(join(claudeConfigDir(e), "settings.json"));
-  const userLocal = readClaudeSettings(join(claudeConfigDir(e), "settings.local.json"));
   const projectLocal = folder ? readClaudeSettings(join(folder, ".claude", "settings.local.json")) : null;
   const project = folder ? readClaudeSettings(join(folder, ".claude", "settings.json")) : null;
-  const disabled = [managed, user, userLocal, projectLocal, project].some((settings) => {
-    const value = permissions(settings).disableBypassPermissionsMode;
-    return value === "disable" || value === true;
-  });
+  const disabled = [managed, user, projectLocal, project].some((settings) => permissions(settings).disableBypassPermissionsMode === "disable");
   const configDir = envDir(e, "CLAUDE_CONFIG_DIR");
   const global = readAgentFile(configDir ? join(configDir, ".claude.json") : join(e.homeDir, ".claude.json"));
   let accepted = false;

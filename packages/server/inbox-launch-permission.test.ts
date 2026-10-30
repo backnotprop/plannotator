@@ -188,10 +188,10 @@ describe("the permission route", () => {
     full.answer(again.body.message_id!, { selected: ["Allow and switch to Full permissions"] });
     expect((await full.call({ key: KEY, request_id: "req-00000020", event: EVENT, message_id: again.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
 
-    // A launch already in Full permissions (its safety checks still ask): nothing to switch to.
+    // A launch already in Full permissions (its safety checks still ask): no mode switch, neither Full nor Auto.
     const already = setup({ bypassAvailable: true, full: true });
     const safety = await already.call({ key: KEY, request_id: "req-00000022", event: EVENT });
-    expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode"]);
+    expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny"]);
   });
 
   test("an answered prompt is never reopened: a stale pick (Deny at the current revision) is refused, and the record stays", async () => {

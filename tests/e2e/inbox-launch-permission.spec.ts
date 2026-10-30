@@ -40,7 +40,8 @@
  *     launch (pinned to default mode) a confirm the first time, then setMode
  *     bypassPermissions (the session switches); no confirm the second time.
  * 11b. Without that consent: Full permissions is never offered, the switch on
- *     starts in auto mode with no allow flag, and Settings says why.
+ *     starts in auto mode with no allow flag, and Settings says why (the notice
+ *     to accept, or bypass turned off in Claude Code's settings).
  * 12. A second Enter right after an answer never allows the prompt that just
  *     arrived: the card ignores activation until it has been on screen.
  * 13. A five-rule session choice shows every rule (desktop and phone, nothing
@@ -687,9 +688,11 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     expect(started.settings?.permissions).toEqual({ allow: ['mcp__plannotator__plannotator_inbox'] });
     expect(await waitFor('the build run', () => fake.permissions()[asked])).toMatchObject({ outcome: 'ran', asked: false });
     // Bypass mode's safety check still asks (the plugin's hook keeps Claude from waiving it): it comes to the card,
-    // never to a Terminal dialog no one sees. Already full: no Full to switch to.
+    // never to a Terminal dialog no one sees. Already full: no mode switch at all.
     await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist', { timeout: 30_000 });
-    await expect(card(page).locator('[data-perm-mode="full"]')).toHaveCount(0);
+    await expect(card(page).locator('.pc-modes, [data-perm-mode]')).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await shot(page, 'full-launch-safety-check');
     await answer(page, { choice: 'Allow once' });
     expect(await waitFor('the safety check', () => fake.permissions()[asked + 1])).toMatchObject({ outcome: 'ran', mode: 'bypassPermissions' });
   } finally {
@@ -763,6 +766,13 @@ test('without the person\'s bypass consent: Full permissions is never offered, t
     await page.reload();
     await expect(row.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     await expect(row.locator('[data-launch-needs-consent]')).toHaveCount(0);
+    // Bypass turned off in the person's Claude settings: said plainly, never as a notice to accept.
+    claudeSettings({ ...CONSENT, permissions: { disableBypassPermissionsMode: 'disable' } });
+    await page.reload();
+    await expect(row.locator('[data-launch-bypass-off]')).toHaveText('Bypass mode is turned off in your Claude Code settings, so sessions start without it.');
+    await expect(row.locator('[data-launch-needs-consent]')).toHaveCount(0);
+    await row.scrollIntoViewIfNeeded();
+    await shot(page, 'settings-bypass-off');
   } finally {
     writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
   }

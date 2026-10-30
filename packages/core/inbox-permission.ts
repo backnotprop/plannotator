@@ -394,6 +394,8 @@ export interface InboxPermissionOptions {
   shownPath?: (path: string) => string;
   /** The session can switch to Full permissions (it started with them allowed: `bypass_available`). */
   fullPermissions?: boolean;
+  /** The session already runs in Full permissions (a launch made full): no mode switch is offered. */
+  full?: boolean;
   /** A Write's file exists (true), does not (false), or is not known (undefined): "overwrite", "create" or "write". */
   overwrite?: boolean;
   /** The file the tool writes is a symbolic link: where it points, as the person reads it ("Links to …" under the path; one line, so it reads back the same). */
@@ -465,8 +467,7 @@ export function inboxPermissionChoices(event: InboxPermissionEvent, options: Inb
     INBOX_PERMISSION_ALLOW_ONCE,
     ...(session ? [session.label] : []),
     INBOX_PERMISSION_DENY,
-    INBOX_PERMISSION_AUTO,
-    ...(options.fullPermissions ? [INBOX_PERMISSION_FULL] : []),
+    ...(options.full ? [] : [INBOX_PERMISSION_AUTO, ...(options.fullPermissions ? [INBOX_PERMISSION_FULL] : [])]),
   ];
 }
 
@@ -562,7 +563,7 @@ export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: Inbo
   const reason = [answer?.other, answer?.note].map((t) => t?.trim()).filter(Boolean).join(" ").slice(0, INBOX_PERMISSION_REASON_MAX) || null;
   const picked = answer && !answer.skipped && answer.selected.length === 1 ? answer.selected[0] : undefined;
   if (picked === INBOX_PERMISSION_ALLOW_ONCE) return { choice: "once", reason: null };
-  if (picked === INBOX_PERMISSION_AUTO) return { choice: "auto", reason: null };
+  if (picked === INBOX_PERMISSION_AUTO) return { choice: options.full ? "once" : "auto", reason: null };
   if (picked === INBOX_PERMISSION_FULL) return { choice: options.fullPermissions ? "full" : "once", reason: null };
   const session = inboxPermissionSessionChoice(event, options.shownPath);
   if (session && picked === session.label) return { choice: "session", reason: null };
