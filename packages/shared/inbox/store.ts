@@ -551,6 +551,8 @@ export class InboxStore {
   /** Each project's display name (`inboxProjectLabels`), worked out again when the projects change. */
   private projectLabels: Map<string, string> | null = null;
   private readonly messages = new Map<string, InboxMessage>();
+  /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
+  private readonly launchedRootIds = new Set<string>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   /**
@@ -734,6 +736,7 @@ export class InboxStore {
           this.indexName(line.record.project_id, line.record.thread_name, line.record.id);
         }
         this.messages.set(line.record.id, line.record);
+        if (line.record.launch !== undefined && line.record.thread_id === line.record.id) this.launchedRootIds.add(line.record.id);
         if (!this.messageSeq.has(line.record.id)) {
           this.messageSeq.set(line.record.id, line.seq);
           const members = this.threadMembers.get(line.record.thread_id);
@@ -4384,6 +4387,7 @@ export class InboxStore {
     this.projectsByRoot.clear();
     this.projectLabels = null;
     this.messages.clear();
+    this.launchedRootIds.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
     this.readdressed.clear();
@@ -5045,7 +5049,10 @@ export class InboxStore {
 
   /** The launched threads' roots (any project, archived included). */
   launchedRoots(): InboxMessage[] {
-    return [...this.messages.values()].filter((message) => message.launch !== undefined && message.thread_id === message.id);
+    return [...this.launchedRootIds].flatMap((id) => {
+      const message = this.messages.get(id);
+      return message ? [message] : [];
+    });
   }
 
   /**

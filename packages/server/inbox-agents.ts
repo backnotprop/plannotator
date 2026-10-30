@@ -98,9 +98,11 @@ export interface AgentEnvironment {
    * Run argv with no stdin, the environment's env, killed (with its process
    * group) after `timeoutMs`, when `signal` aborts, or when this process exits.
    * `cwd`: the folder it runs in (default: this process's). `env`: variables
-   * set on top of the environment's for this run.
+   * set on top of the environment's for this run. `killGroup: false`: on the
+   * limit or exit kill only the CLI itself, never its group (launch: a call
+   * may be the one that starts the person's shared Claude supervisor).
    */
-  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>> }): Promise<AgentRunResult>;
+  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>>; killGroup?: boolean }): Promise<AgentRunResult>;
 }
 
 /** The real boundary: this process's home, environment and PATH. */
@@ -120,7 +122,7 @@ export function createAgentEnvironmentFor(input: {
     homeDir: input.homeDir,
     env,
     which: (command) => Bun.which(command, { PATH: env.PATH ?? "" }),
-    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd),
+    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd, options.killGroup ?? true),
   };
 }
 
@@ -148,7 +150,8 @@ export function liveAgentRunCount(): number {
  * stdout open cannot hold it. On the time limit, when `signal` aborts, or when
  * this process exits first, the whole group is killed (SIGKILL), so a CLI that
  * hangs never outlives its run. A CLI that exited by itself is left alone (its
- * group may hold a daemon it started on purpose).
+ * group may hold a daemon it started on purpose). `killGroup: false` kills
+ * only the CLI itself, so a daemon it is starting survives even a time-out.
  */
 function runWithTimeout(
   argv: readonly string[],
@@ -156,6 +159,7 @@ function runWithTimeout(
   timeoutMs: number,
   signal?: AbortSignal,
   cwd?: string,
+  killGroup = true,
 ): Promise<AgentRunResult> {
   return new Promise((done) => {
     if (signal?.aborted) {
@@ -187,7 +191,7 @@ function runWithTimeout(
       // Once it exited, its pid (and group id) may name another process.
       if (exited) return;
       try {
-        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+        if (killGroup && process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
         else child.kill("SIGKILL");
       } catch {
         try {

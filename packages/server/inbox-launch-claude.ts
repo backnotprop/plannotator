@@ -15,8 +15,11 @@
  * - `stop` leaves `done` and drops the session from the list without `--all`.
  *
  * Every run goes through `AgentEnvironment` (packages/server/inbox-agents.ts):
- * its own process group, no stdin, a time limit. Tests put a fake `claude`
- * first on PATH (tests/helpers/fake-claude/).
+ * its own process group, no stdin, a time limit. On the limit only the CLI
+ * itself is killed, never its group: any of these calls may be the one that
+ * starts the person's shared supervisor (`claude daemon run`), and killing
+ * that would end every background session they have. Tests put a fake
+ * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
 import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
@@ -108,12 +111,17 @@ export function claudeTrustCommand(folder: string): string {
   return `cd ${shellQuote(folder)} && claude`;
 }
 
+/**
+ * `environment`: the plain env every call but the start runs with (status,
+ * stop, respawn, rm). The start brings its own: the person's login shell,
+ * read for that launch only.
+ */
 export function createClaudeHost(options: { environment: () => Promise<AgentEnvironment> }) {
-  const run = async (argv: string[], cwd: string | undefined, timeoutMs = COMMAND_TIMEOUT_MS) => {
-    const e = await options.environment();
+  const run = async (argv: string[], cwd: string | undefined, timeoutMs = COMMAND_TIMEOUT_MS, environment?: AgentEnvironment) => {
+    const e = environment ?? (await options.environment());
     const claude = e.which("claude");
     if (!claude) return { result: { exitCode: 127, timedOut: false, stdout: "", stderr: "claude is not on PATH" } as AgentRunResult, missing: true };
-    return { result: await e.run([claude, ...argv], { timeoutMs, ...(cwd ? { cwd } : {}) }), missing: false };
+    return { result: await e.run([claude, ...argv], { timeoutMs, killGroup: false, ...(cwd ? { cwd } : {}) }), missing: false };
   };
 
   /** Every session Claude's supervisor knows (`--all`), or null when it could not be read. */
@@ -129,13 +137,13 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
      * session id. `fullPermissions` adds bypass mode as the only flag; nothing
      * else goes on argv. A failure names the folder as `shownFolder` (`~/…`).
      */
-    async start(input: { folder: string; shownFolder: string; name: string; settingsPath: string; fullPermissions: boolean }): Promise<
+    async start(input: { folder: string; shownFolder: string; name: string; settingsPath: string; fullPermissions: boolean; environment: AgentEnvironment }): Promise<
       ({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string }
     > {
       // A name that starts with "-" would read as a flag.
       const name = input.name.replace(/^-+/, "").trim() || "Inbox";
       const argv = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.fullPermissions ? ["--permission-mode", "bypassPermissions"] : [])];
-      const { result, missing } = await run(argv, input.folder, START_TIMEOUT_MS);
+      const { result, missing } = await run(argv, input.folder, START_TIMEOUT_MS, input.environment);
       const output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
       const started = result.exitCode === 0 ? parseBackgrounded(result.stdout) : null;
       if (!started) return { ok: false, missing, ...startFailureOf(result, input.shownFolder), output };
@@ -145,7 +153,16 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
         if (found) return { ok: true, session: found.sessionId, short: started.short, output };
         await Bun.sleep(400);
       }
-      return { ok: false, missing: false, code: "failed", text: `Claude Code started ${started.short} but did not list it.`, output };
+      // Never leave it running unseen (Try again would start a second one): stop and remove it first.
+      const stop = (await run(["stop", started.short], undefined)).result;
+      const rm = (await run(["rm", started.short], undefined)).result;
+      return {
+        ok: false,
+        missing: false,
+        code: "failed",
+        text: `Claude Code started ${started.short} but did not list it.`,
+        output: `${output}\n[not listed: stop ${started.short} exit ${stop.exitCode}, rm exit ${rm.exitCode}]`,
+      };
     },
     stop: async (short: string) => (await run(["stop", short], undefined)).result,
     respawn: async (short: string) => (await run(["respawn", short], undefined)).result,

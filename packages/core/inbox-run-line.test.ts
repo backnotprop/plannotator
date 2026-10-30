@@ -15,6 +15,7 @@ const evidence = (over: Partial<InboxRunEvidence> = {}): InboxRunEvidence => ({
   seenLive: false,
   host: null,
   waitingSince: null,
+  respawnFailed: null,
   stoppedByPersonAt: null,
   attachCommand: "cd '/work/app' && claude attach 4f1c9a2e",
   ...over,
@@ -37,6 +38,22 @@ describe("inboxRunOf", () => {
     expect(inboxRunOf(evidence({ live: idle, turnWaiting: true }))?.state).toBe("starting");
     expect(inboxRunOf(evidence({ live: idle, turnWaiting: true, again: true, seenLive: true }))).toMatchObject({ state: "starting", again: true });
     expect(inboxRunOf(evidence({ live: idle, turnWaiting: true, now: T0 + INBOX_RUN_START_GRACE_MS + 1 }))).toBeNull();
+  });
+
+  test("answered in Terminal: a live idle session is blocked on nothing, even while the host's last word was waiting", () => {
+    const waiting = { status: "waiting", state: "blocked", waitingFor: "permission prompt" };
+    expect(inboxRunOf(evidence({ live: { busy: false, busySince: null }, seenLive: true, host: waiting, waitingSince: T0 }))).toBeNull();
+    expect(inboxRunOf(evidence({ live: null, seenLive: true, host: waiting, waitingSince: T0 }))?.state).toBe("waiting_terminal");
+  });
+
+  test("a respawn that did not take is failed with its cause (missing when the CLI is gone), not starting or stopped", () => {
+    const later = T0 + INBOX_RUN_START_GRACE_MS + 1;
+    const waits = { seenLive: true, turnWaiting: true };
+    expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "It did not connect after starting again." }))).toMatchObject({ state: "failed", cause: "It did not connect after starting again." });
+    expect(inboxRunOf(evidence({ ...waits, now: T0 + 1, respawnFailed: "exit 1" }))?.state).toBe("failed");
+    expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "exit 1", cliAvailable: false }))?.state).toBe("missing");
+    // The reply went to another session: nothing waits here, so no failure is shown.
+    expect(inboxRunOf(evidence({ seenLive: true, now: later, respawnFailed: "exit 1", host: "absent" }))?.state).toBe("stopped");
   });
 
   test("a session blocked on a permission prompt is waiting_terminal even while its mod still polls busy", () => {
@@ -66,6 +83,8 @@ describe("inboxRunOf", () => {
   });
 
   test("the CLI gone from PATH while the session is not live is missing", () => {
-    expect(inboxRunOf(evidence({ cliAvailable: false }))?.state).toBe("missing");
+    expect(inboxRunOf(evidence({ cliAvailable: false, turnWaiting: true }))?.state).toBe("missing");
+    // Nothing waits for it (the reply went to another session): no line.
+    expect(inboxRunOf(evidence({ cliAvailable: false, turnWaiting: false, seenLive: true }))).toBeNull();
   });
 });

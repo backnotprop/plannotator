@@ -559,7 +559,7 @@ export function AgentsSettings({
   const launchRow = launchState?.enabled ? (
     <Row
       k="Sessions you start"
-      v={launchState.full_permissions ? 'Full permissions' : 'Ask first, as in Terminal'}
+      v={launchState.full_permissions ? 'Full permissions' : 'Your default mode'}
       sub="Start new sessions with full permissions: Claude Code you start from New message never stops to ask (bypass mode). Applies to the next session you start."
       data={{ 'data-launch-full-row': '' }}
       r={<Switch on={launchState.full_permissions} label="Start new sessions with full permissions" busy={launchBusy} onClick={() => void toggleFull()} />}

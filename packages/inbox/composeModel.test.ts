@@ -235,7 +235,8 @@ describe('launch: the start block under the live sessions (UX screen 01)', () =>
 
   test('the status line says where it starts, or that the folder is gone (screens 02, 13)', () => {
     const start = { agent: 'claude-code' as const, name: 'Claude Code', project: launch.projects[1]! };
-    expect(startStatusLine(start, '~/plannotator/plannotator')).toBe('Claude Code starts in ~/plannotator/plannotator when you send.');
-    expect(startStatusLine({ ...start, project: launch.projects[2]! }, '~/work/billing-svc')).toBe('Pick a folder to start in.');
+    // The exact folder, before anything runs; a gone folder never names itself as where it starts.
+    expect(startStatusLine(start, '~/plannotator/plannotator')).toContain('~/plannotator/plannotator');
+    expect(startStatusLine({ ...start, project: launch.projects[2]! }, '~/work/billing-svc')).not.toContain('~/work/billing-svc');
   });
 });

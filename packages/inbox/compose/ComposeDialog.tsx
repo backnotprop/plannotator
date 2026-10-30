@@ -341,8 +341,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       });
+      // A launch's answer names its launch (the window's own startThread; a transport never starts one).
+      const launchId = (result as { launch?: { id: string } }).launch?.id ?? null;
       const sentTo = start
-        ? { session: `launch:${result.thread_id}`, host: start.agent as string, projectName: start.project.name }
+        ? {
+            // The placeholder the root is addressed to until the start settles: `launch:<launch id>`.
+            session: launchId ? `launch:${launchId}` : '',
+            host: start.agent as string,
+            projectName: start.project.name,
+          }
         : { session: target!.session, host: target!.host, projectName: target!.project.name };
       props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: result.project?.name ?? sentTo.projectName, draftId: draft?.id ?? null, cardId: card?.id ?? null, ...(start ? { launched: true } : {}) });
     } catch (cause) {

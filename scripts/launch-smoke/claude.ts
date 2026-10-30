@@ -8,27 +8,30 @@
  *  A (full permissions): Send with `to.launch` starts Claude Code with no
  *    prompt; the real mod connects and takes the first turn; a `CLAUDE_*`
  *    value from the login shell reaches the worker through the settings
- *    file; the run line moves Starting → Working → rests. Stop → "stopped";
- *    a reply respawns it ("Starting again") and is answered once, the value
- *    still there, the transcript still in bypass mode. Delete stops, removes
- *    and drops the launch folder.
- *  B (no full permissions): a turn that needs a write stops on Claude's own
- *    permission prompt → the run line reads `waiting_terminal` with the
- *    attach command, and the row goes to "Stopped on you". Delete.
+ *    file; the run line moves Starting → Working → rests, never blinking out
+ *    before the turn. Stop → "stopped"; a reply respawns it ("Starting
+ *    again") and is answered once, the value still there, the transcript
+ *    still in bypass mode. Delete stops, removes and drops the launch folder.
+ *  The supervisor: the `claude daemon run` our calls reach is in its own
+ *    process group, never the Inbox's (a time-out kills only our call anyway).
+ *  The login shell ran once: for the start, never for the stop or respawn.
  *
- * Not covered here, on purpose: an untrusted folder (the scratch folder sits
- * in a trusted tree; the fake replays the recorded error text) and Open in
- * Terminal (it would open a window on the person's screen; the e2e checks
- * the osascript argument).
+ * Not covered here, on purpose: a real permission prompt (the person's own
+ * default mode decides, and the settings file carries no permission rules;
+ * the e2e and the run-line unit tests cover the line), an untrusted folder
+ * (the scratch folder sits in a trusted tree; the fake replays the recorded
+ * error text) and Open in Terminal (it would open a window on the person's
+ * screen; the e2e checks the osascript argument).
  *
  * Isolation: a test Inbox in this process on <scratch>/data with its own
- * config.json (`inboxLaunch.enabled`, `extraSettings.model: "haiku"`), never
+ * config.json (`inboxLaunch.enabled`, `inboxLaunch.model: "haiku"`), never
  * the person's Inbox or ~/.plannotator; a stand-in login shell with a clean
  * env, so the person's rc files never decide the result; nothing written to
  * ~/.claude. Teardown stops and removes every session in the scratch folder,
  * deletes the launch folders (they hold keys) and the token file.
  */
 
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
@@ -54,7 +57,7 @@ const { NO_BROWSER } = await import("../../tests/helpers/no-browser");
 process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
 const { isRealDataDir } = await import("../../tests/helpers/real-data-dir");
 if (isRealDataDir(dataDir)) throw new Error(`refusing the real data dir ${dataDir}`);
-writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: true, extraSettings: { model: "haiku" } } }, null, 2));
+writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: true, model: "haiku" } }, null, 2));
 
 // The stand-in login shell: the Inbox reads `$SHELL -ilc`; this one prints a clean env with one CLAUDE_* marker.
 const claudeBin = Bun.which("claude");
@@ -72,7 +75,7 @@ delete process.env.PLANNOTATOR_TEST_SANDBOX;
 const { startInboxServer } = await import("../../packages/server/inbox");
 const { createAgentEnvironmentFor } = await import("../../packages/server/inbox-agents");
 const { createClaudeHost } = await import("../../packages/server/inbox-launch-claude");
-const { createLoginEnv, launchSpawnEnv } = await import("../../packages/server/inbox-launch-env");
+const { launchPlainEnv } = await import("../../packages/server/inbox-launch-env");
 
 const server = await startInboxServer({ dataDir, version: "dev" });
 if (server.port === 59812) throw new Error("refusing the person's Inbox port");
@@ -80,13 +83,25 @@ const base = `http://127.0.0.1:${server.port}`;
 writeFileSync(join(root, "pids.txt"), `claude smoke: inbox (this process) ${process.pid} port ${server.port}\n`, { flag: "a" });
 log(`test Inbox on ${server.port}, data ${dataDir}, marker ${marker}`);
 
-// Teardown's own view of the supervisor, through the same stand-in env the Inbox uses.
-const login = await createLoginEnv({
-  run: (argv, o) => createAgentEnvironmentFor({ platform: platform(), homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
-  env: () => process.env,
-  log,
-})();
-const host = createClaudeHost({ environment: async () => createAgentEnvironmentFor({ platform: platform(), homeDir: homedir(), env: launchSpawnEnv(login) }) });
+// Teardown's own view of the supervisor: the plain env the Inbox uses for every call but a start.
+const host = createClaudeHost({ environment: async () => createAgentEnvironmentFor({ platform: platform(), homeDir: homedir(), env: launchPlainEnv(process.env, [dirname(claudeBin)]) }) });
+// The Inbox logs each login-shell read; count them.
+let loginReads = 0;
+const stderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+  if (String(chunk).includes("Inbox launch: login env read") || String(chunk).includes("could not read the login shell")) loginReads++;
+  return (stderrWrite as (...args: unknown[]) => boolean)(chunk, ...rest);
+}) as typeof process.stderr.write;
+/** Every `claude daemon run` (the shared supervisor): pid, its group and session leader. */
+const supervisors = () =>
+  spawnSync("/bin/ps", ["-axo", "pid=,pgid=,ppid=,command="], { encoding: "utf8" })
+    .stdout.split("\n")
+    .filter((line) => /claude daemon run/.test(line))
+    .map((line) => {
+      const [pid, pgid, ppid] = line.trim().split(/\s+/).map(Number);
+      return { pid, pgid, ppid, ownGroup: pid === pgid };
+    });
+const inboxGroup = Number(spawnSync("/bin/ps", ["-o", "pgid=", "-p", String(process.pid)], { encoding: "utf8" }).stdout.trim());
 
 const api = async (path: string, body?: Record<string, unknown>) => {
   const init = body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ serverSession, ...body }) };
@@ -159,6 +174,8 @@ try {
   results.A_first_marker = String(first.body).includes(marker);
   results.A_first_launch_id = String(first.body).includes(launchA);
   const sessionA = first.author.session as string;
+  results.supervisors = supervisors().map((sup) => ({ ...sup, sharesInboxGroup: sup.pgid === inboxGroup }));
+  log(`supervisors ${JSON.stringify(results.supervisors)} (Inbox group ${inboxGroup})`);
   await until("A resting (no line)", 60_000, async () => (await watchRun(threadA, seenA)()).run === null);
   results.A_lines_first_turn = [...seenA];
   log(`A answered in ${results.A_first_answer_s}s: marker ${results.A_first_marker}, lines ${seenA.join(" → ")}`);
@@ -185,32 +202,10 @@ try {
   results.A_transcript_modes = transcriptModes(sessionA);
   log(`A after reply: lines ${seenAgain.join(" → ")}, marker ${results.A_second_marker}, modes ${results.A_transcript_modes}`);
 
-  // ── B: no full permissions, a turn that needs a write ──
-  const off = await api("/api/inbox/launch/settings", { full_permissions: false });
-  results.B_switch = off.json.launch;
-  const sentB = await api("/api/inbox/messages", {
-    idempotency_key: "smoke-launch-b",
-    body: "Smoke B: use the Write tool to create the file smoke-b.txt in this folder containing the word b. Then send me 'done' through the Plannotator Inbox (reply_to this message).",
-    thread_name: "Smoke B",
-    to: { launch: { agent: "claude-code", project_id: project.id } },
-  });
-  if (sentB.status !== 200) throw new Error(`launch B failed ${sentB.status} ${JSON.stringify(sentB.json)}`);
-  const threadB = sentB.json.thread_id as string;
-  const launchB = sentB.json.launch.id as string;
-  const seenB: string[] = [];
-  const waiting = await until("B waiting on a permission prompt", 240_000, async () => {
-    const read = await watchRun(threadB, seenB)();
-    return read.run?.state === "waiting_terminal" ? read : null;
-  });
-  results.B_lines = seenB;
-  results.B_waiting = { attach_command: waiting.run.attach_command, row_section: waiting.row?.section, row_unread: waiting.row?.unread };
-  log(`B: lines ${seenB.join(" → ")}, row ${waiting.row?.section}`);
-
-  // ── Delete both ──
-  for (const [name, id] of [["A", launchA], ["B", launchB]] as const) {
-    const deleted = await api(`/api/inbox/launch/${id}/delete`, {});
-    results[`${name}_delete`] = { status: deleted.status, launch_dir_left: existsSync(launchDirOf(id)) };
-  }
+  // ── Delete ──
+  const deleted = await api(`/api/inbox/launch/${launchA}/delete`, {});
+  results.A_delete = { status: deleted.status, launch_dir_left: existsSync(launchDirOf(launchA)) };
+  results.login_shell_reads = loginReads;
   const left = await host.agents(work);
   results.listed_after_delete = left?.map((x) => ({ id: x.id, state: x.state })) ?? "unreadable";
 } catch (error) {
@@ -227,7 +222,6 @@ try {
   await server.stop();
   rmSync(join(dataDir, "inbox", "inbox.json"), { force: true });
   rmSync(join(dataDir, "inbox", "launch"), { recursive: true, force: true });
-  rmSync(join(work, "smoke-b.txt"), { force: true });
   writeFileSync(join(root, "claude-results.json"), JSON.stringify(results, null, 2));
   log(`done; results in ${join(root, "claude-results.json")}`);
   process.exit(0);

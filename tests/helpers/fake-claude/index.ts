@@ -34,6 +34,10 @@ export interface FakeClaudeConfig {
   answer?: string;
   /** A session's first poll waits this long (ms): the Inbox shows "Starting" meanwhile. */
   startDelayMs?: number;
+  /** `--bg` answers (and the session exists) only after this long (ms). */
+  bgDelayMs?: number;
+  /** A session takes a command, then reports busy only after this long (ms): the real mod's gap until its next poll. */
+  busyDelayMs?: number;
 }
 
 export interface FakeClaudeCall {
@@ -69,6 +73,10 @@ export interface FakeClaude {
   agents(): FakeClaudeAgent[];
   /** Each fake `osascript` run's arguments. */
   osascript(): string[][];
+  /** How many times the stand-in login shell ran (the Inbox reads it once per start). */
+  logins(): number;
+  /** The ids of the commands sessions took, in order. */
+  delivered(): string[];
   /** Take `claude` off PATH (uninstalled) or put it back. */
   setInstalled(on: boolean): void;
   /** SIGTERM every fake session still running that this fake started; returns how many. */
@@ -91,9 +99,14 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
   install();
   // Open in Terminal: what it would have run, recorded; nothing opens.
   writeFileSync(join(bin, "osascript"), `#!/bin/sh\nfor a in "$@"; do printf '%s\\037' "$a"; done >> ${q(join(state, "osascript.log"))}\nprintf '\\n' >> ${q(join(state, "osascript.log"))}\n`, { mode: 0o755 });
-  // `$SHELL -ilc <command>`: run the command with one more CLAUDE_* value, as a person's .zshrc would export it.
+  // `$SHELL -ilc <command>`: run the command with one more CLAUDE_* value and the fakes on PATH, as a person's
+  // .zshrc would export them (the Inbox starts it from a minimal env). Each run is counted.
   const shell = join(bin, "login-shell");
-  writeFileSync(shell, `#!/bin/sh\n${FAKE_LOGIN_CLAUDE_VALUE.name}=${q(FAKE_LOGIN_CLAUDE_VALUE.value)}\nexport ${FAKE_LOGIN_CLAUDE_VALUE.name}\nexec /bin/sh -c "$2"\n`, { mode: 0o755 });
+  writeFileSync(
+    shell,
+    `#!/bin/sh\necho run >> ${q(join(state, "logins.log"))}\n${FAKE_LOGIN_CLAUDE_VALUE.name}=${q(FAKE_LOGIN_CLAUDE_VALUE.value)}\nexport ${FAKE_LOGIN_CLAUDE_VALUE.name}\nPATH=${q(bin)}:"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`,
+    { mode: 0o755 },
+  );
 
   const lines = <T>(file: string): T[] =>
     existsSync(file)
@@ -132,6 +145,14 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
         .split("\n")
         .filter(Boolean)
         .map((line) => line.split("\u001f").filter((part, i, all) => i < all.length - 1 || part !== ""));
+    },
+    logins() {
+      const file = join(state, "logins.log");
+      return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
+    },
+    delivered() {
+      const file = join(state, "delivered.log");
+      return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
     },
     setInstalled(on) {
       if (on) install();

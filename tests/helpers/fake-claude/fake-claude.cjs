@@ -6,7 +6,8 @@
  * executable (`process.execPath`) through a `/bin/sh` wrapper on PATH.
  *
  * State lives in the folder the wrapper names (`FAKE_CLAUDE_STATE`):
- *  - config.json  what the test asks for: { version, fault, workMs, hold, waiting, answer }
+ *  - config.json  what the test asks for: { version, fault, workMs, hold, waiting, answer, startDelayMs, bgDelayMs, busyDelayMs }
+ *  - delivered.log  one line per command a session took (after `delivered` was posted)
  *  - calls.jsonl  one line per call: argv, cwd, env names, and for --bg the
  *                 settings file (content, mode) and whether the thread existed
  *  - agents/<sessionId>.json  each session, as `claude agents --json` lists it
@@ -16,7 +17,7 @@
  *  --version                 "<version> (Claude Code)"
  *  --bg --name N --settings F [--permission-mode M]
  *                            no prompt; faults: untrusted (Claude's error, exit 1),
- *                            slow (sleeps 40 s); else prints
+ *                            slow (sleeps 40 s); else (after `bgDelayMs`) prints
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
  *                            and starts the session process.
  *  agents --json [--all] [--cwd D]  without --all, done and stopped sessions are left out
@@ -24,7 +25,8 @@
  *
  * The session process (`__session <sessionId>`) reads the settings file's env
  * (PLANNOTATOR_DATA_DIR), finds the Inbox in <dataDir>/inbox/inbox.json and
- * polls its bridge as the mod does. A command: `delivered`, busy, then after
+ * polls its bridge as the mod does. A command: `delivered`, busy (after
+ * `busyDelayMs`, the real mod's gap until its next poll), then after
  * `workMs` (and while `hold` or `waiting` is set) it answers through the
  * Inbox's MCP `send_message` with `reply_to`, and goes idle. `waiting` makes
  * the host list it as waiting on a permission prompt meanwhile.
@@ -145,12 +147,17 @@ function main() {
       setTimeout(() => process.exit(1), 40_000);
       return;
     }
-    const sessionId = crypto.randomUUID();
-    const id = sessionId.replace(/-/g, "").slice(0, 8);
-    const name = flag("--name") || "session";
-    saveAgent({ id, sessionId, cwd: process.cwd(), name, kind: "background", startedAt: Date.now(), status: "idle", state: "running", settingsPath, permissionMode: flag("--permission-mode") || null });
-    startSession(sessionId);
-    process.stdout.write(`Starting background service…\nbackgrounded · ${id} · ${name} (idle — send a prompt to start)\n`);
+    const background = () => {
+      const sessionId = crypto.randomUUID();
+      const id = sessionId.replace(/-/g, "").slice(0, 8);
+      const name = flag("--name") || "session";
+      saveAgent({ id, sessionId, cwd: process.cwd(), name, kind: "background", startedAt: Date.now(), status: "idle", state: "running", settingsPath, permissionMode: flag("--permission-mode") || null });
+      startSession(sessionId);
+      process.stdout.write(`Starting background service…\nbackgrounded · ${id} · ${name} (idle — send a prompt to start)\n`);
+    };
+    // A busy supervisor: the session exists only once --bg answers (Delete may land meanwhile).
+    if (cfg.bgDelayMs) setTimeout(background, cfg.bgDelayMs);
+    else background();
     return;
   }
   record({});
@@ -235,6 +242,8 @@ async function session(sessionId) {
 
   const work = async (command) => {
     await post("/api/inbox/bridge/event", { type: "delivered", id: command.id }).catch(() => {});
+    fs.appendFileSync(path.join(STATE, "delivered.log"), `${command.id}\n`);
+    await sleep(config().busyDelayMs || 0);
     busy = true;
     updateAgent(sessionId, { status: "busy" });
     await post("/api/inbox/bridge/event", { type: "state", busy: true }).catch(() => {});

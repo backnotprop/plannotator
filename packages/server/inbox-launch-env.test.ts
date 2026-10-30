@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CLAUDE_SKIP_PERMISSIONS_ENV, createLoginEnv, launchSettingsEnv, launchSpawnEnv, parseMarkedEnv } from "./inbox-launch-env";
+import { CLAUDE_SKIP_PERMISSIONS_ENV, createLoginEnv, launchPlainEnv, launchSettingsEnv, launchSpawnEnv, parseMarkedEnv } from "./inbox-launch-env";
 
 const login = {
   PATH: "/usr/bin:/bin",
@@ -14,14 +14,26 @@ const login = {
   PLANNOTATOR_SESSION_TAG: "tag",
   PLANNOTATOR_DATA_DIR: "/tmp/inbox-data",
   PLANNOTATOR_ASK_AI_CHILD: "1",
+  PLANNOTATOR_PORT: "19432",
+  PLANNOTATOR_BROWSER: "none",
   CODEX_THREAD_ID: "t1",
 };
 
 describe("launchSpawnEnv", () => {
-  test("drops the starting session's markers and the Inbox's data dir, keeps the person's env", () => {
+  test("drops every PLANNOTATOR_* name and the session markers, keeps the person's env", () => {
     const env = launchSpawnEnv(login);
-    for (const name of ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "PLANNOTATOR_SESSION_TAG", "PLANNOTATOR_DATA_DIR", "PLANNOTATOR_ASK_AI_CHILD", "CODEX_THREAD_ID"]) expect(env[name]).toBeUndefined();
+    expect(Object.keys(env).filter((name) => name.startsWith("PLANNOTATOR_"))).toEqual([]);
+    for (const name of ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PROJECT_DIR", "CODEX_THREAD_ID"]) expect(env[name]).toBeUndefined();
     expect(env).toMatchObject({ PATH: "/usr/bin:/bin", HOME: "/Users/me", CLAUDE_CODE_USE_BEDROCK: "1" });
+  });
+});
+
+describe("launchPlainEnv", () => {
+  test("the Inbox's own env for status, stop and respawn: no PLANNOTATOR_* and no CLAUDE* at all, the extra dirs after its PATH", () => {
+    const env = launchPlainEnv(login, ["/Users/me/.local/bin", "/bin"]);
+    expect(Object.keys(env).filter((name) => name.startsWith("PLANNOTATOR_") || name.startsWith("CLAUDE"))).toEqual([]);
+    expect(env.PATH).toBe("/usr/bin:/bin:/Users/me/.local/bin");
+    expect(env.HOME).toBe("/Users/me");
   });
 });
 
@@ -36,6 +48,11 @@ describe("launchSettingsEnv", () => {
     expect(env.PLANNOTATOR_DATA_DIR).toBe("/data/inbox");
     expect(env[CLAUDE_SKIP_PERMISSIONS_ENV]).toBe("1");
   });
+
+  test("bypass mode comes from the switch alone: the shell's own skip-permissions export is dropped while it is off", () => {
+    const shell = { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" };
+    expect(launchSettingsEnv(shell, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false })[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
+  });
 });
 
 test("parseMarkedEnv reads only what is between the markers, values with = and newlines whole", () => {
@@ -46,28 +63,70 @@ test("parseMarkedEnv reads only what is between the markers, values with = and n
 });
 
 describe("createLoginEnv", () => {
-  test("logs names only, caches for the TTL, and falls back to the Inbox's env when the shell fails", async () => {
+  test("the shell starts from a minimal env, is read on every call, logs names only, and falls back to the plain env", async () => {
     const lines: string[] = [];
-    let t = 0;
-    let calls = 0;
+    const seeds: Record<string, string | undefined>[] = [];
     const mark = "__PLANNOTATOR_LAUNCH_ENV__";
+    const own = { SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/own", PLANNOTATOR_PORT: "1", CLAUDE_CODE_SESSION_ID: "x", SECRET_OF_THE_INBOX: "y" };
     const read = createLoginEnv({
-      run: async () => {
-        calls++;
-        return calls === 1 ? { exitCode: 0, stdout: `${mark}CLAUDE_SECRET_THING=s3cret-value\0PATH=/bin\0${mark}` } : { exitCode: 1, stdout: "" };
+      run: async (_argv, options) => {
+        seeds.push({ ...options.env });
+        return seeds.length === 1 ? { exitCode: 0, stdout: `${mark}CLAUDE_SECRET_THING=s3cret-value\0PATH=/bin\0${mark}` } : { exitCode: 1, stdout: "" };
       },
-      env: () => ({ SHELL: "/bin/zsh", PATH: "/own" }),
-      now: () => t,
-      ttlMs: 1000,
+      env: () => own,
       log: (line) => lines.push(line),
     });
     expect(await read()).toEqual({ CLAUDE_SECRET_THING: "s3cret-value", PATH: "/bin" });
-    t = 500;
-    await read();
-    expect(calls).toBe(1);
-    t = 2000;
-    expect(await read()).toEqual({ SHELL: "/bin/zsh", PATH: "/own" });
+    expect(seeds[0]).toEqual({ SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/usr/bin:/bin" });
+    expect(await read()).toEqual({ SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/own", SECRET_OF_THE_INBOX: "y" });
+    expect(seeds).toHaveLength(2);
     expect(lines.join("\n")).toContain("CLAUDE_SECRET_THING");
     expect(lines.join("\n")).not.toContain("s3cret-value");
+  });
+
+  test("an Inbox started inside a Claude session: that session's names reach neither the shell, the settings file nor the --bg env", async () => {
+    const sessionNames = {
+      CLAUDE_CODE_SESSION_ID: "parent-session",
+      CLAUDE_CODE_MESSAGING_SOCKET: "/tmp/parent.sock",
+      CLAUDE_CODE_MESSAGING_TOKEN: "parent-token",
+      CLAUDE_PID: "4242",
+      CLAUDE_CODE_CHILD_SESSION: "1",
+      CLAUDE_CODE_SESSION_ATTENDED: "1",
+      CLAUDE_CODE_ENTRYPOINT: "cli",
+      CLAUDE_CODE_EXECPATH: "/opt/claude/bin/claude",
+      CLAUDECODE: "1",
+    };
+    const parent = { SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/own", CLAUDE_CONFIG_DIR: "/Users/me/.claude-work", ...sessionNames };
+    const mark = "__PLANNOTATOR_LAUNCH_ENV__";
+    const seeds: Record<string, string | undefined>[] = [];
+    // Worst case: the shell hands them back anyway (as if inherited), next to the person's own value.
+    const echoed = Object.entries({ ...sessionNames, CLAUDE_CONFIG_DIR: "/Users/me/.claude-work", PATH: "/bin" })
+      .map(([name, value]) => `${name}=${value}`)
+      .join("\0");
+    let fail = false;
+    const read = createLoginEnv({
+      run: async (_argv, options) => {
+        seeds.push({ ...options.env });
+        return fail ? { exitCode: 1, stdout: "" } : { exitCode: 0, stdout: `${mark}${echoed}${mark}` };
+      },
+      env: () => parent,
+    });
+    const names = Object.keys(sessionNames);
+    const none = (env: Record<string, string | undefined>) => expect(Object.keys(env).filter((name) => names.includes(name))).toEqual([]);
+
+    const shell = await read();
+    none(seeds[0]!);
+    const settings = launchSettingsEnv(shell, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false });
+    none(settings);
+    expect(settings.CLAUDE_CONFIG_DIR).toBe("/Users/me/.claude-work");
+    none(launchSpawnEnv(shell));
+    // The shell could not be read: the Inbox's own env stands in, still without them.
+    fail = true;
+    const fallback = await read();
+    none(fallback);
+    none(launchSpawnEnv(fallback));
+    none(launchSettingsEnv(fallback, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false }));
+    // Every other call (status, stop, respawn) runs with the plain env: none there either.
+    none(launchPlainEnv(parent, []));
   });
 });

@@ -28,7 +28,8 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * one bordered button is Open in Terminal, where something is blocked on the
  * person (a permission prompt, an untrusted folder). No keyboard shortcuts.
  */
-export function RunLine({ run, phone, onChanged }: { run: InboxRun; phone: boolean; onChanged: () => void }) {
+/** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). */
+export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: InboxRun; phone: boolean; canReaddress?: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -141,7 +142,7 @@ export function RunLine({ run, phone, onChanged }: { run: InboxRun; phone: boole
       icon = 'warn';
       text = (
         <>
-          <b>{name} isn't on this computer any more.</b> Your reply is waiting. Install {name} again and it goes in, or send the reply to another session.
+          <b>{name} isn't on this computer any more.</b> Your reply is waiting. Install {name} again and it goes in{canReaddress ? ', or send the reply to another session.' : '.'}
         </>
       );
       break;

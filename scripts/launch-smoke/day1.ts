@@ -124,7 +124,7 @@ const agentReplies = async (threadId: string) =>
 const results: Record<string, unknown> = {};
 try {
   // ── Risk 1 ──
-  const a = await host.start({ folder: work, shownFolder: work, name: "smoke-A", settingsPath: writeSettings("lch_smokeA", true), fullPermissions: true });
+  const a = await host.start({ folder: work, shownFolder: work, name: "smoke-A", settingsPath: writeSettings("lch_smokeA", true), fullPermissions: true, environment: await environment() });
   writeFileSync(join(logDir, "A.start.log"), a.output);
   if (!a.ok) throw new Error(`A did not start: ${a.text}`);
   sessionsMade.push(a.short);
@@ -167,8 +167,8 @@ try {
   writeFileSync(own, JSON.stringify({ model: "haiku", env: { PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_CLAUDE_MOD: "0" }, enabledPlugins: { "plannotator@plannotator": false } }), { mode: 0o600 });
   const e = await environment();
   const [b, c, d] = await Promise.all([
-    host.start({ folder: work, shownFolder: work, name: "smoke-B", settingsPath: writeSettings("lch_smokeB", false), fullPermissions: false }),
-    host.start({ folder: work, shownFolder: work, name: "smoke-C", settingsPath: writeSettings("lch_smokeC", false), fullPermissions: false }),
+    host.start({ folder: work, shownFolder: work, name: "smoke-B", settingsPath: writeSettings("lch_smokeB", false), fullPermissions: false, environment: e }),
+    host.start({ folder: work, shownFolder: work, name: "smoke-C", settingsPath: writeSettings("lch_smokeC", false), fullPermissions: false, environment: e }),
     e.run([e.which("claude")!, "--bg", "--name", "smoke-own", "--settings", own], { timeoutMs: 30_000, cwd: work }),
   ]);
   const ownShort = /backgrounded · ([0-9a-f]{8})/.exec(d.stdout)?.[1] ?? null;

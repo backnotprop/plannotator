@@ -16,25 +16,31 @@
  *     (02), the folder menu (03); Send writes the thread before `--bg`, with no
  *     prompt or secret on argv and a 0600 settings file holding the login
  *     shell's CLAUDE_* value; Starting (05) → Working · N min (06) → the ⋯
- *     items (07) → a permission prompt in "Stopped on you" (08) → Stop (11) →
- *     a reply respawns it once, Starting again (12), delivered once → no line
- *     (10); Open in Terminal runs `claude attach`; Delete runs stop and rm,
- *     removes launch/<id>/, never purge.
+ *     items (07) → a permission prompt in "Stopped on you" (08) → answered in
+ *     Terminal: the line and the Stopped-on-you row go, with no Stop → Stop
+ *     (11) → a reply respawns it once, Starting again (12), delivered once →
+ *     no line (10); Open in Terminal runs `claude attach`; Delete runs stop
+ *     and rm, removes launch/<id>/, never purge. The login shell ran once.
  *  3. Full permissions (Settings → Agents): bypass mode on argv, Claude's env
  *     switch in the file, "Full permissions" in the header.
  *  4. A replayed Send (same key) starts `--bg` once.
  *  5. An untrusted folder (14): the cause, the "not delivered" tick, Open in
  *     Terminal runs plain `claude` there, Try again starts it.
  *  6. A folder that is gone (13): struck through, Send off, Save draft keeps it.
- *  7. Claude Code uninstalled (15): the reply waits, Send to another session.
+ *  7. Claude Code uninstalled (15): the reply waits; Send to another session
+ *     re-addresses it, and the line goes.
+ *  8. Delete while `--bg` is still running: the session it makes is stopped
+ *     and removed, never left running unseen.
+ *  9. Phone: the To picker (01), the To sentence (02), the working line (06),
+ *     the permission prompt without Open in Terminal (08), no Delete in ⋯.
  *
  * Pictures: LAUNCH_SHOTS_DIR (default .local/proof/launch-pr1), wide light at
- * 2x, plus 02 and 06 dark and phone. Build the binary first (see
+ * 2x, plus 02 and 06 dark, and 01, 02, 06 and 08 on a phone. Build the binary first (see
  * inbox.spec.ts), then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-claude.spec.ts`.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -172,7 +178,8 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
-  rmSync(shots, { recursive: true, force: true });
+  // Old pictures go; anything else in the folder (NOTES.md) stays.
+  if (existsSync(shots)) for (const name of readdirSync(shots)) if (name.endsWith('.png')) rmSync(join(shots, name));
   const root = inboxScratch('plannotator-inbox-launch-e2e-');
   const home = join(root, 'home');
   const bin = join(root, 'bin');
@@ -261,7 +268,9 @@ test('flag off: no start rows and the launch routes answer 404; an old Claude Co
   await openCompose(page);
   await dialog(page).locator('[data-compose-to]').click();
   await expect(dialog(page).locator('[data-compose-session="ses-ws-live"]')).toBeVisible();
-  await page.waitForTimeout(800);
+  // The check ran (the version was asked) and its answer offers no agent: the picker has nothing to add.
+  await waitFor('claude --version', () => world.fake.calls().some((c) => c.argv[0] === '--version'));
+  await expect.poll(async () => page.evaluate(async () => ((await (await fetch('/api/inbox/sessions')).json()) as { launch?: { agents: unknown[] } }).launch?.agents.length)).toBe(0);
   await expect(dialog(page).locator('[data-compose-start]')).toHaveCount(0);
   expect(world.fake.calls().every((c) => c.argv[0] === '--version')).toBe(true);
   await page.keyboard.press('Escape');
@@ -269,7 +278,7 @@ test('flag off: no start rows and the launch routes answer 404; an old Claude Co
   world.fake.configure({ version: '2.1.314' });
 });
 
-test('the journey: To rows, the To sentence, the folder menu; Send writes the thread, then Starting → Working → a permission prompt → Stop → a reply starts it again → done; Open and Delete', async () => {
+test('the journey: To rows, the To sentence, the folder menu; Send writes the thread, then Starting → Working → a permission prompt answered in Terminal → Stop → a reply starts it again → done; Open and Delete', async () => {
   const { page, fake } = world;
   const plannotatorId = await projectIdOf(page, world.projects.plannotator);
   // Look at plannotator's own list: the caption names the project the person is looking at.
@@ -314,8 +323,9 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await expect(menu).toHaveCount(0);
   await expect(d).toBeVisible();
 
-  // Send: a slow first poll, so "Starting" shows; the turn is held so "Working" stays.
-  fake.configure({ startDelayMs: 3500, hold: true });
+  // Send: a slow first poll, so "Starting" shows; a gap between taking the turn and reporting busy
+  // (as the real mod has); the turn is held so "Working" stays.
+  fake.configure({ startDelayMs: 3500, busyDelayMs: 2500, hold: true });
   const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
   await d.locator('[data-compose-send]').click();
   const sent = (await (await answer).json()) as { thread_id: string; launch: { id: string; state: string } };
@@ -339,8 +349,8 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   expect(start.settings!.env!.PLANNOTATOR_LAUNCH).toBe(launchId);
   expect(start.settings!.env!.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBeUndefined();
   expect(start.settings!.permissions!.allow).toContain(INBOX_TOOL_PERMISSION);
-  // The spawn env: the Inbox's own data dir and session markers are not passed down.
-  expect(start.env).not.toContain('PLANNOTATOR_DATA_DIR');
+  // The spawn env: no Plannotator name at all (data dir, ports, markers), no session marker.
+  expect(start.env.filter((name) => name.startsWith('PLANNOTATOR_'))).toEqual([]);
   expect(start.env).not.toContain('CLAUDECODE');
 
   // 05: the thread, the header sentence, "Starting Claude Code in plannotator…", the row says Starting.
@@ -350,6 +360,12 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await expect(p.locator('[data-run="starting"]')).toHaveText('Starting Claude Code in plannotator…');
   await expect(page.locator(`[data-thread-id="${threadId}"] [data-count-words="Starting"]`)).toBeVisible();
   await shot(page, '05-just-started');
+
+  // The session took the turn but has not polled busy yet: still Starting, never a blink to no line.
+  await waitFor('the first turn taken', () => fake.delivered().length === 1);
+  const runNow = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { run?: { state: string } | null };
+  expect(runNow.run?.state).toBe('starting');
+  await expect(p.locator('[data-run="starting"]')).toBeVisible();
 
   // 06: the session polls, takes the message as its first turn: "Claude Code is working · 1 min  Stop".
   await expect(p.locator('[data-run="working"]')).toContainText(/^Claude Code is working · \d+ min/, { timeout: 20_000 });
@@ -378,8 +394,16 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await expect(page.locator(`button[data-thread-id="${threadId}"]`)).toHaveAttribute('data-section', 'stopped');
   await shot(page, '08-permission-prompt-v1');
 
-  // 11: Stop. The host reports it done; the line says who stopped it and that a reply starts it again.
-  await p.locator('[data-run="waiting_terminal"] [data-run-stop]').click();
+  // The person answers the prompt in Terminal (no Stop): the turn ends, it answers, and it rests.
+  // The line goes and the row leaves Stopped on you.
+  fake.configure({ waiting: false, hold: false });
+  await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(p.locator('[data-run]')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.locator(`button[data-thread-id="${threadId}"]`)).not.toHaveAttribute('data-section', 'stopped');
+
+  // 11: Stop (⋯, as it rests). The host reports it done; the line says who stopped it and that a reply starts it again.
+  await p.locator('[data-thread-more]').click();
+  await page.locator('[data-launch-item="stop"]').click();
   await expect(p.locator('[data-run="stopped"]')).toHaveText(/^You stopped Claude Code at \d{1,2}:\d{2} [AP]M\. Your reply starts it again\.$/);
   expect(fake.calls().some((c) => c.argv[0] === 'stop' && c.argv[1] === agent.id)).toBe(true);
   fake.configure({ waiting: false, hold: false, startDelayMs: 3500 });
@@ -393,13 +417,19 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await p.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(p.locator('[data-run="starting"]')).toHaveText('Starting Claude Code again…');
   await shot(page, '12-resumed-by-reply');
+  // It took the reply but has not polled busy yet: still "Starting again", no blink.
+  await waitFor('the reply taken', () => fake.delivered().length === 2);
+  const runTaken = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { run?: { state: string; again: boolean } | null };
+  expect(runTaken.run).toMatchObject({ state: 'starting', again: true });
+  fake.configure({ busyDelayMs: 0 });
   // 10: it takes the reply, answers, rests: no line.
-  // The first turn was stopped before it answered; the respawned session takes the reply and answers it.
-  await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(2, { timeout: 30_000 });
   await expect(p.locator('[data-run]')).toHaveCount(0);
   await shot(page, '10-replied');
   expect(fake.calls().filter((c) => c.argv[0] === 'respawn')).toHaveLength(1);
   expect(fake.starts()).toHaveLength(1);
+  // The login shell was read for the start alone: never for a status read, the stop or the respawn.
+  expect(fake.logins()).toBe(1);
   // Delivered once: one answer to the reply, and the reply was handed over once.
   const thread = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { id: string; author: { kind: string }; reply_to?: string | null; delivery?: unknown }[] } };
   const reply = thread.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!;
@@ -456,7 +486,10 @@ test('a replayed Send (same idempotency key) answers the same thread and starts 
   expect(results[1]!.thread_id).toBe(results[0]!.thread_id);
   expect(results[1]!.replayed).toBe(true);
   await waitFor('the one --bg', () => fake.starts().length === before + 1);
-  await page.waitForTimeout(1500);
+  // The start settled (the session answered): any second --bg would have run by now.
+  await expect
+    .poll(async () => page.evaluate(async (id) => ((await (await fetch(`/api/inbox/threads/${id}`)).json()) as { thread: { messages: { author: { kind: string } }[] } }).thread.messages.filter((m) => m.author.kind === 'agent').length, results[0]!.thread_id), { timeout: 30_000 })
+    .toBe(1);
   expect(fake.starts()).toHaveLength(before + 1);
 });
 
@@ -516,17 +549,22 @@ test('a project folder that is gone (13): struck through, Send off, nothing sent
   expect(refused).toEqual({ status: 422, code: 'folder_missing' });
 });
 
-test('Claude Code uninstalled (15): the reply waits, the line says so, Send to another session is offered; compose stops offering it', async () => {
+test('Claude Code uninstalled (15): the reply waits, the line says so; Send to another session re-addresses it and the line goes; compose stops offering it', async () => {
   const { page, fake } = world;
-  fake.configure({ startDelayMs: 0, hold: false });
+  // It is stopped mid-turn, before it answers: the person's next words are addressed to the session itself (re-addressable).
+  fake.configure({ startDelayMs: 0, hold: true });
+  // Another session runs in the project the launch starts in: the reply can go there.
+  const stopOther = holdLiveSession(world.projects.side, 'ses-side-live');
+  world.stopLive.push(stopOther);
   await page.goto(world.url);
   const threadId = await launchFrom(page, 'Add a changelog entry for the fuzzy search.');
   await openThread(page, threadId);
   const p = pane(page);
-  await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(p.locator('[data-run="working"]')).toBeVisible({ timeout: 20_000 });
   await p.locator('[data-thread-more]').click();
   await page.locator('[data-launch-item="stop"]').click();
   await expect(p.locator('[data-run="stopped"]')).toBeVisible();
+  fake.configure({ hold: false });
   fake.setInstalled(false);
   try {
     await p.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
@@ -534,9 +572,16 @@ test('Claude Code uninstalled (15): the reply waits, the line says so, Send to a
     await p.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
     const line = p.locator('[data-run="missing"]');
     await expect(line).toContainText("Claude Code isn't on this computer any more.", { timeout: 20_000 });
-    await expect(line).toContainText('Your reply is waiting.');
+    await expect(line).toContainText('or send the reply to another session');
     await expect(p.locator('[data-readdress-open]')).toBeVisible();
     await shot(page, '15-fail-agent-not-installed');
+    // Send to another session: the reply goes to the live one; nothing waits on the gone agent, so no line.
+    await p.locator('[data-readdress-open]').click();
+    await p.locator('[data-readdress-session="ses-side-live"]').click();
+    await p.locator('[data-readdress-send]').click();
+    await expect(p.locator('[data-run]')).toHaveCount(0, { timeout: 20_000 });
+    const moved = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { author: { kind: string }; to?: { session: string } | null }[] } };
+    expect(moved.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!.to?.session).toBe('ses-side-live');
     await openCompose(page);
     await dialog(page).locator('[data-compose-to]').click();
     await expect(dialog(page).locator('[data-compose-session="ses-ws-live"]')).toBeVisible();
@@ -548,7 +593,33 @@ test('Claude Code uninstalled (15): the reply waits, the line says so, Send to a
   }
 });
 
-test('phone: the To sentence and the working line', async ({ browser }) => {
+test('Delete while --bg is still running: the session it makes is stopped and removed, never left running', async () => {
+  const { page, fake } = world;
+  fake.configure({ bgDelayMs: 2500, startDelayMs: 0, hold: false });
+  try {
+    await page.goto(world.url);
+    const threadId = await launchFrom(page, 'Rename the flag to match the docs.');
+    const known = new Set(fake.agents().map((agent) => agent.id));
+    await openThread(page, threadId);
+    const p = pane(page);
+    await expect(p.locator('[data-run="starting"]')).toBeVisible();
+    await p.locator('[data-thread-more]').click();
+    await page.locator('[data-launch-item="delete"]').click();
+    await p.locator('[data-launch-delete]').click();
+    await expect(p.locator('[data-launch-confirm]')).toHaveCount(0);
+    // --bg answers after the delete: the Inbox stops and removes what it made.
+    const made = await waitFor('the session --bg made', () => fake.agents().find((agent) => !known.has(agent.id)));
+    await waitFor('stop and rm of it', () => fake.calls().some((c) => c.argv[0] === 'stop' && c.argv[1] === made.id) && fake.calls().some((c) => c.argv[0] === 'rm' && c.argv[1] === made.id));
+    // The thread stays as the person left it: never re-addressed to the session, no line.
+    const root = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { to?: { session: string } | null }[] }; run?: unknown };
+    expect(root.thread.messages[0]!.to?.session).toMatch(/^launch:/);
+    expect(root.run ?? null).toBeNull();
+  } finally {
+    fake.configure({ bgDelayMs: 0 });
+  }
+});
+
+test('phone: the To picker, the To sentence, the working line, the permission prompt; no Open in Terminal or Delete', async ({ browser }) => {
   const { fake } = world;
   const phone = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
   const page = await phone.newPage();
@@ -557,6 +628,8 @@ test('phone: the To sentence and the working line', async ({ browser }) => {
     await page.locator('.ib-lhead [data-open-compose]').click();
     const d = dialog(page);
     await d.locator('[data-compose-to]').click();
+    await expect(d.locator('[data-compose-start="claude-code"]')).toBeVisible();
+    await shot(page, '01-new-thread-to-picker-phone');
     await d.locator('[data-compose-start="claude-code"]').click();
     await d.getByRole('textbox', { name: 'Message' }).fill('Make the Settings search fuzzy, like the palette.');
     await expect(d.locator('[data-compose-to="start"]')).toBeVisible();
@@ -567,9 +640,23 @@ test('phone: the To sentence and the working line', async ({ browser }) => {
     const { thread_id } = (await (await answer).json()) as { thread_id: string };
     await page.goto(`${world.url}#thread=${thread_id}`);
     await expect(page.locator('[data-run="working"]')).toBeVisible({ timeout: 20_000 });
+    // The "Starting Claude Code" toast is not what this picture is about.
+    for (const dismiss of await page.locator('[data-inbox-toast] [data-toast-dismiss]').all()) await dismiss.click();
+    await expect(page.locator('[data-inbox-toast]')).toHaveCount(0);
     await shot(page, '06-working-phone');
+    // 08 on a phone: where to answer, the attach command and Stop; no Open in Terminal.
+    fake.configure({ waiting: true });
+    const waiting = page.locator('[data-run="waiting_terminal"]');
+    await expect(waiting).toContainText('Answer it in Terminal on your Mac:', { timeout: 30_000 });
+    await expect(waiting.locator('[data-run-attach]')).toBeVisible();
+    await expect(waiting.locator('[data-run-stop]')).toBeVisible();
+    await expect(waiting.locator('[data-run-open]')).toHaveCount(0);
+    await shot(page, '08-permission-prompt-v1-phone');
+    // ⋯ on a phone: no Open in Terminal, no Delete.
+    await page.locator('[data-thread-more]').click();
+    await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code']);
   } finally {
-    fake.configure({ hold: false });
+    fake.configure({ hold: false, waiting: false });
     await phone.close();
   }
 });

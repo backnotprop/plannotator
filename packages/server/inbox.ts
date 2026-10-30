@@ -970,9 +970,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // `pinned_at` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
     // Launched threads (only while launch is on): "Starting" / "Working", and a session blocked on a prompt in Stopped on you.
+    // Resolved once per list: off, it is the identity and no row costs anything.
+    const decorate = launch.rowDecorator();
     const rows = store
       .listRows()
-      .map((row) => launch.decorateRow(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
+      .map((row) => decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
     const scoped = projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows;
     const byId = new Map(rows.map((row) => [row.thread_id, row]));
     return {
@@ -2334,8 +2336,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const deliveryListeners = new Set<() => void>();
   let lastDeliverySignature = "";
   const deliveryWatch = setInterval(() => {
-    // Launched threads: read the host when a line could change, respawn a stopped session someone wrote to.
-    launch.sweep();
+    // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
+    launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
     const signature = live.deliverySignature() + launch.signature();
     if (signature === lastDeliverySignature) return;
@@ -2347,7 +2349,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json });
 
   // Launch: compose starts Claude Code in a project, behind `inboxLaunch.enabled` (packages/server/inbox-launch.ts).
-  // The agent gets the person's login-shell env; a sandboxed test Inbox reads no shell at all.
+  // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
   const launch = createInboxLaunch({
     store,
     live,
@@ -2362,6 +2364,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           env: () => process.env,
           log: (line) => process.stderr.write(`${line}\n`),
         }),
+    ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: "" } : process.env),
+    installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
     readBody: (req) => readBody(req),
     json,
@@ -3001,7 +3005,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const run = await launch.runOf(thread.thread_id);
         const row = store.listRow(thread.thread_id);
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.decorateRow(row) : row, ...(run === undefined ? {} : { run }) });
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run }) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);

@@ -1220,7 +1220,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
             launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
               ? () => void launchAct(() => inboxApi.launchStop(launched.id))
               : null,
-          remove: () => setConfirmDelete(true),
+          // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
+          remove: phone ? null : () => setConfirmDelete(true),
         }
       : null;
   // Archived (resolved). What an agent wrote after the archive line behaves as
@@ -4524,7 +4525,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && <RunLine run={runLine} phone={phone} onChanged={() => onRunChanged?.()} />}
+                {message === last && runLine && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
                 {message === last && !runLine && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
@@ -4604,7 +4605,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                     {sendNowError}
                   </p>
                 )}
-                {message === last && (runLine ? runLine.state === 'missing' : delivered?.state === 'undelivered') && lastTo && (
+                {/* A launched agent that is gone: only a message addressed to it (its own `to`) can move; a reply to its answer cannot. */}
+                {message === last && (runLine ? runLine.state === 'missing' && !!last.to : delivered?.state === 'undelivered') && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={lastTo}

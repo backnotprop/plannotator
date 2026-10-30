@@ -6,12 +6,18 @@
  *
  * - `launch.error` → failed (or missing, when the CLI was gone).
  * - The host says it waits on a prompt (`status: waiting` + `waitingFor`) →
- *   waiting_terminal, live or not: a session blocked on a dialog may still
- *   poll. (PR 2 adds `waiting_answer` from our own open question first.)
+ *   waiting_terminal, unless the session is live and idle: a session blocked
+ *   on a dialog may still poll busy, but an idle one is blocked on nothing
+ *   (the person answered in Terminal and the turn ended). (PR 2 adds
+ *   `waiting_answer` from our own open question first.)
+ * - A reply's respawn that failed, or never connected within the grace →
+ *   failed (missing when the CLI is gone), with Try again; it is never
+ *   retried by itself.
  * - Live and busy → working; live and idle → no line, except while the turn
- *   the start was for has not been taken yet (the session connected and is
- *   about to take it): still starting, so the line does not blink out.
- * - Not live: the CLI gone → missing; under a minute since the (re)start →
+ *   the start was for has not visibly begun (not taken yet, or taken but not
+ *   polled busy nor answered): still starting, so the line does not blink out.
+ * - Not live: the CLI gone → missing while a message waits for it (else no
+ *   line: nothing waits on it); under a minute since the (re)start →
  *   starting; the host lists it stopped, done or not at all → stopped; never
  *   seen live a minute after start → failed ("not connected"); else stopped.
  */
@@ -36,7 +42,7 @@ export interface InboxRunEvidence {
   cliAvailable: boolean | null;
   /** The mod's poll: null when not live. */
   live: { busy: boolean | null; busySince: number | null } | null;
-  /** A message to the agent waits to be taken as a turn: the first one, or the reply that respawned it. */
+  /** A message to the agent waits for its turn to begin (not taken, or taken but not yet busy nor answered): the first one, or the reply that respawned it. */
   turnWaiting: boolean;
   /** The session took a message at least once (it connected). */
   seenLive: boolean;
@@ -44,6 +50,8 @@ export interface InboxRunEvidence {
   host: InboxRunHostState | null;
   /** When the host was first seen waiting on a prompt. */
   waitingSince: number | null;
+  /** The reply's respawn did not take: its cause (it exited non-zero, or never connected). Null otherwise. */
+  respawnFailed: string | null;
   /** When the person pressed Stop, while it still holds. */
   stoppedByPersonAt: number | null;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
@@ -73,11 +81,14 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
     return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at });
   }
   const host = e.host === "absent" ? null : e.host;
-  if (host?.status === "waiting" && host.waitingFor) return line("waiting_terminal", { since: iso(e.waitingSince) });
+  const idle = e.live !== null && e.live.busy !== true;
+  if (host?.status === "waiting" && host.waitingFor && !idle) return line("waiting_terminal", { since: iso(e.waitingSince) });
+  // Only while the reply waits for it: re-addressed to another session, nothing here waits any more.
+  if (!e.live && e.respawnFailed && e.turnWaiting) return e.cliAvailable === false ? line("missing") : line("failed", { cause: e.respawnFailed, again: true });
   const starting = () => line("starting", { since: iso(e.startedAt), again: e.again });
   const inGrace = e.now - e.startedAt < INBOX_RUN_START_GRACE_MS;
   if (e.live) return e.live.busy === true ? line("working", { since: iso(e.live.busySince) }) : e.turnWaiting && inGrace ? starting() : null;
-  if (e.cliAvailable === false) return line("missing");
+  if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
   if (!e.seenLive && !hostStopped) return line("failed", { cause: "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?" });
