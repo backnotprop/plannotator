@@ -2373,6 +2373,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const listener of deliveryListeners) listener();
     },
     log: (line) => process.stderr.write(`${line}\n`),
+    // The permission hook runs this Plannotator: the CLI's own argv when it gave one.
+    selfCommand: options.selfCommand?.length ? options.selfCommand : undefined,
   });
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
