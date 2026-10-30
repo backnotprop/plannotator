@@ -321,7 +321,7 @@ test('Artifacts opens beside the thread on its tab: a grid, newest message first
   await shot(page, '02b-artifacts-desktop-end');
 });
 
-test('a tile opens the viewer in a tab; stepping keeps thread order over the files only; closing returns to the tile', async () => {
+test('a tile opens the viewer in a tab; stepping keeps thread order over the files only; closing the last tab closes the pane', async () => {
   const page = world.page;
   const spec = tiles().nth(9);
   await spec.click();
@@ -340,14 +340,20 @@ test('a tile opens the viewer in a tab; stepping keeps thread order over the fil
   // A step replaces the tab.
   await expect(page.locator('[data-file-tab]')).toHaveCount(1);
   await expect(page.locator('[data-file-tab]')).toContainText('checkout-drawer.html');
-  // The tab's close: back on the Artifacts tab, focus on the file's tile.
+  // The last tab's close: the pane closes, back to the thread alone even though Artifacts was shown first (the review
+  // of #2282), focus on the folder button.
   await page.locator('[data-attachment-pane]').getByRole('button', { name: 'Close checkout-drawer.html' }).click();
   await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}$`));
+  await expect(artifactsButton()).toBeFocused();
+  // The folder opens the pane again, on Artifacts.
+  await artifactsButton().click();
+  await expect(tiles()).toHaveCount(11);
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}&artifacts$`));
-  await expect(tiles().nth(10)).toBeFocused();
 });
 
-test('Escape and the pressed button close the pane, focus on the button; a reload keeps it', async () => {
+test('Escape and the lit folder button close the pane, focus on the button; a reload keeps it', async () => {
   const page = world.page;
   await page.reload();
   await expect(tiles()).toHaveCount(11);
@@ -357,7 +363,7 @@ test('Escape and the pressed button close the pane, focus on the button; a reloa
   await expect(page.locator('[data-artifacts-view]')).toHaveCount(0);
   await expect(artifactsButton()).toBeFocused();
   await expect(page.locator('section.ib-pane > .ib-pbody')).toBeVisible();
-  // The button again, then pressed: the pane closes.
+  // The button again, then the lit folder: the pane closes.
   await artifactsButton().click();
   await expect(tiles()).toHaveCount(11);
   await artifactsButton().click();
