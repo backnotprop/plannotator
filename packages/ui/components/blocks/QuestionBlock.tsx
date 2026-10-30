@@ -276,6 +276,18 @@ export interface QuestionBlockProps {
    *  open a gallery of that question's choices (the Plannotator Inbox's option
    *  sets). Absent: the zoom calls `onImageClick(url, alt)` as before. */
   onZoomChoice?: (key: string, index: number, url: string, alt: string) => void;
+  /** The host's words for a card's chrome, per question (ui seam; the
+   *  Plannotator Inbox labels a permission prompt "Permission" and its
+   *  free-text row "Deny, and tell it why…"): `eyebrow` replaces "Question
+   *  N of M", `otherPlaceholder` replaces "Other…". Return undefined (or
+   *  leave a field out) for the card's own words. Absent: today's card. */
+  chrome?: (question: IndexedQuestion) => QuestionChrome | undefined;
+}
+
+/** A host's words for a card's chrome (`chrome`). */
+export interface QuestionChrome {
+  eyebrow?: string;
+  otherPlaceholder?: string;
 }
 
 /** The picture tile's label (`pictureBadge`): a small dark chip over the picture's top-left corner. */
@@ -327,6 +339,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   pictureChoices = true,
   pictureBadge,
   onZoomChoice,
+  chrome,
 }) => {
   const { question, number } = indexed;
   const resolveImage = useImageResolver();
@@ -618,9 +631,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     if (moved || selecting) event.preventDefault();
   };
 
-  const eyebrow = number > 0
+  const words = chrome?.(indexed);
+  const eyebrow = words?.eyebrow ?? (number > 0
     ? `Question ${number} of ${total}${question.kind === 'multi' ? ' · pick any' : ''}`
-    : `Question${question.kind === 'multi' ? ' · pick any' : ''}`;
+    : `Question${question.kind === 'multi' ? ' · pick any' : ''}`);
   const groupName = `question-${uid}`;
   const inputType = question.kind === 'multi' ? 'checkbox' : 'radio';
   const storedOther = answer?.other ?? '';
@@ -989,7 +1003,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   }}
                   onBlur={() => setOtherFocused(false)}
                   disabled={readOnly}
-                  placeholder={readOnly ? '' : 'Other…'}
+                  placeholder={readOnly ? '' : (words?.otherPlaceholder ?? 'Other…')}
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
                   className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
                 />

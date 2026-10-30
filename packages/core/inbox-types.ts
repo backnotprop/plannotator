@@ -828,7 +828,7 @@ export interface InboxLaunchRecord {
 }
 
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
-export type InboxRunState = "starting" | "working" | "waiting_terminal" | "stopped" | "failed" | "missing";
+export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing";
 
 /** What a launched thread's run line shows (the thread route's `run`). */
 export interface InboxRun {
@@ -838,7 +838,7 @@ export interface InboxRun {
   /** The project's name (the line's "in <project>"). */
   project: string;
   folder: string;
-  /** Since when: the start (starting), the turn (working), the prompt (waiting_terminal), the stop. */
+  /** Since when: the start (starting), the turn (working), the prompt (waiting_answer, waiting_terminal), the stop. */
   since: string | null;
   /** `starting` after a reply or Try again ("Starting … again"). */
   again: boolean;

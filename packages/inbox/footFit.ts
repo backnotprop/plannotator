@@ -20,8 +20,9 @@ export type OpenQuestionsLabelForm = 'full' | 'short' | 'count';
 export const OPEN_QUESTIONS_LABEL_FORMS: readonly OpenQuestionsLabelForm[] = ['full', 'short', 'count'];
 
 /** The visible words of each form: "6 open questions" / "6 open" / "6". */
-export function openQuestionsFormText(n: number, form: OpenQuestionsLabelForm, noun: 'question' | 'action item' = 'question'): string {
+export function openQuestionsFormText(n: number, form: OpenQuestionsLabelForm, noun: 'question' | 'action item' | 'permission' = 'question'): string {
   if (form === 'count') return String(n);
+  if (noun === 'permission') return form === 'short' ? `${n} waiting` : `${n} permission${n === 1 ? '' : 's'} waiting`;
   if (form === 'short') return `${n} open`;
   return `${n} open ${noun}${n === 1 ? '' : 's'}`;
 }
@@ -161,7 +162,8 @@ function rowMids(row: Element): number[] {
 export function drawOpenQuestionsForm(button: HTMLElement, fit: FootFit): void {
   const words = button.querySelector<HTMLElement>('[data-oq-words]');
   const n = Number(button.getAttribute('data-oq-n') ?? '0');
-  const noun = button.getAttribute('data-oq-noun') === 'action item' ? 'action item' : 'question';
+  const attr = button.getAttribute('data-oq-noun');
+  const noun = attr === 'action item' || attr === 'permission' ? attr : 'question';
   if (words) words.textContent = openQuestionsFormText(n, fit.form, noun);
   button.setAttribute('data-label-form', fit.form);
   button.toggleAttribute('data-fit-tight', fit.tight);

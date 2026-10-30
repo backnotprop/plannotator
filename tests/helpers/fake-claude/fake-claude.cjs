@@ -30,6 +30,17 @@
  * `workMs` (and while `hold` or `waiting` is set) it answers through the
  * Inbox's MCP `send_message` with `reply_to`, and goes idle. `waiting` makes
  * the host list it as waiting on a permission prompt meanwhile.
+ *
+ * Permission prompts (`prompts`: a list of { tool_name, tool_input,
+ * permission_suggestions }, played in each turn, in order): as Claude Code
+ * does, the session lists itself `waiting` on a "permission prompt" and runs
+ * the settings file's PermissionRequest command (`/bin/sh -c`, matcher `*`)
+ * with the real stdin JSON (bg-perm-test/RESULTS.md) and the settings' env.
+ * Allow runs the tool, deny goes on without it; no output leaves it blocked
+ * on the built-in dialog until `localAnswer` is set: that is the person
+ * answering in `claude attach`, which ends the hook (SIGTERM) and goes on.
+ * Each prompt is one line of permissions.jsonl: the tool, the hook's stdout
+ * (parsed), its exit code and time, and the outcome (ran, denied, local).
  */
 const fs = require("fs");
 const path = require("path");
@@ -227,18 +238,91 @@ async function session(sessionId) {
   const dataDir = env.PLANNOTATOR_DATA_DIR;
   const registry = readJson(path.join(dataDir, "inbox", "inbox.json"), null);
   if (!registry) return;
-  const base = `http://127.0.0.1:${registry.port}`;
-  const headers = { authorization: `Bearer ${registry.token}`, "content-type": "application/json" };
+  // Read again after a failed poll: a restarted Inbox may have a new port and token.
+  let base = `http://127.0.0.1:${registry.port}`;
+  let headers = { authorization: `Bearer ${registry.token}`, "content-type": "application/json" };
+  const reconnect = () => {
+    const next = readJson(path.join(dataDir, "inbox", "inbox.json"), null);
+    if (!next) return;
+    base = `http://127.0.0.1:${next.port}`;
+    headers = { authorization: `Bearer ${next.token}`, "content-type": "application/json" };
+  };
   const startedAt = new Date(agent.startedAt).toISOString();
   let busy = false;
   let idleSince = new Date().toISOString();
   let stopped = false;
+  /** The permission hook running now: it ends with the session, as Claude Code's own hooks do. */
+  let hookChild = null;
   process.on("SIGTERM", () => {
     stopped = true;
+    if (hookChild) {
+      try {
+        hookChild.kill("SIGTERM");
+      } catch {}
+    }
     process.exit(0);
   });
   const post = (p, body) => fetch(base + p, { method: "POST", headers, body: JSON.stringify({ session: sessionId, host: "claude-code", ...body }) });
   const taken = new Set();
+
+  /** One permission prompt, as Claude Code plays it: the hook, then allow, deny, or blocked until answered locally. */
+  const prompt = async (spec) => {
+    const event = {
+      session_id: sessionId,
+      transcript_path: path.join(STATE, `${sessionId}.jsonl`),
+      cwd: agent.cwd,
+      prompt_id: crypto.randomUUID(),
+      permission_mode: agent.permissionMode || "default",
+      effort: { level: "low" },
+      hook_event_name: "PermissionRequest",
+      tool_name: spec.tool_name,
+      tool_input: spec.tool_input || {},
+      ...(spec.permission_suggestions ? { permission_suggestions: spec.permission_suggestions } : {}),
+    };
+    const entry = (((settings.hooks || {}).PermissionRequest || [])[0] || { hooks: [] }).hooks[0];
+    updateAgent(sessionId, { status: "waiting", waitingFor: "permission prompt" });
+    const started = Date.now();
+    let stdout = "";
+    let exitCode = null;
+    let local = false;
+    if (entry && entry.command) {
+      const hookEnv = { ...process.env, ...env, CLAUDE_CODE_SESSION_ID: sessionId, CLAUDE_PROJECT_DIR: agent.cwd };
+      const child = spawn("/bin/sh", ["-c", `exec ${entry.command}`], { cwd: agent.cwd, env: hookEnv, stdio: ["pipe", "pipe", "ignore"] });
+      hookChild = child;
+      fs.appendFileSync(path.join(STATE, "hookpids.log"), `${child.pid}\n`);
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stdin.end(JSON.stringify(event));
+      let done = false;
+      const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+      void exited.then(() => (done = true));
+      while (!done && !stopped) {
+        if (config().localAnswer) {
+          // Answered in `claude attach`: Claude Code closes the dialog and ends the hook.
+          local = true;
+          child.kill("SIGTERM");
+          break;
+        }
+        await sleep(100);
+      }
+      if (stopped) child.kill("SIGTERM");
+      exitCode = await exited;
+      // The hook's own result, as soon as it exits (permissions.jsonl follows once the prompt is settled).
+      fs.appendFileSync(path.join(STATE, "hooks.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, stdout, exitCode, local, ms: Date.now() - started })}\n`);
+      hookChild = null;
+    }
+    let output = null;
+    try {
+      output = stdout.trim() ? JSON.parse(stdout) : null;
+    } catch {}
+    const decision = output && output.hookSpecificOutput && output.hookSpecificOutput.decision;
+    let outcome = local ? "local" : decision ? (decision.behavior === "allow" ? "ran" : "denied") : "blocked";
+    // No decision: the built-in dialog stays until someone answers it locally.
+    while (outcome === "blocked" && !stopped && !config().localAnswer) await sleep(150);
+    if (outcome === "blocked" && config().localAnswer) outcome = "local";
+    fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, ms: Date.now() - started })}\n`);
+    updateAgent(sessionId, { status: "busy", waitingFor: null });
+    return { tool: spec.tool_name, outcome };
+  };
 
   const work = async (command) => {
     await post("/api/inbox/bridge/event", { type: "delivered", id: command.id }).catch(() => {});
@@ -247,10 +331,16 @@ async function session(sessionId) {
     busy = true;
     updateAgent(sessionId, { status: "busy" });
     await post("/api/inbox/bridge/event", { type: "state", busy: true }).catch(() => {});
+    const outcomes = [];
+    for (const spec of config().prompts || []) {
+      if (stopped) return;
+      outcomes.push(await prompt(spec));
+    }
     const until = Date.now() + (config().workMs ?? 800);
     while (!stopped && (Date.now() < until || config().hold || config().waiting)) await sleep(150);
     const first = command.body.split("\n")[0].slice(0, 60);
-    const body = `${config().answer || "Done"}: ${first} (${env.PLANNOTATOR_LAUNCH || "no launch"})`;
+    const tools = outcomes.length > 0 ? ` [${outcomes.map((o) => `${o.tool} ${o.outcome}`).join(", ")}]` : "";
+    const body = `${config().answer || "Done"}: ${first} (${env.PLANNOTATOR_LAUNCH || "no launch"})${tools}`;
     await fetch(`${base}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
@@ -271,6 +361,7 @@ async function session(sessionId) {
   while (!stopped) {
     const response = await post("/api/inbox/bridge/poll", { waitMs: 1000, project_path: agent.cwd, started_at: startedAt, busy, idle_since: busy ? null : idleSince }).catch(() => null);
     if (!response) {
+      reconnect();
       await sleep(300);
       continue;
     }

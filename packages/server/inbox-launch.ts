@@ -39,10 +39,14 @@
  *   POST /api/inbox/launch/:id/delete    stop, rm, and the launch folder; the thread stays
  *   POST /api/inbox/launch/:id/retry     Try again after a failed start
  *   POST /api/inbox/launch/settings      `{ full_permissions }` (Settings → Agents)
+ *
+ * And one route for the launched session's own permission hook, guarded like
+ * the bridge (inbox-launch-permission.ts):
+ *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { INBOX_HOST_NAMES, inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -55,12 +59,34 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentVersionRun, claudeCodeInboxToolOn, claudeCodePluginEnabled, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { claudeAttachCommand, claudeTrustCommand, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost } from "./inbox-launch-claude";
 import { launchPlainEnv, launchSettingsEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { createLaunchPermissions } from "./inbox-launch-permission";
 
 const HOST = "claude-code";
 const AGENT_NAME = INBOX_HOST_NAMES[HOST] ?? "Claude Code";
 /** The agent's own Inbox call never prompts, whatever the person's permission mode. */
 const INBOX_TOOL_PERMISSION = `mcp__plannotator__${INBOX_TOOL_NAME}`;
 const AVAILABLE_TTL_MS = 30_000;
+/** Claude Code's hook timeout for the permission hook: four days, as the plugin's ExitPlanMode hook. */
+const PERMISSION_HOOK_TIMEOUT_S = 345_600;
+
+/**
+ * The argv that runs this same Plannotator: the compiled binary alone, or bun
+ * plus the entry script in a source run (as `selfCommand` in apps/hook).
+ */
+export function plannotatorSelfCommand(argv: readonly string[] = process.argv, execPath: string = process.execPath, exists: (path: string) => boolean = existsSync): string[] {
+  const script = argv[1];
+  if (script && /\.(?:[cm]?[jt]s)$/.test(script) && exists(script)) return [execPath, script];
+  return [execPath];
+}
+
+/** One shell word: single-quoted. */
+const shellWord = (word: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
+
+/** The per-launch PermissionRequest hook: every tool (ExitPlanMode passes straight through to plan review). */
+export function launchPermissionHooks(self: readonly string[]) {
+  const command = [...self, "inbox", "permission-hook"].map(shellWord).join(" ");
+  return { PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command, timeout: PERMISSION_HOOK_TIMEOUT_S }] }] };
+}
 const HOST_TTL_MS = 10_000;
 
 type Availability = { ok: true; version: string } | { ok: false; missing: boolean; reason: string };
@@ -108,6 +134,8 @@ export function createInboxLaunch(options: {
   json: (body: unknown, status?: number) => Response;
   /** The windows should read the list and open thread again (a start settled, a stop). */
   onChange: () => void;
+  /** The argv that runs this Plannotator (the permission hook's command); default `plannotatorSelfCommand()`. */
+  selfCommand?: readonly string[];
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -272,6 +300,7 @@ export function createInboxLaunch(options: {
       respawnFailed: respawnFailedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
       attachCommand: launch.session_ref ? claudeAttachCommand(launch.folder, launch.session_ref) : null,
+      permissionSince: permissions.openSince(root),
     });
   };
 
@@ -283,6 +312,8 @@ export function createInboxLaunch(options: {
   const needsHost = (root: InboxMessage): boolean => {
     const launch = root.launch!;
     if (launch.deleted_at || launch.error || !launch.session_ref) return false;
+    // A permission question waits: the host says whether the person answered it in Terminal meanwhile.
+    if (permissions.holds(launch.id)) return true;
     const cached = hostStateOf(launch.session_ref);
     if (cached && cached !== "absent" && cached.status === "waiting") return true;
     const memo = memoOf(launch);
@@ -294,6 +325,17 @@ export function createInboxLaunch(options: {
   };
 
   const roots = () => store.launchedRoots();
+  const permissions = createLaunchPermissions({
+    store,
+    launchDir,
+    rootOf: (launchId) => roots().find((root) => root.launch!.id === launchId && !root.launch!.deleted_at) ?? null,
+    roots: () => roots().filter((root) => !root.launch!.deleted_at),
+    displayFolder: options.displayFolder,
+    host: { stateOf: (ref) => hostStateOf(ref), readAt: () => hostView?.at ?? 0, refresh: () => void refreshHost() },
+    onChange: options.onChange,
+    now,
+    log,
+  });
   const rootById = (launchId: string): InboxMessage => {
     const root = roots().find((m) => m.launch!.id === launchId);
     if (!root) throw new InboxError("launch_not_found", `No launch ${launchId}.`);
@@ -310,6 +352,7 @@ export function createInboxLaunch(options: {
     const all = roots().filter((root) => !root.launch!.deleted_at);
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
+    permissions.sweep();
     if (!watched) return;
     if (lastAvailable === null || (availability && now() - availability.at > AVAILABLE_TTL_MS)) refreshAvailable();
     if (hostStale() && all.some(needsHost)) void refreshHost();
@@ -326,6 +369,8 @@ export function createInboxLaunch(options: {
       ...(model ? { model } : {}),
       env: launchSettingsEnv(login, { launchId: launch.id, key: randomBytes(32).toString("hex"), dataDir: isDefaultDataDir ? null : options.dataDir, fullPermissions }),
       permissions: { allow: [INBOX_TOOL_PERMISSION] },
+      // Permission prompts come to the launch thread as questions (inbox-launch-permission.ts).
+      hooks: launchPermissionHooks(options.selfCommand ?? plannotatorSelfCommand()),
     };
     writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
     chmodSync(path, 0o600);
@@ -459,6 +504,8 @@ export function createInboxLaunch(options: {
         startLog(launch.id, `stop ${launch.session_ref}: exit ${result.exitCode}\n${result.stdout}${result.stderr}`);
         memo.stoppedAt = now();
         memo.startedAt = Math.min(memo.startedAt, now() - INBOX_RUN_START_GRACE_MS);
+        // Nothing waits on a stopped session's prompt: its questions are withdrawn at once.
+        permissions.withdrawAll(root);
         // Its last polls still read as live for a while: from now it counts as live only once it polls anew.
         if (root.to) memo.quietPolls = options.live.runStateOf(root.to.session)?.polls ?? memo.quietPolls;
         hostView = null;
@@ -485,6 +532,7 @@ export function createInboxLaunch(options: {
           const rm = await host.rm(launch.session_ref);
           log(`Inbox launch ${launch.id}: deleted (stop ${stop.exitCode}, rm ${rm.exitCode})`);
         }
+        permissions.withdrawAll(root);
         // Never `claude purge` here: it clears every session of the folder, and this is the person's project.
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         store.settleLaunch(root.id, { deleted_at: new Date(now()).toISOString() });
@@ -524,6 +572,17 @@ export function createInboxLaunch(options: {
     route,
     sweep,
     stop: () => unsubscribe(),
+
+    /**
+     * The launched session's permission hook (`POST /api/inbox/launch/:id/permission`), after the
+     * caller's connection guard: null for any other path. Off, 404 `launch_off` (the hook then says nothing).
+     */
+    async permissionRoute(req: Request, path: string): Promise<Response | null> {
+      const match = /^\/api\/inbox\/launch\/(lch_[0-9A-HJKMNP-TV-Z]{26})\/permission$/.exec(path);
+      if (!match) return null;
+      if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+      return permissions.handle(req, match[1]!);
+    },
 
     /** Compose's `to.launch`, when launch is on: `{ agent, project_id }`; null for any other `to`. */
     target(to: unknown): { agent: InboxLaunchAgent; project_id: string } | null {
@@ -592,6 +651,8 @@ export function createInboxLaunch(options: {
       if (!root?.launch) return row;
       const runLine = runOfRoot(root);
       if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
+      // A permission question waits on the person: the session is blocked on them (screen 09).
+      if (runLine?.state === "waiting_answer" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
       const word = runLine?.state === "starting" || runLine?.state === "working" ? runLine.state : null;
       // The person's item waits on the start, not on a session that ended: the row says "Starting", no tick.
       // A start that failed, or an agent that is gone, uses the existing "not delivered" tick (screens 14, 15).

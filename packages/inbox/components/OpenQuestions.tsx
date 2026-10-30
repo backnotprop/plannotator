@@ -15,6 +15,7 @@ import {
   type OpenQuestionPlace,
   type OpenQuestionsNoun,
 } from '../openQuestions';
+import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
 import { decideThreadLabel } from '../decisions/entry';
@@ -116,8 +117,14 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   // Only action items wait (Re-ask is offered): the button counts them.
-  const noun: OpenQuestionsNoun = questions.length === 0 && actions > 0 ? 'action item' : 'question';
-  const n = noun === 'question' ? questions.length : actions;
+  // Only a launched agent's permission prompts wait: "1 permission waiting" (screen 09).
+  const noun: OpenQuestionsNoun =
+    questions.length === 0 && actions > 0
+      ? 'action item'
+      : questions.length > 0 && questions.every((q) => isInboxPermissionSession(q.question.asked_by_agent_id))
+        ? 'permission'
+        : 'question';
+  const n = noun === 'action item' ? actions : questions.length;
   const reaskTipId = useId();
   const skipTipId = useId();
   const max: OpenQuestionsLabelForm = phone ? 'short' : 'full';

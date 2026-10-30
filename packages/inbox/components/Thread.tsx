@@ -9,6 +9,7 @@ import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { INBOX_PERMISSION_EYEBROW, INBOX_PERMISSION_REASON_PLACEHOLDER, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxListRow, type InboxSectionId, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -280,6 +281,10 @@ export function commentTags(record: InboxAnnotationRecord): string[] {
 }
 
 const NO_SENT_ANSWERS: readonly SentAnswerGroup[] = [];
+
+/** A permission prompt's card (launch): "Permission" over it, and the free-text row is the reason for a Deny. */
+const PERMISSION_CHROME = { eyebrow: INBOX_PERMISSION_EYEBROW, otherPlaceholder: INBOX_PERMISSION_REASON_PLACEHOLDER };
+const permissionChrome = () => PERMISSION_CHROME;
 
 /** The URL of a fence's embed document: the Inbox keeps the page and serves it under its own policy. */
 async function inboxEmbedUrl(html: string): Promise<string | null> {
@@ -752,9 +757,12 @@ export function MessageBody({
     [message.questions],
   );
 
+  // A Claude Code permission prompt (launch): "Permission" over it, and its free-text row is the Deny's reason.
+  const permission = message.author.kind === 'agent' && isInboxPermissionSession(message.author.session);
+
   return (
     <ImageResolverContext.Provider value={resolveImage}>
-    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
+    <div className="ib-body" data-message-id={message.id} data-permission={permission ? '' : undefined} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
       {refCard}
       {(!(replyParts || actionsSent) || shown !== '') && (
       <Viewer
@@ -792,6 +800,7 @@ export function MessageBody({
         questionContractLines
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
+        questionChrome={permission ? permissionChrome : undefined}
         questionPictureBadge={pictureBadge}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}

@@ -2508,7 +2508,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return mcp.fetch(req);
     }
 
-    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/")) {
+    // A launched session's permission hook (inbox-launch-permission.ts): guarded like the bridge below
+    // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
+    const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
       if (via === "tailnet") return localOnly();
@@ -2519,6 +2522,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const match = /^Bearer\s+(\S+)$/i.exec((req.headers.get("authorization") ?? "").trim());
       if (!match || !tokensEqual(match[1]!, token)) {
         return json({ error: "Missing or wrong Inbox token.", code: "unauthorized" }, 401);
+      }
+      if (isPermissionHook) {
+        try {
+          return (await launch.permissionRoute(req, path)) ?? json({ error: "Not found", code: "not_found" }, 404);
+        } catch (error) {
+          return errorResponse(error);
+        }
       }
       if (path === "/api/inbox/control/stop") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);

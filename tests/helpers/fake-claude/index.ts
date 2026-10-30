@@ -38,6 +38,29 @@ export interface FakeClaudeConfig {
   bgDelayMs?: number;
   /** A session takes a command, then reports busy only after this long (ms): the real mod's gap until its next poll. */
   busyDelayMs?: number;
+  /** Permission prompts each turn plays, in order: the settings file's PermissionRequest hook runs with Claude Code's stdin. */
+  prompts?: FakePermissionPrompt[];
+  /** The person answers the open dialog in `claude attach`: the hook is ended (SIGTERM) and the session goes on. */
+  localAnswer?: boolean;
+}
+
+/** One tool call that needs permission (Claude Code's PermissionRequest stdin, less what the session fills in). */
+export interface FakePermissionPrompt {
+  tool_name: string;
+  tool_input?: Record<string, unknown>;
+  permission_suggestions?: Record<string, unknown>[];
+}
+
+/** What a permission prompt came to (permissions.jsonl). */
+export interface FakePermissionResult {
+  sessionId: string;
+  tool: string;
+  input: Record<string, unknown>;
+  /** The hook's stdout, parsed; null when it printed nothing. */
+  output: { hookSpecificOutput?: { hookEventName?: string; decision?: { behavior: string; updatedInput?: unknown; updatedPermissions?: unknown[]; message?: string } } } | null;
+  exitCode: number | null;
+  outcome: "ran" | "denied" | "local" | "blocked";
+  ms: number;
 }
 
 export interface FakeClaudeCall {
@@ -77,6 +100,10 @@ export interface FakeClaude {
   logins(): number;
   /** The ids of the commands sessions took, in order. */
   delivered(): string[];
+  /** Each permission prompt a session played, in order. */
+  permissions(): FakePermissionResult[];
+  /** Each permission hook run, as it exited: its raw stdout and exit code. */
+  hooks(): { sessionId: string; tool: string; stdout: string; exitCode: number | null; local: boolean; ms: number }[];
   /** Take `claude` off PATH (uninstalled) or put it back. */
   setInstalled(on: boolean): void;
   /** SIGTERM every fake session still running that this fake started; returns how many. */
@@ -150,6 +177,8 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
       const file = join(state, "logins.log");
       return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
     },
+    permissions: () => lines<FakePermissionResult>(join(state, "permissions.jsonl")),
+    hooks: () => lines<ReturnType<FakeClaude["hooks"]>[number]>(join(state, "hooks.jsonl")),
     delivered() {
       const file = join(state, "delivered.log");
       return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
@@ -159,13 +188,16 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
       else rmSync(claude, { force: true });
     },
     stopAll() {
-      const file = join(state, "pids.log");
-      if (!existsSync(file)) return 0;
       let stopped = 0;
-      for (const pid of new Set(readFileSync(file, "utf8").split("\n").filter(Boolean).map(Number))) {
+      const pidsOf = (name: string) => {
+        const file = join(state, name);
+        return existsSync(file) ? [...new Set(readFileSync(file, "utf8").split("\n").filter(Boolean).map(Number))] : [];
+      };
+      const candidates = [...pidsOf("pids.log").map((pid) => ({ pid, hook: false })), ...pidsOf("hookpids.log").map((pid) => ({ pid, hook: true }))];
+      for (const { pid, hook } of candidates) {
         const command = spawnSync("/bin/ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
-        // Only a process that is still this fake's session (never a reused pid).
-        if (!command.includes(SCRIPT) || !command.includes("__session")) continue;
+        // Only a process that is still this fake's session, or a permission hook it ran (never a reused pid).
+        if (hook ? !command.includes("permission-hook") : !command.includes(SCRIPT) || !command.includes("__session")) continue;
         try {
           process.kill(pid, "SIGTERM");
           stopped++;
