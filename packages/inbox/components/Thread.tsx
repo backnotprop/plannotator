@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -743,8 +743,12 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
-  /** Study (throwaway): the thread in full screen (variant B). */
+  /**
+   * The thread in full screen: the sidebar and the list hidden, the thread at a reading measure. The header leads with
+   * "‹ Inbox" (back to them) in place of the button that hid them, and has no ×.
+   */
   threadAlone?: boolean;
+  /** Enter or leave the thread's full screen; absent where it has none (a phone, a thread opened from a card). */
   onFull?: (on: boolean) => void;
   /** A line under the subject, from the window (the tour's notifications ask, once more, in the first real thread). */
   notice?: React.ReactNode;
@@ -1096,7 +1100,7 @@ function lastAgentMessageId(messages: readonly { id: string; author: { kind: str
   return '';
 }
 
-export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, runsVersion = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, onFilesRoute, decide = null , threadAlone = false, onFull }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, runsVersion = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, onFilesRoute, decide = null, threadAlone = false, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -3296,9 +3300,11 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   // The folder button: the thread's artifacts, and on a desktop its project folder too, so a thread with a folder and
   // nothing sent yet still has it (owner, 2026-10-27; PROJECT-FOLDER definition).
   const folderOnly = filesTabsOn && !hasArtifacts && files !== null && filesUi.folder != null;
-  // Beside the thread the pane is the files: its tab row closes it (×), so the header's button shows only while it is
-  // closed, the way in, with the thread's file count; the count is never on screen twice.
-  const artifactsButton = onArtifacts !== undefined && (hasArtifacts || artifactsOn || folderOnly) && !(filesTabsOn && filesUi.paneOpen);
+  // Beside the thread the folder button is the pane's toggle (approval "inbox-files-tabs", 2026-10-30): closed, it sits
+  // with the header's icons and carries the thread's file count; open, it moves to where the thread's × was, lit and
+  // without the count (the "1 of 3" under the file says it), and the × comes back when the pane closes.
+  const filesDoorOpen = filesTabsOn && filesUi.paneOpen;
+  const artifactsButton = onArtifacts !== undefined && (hasArtifacts || artifactsOn || folderOnly || filesDoorOpen);
   // Files beside the thread ("inbox-files-tabs"): opening the pane on Artifacts focuses its heading; closing it
   // (Escape, the pressed button) returns focus to the button when it was in the pane or nowhere. A change only,
   // never on the first draw.
@@ -3318,6 +3324,16 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     const stray = !active || active === document.body || !active.isConnected;
     if (stray) artifactsButtonRef.current?.focus();
   }, [filesUi.paneOpen]);
+  // The thread's full screen: the button pressed goes away (the other one takes its place), so focus follows to it
+  // when it was on the one pressed or nowhere. A change only, never on the first draw.
+  const aloneWas = useRef(threadAlone);
+  useLayoutEffect(() => {
+    if (aloneWas.current === threadAlone) return;
+    aloneWas.current = threadAlone;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    sectionRef.current?.querySelector<HTMLElement>(threadAlone ? '[data-full-back]' : '[data-full-in]')?.focus();
+  }, [threadAlone]);
   const openAttachment = file ? (allFiles.find((a) => a.id === file.id) ?? filesUi.projectAttachment(file.id)) : null;
   const fileOpen = openAttachment !== null;
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
@@ -3406,6 +3422,51 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       </button>
     </Tip>
   ) : null;
+
+  // The folder button (the Artifacts button where files cannot show beside the thread). One element, drawn in one of two
+  // places: with the header's icons while the pane is closed, at the header's end (the thread's × place) while it is open.
+  const folderButton = (
+    <Tip
+      content={
+        filesDoorOpen
+          ? 'Close the files'
+          : folderOnly
+            ? `Project folder: ${filesUi.folder!.path}`
+            : filesTabsOn
+              ? 'Open the files: every file, image and guided review in this thread, and the project folder'
+              : artifactsOn
+                ? 'Back to the thread'
+                : 'Artifacts: every file, image and guided review in this thread'
+      }
+    >
+      <button
+        ref={artifactsButtonRef}
+        type="button"
+        className="ib-iconbtn ib-artbtn"
+        aria-label={
+          filesDoorOpen
+            ? 'Close files'
+            : folderOnly
+              ? `Open files: project folder, ${folderLabel(filesUi.folder!)}`
+              : filesTabsOn
+                ? `Open files (${artifactList.length})`
+                : `Artifacts, ${artifactList.length}`
+        }
+        aria-pressed={filesTabsOn ? filesUi.paneOpen : artifactsOn}
+        aria-expanded={filesTabsOn ? filesUi.paneOpen : undefined}
+        onClick={() => (filesTabsOn ? filesUi.toggleDoor() : onArtifacts?.(!artifactsOn))}
+        data-artifacts-button=""
+        data-files-door={filesTabsOn ? (filesUi.paneOpen ? 'open' : 'closed') : undefined}
+      >
+        <Icon name={filesTabsOn ? 'folder' : 'artifacts'} size={17} />
+        {!folderOnly && !filesDoorOpen && (
+          <span className="ib-artbtn-n" aria-hidden="true" data-files-count="">
+            {artifactList.length}
+          </span>
+        )}
+      </button>
+    </Tip>
+  );
 
   return (
     <>
@@ -3503,36 +3564,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
               </span>
             )}
             {pinButton}
-            {artifactsButton && (
-              <Tip
-                content={
-                  folderOnly
-                    ? `Project folder: ${filesUi.folder!.path}`
-                    : filesTabsOn
-                      ? 'Open the files: every file, image and guided review in this thread, and the project folder'
-                      : artifactsOn
-                        ? 'Back to the thread'
-                        : 'Artifacts: every file, image and guided review in this thread'
-                }
-              >
-                <button
-                  ref={artifactsButtonRef}
-                  type="button"
-                  className="ib-iconbtn ib-artbtn"
-                  aria-label={folderOnly ? `Project folder, ${folderLabel(filesUi.folder!)}` : `Artifacts, ${artifactList.length}`}
-                  aria-pressed={filesTabsOn ? filesUi.paneOpen : artifactsOn}
-                  onClick={() => (filesTabsOn ? filesUi.toggleDoor() : onArtifacts?.(!artifactsOn))}
-                  data-artifacts-button=""
-                >
-                  <Icon name={filesTabsOn ? 'folder' : 'artifacts'} size={17} />
-                  {!folderOnly && (
-                    <span className="ib-artbtn-n" aria-hidden="true">
-                      {artifactList.length}
-                    </span>
-                  )}
-                </button>
-              </Tip>
-            )}
+            {artifactsButton && !filesDoorOpen && folderButton}
             {!one && !artifactsOn && (
               <Tip content={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}>
                 <button
@@ -3547,15 +3579,22 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
               </Tip>
             )}
             {archiveButton}
-            {phone || stacked || backBesideFile || threadAlone ? null : (
-              <>
+            {/* The end of the header: the lit folder while the pane is open, else the thread's ×. Keyed apart, so React
+                never turns one button into the other (focus on the folder would land on the × and close the thread). */}
+            {artifactsButton && filesDoorOpen ? (
+              <Fragment key="door">
+                <span className="ib-vsep" aria-hidden="true" />
+                {folderButton}
+              </Fragment>
+            ) : phone || stacked || backBesideFile || threadAlone ? null : (
+              <Fragment key="close">
                 <span className="ib-vsep" aria-hidden="true" />
                 <Tip content="Close">
                   <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close the thread">
                     <Icon name="x" />
                   </button>
                 </Tip>
-              </>
+              </Fragment>
             )}
           </>
         )}

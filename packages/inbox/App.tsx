@@ -1397,6 +1397,7 @@ function Inbox() {
   // is open and comes back on leaving, without writing the person's stored choice. ⌘B there opens it
   // for this visit only.
   const [settingsSidebar, setSettingsSidebar] = useState(false);
+  // The thread in full screen (`full` below): Escape's ladder reads it.
   const threadFullRef = useRef(false);
   useEffect(() => {
     if (route.page !== 'settings') setSettingsSidebar(false);
@@ -1414,6 +1415,7 @@ function Inbox() {
       if (selectionToolbarShowing()) return;
       // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
+      // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
       if (!now.guide && !now.artifacts && threadFullRef.current) {
         setThreadFull(false);
@@ -1713,8 +1715,9 @@ function Inbox() {
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
+  // The thread in full screen (the header's "Hide the sidebar and the list"): the sidebar and the list hide for this
+  // thread, without writing the person's sidebar choice. It ends with the thread, with "‹ Inbox" or Escape.
   const [threadFull, setThreadFull] = useState(false);
-  threadFullRef.current = threadFull;
   useEffect(() => {
     if (!route.thread) setThreadFull(false);
   }, [route.thread]);
@@ -2978,6 +2981,7 @@ function Inbox() {
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
   const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard;
+  threadFullRef.current = full;
   const backToCard = () => close({ page: 'board', project: null, thread: null, board: route.board ?? 'lanes', card: fromCard });
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;

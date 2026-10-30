@@ -232,7 +232,10 @@ export function useFilesTabs(input: FilesTabsInput) {
 
   /** The pane's × (and Escape's last step): back to the thread alone; its tabs close. */
   const closePane = () => input.leave(null, () => input.showArtifacts(false));
-  /** The folder button in the thread header (shown only while the pane is closed): opens the pane, on the last file shown, else Artifacts. */
+  /**
+   * The folder button in the thread header, the pane's toggle: closed, it opens the pane (on the last file shown, else
+   * Artifacts); open, it sits lit where the thread's × was and closes the pane, as the pane's own × does.
+   */
   const toggleDoor = () => {
     if (paneOpen) {
       closePane();
