@@ -234,28 +234,31 @@ test('an agent and the person fill one thread with eleven artifacts', async () =
   expect(empty.thread_id).not.toBe(world.threadId);
 });
 
-test('the header: icons on the right with component tooltips, Artifacts with its count; Mark read keeps its label', async () => {
+test('the header: icons on the right with component tooltips, the folder with its count; Mark read keeps its label', async () => {
   const page = world.page;
   await page.goto(`${world.url}#thread=${world.threadId}`);
   const button = artifactsButton();
   await expect(button).toBeVisible();
-  await expect(button).toHaveAttribute('aria-label', 'Artifacts, 11');
+  // On a desktop the button is the Files pane's toggle (approval "inbox-files-tabs", 2026-10-30).
+  await expect(button).toHaveAttribute('aria-label', 'Open files (11)');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
   await expect(button).not.toHaveAttribute('title');
   await expect(header().locator('[data-mark-read]')).toContainText('Mark read');
   // Expand all is an icon now, named by its label.
   const expand = header().locator('[data-expand-all]');
   await expect(expand).toHaveAttribute('aria-label', /Expand all messages|Fold the earlier messages/);
   await expect(expand).toHaveText('');
-  // The order at the right: Artifacts, Expand, Archive, a hairline, the close.
+  // The order at the right: the folder, Expand, Archive, a hairline, the close (the thread's full screen and its
+  // hairline lead the header, before Mark read).
   const order = await header().evaluate((head) =>
     [...head.querySelectorAll('[data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map(
       (el) => el.getAttribute('data-artifacts-button') !== null ? 'artifacts' : el.hasAttribute('data-expand-all') ? 'expand' : el.hasAttribute('data-archive') ? 'archive' : el.classList.contains('ib-vsep') ? '|' : 'close',
     ),
   );
-  expect(order).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
+  expect(order.slice(-5)).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
   await button.hover();
-  await expect(page.locator('[data-pn-tooltip]')).toContainText('Artifacts: every file, image and guided review in this thread');
+  await expect(page.locator('[data-pn-tooltip]')).toContainText('Open the files: every file, image and guided review in this thread');
   await shot(page, '01-thread-header-desktop');
   await page.mouse.move(10, 600);
 });
@@ -265,6 +268,10 @@ test('Artifacts opens beside the thread on its tab: a grid, newest message first
   await artifactsButton().click();
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}&artifacts$`));
   await expect(artifactsButton()).toHaveAttribute('aria-pressed', 'true');
+  // Open, the folder is lit where the thread's × was, named for closing, with no count.
+  await expect(artifactsButton()).toHaveAccessibleName('Close files');
+  await expect(artifactsButton()).toHaveText('');
+  await expect(header().getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   await expect(page.locator('[data-artifacts-view] h2')).toBeFocused();
   // The thread column is always the thread: the grid is beside it, on the Artifacts tab.
   await expect(page.locator('section.ib-pane > .ib-pbody:not(.ib-artbody)')).toBeVisible();
@@ -376,7 +383,7 @@ test('a thread with no artifact: the button is its project folder\'s (no count);
   await page.goto(`${world.url}#thread=${world.emptyThread}`);
   await expect(page.locator('section.ib-pane [data-archive]')).toBeVisible();
   // On a desktop the thread's project folder keeps the button (owner, 2026-10-27): named for the folder, no count.
-  await expect(artifactsButton()).toHaveAttribute('aria-label', 'Project folder, checkout-web');
+  await expect(artifactsButton()).toHaveAttribute('aria-label', 'Open files: project folder, checkout-web');
   await page.goto(`${world.url}#thread=${world.emptyThread}&artifacts`);
   await expect(page.locator('[data-artifacts-empty]')).toContainText('No artifacts in this thread yet');
   await shot(page, '04-empty-desktop');
