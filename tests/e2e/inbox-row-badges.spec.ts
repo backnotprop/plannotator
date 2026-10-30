@@ -7,20 +7,23 @@
  *
  *  - Stopped is a red triangle alone, Holds up an amber triangle and its count;
  *    their accessible text stays "Stopped" and "Holds up 3".
- *  - The one-line row (approval "inbox-row-byline"): the project, the subject
- *    cell, then the agents' marks, the badge, the count and the time, each in
- *    its own column: every column's right edge lines up down the list, and
- *    every subject cell starts on one left edge.
+ *  - The one-line row (approvals "inbox-row-byline" and "list-rows-mail-icons"):
+ *    the project with the agents' marks right after it, the title cell, then
+ *    the badge, the count and the time, each in its own column: every
+ *    column's right edge lines up down the list, and every title cell starts
+ *    on one left edge.
  *  - Card A opens on the badge after the tooltip delay, and while the row has
  *    keyboard focus; a click's focus opens nothing.
- *  - Beside an open thread the two-line rows keep the card (approval
- *    "inbox-row-byline", 2026-10-29). Line 1 is the project, the thread pill
- *    and the time; line 2 is the subject, then at its right end the marks,
- *    the badge and the open count `?N` last. The subject is cut first: the
- *    marks, the badge and the count are never cut and end on the line's edge.
- *  - An iPhone (WebKit): icons only, no card, the same two lines. On a 320 or
- *    360 px phone the subject is still cut first, and the thread pill keeps a
- *    readable width.
+ *  - Beside an open thread the three-line rows keep the card (approval
+ *    "list-rows-mail-icons", 2026-10-30). Line 1 is the project, the agents'
+ *    marks and the time; line 2 is the thread's title, never cut (it wraps);
+ *    line 3 is the grey preview, then at its right end the badge and the open
+ *    count `?N` last. The preview is cut first: the badge and the count are
+ *    never cut and end on the line's edge. A long project wraps, and the marks
+ *    follow its last word, never dropped.
+ *  - An iPhone (WebKit): icons only, no card, the same three lines. On a 320
+ *    or 360 px phone the preview is still cut first, the title is whole, and a
+ *    long project's marks wrap after it.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs (desktop light and dark, beside a thread, both cards open, keyboard,
@@ -52,7 +55,7 @@ interface World {
   holding: string;
   /** A long project name, a long thread name, a long subject and two questions. */
   long: string;
-  /** No badge, no thread name, no count: the marks end line 2. */
+  /** No badge, no thread name, no count: no line 3. */
   news: string;
   /** Two agents in one thread. */
   pair: string;
@@ -111,6 +114,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     thread: 'ledger-migration-dry-run-before-the-q3-close-and-audit',
     body: ['Two calls.', '', ':::question', 'Run the dry run on Friday?', '', '- [ ] Yes', '- [ ] No', ':::', '', ':::question', 'Keep the old ledger?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'),
   });
+  // A second agent on the long project's thread: two marks to wrap after the long name.
+  await pi.send({ project_path: northwind, reply_to: long.message_id ?? long.thread_id, body: 'Pi here: the dry run needs the audit sign-off first.' });
   const named = await claude.send({ project_path: billing, body: DEMO_MESSAGES.named, thread: 'refund-webhooks' });
   // A second agent in that thread: its row shows the pair of marks.
   await pi.send({ project_path: billing, reply_to: named.message_id ?? named.thread_id, body: 'Pi here: the webhook is signed, so trusting it is safe.' });
@@ -147,7 +152,7 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop: the triangles with their words, and the marks, badge and count in their own columns', async () => {
+test('desktop: the triangles with their words, the marks after the project, the badge and count in their own columns', async () => {
   const { page } = world;
   await page.goto(world.url);
   const stop = page.locator(`.ib-row[data-thread-id="${world.stopped}"] [data-row-badge]`);
@@ -171,21 +176,26 @@ test('desktop: the triangles with their words, and the marks, badge and count in
   expect(described).toBeTruthy();
   await expect(page.locator(`[id="${described}"]`)).toHaveText(/^Stopped: The retry worker cannot ship without this\. Also holds up: The retry worker; The admin retry view\.$/);
 
-  // Left to right after the subject: the marks, the badge, the count, the time, each column on one right edge
-  // down the list (approval "inbox-row-byline", the one-line row); every subject cell starts on one left edge.
+  // Left to right: the project and its agents' marks, the title cell, then the words, the badge, the count and the
+  // time, each column on one right edge down the list (approval "list-rows-mail-icons", the wide row); every title
+  // cell starts on one left edge; the marks sit right after the project, inside its column.
   const geometry = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('.ib-row')].map((r) => {
       const box = (sel: string) => r.querySelector(sel)!.getBoundingClientRect();
       const badge = r.querySelector('.ib-bcol > [data-row-badge]');
       return {
+        id: r.dataset.threadId,
         cells: [...r.children].map((c) => c.className.split(' ')[0]),
-        rights: ['.ib-mcol', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => Math.round(box(sel).right)),
-        lefts: ['.ib-mcol', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).left),
+        from: [...r.querySelector('.ib-from')!.children].map((c) => c.className.split(' ')[0]),
+        rights: ['.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => Math.round(box(sel).right)),
+        lefts: ['.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).left),
+        projectRight: box('.ib-p').right,
+        marks: box('.ib-ags').toJSON() as DOMRect,
         subjRight: box('.ib-subj').right,
         subj: box('.ib-subj').left,
         // A badge ends on its column's right edge.
         badgeEnd: badge ? Math.abs(badge.getBoundingClientRect().right - box('.ib-bcol').right) : 0,
-        inSubject: r.querySelector('.ib-subj :is(.ib-mk, [data-row-badge])') !== null,
+        inSubject: r.querySelector('.ib-subj :is(.ib-mk, .ib-ags, [data-row-badge])') !== null,
       };
     }),
   );
@@ -193,9 +203,12 @@ test('desktop: the triangles with their words, and the marks, badge and count in
   for (let i = 0; i < 4; i++) expect(new Set(geometry.map((g) => g.rights[i])).size, `column ${i}`).toBe(1);
   expect(new Set(geometry.map((g) => Math.round(g.subj))).size).toBe(1);
   for (const g of geometry) {
-    expect(g.cells.slice(-6)).toEqual(['ib-subj', 'ib-cw', 'ib-mcol', 'ib-bcol', 'ib-cq', 'ib-t']);
+    expect(g.cells.slice(-6), `row ${g.id}`).toEqual(['ib-from', 'ib-subj', 'ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
+    expect(g.from, `row ${g.id}`).toEqual(['ib-p', 'ib-ags']);
+    expect(g.marks.left, `row ${g.id}: the marks follow the project`).toBeGreaterThanOrEqual(g.projectRight);
+    expect(g.marks.right, `row ${g.id}: the marks stay in the project's column`).toBeLessThanOrEqual(g.subj);
     expect(g.inSubject).toBe(false);
-    expect(g.lefts[0]).toBeGreaterThanOrEqual(g.subjRight);
+    expect(g.lefts[0]).toBeGreaterThanOrEqual(g.subjRight - 0.5);
     for (let i = 1; i < 4; i++) expect(g.lefts[i]).toBeGreaterThanOrEqual(g.rights[i - 1]! - 0.5);
     expect(g.badgeEnd).toBeLessThanOrEqual(0.5);
   }
@@ -253,58 +266,101 @@ test("keyboard focus on the row opens the card; a click's focus does not", async
   await expect(card(page)).toHaveCount(0);
 });
 
-/** A row's line 2, read in the page: what is on it in order, and where its right-hand parts sit. */
-function lineTwo(line: Element) {
+/** A row's line 3, read in the page: what is on it in order, and where its parts sit. */
+function lineThree(line: Element) {
   const kids = [...line.children];
-  const named = (c: Element) => (c.matches('[data-row-badge]') ? 'badge' : c.classList.contains('ib-qn') ? 'count' : c.classList.contains('ib-c') ? 'words' : c.className.split(' ')[0]!);
+  const named = (c: Element) =>
+    c.matches('[data-row-badge]') ? 'badge' : c.classList.contains('ib-qn') ? 'count' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-c') ? 'words' : c.classList.contains('ib-pv') ? 'preview' : c.matches('[data-guide-mark]') ? 'guide' : c.matches('[data-pin-mark]') ? 'pin' : c.className.split(' ')[0]!;
   const box = (c: Element | null | undefined) => (c ? c.getBoundingClientRect() : null);
-  const subject = line.querySelector(':scope > .ib-s .ib-st, :scope > .ib-m2') as HTMLElement;
-  const mark = line.querySelector(':scope > .ib-mcol');
+  const lr = line.getBoundingClientRect();
+  const preview = line.querySelector<HTMLElement>(':scope > .ib-pv');
   const badge = line.querySelector(':scope > [data-row-badge]');
-  const count = line.querySelector(':scope > .ib-c');
+  const count = line.querySelector(':scope > :is(.ib-qn, .ib-c)');
   // Each right-hand part shows whole: nothing in it is cut, and it sits inside the line.
-  const whole = [mark, badge, count].filter((c): c is Element => c !== null).every((c) => {
+  const whole = [badge, count].filter((c): c is Element => c !== null).every((c) => {
     const r = c.getBoundingClientRect();
-    const l = line.getBoundingClientRect();
-    return c.scrollWidth <= c.clientWidth + 0.5 && r.left >= l.left - 0.5 && r.right <= l.right + 0.5;
+    return c.scrollWidth <= c.clientWidth + 0.5 && r.left >= lr.left - 0.5 && r.right <= lr.right + 0.5;
   });
   return {
     order: kids.map(named),
-    lineRight: line.getBoundingClientRect().right,
-    lastRight: kids[kids.length - 1]!.getBoundingClientRect().right,
-    subjectLeft: subject.getBoundingClientRect().left,
-    lineLeft: line.getBoundingClientRect().left,
-    subjectCut: subject.scrollWidth > subject.clientWidth + 0.5,
-    mark: box(mark)?.toJSON() as DOMRect | undefined,
+    shown: getComputedStyle(line).display !== 'none' && lr.height > 0,
+    lineRight: lr.right,
+    lineLeft: lr.left,
+    lastRight: kids.length ? kids[kids.length - 1]!.getBoundingClientRect().right : null,
+    previewLeft: preview ? preview.getBoundingClientRect().left : null,
+    previewCut: preview ? preview.scrollWidth > preview.clientWidth + 0.5 : null,
+    preview: box(preview)?.toJSON() as DOMRect | undefined,
     badge: box(badge)?.toJSON() as DOMRect | undefined,
     count: box(count)?.toJSON() as DOMRect | undefined,
     whole,
   };
 }
 
-/** Line 2's order and geometry, the same on a two-line row and a phone row (approval "inbox-row-byline"). */
-function expectLineTwo(l: ReturnType<typeof lineTwo>, id: string) {
-  // The subject starts the line; the marks come before the badge, and the count, when there is one, is last.
-  expect(l.order[0], `row ${id}`).toMatch(/^ib-(s|m2)$/);
-  expect(Math.abs(l.subjectLeft - l.lineLeft), `row ${id}`).toBeLessThanOrEqual(0.5);
-  const tail = l.order.slice(l.order.indexOf('ib-mcol'));
-  expect(['ib-mcol', 'ib-mcol,badge', 'ib-mcol,count', 'ib-mcol,words', 'ib-mcol,badge,count', 'ib-mcol,badge,words'], `row ${id}: ${l.order}`).toContain(tail.join(','));
+/** Line 3's order and geometry, the same on a three-line row and a phone row (approval "list-rows-mail-icons"). */
+function expectLineThree(l: ReturnType<typeof lineThree>, id: string) {
+  // Nothing to show: no line at all, never an empty strip.
+  if (l.order.length === 0) {
+    expect(l.shown, `row ${id}: an empty line 3 is drawn`).toBe(false);
+    return;
+  }
+  expect(l.shown, `row ${id}`).toBe(true);
+  // The preview, when there is one, starts the line; then the pin and the book; the badge before the count, last.
+  const parts = l.order.filter((p) => p !== 'preview');
+  if (l.order.includes('preview')) {
+    expect(l.order[0], `row ${id}`).toBe('preview');
+    expect(Math.abs(l.previewLeft! - l.lineLeft), `row ${id}`).toBeLessThanOrEqual(0.5);
+  }
+  const rank = { pin: 0, guide: 1, badge: 2, words: 3, action: 3, count: 4 } as Record<string, number>;
+  for (const p of parts) expect(rank[p], `row ${id}: ${l.order}`).toBeDefined();
+  expect(parts.map((p) => rank[p]), `row ${id}: ${l.order}`).toEqual([...parts.map((p) => rank[p]!)].sort((a, b) => a - b));
   // Left to right on screen in that order, and the last ends the line.
-  if (l.badge) expect(l.badge.left, `row ${id}`).toBeGreaterThanOrEqual(l.mark!.right);
-  if (l.count) expect(l.count.left, `row ${id}`).toBeGreaterThanOrEqual((l.badge ?? l.mark)!.right);
-  expect(Math.abs(l.lastRight - l.lineRight), `row ${id}`).toBeLessThanOrEqual(0.5);
-  expect(l.whole, `row ${id}: a mark, badge or count is cut`).toBe(true);
+  if (l.badge && l.preview) expect(l.badge.left, `row ${id}`).toBeGreaterThanOrEqual(l.preview.right - 0.5);
+  if (l.count && l.badge) expect(l.count.left, `row ${id}`).toBeGreaterThanOrEqual(l.badge.right - 0.5);
+  if (parts.length) expect(Math.abs(l.lastRight! - l.lineRight), `row ${id}`).toBeLessThanOrEqual(0.5);
+  expect(l.whole, `row ${id}: a badge or count is cut`).toBe(true);
 }
 
-test('beside an open thread: the project, the pill and the time on line 1; the subject, then the marks, the badge and ?N on line 2; the card on keyboard focus', async () => {
+/** Lines 1 and 2 of a three-line or phone row, read in the page: the project, its marks, the time and the title. */
+function topLines(row: Element) {
+  const line = (row.querySelector(':scope > .ib-l1') ?? row.querySelector(':scope > .ib-m1'))!;
+  const project = line.querySelector<HTMLElement>('.ib-p');
+  const marks = line.querySelector<HTMLElement>('.ib-ags')!;
+  const time = line.querySelector<HTMLElement>('.ib-t')!;
+  const title = (row.querySelector<HTMLElement>('.ib-l2 > .ib-title') ?? row.querySelector<HTMLElement>(':scope > .ib-m2'))!;
+  const rr = row.getBoundingClientRect();
+  const fragments = project ? [...project.getClientRects()] : [];
+  const last = fragments[fragments.length - 1];
+  const m = marks.getBoundingClientRect();
+  const t = title.getBoundingClientRect();
+  return {
+    line1: [...line.children].map((c) => c.className.split(' ')[0]),
+    from: [...line.querySelector(':scope > .ib-from')!.children].map((c) => c.className.split(' ')[0]),
+    projectLines: fragments.length,
+    projectCut: project ? project.scrollWidth > project.clientWidth + 0.5 : false,
+    // The marks follow the project's last word: on its last line after it, or at the start of the next.
+    marksAfter: !last || (m.top >= last.top - 4 && m.left >= last.right - 0.5) || m.top >= last.bottom - 4,
+    marksDrawn: marks.querySelectorAll(':scope > .ib-ag').length,
+    marksName: marks.getAttribute('aria-label'),
+    marksInside: m.width > 0 && m.left >= rr.left - 0.5 && m.right <= rr.right + 0.5,
+    timeWhole: time.scrollWidth <= time.clientWidth + 0.5,
+    timeEnd: Math.abs(line.getBoundingClientRect().right - time.getBoundingClientRect().right),
+    title: title.textContent,
+    titleCut: title.scrollWidth > title.clientWidth + 0.5,
+    titleInside: t.right <= rr.right + 0.5,
+    titleLines: Math.round(t.height / parseFloat(getComputedStyle(title).lineHeight)),
+  };
+}
+
+test('beside an open thread: the project, its marks and the time on line 1; the title on line 2, never cut; the preview, the badge and ?N on line 3; the card on keyboard focus', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.stopped}`);
   const narrow = page.locator(`.ib-nrow[data-thread-id="${world.holding}"]`);
   await expect(narrow).toBeVisible();
-  // Line 1: the project, the thread's pill, the time; no count and no mark.
-  expect(await narrow.locator('.ib-l1 > *').evaluateAll((els) => els.map((e) => e.className.split(' ')[0]))).toEqual(['ib-pw', 'ib-key', 'ib-t']);
-  await expect(narrow.locator('.ib-l1 :is(.ib-mk, .ib-c)')).toHaveCount(0);
-  // The hover's Mark read sits on line 1 and stops above line 2 (and so above its marks and count).
+  // Line 1: the project and its marks, the time; no count and no badge.
+  expect(await narrow.locator('.ib-l1 > *').evaluateAll((els) => els.map((e) => e.className.split(' ')[0]))).toEqual(['ib-from', 'ib-t']);
+  await expect(narrow.locator('.ib-l1 :is(.ib-c, [data-row-badge])')).toHaveCount(0);
+  // The hover's Mark read sits on line 1 and stops above line 2, and the row keeps its height.
+  const before = await narrow.evaluate((r) => r.getBoundingClientRect().height);
   await narrow.locator('.ib-l1 .ib-p').hover();
   await expect(page.locator(`.ib-rw[data-row="${world.holding}"] [data-row-mark-read]`)).toBeVisible();
   const clearance = await page.evaluate((id) => {
@@ -312,43 +368,51 @@ test('beside an open thread: the project, the pill and the time on line 1; the s
     return rw.querySelector('.ib-l2')!.getBoundingClientRect().top - rw.querySelector('[data-row-mark-read]')!.getBoundingClientRect().bottom;
   }, world.holding);
   expect(clearance).toBeGreaterThanOrEqual(0);
+  expect(await narrow.evaluate((r) => r.getBoundingClientRect().height)).toBe(before);
   await page.mouse.move(5, 5);
-  const rows = await page.evaluate(`[...document.querySelectorAll('.ib-nrow')].map((r) => ({ id: r.dataset.threadId, l2: (${lineTwo.toString()})(r.querySelector('.ib-l2')) }))`) as { id: string; l2: ReturnType<typeof lineTwo> }[];
+  const rows = await page.evaluate(`[...document.querySelectorAll('.ib-nrow')].map((r) => ({ id: r.dataset.threadId, top: (${topLines.toString()})(r), l3: (${lineThree.toString()})(r.querySelector('.ib-l3')) }))`) as { id: string; top: ReturnType<typeof topLines>; l3: ReturnType<typeof lineThree> }[];
   expect(rows.length).toBeGreaterThanOrEqual(5);
-  for (const r of rows) expectLineTwo(r.l2, r.id);
-  // A badge and a count: the marks, the badge, then ?N at the far right.
-  expect(rows.find((r) => r.id === world.stopped)!.l2.order.slice(-3)).toEqual(['ib-mcol', 'badge', 'count']);
-  // Nothing to count and no badge: the marks end the line.
-  expect(rows.find((r) => r.id === world.news)!.l2.order.slice(-1)).toEqual(['ib-mcol']);
-  // Two agents: both marks at the scale's 20 px, and neither tile covers the other's glyph.
-  const pair = await page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-l2 > .ib-mcol .ib-mk`).evaluateAll((marks) =>
-    marks.map((m) => ({ tile: m.getBoundingClientRect(), glyph: m.firstElementChild!.getBoundingClientRect() })),
-  );
+  for (const r of rows) {
+    expectLineThree(r.l3, r.id);
+    expect(r.top.line1, `row ${r.id}`).toEqual(['ib-from', 'ib-t']);
+    expect(r.top.from, `row ${r.id}`).toEqual(['ib-p', 'ib-ags']);
+    expect(r.top.marksAfter, `row ${r.id}: the marks follow the project`).toBe(true);
+    expect(r.top.marksInside, `row ${r.id}: the marks leave the row`).toBe(true);
+    expect(r.top.timeWhole && r.top.timeEnd <= 0.5, `row ${r.id}: the time ends line 1 whole`).toBe(true);
+    expect(r.top.titleCut, `row ${r.id}: the title is cut`).toBe(false);
+    expect(r.top.titleInside, `row ${r.id}: the title leaves the row`).toBe(true);
+  }
+  // A badge and a count: the preview, the badge, then ?N at the far right.
+  expect(rows.find((r) => r.id === world.stopped)!.l3.order).toEqual(['preview', 'badge', 'count']);
+  // No name, no badge, nothing to count: the subject is the title, and there is no line 3.
+  expect(rows.find((r) => r.id === world.news)!.l3.order).toEqual([]);
+  // Two agents: two bare 16 px marks after the project, apart, one name for both.
+  const pair = await page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-l1 .ib-ags > .ib-ag`).evaluateAll((marks) => marks.map((m) => m.getBoundingClientRect().toJSON() as DOMRect));
   expect(pair.length).toBe(2);
-  for (const m of pair) expect(Math.round(m.tile.width)).toBe(20);
-  expect(pair[0]!.glyph.right).toBeLessThanOrEqual(pair[1]!.tile.left);
-  // The long row at the column's narrowest (380 px): the subject is cut, the marks, the badge and ?N are whole;
-  // on line 1 the long project is cut before the pill, and the time ends the line whole.
+  for (const m of pair) expect(Math.round(m.width)).toBe(16);
+  expect(pair[0]!.right).toBeLessThan(pair[1]!.left);
+  await expect(page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-ags`)).toHaveAttribute('aria-label', 'Claude Code and Pi');
+  // The long row at the column's narrowest (380 px): the long project is never cut (it wraps when it must; the
+  // 320 and 360 px phones below prove the wrap), and both marks follow it; the long name wraps on line 2, whole;
+  // the preview is cut first on line 3, and ?2 is whole.
   const long = rows.find((r) => r.id === world.long)!;
-  expect(long.l2.subjectCut).toBe(true);
-  const l1 = await page.locator(`.ib-nrow[data-thread-id="${world.long}"] .ib-l1`).evaluate((line) => {
-    const p = line.querySelector<HTMLElement>('.ib-p')!;
-    const t = line.querySelector<HTMLElement>('.ib-t')!;
-    return { projectCut: p.scrollWidth > p.clientWidth, timeWhole: t.scrollWidth <= t.clientWidth + 0.5, timeEnd: line.getBoundingClientRect().right - t.getBoundingClientRect().right };
-  });
-  expect(l1.projectCut).toBe(true);
-  expect(l1.timeWhole).toBe(true);
-  expect(Math.abs(l1.timeEnd)).toBeLessThanOrEqual(0.5);
-  // On hover the action covers line 1's right end: the pill gives way and ends before it, never under it.
-  await page.locator(`.ib-nrow[data-thread-id="${world.long}"] .ib-l2`).hover();
+  expect(long.top.projectCut).toBe(false);
+  expect(long.top.marksDrawn).toBe(2);
+  expect(long.top.marksName).toBe('OpenCode and Pi');
+  expect(long.top.title).toBe('ledger-migration-dry-run-before-the-q3-close-and-audit');
+  expect(long.top.titleLines).toBeGreaterThan(1);
+  expect(long.l3.previewCut).toBe(true);
+  // On hover the action covers line 1's right end; the row keeps its height, and line 2 starts below the action.
+  const longRow = page.locator(`.ib-nrow[data-thread-id="${world.long}"]`);
+  const longHeight = await longRow.evaluate((r) => r.getBoundingClientRect().height);
+  await longRow.locator('.ib-l2').hover();
   await expect(page.locator(`.ib-rw[data-row="${world.long}"] .ib-ract`)).toBeVisible();
-  const cover = await page.locator(`.ib-rw[data-row="${world.long}"]`).evaluate((rw) => {
-    const key = rw.querySelector<HTMLElement>('.ib-l1 .ib-key')!;
-    const name = key.querySelector<HTMLElement>('.ib-keyt')!;
-    return { keyRight: key.getBoundingClientRect().right, actionLeft: rw.querySelector('.ib-ract')!.getBoundingClientRect().left, cut: name.scrollWidth > name.clientWidth };
-  });
-  expect(cover.keyRight).toBeLessThanOrEqual(cover.actionLeft);
-  expect(cover.cut).toBe(true);
+  const cover = await page.locator(`.ib-rw[data-row="${world.long}"]`).evaluate((rw) => ({
+    height: rw.querySelector('.ib-nrow')!.getBoundingClientRect().height,
+    clearance: rw.querySelector('.ib-l2')!.getBoundingClientRect().top - rw.querySelector('.ib-ract')!.getBoundingClientRect().bottom,
+  }));
+  expect(cover.height).toBe(longHeight);
+  expect(cover.clearance).toBeGreaterThanOrEqual(0);
   await page.mouse.move(5, 5);
   await shot(page, 'beside-thread');
   await page.keyboard.press('Shift');
@@ -370,7 +434,7 @@ test('beside an open thread: the project, the pill and the time on line 1; the s
   await expect(page).not.toHaveURL(new RegExp(`thread=${world.stopped}`));
 });
 
-test('an iPhone (WebKit): icons only, no card; two lines, the subject then the marks, the badge and ?N', async () => {
+test('an iPhone (WebKit): icons only, no card; three lines, the project and its marks, the title, then the preview, the badge and ?N', async () => {
   let own: Browser | null = null;
   try {
     own = await webkit.launch({ args: [] });
@@ -380,18 +444,23 @@ test('an iPhone (WebKit): icons only, no card; two lines, the subject then the m
       await page.goto(world.url);
       const row = page.locator(`.ib-mrow[data-thread-id="${world.holding}"]`);
       await expect(row.locator('[data-row-badge]')).toHaveText('Holds up 3');
-      const m1 = await row.locator('.ib-m1 > *').evaluateAll((els) => els.map((e) => e.className.split(' ')[0]));
-      expect(m1).toEqual(['ib-pw', 'ib-key', 'ib-t']);
       // The rows skip paint until laid out (content-visibility): give WebKit a frame or two.
       await page.waitForTimeout(600);
-      const rows = await page.evaluate(`[...document.querySelectorAll('.ib-mrow')].map((r) => ({ id: r.getAttribute('data-thread-id'), lines: [...r.children].filter((c) => !c.classList.contains('ib-sr')).map((c) => c.className), l2: (${lineTwo.toString()})(r.querySelector(':scope > .ib-ml2')) }))`) as { id: string; lines: string[]; l2: ReturnType<typeof lineTwo> }[];
+      const rows = await page.evaluate(`[...document.querySelectorAll('.ib-mrow')].map((r) => ({ id: r.getAttribute('data-thread-id'), lines: [...r.children].filter((c) => !c.classList.contains('ib-sr')).map((c) => c.className), top: (${topLines.toString()})(r), l3: (${lineThree.toString()})(r.querySelector(':scope > .ib-m3')) }))`) as { id: string; lines: string[]; top: ReturnType<typeof topLines>; l3: ReturnType<typeof lineThree> }[];
       expect(rows.length).toBeGreaterThanOrEqual(5);
       for (const r of rows) {
-        expect(r.lines, `row ${r.id}`).toEqual(['ib-m1', 'ib-ml2']);
-        expectLineTwo(r.l2, r.id);
+        expect(r.lines, `row ${r.id}`).toEqual(['ib-m1', 'ib-m2', 'ib-m3']);
+        expect(r.top.line1, `row ${r.id}`).toEqual(['ib-from', 'ib-t']);
+        expect(r.top.from, `row ${r.id}`).toEqual(['ib-p', 'ib-ags']);
+        expect(r.top.marksAfter && r.top.marksInside, `row ${r.id}: the marks follow the project, inside the row`).toBe(true);
+        expect(r.top.titleCut || !r.top.titleInside, `row ${r.id}: the title is cut`).toBe(false);
+        expectLineThree(r.l3, r.id);
       }
-      // The long row: its subject is cut, the marks, the badge and the count are whole.
-      expect(rows.find((r) => r.id === world.long)!.l2.subjectCut).toBe(true);
+      // The long row: its preview is cut, the count is whole; its project wraps with both marks after it.
+      const long = rows.find((r) => r.id === world.long)!;
+      expect(long.l3.previewCut).toBe(true);
+      expect(long.top.projectCut).toBe(false);
+      expect(long.top.marksDrawn).toBe(2);
       await row.locator('[data-row-badge]').tap();
       await page.waitForTimeout(400);
       await expect(card(page)).toHaveCount(0);
@@ -408,7 +477,7 @@ test('an iPhone (WebKit): icons only, no card; two lines, the subject then the m
   }
 });
 
-test('a small phone (320, 360): the subject gives way first; the marks, the badge and ?N stay whole; the thread name keeps a readable width', async () => {
+test('a small phone (320, 360): the preview gives way first; the badge and ?N stay whole; the title is never cut; a long project wraps and its marks follow, never dropped', async () => {
   const own = await webkit.launch({ args: [] });
   try {
     for (const width of [320, 360]) {
@@ -417,15 +486,29 @@ test('a small phone (320, 360): the subject gives way first; the marks, the badg
       await page.goto(world.url);
       const row = page.locator(`.ib-mrow[data-thread-id="${world.guided}"]`);
       await row.scrollIntoViewIfNeeded();
-      await expect(row.locator('.ib-ml2 > [data-guide-mark]')).toBeVisible();
+      await expect(row.locator('.ib-m3 > [data-guide-mark]')).toBeVisible();
       await expect(row.locator('[data-row-badge]')).toHaveText('Holds up 3');
       // The rows skip paint until laid out (content-visibility): give WebKit a frame or two.
       await page.waitForTimeout(600);
-      const l2 = (await row.locator('.ib-ml2').evaluate(`(${lineTwo.toString()})(document.querySelector('.ib-mrow[data-thread-id="${world.guided}"] .ib-ml2'))`)) as ReturnType<typeof lineTwo>;
-      expectLineTwo(l2, `${world.guided} at ${width}`);
-      const pill = await row.locator('.ib-m1 .ib-key').evaluate((el) => el.getBoundingClientRect().width);
-      // At least 48 px of the pill's 11.5 px text, never a sliver.
-      expect(pill).toBeGreaterThanOrEqual(48);
+      const l3 = (await page.evaluate(`(${lineThree.toString()})(document.querySelector('.ib-mrow[data-thread-id="${world.guided}"] .ib-m3'))`)) as ReturnType<typeof lineThree>;
+      expectLineThree(l3, `${world.guided} at ${width}`);
+      // The preview is what gives way; it keeps a readable width, never a sliver.
+      expect(l3.preview!.width, `at ${width}`).toBeGreaterThanOrEqual(40);
+      // The long project (44 characters, no space) wraps inside the row; both marks follow its last word; the
+      // long name wraps on line 2, whole.
+      const longRow = page.locator(`.ib-mrow[data-thread-id="${world.long}"]`);
+      await longRow.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      const top = (await page.evaluate(`(${topLines.toString()})(document.querySelector('.ib-mrow[data-thread-id="${world.long}"]'))`)) as ReturnType<typeof topLines>;
+      expect(top.projectCut, `at ${width}`).toBe(false);
+      expect(top.projectLines, `at ${width}`).toBeGreaterThan(1);
+      expect(top.marksDrawn, `at ${width}`).toBe(2);
+      expect(top.marksAfter && top.marksInside, `at ${width}: the marks follow the project, inside the row`).toBe(true);
+      expect(top.timeWhole && top.timeEnd <= 0.5, `at ${width}: the time ends line 1 whole`).toBe(true);
+      expect(top.titleCut, `at ${width}`).toBe(false);
+      expect(top.titleInside, `at ${width}`).toBe(true);
+      expect(top.titleLines, `at ${width}`).toBeGreaterThan(1);
+      expect(await longRow.evaluate((r) => r.scrollWidth <= r.clientWidth + 0.5), `at ${width}: the row spills`).toBe(true);
       await page.screenshot({ path: join(proofDir, `phone-${width}.png`) });
       await context.close();
     }
@@ -504,12 +587,12 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
           const pill = r.querySelector('.ib-cw [data-undelivered]')?.getBoundingClientRect();
           return {
             id: r.dataset.threadId,
-            rights: ['.ib-subj', '.ib-cw', '.ib-mcol', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => Math.round(box(sel).right)),
+            rights: ['.ib-subj', '.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => Math.round(box(sel).right)),
             subj: Math.round(box('.ib-subj').left),
             subjWidth: box('.ib-subj').width,
-            others: Math.max(...['.ib-p', '.ib-cw', '.ib-mcol', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).width)),
-            // The Undelivered pill itself, not just its slot (review D1): inside its column, clear of the marks.
-            pill: pill ? pill.left >= box('.ib-cw').left - 0.5 && pill.right <= box('.ib-cw').right + 0.5 && pill.right <= box('.ib-mcol').left : null,
+            others: Math.max(...['.ib-from', '.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).width)),
+            // The Undelivered pill itself, not just its slot (review D1): inside its column, clear of the badge.
+            pill: pill ? pill.left >= box('.ib-cw').left - 0.5 && pill.right <= box('.ib-cw').right + 0.5 && pill.right <= box('.ib-bcol').left : null,
           };
         }),
       }));
@@ -517,21 +600,21 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
       expect(layout.list, where).toBeGreaterThanOrEqual(full ? 1150 : 900);
       if (!full) expect(layout.list, where).toBeLessThan(1150);
       expect(layout.rows.length).toBeGreaterThanOrEqual(9);
-      for (let i = 0; i < 6; i++) expect(new Set(layout.rows.map((g) => g.rights[i])).size, `column ${i} ${where}: ${JSON.stringify(layout.rows)}`).toBe(1);
+      for (let i = 0; i < 5; i++) expect(new Set(layout.rows.map((g) => g.rights[i])).size, `column ${i} ${where}: ${JSON.stringify(layout.rows)}`).toBe(1);
       expect(new Set(layout.rows.map((g) => g.subj)).size).toBe(1);
       for (const g of layout.rows) {
         expect(g.subjWidth, `the subject is the widest column ${where}`).toBeGreaterThan(g.others);
         if (g.pill !== null) expect(g.pill, `${g.id}: the pill stays in its column ${where}`).toBe(true);
       }
     }
-    // Hover: the action covers the time and ?N; the marks and the badge stay.
+    // Hover: the action covers the time and ?N; the project with its marks and the badge stay.
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(world.url);
     const stopped = page.locator(`.ib-row[data-thread-id="${world.stopped}"]`);
     await stopped.locator('.ib-subj').hover();
     await expect(page.locator(`.ib-rw[data-row="${world.stopped}"] .ib-ract`)).toBeVisible();
-    const shown = await stopped.evaluate((r) => Object.fromEntries(['.ib-mcol', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => [sel, getComputedStyle(r.querySelector(sel)!).visibility])));
-    expect(shown).toEqual({ '.ib-mcol': 'visible', '.ib-bcol': 'visible', '.ib-cq': 'hidden', '.ib-t': 'hidden' });
+    const shown = await stopped.evaluate((r) => Object.fromEntries(['.ib-ags', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => [sel, getComputedStyle(r.querySelector(sel)!).visibility])));
+    expect(shown).toEqual({ '.ib-ags': 'visible', '.ib-bcol': 'visible', '.ib-cq': 'hidden', '.ib-t': 'hidden' });
     await page.mouse.move(5, 5);
     await shot(page, 'desktop-words');
 
@@ -549,16 +632,16 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
     }
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    // Beside a thread (the 380 px list): the short form (approval "inbox-row-byline", option A) ends line 2 in at
-    // most 124 px, the Undelivered pill whole inside it, and the subject keeps its room (the full "Draft · Your
+    // Beside a thread (the 380 px list): the short form (approval "inbox-row-byline", option A) ends line 3 in at
+    // most 124 px, the Undelivered pill whole inside it, and the preview keeps its room (the full "Draft · Your
     // reply, 2 picks, 3 comments" would leave it a sliver).
     await page.goto(`${world.url}#thread=${world.stopped}`);
     await expect(page.locator(`.ib-nrow[data-thread-id="${world.news}"] [data-draft-label]`)).toHaveText('Draft');
-    // The open counts end line 2: the action pill, then `?N` when a question waits too, never cut.
+    // The open counts end line 3: the action pill, then `?N` when a question waits too, never cut.
     for (const [id, actions, questions, name] of counted) {
       const row = page.locator(`.ib-nrow[data-thread-id="${id}"]`);
       await expect(row).toHaveAccessibleName(name);
-      const tail = await row.locator('.ib-l2').evaluate((l) => {
+      const tail = await row.locator('.ib-l3').evaluate((l) => {
         const kids = [...l.children];
         const pill = l.querySelector<HTMLElement>(':scope > [data-action-count]')!;
         const lr = l.getBoundingClientRect();
@@ -572,9 +655,10 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
     }
     for (const [id, short, full] of expected) {
       await expect(page.locator(`.ib-nrow[data-thread-id="${id}"]`)).toHaveAccessibleName(named(full));
-      const line = await page.locator(`.ib-nrow[data-thread-id="${id}"] .ib-l2`).evaluate((l) => {
+      const line = await page.locator(`.ib-nrow[data-thread-id="${id}"] .ib-l3`).evaluate((l) => {
         const words = l.querySelector(':scope > .ib-c')!;
-        const subject = l.querySelector<HTMLElement>('.ib-s .ib-st')!;
+        // The preview: a named thread's subject (an unnamed one's subject is its title, on line 2, whole).
+        const subject = l.querySelector<HTMLElement>(':scope > .ib-pv');
         const pill = words.querySelector<HTMLElement>('[data-undelivered]');
         const text = pill?.querySelector<HTMLElement>('.ib-bwt');
         const lr = l.getBoundingClientRect();
@@ -583,8 +667,8 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
           last: l.lastElementChild === words,
           wordsWidth: words.getBoundingClientRect().width,
           pill: pill ? { width: pill.getBoundingClientRect().width, inside: pill.getBoundingClientRect().right <= lr.right + 0.5, whole: text!.scrollWidth <= text!.clientWidth + 0.5 } : null,
-          subject: subject.getBoundingClientRect().width,
-          whole: subject.scrollWidth <= subject.clientWidth + 0.5,
+          subject: subject ? subject.getBoundingClientRect().width : 0,
+          whole: subject ? subject.scrollWidth <= subject.clientWidth + 0.5 : true,
           line: lr.width,
         };
       });
@@ -593,11 +677,11 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
       expect(line.wordsWidth, id).toBeLessThanOrEqual(124.5);
       if (line.pill) {
         expect(line.pill.width, `${id}: the pill fits the slot`).toBeLessThanOrEqual(124.5);
-        expect(line.pill.inside, `${id}: the pill ends inside line 2`).toBe(true);
+        expect(line.pill.inside, `${id}: the pill ends inside line 3`).toBe(true);
         expect(line.pill.whole, `${id}: the pill's words are whole`).toBe(true);
       }
       // Whole, or cut no shorter than 120 px.
-      if (!line.whole) expect(line.subject, `${id}: the subject keeps its room in a ${line.line} px line`).toBeGreaterThanOrEqual(120);
+      if (!line.whole) expect(line.subject, `${id}: the preview keeps its room in a ${line.line} px line`).toBeGreaterThanOrEqual(120);
     }
   } finally {
     await page.unroute('**/api/inbox/threads?archived=exclude');

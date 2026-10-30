@@ -372,7 +372,7 @@ test.skipIf(!hasDom)('the list says "Draft" ("Draft · Your reply", "Draft · 1 
   const saved = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Pagefind.', base: null }));
   expect(saved.status).toBe(200);
   const el = await renderApp('');
-  // The full words (`data-count-words`); the row draws them on a wide row, "Draft" on a two-line or phone row
+  // The full words (`data-count-words`); the row draws them on a wide row, "Draft" on a three-line or phone row
   // (approval "inbox-row-byline", option A).
   const label = (id: string) => el.querySelector(`[data-thread-id="${id}"] [data-draft-label]`)?.textContent?.replace(/\s+/g, ' ').trim();
   const full = (id: string) => el.querySelector(`[data-thread-id="${id}"] .ib-c`)?.getAttribute('data-count-words');

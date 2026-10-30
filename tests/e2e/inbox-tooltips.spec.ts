@@ -7,11 +7,14 @@
  *
  * - nothing in the window carries a native title (an iframe's title is its
  *   accessible name and stays);
- * - a cut project label in a row and a sidebar project open the component
- *   tooltip within a moment, and a sidebar project's tooltip names its folder;
- * - no thread chip loses a fraction of a pixel to the subject's shrink (the
- *   chip "reconciliation-run" was drawn "reconciliation-r…" by a 0.06 px
- *   overflow), and a chip cut by a fraction of a pixel still opens its tooltip;
+ * - a cut preview in a row and a sidebar project open the component tooltip
+ *   within a moment, and a sidebar project's tooltip names its folder; beside a
+ *   thread a long project label is never cut (approval "list-rows-mail-icons":
+ *   it wraps);
+ * - no wide row's title loses a fraction of a pixel to the preview's shrink
+ *   (the old thread chip "reconciliation-run" was drawn "reconciliation-r…" by
+ *   a 0.06 px overflow), and a title cut by a fraction of a pixel still opens
+ *   its tooltip;
  * - Escape with a tooltip open still closes the thread;
  * - a disabled control still shows its tooltip (the pointer reaches its
  *   wrapper).
@@ -82,7 +85,7 @@ async function openPage(browser: import('@playwright/test').Browser) {
   return { context, page };
 }
 
-test('nothing in the window has a native title; a cut project label and a sidebar project open the component tooltip at once', async ({ browser }) => {
+test('nothing in the window has a native title; a cut preview and a sidebar project open the component tooltip at once', async ({ browser }) => {
   const { context, page } = await openPage(browser);
   try {
     // The whole window, ui's question card included (componentTooltips); an iframe's title is its accessible name.
@@ -93,12 +96,16 @@ test('nothing in the window has a native title; a cut project label and a sideba
     );
     expect(titles).toEqual([]);
 
-    // The project label of a two-line row, cut with "…".
+    // The project label of a two-line row is whole: it wraps, never cut.
     const label = page.locator('.ib-lbody .ib-nrow .ib-p', { hasText: LONG }).first();
-    expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5)).toBe(true);
+    // Its preview (the named thread's subject), cut with "…".
+    const SUBJECT = 'Ledger totals disagree after the nightly batch finished';
+    const preview = page.locator('.ib-lbody .ib-nrow .ib-pv', { hasText: SUBJECT }).first();
+    expect(await preview.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     const t0 = Date.now();
-    await label.hover();
-    await expect(tooltip(page)).toHaveText(LONG, { timeout: 1000 });
+    await preview.hover();
+    await expect(tooltip(page)).toHaveText(SUBJECT, { timeout: 1000 });
     expect(Date.now() - t0).toBeLessThan(1000);
     await page.waitForTimeout(200);
     await page.screenshot({ path: join(proofDir, 'list-project-label-1440.png') });
@@ -131,12 +138,15 @@ test('nothing in the window has a native title; a cut project label and a sideba
   }
 });
 
-test('no chip loses a fraction of a pixel to the subject, and a chip cut by a fraction of a pixel still opens its tooltip', async ({ browser }) => {
+test('no wide title loses a fraction of a pixel to the preview, and a title cut by a fraction of a pixel still opens its tooltip', async ({ browser }) => {
   const { context, page } = await openPage(browser);
   try {
+    // The wide rows: close the thread.
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.ib-lbody .ib-row');
     const measure = () =>
       page.evaluate(() =>
-        [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-keyt')].map((el) => {
+        [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-row .ib-title')].map((el) => {
           const range = document.createRange();
           range.selectNodeContents(el);
           const style = getComputedStyle(el);
@@ -144,19 +154,19 @@ test('no chip loses a fraction of a pixel to the subject, and a chip cut by a fr
           return { text: el.textContent, overflow: range.getBoundingClientRect().width - inner };
         }),
       );
-    // Some width between the narrow list's 380 px and wide enough for every row.
-    for (const width of [380, 393, 417, 452, 520, 611]) {
+    // Some widths of the wide list, from the narrowest that keeps wide rows (900 px).
+    for (const width of [900, 913, 947, 1001, 1077, 1150]) {
       await page.locator('.ib-listcol').evaluate((el, w) => ((el as HTMLElement).style.width = `${w}px`), width);
       await page.waitForTimeout(50);
-      const chips = await measure();
-      expect(chips.length).toBeGreaterThan(0);
-      // A chip either fits or is really cut; never cut by under a pixel because the subject shrank.
-      expect(chips.filter((c) => c.overflow > 0.01 && c.overflow < 1), `at ${width}px: ${JSON.stringify(chips)}`).toEqual([]);
+      const titles = await measure();
+      expect(titles.length).toBeGreaterThan(0);
+      // A title either fits or is really cut; never cut by under a pixel because the preview shrank.
+      expect(titles.filter((c) => c.overflow > 0.01 && c.overflow < 1), `at ${width}px: ${JSON.stringify(titles)}`).toEqual([]);
     }
     await page.locator('.ib-listcol').evaluate((el) => ((el as HTMLElement).style.width = ''));
 
-    // Force the owner's case: the chip's box 0.06 px narrower than its text, both integer widths equal.
-    const chip = page.locator('.ib-lbody .ib-keyt', { hasText: 'reconciliation-run' }).first();
+    // Force the owner's case: the title's box 0.06 px narrower than its text, both integer widths equal.
+    const chip = page.locator('.ib-lbody .ib-row .ib-title', { hasText: 'reconciliation-run' }).first();
     const forced = await chip.evaluate((el) => {
       const range = document.createRange();
       range.selectNodeContents(el);

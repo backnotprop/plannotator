@@ -346,7 +346,7 @@ test('the sent reply shows one line per agent (Lines): delivered, queued with it
   await expect(page.locator('.ib-lbody [data-thread-id="' + world.tags.ids.t2 + '"]').first()).toContainText('1 of 3 delivered · Pi queued');
 });
 
-test('the thread head and the row show the agents in the thread, overlapping', async () => {
+test('the thread head shows the agents in the thread overlapping, the row beside its project', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.tags.ids.t3}`);
   const head = page.locator('[data-thread-participants]');
@@ -354,7 +354,8 @@ test('the thread head and the row show the agents in the thread, overlapping', a
   await expect(head.locator('[data-tag-stack]')).toHaveAttribute('data-tag-stack', '2');
   await shot(page, '6-thread-head-desktop', { clip: { selector: '.ib-pbody > .ib-tmeta[data-thread-meta]', pad: 40 } });
   const row = page.locator(`.ib-lbody [data-thread-id="${world.tags.ids.t3}"]`).first();
-  await expect(row.locator('[data-tag-stack]')).toHaveAttribute('data-tag-stack', '2');
+  await expect(row.locator('[data-row-agents]')).toHaveAttribute('data-row-agents', '2');
+  await expect(row.locator('[data-row-agents]')).toHaveAttribute('aria-label', 'Claude Code and Pi');
   await shot(page, '7-list-row-desktop', { clip: { selector: `.ib-lbody [data-thread-id="${world.tags.ids.t2}"]`, pad: 24 } });
   await shot(page, '7-list-desktop');
 });

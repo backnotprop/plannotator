@@ -276,7 +276,7 @@ async function shortHitAreas(page: Page, selector: string): Promise<{ measured: 
   });
 }
 
-const ROW_PARTS = '.ib-mk, .ib-p, .ib-t, .ib-m2, .ib-badge, .ib-key, .ib-c, .ib-att';
+const ROW_PARTS = '.ib-mk, .ib-agx, .ib-agplus, .ib-p, .ib-t, .ib-m2, .ib-pv, .ib-badge, .ib-c, .ib-att';
 
 for (const phone of [
   { name: 'iPhone 15 (WebKit)', device: devices['iPhone 15'], browserName: 'webkit' as const },

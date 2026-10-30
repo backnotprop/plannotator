@@ -8,10 +8,10 @@
  *    keyboard focus: a header, one row per item, Q labels only when the items
  *    come from more than one question, a footer with the agent and the time.
  *  - The row's name stays short; the card's words ride aria-describedby.
- *  - The agent's mark has its own column before the time (wide). On a
- *    two-line row and a phone row (approval "inbox-row-byline", 2026-10-29)
- *    line 1 is the project, the thread's pill and the time; line 2 is the
- *    subject, then the marks, the badge and the open count `?N` last.
+ *  - Beside a thread and on a phone (approval "list-rows-mail-icons",
+ *    2026-10-30, which keeps inbox-row-byline's badge places) the badge and
+ *    the open count `?N` end line 3, after the preview; the agents' marks are
+ *    on line 1, after the project, never beside the badge.
  *  - A phone draws the icons only: no card.
  *
  * happy-dom matches `:focus-visible` for every focus, so a keyboard focus is
@@ -224,7 +224,7 @@ describe.if(hasDom)('the badges in the list', () => {
     expect(hold.querySelector('.ib-bw')!.textContent).toBe('Holds up 3');
   });
 
-  test('a two-line row: a triangle alone and a triangle with its count; the words stay for a screen reader', () => {
+  test('a three-line row: a triangle alone and a triangle with its count; the words stay for a screen reader', () => {
     const el = mount({ narrow: true });
     const stop = el.querySelector<HTMLElement>('[data-thread-id="msg_stop"] [data-row-badge]')!;
     expect(stop.classList.contains('ib-bwords')).toBe(false);
@@ -327,46 +327,39 @@ describe.if(hasDom)('the badges in the list', () => {
     expect(card()!.dataset.waitCard).toBe('stop');
   });
 
-  test('beside a thread too: the card on keyboard focus; line 1 is the project, the pill and the time; line 2 ends with the marks, the badge and ?N', async () => {
+  test('beside a thread too: the card on keyboard focus; line 3 ends with the badge and ?N, the marks are on line 1', async () => {
     const el = mount({ narrow: true });
     const r = el.querySelector<HTMLElement>('.ib-nrow[data-thread-id="msg_stop"]')!;
-    const parts = (id: string, line: 'ib-l1' | 'ib-l2') =>
-      [...el.querySelector(`.ib-nrow[data-thread-id="${id}"] .${line}`)!.children].map((c) =>
+    const parts = (id: string) =>
+      [...el.querySelector(`.ib-nrow[data-thread-id="${id}"] .ib-l3`)!.children].map((c) =>
         c.matches('[data-row-badge]') ? 'badge' : c.classList.contains('ib-qn') ? `?${c.querySelector('[aria-hidden="true"]:not(svg)')!.textContent}` : c.className.split(' ')[0],
       );
-    // Line 1 (approval "inbox-row-byline"): the project, the thread's pill, the time; no count and no mark.
-    expect(parts('msg_stop', 'ib-l1')).toEqual(['ib-pw', 'ib-key', 'ib-t']);
-    expect(r.querySelector('.ib-l1 :is(.ib-mk, .ib-c)')).toBeNull();
-    // Line 2: the subject first, then the marks, the badge and the open count last.
-    expect(parts('msg_stop', 'ib-l2')).toEqual(['ib-s', 'ib-mcol', 'badge', '?2']);
-    expect(r.querySelector('.ib-l2 > .ib-mcol .ib-mk')).not.toBeNull();
+    // The preview first (a named thread's subject), then the badge and the open count last.
+    expect(parts('msg_stop')).toEqual(['ib-pv', 'badge', '?2']);
     // One question counts too; its words are for a screen reader.
-    expect(parts('msg_hold', 'ib-l2')).toEqual(['ib-s', 'ib-mcol', 'badge', '?1']);
+    expect(parts('msg_hold')).toEqual(['ib-pv', 'badge', '?1']);
     expect(el.querySelector('.ib-nrow[data-thread-id="msg_hold"] .ib-qn .ib-sr')!.textContent).toBe('1 question');
-    // No badge: the marks sit right before the count; nothing to count: the marks end the line.
-    expect(parts('msg_wait', 'ib-l2')).toEqual(['ib-s', 'ib-mcol', '?2']);
-    expect(parts('msg_news', 'ib-l2')).toEqual(['ib-s', 'ib-mcol']);
-    expect(parts('msg_news', 'ib-l1')).toEqual(['ib-pw', 'ib-t']);
-    // Two agents: both marks, at the scale's tile size, in the same box, where a single mark would be.
-    expect(parts('msg_pair', 'ib-l2')).toEqual(['ib-s', 'ib-mcol', '?2']);
-    const pair = el.querySelector('.ib-nrow[data-thread-id="msg_pair"] .ib-l2 > .ib-mcol')!;
-    expect(pair.querySelectorAll('.ib-tg-stack > .ib-mk').length).toBe(2);
+    // An unnamed thread's subject is its title: no preview, the count alone; nothing to count: no line 3 at all.
+    expect(parts('msg_wait')).toEqual(['?2']);
+    expect(parts('msg_news')).toEqual([]);
+    // No mark beside the badge: the agents are line 1's, after the project.
+    for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_pair', 'msg_news']) {
+      const l = el.querySelector(`.ib-nrow[data-thread-id="${id}"]`)!;
+      expect(l.querySelector('.ib-l3 .ib-mk')).toBeNull();
+      expect(l.querySelector('.ib-l1 .ib-from > .ib-ags .ib-mk')).not.toBeNull();
+    }
     act(() => r.focus());
     await settle(50);
     expect(card()!.dataset.waitCard).toBe('stop');
   });
 
-  test('a phone: icons only, no card; the marks, the badge and the count end line 2, after the subject', async () => {
+  test('a phone: icons only, no card; the badge and the count end line 3, after the preview', async () => {
     const el = mount({ phone: true });
     const r = el.querySelector<HTMLElement>('.ib-mrow[data-thread-id="msg_hold"]')!;
     expect(r.querySelector('[data-row-badge]')!.textContent).toBe('Holds up 3');
-    expect([...r.querySelector('.ib-m1')!.children].map((c) => c.className)).toEqual(['ib-pw', 'ib-key', 'ib-t']);
     const stop = el.querySelector<HTMLElement>('.ib-mrow[data-thread-id="msg_stop"]')!;
-    expect([...stop.querySelector('.ib-ml2')!.children].map((c) => c.className.split(' ').slice(0, 2).join('.'))).toEqual(['ib-m2', 'ib-mcol', 'ib-badge.ib-bicon', 'ib-c.ib-qn']);
-    // Nothing else to list: two lines all the same, the marks ending line 2.
-    const news = el.querySelector<HTMLElement>('.ib-mrow[data-thread-id="msg_news"]')!;
-    expect([...news.children].filter((c) => !c.classList.contains('ib-sr')).map((c) => c.className)).toEqual(['ib-m1', 'ib-ml2']);
-    expect([...news.querySelector('.ib-ml2')!.children].map((c) => c.className)).toEqual(['ib-m2', 'ib-mcol']);
+    expect([...stop.querySelector('.ib-m3')!.children].map((c) => c.className.split(' ').slice(0, 2).join('.'))).toEqual(['ib-pv', 'ib-badge.ib-bicon', 'ib-c.ib-qn']);
+    expect(stop.querySelector('.ib-m3 .ib-mk')).toBeNull();
     act(() => r.focus());
     await tooltipOf(r.querySelector('[data-row-badge]')!);
     expect(card() === null).toBe(true);

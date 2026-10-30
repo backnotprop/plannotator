@@ -319,8 +319,8 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Claude Code…');
   const listRow = page.locator(`.ib-listcol [data-thread-id="${command.thread_id}"]`).first();
   await expect(listRow).toContainText('To Claude Code');
-  // The chip as compose showed it.
-  await expect(listRow.locator('.ib-key').first()).toContainText('Inbox list');
+  // The thread's name as compose showed it, the row's title (approval "list-rows-mail-icons").
+  await expect(listRow.locator('.ib-title, .ib-m2').first()).toContainText('Inbox list');
   await claude.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Claude Code, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
   await shot(page, '07-thread-delivered');

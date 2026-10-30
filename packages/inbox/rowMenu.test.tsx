@@ -449,7 +449,7 @@ test.skipIf(!hasDom)('with a thread open: Archive from another row keeps it in p
   await until(() => !!document.querySelector('section.ib-pane'), 'the thread');
   const placed = () => [...document.querySelectorAll('.ib-listcol [data-row]')].map((el) => el.getAttribute('data-row'));
   const before = placed();
-  const subject = rowButton(ids.waiting)!.querySelector('.ib-st')!.textContent!;
+  const subject = rowButton(ids.waiting)!.querySelector('.ib-title')!.textContent!;
   await openMenu(ids.waiting);
   await choose('archive');
   await until(() => toast()?.textContent?.includes('Archived') === true, 'the toast');

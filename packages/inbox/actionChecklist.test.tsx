@@ -754,8 +754,8 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
   const named = rowOf('.ib-row', 'msg_b').cloneNode(true) as Element;
   named.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
   expect(named.textContent).toContain(' 1 action to do 2 questions');
-  // Beside a thread and on a phone: at line 2's end, the action pill then `?N`, after the marks and the badge.
-  for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l2'], [false, true, '.ib-mrow', '.ib-ml2']] as const) {
+  // Beside a thread and on a phone: at line 3's end, the action pill then `?N`, after the badge.
+  for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l3'], [false, true, '.ib-mrow', '.ib-m3']] as const) {
     rerender(list(narrow, phone));
     for (const [id, want] of Object.entries(expected)) expect(counts(rowOf(shape, id))).toEqual(want as never);
     const tail = [...rowOf(shape, 'msg_b').querySelector(line)!.children].slice(-3).map((c) => (c.matches('[data-row-badge]') ? 'badge' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'question' : c.className));

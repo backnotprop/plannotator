@@ -312,7 +312,8 @@ test('agents write three threads in two projects; the rows land in the six secti
   const holdingRow = page.locator(`[data-section-id="holding"] [data-thread-id="${holding.thread_id}"]`);
   await expect(holdingRow.locator('.ib-badge')).toHaveText('Holds up 3');
   const namedRow = page.locator(`[data-section-id="waiting"] [data-thread-id="${named.thread_id}"]`);
-  await expect(namedRow.locator('.ib-key')).toHaveText('refund-webhooks');
+  // The thread's name is the row's title (approval "list-rows-mail-icons").
+  await expect(namedRow.locator('.ib-title')).toHaveText('refund-webhooks');
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Holding up work\s*1$/, /^Waiting on you\s*1$/]);
   await expect(side(page).getByRole('button', { name: /^Inbox/ })).toContainText('3');
   await expect(side(page).getByRole('button', { name: /^billing-svc(?: \d+)?$/ })).toContainText('2');
@@ -329,12 +330,14 @@ async function leftOf(page: Page, selector: string): Promise<number> {
 
 test('a project folder filters the list and the sections still apply', async () => {
   const { page } = world;
-  // Every project: the row starts with the project label, the agent mark sits two columns in.
+  // Every project: the row starts with the project label, the agents' marks right after it, in the same column.
   const named = `.ib-row[data-thread-id="${world.threads.named}"]`;
   const stoppedRow = `.ib-row[data-thread-id="${world.threads.stopped}"]`;
   const labelLeft = await leftOf(page, `${named} .ib-p`);
   expect(await leftOf(page, '.ib-band')).toBe(labelLeft - 12);
-  expect(await leftOf(page, `${named} .ib-mk`)).toBeGreaterThan(labelLeft + 200);
+  const labelRight = await page.locator(`${named} .ib-p`).evaluate((el) => el.getBoundingClientRect().right);
+  expect(await leftOf(page, `${named} .ib-ags`)).toBeGreaterThan(labelRight);
+  expect(await leftOf(page, `${named} .ib-ags`)).toBeLessThan(await leftOf(page, `${named} .ib-subj`));
 
   await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'docs-site' })).toBeVisible();
@@ -350,16 +353,17 @@ test('a project folder filters the list and the sections still apply', async () 
   await side(page).getByRole('button', { name: /^billing-svc(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
-  // One project: no project column at all, and no empty block where it was. The
-  // subject cell starts where the project label did, badge or not. The agents'
-  // marks, the badge and the count have their own columns before the time
-  // (approval "inbox-row-byline", the one-line row), each on one right edge for every row.
+  // One project: no project label. The agents' marks start the row where the
+  // label did (approval "list-rows-mail-icons"), and the title cell starts on one
+  // left edge for every row, badge or not. The badge and the count have their own
+  // columns before the time, each on one right edge for every row.
   await expect(page.locator('.ib-row .ib-p')).toHaveCount(0);
-  expect(await leftOf(page, `${named} .ib-subj`)).toBe(labelLeft);
-  expect(await leftOf(page, `${stoppedRow} .ib-subj`)).toBe(labelLeft);
+  expect(await leftOf(page, `${named} .ib-ags`)).toBe(labelLeft);
+  expect(await leftOf(page, `${stoppedRow} .ib-ags`)).toBe(labelLeft);
+  expect(await leftOf(page, `${stoppedRow} .ib-subj`)).toBe(await leftOf(page, `${named} .ib-subj`));
   await expect(page.locator('.ib-row .ib-subj :is(.ib-mk, .ib-badge)')).toHaveCount(0);
   const rightOf = async (sel: string) => Math.round((await page.locator(sel).boundingBox())!.x + (await page.locator(sel).boundingBox())!.width);
-  for (const cell of ['.ib-cw', '.ib-mcol', '.ib-bcol', '.ib-cq']) expect(await rightOf(`${named} ${cell}`)).toBe(await rightOf(`${stoppedRow} ${cell}`));
+  for (const cell of ['.ib-cw', '.ib-bcol', '.ib-cq']) expect(await rightOf(`${named} ${cell}`)).toBe(await rightOf(`${stoppedRow} ${cell}`));
   expect(await rightOf(`${stoppedRow} .ib-bcol .ib-badge`)).toBe(await rightOf(`${stoppedRow} .ib-bcol`));
   expect(await rightOf(`${named} .ib-cq`)).toBeLessThanOrEqual(await leftOf(page, `${named} .ib-t`));
   await shot('1.2-project-filter');
@@ -430,8 +434,8 @@ test('a pick is saved at once and the agent reads it through read_thread', async
       };
       const count = rect(el.querySelector('.ib-c .ib-cs')!);
       const time = rect(el.querySelector('.ib-t')!);
-      // A two-line row's count ends line 2 (approval "inbox-row-byline"), under the time: it must end inside that line.
-      const l2 = el.querySelector('.ib-l2');
+      // A three-line row's count ends line 3 (approval "list-rows-mail-icons"), under the time: it must end inside that line.
+      const l2 = el.querySelector('.ib-l3');
       const lineEnd = l2 ? Math.round(l2.getBoundingClientRect().right - count.right) : null;
       return { shape: el.className.split(' ')[0], list: document.querySelector('.ib-lbody')!.clientWidth, text: el.querySelector('.ib-c .ib-cs')!.textContent, full: el.querySelector('.ib-c')!.getAttribute('data-count-words'), gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4, lineEnd, last: l2 ? l2.lastElementChild === el.querySelector('.ib-c') : null };
     });
@@ -621,6 +625,86 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // The sidebar slid away for Settings; "← Inbox" is the way back.
   await page.locator('[data-settings-back]').click();
   await expect(page).not.toHaveURL(/#settings/);
+});
+
+// Late, in a project of its own, so its threads change no count above (review of #2374, finding 1).
+test("one project's list: three agents with ×N stay in the marks' column and end before the title, at its widest and narrowest", async () => {
+  const { page } = world;
+  const ops = scratchProject(join(world.root, 'src'), 'ops-console');
+  // Hosts this spec has already seen: a host new to it brings the agent-note dialog, over the Update test below.
+  const [claudeA, claudeB, codexA, codexB, codexC, opencodeA, opencodeB] = [
+    await agent('Claude Code', 'claude-code'),
+    await agent('Claude Code', 'claude-code'),
+    await agent('Codex', 'codex'),
+    await agent('Codex', 'codex'),
+    await agent('Codex', 'codex'),
+    await agent('OpenCode', 'opencode'),
+    await agent('OpenCode', 'opencode'),
+  ];
+  const ask = (prompt: string) => [':::question', prompt, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
+  // Three hosts, each with "×N" (Claude Code ×2, Codex ×3, OpenCode ×2): the widest run of three marks.
+  const trio = await claudeA!.send({ project_path: ops, thread: 'three-agents', subject: 'Three agents, each twice or more', body: ask('Keep the icons in their column?') });
+  for (const a of [claudeB, codexA, codexB, codexC, opencodeA, opencodeB]) await a!.send({ project_path: ops, reply_to: trio.thread_id, body: 'Here too.' });
+  // Three hosts, one session each: the common run.
+  const plain = await claudeA!.send({ project_path: ops, thread: 'three-plain', subject: 'Three agents, one session each', body: ask('Three bare marks?') });
+  for (const a of [codexA, opencodeA]) await a!.send({ project_path: ops, reply_to: plain.thread_id, body: 'Joined.' });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(world.url);
+  await side(page).getByRole('button', { name: /^ops-console(?: \d+)?$/ }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'ops-console' })).toBeVisible();
+  await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(2);
+  await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-ags`)).toHaveAttribute('aria-label', '2 Claude Code sessions, 3 Codex sessions and 2 OpenCode sessions');
+  await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-agx`)).toHaveText(['×2', '×3', '×2']);
+  // 1440: the column's widest (112 px), the runs on one line. 1000: its narrowest (80 px), the runs wrap inside it.
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(150);
+    const rows = await page.locator('.ib-lbody .ib-row').evaluateAll((els) =>
+      els.map((r) => {
+        const from = r.querySelector('.ib-from')!.getBoundingClientRect();
+        const marks = r.querySelector('.ib-ags')!;
+        const parts = [...marks.children].map((c) => c.getBoundingClientRect());
+        const box = r.getBoundingClientRect();
+        return {
+          id: (r as HTMLElement).dataset.threadId,
+          drawn: marks.querySelectorAll(':scope > .ib-ag').length,
+          lines: new Set(parts.map((b) => Math.round(b.top))).size,
+          marksRight: Math.max(...parts.map((b) => b.right)),
+          marksTop: Math.min(...parts.map((b) => b.top)),
+          marksBottom: Math.max(...parts.map((b) => b.bottom)),
+          rowTop: box.top,
+          rowBottom: box.bottom,
+          fromRight: from.right,
+          titleLeft: r.querySelector('.ib-subj')!.getBoundingClientRect().left,
+        };
+      }),
+    );
+    for (const r of rows) {
+      const where = `row ${r.id} at ${width}`;
+      expect(r.drawn, where).toBe(3);
+      if (width === 1440) expect(r.lines, `${where}: the run wraps at the column's widest`).toBe(1);
+      // Every mark and "×N" ends inside the marks' column (wrapping there when the run is wider), before the
+      // title starts; none spills out of the row.
+      expect(r.marksRight, `${where}: the marks run into the title`).toBeLessThanOrEqual(r.titleLeft);
+      expect(r.marksRight, `${where}: the marks leave their column`).toBeLessThanOrEqual(r.fromRight + 0.5);
+      expect(r.marksTop, where).toBeGreaterThanOrEqual(r.rowTop);
+      expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // These sessions bring the agent-note dialog on this load (docs/agent-guides/inbox-foundation.md, asked once per
+  // agent): answer it "Not now", or it opens again over the Update test below.
+  const note = page.locator('dialog[data-dialog="agent-note"]');
+  await note.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
+  if (await note.isVisible()) {
+    const notNow = note.locator('[data-anote-notnow]');
+    if (await notNow.count()) await notNow.click();
+    else await page.keyboard.press('Escape');
+    await expect(note).toHaveCount(0);
+  }
+  await shot('1.3-project-filter-agents');
+  await side(page).getByRole('button', { name: /^Inbox/ }).click();
 });
 
 // Before the restart, whose gap (the old Inbox gone, the new one not yet up)

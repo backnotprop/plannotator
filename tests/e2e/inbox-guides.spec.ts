@@ -442,17 +442,18 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
   const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()).projects as { id: string; name: string }[];
   const ledger = projects.find((p) => p.name === 'ledger')!;
   for (const [i, name] of names.entries()) {
-    // Every project below 900px of list draws the two-line row; one project
-    // keeps the wide row. The wide row's subject cell holds the chip, the
-    // subject and the mark. The two-line row and, below 768px (a phone,
-    // packages/inbox/phone.ts), the mail row put the chip on line 1 before the
-    // time and the subject and the mark on line 2 (approval "inbox-row-byline").
+    // Every project below 900px of list draws the three-line row; one project
+    // keeps the wide row. The wide row's title cell holds the name (one line,
+    // cut with "…"), the subject and the mark. The three-line row and, below
+    // 768px (a phone, packages/inbox/phone.ts), the mail row put the name on
+    // line 2, whole (it wraps), and the subject and the mark on line 3
+    // (approval "list-rows-mail-icons").
     const row = page.locator(`.ib-lbody [data-thread-id="${threads[i]}"]`);
     for (const route of ['', `#project=${ledger.id}`]) {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto(`${world.url}${route}`);
       await expect(row).toBeVisible();
-      await expect(row.locator('.ib-key')).toHaveText(name);
+      await expect(row.locator('.ib-title, .ib-m2').first()).toHaveText(name);
       await expect(row.locator('[data-guide-mark]')).toHaveCount(1);
       // One project keeps the wide row down to a phone's width, then the mail row: also 360, 500 and 520px there.
       for (const width of route ? [360, 500, 520, 556, 656, 820] : [556, 656, 820]) {
@@ -474,38 +475,42 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
         const measured = await row.evaluate((el) => {
           const body = el.closest('.ib-lbody')!;
           const wideRow = el.querySelector('.ib-subj') !== null;
-          const line = (el.querySelector('.ib-subj') ?? el.querySelector('.ib-l2') ?? el.querySelector('.ib-ml2'))!.getBoundingClientRect();
+          // The line with the mark: the wide row's title cell, else line 3.
+          const line = el.querySelector(':is(.ib-subj, .ib-l3, .ib-m3)')!.getBoundingClientRect();
           const box = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
-          const subject = box(el.querySelector('.ib-s') ? '.ib-s' : '.ib-m2');
-          const nameEl = el.querySelector<HTMLElement>('.ib-keyt') ?? el.querySelector<HTMLElement>('.ib-key')!;
+          const title = el.querySelector<HTMLElement>(':is(.ib-title, .ib-m2)')!;
+          const t = title.getBoundingClientRect();
           return {
+            wideRow,
             listOverflow: body.scrollWidth - body.clientWidth,
             rowOverflow: el.scrollWidth - el.clientWidth,
             lineRight: line.right,
-            // What the subject line must end before: the count words' column, or the row's own edge.
+            // What the mark's line must end before: the count words' column, or the row's own edge.
             limit: wideRow ? box('.ib-cw').left : el.getBoundingClientRect().right,
-            // What the chip must end before: its own line's end (the wide row's subject cell), or line 1's time.
-            keyLimit: wideRow ? line.right : box('.ib-t').left,
-            keyRight: box('.ib-key').right,
-            keyWidth: box('.ib-key').width,
-            keyTruncated: nameEl.scrollWidth > nameEl.clientWidth + 1,
-            keyLines: Math.round(nameEl.getBoundingClientRect().height / parseFloat(getComputedStyle(nameEl).lineHeight)),
+            titleShown: Math.min(t.right, line.right) - t.left,
+            titleRight: t.right,
+            rowRight: el.getBoundingClientRect().right,
+            titleCut: title.scrollWidth > title.clientWidth + 1,
+            titleLines: Math.round(t.height / parseFloat(getComputedStyle(title).lineHeight)),
             markRight: box('[data-guide-mark]').right,
-            subjectShown: Math.min(subject.right, line.right) - subject.left,
           };
         });
         const where = `(${name.length}-character name, ${route ? 'one project' : 'every project'}, ${width}px)`;
-        expect(measured.subjectShown, `the subject is squeezed out ${where}`).toBeGreaterThan(20);
+        expect(measured.titleShown, `the name is squeezed out ${where}`).toBeGreaterThan(20);
         expect(measured.markRight, `the Guided review mark is clipped ${where}`).toBeLessThanOrEqual(measured.lineRight + 0.5);
-        expect(measured.keyRight, `the thread chip leaves its line ${where}`).toBeLessThanOrEqual(measured.keyLimit + 0.5);
         expect(measured.listOverflow, `the list scrolls sideways ${where}`).toBe(0);
         expect(measured.rowOverflow, `the row spills ${where}`).toBe(0);
-        expect(measured.lineRight, `the subject line runs into the count ${where}`).toBeLessThanOrEqual(measured.limit);
-        // The chip is shown with some of its name, or left out: never a bare border.
-        expect(measured.keyWidth === 0 || measured.keyWidth >= 24, `the thread chip is squeezed to its border (${measured.keyWidth}px) ${where}`).toBe(true);
-        // Every row's chip, a phone's too, cuts a long name with "…" on one line.
-        if (name.length === 120 && measured.keyWidth > 0) expect(measured.keyTruncated, `the thread chip keeps its ellipsis ${where}`).toBe(true);
-        expect(measured.keyWidth === 0 || measured.keyLines <= 1, `the thread chip's name runs past its line ${where}`).toBe(true);
+        expect(measured.lineRight, `the title cell runs into the count ${where}`).toBeLessThanOrEqual(measured.limit);
+        if (measured.wideRow) {
+          // The wide row is one line: the long name ends in "…" (its tooltip shows it whole).
+          expect(measured.titleLines, `the wide row's name runs past its line ${where}`).toBe(1);
+          if (name.length === 120) expect(measured.titleCut, `the wide row's name keeps its ellipsis ${where}`).toBe(true);
+        } else {
+          // Beside a thread and on a phone the name is never cut: it wraps inside the row.
+          expect(measured.titleCut, `the name is cut ${where}`).toBe(false);
+          expect(measured.titleRight, `the name leaves the row ${where}`).toBeLessThanOrEqual(measured.rowRight + 0.5);
+          if (name.length === 120) expect(measured.titleLines, `the long name wraps ${where}`).toBeGreaterThan(1);
+        }
       }
     }
   }

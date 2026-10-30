@@ -46,7 +46,7 @@ const LABELS: Record<RowMenuAction, { label: string; icon: IconName }> = {
 /** A touch (or a long press that a phone turns into `contextmenu`) never opens the menu: phones have none. */
 const TOUCH_WINDOW_MS = 1500;
 
-/** The row a `contextmenu` event names: a wide or two-line row (its wrapper, `data-row`), or a phone's row. */
+/** The row a `contextmenu` event names: a wide or three-line row (its wrapper, `data-row`), or a phone's row. */
 function rowElementOf(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null;
   const wrapper = target.closest<HTMLElement>('[data-row]');

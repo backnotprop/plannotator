@@ -1,12 +1,12 @@
 /**
- * The list's project column. With every project shown a wide row carries the
- * project label before the subject cell (approval "inbox-row-byline", the
- * one-line row); the agents' marks, the badge, the count and the time follow
- * in columns of their own. In one project's list (a sidebar folder) the
- * project cell is not rendered, so the row does not start with an empty
- * block. The failure this catches is the column coming back merely hidden
- * (display: none, an empty span) while the grid still reserves its width.
- * Pixel positions are proved in tests/e2e/inbox.spec.ts.
+ * The list's project column. With every project shown a wide row starts with
+ * the project label and the agents' marks after it (approval
+ * "list-rows-mail-icons", 2026-10-30), then the title cell; the words, the
+ * badge, the count and the time follow in columns of their own. In one
+ * project's list (a sidebar folder) the project label is not rendered and the
+ * first cell holds the marks alone. The failure this catches is the label
+ * coming back merely hidden (display: none, an empty span), or the marks
+ * dropped with it. Pixel positions are proved in tests/e2e/inbox.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -96,64 +96,69 @@ function rowEl(el: HTMLElement, id: string): HTMLElement {
 }
 
 describe.if(hasDom)('the wide list', () => {
-  test('every project: the project, the subject cell, then the marks, the badge, the count and the time in columns', () => {
+  test('every project: the project and its marks, the title cell, then the badge, the count and the time in columns', () => {
     const el = render(false);
     expect(el.querySelector('.ib-listcol')!.classList.contains('ib-noproj')).toBe(false);
     for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_sent']) {
       const r = rowEl(el, id);
       const cells = [...r.children];
-      expect(cells.length).toBe(7);
-      expect(cells[0]!.className).toBe('ib-p');
-      expect(cells[0]!.textContent).toBe('billing-svc');
+      expect(cells.length).toBe(6);
+      expect(cells[0]!.className).toBe('ib-from');
+      expect(cells[0]!.querySelector('.ib-p')!.textContent).toBe('billing-svc');
+      expect(cells[0]!.querySelector('.ib-p + .ib-ags .ib-mk')).not.toBeNull();
       expect(cells[1]!.className).toBe('ib-subj');
-      // The badge and the marks sit in their own columns, never inside the subject cell; every row has every
-      // cell, empty or not, so the columns line up down the list.
+      // The badge sits in its own column, never inside the title cell, and no mark is right of the project cell;
+      // every row has every cell, empty or not, so the columns line up down the list.
       expect(cells[1]!.querySelector('.ib-badge, .ib-mk')).toBeNull();
-      expect(cells.slice(2).map((c) => c.className.split(' ')[0])).toEqual(['ib-cw', 'ib-mcol', 'ib-bcol', 'ib-cq', 'ib-t']);
+      expect(cells.slice(2).map((c) => c.className.split(' ')[0])).toEqual(['ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
+      expect(cells.slice(1).some((c) => c.querySelector('.ib-mk'))).toBe(false);
     }
-    expect(rowEl(el, 'msg_stop').children[4]!.querySelector('.ib-badge')!.textContent).toBe('Stopped');
+    expect(rowEl(el, 'msg_stop').children[3]!.querySelector('.ib-badge')!.textContent).toBe('Stopped');
     // The open count is ?N (from one question on), its words for a screen reader.
-    expect(rowEl(el, 'msg_stop').children[5]!.querySelector('.ib-sr')!.textContent).toBe('1 question');
+    expect(rowEl(el, 'msg_stop').children[4]!.querySelector('.ib-sr')!.textContent).toBe('1 question');
   });
 
-  test("one project: no project cell; the subject cell starts the row", () => {
+  test("one project: no project label; the first cell holds the agents' marks alone", () => {
     const el = render(true);
     expect(el.querySelector('.ib-listcol')!.classList.contains('ib-noproj')).toBe(true);
     expect(el.querySelectorAll('.ib-row .ib-p').length).toBe(0);
     for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_sent']) {
       const cells = [...rowEl(el, id).children];
-      expect(cells.map((c) => c.className.split(' ')[0])).toEqual(['ib-subj', 'ib-cw', 'ib-mcol', 'ib-bcol', 'ib-cq', 'ib-t']);
+      expect(cells.map((c) => c.className.split(' ')[0])).toEqual(['ib-from', 'ib-subj', 'ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
+      expect([...cells[0]!.children].map((c) => c.className)).toEqual(['ib-ags']);
     }
-    // The subject cell starts with the thread chip or the subject, badge or not.
-    expect(rowEl(el, 'msg_wait').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-key');
-    expect(rowEl(el, 'msg_sent').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-s');
+    // The title cell starts with the title: the thread's name, or the subject of an unnamed thread.
+    expect(rowEl(el, 'msg_wait').querySelector('.ib-subj > .ib-title')!.textContent).toBe('refund-webhooks');
+    expect(rowEl(el, 'msg_sent').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-title');
     // The badge keeps its own column; its words stay for a screen reader.
     for (const [id, badge] of [['msg_stop', 'Stopped'], ['msg_hold', 'Holds up 2']] as const) {
       const r = rowEl(el, id);
       expect(r.querySelector('.ib-subj .ib-badge')).toBeNull();
       expect(r.querySelector('.ib-bcol > .ib-badge')!.textContent).toBe(badge);
     }
-    // The thread chip and the guided review mark stay in the subject cell.
+    // The guided review mark stays in the title cell, after the preview.
     const wait = rowEl(el, 'msg_wait').querySelector('.ib-subj')!;
-    expect(wait.querySelector('.ib-key')!.textContent).toBe('refund-webhooks');
+    expect([...wait.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-title', 'ib-pv', 'ib-att']);
     const mark = wait.querySelector('[data-guide-mark]')!;
     expect(mark.getAttribute('aria-label')).toBe('Guided review');
   });
 
-  test("beside an open thread: a narrow row's first line names its agent in one project, the project in all", () => {
+  test("beside an open thread: a narrow row's first line is the agents' marks alone in one project, the project and its marks in all", () => {
     let el = render(true, true);
-    const l1 = (id: string) => el.querySelector<HTMLElement>(`.ib-nrow[data-thread-id="${id}"] .ib-l1 .ib-p`)!.textContent;
+    const l1 = (id: string) => el.querySelector<HTMLElement>(`.ib-nrow[data-thread-id="${id}"] .ib-l1 .ib-from`)!;
     expect(el.querySelectorAll('.ib-row').length).toBe(0);
-    expect(l1('msg_wait')).toBe('Claude Code');
-    expect(l1('msg_sent')).toBe('Pi');
+    expect(l1('msg_wait').querySelector('.ib-p')).toBeNull();
+    expect(l1('msg_wait').querySelector('.ib-ags')!.getAttribute('aria-label')).toBe('Claude Code');
+    expect(l1('msg_sent').querySelector('.ib-ags')!.getAttribute('aria-label')).toBe('Pi');
     act(() => root?.unmount());
     host?.remove();
     el = render(false, true);
-    expect(l1('msg_wait')).toBe('billing-svc');
-    expect(l1('msg_sent')).toBe('billing-svc');
+    expect(l1('msg_wait').querySelector('.ib-p')!.textContent).toBe('billing-svc');
+    expect(l1('msg_sent').querySelector('.ib-p')!.textContent).toBe('billing-svc');
+    expect(l1('msg_sent').querySelector('.ib-ags')!.getAttribute('aria-label')).toBe('Pi');
   });
 
-  test('every project, in a list narrower than the wide row needs: two-line rows; one project keeps its wide rows', () => {
+  test('every project, in a list narrower than the wide row needs: three-line rows; one project keeps its wide rows', () => {
     const saved = globalThis.ResizeObserver;
     let width = 800;
     // happy-dom lays nothing out: report the list's width the way a browser's observer would.
@@ -170,7 +175,7 @@ describe.if(hasDom)('the wide list', () => {
       let el = render(false);
       expect(el.querySelectorAll('.ib-row').length).toBe(0);
       expect(el.querySelectorAll('.ib-nrow').length).toBe(4);
-      // The guided review mark stays on the two-line row.
+      // The guided review mark stays on the three-line row.
       expect(el.querySelector('.ib-nrow[data-thread-id="msg_wait"] [data-guide-mark]')).not.toBeNull();
       act(() => root?.unmount());
       host?.remove();
@@ -186,7 +191,7 @@ describe.if(hasDom)('the wide list', () => {
     }
   });
 
-  test('a focused row keeps focus when the list crosses the two-line width, both ways', () => {
+  test('a focused row keeps focus when the list crosses the three-line width, both ways', () => {
     const saved = globalThis.ResizeObserver;
     let resize: (width: number) => void = () => {};
     // happy-dom lays nothing out: the stub reports the widths a browser's observer would.

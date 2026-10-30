@@ -196,7 +196,7 @@ export function WaitCard({ row, agent, mark, time }: { row: InboxListRow; agent:
 }
 
 /**
- * The badge. `card` (the wide and two-line rows): the hover card, opened on
+ * The badge. `card` (the wide and three-line rows): the hover card, opened on
  * hover and, through `open`, while the row has keyboard focus. Without it (a
  * phone) the icons only. `words` (a wide row, the owner's call of 2026-10-29: the
  * full words in full-width mode): the triangle, then the badge's own words as

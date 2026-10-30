@@ -133,7 +133,7 @@ test("a reply to A moves A to Sent; Waiting keeps C, B", async () => {
   const row = page.locator(`.ib-lbody [data-thread-id="${threads.pi}"]`);
   await expect(row).toHaveAttribute('data-section', 'sent');
   // Its own subject, and the delivery glyph before the time says where the reply is (approval "inbox-row-delivery").
-  await expect(row.locator('.ib-st')).toHaveText('Keep the CSV header row?');
+  await expect(row.locator('.ib-title')).toHaveText('Keep the CSV header row?');
   await expect(row.locator('.ib-tick')).toHaveAttribute('aria-label', 'Saved for Pi,');
   // While the thread is open the person's own Send does not reorder the list (owner ruling 2026-10-11).
   expect(await sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode, threads.pi]);

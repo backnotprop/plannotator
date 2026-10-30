@@ -316,7 +316,7 @@ test.skipIf(!hasDom)('an MCP agent gets the other heads-up; Send carries the tag
   expect(again.querySelector(`[data-tag-line="${S.owner}"]`)!.getAttribute('data-delivery')).not.toBe('delivered');
 }, 30_000);
 
-test.skipIf(!hasDom)('the thread head and the row show the agents in the thread, overlapping; the Sent row counts deliveries', async () => {
+test.skipIf(!hasDom)('the thread head shows the agents in the thread overlapping, the row beside its project; the Sent row counts deliveries', async () => {
   const el = await renderApp(`#thread=${tags.ids.t3}`);
   await until(() => el.querySelector('[data-thread-participants]') !== null, 'the thread head');
   expect(el.querySelector('[data-thread-participants]')!.textContent).toBe('Claude Code and Pi');
@@ -325,7 +325,7 @@ test.skipIf(!hasDom)('the thread head and the row show the agents in the thread,
   const rows = model.sections.flatMap((s) => s.threads);
   expect(rows.find((r) => r.thread_id === tags.ids.t3)!.participants?.map((p) => p.host)).toEqual(['claude-code', 'pi']);
   const row = el.querySelector(`.ib-lbody [data-thread-id="${tags.ids.t2}"]`)!;
-  expect(row.querySelector('[data-tag-stack]')!.getAttribute('data-tag-stack')).toBe('3');
+  expect(row.querySelector('[data-row-agents]')!.getAttribute('data-row-agents')).toBe('3');
   // Pi's connection took its copy in the test before (it delivers everything it is handed): the owner still waits.
   expect(row.textContent).toContain('1 of 3 delivered · Claude Code queued');
 }, 30_000);

@@ -1,6 +1,6 @@
 /**
  * The delivery glyph before a row's time ("Ticks", approval
- * "inbox-row-delivery"): one shape per state on wide, two-line and phone
+ * "inbox-row-delivery"): one shape per state on wide, three-line and phone
  * rows; the state in words in the row's accessible name; the thread's line
  * as ui's tooltip (no native title); the delivery time once delivered; and
  * a Sent row keeps its real subject. An older Inbox (no `delivery`) keeps
@@ -135,7 +135,7 @@ function hover(target: HTMLElement) {
 
 const tooltipWith = (el: HTMLElement, text: string) => [...document.body.querySelectorAll('*')].some((n) => !el.contains(n) && n.children.length === 0 && n.textContent === text);
 
-test.skipIf(!hasDom)('one shape per state, on wide, two-line and phone rows; a row from an older Inbox has none', () => {
+test.skipIf(!hasDom)('one shape per state, on wide, three-line and phone rows; a row from an older Inbox has none', () => {
   for (const options of [{}, { narrow: true }, { phone: true }]) {
     const el = render(options);
     expect(tick(el, QUEUED.thread_id)!.dataset.tick).toBe('queued');
@@ -161,9 +161,9 @@ test.skipIf(!hasDom)("the state in words is in the row's name; a Sent row keeps 
   expect(accessibleName(rowEl(el, SAVED.thread_id))).toContain('Saved for Codex,');
   expect(accessibleName(rowEl(el, UNDELIVERED.thread_id))).toContain('Not delivered,');
   expect(accessibleName(rowEl(el, DELIVERED.thread_id))).toContain(`Delivered to Claude Code, ${shortTime(DELIVERED_AT)}`);
-  expect(rowEl(el, SENDING.thread_id).querySelector('.ib-st')!.textContent).toBe('Drop the legacy share portal route?');
+  expect(rowEl(el, SENDING.thread_id).querySelector('.ib-title')!.textContent).toBe('Drop the legacy share portal route?');
   // No glyph: the older wording stays.
-  expect(rowEl(el, OLDER.thread_id).querySelector('.ib-st')!.textContent).toBe('Queued for Claude Code; it gets this as its next turn.');
+  expect(rowEl(el, OLDER.thread_id).querySelector('.ib-title')!.textContent).toBe('Queued for Claude Code; it gets this as its next turn.');
 });
 
 test.skipIf(!hasDom)("the tooltip is the thread's delivery line, ui's tooltip, never a native title", async () => {

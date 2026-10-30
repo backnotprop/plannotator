@@ -1,11 +1,11 @@
 /**
- * A Quiet row's subject with Soft's quiet-text switch off (light mode, the
- * owner's pick) draws as it does today: in the narrow list beside an open
- * thread every subject is quiet text (`.ib-nrow .ib-l2 .ib-s`), and in the
- * wide list a Quiet row's subject takes its row's colour. The failure this
- * catches: the Soft rule for Quiet subjects (`var(--ib-quiet-dim, <today's>)`)
- * winning over today's narrow rule with a fallback of the row's text colour,
- * so the narrow Quiet subjects turned dark in light mode.
+ * A Quiet row's title with Soft's quiet-text switch off (light mode, the
+ * owner's pick): in the narrow list beside an open thread a Quiet title is
+ * quiet text (`.ib-nrow[data-section="quiet"] .ib-title`), and in the wide
+ * list a Quiet row's title takes its row's colour. The failure this catches:
+ * the Soft rule for Quiet titles (`var(--ib-quiet-dim, <today's>)`) falling
+ * back to the row's text colour on the narrow row, so the narrow Quiet titles
+ * turned dark in light mode.
  *
  * The real list is rendered; the colour is worked out from inbox.css by
  * cssCascade.testing.ts (happy-dom does not apply the Soft switches).
@@ -92,20 +92,20 @@ function render(narrow: boolean, mode: 'light' | 'dark'): HTMLElement {
 }
 
 function subject(el: HTMLElement, id: string): HTMLElement {
-  const found = el.querySelector<HTMLElement>(`[data-thread-id="${id}"] .ib-s`);
+  const found = el.querySelector<HTMLElement>(`[data-thread-id="${id}"] .ib-title`);
   expect(found).not.toBeNull();
   return found!;
 }
 
-describe.if(hasDom)("Quiet subjects with Soft's quiet text off", () => {
-  test('light, narrow list: a Quiet subject is quiet text, as every narrow subject is today', () => {
+describe.if(hasDom)("Quiet titles with Soft's quiet text off", () => {
+  test('light, narrow list: a Quiet title is quiet text', () => {
     const el = render(true, 'light');
     expect(el.querySelector('.ib-nrow[data-section="quiet"]')).not.toBeNull();
     const cascade = loadCascade(CSS);
     expect(cascade.resolved(subject(el, 'msg_quiet'), 'color')).toBe('var(--muted-foreground)');
   });
 
-  test('light, wide list: a Quiet subject keeps its row\'s colour', () => {
+  test('light, wide list: a Quiet title keeps its row\'s colour', () => {
     const el = render(false, 'light');
     const quietRow = el.querySelector<HTMLElement>('.ib-row[data-section="quiet"]');
     expect(quietRow).not.toBeNull();
@@ -115,7 +115,7 @@ describe.if(hasDom)("Quiet subjects with Soft's quiet text off", () => {
     expect(own).not.toBe('var(--muted-foreground)');
   });
 
-  test('dark (the switch on): the narrow and wide Quiet subjects step back to quiet text', () => {
+  test('dark (the switch on): the narrow and wide Quiet titles step back to quiet text', () => {
     for (const narrow of [true, false]) {
       const el = render(narrow, 'dark');
       const cascade = loadCascade(CSS);

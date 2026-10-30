@@ -89,20 +89,23 @@ function render(filtered: boolean, narrow = false): HTMLElement {
 }
 
 /**
- * A phone row's two lines: line 1 (`class:text`), the subject, and what follows the subject on line 2
- * (`after`: the agent's mark as 'mark', the open count as `?N`, anything else by its text).
+ * A phone row's three lines (approval "list-rows-mail-icons"): line 1 (the project's text, the agents' marks by
+ * their name as `agents:<name>`, the time as `time`), the title, and line 3 (the preview by its text, the open count
+ * as `?N`, anything else by its text), or `null` when the row has no line 3.
  */
-function lines(el: HTMLElement, id: string): { l1: string[]; subject: string; after: string[] } {
+function lines(el: HTMLElement, id: string): { l1: string[]; title: string; l3: string[] | null } {
   const r = el.querySelector<HTMLElement>(`.ib-mrow[data-thread-id="${id}"]`);
   expect(r).not.toBeNull();
-  const [m1, l2, ...rest] = [...r!.children].filter((c) => !c.classList.contains('ib-sr')) as HTMLElement[];
-  expect([m1!.className, l2!.className]).toEqual(['ib-m1', 'ib-ml2']);
+  const [m1, m2, m3, ...rest] = [...r!.children].filter((c) => !c.classList.contains('ib-sr')) as HTMLElement[];
+  expect([m1!.className, m2!.className, m3!.className]).toEqual(['ib-m1', 'ib-m2', 'ib-m3']);
   expect(rest).toEqual([]);
-  const [subject, ...after] = [...l2!.children];
-  expect(subject!.className).toBe('ib-m2');
-  const named = (c: Element) => (c.className === 'ib-mcol' ? 'mark' : c.classList.contains('ib-qn') ? `?${c.getAttribute('data-open-count')}` : c.textContent ?? '');
-  const l1 = [...m1!.children].map((c) => `${c.className}:${c.textContent}`);
-  return { l1, subject: subject!.textContent ?? '', after: after.map(named) };
+  const from = m1!.querySelector(':scope > .ib-from')!;
+  const l1 = [
+    ...[...from.children].map((c) => (c.getAttribute('role') === 'img' ? `agents:${c.getAttribute('aria-label')}` : c.textContent ?? '')),
+    ...[...m1!.children].filter((c) => c !== from).map((c) => (c.classList.contains('ib-t') ? 'time' : c.className)),
+  ];
+  const named = (c: Element) => (c.classList.contains('ib-qn') ? `?${c.getAttribute('data-open-count')}` : c.textContent ?? '');
+  return { l1, title: m2!.textContent ?? '', l3: m3!.children.length ? [...m3!.children].map(named) : null };
 }
 
 describe.if(hasDom)('the list on a phone', () => {
@@ -116,30 +119,33 @@ describe.if(hasDom)('the list on a phone', () => {
     }
   });
 
-  test('two lines: where, the thread and when; then the subject, the marks, the badge and the count at its end', () => {
+  test('three lines: the project, its agents and when; the title; then the preview, the badge and the count at its end', () => {
     const el = render(false);
+    // An unnamed thread: its subject is the title, and line 3 holds the badge and ?N alone.
     expect(lines(el, 'msg_stop')).toEqual({
-      // Line 1 is the project and the time; line 2 the subject, then the mark, the badge and ?N last (approval "inbox-row-byline").
-      l1: ['ib-pw:payments-reconciliation-service-v2', expect.stringMatching(/^ib-t:/)],
-      subject: 'Subject msg_stop',
-      after: ['mark', 'Stopped', '?2'],
+      l1: ['payments-reconciliation-service-v2', 'agents:Claude Code', 'time'],
+      title: 'Subject msg_stop',
+      l3: ['Stopped', '?2'],
     });
-    // The long thread name joins line 1, before the time; the guided review book follows the subject.
-    const wait = lines(el, 'msg_wait');
-    expect(wait.l1).toEqual(['ib-pw:payments-reconciliation-service-v2', 'ib-key:refund-webhooks-and-the-long-running-reconciliation-job', expect.stringMatching(/^ib-t:/)]);
-    expect(wait.after).toEqual(['', 'mark', '?2']);
-    expect(el.querySelector('.ib-mrow[data-thread-id="msg_wait"] .ib-ml2 > [data-guide-mark]')!.getAttribute('aria-label')).toBe('Guided review');
-    // A Sent row says where the reply is; its agent's mark ends line 2.
+    // A named thread: the name is the title, whole however long; the subject is the preview, then the guided review book.
+    expect(lines(el, 'msg_wait')).toEqual({
+      l1: ['payments-reconciliation-service-v2', 'agents:Claude Code', 'time'],
+      title: 'refund-webhooks-and-the-long-running-reconciliation-job',
+      l3: ['Subject msg_wait', '', '?2'],
+    });
+    expect(el.querySelector('.ib-mrow[data-thread-id="msg_wait"] .ib-m3 > [data-guide-mark]')!.getAttribute('aria-label')).toBe('Guided review');
+    // A Sent row says where the reply is, as its title; nothing else waits, so no line 3.
     expect(lines(el, 'msg_sent')).toEqual({
-      l1: ['ib-pw:payments-reconciliation-service-v2', expect.stringMatching(/^ib-t:/)],
-      subject: 'Saved for Pi. It sees it when it next reads this thread.',
-      after: ['mark'],
+      l1: ['payments-reconciliation-service-v2', 'agents:Pi', 'time'],
+      title: 'Saved for Pi. It sees it when it next reads this thread.',
+      l3: null,
     });
   });
 
-  test("one project's list names the agent where the project was", () => {
+  test("one project's list: the agents' marks alone where the project was, no name in words", () => {
     const el = render(true);
-    expect(lines(el, 'msg_stop').l1[0]).toBe('ib-pw:Claude Code');
-    expect(lines(el, 'msg_sent').l1[0]).toBe('ib-pw:Pi');
+    expect(lines(el, 'msg_stop').l1).toEqual(['agents:Claude Code', 'time']);
+    expect(lines(el, 'msg_sent').l1).toEqual(['agents:Pi', 'time']);
+    expect(el.querySelector('.ib-mrow[data-thread-id="msg_stop"] .ib-m1')!.textContent).not.toContain('Claude Code');
   });
 });

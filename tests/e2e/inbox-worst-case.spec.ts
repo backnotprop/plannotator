@@ -205,12 +205,12 @@ test('the names: real folder names, a parent folder for two "api", days and year
     await page.waitForSelector(`[data-thread-id="${world.seed.threads.lastYear}"]`);
     await expect(page.locator(`[data-thread-id="${world.seed.threads.lastYear}"] .ib-t`)).toHaveText(new RegExp(`, ${new Date().getFullYear() - 1}$`));
     // No subject is cut inside a character (row 26).
-    for (const subject of await page.locator('.ib-lbody .ib-st').allTextContents()) expect(subject).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
-    // Hovered, what the list cuts with "…" (the subject, the thread label, the project) shows its full text in
+    for (const subject of await page.locator('.ib-lbody :is(.ib-title, .ib-pv)').allTextContents()) expect(subject).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+    // Hovered, what the list cuts with "…" (the title, the preview, the project) shows its full text in
     // ui's tooltip, only while cut, and nothing in the list carries a native title (row 23; inbox-polish, item 3;
     // the owner's "an actual component tooltip", 2026-10-17).
     const items = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-st, .ib-lbody .ib-keyt, .ib-lbody .ib-p')].map((el) => ({
+      [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-title, .ib-lbody .ib-pv, .ib-lbody .ib-p')].map((el) => ({
         project: el.classList.contains('ib-p'),
         cut: el.scrollWidth > el.clientWidth + 1,
         text: el.textContent,
@@ -222,8 +222,8 @@ test('the names: real folder names, a parent folder for two "api", days and year
     for (const project of [false, true]) {
       const cutIndex = items.findIndex((t) => t.project === project && t.cut);
       if (project && cutIndex < 0) continue;
-      expect(cutIndex, 'a cut subject or label').toBeGreaterThanOrEqual(0);
-      await page.locator('.ib-lbody :is(.ib-st, .ib-keyt, .ib-p)').nth(cutIndex).hover();
+      expect(cutIndex, 'a cut title, preview or label').toBeGreaterThanOrEqual(0);
+      await page.locator('.ib-lbody :is(.ib-title, .ib-pv, .ib-p)').nth(cutIndex).hover();
       // ui's tooltip (portaled into the window's root, out of the row) holds the whole text.
       await expect(page.locator('[data-pn-tooltip]').getByText(items[cutIndex]!.text!, { exact: true })).toBeVisible();
       await page.mouse.move(1, 1);

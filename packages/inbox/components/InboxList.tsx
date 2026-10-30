@@ -4,11 +4,11 @@ import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { threadChipName } from '../threadChip';
 import { agentName, formatCount, shortTime, waitCount } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
+import { RowAgents } from './RowAgents';
 import { ProjectTipText, Tip } from './Tip';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
@@ -43,7 +43,7 @@ export interface InboxListProps {
   projectNames?: ReadonlyMap<string, string>;
   /**
    * A thread is open beside the list: a column of its own width (380px, or
-   * wider where the person dragged its edge), two-line rows until it is
+   * wider where the person dragged its edge), three-line rows until it is
    * wide enough for the wide ones.
    */
   narrow: boolean;
@@ -114,9 +114,12 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
   return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
 }
 
-/** The row's mark: the agent's, or, when several agents are in the thread, their marks overlapping (Lines). */
-function RowMark({ row, fold }: { row: InboxListRow; fold?: number }) {
-  if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} fold={fold} />;
+/**
+ * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
+ * (Lines). The row itself draws its agents beside the project (`RowAgents`).
+ */
+function RowMark({ row }: { row: InboxListRow }) {
+  if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
   return <AuthorMark author={rowAgent(row)} />;
 }
 
@@ -155,7 +158,7 @@ function useKeyboardFocus(enabled: boolean): [
   ];
 }
 
-/** The row's badge with its hover card (wide and two-line rows), or null. `words`: the triangle and its words (a wide row). */
+/** The row's badge with its hover card (wide and three-line rows), or null. `words`: the triangle and its words (a wide row). */
 function badgeOf(row: InboxListRow, kbd: boolean, words = false): ReactNode {
   if (!rowHasBadge(row)) return null;
   const card = <WaitCard row={row} agent={agentName(rowAgent(row))} mark={<RowMark row={row} />} time={shortTime(rowTimeIso(row))} />;
@@ -173,22 +176,6 @@ function BadgeWords({ row, id }: { row: InboxListRow; id: string }) {
 }
 
 /**
- * The agent's mark in a box of its own: on a wide row a column of its own, before the badge's and the count's
- * columns (approval "inbox-row-byline", the one-line row); on a two-line or phone row, line 2's right end, just
- * before the badge and the count (approval "inbox-row-byline", 2026-10-29), so it moves with what follows it.
- */
-function MarkCol({ row, fold }: { row: InboxListRow; fold?: number }) {
-  return (
-    <span className="ib-mcol" data-mark-col="">
-      <RowMark row={row} fold={fold} />
-    </span>
-  );
-}
-
-/** A list row shows up to three agents' marks, past that two marks and "+N" (approval "inbox-row-byline"). */
-const LINE_MARKS = 3;
-
-/**
  * The subject cell's words. A row keeps its own subject: the delivery glyph
  * by its time says where the person's reply is (approval "inbox-row-delivery").
  * An older Inbox sends no `delivery`: its Sent row says it in words instead.
@@ -203,9 +190,46 @@ function subjectOf(row: InboxListRow): string {
   return row.subject ?? '(no subject)';
 }
 
+/** The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none. */
+function titleOf(row: InboxListRow): string {
+  return row.thread_name?.trim() ? row.thread_name : subjectOf(row);
+}
+
+/**
+ * The grey preview under or after the title: the subject of a named thread (`subjectOf`, so a Sent row's words
+ * too), nothing under an unnamed one, whose subject is its title, or when the subject only repeats the name.
+ */
+function previewOf(row: InboxListRow): string | null {
+  if (!row.thread_name?.trim()) return null;
+  const subject = subjectOf(row);
+  return subject.trim() === row.thread_name.trim() ? null : subject;
+}
+
+/**
+ * Line 1's start (approval "list-rows-mail-icons"): the project, then the agents' marks right after it. The
+ * project is left out in one project's list, which leaves the marks alone. A three-line or phone row's line wraps
+ * like text, so on a long project the marks follow its last word onto the next line, never cut and never dropped.
+ * A wide row's cell is one line: the project gives way with "…" (its tooltip shows it whole), the marks never do.
+ */
+function FromLine({ row, project, filtered, wide = false, tip = true }: { row: InboxListRow; project: string; filtered: boolean; wide?: boolean; tip?: boolean }) {
+  return (
+    <span className="ib-from">
+      {!filtered &&
+        (wide ? (
+          <ClipText className="ib-p" text={project} />
+        ) : (
+          <span className="ib-p" dir="auto">
+            {project}
+          </span>
+        ))}
+      <RowAgents participants={row.participants} agent={rowAgent(row)} tip={tip} />
+    </span>
+  );
+}
+
 /**
  * What the count says in words (approval "inbox-row-byline"), or null: the open counts (`OpenCounts`) or nothing. A
- * two-line or phone row draws `short` in its 124 px slot (option A, 2026-10-29) and says `full` in the tooltip and its
+ * three-line or phone row draws `short` in its 124 px slot (option A, 2026-10-29) and says `full` in the tooltip and its
  * name; a wide row draws `long`, the full words (the owner, 2026-10-29: full words in full-width mode). Open action
  * items are no longer words here (approval "inbox-row-action-icon", 2026-10-29): they are the action pill beside `?N`.
  */
@@ -230,7 +254,7 @@ function countWords(row: InboxListRow, now: number): { short: ReactNode; long: R
 }
 
 /**
- * The count in words (`countWords`), nothing when the count is `?N` or there is none. A two-line or phone row draws
+ * The count in words (`countWords`), nothing when the count is `?N` or there is none. A three-line or phone row draws
  * the short form, its full words for a screen reader and, with `tip`, in the tooltip. A wide row (`wide`) draws the
  * full words in its words column; cut there, they are the tooltip too.
  */
@@ -260,7 +284,7 @@ function CountWords({ row, tip = false, wide = false }: { row: InboxListRow; tip
 }
 
 /**
- * The row's count (approval "inbox-row-byline", 2026-10-29): at the right end of a two-line or phone row's line 2.
+ * The row's count (approval "inbox-row-byline", 2026-10-29): at the right end of a three-line or phone row's line 3.
  * What waits on the person is the action pill and `?N` (`OpenCounts`); anything else in words (`CountWords`).
  */
 function LineCount({ row, tip = false }: { row: InboxListRow; tip?: boolean }) {
@@ -305,11 +329,6 @@ function QuestionCount({ row, tip = false }: { row: InboxListRow; tip?: boolean 
   return tip ? <Tip content={words}>{cell}</Tip> : cell;
 }
 
-/** The thread's name as a chip, unless the subject already starts with it (`threadChipName`). */
-export function chipName(row: InboxListRow): string | null {
-  return threadChipName(row.thread_name, subjectOf(row));
-}
-
 /**
  * One line of text the row may cut with "…": ui's tooltip shows it whole on
  * hover (`Tip`; the window's provider sets the delays), only while it is cut. Never a
@@ -328,9 +347,9 @@ function ClipText({ className, text }: { className: string; text: string }) {
 
 /**
  * The thread's name as a soft pill, cut with "…" (its tooltip shows it whole), or nothing.
- * `name` is what `threadChipName` gave. The open thread (Thread.tsx) draws the same pill
- * first in its meta line, with `lead` (for a screen reader only) saying what the word is;
- * a row needs none, its name already holds the whole text.
+ * `name` is what `threadChipName` gave. The open thread (Thread.tsx) draws it first in its
+ * meta line, with `lead` (for a screen reader only) saying what the word is. The list's
+ * rows no longer draw it: their title is the name (approval "list-rows-mail-icons").
  */
 export function ThreadChip({ name, lead }: { name: string | null; lead?: string }) {
   if (!name) return null;
@@ -340,6 +359,12 @@ export function ThreadChip({ name, lead }: { name: string | null; lead?: string 
       <ClipText className="ib-keyt" text={name} />
     </span>
   );
+}
+
+/** A three-line row's grey preview (`previewOf`), cut with "…" (its tooltip shows it whole), or nothing. */
+function Preview({ row }: { row: InboxListRow }) {
+  const preview = previewOf(row);
+  return preview ? <ClipText className="ib-pv" text={preview} /> : null;
 }
 
 /** The record's 1.1: a thread that carries a guided review says so after its subject. */
@@ -356,17 +381,16 @@ function GuideMark({ row }: { row: InboxListRow }) {
 }
 
 /**
- * The wide row's subject cell: the thread chip, the subject and the guided
- * review mark. When the line is short of room the subject gives way first,
- * down to a floor (inbox.css), then the chip; the mark drops its label to its icon.
+ * The wide row's title cell (approval "list-rows-mail-icons"): the title, the grey preview, the pin and the guided
+ * review mark. Short of room the preview gives way first, all the way, then the title; each cut ends in "…" with
+ * its tooltip. The mark drops its label to its icon.
  */
-function SubjectLine({ row, pinned = false }: { row: InboxListRow; pinned?: boolean }) {
+function TitleCell({ row, pinned = false }: { row: InboxListRow; pinned?: boolean }) {
+  const preview = previewOf(row);
   return (
     <>
-      <ThreadChip name={chipName(row)} />
-      <span className="ib-s">
-        <ClipText className="ib-st" text={subjectOf(row)} />
-      </span>
+      <ClipText className="ib-title" text={titleOf(row)} />
+      {preview && <ClipText className="ib-pv" text={preview} />}
       {pinned && <PinMark />}
       <GuideMark row={row} />
     </>
@@ -375,7 +399,7 @@ function SubjectLine({ row, pinned = false }: { row: InboxListRow; pinned?: bool
 
 /**
  * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"):
- * after the subject (wide and two-line rows), before the time (a phone's row).
+ * after the preview (wide and three-line rows), before the time (a phone's row).
  * For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
  */
 function PinMark() {
@@ -392,10 +416,10 @@ function PinnedWords() {
 }
 
 /**
- * Below this list width the wide row of every project leaves its subject cell
- * too little room (the project, words, mark, badge, open counts and time
- * columns are fixed at 170px, 124px, 64px, 52px, 84px and 76px), so the list
- * draws the two-line rows instead.
+ * Below this list width the wide row of every project leaves its title cell
+ * too little room (the project and agents, words, badge, open counts and time
+ * columns are fixed at 220px, 124px, 52px, 84px and 76px), so the list draws
+ * the three-line rows instead.
  */
 export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
 
@@ -408,12 +432,12 @@ export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
 
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
- * one-line row). With every project shown it is six columns: the project, the
- * subject cell (the thread pill, the subject), then right-aligned the agents'
- * marks, the badge, the open counts (the action pill, `?N`) and the time, each in a column of its own
- * so they line up down the list. In one project's list (`filtered`) the project
- * column is not rendered at all, so a row starts at the list's left edge
- * instead of after an empty block.
+ * one-line row; its cells as approval "list-rows-mail-icons", 2026-10-30, lays
+ * them out). Six columns: the project with the agents' marks after it, the
+ * title cell (the thread's name in bold when unread, then the grey subject),
+ * then right-aligned the words, the badge, the open counts (the action pill,
+ * `?N`) and the time, each in a column of its own so they line up down the
+ * list. In one project's list (`filtered`) the first column holds the marks alone.
  */
 function WideRow({ row, project, selected, filtered, lit, pinned, keys, full, onOpen }: { row: InboxListRow; project: string; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; full: boolean; onOpen: () => void }) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
@@ -435,16 +459,15 @@ function WideRow({ row, project, selected, filtered, lit, pinned, keys, full, on
       aria-describedby={rowHasBadge(row) ? wordsId : undefined}
       {...focus}
     >
-      {!filtered && <ClipText className="ib-p" text={project} />}
+      <FromLine row={row} project={project} filtered={filtered} wide />
       <span className="ib-subj">
-        <SubjectLine row={row} pinned={pinned} />
+        <TitleCell row={row} pinned={pinned} />
       </span>
       {/* Every column right of the words has a fixed width, so each lines up down the list. The words (a draft,
-          Undelivered, Read …) take the width they need, between the subject and the marks. */}
+          Undelivered, Read …) take the width they need, between the title cell and the badge. */}
       <span className="ib-cw">
         <CountWords row={row} wide={full} tip={!full} />
       </span>
-      <MarkCol row={row} fold={LINE_MARKS} />
       <span className="ib-bcol">{badgeEl}</span>
       <span className="ib-cq">
         <OpenCounts row={row} tip />
@@ -513,7 +536,7 @@ function RowWithAction({
             type="button"
             className="ib-ract"
             data-row-send-now=""
-            aria-label={`Send now: ${row.subject ?? '(no subject)'}`}
+            aria-label={`Send now: ${titleOf(row)}`}
             onClick={(event) => {
               event.stopPropagation();
               onSendNow(row);
@@ -530,7 +553,7 @@ function RowWithAction({
             type="button"
             className="ib-ract"
             data-row-mark-read=""
-            aria-label={`Mark read: ${row.subject ?? '(no subject)'}`}
+            aria-label={`Mark read: ${titleOf(row)}`}
             onClick={(event) => {
               event.stopPropagation();
               onMarkRead(row);
@@ -564,25 +587,26 @@ function NarrowRow({ row, project, selected, filtered, lit, pinned, keys, onOpen
       aria-describedby={rowHasBadge(row) ? wordsId : undefined}
       {...focus}
     >
-      {/* Line 1 (approval "inbox-row-byline", 2026-10-29): the project, the thread's name, then the ✓ and the time
-          at the right. Short of room the project gives way, down to a floor, before the thread's name. */}
+      {/* Three lines (approval "list-rows-mail-icons", 2026-10-30). Line 1: the project and the agents' marks
+          after it, then the ✓ and the time at the right. */}
       <div className="ib-l1">
-        <span className="ib-pw">
-          <ClipText className="ib-p" text={filtered ? agentName(rowAgent(row)) : project} />
-        </span>
-        <ThreadChip name={chipName(row)} />
+        <FromLine row={row} project={project} filtered={filtered} />
         <span className="ib-t">
           <TimeWithTick delivery={row.delivery} time={shortTime(rowTimeIso(row))} />
         </span>
       </div>
-      {/* Line 2: the subject, then at its right end the agents' marks, the badge and the count. Only the subject is cut. */}
+      {/* Line 2: the title, never cut: a long one wraps. */}
       <div className="ib-l2">
-        <span className="ib-s">
-          <ClipText className="ib-st" text={subjectOf(row)} />
+        <span className="ib-title" dir="auto">
+          {titleOf(row)}
         </span>
+      </div>
+      {/* Line 3: the grey preview, cut first, then the pin, the guided review mark, and at the right end the badge
+          and the count (inbox-row-byline's line 2 without the marks). Nothing to show: no line. */}
+      <div className="ib-l3">
+        <Preview row={row} />
         {pinned && <PinMark />}
         <GuideMark row={row} />
-        <MarkCol row={row} fold={LINE_MARKS} />
         {badge}
         <LineCount row={row} tip />
       </div>
@@ -594,18 +618,18 @@ function NarrowRow({ row, project, selected, filtered, lit, pinned, keys, onOpen
 }
 
 /**
- * A row on a phone, read like a mail app's, in the two-line row's order
- * (approval "inbox-row-byline", 2026-10-29): where and when on the first line
- * (the project, or the agent in one project's list, the thread's name, and the
- * time), then the subject with the agents' marks, the badge and the count at
- * the right end of line 2.
+ * A row on a phone, read like a mail app's, in the three-line row's order
+ * (approval "list-rows-mail-icons", 2026-10-30): the project and the agents'
+ * marks, the pin and the time on line 1; the title on line 2, never cut; the
+ * grey preview with the guided review book, the badge and the count at the
+ * right end of line 3.
  */
 function PhoneRow({ row, project, filtered, lit, menu, pinned, keys, onOpen }: { row: InboxListRow; project: string; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; onOpen: () => void }) {
   const wordsId = useId();
   // A phone: the icons only, no card (the thread shows the details).
   const badge = rowHasBadge(row) ? <RowBadge row={row} /> : null;
   const guide = row.guide && row.section !== 'sent';
-  const chip = chipName(row);
+  const preview = previewOf(row);
   return (
     <>
     <button
@@ -621,28 +645,27 @@ function PhoneRow({ row, project, filtered, lit, menu, pinned, keys, onOpen }: {
       aria-describedby={rowHasBadge(row) ? wordsId : undefined}
     >
       <span className="ib-m1">
-        <span className="ib-pw">
-          <ClipText className="ib-p" text={filtered ? agentName(rowAgent(row)) : project} />
-        </span>
-        {chip && (
-          <span className="ib-key">
-            <span className="ib-keyt" dir="auto">{chip}</span>
-          </span>
-        )}
+        <FromLine row={row} project={project} filtered={filtered} tip={false} />
         {pinned && <PinMark />}
         <span className="ib-t">
           <TimeWithTick delivery={row.delivery} time={shortTime(rowTimeIso(row))} />
         </span>
       </span>
-      {/* Line 2: the subject (cut first), then the guided review book, the agents' marks, the badge and the count. */}
-      <span className="ib-ml2">
-        <span className="ib-m2" dir="auto">{subjectOf(row)}</span>
+      {/* Line 2: the title, never cut. Line 3: the preview (cut first), then the book, the badge and the count. */}
+      <span className="ib-m2" dir="auto">
+        {titleOf(row)}
+      </span>
+      <span className="ib-m3">
+        {preview && (
+          <span className="ib-pv" dir="auto">
+            {preview}
+          </span>
+        )}
         {guide && (
           <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
             <Icon name="book" size={13} />
           </span>
         )}
-        <MarkCol row={row} fold={LINE_MARKS} />
         {badge}
         <LineCount row={row} />
       </span>
