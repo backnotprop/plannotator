@@ -51,6 +51,7 @@ import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getPRNu
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
+import { repoLabel } from '@plannotator/ui/utils/repoLabel';
 import { loadDiffFont } from '@plannotator/ui/utils/diffFonts';
 import { monoFontStack, normalizeCssFontSize } from '@plannotator/ui/utils/cssFontFamily';
 import { getAgentSwitchSettings, getEffectiveAgentName } from '@plannotator/ui/utils/agentSwitch';
@@ -818,9 +819,14 @@ const ReviewApp: React.FC = () => {
   /** The region the issue / PR / MR hover cards listen on (the whole app). */
   const refCardRootRef = useRef<HTMLDivElement>(null);
 
+  // Settings → General → "Hide the repository owner": the tab title and the
+  // header's repository label; the header's hover keeps the full owner/repo.
+  const hideRepoOwner = useConfigValue('hideRepoOwner');
+  const repoName = repoInfo ? repoLabel(repoInfo.display, hideRepoOwner) : null;
+
   useEffect(() => {
-    document.title = repoInfo ? `${repoInfo.display} · Code Review` : "Code Review";
-  }, [repoInfo]);
+    document.title = repoName ? `${repoName} · Code Review` : "Code Review";
+  }, [repoName]);
 
   const { prMetadata, prStackInfo, prStackTree, prDiffScope, prDiffScopeOptions, prPatchIncomplete, prPatchUpgradeAvailable, updatePRSession } = usePRSession();
   const { status: reviewProgressStatus, persistViewed, flush: flushReviewProgress } = useReviewProgress({
@@ -5881,7 +5887,7 @@ const ReviewApp: React.FC = () => {
                   title={repoInfo.display}
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
-                  {repoInfo.display}
+                  {repoName}
                 </span>
               </div>
             ) : isStaticPatch ? (

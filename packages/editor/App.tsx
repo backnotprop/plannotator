@@ -33,6 +33,7 @@ import {
   type AnnotateBundleFile,
 } from '@plannotator/shared/annotate-bundle';
 import { setExtraMarkdownExtensions } from '@plannotator/ui/utils/markdownExtensions';
+import { repoLabel } from '@plannotator/ui/utils/repoLabel';
 import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { documentRendersHtml, htmlAssetRouteFromDocument, resolveHtmlLinkIntent } from '@plannotator/ui/utils/htmlLinkNavigation';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
@@ -6702,6 +6703,13 @@ const App: React.FC = () => {
     () => blocks.find((block) => block.type === 'heading')?.content ?? null,
     [blocks],
   );
+  // Settings → General → "Hide the repository owner" names the repository in
+  // the tab title as the document header's chip does.
+  const hideRepoOwner = useConfigValue('hideRepoOwner');
+  const titleRepo = useMemo(
+    () => repoInfo && { ...repoInfo, display: repoLabel(repoInfo.display, hideRepoOwner) },
+    [repoInfo, hideRepoOwner],
+  );
   const documentTitleInput = useMemo<DocumentTitleInput>(() => ({
     apiMode: isApiMode,
     annotateMode,
@@ -6717,8 +6725,8 @@ const App: React.FC = () => {
     liveAppUrl: liveApp?.targetUrl ?? null,
     planHeading,
     archiveTitle: archive.currentInfo?.title ?? null,
-    repo: repoInfo,
-  }), [annotateMode, annotateSource, archive.archiveMode, archive.currentInfo?.title, bundleFiles, bundleIndex, fileBrowser.activeFile, goalSetupMode, isApiMode, linkedDocHook.filepath, liveApp?.targetUrl, planHeading, repoInfo, sessionFolderPath, sourceFilePath]);
+    repo: titleRepo,
+  }), [annotateMode, annotateSource, archive.archiveMode, archive.currentInfo?.title, bundleFiles, bundleIndex, fileBrowser.activeFile, goalSetupMode, isApiMode, linkedDocHook.filepath, liveApp?.targetUrl, planHeading, titleRepo, sessionFolderPath, sourceFilePath]);
   const compactDocumentTitle = useMemo(() => resolveCompactDocumentTitle(documentTitleInput), [documentTitleInput]);
   const headerDocumentName = useMemo(() => documentHeaderName(documentTitleInput), [documentTitleInput]);
   const tabTitle = useMemo(() => documentTabTitle(documentTitleInput), [documentTitleInput]);

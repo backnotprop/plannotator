@@ -63,6 +63,10 @@ Controls whether the browser tab closes automatically after you approve or deny 
 | **After 3 seconds** | Tab closes after a 3-second delay |
 | **After 5 seconds** | Tab closes after a 5-second delay |
 
+### Hide the repository owner
+
+Controls how the repository is named beside the document, in the plan diff, in code review's header and in the tab title. Off by default: `acme/payments-service`. On, the repository's name stands alone: `payments-service`, or the project for a GitLab subgroup path. Hovering the name always shows the full owner and repository. Outside a git remote the label is the folder name, which has no owner, so the setting changes nothing there. The setting is kept in your browser.
+
 ## Display
 
 > Plan review only. These settings do not appear in the code review UI.

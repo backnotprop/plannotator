@@ -20,6 +20,8 @@ import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
 import { hostnameOrFallback } from '@plannotator/core/project';
 import { OpenInAppButton } from './OpenInAppButton';
+import { useConfigValue } from '../config';
+import { repoLabel } from '../utils/repoLabel';
 
 export interface LinkedDocBadgeInfo {
   filepath: string;
@@ -70,6 +72,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   sourceInfo,
   openInAppPath,
 }) => {
+  const hideRepoOwner = useConfigValue('hideRepoOwner');
   const isRow = layout === 'row';
   const isHorizontal = layout !== 'column';
   const canOpenInApp =
@@ -105,7 +108,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
             className="px-1.5 py-0.5 bg-muted/50 rounded truncate max-w-[140px]"
             title={repoInfo.display}
           >
-            {repoInfo.display}
+            {repoLabel(repoInfo.display, hideRepoOwner)}
           </span>
           {repoInfo.branch && (
             <span
