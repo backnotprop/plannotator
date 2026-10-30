@@ -3296,7 +3296,9 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   // The folder button: the thread's artifacts, and on a desktop its project folder too, so a thread with a folder and
   // nothing sent yet still has it (owner, 2026-10-27; PROJECT-FOLDER definition).
   const folderOnly = filesTabsOn && !hasArtifacts && files !== null && filesUi.folder != null;
-  const artifactsButton = onArtifacts !== undefined && (hasArtifacts || artifactsOn || folderOnly);
+  // Beside the thread the pane is the files: its tab row closes it (×), so the header's button shows only while it is
+  // closed, the way in, with the thread's file count; the count is never on screen twice.
+  const artifactsButton = onArtifacts !== undefined && (hasArtifacts || artifactsOn || folderOnly) && !(filesTabsOn && filesUi.paneOpen);
   // Files beside the thread ("inbox-files-tabs"): opening the pane on Artifacts focuses its heading; closing it
   // (Escape, the pressed button) returns focus to the button when it was in the pane or nowhere. A change only,
   // never on the first draw.
@@ -3505,13 +3507,9 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
               <Tip
                 content={
                   folderOnly
-                    ? filesUi.paneOpen
-                      ? 'Hide the project folder'
-                      : `Project folder: ${filesUi.folder!.path}`
+                    ? `Project folder: ${filesUi.folder!.path}`
                     : filesTabsOn
-                      ? filesUi.paneOpen
-                        ? 'Hide the artifacts'
-                        : 'Artifacts: every file, image and guided review in this thread, and the project folder'
+                      ? 'Open the files: every file, image and guided review in this thread, and the project folder'
                       : artifactsOn
                         ? 'Back to the thread'
                         : 'Artifacts: every file, image and guided review in this thread'

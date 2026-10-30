@@ -1,11 +1,13 @@
 /**
  * The tab row over the files beside a thread (approval "inbox-files-tabs",
- * "Tabs in the title row"): the fixed Artifacts tab with its count, one tab
- * per open file (its icon, name, comments waiting, ×), then + (the files
- * panel), then, with one file open, that file's tools (`tools`, folded into
- * the row to save the bar under it), and at the right `trailing` (the panel
- * button and the view switch). Many tabs scroll; the "N ⌄" menu lists them all
- * with "Close the others" and "Close all".
+ * "Tabs in the title row"), drawn like a browser's: the fixed Artifacts tab,
+ * one tab per open file (its icon, name, comments waiting, ×), then + (the
+ * files panel). At the right, what belongs to the pane, not to a file: the ⌄
+ * menu of open tabs (with two or more), `trailing` (the files panel button)
+ * and × (close the pane). A file's own tools always sit in the bar under the
+ * tabs, never in this row, so one file open looks like two, minus a tab. No
+ * number here repeats the thread's file count (the stepper under the file
+ * says "1 of 3"); a tab's number is its comments waiting.
  *
  * Keys stay in the row: Left/Right/Home/End move between tabs (the tablist
  * pattern), Enter or Space shows one. No window shortcut is added.
@@ -26,7 +28,6 @@ export interface FileTabView {
 }
 
 export interface FilesTabRowProps {
-  artifactsCount: number;
   /** The Artifacts tab is the one on screen (no file shown). */
   artifactsOn: boolean;
   onArtifacts: () => void;
@@ -38,15 +39,14 @@ export interface FilesTabRowProps {
   onCloseAll: () => void;
   /** + : the files panel, its filter focused. */
   onPlus: () => void;
-  /** The one open file's tools, folded into the row; null when they sit in the bar under it. */
-  tools?: ReactNode;
   trailing?: ReactNode;
+  /** × at the row's right end: close the pane (all its tabs), back to the thread alone. */
+  onClosePane: () => void;
 }
 
 export function FilesTabRow(props: FilesTabRowProps) {
   const { tabs, current, artifactsOn } = props;
   const rowRef = useRef<HTMLDivElement>(null);
-  const fold = props.tools != null;
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const tab = (event.target as HTMLElement).closest?.<HTMLElement>('[role="tab"]');
     if (!tab || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -62,14 +62,13 @@ export function FilesTabRow(props: FilesTabRowProps) {
     all[to]?.focus();
   };
   return (
-    <div className={`ib-tabrow${fold ? ' ib-tabfold' : ''}`} ref={rowRef} data-files-tabs="">
+    <div className="ib-tabrow" ref={rowRef} data-files-tabs="">
       <div className="ib-tablist" role="tablist" aria-label="Open files" onKeyDown={onKeyDown}>
         <span className={`ib-tab ib-tabfixed${artifactsOn ? ' ib-on' : ''}`} role="presentation">
           <Tip content="Every file in this thread">
             <button type="button" role="tab" aria-selected={artifactsOn} tabIndex={artifactsOn ? 0 : -1} className="ib-tsel" onClick={props.onArtifacts} data-artifacts-tab="">
               <Icon name="artifacts" size={14} />
               <span className="ib-tl">Artifacts</span>
-              {props.artifactsCount > 0 && <span className="ib-tcm ib-tcm-q">{props.artifactsCount}</span>}
             </button>
           </Tip>
         </span>
@@ -117,19 +116,12 @@ export function FilesTabRow(props: FilesTabRowProps) {
           <Icon name="plus" size={16} />
         </button>
       </Tip>
-      {fold && (
-        <>
-          <span className="ib-tdiv" aria-hidden="true" />
-          {props.tools}
-        </>
-      )}
       <span className="ib-sp" />
       {tabs.length > 1 && (
         <DropdownMenu>
           <Tip content="Open files">
             <DropdownMenuTrigger render={<button type="button" className="ib-tovf" aria-label={`Open files, ${tabs.length}`} data-tabs-menu="" />}>
-              {tabs.length}
-              <Icon name="chevD" size={13} />
+              <Icon name="chevD" size={15} />
             </DropdownMenuTrigger>
           </Tip>
           <DropdownMenuContent align="end" sideOffset={6} className="min-w-[16rem]" finalFocus={false}>
@@ -154,6 +146,11 @@ export function FilesTabRow(props: FilesTabRowProps) {
         </DropdownMenu>
       )}
       {props.trailing}
+      <Tip content="Close the files">
+        <button type="button" className="ib-iconbtn ib-tclose" aria-label="Close the files" onClick={props.onClosePane} data-files-close="">
+          <Icon name="x" size={16} />
+        </button>
+      </Tip>
     </div>
   );
 }

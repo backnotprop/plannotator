@@ -230,12 +230,11 @@ export interface AttachmentPaneProps {
    */
   openIn?: OpenInSurface;
   /**
-   * Files tabs (approval "inbox-files-tabs"): beside the thread, the header is the tab row. With one file open
-   * (`fold`) the file's tools sit in that row (`row({ file, view })`); with more, the row (`row(null)`) and under it a
-   * slim bar: `crumb`, the file's tools, then `extra` (the files panel's button) and the view switch. The tab's ×
+   * Files tabs (approval "inbox-files-tabs"): beside the thread, the header is the tab row (`row`) and always, under
+   * it, a slim bar for the file on screen: `crumb`, the file's tools, then the view switch. The tab's ×
    * closes the file, so the bar has no close. Full screen ignores it. Absent: today's header.
    */
-  tabs?: { row: (tools: { file: ReactNode; view: ReactNode } | null) => ReactNode; fold: boolean; crumb: ReactNode; extra?: ReactNode };
+  tabs?: { row: ReactNode; crumb: ReactNode };
   /** The files panel at the body's right edge (Files tabs): while it shows, the comments fold into the header's button. */
   aside?: ReactNode;
   /** The window's toast: a drawing added to the reply says so, with Undo. */
@@ -1534,20 +1533,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           shifted={drawerMode && drawer && hasPanel}
         />
       ) : props.tabs ? (
-        <div className={`ib-ftop${props.tabs.fold ? '' : ' ib-ftop2'}`} data-files-header="">
-          {/* The header's line (whose file, a film's length, an image's message) stays beside the thread: after the
-              tools in the tab row with one file, after the path in the bar with more. */}
-          {props.tabs.row(props.tabs.fold ? { file: <>{fileTools}{fromLine}</>, view: viewTools } : null)}
-          {!props.tabs.fold && (
-            <div className="ib-vhead ib-vslim">
-              {props.tabs.crumb}
-              {fromLine}
-              <span className="ib-vtools">{fileTools}</span>
-              <span className="ib-sp" />
-              {props.tabs.extra}
-              {viewTools}
-            </div>
-          )}
+        <div className="ib-ftop ib-ftop2" data-files-header="">
+          {props.tabs.row}
+          {/* The file on screen: where it is and whose it is, its tools, then the view switch. */}
+          <div className="ib-vhead ib-vslim">
+            {props.tabs.crumb}
+            {fromLine}
+            <span className="ib-vtools">{fileTools}</span>
+            <span className="ib-sp" />
+            {viewTools}
+          </div>
         </div>
       ) : (
         <div className="ib-vhead">

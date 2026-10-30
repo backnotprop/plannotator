@@ -8,7 +8,7 @@
  * Only where a file can show beside the thread (`enabled`: a desktop window
  * with room); a phone and a stacked window keep today's screens.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
@@ -230,10 +230,12 @@ export function useFilesTabs(input: FilesTabsInput) {
     input.leave(null, () => input.showArtifacts(true, { replace: true }));
   };
 
-  /** The folder button in the thread header: opens the pane (the last file shown, else Artifacts), or closes it. */
+  /** The pane's × (and Escape's last step): back to the thread alone; its tabs close. */
+  const closePane = () => input.leave(null, () => input.showArtifacts(false));
+  /** The folder button in the thread header (shown only while the pane is closed): opens the pane, on the last file shown, else Artifacts. */
   const toggleDoor = () => {
     if (paneOpen) {
-      input.leave(null, () => input.showArtifacts(false));
+      closePane();
       return;
     }
     const back = lastCurrent.current && tabsRef.current.includes(lastCurrent.current) ? lastCurrent.current : tabsRef.current[tabsRef.current.length - 1];
@@ -268,9 +270,9 @@ export function useFilesTabs(input: FilesTabsInput) {
     </Tip>
   );
 
-  const tabRow = (tools: { file: ReactNode; view: ReactNode } | null, trailing?: ReactNode) => (
+  /** The pane's own row (the tabs, then the pane's controls: the files panel button and ×), the same on every tab. */
+  const tabRow = () => (
     <FilesTabRow
-      artifactsCount={input.artifacts?.length ?? 0}
       artifactsOn={!current}
       onArtifacts={toArtifacts}
       tabs={tabViews}
@@ -283,17 +285,8 @@ export function useFilesTabs(input: FilesTabsInput) {
         setTreeOpen(true);
         setFilterFocus((n) => n + 1);
       }}
-      tools={tools?.file ?? null}
-      trailing={
-        tools ? (
-          <>
-            {treeButton}
-            {tools.view}
-          </>
-        ) : (
-          trailing
-        )
-      }
+      trailing={treeButton}
+      onClosePane={closePane}
     />
   );
 
@@ -350,11 +343,9 @@ export function useFilesTabs(input: FilesTabsInput) {
   const paneTabs = (attachment: InboxAttachmentState) =>
     enabled
       ? {
-          row: (tools: { file: ReactNode; view: ReactNode } | null) => tabRow(tools),
-          // One file open: its tools fold into the tab row.
-          fold: tabs.length <= 1,
+          // Tabs are always tabs: the file's tools sit in the bar under them, with one file open as with more.
+          row: tabRow(),
           crumb: crumb(attachment),
-          extra: treeButton,
         }
       : undefined;
 
@@ -372,7 +363,7 @@ export function useFilesTabs(input: FilesTabsInput) {
     aside,
     /** The panel itself: ThreadPane renders it while a pane holds `aside`. */
     panelPortal,
-    artifactsTabRow: tabRow(null, treeButton),
+    artifactsTabRow: tabRow(),
     treeOpen: treeShown,
     /** The thread's project folder: undefined while asked, null when it has none (desktop only). */
     folder,
