@@ -58,6 +58,8 @@ describe("launchSettingsEnv", () => {
     const env = launchSettingsEnv(login, { launchId: "lch_1", key: "k", dataDir: "/data/inbox", fullPermissions: true });
     expect(env.PLANNOTATOR_DATA_DIR).toBe("/data/inbox");
     expect(env[CLAUDE_SKIP_PERMISSIONS_ENV]).toBe("1");
+    // The permission hook's "Allow and switch to Full permissions" is honoured only with this.
+    expect(env.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBe("1");
   });
 
   test("bypass mode comes from the switch alone: the shell's own skip-permissions export is dropped while it is off", () => {

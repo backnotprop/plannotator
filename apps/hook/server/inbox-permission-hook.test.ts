@@ -99,9 +99,23 @@ describe("permission-hook", () => {
       updatedPermissions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "ls:*" }], behavior: "allow", destination: "session" }],
     });
     expect(await run({ choice: "bypassPermissions" })).toBeNull();
+    // Auto mode: this session only. Full permissions: never from a launch that did not allow them.
+    expect(await run({ choice: "auto" })).toEqual({ behavior: "allow", updatedInput: { command: "ls" }, updatedPermissions: [{ type: "setMode", mode: "auto", destination: "session" }] });
+    expect(await run({ choice: "full" })).toBeNull();
     const denied = await run({ choice: "deny", reason: "Not now." });
     expect(denied?.behavior).toBe("deny");
     expect(String(denied?.message)).toEndWith("Their reason: Not now.");
+  });
+
+  test("Full permissions: honoured only when this session's own settings file says its launch allows them", async () => {
+    const box = inbox([{ status: 200, body: { status: "decided", message_id: "msg_1", choice: "full", reason: null } }]);
+    const env = { ...ENV, PLANNOTATOR_LAUNCH_FULL_PERMISSIONS: "1" };
+    const out = await permissionHookOutput({ stdin: JSON.stringify(BASH), env, dataDir: "/nowhere", fetch: box.fetch, sleep: box.sleep, registry: () => REGISTRY });
+    expect(JSON.parse(out!).hookSpecificOutput.decision).toEqual({
+      behavior: "allow",
+      updatedInput: { command: "ls" },
+      updatedPermissions: [{ type: "setMode", mode: "bypassPermissions", destination: "session" }],
+    });
   });
 
   test("a token the Inbox keeps refusing ends the wait, with a line on stderr; a new token in inbox.json keeps it going", async () => {

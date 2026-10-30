@@ -29,10 +29,6 @@ export function isInboxPermissionSession(session: string | null | undefined): bo
   return typeof session === "string" && session.startsWith(INBOX_PERMISSION_SESSION_PREFIX);
 }
 
-/** The card's small label over the prompt, and the free-text row's placeholder (the reason for a Deny). */
-export const INBOX_PERMISSION_EYEBROW = "Permission";
-export const INBOX_PERMISSION_REASON_PLACEHOLDER = "Deny, and tell it why…";
-
 /** The follow-ups that withdraw a question no hook waits on any more. */
 export const INBOX_PERMISSION_ANSWERED_IN_TERMINAL = "Answered in Terminal.";
 export const INBOX_PERMISSION_NO_LONGER_WAITING = "No longer waiting.";
@@ -199,61 +195,177 @@ function asked(event: InboxPermissionEvent, agent: string, shownPath: (path: str
   return { prompt: `${agent} wants to use ${code(oneLine(event.tool_name))}`, detail: json };
 }
 
+/** A fenced block for the body: longer than any run of 3+ backticks in the text, a line starting `:::` broken with a zero-width space, every control or invisible character shown. */
+function fenced(text: string, info = ""): string {
+  const shown = visible(text).replace(/^(\s*):::/gm, "$1:​::");
+  const fence = "`".repeat(Math.max(2, ...(shown.match(/`{3,}/g) ?? []).map((run) => run.length)) + 1);
+  return `${fence}${info}\n${shown}\n${fence}`;
+}
+
 /**
  * The detail as Markdown over the card, or null when it cannot be shown in
  * full and exactly: longer than `INBOX_PERMISSION_DETAIL_MAX`, or a path, link
  * or query holding a line break, a control or an invisible character (a line
  * break could open a `:::question` of its own over the real choices). A block
- * is fenced, a line starting `:::` is broken with a zero-width space, and every
- * control or invisible character in it is shown as `⟨U+…⟩`.
+ * is fenced (`fenced`).
  */
 function shownDetail(detail: Detail): string | null {
   if (detail.text.length > INBOX_PERMISSION_DETAIL_MAX) return null;
   if (detail.on === "line") return plain(detail.text) ? code(detail.text) : null;
-  const shown = visible(detail.text).replace(/^(\s*):::/gm, "$1:​::");
-  const fence = "`".repeat(Math.max(2, ...(shown.match(/`{3,}/g) ?? []).map((run) => run.length)) + 1);
-  return `${fence}\n${shown}\n${fence}`;
+  return fenced(detail.text);
+}
+
+/** The longest file content or change a card shows. A longer one is never asked here: the person could not read all of what they allow. */
+export const INBOX_PERMISSION_PREVIEW_MAX = 50_000;
+
+/** What Claude Code's own dialog shows besides the detail: a Write's content, an Edit's change (`-` and `+` lines). */
+export interface InboxPermissionPreview {
+  kind: "write" | "diff";
+  text: string;
+}
+
+function previewOf(event: InboxPermissionEvent): InboxPermissionPreview | null {
+  const input = event.tool_input;
+  const text = (key: string) => (typeof input[key] === "string" ? (input[key] as string) : null);
+  if (event.tool_name === "Write" && text("content") !== null) return { kind: "write", text: text("content")!.replace(/\n$/, "") };
+  if (event.tool_name === "Edit" && text("old_string") !== null && text("new_string") !== null) {
+    const sign = (mark: string, body: string) => body.split("\n").map((line) => `${mark}${line}`);
+    return { kind: "diff", text: [...sign("-", text("old_string")!), ...sign("+", text("new_string")!)].join("\n") };
+  }
+  return null;
+}
+
+/** What Claude says the call is for (a Bash call's description, a fetch's prompt): one plain line, or null. */
+function purposeOf(event: InboxPermissionEvent): string | null {
+  const key = event.tool_name === "Bash" ? "description" : event.tool_name === "WebFetch" ? "prompt" : null;
+  const value = key && typeof event.tool_input[key] === "string" ? (event.tool_input[key] as string).trim() : "";
+  // Commentary, not the request: one that cannot be shown exactly on one line is left out.
+  return value && plain(value) ? oneLine(value, 300) : null;
+}
+
+/**
+ * Whether a launched session can switch to Full permissions (`bypassPermissions`):
+ * Claude Code honours that switch only in a session started with them allowed.
+ * Today that is a launch made with Settings → Agents' "Start new sessions with
+ * full permissions" (`--permission-mode bypassPermissions`). If every launch
+ * also passes `--allow-dangerously-skip-permissions` (the owner's open
+ * question), this is where it says so.
+ */
+export const inboxLaunchFullPermissions = (launch: { full_permissions?: true }): boolean => launch.full_permissions === true;
+
+/** In a launch's settings file `env` when `inboxLaunchFullPermissions`: the hook honours "Full permissions" only then. */
+export const INBOX_LAUNCH_FULL_PERMISSIONS_ENV = "PLANNOTATOR_LAUNCH_FULL_PERMISSIONS";
+
+/** The answer that also switches the session's mode (Claude Code's `setMode`, destination `session`). */
+export const INBOX_PERMISSION_AUTO = "Allow and switch to Auto mode";
+export const INBOX_PERMISSION_FULL = "Allow and switch to Full permissions";
+
+export interface InboxPermissionOptions {
+  /** A path as the person reads it (`~/…`). */
+  shownPath?: (path: string) => string;
+  /** The session can switch to Full permissions (it started with them allowed). */
+  fullPermissions?: boolean;
 }
 
 export interface InboxPermissionQuestion {
-  /** The message body: the detail and folder, then one `:::question` block holding only the prompt and the choices. */
+  /** The message body: the detail, the preview, the purpose and the folder, then one `:::question` block holding only the prompt and the choices. */
   body: string;
   /** The question's prompt, as the store must read it back. */
   prompt: string;
-  /** The choices in order: Allow once, the session choice when there is one, Deny. */
+  /** The choices in order (`inboxPermissionChoices`). */
   choices: string[];
-  /** False when the detail cannot be shown in full and exactly: never asked here (Claude Code's own dialog decides). */
+  /** False when the detail or the preview cannot be shown in full and exactly: never asked here (Claude Code's own dialog decides). */
   askable: boolean;
 }
 
 /**
  * The question for one permission prompt: what the agent wants, where, and
- * Allow once / Allow <suggestion> for this session / Deny. The free-text row
- * under the choices is the reason for a Deny.
+ * its choices. The window draws it as the permission card
+ * (`readInboxPermissionBody` reads the body back).
  */
-export function inboxPermissionQuestion(
-  event: InboxPermissionEvent,
-  options: { agent: string; folder: string; shownPath?: (path: string) => string },
-): InboxPermissionQuestion {
+export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { agent: string; folder: string } & InboxPermissionOptions): InboxPermissionQuestion {
   const shownPath = options.shownPath ?? ((path: string) => path);
   const { prompt, detail } = asked(event, options.agent, shownPath);
   const shown = detail === null ? null : shownDetail(detail);
-  const choices = inboxPermissionChoices(event, shownPath);
-  // The detail and the folder go OVER the block, never in it: inside, a line of the command that reads
+  const preview = previewOf(event);
+  const purpose = purposeOf(event);
+  const choices = inboxPermissionChoices(event, options);
+  // Everything taken from the tool's input goes OVER the block, never in it: inside, a line that reads
   // as a list item (`- Deny`, a commit message's bullets, `- [ ] x`) would become a choice.
   // The block holds only the prompt and the choices, written as checkboxes.
   const lines: string[] = [];
   if (shown) lines.push(shown, "");
+  if (preview) lines.push(fenced(preview.text, preview.kind), "");
+  if (purpose) lines.push(`Purpose: ${purpose}`, "");
   lines.push(`in ${code(oneLine(options.folder, 200))}`, "", ":::question", prompt, "");
   for (const choice of choices) lines.push(`- [ ] ${choice}`);
   lines.push(":::");
-  return { body: lines.join("\n"), prompt, choices, askable: detail === null || shown !== null };
+  const askable = (detail === null || shown !== null) && (preview === null || preview.text.length <= INBOX_PERMISSION_PREVIEW_MAX);
+  return { body: lines.join("\n"), prompt, choices, askable };
 }
 
-/** The choices a prompt's question must have, in order: Allow once, the session choice when there is one, Deny. */
-export function inboxPermissionChoices(event: InboxPermissionEvent, shownPath: (path: string) => string = (path) => path): string[] {
-  const session = inboxPermissionSessionChoice(event, shownPath);
-  return [INBOX_PERMISSION_ALLOW_ONCE, ...(session ? [session.label] : []), INBOX_PERMISSION_DENY];
+/**
+ * The choices a prompt's question must have, in order: Allow once, the
+ * session choice when there is one, Deny, then the mode switches (Auto mode
+ * always, Full permissions only when the session can switch to it).
+ */
+export function inboxPermissionChoices(event: InboxPermissionEvent, options: InboxPermissionOptions = {}): string[] {
+  const session = inboxPermissionSessionChoice(event, options.shownPath);
+  return [
+    INBOX_PERMISSION_ALLOW_ONCE,
+    ...(session ? [session.label] : []),
+    INBOX_PERMISSION_DENY,
+    INBOX_PERMISSION_AUTO,
+    ...(options.fullPermissions ? [INBOX_PERMISSION_FULL] : []),
+  ];
+}
+
+/** A permission question's body read back for the card: exactly what `inboxPermissionQuestion` wrote over the block. */
+export interface InboxPermissionBody {
+  /** The command or the input (a block), or the path, link or query (a line), as shown. */
+  detail: { text: string; on: "block" | "line" } | null;
+  preview: InboxPermissionPreview | null;
+  purpose: string | null;
+  folder: string | null;
+}
+
+/** Inline code back to its text (`code`). */
+function uncode(text: string): string | null {
+  const m = /^(`+)(.*)\1$/.exec(text);
+  if (!m) return null;
+  return m[1]!.length > 1 && m[2]!.startsWith(" ") && m[2]!.endsWith(" ") ? m[2]!.slice(1, -1) : m[2]!;
+}
+
+/**
+ * Reads a permission question's body the way `inboxPermissionQuestion` wrote
+ * it, line by line, up to its own `:::question` (a line of the input that
+ * starts `:::` was broken, so the first one at a line's start is the block's).
+ * A fence closes only on its own exact line (it is longer than any run of
+ * backticks inside). Display only: the decision never comes from here.
+ */
+export function readInboxPermissionBody(body: string): InboxPermissionBody {
+  const lines = body.split("\n");
+  const end = lines.indexOf(":::question");
+  const head = end < 0 ? lines : lines.slice(0, end);
+  const out: InboxPermissionBody = { detail: null, preview: null, purpose: null, folder: null };
+  for (let i = 0; i < head.length; i++) {
+    const line = head[i]!;
+    const open = /^(`{3,})(write|diff)?$/.exec(line);
+    if (open) {
+      const close = head.indexOf(open[1]!, i + 1);
+      if (close < 0) break;
+      const text = head.slice(i + 1, close).join("\n").replace(/^(\s*):​::/gm, "$1:::");
+      if (open[2]) out.preview = { kind: open[2] as InboxPermissionPreview["kind"], text };
+      else out.detail = { text, on: "block" };
+      i = close;
+    } else if (line.startsWith("in `")) out.folder = uncode(line.slice(3));
+    else if (line.startsWith("Purpose: ")) out.purpose = line.slice("Purpose: ".length);
+    else if (line.startsWith("`")) {
+      const text = uncode(line);
+      if (text !== null) out.detail = { text, on: "line" };
+    }
+  }
+  return out;
 }
 
 /** Claude Code's PermissionRequest decision (`hookSpecificOutput.decision`). */
@@ -267,8 +379,8 @@ export function inboxPermissionDenyMessage(reason: string | null): string {
   return `The person denied this in the Plannotator Inbox. Do not retry it; go on with the next step without it.${why ? ` Their reason: ${why}` : ""}`;
 }
 
-/** What the person chose, as the Inbox hands it to the hook: never a decision's JSON. */
-export type InboxPermissionChoice = "once" | "session" | "deny";
+/** What the person chose, as the Inbox hands it to the hook: never a decision's JSON. `auto` and `full` allow and switch the session's mode. */
+export type InboxPermissionChoice = "once" | "session" | "deny" | "auto" | "full";
 export interface InboxPermissionAnswer {
   choice: InboxPermissionChoice;
   /** The reason the person gave with a Deny, or null. */
@@ -279,34 +391,48 @@ export interface InboxPermissionAnswer {
 export const INBOX_PERMISSION_REASON_MAX = 2_000;
 
 /**
- * The person's answer as one of three choices. The pick is matched by its
+ * The person's answer as one of the choices. The pick is matched by its
  * exact label against the labels this prompt's event makes, never by
- * position: "Allow once", the session label rebuilt from the event, and
+ * position: "Allow once", the session label rebuilt from the event, the mode
+ * switches (Full permissions only when the session can switch to it), and
  * anything else (a Skip, free text with no pick, an unknown label) is a Deny.
  * The free text (or a note) is the reason.
  */
-export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: InboxPermissionEvent, shownPath: (path: string) => string = (path) => path): InboxPermissionAnswer {
+export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: InboxPermissionEvent, options: InboxPermissionOptions = {}): InboxPermissionAnswer {
   const reason = [answer?.other, answer?.note].map((t) => t?.trim()).filter(Boolean).join(" ").slice(0, INBOX_PERMISSION_REASON_MAX) || null;
   const picked = answer && !answer.skipped && answer.selected.length === 1 ? answer.selected[0] : undefined;
   if (picked === INBOX_PERMISSION_ALLOW_ONCE) return { choice: "once", reason: null };
-  const session = inboxPermissionSessionChoice(event, shownPath);
+  if (picked === INBOX_PERMISSION_AUTO) return { choice: "auto", reason: null };
+  if (picked === INBOX_PERMISSION_FULL && options.fullPermissions) return { choice: "full", reason: null };
+  const session = inboxPermissionSessionChoice(event, options.shownPath);
   if (session && picked === session.label) return { choice: "session", reason: null };
   return { choice: "deny", reason };
 }
 
+/** Claude Code's `setMode` update, for this session only. */
+const setMode = (mode: "auto" | "bypassPermissions") => ({ type: "setMode", mode, destination: "session" });
+
 /**
  * The decision Claude Code reads, built by the hook from ITS OWN event: the
- * tool input unchanged, and for "session" the update Claude Code itself
- * suggested (destination `session`, never bypass mode). Null when the answer
- * cannot be honoured (an unknown choice, or "session" with no suggestion):
- * say nothing, and Claude Code's own dialog decides.
+ * tool input unchanged; for "session" the update Claude Code itself suggested
+ * (destination `session`); for "auto" Auto mode for this session; for "full"
+ * Full permissions (`bypassPermissions`) for this session, only when the
+ * hook's own launch allows them (`fullPermissions`). Null when the answer
+ * cannot be honoured (an unknown choice, "session" with no suggestion, "full"
+ * not allowed): say nothing, and Claude Code's own dialog decides.
  */
-export function inboxPermissionDecisionFor(event: InboxPermissionEvent, answer: { choice?: unknown; reason?: unknown }): InboxPermissionDecision | null {
+export function inboxPermissionDecisionFor(
+  event: InboxPermissionEvent,
+  answer: { choice?: unknown; reason?: unknown },
+  options: { fullPermissions?: boolean } = {},
+): InboxPermissionDecision | null {
   if (answer.choice === "once") return { behavior: "allow", updatedInput: event.tool_input };
   if (answer.choice === "session") {
     const session = inboxPermissionSessionChoice(event);
     return session ? { behavior: "allow", updatedInput: event.tool_input, updatedPermissions: [session.update] } : null;
   }
+  if (answer.choice === "auto") return { behavior: "allow", updatedInput: event.tool_input, updatedPermissions: [setMode("auto")] };
+  if (answer.choice === "full") return options.fullPermissions ? { behavior: "allow", updatedInput: event.tool_input, updatedPermissions: [setMode("bypassPermissions")] } : null;
   if (answer.choice === "deny") {
     const reason = typeof answer.reason === "string" ? answer.reason.slice(0, INBOX_PERMISSION_REASON_MAX) : null;
     return { behavior: "deny", message: inboxPermissionDenyMessage(reason) };

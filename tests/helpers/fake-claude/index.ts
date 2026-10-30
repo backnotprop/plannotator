@@ -32,6 +32,8 @@ export interface FakeClaudeConfig {
   waiting?: boolean;
   /** The answer's first word. */
   answer?: string;
+  /** The whole answer, in words, in place of the line tests read (screenshots). */
+  body?: string;
   /** A session's first poll waits this long (ms): the Inbox shows "Starting" meanwhile. */
   startDelayMs?: number;
   /** `--bg` answers (and the session exists) only after this long (ms). */

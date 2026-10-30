@@ -340,7 +340,8 @@ async function session(sessionId) {
     while (!stopped && (Date.now() < until || config().hold || config().waiting)) await sleep(150);
     const first = command.body.split("\n")[0].slice(0, 60);
     const tools = outcomes.length > 0 ? ` [${outcomes.map((o) => `${o.tool} ${o.outcome}`).join(", ")}]` : "";
-    const body = `${config().answer || "Done"}: ${first} (${env.PLANNOTATOR_LAUNCH || "no launch"})${tools}`;
+    // `body`: the whole answer, in words (a screenshot's realistic reply); otherwise the line tests read.
+    const body = config().body || `${config().answer || "Done"}: ${first} (${env.PLANNOTATOR_LAUNCH || "no launch"})${tools}`;
     await fetch(`${base}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },

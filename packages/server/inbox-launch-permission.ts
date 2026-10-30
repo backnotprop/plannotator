@@ -39,6 +39,7 @@ import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
+  inboxLaunchFullPermissions,
   inboxPermissionAnswer,
   inboxPermissionQuestion,
   inboxPermissionSession,
@@ -46,6 +47,7 @@ import {
   readInboxPermissionEvent,
   type InboxPermissionChoice,
   type InboxPermissionEvent,
+  type InboxPermissionOptions,
   type InboxPermissionQuestion,
 } from "@plannotator/core/inbox-permission";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -152,9 +154,12 @@ export function createLaunchPermissions(options: {
     options.onChange();
   };
 
+  /** How a launch's questions read paths, and whether its session can switch to Full permissions. */
+  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: inboxLaunchFullPermissions(root.launch!) });
+
   /** The question this prompt asks in a launch's thread. */
   const questionFor = (root: InboxMessage, event: InboxPermissionEvent): InboxPermissionQuestion =>
-    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), shownPath: options.displayFolder });
+    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root) });
 
   /**
    * Whether the stored question is exactly the one this prompt asks: the body
@@ -175,7 +180,7 @@ export function createLaunchPermissions(options: {
   };
 
   /** Where the question stands: decided (the delivery recorded), withdrawn, or still waiting (null). */
-  const settled = (messageId: string, event: InboxPermissionEvent, expected: InboxPermissionQuestion): PermissionAnswer | null => {
+  const settled = (messageId: string, event: InboxPermissionEvent, expected: InboxPermissionQuestion, answerOptions: InboxPermissionOptions): PermissionAnswer | null => {
     const question = store.questionsOf(messageId)[0];
     if (!question || question.state === "superseded" || question.state === "closed") return { status: "withdrawn", message_id: messageId };
     // Never answer a card that is not exactly this prompt's (its detail, its prompt, its three choices): Claude Code's own dialog decides.
@@ -184,7 +189,7 @@ export function createLaunchPermissions(options: {
       return { status: "withdrawn", message_id: messageId };
     }
     if (question.state !== "sent") return null;
-    const { choice, reason } = inboxPermissionAnswer(question.answer, event, options.displayFolder);
+    const { choice, reason } = inboxPermissionAnswer(question.answer, event, answerOptions);
     const message = store.message(messageId);
     if (question.sent_reply_id && message?.author.kind === "agent" && message.author.session) {
       try {
@@ -237,6 +242,7 @@ export function createLaunchPermissions(options: {
       if (!event) return json({ error: "event: Claude Code's PermissionRequest input.", code: "validation_error" }, 400);
       const requestId = typeof body.request_id === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.request_id) ? body.request_id : null;
       const question = questionFor(root, event);
+      const answerOptions = optionsFor(root);
       let messageId: string;
       if (typeof body.message_id === "string") {
         const message = store.message(body.message_id);
@@ -251,7 +257,7 @@ export function createLaunchPermissions(options: {
         if (!asked) return json({ status: "withdrawn", message_id: null } satisfies PermissionAnswer);
         messageId = asked;
       }
-      const done = settled(messageId, event, question);
+      const done = settled(messageId, event, question, answerOptions);
       if (done) return json(done);
       const lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };
       leases.set(messageId, lease);
@@ -260,7 +266,7 @@ export function createLaunchPermissions(options: {
       try {
         while (now() < deadline && !req.signal.aborted) {
           await new Promise((resolve) => setTimeout(resolve, CHECK_EVERY_MS));
-          const answer = settled(messageId, event, question);
+          const answer = settled(messageId, event, question, answerOptions);
           if (answer) return json(answer);
         }
       } finally {

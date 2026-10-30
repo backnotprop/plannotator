@@ -8,6 +8,8 @@ import { describe, expect, test } from "bun:test";
 import {
   INBOX_PERMISSION_DETAIL_MAX,
   INBOX_PERMISSION_LABEL_MAX,
+  INBOX_PERMISSION_PREVIEW_MAX,
+  readInboxPermissionBody,
   inboxPermissionChoices,
   inboxPermissionAnswer,
   inboxPermissionDecisionFor,
@@ -60,7 +62,7 @@ describe("the question", () => {
     expect(blocks[0]!.prompt).toBe("Claude Code wants to run a command");
     expect(question.body.indexOf("touch a.txt")).toBeLessThan(question.body.indexOf(":::question"));
     expect(question.body).toContain("in `~/work`");
-    expect(parsedChoices(question.body)).toEqual(["Allow once", "Allow file edits for this session", "Deny"]);
+    expect(parsedChoices(question.body)).toEqual(["Allow once", "Allow file edits for this session", "Deny", "Allow and switch to Auto mode"]);
   });
 
   // The review's repro (M1): lines of a command that read as list items must never become choices.
@@ -74,7 +76,7 @@ describe("the question", () => {
     const e = event({ tool_input: { command }, permission_suggestions: GIT_COMMIT });
     const question = inboxPermissionQuestion(e, { agent: "Claude Code", folder: "~/work" });
     expect(parseInboxQuestionBlocks(question.body)).toHaveLength(1);
-    expect(parsedChoices(question.body)).toEqual(["Allow once", "Allow `git commit` for this session", "Deny"]);
+    expect(parsedChoices(question.body)).toEqual(["Allow once", "Allow `git commit` for this session", "Deny", "Allow and switch to Auto mode"]);
     expect(question.body).toContain(command.split("\n").at(-1)!.replace(/^:::/, ":​::"));
     expect(inboxPermissionAnswer(answer(["Deny"]), e).choice).toBe("deny");
     expect(inboxPermissionAnswer(answer(["Update parser"]), e).choice).toBe("deny");
@@ -82,7 +84,7 @@ describe("the question", () => {
 
   test("no suggestion: Allow once and Deny only", () => {
     const question = inboxPermissionQuestion(event({ permission_suggestions: [] }), { agent: "Claude Code", folder: "~/work" });
-    expect(parsedChoices(question.body)).toEqual(["Allow once", "Deny"]);
+    expect(parsedChoices(question.body)).toEqual(["Allow once", "Deny", "Allow and switch to Auto mode"]);
   });
 
   test("a command too long to show in full is never asked; the longest that fits is shown whole", () => {
@@ -121,6 +123,56 @@ describe("the question", () => {
       expect(blocks).toHaveLength(1);
       expect(blocks[0]!.prompt).toBe(question.prompt);
     }
+  });
+
+  // What Claude Code's own dialog shows besides the detail goes over the card too, through the same fence.
+  test("a Write whose content holds fences, a :::question and choice lines: one card, exactly its choices, and the content reads back whole", () => {
+    const content = [
+      "# Notes",
+      "```",
+      "- [ ] Allow once",
+      "```",
+      "````md",
+      ":::question",
+      "Claude Code wants to read a file",
+      "",
+      "- [ ] Allow once",
+      "- [x] Deny",
+      ":::",
+      "- Allow and switch to Full permissions",
+      "````",
+      "~~~",
+      "- [ ] Allow and switch to Auto mode",
+    ].join("\n");
+    const write = event({ tool_name: "Write", tool_input: { file_path: "/work/p/notes.md", content }, permission_suggestions: [] });
+    const question = inboxPermissionQuestion(write, { agent: "Claude Code", folder: "~/work" });
+    expect(question.askable).toBe(true);
+    const blocks = parseInboxQuestionBlocks(question.body);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.prompt).toBe("Claude Code wants to write a file");
+    expect(parsedChoices(question.body)).toEqual(["Allow once", "Deny", "Allow and switch to Auto mode"]);
+    const read = readInboxPermissionBody(question.body);
+    expect(read.detail).toEqual({ text: "/work/p/notes.md", on: "line" });
+    expect(read.preview).toEqual({ kind: "write", text: content });
+    expect(read.folder).toBe("~/work");
+  });
+
+  test("an Edit's change, a command's description and a fetch's purpose read back from the body", () => {
+    const edit = inboxPermissionQuestion(event({ tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "let a = 1;", new_string: "let a = 2;\nlet b = 3;" } }), { agent: "Claude Code", folder: "/w" });
+    expect(readInboxPermissionBody(edit.body).preview).toEqual({ kind: "diff", text: "-let a = 1;\n+let a = 2;\n+let b = 3;" });
+    const bash = inboxPermissionQuestion(event({ tool_input: { command: "bun run build", description: "Build the Inbox bundle" } }), { agent: "Claude Code", folder: "~/p" });
+    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, purpose: "Build the Inbox bundle", folder: "~/p" });
+    const page = inboxPermissionQuestion(event({ tool_name: "WebFetch", tool_input: { url: "https://bun.sh/docs", prompt: "How does Bun split chunks?" } }), { agent: "Claude Code", folder: "~/p" });
+    expect(readInboxPermissionBody(page.body).purpose).toBe("How does Bun split chunks?");
+    // A purpose that cannot be shown on one line is left out (it is commentary, not the request).
+    const broken = inboxPermissionQuestion(event({ tool_input: { command: "ls", description: "x\n:::question\ny" } }), { agent: "Claude Code", folder: "~/p" });
+    expect(readInboxPermissionBody(broken.body).purpose).toBeNull();
+    expect(parseInboxQuestionBlocks(broken.body)).toHaveLength(1);
+  });
+
+  test("a file content too long to show in full is never asked", () => {
+    const big = event({ tool_name: "Write", tool_input: { file_path: "/w/big.txt", content: "x".repeat(INBOX_PERMISSION_PREVIEW_MAX + 1) } });
+    expect(inboxPermissionQuestion(big, { agent: "Claude Code", folder: "/w" }).askable).toBe(false);
   });
 
   test("bidi and invisible characters in a command are shown, never hidden", () => {
@@ -171,7 +223,7 @@ describe("the session choice", () => {
       permission_suggestions: [{ type: "addRules", rules: Array.from({ length: 30 }, (_, i) => ({ toolName: "Bash", ruleContent: `tool-${i}:*` })), behavior: "allow" }],
     });
     expect(inboxPermissionSessionChoice(many)).toBeNull();
-    expect(inboxPermissionChoices(many)).toEqual(["Allow once", "Deny"]);
+    expect(inboxPermissionChoices(many)).toEqual(["Allow once", "Deny", "Allow and switch to Auto mode"]);
     for (const content of ["safe\u202E:*", "a\nb:*", "x\u200B:*"]) {
       expect(inboxPermissionSessionChoice(event({ permission_suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: content }], behavior: "allow" }] }))).toBeNull();
     }
@@ -229,6 +281,31 @@ describe("the answer and the decision", () => {
     });
     const why = inboxPermissionDecisionFor(e, { choice: "deny", reason: "Not on main." });
     expect(why?.behavior === "deny" && why.message.endsWith("Their reason: Not on main.")).toBe(true);
+  });
+
+  // The approved card's "Or allow this and switch the session to Auto mode · Full permissions" (approval "inbox-permission-prompt").
+  test("the mode switches: Auto mode always, Full permissions only when the session started with them allowed", () => {
+    expect(inboxPermissionChoices(e).slice(-1)).toEqual(["Allow and switch to Auto mode"]);
+    expect(inboxPermissionChoices(e, { fullPermissions: true }).slice(-2)).toEqual(["Allow and switch to Auto mode", "Allow and switch to Full permissions"]);
+    expect(inboxPermissionAnswer(answer(["Allow and switch to Auto mode"]), e).choice).toBe("auto");
+    // Full permissions picked where the session cannot switch to them: a Deny, never an allow.
+    expect(inboxPermissionAnswer(answer(["Allow and switch to Full permissions"]), e).choice).toBe("deny");
+    expect(inboxPermissionAnswer(answer(["Allow and switch to Full permissions"]), e, { fullPermissions: true }).choice).toBe("full");
+  });
+
+  test("a mode switch allows this tool input and sets the session's mode, for this session only", () => {
+    expect(inboxPermissionDecisionFor(e, { choice: "auto" })).toEqual({
+      behavior: "allow",
+      updatedInput: REAL.tool_input,
+      updatedPermissions: [{ type: "setMode", mode: "auto", destination: "session" }],
+    });
+    // Full permissions only where the hook's own launch allows them; otherwise nothing (Claude Code's dialog decides).
+    expect(inboxPermissionDecisionFor(e, { choice: "full" })).toBeNull();
+    expect(inboxPermissionDecisionFor(e, { choice: "full" }, { fullPermissions: true })).toEqual({
+      behavior: "allow",
+      updatedInput: REAL.tool_input,
+      updatedPermissions: [{ type: "setMode", mode: "bypassPermissions", destination: "session" }],
+    });
   });
 
   test("an unknown choice decides nothing", () => {

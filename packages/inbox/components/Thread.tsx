@@ -10,7 +10,7 @@ import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { INBOX_PERMISSION_EYEBROW, INBOX_PERMISSION_REASON_PLACEHOLDER, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxListRow, type InboxSectionId, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -41,6 +41,7 @@ import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenAr
 import { GuideCard } from './GuideCard';
 import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
+import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
@@ -283,10 +284,6 @@ export function commentTags(record: InboxAnnotationRecord): string[] {
 
 const NO_SENT_ANSWERS: readonly SentAnswerGroup[] = [];
 
-/** A permission prompt's card (launch): "Permission" over it, and the free-text row is the reason for a Deny. */
-const PERMISSION_CHROME = { eyebrow: INBOX_PERMISSION_EYEBROW, otherPlaceholder: INBOX_PERMISSION_REASON_PLACEHOLDER };
-const permissionChrome = () => PERMISSION_CHROME;
-
 /** The URL of a fence's embed document: the Inbox keeps the page and serves it under its own policy. */
 async function inboxEmbedUrl(html: string): Promise<string | null> {
   const answer = await inboxApi.embed(html);
@@ -317,14 +314,7 @@ export function MessageBody({
   pictureBadge,
   inlineRefOf,
   replyFiles,
-  permission = false,
 }: {
-  /**
-   * A Claude Code permission prompt of a launched thread, with launch on (the
-   * Inbox reserves the `perm:` author for its own permission route): "Permission"
-   * over the card, and its free-text row is the Deny's reason.
-   */
-  permission?: boolean;
   /**
    * The action items this person's message carried (approval
    * "inbox-action-items-in-reply"): listed as "You did 1 action item", and the
@@ -767,7 +757,7 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
-    <div className="ib-body" data-message-id={message.id} data-permission={permission ? '' : undefined} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
+    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
       {refCard}
       {(!(replyParts || actionsSent) || shown !== '') && (
       <Viewer
@@ -805,7 +795,6 @@ export function MessageBody({
         questionContractLines
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
-        questionChrome={permission ? permissionChrome : undefined}
         questionPictureBadge={pictureBadge}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
@@ -3347,6 +3336,19 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   // note) are read past: they are not the person's reply, and the line stays
   // on the reply before them.
   const last = lastNonNote(thread.messages) ?? thread.messages[0]!;
+  // A launched session's permission prompts (with launch on): each is its own card (PermissionCard), the
+  // reply that carried its answer is not shown (the card says it), nor the follow-up that withdrew one
+  // (the card says that too). While the session waits on one, the card's header is the run line.
+  const isPermMessage = (m: InboxMessageWire) => launchOn && m.author.kind === 'agent' && isInboxPermissionSession(m.author.session);
+  const permMessages = thread.messages.filter(isPermMessage);
+  const permAnswerReplies = new Set(permMessages.flatMap((m) => (m.questions ?? []).map((q) => q.sent_reply_id).filter((id): id is string => !!id)));
+  const permWaiting = permMessages.some((m) => (m.questions ?? []).some((q) => q.state === 'open' || q.state === 'picked'));
+  const runInCard = permWaiting && runLine?.state === 'waiting_answer';
+  const newestId = thread.messages.at(-1)?.id ?? null;
+  const permFollowUp = (m: InboxMessageWire): string | null => {
+    const by = m.questions?.[0]?.superseded_by?.message_id;
+    return by ? (thread.messages.find((x) => x.id === by)?.body.trim() ?? null) : null;
+  };
   const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).
@@ -4238,6 +4240,26 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
           // The day too when it is not today, and the whole moment on hover.
           const time = whenTime(message.created_at);
           const fullWhen = fullTime(message.created_at);
+          // A permission prompt: its card, or nothing for the reply that answered it and the follow-up that withdrew it.
+          if (isPermMessage(message) || permAnswerReplies.has(message.id)) {
+            if (isPermMessage(message) && (message.questions?.length ?? 0) > 0) {
+              before.push(
+                <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
+                  <div data-message-id={message.id}>
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} onChanged={onChanged} />
+                  </div>
+                </article>,
+              );
+            }
+            if (message === last && runLine && !runInCard) {
+              before.push(
+                <div className="ib-msg" key="perm-run">
+                  <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />
+                </div>,
+              );
+            }
+            return before;
+          }
           // A Tidy note: one quiet line in place of the message.
           if (message.tidy) {
             before.push(<TidyNote key={message.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
@@ -4465,7 +4487,6 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                 ) : (
                 <MessageBody
                   message={message}
-                  permission={launchOn && message.author.kind === 'agent' && isInboxPermissionSession(message.author.session)}
                   sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
                   sentActions={message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined}
                   replyFiles={message.author.kind === 'person' ? { files: allFiles, personMessageIds, onOpen: openFromReply } : undefined}
@@ -4542,7 +4563,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
+                {message === last && runLine && !runInCard && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
                 {message === last && !runLine && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>

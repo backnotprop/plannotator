@@ -24,7 +24,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { inboxPermissionDecisionFor, inboxPermissionHookOutput, isPassThroughTool, readInboxPermissionEvent } from "@plannotator/core/inbox-permission";
+import { INBOX_LAUNCH_FULL_PERMISSIONS_ENV, inboxPermissionDecisionFor, inboxPermissionHookOutput, isPassThroughTool, readInboxPermissionEvent } from "@plannotator/core/inbox-permission";
 import { readInboxRegistry } from "@plannotator/shared/inbox/registry";
 
 export const PERMISSION_HOOK_RETRY_MS = 2_000;
@@ -113,8 +113,9 @@ export async function permissionHookOutput(deps: PermissionHookDeps): Promise<st
       continue;
     }
     if (body.status === "decided") {
-      // Only the choice comes from the Inbox: the decision is built from this hook's own event.
-      const decision = inboxPermissionDecisionFor(event, body);
+      // Only the choice comes from the Inbox: the decision is built from this hook's own event, and Full
+      // permissions only when this session's own settings file says its launch allows them.
+      const decision = inboxPermissionDecisionFor(event, body, { fullPermissions: deps.env[INBOX_LAUNCH_FULL_PERMISSIONS_ENV] === "1" });
       return decision ? inboxPermissionHookOutput(decision) : null;
     }
     return null;

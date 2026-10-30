@@ -354,10 +354,6 @@ export interface ViewerProps {
    *  `QuestionBlock` `statusLabel`): the Plannotator Inbox says "Not sent" for
    *  a saved, unsent pick. Absent: the card's own tags. */
   questionStatusLabel?: QuestionBlockProps['statusLabel'];
-  /** The host's words for a question card's chrome (ui seam, see
-   *  `QuestionBlock` `chrome`): its eyebrow and its "Other…" placeholder.
-   *  Absent: the card's own words. */
-  questionChrome?: QuestionBlockProps['chrome'];
   /** A host's own card in place of a question's (ui seam for a question the
    *  host no longer lets anyone answer, such as the Plannotator Inbox's
    *  replaced questions). Called per question; a returned node is drawn
@@ -848,7 +844,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionReadOnly,
   questionStatusTag,
   questionStatusLabel,
-  questionChrome,
   renderQuestionCard,
   renderDirectiveBlock,
   renderQuestionBelowPrompt,
@@ -1991,7 +1986,6 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionPictureChoices={questionPictureChoices}
                   questionPictureBadge={questionPictureBadge}
                   onQuestionPictureZoom={onQuestionPictureZoom}
-                  questionChrome={questionChrome}
                 />
               );
               // `textComments`: a question card's words are not commented on

@@ -76,9 +76,7 @@ export const BlockRenderer: React.FC<{
   questionPictureBadge?: QuestionBlockProps['pictureBadge'];
   /** A picture tile's zoom, with its question and choice (see `QuestionBlock` `onZoomChoice`). */
   onQuestionPictureZoom?: QuestionBlockProps['onZoomChoice'];
-  /** The host's words for a card's chrome (see `QuestionBlock` `chrome`). */
-  questionChrome?: QuestionBlockProps['chrome'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom, questionChrome }) => {
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -218,7 +216,6 @@ export const BlockRenderer: React.FC<{
               pictureChoices={questionPictureChoices}
               pictureBadge={questionPictureBadge}
               onZoomChoice={onQuestionPictureZoom}
-              chrome={questionChrome}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               imageBaseDir={imageBaseDir}

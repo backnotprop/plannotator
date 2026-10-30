@@ -33,6 +33,8 @@
  */
 const PER_SESSION_CLAUDE =
   /^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_ENTRYPOINT|CLAUDE_CODE_EXECPATH|CLAUDE_CODE_CHILD_SESSION|CLAUDE_CODE_SESSION_.*|CLAUDE_JOB_DIR|CLAUDE_PROJECT_DIR|CLAUDE_CODE_MESSAGING_.*)$/;
+import { INBOX_LAUNCH_FULL_PERMISSIONS_ENV } from "@plannotator/core/inbox-permission";
+
 /** Never in a spawn: every Plannotator name (markers, data dir, ports, test switches), the other hosts' session markers. */
 const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID)$/;
 
@@ -71,7 +73,11 @@ export function launchSettingsEnv(
   if (input.dataDir) out.PLANNOTATOR_DATA_DIR = input.dataDir;
   out.PLANNOTATOR_LAUNCH = input.launchId;
   out.PLANNOTATOR_LAUNCH_KEY = input.key;
-  if (input.fullPermissions) out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
+  if (input.fullPermissions) {
+    out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
+    // The permission hook may switch this session back to Full permissions (it started with them).
+    out[INBOX_LAUNCH_FULL_PERMISSIONS_ENV] = "1";
+  }
   return out;
 }
 

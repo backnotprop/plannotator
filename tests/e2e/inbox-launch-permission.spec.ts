@@ -10,15 +10,15 @@
  * are never touched: temp HOME and PLANNOTATOR_DATA_DIR,
  * PLANNOTATOR_INBOX_CONNECT=0, PLANNOTATOR_UPDATE_CHECK=0, NO_BROWSER.
  *
- *  1. Allow once: the question in the launch thread (Permission, the command,
- *     the folder, Allow once / Allow `bun run` for this session / Deny), the line
- *     "waiting on your answer", the foot "1 permission waiting", the row in
+ *  1. Allow once: the card in the launch thread (the action, the command, its
+ *     purpose and folder, Allow once / Allow `bun run` for this session / Deny),
+ *     its header the run line, the foot "1 permission waiting", the row in
  *     Stopped on you; the hook prints allow with updatedInput and nothing more;
  *     the agent goes on; the answer never reaches the session's own poll.
  *  2. Allow for this session: updatedPermissions, destination session.
  *  3. Deny with a reason: deny, the reason in the message, and the agent goes on.
- *  4. Answered in Terminal: the hook is ended; the question is withdrawn
- *     ("Answered in Terminal.") and can no longer be answered.
+ *  4. Answered in Terminal: the hook is ended; the card shrinks to its record
+ *     ("Answered in Terminal") and can no longer be answered.
  *  5. Stop while waiting: withdrawn at once ("No longer waiting.").
  *  6. The Inbox stops mid-wait and starts again: the hook keeps waiting, and the
  *     answer given after the restart decides; one question, never two.
@@ -27,6 +27,12 @@
  *     (403 window_only) and decides nothing; the window still answers.
  *  9. Launch turned off while a question waits: the question is withdrawn,
  *     and nothing draws as a permission card.
+ * 10. The approved card (approval "inbox-permission-prompt"): Bash by its
+ *     session rule, Write by Allow once (focused, Enter), WebFetch denied with
+ *     a reason, Edit allowed with a switch to Auto mode (setMode auto); Full
+ *     permissions drawn off with its reason; four one-line records after.
+ * 11. Full permissions in a session started with them: a confirm the first
+ *     time, then setMode bypassPermissions; no confirm the second time.
  *
  * Pictures: LAUNCH_PR2_SHOTS_DIR (default .local/proof/launch-pr2). Build the
  * binary first (see inbox.spec.ts), then
@@ -110,7 +116,9 @@ async function shot(page: Page, name: string, options: { scheme?: 'light' | 'dar
 
 const dialog = (page: Page) => page.locator('dialog[data-compose]');
 const pane = (page: Page) => page.locator('section.ib-pane');
-const card = (page: Page) => pane(page).locator('[data-permission] fieldset.question-block').last();
+/** The waiting permission card (an answered one is a one-line record, `[data-perm-record]`). */
+const card = (page: Page) => pane(page).locator('section.pc-card[data-permission]').last();
+const record = (page: Page, outcome: string) => pane(page).locator(`[data-perm-record="${outcome}"]`);
 
 async function waitFor<T>(what: string, check: () => T | null | undefined | false, timeoutMs = 30_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -144,14 +152,17 @@ async function launch(page: Page, words: string): Promise<{ threadId: string; la
 type ThreadRead = { serverSession: string; thread: { messages: { id: string; author: { kind: string; session?: string | null }; body: string; reply_to?: string | null; delivery?: { session: string } | null }[] }; run?: { state: string } | null };
 const readThread = (page: Page, threadId: string) => page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId) as Promise<ThreadRead>;
 
-/** The person's answer: a pick (or the reason typed on the free-text row), then Send in the thread's foot. */
-async function answer(page: Page, pick: { choice?: string; reason?: string }): Promise<void> {
+/** The person's answer on the card: one click (or Deny with a reason: the field, then "Deny and send"). */
+async function answer(page: Page, pick: { choice?: 'Allow once' | 'session' | 'Deny' | 'Auto mode'; reason?: string }): Promise<void> {
   const c = card(page);
-  if (pick.choice) await c.locator('[data-question-option]', { hasText: pick.choice }).click();
-  if (pick.reason) await c.getByPlaceholder('Deny, and tell it why…').fill(pick.reason);
-  const send = pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true });
-  await expect(send).toBeVisible();
-  await send.click();
+  if (pick.reason) {
+    await c.locator('[data-perm="reason"]').click();
+    await c.getByRole('textbox', { name: 'Why you deny this, for Claude' }).fill(pick.reason);
+    await c.locator('[data-perm-deny-send]').click();
+    return;
+  }
+  const target = { 'Allow once': '[data-perm="once"]', session: '[data-perm="session"]', Deny: '[data-perm="deny"]', 'Auto mode': '[data-perm-mode="auto"]' }[pick.choice!];
+  await c.locator(target).click();
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -207,7 +218,7 @@ test.afterAll(async () => {
 
 test.afterEach(() => {
   // Each test starts from a quiet fake: no prompt, no local answer.
-  world.fake.configure({ prompts: [], localAnswer: false, hold: false, workMs: 800 });
+  world.fake.configure({ prompts: [], localAnswer: false, hold: false, workMs: 800, body: '' });
 });
 
 test('allow once: the question in the launch thread, the waiting line and the foot; allow with the tool input only; the agent goes on; never a second turn', async ({ browser }) => {
@@ -217,19 +228,17 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   const p = pane(page);
 
 
-  // The card: an ordinary question card with its own words.
+  // The card: its own frame, the runtime and its status in the header, the action, the exact request, the answers.
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   const c = card(page);
-  await expect(c.locator('.text-muted-foreground').first()).toHaveText('Permission');
-  await expect(c).toContainText('Claude Code wants to run a command');
-  // The command and the folder sit over the card (never inside its block, where a list line would read as a choice).
-  const body = pane(page).locator('[data-permission]').last();
-  await expect(body.locator('pre').first()).toContainText('bun run --cwd apps/inbox build');
-  await expect(body).toContainText('in ~/plannotator/plannotator');
-  await expect(c.locator('[data-question-option]')).toHaveText(['Allow once', SESSION_CHOICE, 'Deny']);
-  await expect(c.getByPlaceholder('Deny, and tell it why…')).toBeVisible();
-  // The line, the foot and the row.
-  await expect(p.locator('[data-run="waiting_answer"]')).toContainText(/^Claude Code is waiting on your answer · \d+ min/, { timeout: 15_000 });
+  await expect(c.locator('.pc-title')).toHaveText('Run a command');
+  await expect(c.locator('[data-perm-detail]')).toHaveText('bun run --cwd apps/inbox build');
+  await expect(c.locator('.pc-why')).toHaveText('Build the Inbox bundle. Runs in ~/plannotator/plannotator');
+  await expect(c.locator('.pc-row button')).toHaveText(['Allow once', SESSION_CHOICE, 'Deny', 'Deny with a reason']);
+  await expect(c.locator('.pc-modes')).toContainText('Or allow this and switch the session to');
+  // The header is the run line while the session waits (no second line under the card), and the foot and the row.
+  await expect(c.locator('[data-run="waiting_answer"]')).toContainText(/Claude Code is waiting for your permission · \d+ min/, { timeout: 15_000 });
+  await expect(p.locator('[data-run]')).toHaveCount(1);
   await expect(p.locator('[data-run="waiting_answer"] [data-run-stop]')).toBeVisible();
   await expect(p.locator('[data-open-questions]')).toContainText('1 permission waiting');
   // The row: the list holds still while a thread is open (the launched row was drawn in folded Quiet),
@@ -245,14 +254,14 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   await shot(page, 'permission-waiting');
   await shot(page, 'permission-waiting-dark', { scheme: 'dark' });
 
-  // The phone: the same card and line.
+  // The phone: the same card, its header the line.
   const phone = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
   try {
     const mobile = await phone.newPage();
     await mobile.goto(`${world.url}#thread=${threadId}`);
-    await expect(pane(mobile).locator('[data-permission] fieldset.question-block')).toBeVisible();
-    await expect(pane(mobile).locator('[data-run="waiting_answer"]')).toBeVisible();
-    await pane(mobile).locator('[data-permission]').scrollIntoViewIfNeeded();
+    await expect(card(mobile)).toBeVisible();
+    await expect(card(mobile).locator('[data-run="waiting_answer"]')).toBeVisible();
+    await card(mobile).scrollIntoViewIfNeeded();
     await shot(mobile, 'permission-waiting-phone');
     await shot(mobile, 'permission-waiting-phone-dark', { scheme: 'dark' });
   } finally {
@@ -268,7 +277,11 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   // The agent goes on and answers; the line goes once it rests.
   await expect(p.locator('article.ib-message[data-author="agent"]').last()).toContainText('[Bash ran]', { timeout: 30_000 });
   await expect(p.locator('[data-run]')).toHaveCount(0, { timeout: 30_000 });
-  await expect(c.locator('[data-question-control]').first()).toBeDisabled();
+  // Answered, the card is one framed line in its place; the reply that carried the answer is not shown.
+  await expect(card(page)).toHaveCount(0);
+  await expect(record(page, 'once')).toContainText('Allowed once');
+  await expect(record(page, 'once')).toContainText('bun run --cwd apps/inbox build');
+  await expect(p.locator('article.ib-message[data-author="person"]')).toHaveCount(1);
   await shot(page, 'permission-answered');
   // The answer went to the permission identity (the hook's call recorded it), never to the session's poll.
   const after = await readThread(page, threadId);
@@ -286,7 +299,7 @@ test('allow for this session: allow with the update for this session (never the 
   fake.configure({ prompts: [BUILD] });
   await launch(page, 'Run the Inbox build again after the scorer change.');
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
-  await answer(page, { choice: SESSION_CHOICE });
+  await answer(page, { choice: 'session' });
   const result = await waitFor('the prompt decided', () => fake.permissions()[before]);
   expect(result.outcome).toBe('ran');
   expect(result.output?.hookSpecificOutput?.decision).toEqual({
@@ -302,8 +315,8 @@ test('deny with a reason: deny, the reason carried, and the agent goes on withou
   fake.configure({ prompts: [{ tool_name: 'Bash', tool_input: { command: 'git push --force origin main' } }] });
   await launch(page, 'Ship the scorer change.');
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
-  // No suggestion from Claude Code: Allow once and Deny only.
-  await expect(card(page).locator('[data-question-option]')).toHaveText(['Allow once', 'Deny']);
+  // No suggestion from Claude Code: no session choice.
+  await expect(card(page).locator('.pc-row button')).toHaveText(['Allow once', 'Deny', 'Deny with a reason']);
   await answer(page, { reason: 'Never force-push main. Open a pull request instead.' });
   const result = await waitFor('the prompt decided', () => fake.permissions()[before]);
   expect(result.outcome).toBe('denied');
@@ -312,6 +325,7 @@ test('deny with a reason: deny, the reason carried, and the agent goes on withou
   expect(decision?.message).toContain('Do not retry it');
   expect(decision?.message).toContain('Their reason: Never force-push main. Open a pull request instead.');
   await expect(pane(page).locator('article.ib-message[data-author="agent"]').last()).toContainText('[Bash denied]', { timeout: 30_000 });
+  await expect(record(page, 'deny').last()).toContainText('You said: “Never force-push main. Open a pull request instead.”');
 });
 
 test('answered in Terminal: the hook is ended, and the question is withdrawn and can no longer be answered', async () => {
@@ -327,12 +341,10 @@ test('answered in Terminal: the hook is ended, and the question is withdrawn and
   expect(ended.local).toBe(true);
   expect(ended.stdout).toBe('');
   // The host reads the session as gone on: the question is withdrawn from the same identity.
-  await expect(pane(page).locator('article.ib-message[data-author="agent"]', { hasText: 'Answered in Terminal.' })).toBeVisible({ timeout: 45_000 });
+  // The card shrinks to its record, which says so; nothing on it answers any more.
+  await expect(record(page, 'withdrawn')).toContainText('Answered in Terminal', { timeout: 45_000 });
   await expect(card(page)).toHaveCount(0);
-  // The card says it no longer applies; its choices are folded away behind "Show the old options".
-  const withdrawn = pane(page).locator('[data-permission]').first();
-  await expect(withdrawn).toContainText('No longer applies');
-  await expect(withdrawn.locator('[data-question-option]').first()).toBeHidden();
+  await expect(pane(page).locator('[data-perm]')).toHaveCount(0);
   await expect(pane(page).locator('[data-run="waiting_answer"]')).toHaveCount(0);
   const read = await readThread(page, threadId);
   expect(read.run?.state).not.toBe('waiting_answer');
@@ -348,7 +360,7 @@ test('Stop while waiting: the question is withdrawn at once', async () => {
   const line = pane(page).locator('[data-run="waiting_answer"]');
   await expect(line).toBeVisible({ timeout: 15_000 });
   await line.locator('[data-run-stop]').click();
-  await expect(pane(page).locator('article.ib-message[data-author="agent"]', { hasText: 'No longer waiting.' })).toBeVisible({ timeout: 10_000 });
+  await expect(record(page, 'withdrawn')).toContainText('No longer waiting', { timeout: 10_000 });
   await expect(card(page)).toHaveCount(0);
   await expect(pane(page).locator('[data-run="stopped"]')).toBeVisible();
 });
@@ -459,5 +471,170 @@ test('launch turned off while a question waits: the question is withdrawn, and n
   } finally {
     writeConfig({ inboxLaunch: { enabled: true } });
     fake.configure({ localAnswer: true });
+  }
+});
+
+const FUZZY = [
+  '/** Fuzzy match for the Settings search: every query letter, in order, anywhere in the label. */',
+  'export function fuzzyScore(query: string, label: string): number | null {',
+  '  const q = query.toLowerCase();',
+  '  const l = label.toLowerCase();',
+  '  let at = 0;',
+  '  let score = 0;',
+  '  let run = 0;',
+  '  for (const ch of q) {',
+  '    const found = l.indexOf(ch, at);',
+  '    if (found === -1) return null;',
+  '    run = found === at ? run + 1 : 0;',
+  '    score += 1 + run;',
+  '    at = found + 1;',
+  '  }',
+  '  return score;',
+  '}',
+  '',
+  '/** The labels that match, best first. */',
+  'export function fuzzyFilter<T>(items: T[], query: string, label: (item: T) => string): T[] {',
+  '  if (!query.trim()) return items;',
+  '  return items',
+  '    .map((item) => ({ item, score: fuzzyScore(query, label(item)) }))',
+  '    .filter((x): x is { item: T; score: number } => x.score !== null)',
+  '    .sort((a, b) => b.score - a.score)',
+  '    .map((x) => x.item);',
+  '}',
+].join('\n');
+
+test('the approved card: Write by Allow once (Enter), Bash by its session rule, WebFetch denied with a reason, Edit allowed with a switch to Auto mode', async ({ browser }) => {
+  const { page, fake } = world;
+  const before = fake.permissions().length;
+  const write: FakePermissionPrompt = {
+    tool_name: 'Write',
+    tool_input: { file_path: `${world.project}/packages/inbox/search/fuzzy.ts`, content: `${FUZZY}\n` },
+    permission_suggestions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+  };
+  const fetchPage: FakePermissionPrompt = {
+    tool_name: 'WebFetch',
+    tool_input: { url: 'https://bun.sh/docs/bundler#splitting', prompt: 'How does Bun split chunks, and can a chunk be capped by size?' },
+    permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'WebFetch', ruleContent: 'domain:bun.sh' }], behavior: 'allow', destination: 'localSettings' }],
+  };
+  const edit: FakePermissionPrompt = {
+    tool_name: 'Edit',
+    tool_input: {
+      file_path: `${world.project}/packages/inbox/components/Settings.tsx`,
+      old_string: "const shown = items.filter((s) => s.label.toLowerCase().startsWith(query));",
+      new_string: "const shown = fuzzyFilter(items, query, (s) => s.label);",
+    },
+    permission_suggestions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+  };
+  fake.configure({
+    prompts: [BUILD, write, fetchPage, edit],
+    body: 'Settings search now matches fuzzy. I added `packages/inbox/search/fuzzy.ts` and wired it into the palette, so “ntf” finds Notifications.\n\nThe bundle builds. The search chunk grew from 38 KB to 41 KB. I skipped the Bun docs, as you asked.',
+  });
+  await launch(page, 'The Settings search should match fuzzy, not prefix. Rebuild the Inbox bundle to check the chunk size.');
+  const p = pane(page);
+  const decision = (i: number) => waitFor(`prompt ${i + 1} decided`, () => fake.permissions()[before + i]).then((r) => r.output?.hookSpecificOutput?.decision);
+
+  // 1. Bash: its session rule.
+  await expect(card(page).locator('.pc-title')).toHaveText('Run a command', { timeout: 30_000 });
+  await answer(page, { choice: 'session' });
+  expect(await decision(0)).toEqual({
+    behavior: 'allow',
+    updatedInput: BUILD.tool_input,
+    updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'bun run:*' }], behavior: 'allow', destination: 'session' }],
+  });
+  await expect(record(page, 'session')).toContainText('Allowed bun run for this session');
+
+  // 2. Write: the path, "New file, 26 lines", ten numbered lines and the rest folded; Allow once has focus, so Enter answers it.
+  const c = card(page);
+  await expect(c.locator('.pc-title')).toHaveText('Write a file', { timeout: 30_000 });
+  await expect(c.locator('.pc-file-head')).toContainText('packages/inbox/search/fuzzy.ts');
+  await expect(c.locator('.pc-facts')).toHaveText('New file, 26 lines');
+  await expect(c.locator('.pc-line')).toHaveCount(10);
+  await expect(c.locator('.pc-more')).toHaveText('Show 16 more lines');
+  await expect(c.locator('[data-perm="session"]')).toHaveText('Allow file edits for this session');
+  await expect(c.locator('[data-perm="once"]')).toBeFocused();
+  await page.mouse.move(0, 0);
+  await shot(page, 'light');
+  await shot(page, 'dark', { scheme: 'dark' });
+  await page.keyboard.press('Enter');
+  expect(await decision(1)).toEqual({ behavior: 'allow', updatedInput: write.tool_input });
+  await expect(record(page, 'once')).toContainText('Allowed once');
+  await expect(record(page, 'once')).toContainText('packages/inbox/search/fuzzy.ts');
+
+  // 3. WebFetch: the link with its host, what Claude looks for; denied with a reason. The phone first.
+  await expect(card(page).locator('[data-perm-url]')).toHaveText('https://bun.sh/docs/bundler#splitting', { timeout: 30_000 });
+  await expect(card(page).locator('.pc-why')).toHaveText('Looking for: How does Bun split chunks, and can a chunk be capped by size?');
+  await expect(card(page).locator('[data-perm="session"]')).toHaveText('Allow pages on bun.sh for this session');
+  const phone = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
+  try {
+    const mobile = await phone.newPage();
+    await mobile.goto(page.url());
+    await expect(card(mobile).locator('[data-perm-url]')).toBeVisible();
+    await card(mobile).locator('.pc-modes').scrollIntoViewIfNeeded();
+    await shot(mobile, 'phone');
+  } finally {
+    await phone.close();
+  }
+  await answer(page, { reason: 'No need, the chunk size is fine. Skip the docs and finish.' });
+  const denied = await decision(2);
+  expect(denied?.behavior).toBe('deny');
+  expect(denied?.message).toContain('Their reason: No need, the chunk size is fine. Skip the docs and finish.');
+  await expect(record(page, 'deny')).toContainText('You said: “No need, the chunk size is fine. Skip the docs and finish.”');
+
+  // 4. Edit: the change as removed and added lines. Full permissions is off for a session not started with them; Auto mode allows and switches.
+  await expect(card(page).locator('.pc-facts')).toHaveText('1 removed, 1 added', { timeout: 30_000 });
+  const full = card(page).locator('[data-perm-mode="full"]');
+  await expect(full).toHaveAttribute('aria-disabled', 'true');
+  await full.hover();
+  await expect(card(page).locator('[data-perm-full-off]')).toHaveText('Start the session with full permissions allowed to use this');
+  await shot(page, 'full-disabled');
+  await full.click({ force: true }); // drawn off (aria-disabled), still clickable: it must send nothing
+  await page.waitForTimeout(500);
+  expect(fake.permissions().length).toBe(before + 3);
+  await answer(page, { choice: 'Auto mode' });
+  expect(await decision(3)).toEqual({
+    behavior: 'allow',
+    updatedInput: edit.tool_input,
+    updatedPermissions: [{ type: 'setMode', mode: 'auto', destination: 'session' }],
+  });
+  await expect(record(page, 'auto')).toContainText('Allowed and switched to Auto mode');
+
+  // Answered: four one-line records, no "You answered" replies, then Claude's answer.
+  await expect(p.locator('article.ib-message[data-author="agent"]').last()).toContainText('Settings search now matches fuzzy', { timeout: 30_000 });
+  await expect(p.locator('[data-perm-record]')).toHaveCount(4);
+  await expect(p.locator('article.ib-message[data-author="person"]')).toHaveCount(1);
+  await page.mouse.move(0, 0);
+  await shot(page, 'after-answer');
+  expect(world.errors).toEqual([]);
+});
+
+test('Full permissions, in a session started with them allowed: it asks to confirm the first time, then allows and switches', async () => {
+  const { page, fake } = world;
+  const before = fake.permissions().length;
+  writeConfig({ inboxLaunch: { enabled: true, fullPermissions: true } });
+  try {
+    fake.configure({ prompts: [BUILD, { tool_name: 'Bash', tool_input: { command: 'bun test packages/inbox' } }] });
+    await launch(page, 'Run the Inbox tests once the build is green.');
+    const c = card(page);
+    await expect(c.locator('[data-perm-mode="full"]')).not.toHaveAttribute('aria-disabled', 'true', { timeout: 30_000 });
+    await c.locator('[data-perm-mode="full"]').click();
+    // The first time: a confirm in place, nothing sent yet.
+    await expect(c.locator('[data-perm-confirm-full]')).toContainText('Switch this session to Full permissions?');
+    await page.waitForTimeout(500);
+    expect(fake.permissions().length).toBe(before);
+    await c.locator('[data-perm-full-confirm]').click();
+    const first = await waitFor('the prompt decided', () => fake.permissions()[before]);
+    expect(first.output?.hookSpecificOutput?.decision).toEqual({
+      behavior: 'allow',
+      updatedInput: BUILD.tool_input,
+      updatedPermissions: [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }],
+    });
+    // The second time in the same session: no confirm.
+    await expect(card(page).locator('[data-perm-detail]')).toHaveText('bun test packages/inbox', { timeout: 30_000 });
+    await card(page).locator('[data-perm-mode="full"]').click();
+    const second = await waitFor('the second prompt decided', () => fake.permissions()[before + 1]);
+    expect(second.output?.hookSpecificOutput?.decision?.updatedPermissions).toEqual([{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }]);
+    await expect(record(page, 'full')).toHaveCount(2);
+  } finally {
+    writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
   }
 });
