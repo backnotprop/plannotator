@@ -100,4 +100,19 @@ describe("claudeTrustsFolder", () => {
     expect(claudeTrustsFolder(env(home), "/work/scratch")).toBe(true);
     expect(claudeTrustsFolder(env(home), "/workshop")).toBe(false);
   });
+
+  test("a git repository under a trusted folder is not covered: only its own entry counts (a scratch folder the agent made a repository)", () => {
+    const home = mkdtempSync(join(tmpdir(), "plannotator-trust-repo-"));
+    restore.push(() => rmSync(home, { recursive: true, force: true }));
+    const root = join(home, "scratch");
+    const repo = join(root, "notes");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    mkdirSync(join(root, "plain"), { recursive: true });
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [root]: { hasTrustDialogAccepted: true } } }));
+    expect(claudeTrustsFolder(env(home), join(root, "plain"))).toBe(true);
+    expect(claudeTrustsFolder(env(home), repo)).toBe(false);
+    expect(claudeTrustsFolder(env(home), join(repo, "src"))).toBe(false);
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [root]: { hasTrustDialogAccepted: true }, [repo]: { hasTrustDialogAccepted: true } } }));
+    expect(claudeTrustsFolder(env(home), join(repo, "src"))).toBe(true);
+  });
 });

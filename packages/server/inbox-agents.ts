@@ -658,9 +658,10 @@ export function claudeBypassSetup(e: AgentEnvironment, folder: string | null = n
 }
 
 /**
- * Whether Claude Code trusts `folder`: its global config (`~/.claude.json`, `$CLAUDE_CONFIG_DIR/.claude.json`)
- * records `hasTrustDialogAccepted: true` for the folder or a folder above it (a child inherits a trusted
- * parent's trust: bg-test). Read only; the Inbox never writes it. Unreadable: not trusted.
+ * Whether Claude Code trusts `folder`, as it keys trust (code.claude.com/docs permissions, "workspace trust"):
+ * in a git repository, on the repository's root, which a parent's trust never covers; outside one, on the
+ * folder or any folder above it. Read from its global config (`~/.claude.json`, `$CLAUDE_CONFIG_DIR/.claude.json`):
+ * `projects[<path>].hasTrustDialogAccepted: true`. Read only; the Inbox never writes it. Unreadable: not trusted.
  */
 export function claudeTrustsFolder(e: AgentEnvironment, folder: string): boolean {
   const configDir = envDir(e, "CLAUDE_CONFIG_DIR");
@@ -676,6 +677,8 @@ export function claudeTrustsFolder(e: AgentEnvironment, folder: string): boolean
   const table = projects as Record<string, { hasTrustDialogAccepted?: unknown } | undefined>;
   for (let dir = folder; ; dir = dirname(dir)) {
     if (table[dir]?.hasTrustDialogAccepted === true) return true;
+    // A repository's root: only its own entry counts.
+    if (existsSync(join(dir, ".git"))) return false;
     if (dirname(dir) === dir) return false;
   }
 }

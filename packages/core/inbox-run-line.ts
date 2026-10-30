@@ -54,6 +54,8 @@ export interface InboxRunEvidence {
   waitingSince: number | null;
   /** The reply's respawn did not take: its cause (it exited non-zero, or never connected). Null otherwise. */
   respawnFailed: string | null;
+  /** That respawn was refused because Claude Code does not trust the folder: the line offers Open in Terminal. */
+  respawnUntrusted?: boolean;
   /** When the person pressed Stop, while it still holds. */
   stoppedByPersonAt: number | null;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
@@ -89,7 +91,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   const idle = e.live !== null && e.live.busy !== true;
   if (host?.status === "waiting" && host.waitingFor && !idle) return line("waiting_terminal", { since: iso(e.waitingSince) });
   // Only while the reply waits for it: re-addressed to another session, nothing here waits any more.
-  if (!e.live && e.respawnFailed && e.turnWaiting) return e.cliAvailable === false ? line("missing") : line("failed", { cause: e.respawnFailed, again: true });
+  if (!e.live && e.respawnFailed && e.turnWaiting) return e.cliAvailable === false ? line("missing") : line("failed", { cause: e.respawnFailed, again: true, untrusted: e.respawnUntrusted === true });
   const starting = () => line("starting", { since: iso(e.startedAt), again: e.again });
   const inGrace = e.now - e.startedAt < INBOX_RUN_START_GRACE_MS;
   if (e.live) return e.live.busy === true ? line("working", { since: iso(e.live.busySince) }) : e.turnWaiting && inGrace ? starting() : null;

@@ -198,8 +198,11 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
     stop: async (short: string) => (await run(["stop", short], undefined)).result,
     respawn: async (short: string) => (await run(["respawn", short], undefined)).result,
     rm: async (short: string) => (await run(["rm", short], undefined)).result,
-    /** `claude purge <folder>`: every session and transcript Claude keeps for that folder. Only ever a scratch folder. */
-    purge: async (folder: string) => (await run(["purge", folder], undefined)).result,
+    /**
+     * `claude purge --yes <folder>`: every session, transcript and `~/.claude.json` entry Claude keeps for that folder
+     * (`--yes`: no confirmation, which would wait on a terminal no one sees). Only ever a scratch folder.
+     */
+    purge: async (folder: string) => (await run(["purge", "--yes", folder], undefined)).result,
   };
 }
 

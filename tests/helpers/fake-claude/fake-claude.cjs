@@ -18,13 +18,14 @@
  *  --bg --name N --settings F [--allow-dangerously-skip-permissions] [--permission-mode M]
  *                            no prompt; faults: untrusted (Claude's error, exit 1;
  *                            with `trustCheck`, only in a folder HOME's .claude.json
- *                            does not trust, itself or above),
+ *                            does not trust, itself or above, a repository root only
+ *                            by its own entry; `respawn` checks it too),
  *                            refuseAuto (commander's refusal of `auto`, exit 1),
  *                            slow (sleeps 40 s); else (after `bgDelayMs`) prints
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
  *                            and starts the session process.
  *  agents --json [--all] [--cwd D]  without --all, done and stopped sessions are left out
- *  stop <id> / respawn <id> / rm <id> / purge <folder> / attach <id>
+ *  stop <id> / respawn <id> / rm <id> / purge --yes <folder> / attach <id>
  *
  * The session process (`__session <sessionId>`) reads the settings file's env
  * (PLANNOTATOR_DATA_DIR), finds the Inbox in <dataDir>/inbox/inbox.json and
@@ -100,13 +101,23 @@ const updateAgent = (sessionId, patch) => {
   if (current) saveAgent({ ...current, ...patch });
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-/** Claude's folder trust (`trustCheck`): HOME's ~/.claude.json records the folder, or a folder above it, as accepted. */
+/**
+ * Claude's folder trust (`trustCheck`), keyed as Claude keys it: HOME's ~/.claude.json accepts the folder or a
+ * folder above it, but a git repository's root (a `.git` there) counts only through its own entry: a parent's
+ * trust never covers a nested repository (the real-CLI smoke and code.claude.com's workspace-trust docs).
+ */
 const trusted = (folder) => {
   const projects = (readJson(path.join(process.env.HOME || "", ".claude.json"), {}) || {}).projects || {};
   for (let dir = folder; ; dir = path.dirname(dir)) {
     if (projects[dir] && projects[dir].hasTrustDialogAccepted === true) return true;
+    if (fs.existsSync(path.join(dir, ".git"))) return false;
     if (path.dirname(dir) === dir) return false;
   }
+};
+const untrustedExit = (folder) => {
+  process.stdout.write("Starting background service…\n");
+  process.stderr.write(`Error: Workspace not trusted. Run \`claude\` in ${folder} once and accept the trust dialog.\n`);
+  process.exit(1);
 };
 
 const args = process.argv.slice(2);
@@ -176,11 +187,7 @@ function main() {
     } catch {}
     const env = (settings && settings.env) || {};
     record({ settingsPath, settings, settingsMode: mode, threadExisted: threadWritten(env.PLANNOTATOR_DATA_DIR, env.PLANNOTATOR_LAUNCH) });
-    if (cfg.fault === "untrusted" || (cfg.trustCheck && !trusted(process.cwd()))) {
-      process.stdout.write("Starting background service…\n");
-      process.stderr.write(`Error: Workspace not trusted. Run \`claude\` in ${process.cwd()} once and accept the trust dialog.\n`);
-      process.exit(1);
-    }
+    if (cfg.fault === "untrusted" || (cfg.trustCheck && !trusted(process.cwd()))) untrustedExit(process.cwd());
     if (cfg.fault === "slow") {
       setTimeout(() => process.exit(1), 40_000);
       return;
@@ -246,6 +253,8 @@ function main() {
     return;
   }
   if (command === "respawn") {
+    // Claude checks trust before it restarts a background session too.
+    if (cfg.trustCheck && !trusted(agent.cwd)) untrustedExit(agent.cwd);
     updateAgent(agent.sessionId, { state: "running", status: "idle" });
     startSession(agent.sessionId);
     process.stdout.write(`respawned ${agent.id}\n`);
@@ -263,8 +272,14 @@ function main() {
   }
   // purge <folder>: every session of that folder goes (and, in Claude, its transcripts).
   if (command === "purge") {
-    for (const a of allAgents()) if (a.cwd === ref) fs.rmSync(agentFile(a.sessionId), { force: true });
-    process.stdout.write(`purged ${ref}\n`);
+    // Without -y/--yes Claude asks to confirm: with no terminal, nothing is purged.
+    const folder = args.slice(1).filter((a) => !a.startsWith("-")).pop();
+    if (!args.includes("--yes") && !args.includes("-y")) {
+      process.stderr.write("fake claude: purge needs --yes without a terminal\n");
+      process.exit(1);
+    }
+    for (const a of allAgents()) if (a.cwd === folder) fs.rmSync(agentFile(a.sessionId), { force: true });
+    process.stdout.write(`purged ${folder}\n`);
     return;
   }
   if (command === "attach") return;

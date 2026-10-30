@@ -17,7 +17,11 @@
  *     trusted yet, so the row reads "trust it once"; the start fails as
  *     untrusted, Open in Terminal runs `claude` in the root, and once the person
  *     trusted it, Try again starts it and the row reads plain again.
- *  4. A link never lets a scratch folder leave the root: a link already at the
+ *  4. Scratch folders are plain folders, never repositories, so the root's trust
+ *     covers them. One the agent made a repository needs its own trust (Claude keys
+ *     trust on a repository's root, and checks it before a restart): the reply's
+ *     restart is refused, Open in Terminal runs `claude` in that folder, Try again.
+ *  5. A link never lets a scratch folder leave the root: a link already at the
  *     name is skipped (`-2`), and a folder swapped for a link to a folder outside
  *     is neither purged nor removed by Delete.
  *
@@ -218,6 +222,8 @@ test('Send to a new scratch folder: made under the root, named by the thread, -2
   const folder = join(scratchRoot, 'settings-search');
   expect(first.project).toMatchObject({ root: folder, name: 'settings-search' });
   expect(lstatSync(folder).isDirectory()).toBe(true);
+  // A plain folder, never a repository: Claude's trust of the root (or a folder above) covers it.
+  expect(existsSync(join(folder, '.git'))).toBe(false);
   // Claude Code started in that folder, and its answer came back to the thread.
   const start = await waitFor('claude --bg', () => fake.starts().at(-1));
   expect(start.cwd).toBe(folder);
@@ -245,7 +251,7 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   await deleteFromMenu(page, first!.threadId, 'delete-confirm-scratch');
   await waitFor('the folder removed', () => !existsSync(first!.folder));
   const purges = fake.calls().filter((c) => c.argv[0] === 'purge');
-  expect(purges.map((c) => c.argv)).toEqual([['purge', first!.folder]]);
+  expect(purges.map((c) => c.argv)).toEqual([['purge', '--yes', first!.folder]]);
   expect(existsSync(join(world.dataDir, 'inbox', 'launch', first!.launchId))).toBe(false);
   // The other scratch folder and its session stay; the thread stays too.
   expect(lstatSync(second!.folder).isDirectory()).toBe(true);
@@ -256,8 +262,8 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   await deleteFromMenu(page, second!.threadId);
   await waitFor('the second folder removed', () => !existsSync(second!.folder));
   expect(fake.calls().filter((c) => c.argv[0] === 'purge').map((c) => c.argv)).toEqual([
-    ['purge', first!.folder],
-    ['purge', second!.folder],
+    ['purge', '--yes', first!.folder],
+    ['purge', '--yes', second!.folder],
   ]);
   await openFolderMenu(page, 'Anything.', 'Anything');
   await expect(dialog(page).locator('[data-compose-folder-option]')).toHaveCount(2);
@@ -317,6 +323,33 @@ test('a moved root is used for the next launch; untrusted, the row reads "trust 
   await plain.hover();
   await shot(page, '03-new-session-where-scratch');
   await page.keyboard.press('Escape');
+  expect(world.errors).toEqual([]);
+});
+
+test('a scratch folder the agent made its own git repository needs its own trust: the restart is refused, Open in Terminal runs claude in that folder, and Try again restarts it', async () => {
+  const { page, fake } = world;
+  const { moved } = world.launched;
+  await openThread(page, moved!.threadId);
+  const p = pane(page);
+  // Stop it, then the agent's folder becomes a repository (as `git init` there would): Claude keys its trust on
+  // that root now, and the scratch root's trust no longer covers it.
+  await p.locator('[data-thread-more]').click();
+  await page.locator('[data-launch-item="stop"]').click();
+  await expect(p.locator('[data-run="stopped"]')).toBeVisible();
+  git(moved!.folder);
+  await p.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await p.getByRole('textbox', { name: /^Reply to Claude Code/ }).fill('Add a README to the prototype.');
+  await p.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  const line = p.locator('[data-run="failed"]');
+  await expect(line).toContainText("~/Plannotator/scratch/onboarding-checklist isn't a trusted folder yet.", { timeout: 30_000 });
+  const opened = fake.osascript().length;
+  await line.locator('[data-run-open]').click();
+  const ran = await waitFor('osascript', () => fake.osascript()[opened]);
+  expect(ran.at(-1)).toBe(`cd '${moved!.folder}' && claude`);
+  trust([world.dataDir, join(world.home, 'Plannotator', 'scratch'), moved!.folder]);
+  await line.locator('[data-run-retry]').click();
+  await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(2, { timeout: 30_000 });
+  expect(fake.calls().filter((c) => c.argv[0] === 'respawn')).toHaveLength(2);
   expect(world.errors).toEqual([]);
 });
 

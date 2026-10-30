@@ -54,7 +54,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { INBOX_HOST_NAMES, inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -115,7 +115,7 @@ interface Memo {
    * pending reply's id). `connected` once it polled again; `failed` when it
    * exited non-zero. Never retried by itself: Try again or a new reply.
    */
-  respawn: { for: string; connected: boolean; failed: string | null } | null;
+  respawn: { for: string; connected: boolean; failed: string | null; untrusted?: boolean } | null;
   /**
    * The session polled busy since the latest start or respawn. Until then a
    * turn it took (delivered) has not visibly begun: the line stays Starting
@@ -264,7 +264,7 @@ export function createInboxLaunch(options: {
     throw scratchRefused(`Every scratch folder name for this thread is taken in ${options.displayFolder(root)}. Rename the thread.`);
   };
   /**
-   * Delete's last step for a scratch launch: `claude purge <folder>` (that folder's sessions and transcripts)
+   * Delete's last step for a scratch launch: `claude purge --yes <folder>` (that folder's sessions and transcripts)
    * and the folder itself, only while it is intact. Never for a project folder.
    */
   const removeScratch = async (launch: InboxLaunchRecord): Promise<boolean> => {
@@ -278,8 +278,13 @@ export function createInboxLaunch(options: {
     log(`Inbox launch ${launch.id}: scratch folder removed (purge ${purge.exitCode})`);
     return true;
   };
-  /** The folder a start failure names and Open in Terminal trusts: a scratch launch's root, so one trust covers every scratch folder. */
-  const trustFolderOf = (launch: InboxLaunchRecord) => (launch.scratch ? dirname(launch.folder) : launch.folder);
+  /**
+   * The folder a start failure names and Open in Terminal trusts. A scratch launch: its root, so one trust covers
+   * every scratch folder in it (the Inbox makes plain folders, never repositories). Claude keys trust on a
+   * repository's root and never lets a parent's trust cover a nested repository, so a scratch folder the agent
+   * made a repository (`git init`) is trusted on its own.
+   */
+  const trustFolderOf = (launch: InboxLaunchRecord) => (launch.scratch && !existsSync(join(launch.folder, ".git")) ? dirname(launch.folder) : launch.folder);
   /** How a launch made now would start (`launchStartOf`), from the switch, the person's Claude setup and the last shell read. */
   const startNow = (setup: ReturnType<typeof claudeSetup>) =>
     launchStartOf({ setting: config().fullPermissions, defaultMode: setup.defaultMode, shellSkips: shell?.skips ?? false, consent: setup.consent, disabled: setup.disabled });
@@ -382,6 +387,9 @@ export function createInboxLaunch(options: {
     return now() - memo.startedAt >= INBOX_RUN_START_GRACE_MS ? "It started again but did not connect to the Inbox." : null;
   };
 
+  /** The reply's restart was refused because Claude Code does not trust the folder. */
+  const respawnUntrustedOf = (memo: Memo): boolean => memo.respawn?.untrusted === true && respawnFailedOf(memo) !== null;
+
   /**
    * A turn waits for the session: the root or a reply is not taken yet, or it
    * was taken since the latest start but the session has neither polled busy
@@ -420,6 +428,7 @@ export function createInboxLaunch(options: {
       host: hostState,
       waitingSince: memo.waitingSince,
       respawnFailed: respawnFailedOf(memo),
+      respawnUntrusted: respawnUntrustedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
       attachCommand: launch.session_ref ? claudeAttachCommand(launch.folder, launch.session_ref) : null,
       permissionSince: permissions.openSince(root),
@@ -599,7 +608,10 @@ export function createInboxLaunch(options: {
       .then(async (result) => {
         startLog(launch.id, `respawn ${launch.session_ref}: exit ${result.exitCode}\n${result.stdout}${result.stderr}`);
         if (result.exitCode === 0) return;
-        attempt.failed = startFailureOf(result, options.displayFolder(launch.folder)).text;
+        const failure = startFailureOf(result, options.displayFolder(trustFolderOf(launch)));
+        attempt.failed = failure.text;
+        // Claude checks trust before a restart too (a scratch folder that became its own repository needs its own).
+        attempt.untrusted = failure.code === "untrusted";
         lastAvailable = await available(true);
       })
       .finally(() => {
@@ -717,7 +729,9 @@ export function createInboxLaunch(options: {
       case "open": {
         if (via === "tailnet") return localOnly();
         if (options.platform !== "darwin") throw new InboxError("open_unavailable", "Open in Terminal is for macOS; copy the command instead.");
-        const command = launch.session_ref && !launch.error ? claudeAttachCommand(launch.folder, launch.session_ref) : claudeTrustCommand(trustFolderOf(launch));
+        // A start or restart Claude refused for trust: plain `claude` where trust is keyed, so its trust prompt shows.
+        const untrusted = !!launch.error || respawnUntrustedOf(memoOf(launch));
+        const command = launch.session_ref && !untrusted ? claudeAttachCommand(launch.folder, launch.session_ref) : claudeTrustCommand(trustFolderOf(launch));
         const e = await environment();
         const osascript = e.which("osascript");
         if (!osascript) throw new InboxError("open_unavailable", "osascript is not on PATH; copy the command instead.");

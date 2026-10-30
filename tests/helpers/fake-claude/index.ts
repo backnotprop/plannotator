@@ -24,7 +24,10 @@ export interface FakeClaudeConfig {
   version?: string;
   /** `untrusted`: `--bg` fails with Claude's untrusted-folder error. `slow`: it never answers in time. */
   fault?: "untrusted" | "slow" | null;
-  /** Claude's folder trust: `--bg` fails as untrusted unless HOME's .claude.json trusts the folder or a folder above it (bg-test). */
+  /**
+   * Claude's folder trust: `--bg` and `respawn` fail as untrusted unless HOME's .claude.json trusts the folder or a
+   * folder above it; a git repository's root only by its own entry (a parent's trust never covers a nested repository).
+   */
   trustCheck?: boolean;
   /** `--bg --permission-mode auto` fails as a CLI without auto mode does (commander's refusal of the value). */
   refuseAuto?: boolean;
