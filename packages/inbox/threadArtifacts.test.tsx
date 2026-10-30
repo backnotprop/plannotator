@@ -55,7 +55,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 6;
+const TESTS = 7;
 // Each test reads a real Inbox in another process; a cold start can take a few seconds.
 setDefaultTimeout(20_000);
 
@@ -170,12 +170,13 @@ async function openThread() {
   return el;
 }
 
-test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at the right, Mark read keeping its label; a thread with no artifact has it for its project folder', async () => {
+test.skipIf(!hasDom)('the header: the folder button with the count, icons at the right, Mark read keeping its label; a thread with no artifact has it for its project folder', async () => {
   const el = await openThread();
   const b = button(el)!;
   // Seven artifacts: the image in the text (also attached: one), the spec, the sketch, the after image, the ZIP, the guide, the SQL.
-  expect(b.getAttribute('aria-label')).toBe('Artifacts, 7');
+  expect(b.getAttribute('aria-label')).toBe('Open files (7)');
   expect(b.getAttribute('aria-pressed')).toBe('false');
+  expect(b.getAttribute('aria-expanded')).toBe('false');
   expect(b.hasAttribute('title')).toBe(false);
   expect(b.textContent).toBe('7');
   const expand = el.querySelector<HTMLButtonElement>('[data-expand-all]')!;
@@ -185,14 +186,15 @@ test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at t
   const order = [...head.querySelectorAll('[data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map((n) =>
     n.hasAttribute('data-artifacts-button') ? 'artifacts' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-archive') ? 'archive' : n.classList.contains('ib-vsep') ? '|' : 'close',
   );
-  expect(order).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
+  // (A desktop beside the list leads with the thread's full screen and its hairline, before Mark read.)
+  expect(order.slice(-5)).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
   // A thread with no artifact, in a project folder (owner, 2026-10-27): the button opens the folder; no count.
   act(() => root?.unmount());
   host?.remove();
   const plain = await renderApp(`#thread=${ids.waiting}`);
   await until(() => button(plain) !== null, 'the folder button on a thread with no artifact');
   const folderButton = button(plain)!;
-  expect(folderButton.getAttribute('aria-label')).toMatch(/^Project folder, billing/);
+  expect(folderButton.getAttribute('aria-label')).toMatch(/^Open files: project folder, billing/);
   expect(folderButton.textContent).toBe('');
   act(() => folderButton.click());
   // The pane opens on the project folder: the files panel shows, focus in its filter, the empty grid points there.
@@ -241,6 +243,38 @@ test.skipIf(!hasDom)('a tile opens its file in a tab beside the thread; the imag
   const label = el.ownerDocument.querySelector('[data-step-label]')?.getAttribute('aria-label') ?? el.ownerDocument.querySelector('[data-full-view-position]')?.getAttribute('aria-label') ?? '';
   // Six files step (the guide opens its own reader): the image is the first.
   expect(label).toMatch(/^1 of 6, before\.png\./);
+});
+
+const headOrder = (el: ParentNode) =>
+  [...el.querySelectorAll('section.ib-pane .ib-phead :is([data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"])')].map((n) =>
+    n.hasAttribute('data-artifacts-button') ? 'folder' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-archive') ? 'archive' : n.classList.contains('ib-vsep') ? '|' : 'close',
+  );
+
+test.skipIf(!hasDom)("the folder is the pane's toggle: lit in the ×'s place while open, with no count; the pane's × brings the thread's × back", async () => {
+  const el = await openThread();
+  // Closed: the folder with the header's icons, the thread's × at the end.
+  expect(headOrder(el).slice(-5)).toEqual(['folder', 'expand', 'archive', '|', 'close']);
+  expect(button(el)!.querySelector('[data-files-count]')?.textContent).toBe('7');
+  act(() => button(el)!.click());
+  await until(() => tiles(el).length === 7, 'the grid');
+  // Open: the folder ends the header where the × was, pressed and expanded, named for what it does now, no count.
+  expect(headOrder(el).slice(-4)).toEqual(['expand', 'archive', '|', 'folder']);
+  expect(headOrder(el)).not.toContain('close');
+  const lit = button(el)!;
+  expect(lit.getAttribute('aria-pressed')).toBe('true');
+  expect(lit.getAttribute('aria-expanded')).toBe('true');
+  expect(lit.getAttribute('aria-label')).toBe('Close files');
+  expect(lit.querySelector('[data-files-count]')).toBeNull();
+  expect(lit.textContent).toBe('');
+  // Counts once: not on the Artifacts tab either.
+  expect(el.querySelector('[data-artifacts-tab] .ib-tcm')).toBeNull();
+  // The pane's own × closes it: the thread's × is back and the folder carries its count again.
+  act(() => el.querySelector<HTMLButtonElement>('[data-files-close]')!.click());
+  await until(() => view(el) === null, 'the pane closed by its ×');
+  expect(headOrder(el).slice(-2)).toEqual(['|', 'close']);
+  expect(button(el)!.getAttribute('aria-label')).toBe('Open files (7)');
+  expect(button(el)!.getAttribute('aria-expanded')).toBe('false');
+  expect(button(el)!.querySelector('[data-files-count]')?.textContent).toBe('7');
 });
 
 test.skipIf(!hasDom)('Escape and the pressed button close the pane, with focus on the button', async () => {

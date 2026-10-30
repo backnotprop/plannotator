@@ -175,14 +175,20 @@ test.skipIf(!hasDom)('with a file open beside the thread, ‹ Inbox leads the he
   expect(el.querySelector('.ib-listcol')).toBeNull();
   expect(sidebarState(el)).toBe('collapsed');
   const head = el.querySelector('section.ib-pane .ib-phead')!;
-  expect(head.firstElementChild).toBe(back(el));
-  // Mark read follows the way back (after its divider), and Archive ends the header, where the × was.
+  // Node identity is compared as a boolean: a failing toBe on two happy-dom nodes makes Bun print the whole DOM and
+  // run out of memory.
+  expect(head.firstElementChild === back(el)).toBe(true);
+  // Mark read follows the way back (after its divider). The pane beside the thread is open, so its lit folder ends the
+  // header where the × was (approval "inbox-files-tabs", 2026-10-30), after Archive.
   const buttons = [...head.querySelectorAll('button')];
-  expect(buttons[0]).toBe(back(el)!);
+  expect(buttons[0] === back(el)).toBe(true);
   const markRead = head.querySelector<HTMLButtonElement>('[data-mark-read]');
   expect(markRead).not.toBeNull();
-  expect(buttons[1]).toBe(markRead!);
-  expect(head.lastElementChild).toBe(head.querySelector('[data-archive]'));
+  expect(buttons[1] === markRead).toBe(true);
+  const folder = head.querySelector('[data-artifacts-button]');
+  expect(head.lastElementChild === folder).toBe(true);
+  expect(folder?.getAttribute('aria-pressed')).toBe('true');
+  expect(buttons.at(-2) === head.querySelector('[data-archive]')).toBe(true);
   expect(back(el)!.getAttribute('aria-label')).toBe('Back to Inbox');
   expect(back(el)!.textContent?.trim()).toBe('Inbox');
   expect(await tooltipOf(back(el)!)).toBe('Close notes.md and show the list');

@@ -329,13 +329,15 @@ test.skipIf(!hasDom)('the header leads with Mark read; Archive sits beside the c
   const markRead = head.querySelector('[data-mark-read]')!;
   const archive = head.querySelector('[data-archive]')!;
   const close = head.querySelector('button[aria-label="Close the thread"]');
-  // DOM order is the tab order: Mark read first, Archive then the close last.
-  expect(buttons[0]).toBe(markRead as HTMLButtonElement);
+  // DOM order is the tab order: Mark read first (after the thread's full-screen button and its hairline, where that
+  // shows), Archive then the close last. Node identity as a boolean: a failing toBe on happy-dom nodes runs out of memory.
+  const full = head.querySelector('[data-full-in]');
+  expect(buttons[full ? 1 : 0] === markRead).toBe(true);
   if (close) {
     expect(buttons.at(-1) === close).toBe(true);
     expect(archive.nextElementSibling?.className).toBe('ib-vsep');
     expect(archive.nextElementSibling?.nextElementSibling === close).toBe(true);
-    expect(head.querySelectorAll('.ib-vsep').length).toBe(1);
+    expect(head.querySelectorAll('.ib-vsep').length).toBe(full ? 2 : 1);
   } else {
     expect(buttons.at(-1) === archive).toBe(true);
     expect(head.querySelectorAll('.ib-vsep').length).toBe(0);

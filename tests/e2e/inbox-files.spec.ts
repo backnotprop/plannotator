@@ -8,9 +8,16 @@
  *   with the files panel: the project is listed like VS Code (no .git,
  *   ignored folders dimmed, a folder opened later dims its rows too, .env
  *   locked). A locked row never asks the server for its contents.
- * - One file open: its tools sit in the tab row (no bar under it). A second
- *   file: a tab to the right and the tools drop to a bar with the path.
- *   Closing a tab shows its right neighbour, else its left, else Artifacts.
+ * - Tabs are always tabs (amendment 2026-10-30): one file open shows the tab
+ *   row and, under it, the file's tools in their own bar with the path, as
+ *   with two. Counts once: no number on the Artifacts tab, the open-tabs menu
+ *   a plain ⌄. Closing a tab shows its right neighbour, else its left, else
+ *   Artifacts.
+ * - The folder button is the pane's toggle: closed, it carries the thread's
+ *   file count beside the header's icons and the thread's × shows; open, it
+ *   sits lit (pressed, expanded, "Close files") where the × was, without the
+ *   count, and the × is gone. The folder or the pane's own × closes the pane,
+ *   and the thread's × comes back, focus on the folder.
  * - The panel is the same on every tab: a folder opened beside a file is
  *   still open on Artifacts.
  * - The changes toggle: no M/A marks while off; on, totals.ts reads M.
@@ -211,20 +218,34 @@ test('the folder button opens Artifacts with the project listed like VS Code', a
   expect(world.contentPaths.filter((p) => p.endsWith('.env'))).toEqual([]);
 });
 
-test('one file keeps its tools in the tab row; a second drops them to a bar', async () => {
+test('one file shows a tab row and its tools in a row of their own, as two do', async () => {
   const { page } = world;
   await panel().locator('[role=tree][aria-label="Artifacts"] [role=treeitem]', { hasText: 'totals.ts' }).click();
   await expect(fileTabs()).toHaveCount(1);
-  await expect(page.locator('.ib-ftop .ib-vslim')).toHaveCount(0);
-  await expect(page.locator('[data-files-tabs]')).toHaveClass(/ib-tabfold/);
-  // The header's line stays beside the thread: in the tab row with one file.
-  await expect(page.locator('[data-files-header] [data-files-tabs] [data-header-from]')).toHaveText('from Claude Code in ledger');
+  // Tabs are always tabs: the row holds tabs and the pane's controls, never the file's tools.
+  const row = page.locator('[data-files-header] [data-files-tabs]');
+  const bar = page.locator('[data-files-header] .ib-vslim');
+  await expect(bar).toBeVisible();
+  await expect(row.locator('[data-header-from]')).toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'Side by side' })).toHaveCount(0);
+  await expect(bar.getByRole('button', { name: 'Side by side' })).toBeVisible();
+  // The tools row sits under the tab row.
+  const rowBox = (await row.boundingBox())!;
+  const barBox = (await bar.boundingBox())!;
+  expect(barBox.y).toBeGreaterThanOrEqual(rowBox.y + rowBox.height - 1);
+  // The header's line stays beside the thread, in the bar.
+  await expect(bar.locator('[data-header-from]')).toHaveText('from Claude Code in ledger');
+  // Counts once: no number on the Artifacts tab.
+  await expect(page.locator('[data-artifacts-tab]')).toHaveText('Artifacts');
   await projectRow('docs').click();
   await projectRow('docs/notes.md').click();
   await expect(fileTabs()).toHaveCount(2);
   await expect(fileTabs().nth(1)).toContainText('notes.md');
   await expect(fileTabs().nth(1)).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.ib-ftop .ib-vslim')).toBeVisible();
+  // The open-tabs menu is a plain ⌄: no count on it.
+  await expect(page.locator('[data-tabs-menu]')).toHaveText('');
+  await expect(page.locator('[data-tabs-menu]')).toHaveAccessibleName('Open files, 2');
   await expect(page.locator('[data-files-crumbs]')).toContainText('docs');
   // With two, in the bar under the tabs; a file of the folder was sent by nobody.
   await expect(page.locator('.ib-ftop .ib-vslim [data-header-from]')).toHaveText('in ledger');
@@ -271,6 +292,64 @@ test('Escape keeps the file beside the thread; Close all goes back to the thread
   await expect(panel()).toHaveCount(0);
   await page.locator('[data-files-panel-toggle]').click();
   await expect(panel()).toBeVisible();
+});
+
+test("the folder button is the pane's toggle: lit where the thread's × was while open, its count only while closed", async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#thread=${world.threadId}`);
+  const head = page.locator('section.ib-pane .ib-phead');
+  const door = head.locator('[data-artifacts-button]');
+  const count = door.locator('[data-files-count]');
+  const closeThread = head.getByRole('button', { name: 'Close the thread' });
+  const lastButton = () => head.evaluate((h) => [...h.querySelectorAll('button')].pop()?.getAttribute('aria-label') ?? null);
+  const shut = async () => {
+    await expect(page.locator('[data-files-tabs]')).toHaveCount(0);
+    await expect(closeThread).toBeVisible();
+    await expect(door).toHaveAttribute('aria-pressed', 'false');
+    await expect(door).toHaveAttribute('aria-expanded', 'false');
+    await expect(door).toHaveAccessibleName(/^Open files \(\d+\)$/);
+    const n = /\((\d+)\)/.exec((await door.getAttribute('aria-label'))!)![1];
+    await expect(count).toHaveText(n);
+    expect(await lastButton()).toBe('Close the thread');
+  };
+  const open = async () => {
+    // The pane's tab row: on Artifacts and over a file alike.
+    await expect(page.locator('[data-files-tabs]')).toBeVisible();
+    await expect(closeThread).toHaveCount(0);
+    await expect(door).toHaveAttribute('aria-pressed', 'true');
+    await expect(door).toHaveAttribute('aria-expanded', 'true');
+    await expect(door).toHaveAccessibleName('Close files');
+    await expect(count).toHaveCount(0);
+    // Where the thread's × was: the header's last control.
+    expect(await lastButton()).toBe('Close files');
+  };
+  await shut();
+  // The folder opens the pane and takes the ×'s place, lit, with no count (the "1 of N" under a file says it).
+  await door.click();
+  await open();
+  // The folder closes it: the × comes back.
+  await door.click();
+  await shut();
+  // Focus follows the folder to its place, never onto the × that took the old one (Enter there would close the thread).
+  await expect(door).toBeFocused();
+  // The pane's own × closes it too, and brings the thread's × back.
+  await door.click();
+  await open();
+  await page.locator('[data-files-close]').click();
+  await shut();
+  // With a file open beside the thread the folder stays lit at the end; it closes the file's pane.
+  await door.click();
+  if ((await panel().count()) === 0) await page.locator('[data-files-panel-toggle]').click();
+  await panel().locator('[role=tree][aria-label="Artifacts"] [role=treeitem]', { hasText: 'totals.ts' }).click();
+  await expect(fileTabs()).toHaveCount(1);
+  await open();
+  await door.click();
+  await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+  await shut();
+  // Left open on Artifacts with the panel, for the tests after this one.
+  await door.click();
+  await expect(panel()).toBeVisible();
+  expect(world.errors).toEqual([]);
 });
 
 test('change marks show only while the changes toggle is on', async () => {
@@ -324,7 +403,7 @@ test('a thread with no artifact: the button opens its project folder; none for t
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.plainThread}`);
   const door = page.locator('[data-artifacts-button]');
-  await expect(door).toHaveAttribute('aria-label', 'Project folder, ledger');
+  await expect(door).toHaveAttribute('aria-label', 'Open files: project folder, ledger');
   await expect(door.locator('.ib-artbtn-n')).toHaveCount(0);
   await door.click();
   // The pane opens on the folder: the panel lists it, focus in its filter, the empty grid points there.
