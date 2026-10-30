@@ -6,17 +6,20 @@
  * carries that session's markers. A launched agent instead gets the person's
  * LOGIN shell env: `$SHELL -ilc`, printed with `env -0` between markers, 5 s
  * at most, read once per launch and at no other time (never for a status
- * read, a stop or a respawn). The shell starts from a minimal env, so nothing
- * of the Inbox's own reaches it.
+ * read, a stop or a respawn). The shell starts from the Inbox's env through
+ * `launchSpawnEnv`, so what launchd and the session give (SSH_AUTH_SOCK,
+ * `launchctl setenv` proxies, LC_*) stays, and the Inbox's markers do not.
  *
  * - `launchSpawnEnv`: the env a `claude` call runs with. Our call may be the
  *   one that starts the person's shared supervisor, whose env every later
- *   background session inherits, so no `PLANNOTATOR_*` name and no
- *   per-session Claude marker passes. Unlike `askAiChildEnv`, the Inbox stays
+ *   background session inherits, so no `PLANNOTATOR_*` name, no per-session
+ *   Claude marker and no skip-permissions export passes (that one is set only
+ *   when the full-permissions switch is on). The person's own `CLAUDE_*`
+ *   settings (CLAUDE_CONFIG_DIR) stay. Unlike `askAiChildEnv`, the Inbox stays
  *   ON for a launched agent: its settings file says where the Inbox is.
  * - `launchPlainEnv`: every call but the start (status, stop, respawn, rm,
- *   `--version`): the Inbox's own env through the same filter, minus every
- *   `CLAUDE*` name (those came from whichever session started the Inbox).
+ *   `--version`): the Inbox's own env through the same filter, with extra
+ *   PATH folders.
  * - `launchSettingsEnv`: what goes in the per-launch settings FILE's `env`
  *   (reaches only our session, survives respawn, never shows in `ps`).
  *
@@ -33,21 +36,21 @@ const PER_SESSION_CLAUDE =
 /** Never in a spawn: every Plannotator name (markers, data dir, ports, test switches), the other hosts' session markers. */
 const SPAWN_DROP = /^(PLANNOTATOR_.*|CODEX_THREAD_ID)$/;
 
-/** The login shell starts from these alone (and a plain PATH): nothing of the Inbox's own env reaches it. */
-const LOGIN_SEED = ["HOME", "USER", "LOGNAME", "SHELL", "TERM", "TMPDIR", "LANG"] as const;
-
 /** Claude Code's own switch for bypass mode without the acceptance dialog. */
 export const CLAUDE_SKIP_PERMISSIONS_ENV = "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS";
 
 export type LaunchEnv = Record<string, string>;
 
-export function launchSpawnEnv(env: Readonly<LaunchEnv>): LaunchEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name)));
+/** `env` without Plannotator's names, Claude's per-session ones and the skip-permissions export; that is set only when `fullPermissions`. */
+export function launchSpawnEnv(env: Readonly<LaunchEnv>, fullPermissions = false): LaunchEnv {
+  const out = Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV));
+  if (fullPermissions) out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
+  return out;
 }
 
-/** The Inbox's own env for the calls that are not a start: filtered, no `CLAUDE*` at all, `extraPath` after its PATH. */
+/** The Inbox's own env for the calls that are not a start: the same filter, `extraPath` after its PATH. */
 export function launchPlainEnv(own: Readonly<Record<string, string | undefined>>, extraPath: readonly string[] = []): LaunchEnv {
-  const out = Object.fromEntries(Object.entries(launchSpawnEnv(stringsOf(own))).filter(([name]) => !name.startsWith("CLAUDE")));
+  const out = launchSpawnEnv(stringsOf(own));
   const path = [...(out.PATH ?? "").split(":"), ...extraPath].filter(Boolean);
   out.PATH = [...new Set(path)].join(":");
   return out;
@@ -91,11 +94,9 @@ export interface LoginEnvRunner {
   (argv: string[], options: { timeoutMs: number; env: Readonly<Record<string, string | undefined>> }): Promise<{ exitCode: number; stdout: string }>;
 }
 
-/** The env the login shell starts from: the seed names of the Inbox's env, and PATH=/usr/bin:/bin. */
+/** The env the login shell starts from: the Inbox's own through the spawn filter (no whitelist: SSH_AUTH_SOCK and the like stay). */
 export function loginSeedEnv(own: Readonly<Record<string, string | undefined>>): LaunchEnv {
-  const out: LaunchEnv = { PATH: "/usr/bin:/bin" };
-  for (const name of LOGIN_SEED) if (typeof own[name] === "string") out[name] = own[name]!;
-  return out;
+  return launchSpawnEnv(stringsOf(own));
 }
 
 /**

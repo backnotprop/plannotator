@@ -29,9 +29,11 @@
  *  6. A folder that is gone (13): struck through, Send off, Save draft keeps it.
  *  7. Claude Code uninstalled (15): the reply waits; Send to another session
  *     re-addresses it, and the line goes.
- *  8. Delete while `--bg` is still running: the session it makes is stopped
+ *  8. Stop while it starts again for a reply: "You stopped", never a
+ *     failure, and the same reply does not respawn it again.
+ *  9. Delete while `--bg` is still running: the session it makes is stopped
  *     and removed, never left running unseen.
- *  9. Phone: the To picker (01), the To sentence (02), the working line (06),
+ * 10. Phone: the To picker (01), the To sentence (02), the working line (06),
  *     the permission prompt without Open in Terminal (08), no Delete in ⋯.
  *
  * Pictures: LAUNCH_SHOTS_DIR (default .local/proof/launch-pr1), wide light at
@@ -590,6 +592,40 @@ test('Claude Code uninstalled (15): the reply waits, the line says so; Send to a
     await page.keyboard.press('Escape');
   } finally {
     fake.setInstalled(true);
+  }
+});
+
+test('Stop while it starts again for a reply: "You stopped", never a failure, and the same reply does not start it again', async () => {
+  const { page, fake } = world;
+  fake.configure({ startDelayMs: 0, hold: false });
+  try {
+    await page.goto(world.url);
+    const threadId = await launchFrom(page, 'Drop the unused export.');
+    await openThread(page, threadId);
+    const p = pane(page);
+    await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+    await expect(p.locator('[data-run]')).toHaveCount(0);
+    await p.locator('[data-thread-more]').click();
+    await page.locator('[data-launch-item="stop"]').click();
+    await expect(p.locator('[data-run="stopped"]')).toBeVisible();
+    // The respawned session is slow to connect: Stop lands while the line says "Starting again".
+    fake.configure({ startDelayMs: 30_000 });
+    const respawnsBefore = fake.calls().filter((c) => c.argv[0] === 'respawn').length;
+    await p.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+    await p.getByRole('textbox', { name: /^Reply to Claude Code/ }).fill('And the test that imports it.');
+    await p.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(p.locator('[data-run="starting"]')).toHaveText('Starting Claude Code again…');
+    const agentReads = fake.calls().filter((c) => c.argv[0] === 'agents').length;
+    await p.locator('[data-thread-more]').click();
+    await page.locator('[data-launch-item="stop"]').click();
+    await expect(p.locator('[data-run="stopped"]')).toHaveText(/^You stopped Claude Code at \d{1,2}:\d{2} [AP]M\. Your reply starts it again\.$/);
+    // A sweep ran since (Stop drops the host view; the next sweep respawns first, then reads it again):
+    // the reply that already respawned it once did not respawn it again, and the line holds.
+    await waitFor('a sweep after Stop', () => fake.calls().filter((c) => c.argv[0] === 'agents').length > agentReads);
+    expect(fake.calls().filter((c) => c.argv[0] === 'respawn')).toHaveLength(respawnsBefore + 1);
+    await expect(p.locator('[data-run="stopped"]')).toBeVisible();
+  } finally {
+    fake.configure({ startDelayMs: 0 });
   }
 });
 

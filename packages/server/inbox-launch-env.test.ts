@@ -26,12 +26,23 @@ describe("launchSpawnEnv", () => {
     for (const name of ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PROJECT_DIR", "CODEX_THREAD_ID"]) expect(env[name]).toBeUndefined();
     expect(env).toMatchObject({ PATH: "/usr/bin:/bin", HOME: "/Users/me", CLAUDE_CODE_USE_BEDROCK: "1" });
   });
+
+  test("the shell's own skip-permissions export never rides the --bg env; the switch alone sets it", () => {
+    const shell = { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" };
+    expect(launchSpawnEnv(shell)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
+    expect(launchSpawnEnv(shell, false)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
+    expect(launchSpawnEnv(login, true)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBe("1");
+  });
 });
 
 describe("launchPlainEnv", () => {
-  test("the Inbox's own env for status, stop and respawn: no PLANNOTATOR_* and no CLAUDE* at all, the extra dirs after its PATH", () => {
-    const env = launchPlainEnv(login, ["/Users/me/.local/bin", "/bin"]);
-    expect(Object.keys(env).filter((name) => name.startsWith("PLANNOTATOR_") || name.startsWith("CLAUDE"))).toEqual([]);
+  test("the Inbox's own env for status, stop and respawn: no PLANNOTATOR_* or session marker, the person's CLAUDE_CONFIG_DIR kept, the extra dirs after its PATH", () => {
+    const env = launchPlainEnv({ ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" }, ["/Users/me/.local/bin", "/bin"]);
+    expect(Object.keys(env).filter((name) => name.startsWith("PLANNOTATOR_"))).toEqual([]);
+    for (const name of ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PROJECT_DIR", CLAUDE_SKIP_PERMISSIONS_ENV]) expect(env[name]).toBeUndefined();
+    // The same config dir for availability, status, stop, respawn and rm as the start uses.
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/Users/me/.claude-work");
+    expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
     expect(env.PATH).toBe("/usr/bin:/bin:/Users/me/.local/bin");
     expect(env.HOME).toBe("/Users/me");
   });
@@ -63,7 +74,7 @@ test("parseMarkedEnv reads only what is between the markers, values with = and n
 });
 
 describe("createLoginEnv", () => {
-  test("the shell starts from a minimal env, is read on every call, logs names only, and falls back to the plain env", async () => {
+  test("the shell starts from the Inbox's env through the filter, is read on every call, logs names only, and falls back to the plain env", async () => {
     const lines: string[] = [];
     const seeds: Record<string, string | undefined>[] = [];
     const mark = "__PLANNOTATOR_LAUNCH_ENV__";
@@ -77,11 +88,28 @@ describe("createLoginEnv", () => {
       log: (line) => lines.push(line),
     });
     expect(await read()).toEqual({ CLAUDE_SECRET_THING: "s3cret-value", PATH: "/bin" });
-    expect(seeds[0]).toEqual({ SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/usr/bin:/bin" });
+    expect(seeds[0]).toEqual({ SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/own", SECRET_OF_THE_INBOX: "y" });
     expect(await read()).toEqual({ SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/own", SECRET_OF_THE_INBOX: "y" });
     expect(seeds).toHaveLength(2);
     expect(lines.join("\n")).toContain("CLAUDE_SECRET_THING");
     expect(lines.join("\n")).not.toContain("s3cret-value");
+  });
+
+  test("what launchd and the session give (SSH_AUTH_SOCK, a launchctl proxy, LC_*) reaches the shell and the --bg env", async () => {
+    const mark = "__PLANNOTATOR_LAUNCH_ENV__";
+    const own = { SHELL: "/bin/zsh", HOME: "/Users/me", PATH: "/own", SSH_AUTH_SOCK: "/private/tmp/launchd-1/Listeners", HTTPS_PROXY: "http://proxy:3128", LC_ALL: "en_US.UTF-8" };
+    const read = createLoginEnv({
+      // A login shell inherits what it was started with and adds its rc's exports.
+      run: async (_argv, options) => ({
+        exitCode: 0,
+        stdout: `${mark}${Object.entries({ ...options.env, CLAUDE_CONFIG_DIR: "/Users/me/.claude-work" })
+          .map(([name, value]) => `${name}=${value}`)
+          .join("\0")}${mark}`,
+      }),
+      env: () => own,
+    });
+    const bg = launchSpawnEnv(await read());
+    expect(bg).toMatchObject({ SSH_AUTH_SOCK: own.SSH_AUTH_SOCK, HTTPS_PROXY: own.HTTPS_PROXY, LC_ALL: own.LC_ALL, CLAUDE_CONFIG_DIR: "/Users/me/.claude-work" });
   });
 
   test("an Inbox started inside a Claude session: that session's names reach neither the shell, the settings file nor the --bg env", async () => {

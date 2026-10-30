@@ -37,7 +37,7 @@
  *   POST /api/inbox/launch/:id/stop      claude stop
  *   POST /api/inbox/launch/:id/open      Terminal: `claude attach` (or plain `claude` in an untrusted folder); macOS
  *   POST /api/inbox/launch/:id/delete    stop, rm, and the launch folder; the thread stays
- *   POST /api/inbox/launch/:id/retry     Try again after a failed start
+ *   POST /api/inbox/launch/:id/retry     Try again after a failed start, respawn or connection
  *   POST /api/inbox/launch/settings      `{ full_permissions }` (Settings → Agents)
  */
 
@@ -144,12 +144,12 @@ export function createInboxLaunch(options: {
     });
   const host: ClaudeHost = createClaudeHost({ environment });
 
-  // ── Availability: `claude` on the login PATH, new enough, the plugin's mod and its Inbox tool on ──
+  // ── Availability: `claude` on the plain env's PATH (the Inbox's, the last start's login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on ──
   let availability: { at: number; value: Promise<Availability> } | null = null;
   const checkAvailable = async (): Promise<Availability> => {
     const e = await environment();
     const path = e.which("claude");
-    if (!path) return { ok: false, missing: true, reason: "claude is not on your login shell's PATH" };
+    if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local" };
     const version = parseClaudeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
     if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}` };
     if (!claudeCodePluginEnabled(e) || !claudeCodeInboxToolOn(e)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off" };
@@ -227,7 +227,8 @@ export function createInboxLaunch(options: {
 
   /** Why the reply's respawn did not take, or null: it failed, or it never polled within the grace. */
   const respawnFailedOf = (memo: Memo): string | null => {
-    if (!memo.respawn || memo.respawn.connected) return null;
+    // Stopped by the person: "You stopped", never a failure.
+    if (!memo.respawn || memo.respawn.connected || memo.stoppedAt !== null) return null;
     if (memo.respawn.failed) return memo.respawn.failed;
     return now() - memo.startedAt >= INBOX_RUN_START_GRACE_MS ? "It started again but did not connect to the Inbox." : null;
   };
@@ -352,7 +353,7 @@ export function createInboxLaunch(options: {
       const { fullPermissions, model } = config();
       const settingsPath = writeSettings(launch, login, fullPermissions, model);
       const name = root.thread_name ?? root.subject ?? "Inbox";
-      const startEnvironment = createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: launchSpawnEnv(login) });
+      const startEnvironment = createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: launchSpawnEnv(login, fullPermissions) });
       const result = await host.start({ folder: launch.folder, shownFolder: options.displayFolder(launch.folder), name, settingsPath, fullPermissions, environment: startEnvironment });
       startLog(launch.id, result.output);
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
@@ -501,7 +502,13 @@ export function createInboxLaunch(options: {
           respawn(root, memo.respawn!.for);
           return json({ run: runOfRoot(store.message(root.id)!) });
         }
-        if (!launch.error) throw new InboxError("validation_error", "That launch did not fail.");
+        if (!launch.error) {
+          // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
+          if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
+          if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, memo.respawn?.for ?? root.id);
+          else void run(root, true);
+          return json({ run: runOfRoot(store.message(root.id)!) });
+        }
         const cleared = store.settleLaunch(root.id, { error: null });
         void run(cleared, true);
         return json({ run: runOfRoot(cleared) });
