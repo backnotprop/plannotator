@@ -171,7 +171,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
       className="ib-anote"
     >
       {/* The band is this run's news before the answer; the results view drops it, as in the approved mock. */}
-      {!done && band && (band.connected || band.byHand || band.failed.length > 0 || band.foreign.length > 0) && (
+      {!done && band && (band.connected || band.trusted || band.byHand || band.failed.length > 0 || band.trustFailed.length > 0 || band.foreign.length > 0 || band.elsewhere.length > 0) && (
         <div className="ib-anote-band" role="status" data-anote-band="">
           {band.connected && (
             <p className="ib-anote-ok">
@@ -179,7 +179,13 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
               <span dir="auto">{band.connected}</span>
             </p>
           )}
-          {band.failed.map((line) => (
+          {band.trusted && (
+            <p className="ib-anote-ok" data-anote-trusted="">
+              <Icon name="checkCircle" />
+              <span dir="auto">{band.trusted}</span>
+            </p>
+          )}
+          {[...band.failed, ...band.trustFailed.map((line) => ({ ...line, agent: `t-${line.agent}` }))].map((line) => (
             <p className="ib-anote-warn" key={`f-${line.agent}`}>
               <Icon name="warn" />
               <span>
@@ -201,6 +207,17 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
               </span>
             </p>
           )}
+          {band.elsewhere.map((line) => (
+            <p className="ib-anote-quiet" key={`m-${line.agent}`} data-anote-elsewhere="">
+              <Icon name="info" />
+              <span>
+                {line.text}{' '}
+                <button type="button" className="ib-lnk" onClick={() => toSettings()}>
+                  Settings → Agents
+                </button>
+              </span>
+            </p>
+          ))}
           {band.foreign.map((line) => (
             <p className="ib-anote-quiet" key={`x-${line.agent}`}>
               <Icon name="info" />

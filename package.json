@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.28.35",
+  "version": "0.28.38",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -29,17 +29,21 @@
     "build:portal": "bun run --cwd apps/portal build",
     "build:marketing": "bun run --cwd apps/marketing build",
     "build:opencode": "bun run --cwd apps/opencode-plugin build",
+    "build:dsh": "bun run --cwd apps/dsh-plugin build",
     "build:review": "bun run --cwd apps/review build",
     "build:t3": "bun run --cwd packages/t3-code build",
     "build:pi": "bun run build:review && bun run build:hook && bun run --cwd apps/pi-extension build",
-    "build": "bun run build:review && bun run build:hook && bun run build:opencode",
+    "build": "bun run build:review && bun run build:hook && bun run build:opencode && bun run build:dsh",
     "dev:vscode": "bun run --cwd apps/vscode-extension watch",
     "build:vscode": "bun run --cwd apps/vscode-extension build",
+    "build:viewer-pin": "rm -f apps/guides-show/dist/viewer/manifest.json && bun run --cwd apps/guides-show build:viewer && bun run --cwd apps/guides-show sync:manifest",
     "package:vscode": "bun run --cwd apps/vscode-extension package",
     "check:release-version": "node scripts/check-release-version.mjs",
     "check:sibling-deps": "bun scripts/check-sibling-deps.ts",
     "test": "bun test",
-    "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/acp-client/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/guide-viewer/tsconfig.json && tsc --noEmit -p apps/guides-show/tsconfig.json && tsc --noEmit -p apps/relay/tsconfig.json && tsc --noEmit -p apps/feedback-service/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.strict-consumer.json && tsc --noEmit -p apps/pi-extension/tsconfig.json && tsc --noEmit -p apps/hook/hooks/mod/tsconfig.json && tsc --noEmit -p apps/hook/tsconfig.server.json && tsc --noEmit -p packages/inbox/tsconfig.json && tsc --noEmit -p apps/inbox/tsconfig.json && tsc --noEmit -p packages/t3-code/tsconfig.json",
+    "postinstall": "bun apps/guides-show/build/sync-manifest.ts --if-missing",
+    "bench:plan-load": "bun scripts/bench-plan-load.mjs",
+    "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/acp-client/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/guide-viewer/tsconfig.json && tsc --noEmit -p apps/guides-show/tsconfig.json && tsc --noEmit -p apps/relay/tsconfig.json && tsc --noEmit -p apps/feedback-service/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.strict-consumer.json && tsc --noEmit -p apps/pi-extension/tsconfig.json && tsc --noEmit -p apps/hook/hooks/mod/tsconfig.json && tsc --noEmit -p apps/hook/tsconfig.server.json && tsc --noEmit -p packages/inbox/tsconfig.json && tsc --noEmit -p apps/inbox/tsconfig.json && tsc --noEmit -p packages/t3-code/tsconfig.json && tsc --noEmit -p apps/dsh-plugin/tsconfig.json",
     "build:ui-css": "bun run --cwd packages/ui build:css",
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
@@ -67,7 +71,8 @@
     "dompurify": "^3.4.17",
     "sharp": "0.35.5",
     "source-map-js": "1.2.2",
-    "proxy-addr": "2.0.8"
+    "proxy-addr": "2.0.8",
+    "katex": "^0.19.0"
   },
   "patchedDependencies": {
     "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch"

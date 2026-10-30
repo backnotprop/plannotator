@@ -1,14 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CodeAnnotation } from '@plannotator/ui/types';
-import type {
-  AvailableBranches,
-  CompareTargetConfig,
-  RecentCommit,
-  SinceBaseSections,
-} from '@plannotator/shared/types';
-import { BaseBranchPicker } from './BaseBranchPicker';
-import { PanelViewToggle } from './PanelViewToggle';
-import { SemanticDiffRow, CallFlowRow, AllFilesRow } from './PanelNavRows';
+import type { SinceBaseSections } from '@plannotator/shared/types';
+import { ReviewPanelHeader, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
+import { SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 import {
   ViewedControl,
@@ -78,20 +72,10 @@ interface SectionsPanelProps {
   onToggleShowStageControls?: () => void;
   autoViewed?: boolean;
   onToggleAutoViewed?: () => void;
-  isLoadingDiff?: boolean;
-  /** Base picker ("vs origin/main" affordance). */
-  availableBranches?: AvailableBranches;
-  selectedBase?: string;
-  detectedBase?: string;
-  onSelectBase?: (branch: string) => void;
-  compareTarget?: CompareTargetConfig;
-  recentCommits?: RecentCommit[];
-  /** Panel view switcher (Git status / Commits / Tree), same header slot in
-   * every view. */
-  onSelectPanelView: (view: 'sections' | 'commits' | 'tree') => void;
-  /** Offer the Commits segment (git-local sessions only). */
-  showCommitsOption?: boolean;
-  /** All files nav row — the review's landing view, listed first. */
+  /** The top of the panel (views, "All changes since <base>", Changes |
+   *  All files, Go to File), the same header every view draws. */
+  header: ReviewPanelHeaderModel;
+  /** "All changes" nav row (every change in one view), the review's landing view, listed first. */
   onSelectAllFiles?: () => void;
   isAllFilesActive?: boolean;
   /** Semantic diff nav row (same as tree view). */
@@ -236,15 +220,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
   onToggleShowStageControls,
   autoViewed,
   onToggleAutoViewed,
-  isLoadingDiff,
-  availableBranches,
-  selectedBase,
-  detectedBase,
-  onSelectBase,
-  compareTarget,
-  recentCommits,
-  onSelectPanelView,
-  showCommitsOption,
+  header,
   onSelectAllFiles,
   isAllFilesActive,
   onSelectSemanticDiff,
@@ -540,36 +516,10 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
       className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: width ?? 256 }}
     >
-      {/* Header — the view toggle owns the entire top row (full width);
-          identical layout to the tree view so nothing moves between views.
-          The controls that used to share it render as PanelControlsRow below
-          the All files entry. */}
-      <div
-        className="px-3 flex items-center border-b border-border/50 flex-shrink-0"
-        style={{ height: 'var(--panel-header-h)' }}
-      >
-        <PanelViewToggle view="sections" onSelect={onSelectPanelView} showCommits={showCommitsOption} />
-      </div>
-
-      {/* Baseline row — the ONLY comparison control in this view. The sections
-          view IS the since-base comparison; other diff modes live in the tree
-          view's dropdown, and the header toggle is the path between them. */}
-      {onSelectBase && selectedBase && detectedBase && availableBranches && compareTarget && (
-        <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2 flex-shrink-0">
-          <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">vs</span>
-          <div className="flex-1 min-w-0">
-            <BaseBranchPicker
-              availableBranches={availableBranches}
-              selectedBase={selectedBase}
-              detectedBase={detectedBase}
-              onSelectBase={onSelectBase}
-              disabled={isLoadingDiff}
-              copy={compareTarget.picker}
-              recentCommits={recentCommits}
-            />
-          </div>
-        </div>
-      )}
+      {/* The shared header. The base is the only comparison control in this
+          view: Git status IS the since-base comparison; other diff types live
+          in the tree view's menu, and the view tabs are the path between them. */}
+      <ReviewPanelHeader model={header} width={width ?? 256} />
 
       {/* Sections (or search results — same swap the tree view does) */}
       <div ref={scrollportRef} className="flex-1 min-h-0">
@@ -589,7 +539,7 @@ export const SectionsPanel: React.FC<SectionsPanelProps> = ({
               <SemanticDiffRow active={isSemanticDiffActive ?? false} onClick={onSelectSemanticDiff} />
             )}
             {onSelectAllFiles && (
-              <AllFilesRow
+              <AllChangesRow
                 active={isAllFilesActive ?? false}
                 onClick={onSelectAllFiles}
                 additions={totalAdditions}

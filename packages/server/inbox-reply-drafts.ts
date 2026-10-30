@@ -13,7 +13,7 @@
  *
  * The Send that carries the words deletes the draft (`clear_draft: <updated_at>`
  * on the reply route: only while the draft is still the one those words were
- * saved as). A save may name `base_body` (the words the window saved last),
+ * saved as, or holds exactly the reply's words). A save may name `base_body` (the words the window saved last),
  * which the page's save as it goes uses when its `base` is a step behind. Drafts are files under `inbox/reply-drafts/`, outside the
  * event log (shared/inbox/reply-drafts.ts): agents, the MCP and search never
  * see them. A change tells every open window (`event: drafts` on the window's

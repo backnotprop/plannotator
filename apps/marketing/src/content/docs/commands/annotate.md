@@ -15,6 +15,7 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 | Markdown file | `plannotator annotate README.md` | Opens the file directly |
 | Plain-text file | `plannotator annotate config.yaml` | Opens the file directly, rendered as plain text |
 | Diagram file | `plannotator annotate flow.mmd` | Renders the whole file as one diagram in the diagram viewer |
+| AsciiDoc file | `plannotator annotate docs/guide.adoc` | Renders the AsciiDoc document |
 | HTML file | `plannotator annotate docs/guide.html` | Renders the HTML directly |
 | URL | `plannotator annotate https://docs.stripe.com/api` | Fetches the page, converts to markdown, then opens |
 | Local app URL | `plannotator annotate http://localhost:5173` | Opens your running dev app live and annotates it in place |
@@ -23,6 +24,10 @@ The `/plannotator-annotate` command opens files, URLs, or folders in the Plannot
 ### Supported file types
 
 Beyond `.md`, `.mdx`, `.txt`, `.html`, and `.htm`, annotate accepts common plain-text config and data formats: `.yaml`, `.yml`, `.json`, `.jsonc`, `.json5`, `.toml`, `.ini`, `.cfg`, `.conf`, `.properties`, `.csv`, `.tsv`, `.log`, `.xml`, and `.env.example`. These render exactly like `.txt` — as plain text you can select and annotate.
+
+### AsciiDoc files
+
+`.adoc` and `.asciidoc` files render as AsciiDoc: sections, lists, listings with syntax highlighting, admonitions, tables and quotes. Exported feedback names the real lines in the `.adoc` file. `include::` and `ifdef::` lines are shown as written rather than resolved, and nested content inside admonition blocks and table cells shows as plain text.
 
 ### Diagram files
 

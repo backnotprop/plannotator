@@ -56,6 +56,13 @@ export interface InboxComposerTags {
   options: readonly TagOption[];
   /** The sessions the text still tags, in order, every time they change. */
   onChange: (ids: readonly string[]) => void;
+  /**
+   * The reply box's one line under the field (approval "inbox-tag-handoff",
+   * A2), drawn in place of TagNotes while the text tags an agent that does
+   * not own the thread. Absent: TagNotes, as before.
+   */
+  /** `focusField` puts focus back in the field (a link that switched the line is gone after the click). */
+  note?: (props: { id: string; tagged: readonly TagOption[]; focusField: () => void }) => React.ReactNode;
 }
 
 export interface InboxComposerFieldProps {
@@ -215,7 +222,7 @@ export function InboxComposerField({
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
-      {options && showNotes && <TagNotes id={notesId} tagged={tagged} owner={owner} />}
+      {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}
       {options && (
         <div className="ib-sr" role="status" aria-live="polite" data-tag-live="">
           {tagMenu ? `${tagMenu.items.length} ${tagMenu.items.length === 1 ? 'agent' : 'agents'}${announce ? `. ${announce}` : ''}` : announce}

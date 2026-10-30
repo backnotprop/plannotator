@@ -41,6 +41,17 @@ describe('AI provider origin defaults', () => {
     expect(findOriginAIProvider(providers, 'opencode')?.id).toBe('opencode-sdk');
   });
 
+  it('a Qwen Code session defaults to the qwen-sdk provider', () => {
+    const withQwen: AIProviderOption[] = [
+      ...providers,
+      { id: 'qwen-sdk', name: 'qwen-sdk', models: [{ id: 'qwen3-coder-plus', label: 'Qwen3 Coder Plus', default: true }] },
+    ];
+    expect(resolveAIProviderSelection({ providers: withQwen, origin: 'qwen-code', settings: settings({ providerId: 'claude-local' }) })).toEqual({
+      providerId: 'qwen-sdk',
+      model: 'qwen3-coder-plus',
+    });
+  });
+
   it('uses the origin-matched provider before the global saved provider', () => {
     const selection = resolveAIProviderSelection({
       providers,

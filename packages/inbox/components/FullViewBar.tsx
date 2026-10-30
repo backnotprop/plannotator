@@ -1,6 +1,15 @@
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
-import { formatShortcutBindingText, formatShortcutBindingTokens } from '@plannotator/ui/shortcuts';
+import { formatShortcutBindingText } from '@plannotator/ui/shortcuts';
+import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
+import { shortcutAria, TipKeys, type ShortcutRef } from '../shortcuts/hint';
+import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+
+const EXIT_KEYS: ShortcutRef = { scope: inboxFileViewerShortcuts, action: 'escape' };
+/** F: out of full screen the way × goes (Thread.tsx `fullScreenByKey`). */
+const FULL_KEYS: ShortcutRef = { scope: inboxThreadShortcuts, action: 'fullScreen' };
+const TOOLS_KEYS: ShortcutRef = { scope: inboxFileViewerShortcuts, action: 'toggleTools' };
+const exitKeys = shortcutAria(EXIT_KEYS);
 import { modKey } from '@plannotator/ui/utils/platform';
 import { Icon } from '../icons';
 import { Tip as HoverTip } from './Tip';
@@ -62,6 +71,8 @@ export interface FullViewBarProps {
     index: number;
     total: number;
     name: string;
+    /** What `index` of `total` counts: the thread's files, or a question's picture choices (optionSets.ts). Absent: files. */
+    noun?: 'file' | 'option';
     open: boolean;
     peekId: string;
     onOpenChange: (open: boolean) => void;
@@ -98,22 +109,8 @@ export interface FullViewBarHandle {
   toggle: () => void;
 }
 
-function Keys({ binding }: { binding: string }) {
-  return (
-    <span className="flex items-center gap-1">
-      {formatShortcutBindingTokens(binding).map((key, index) => (
-        <kbd
-          key={`${key}-${index}`}
-          className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-border/60 bg-muted px-1 font-mono text-[10px] leading-none text-foreground/80"
-        >
-          {key}
-        </kbd>
-      ))}
-    </span>
-  );
-}
-
-function Tip({ text, note, binding, phone, passEscape, children }: { text: string; note?: string; binding?: string | null; phone: boolean; passEscape?: boolean; children: React.ReactElement }) {
+function Tip({ text, note, keys, phone, passEscape, children }: { text: string; note?: string; keys?: ShortcutRef | readonly ShortcutRef[] | null; phone: boolean; passEscape?: boolean; children: React.ReactElement }) {
+  const refs = keys ? (Array.isArray(keys) ? keys : [keys as ShortcutRef]) : [];
   // A phone has no hover: a tooltip there only opens on focus, unseen, and takes the next Escape for itself. The buttons carry their names.
   if (phone) return children;
   return (
@@ -125,7 +122,13 @@ function Tip({ text, note, binding, phone, passEscape, children }: { text: strin
         <span className="flex flex-col gap-1">
           <span>{text}</span>
           {note && <span className="text-muted-foreground">{note}</span>}
-          {binding && <Keys binding={binding} />}
+          {refs.length > 0 && (
+            <span className="flex items-center gap-2">
+              {refs.map((ref) => (
+                <TipKeys key={`${ref.scope.id}.${ref.action}`} {...ref} />
+              ))}
+            </span>
+          )}
         </span>
       }
     >
@@ -257,7 +260,9 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
   // The way out of full screen names where it goes, "Side by side" (a pick: remembered); on a phone or a stacked window it is Back to the thread.
   const exit = props.leave.kind === 'exit';
   const leaveButton = (
-    <Tip text={exit ? 'Side by side' : 'Back to the thread'} note={exit ? 'The file beside the thread; files open this way until you choose again' : undefined} phone={phone}>
+    // F is named once, on the control that does what it does (approved hint placement): here where full screen came
+    // from beside the thread (F goes back there, saving nothing); on × where × closes the file.
+    <Tip text={exit ? 'Side by side' : 'Back to the thread'} note={exit ? 'The file beside the thread; files open this way until you choose again' : undefined} keys={exit && !props.exitCloses ? FULL_KEYS : null} phone={phone}>
       <button
         type="button"
         className={`ib-fvb ib-fvexit${exit ? ' ib-fvside' : ''}`}
@@ -394,7 +399,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
               // A phone's pill: its name starts with the text it shows (WCAG 2.5.3, Label in Name), then says it in words.
               aria-label={
                 phone
-                  ? `${position.index + 1}/${position.total}: file ${position.index + 1} of ${position.total}, ${position.name}. Show every file`
+                  ? `${position.index + 1}/${position.total}: ${position.noun ?? 'file'} ${position.index + 1} of ${position.total}, ${position.name}. Show every file`
                   : `${position.index + 1} of ${position.total}, ${position.name}. Show every file in this thread`
               }
               onClick={() => position.onOpenChange(!position.open)}
@@ -425,20 +430,20 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
         {props.leave.kind === 'exit' && leaveButton}
         {props.onExitFull && props.leave.kind === 'exit' && !phone && (
           // Its tooltip says Esc, so one Esc on it leaves (the tooltip does not keep that press).
-          <Tip text={props.exitCloses ? 'Back to the thread' : 'Exit full screen'} binding="Escape" phone={phone} passEscape>
+          <Tip text={props.exitCloses ? 'Back to the thread' : 'Exit full screen'} keys={props.exitCloses ? [EXIT_KEYS, FULL_KEYS] : EXIT_KEYS} phone={phone} passEscape>
             <button
               type="button"
               className="ib-fvb"
               onClick={props.onExitFull}
               aria-label={props.exitCloses ? 'Back to the thread' : 'Exit full screen'}
-              aria-keyshortcuts="Escape"
+              aria-keyshortcuts={exitKeys}
               data-full-view-close=""
             >
               <Icon name="x" size={iconSize} />
             </button>
           </Tip>
         )}
-        <Tip text={hideText} binding={props.chord} phone={phone}>
+        <Tip text={hideText} keys={props.chord ? TOOLS_KEYS : null} phone={phone}>
           <button
             type="button"
             className="ib-fvb ib-fvhide"

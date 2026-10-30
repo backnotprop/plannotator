@@ -198,6 +198,14 @@ test('the wake line names the hosts a reply wakes, and what other agents do inst
   expect(mcpWakeLine(['codex'])).toBe(
     "These reach the Inbox through MCP: Codex 0.149 or later gets your reply as a new turn on its own; the others see it the next time they check the Inbox, and can't be woken.",
   );
+  // Qwen Code is woken from 0.24 (its trusted senders); with Codex, both are named and the verb agrees.
+  expect(mcpWakeLine(['qwen'])).toBe(
+    "These reach the Inbox through MCP: Qwen Code 0.24 or later gets your reply as a new turn on its own; the others see it the next time they check the Inbox, and can't be woken.",
+  );
+  expect(mcpWakeLine(['codex', 'qwen'])).toBe(
+    "These reach the Inbox through MCP: Codex 0.149 or later and Qwen Code 0.24 or later get your reply as a new turn on their own; the others see it the next time they check the Inbox, and can't be woken.",
+  );
+  expect(wakeLine(['qwen'])).toContain('and in Qwen Code 0.24 or later through MCP.');
   // Only a Codex row that is on this computer counts.
   expect(mcpWakingHostsHere(SCENARIOS.typical())).toEqual(['codex']);
   expect(mcpWakingHostsHere(SCENARIOS.none())).toEqual([]);

@@ -158,6 +158,34 @@ describe("reply drafts", () => {
     expect(server.store.replyDraft(thread_id)).toBeNull();
   });
 
+  test("a Send whose clear_draft names a stale updated_at (or none) still clears a draft holding exactly its words", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The build is green.", "ses_c5");
+    // The window's last save landed without its answer: it still knows the first draft's updated_at.
+    // The box's raw words are saved; the Send carries them trimmed.
+    const first = (await saveDraft(server, thread_id, "Ship", null))!;
+    await saveDraft(server, thread_id, "Ship it\n", first.updated_at);
+    const stale = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Ship it", clear_draft: first.updated_at });
+    expect(stale.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+    // No updated_at known at all ('').
+    await saveDraft(server, thread_id, "Tag the release", null);
+    const none = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k2", words: "Tag the release", clear_draft: "" });
+    expect(none.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+  });
+
+  test("a Send whose clear_draft names a stale updated_at leaves a draft holding different words", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The build is green.", "ses_c6");
+    const mine = (await saveDraft(server, thread_id, "Ship it", null))!;
+    // Another window's newer, different words.
+    const theirs = (await saveDraft(server, thread_id, "Ship it, and tag the release", mine.updated_at))!;
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Ship it", clear_draft: mine.updated_at })).status).toBe(200);
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k2", words: "Ship it", clear_draft: "" })).status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toEqual(theirs);
+  });
+
   test("a save sent as the page goes, a step behind on its base, lands when the draft holds the words it last wrote", async () => {
     const { server, send } = await setup();
     const { thread_id } = await send("The build is green.", "ses_c3");

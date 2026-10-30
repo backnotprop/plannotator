@@ -83,6 +83,18 @@ export function inboxToolCallParams(call: { name: string; arguments: Record<stri
 export const INBOX_REPLY_TO_CHECK = 'Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.'
 
 /**
+ * How an issue or PR ref in a message links (a bare `#104` meant for another
+ * repo once linked into the thread's project). In send_message's `body`, the
+ * agent tool's `body`, and `plannotator inbox --help` / `card --help`.
+ * `owner/repo#123` links on the project's own forge, so a GitHub ref from a
+ * GitLab project needs its URL.
+ */
+export const INBOX_REF_LINK_RULE = "A bare #123 links to this project's repository. For an issue or PR in another repo, write owner/repo#123 or its full URL (in a GitLab project, a GitHub one needs its URL)."
+
+/** The card's `say` and `you`: a pointer to the rule on `body`, not the rule again (every request carries both). */
+export const INBOX_REF_LINK_POINTER = "Refs link as in send_message's body."
+
+/**
  * The `_meta` key a connection sets to `true` on the read_thread list it reads
  * for the session's thread list (`inboxSessionThreadsParams`), not a call the
  * agent made: the Inbox makes no project for a folder it does not know, and
@@ -242,9 +254,37 @@ export const INBOX_CHANNEL_RULE =
  */
 export const INBOX_SESSION_THREADS_CHANNEL = "Their decisions stay in these threads: when the person writes in the chat, say what waits and link the thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar)."
 
+/** When to use the Inbox. Fixed text: the agent tool's lead and the Inbox's server instructions carry it whole. */
+export const INBOX_USE_RULE =
+  "Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary, files in `attachments`), or when they ask."
+
+/**
+ * Follow through, without pinging (the owner, 2026-10-27: an agent promised
+ * the person pictures "coming" and left them unsent for an hour, held
+ * questions "to batch them" and never sent them, and left the person's last
+ * message in a thread unanswered). The owner's own words (typos fixed,
+ * "the person" as everywhere else): no ban on progress, and no clauses that
+ * over-specify it; instructions to a model are kept to the spirit. Fixed
+ * text, one wording everywhere: the agent tool's lead, the Inbox's server
+ * instructions, the reminder, the note, `plannotator inbox --help` and the
+ * skill (tests/inbox-guidance-parity.test.ts).
+ */
+export const INBOX_FOLLOW_THROUGH_RULE =
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination."
+
+/** A subagent's results go to the agent that started it, not to the person. Fixed text. */
+export const INBOX_SUBAGENT_RULE = "If another agent started you, report to it instead."
+
+/**
+ * The rules every agent gets with the tool or the MCP server, in one string:
+ * the agent tool's lead and the Inbox's server instructions carry it whole,
+ * so the two can never word them differently.
+ */
+export const INBOX_AGENT_RULES = `${INBOX_USE_RULE} ${INBOX_CHANNEL_RULE} ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_SUBAGENT_RULE}`
+
 /** What the agent tool says, before the per-action lines. Fixed text. */
 export const INBOX_TOOL_LEAD =
-  `The Plannotator Inbox on this machine: message the person and get their answer later, without blocking this session. Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary, files in \`attachments\`), or when they ask. ${INBOX_CHANNEL_RULE} No routine progress. If another agent started you, report to it instead. Set \`action\` to a tool below with its fields; the project and session are filled in.`
+  `The Plannotator Inbox on this machine: message the person and get their answer later, without blocking this session. ${INBOX_AGENT_RULES} Set \`action\` to a tool below, with its fields.`
 
 /**
  * Fixed text: how a reply comes back. The connection delivers the person's
@@ -253,7 +293,7 @@ export const INBOX_TOOL_LEAD =
  * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "A reply to a message you sent arrives in this session by itself once it is idle, headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
+  "A reply arrives in this session by itself once it is idle, headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
 
 /**
  * Fixed text, the description's last line: where everything the tool's short
@@ -278,9 +318,13 @@ export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlast
  * OpenCode request carries it).
  */
 export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
-  read_thread: 'Read a thread (thread_id): open questions, the newest messages, earlier ones one line each; with no id, list your threads (asked_by "anyone": all).',
+  send_message: "Message the person (markdown), in your session's open thread (see `thread`).",
+  wait_for_reply: 'Wait for a reply (thread_id or message_id; neither: any open thread you asked).',
+  resolve_message: "Archive a message's thread, only when nothing in it is left for the person to read or answer.",
+  // What a read shows lives on `thread_id` (a field description does not count toward the 2,048).
+  read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
   search: 'Find messages by words, older ones too (read-only).',
-  get_guide_brief: "The method, JSON shape and rules for writing a guided review, with a worked submit_guide call.",
+  get_guide_brief: "How to write a guided review: method, JSON shape, rules, a worked submit_guide call.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
 }
 
@@ -315,12 +359,19 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone. Visual options can be picture choices, `- [ ] Label — ![alt](path)`: the picture picks it, the label comes back.',
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why; optional `Where: <url>`, `Run: <command>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done or Can\'t do it comes back under "Action items you asked for".',
+      '',
+      'Blocks fenced as `mermaid` or `dot` draw as diagrams; one fenced as `html` draws as a live, sandboxed page in the message (chart, SVG, mock; https libraries load). Leave its background transparent; use var(--foreground), var(--chart-1)…var(--chart-5). Let content set its height: no vh units or height:100% on html or body.',
+      '',
+      INBOX_REF_LINK_RULE,
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
     thread: "A short thread name, one line, to keep separate work apart: the same name in this project is the same open thread, across sessions. Without it, your messages join your session's open thread. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
     supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: 'Files to show the person beside the message, absolute or relative to project_path: a plan, a screenshot, an HTML mock, code, a video, any file. For something visual, a screenshot or image usually reads fastest; attach the HTML or source too when they should open or click through it. Link one from the body (`[the mock](mock.html)`) to open it beside the thread. Their comments on the files come back in the reply. Folders and .env files are refused.',
+  },
+  read_thread: {
+    thread_id: 'A thread id. read_thread shows its open questions, the newest messages in full, and earlier ones one line each.',
   },
   submit_guide: {
     guide: "The guide in get_guide_brief's output_schema, as an object or its JSON.",
@@ -334,17 +385,18 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
  * before_agent_start message, OpenCode's fixed system line), when the
  * `inboxReminder` switch allows it. Fixed text: it sits in the cached prompt
  * prefix and must never change within a session. For hosts with the wake
- * (the reply comes back as a turn).
+ * (the reply comes back as a turn). The follow-through rule sits right after
+ * the send, before anything about the chat, so it reads as about the Inbox.
  */
 export const INBOX_REMINDER_TEXT =
-  "Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. Their reply comes back here. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run `plannotator inbox --help` for how it works."
+  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. ${INBOX_FOLLOW_THROUGH_RULE} Their reply comes back here. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
 
 /**
  * The same line for a host without the wake (OpenCode 1): the reply does not
  * come back by itself there, so it names wait_for_reply instead.
  */
 export const INBOX_REMINDER_TEXT_NO_WAKE =
-  "Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. Call wait_for_reply when you need their answer. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run `plannotator inbox --help` for how it works."
+  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. ${INBOX_FOLLOW_THROUGH_RULE} Call wait_for_reply when you need their answer. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
 
 /**
  * The reminder naming the tool as the host registered it. Claude Code defers
@@ -355,6 +407,50 @@ export const INBOX_REMINDER_TEXT_NO_WAKE =
 export function inboxReminderText(toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean } = {}): string {
   const text = options.wakes === false ? INBOX_REMINDER_TEXT_NO_WAKE : INBOX_REMINDER_TEXT
   return text.replace(INBOX_TOOL_NAME, toolName)
+}
+
+/**
+ * The Inbox's guide line on the briefing, the command copies' bullet word for
+ * word: never run the window's command to send (the `plannotator` skill's
+ * wording). Fixed text.
+ */
+export const INBOX_BRIEFING_NEVER_RUN =
+  "Never run `plannotator inbox` just to send: send_message starts a stopped Inbox itself, and bare `plannotator inbox` opens the window for the person."
+
+/** The briefing's last line, and every `/plannotator-inbox` copy's: what the agent does with the Inbox from now on. Fixed text. */
+export const INBOX_BRIEFING_FROM_NOW_ON =
+  'For the rest of this session, use the Inbox as above: for a decision the person is not here to make, and to hand over long work you finished.'
+
+/**
+ * What `/plannotator-inbox` gives the model where the host answers the
+ * command itself and starts no turn (the Claude Code mod, Pi, OpenCode 2;
+ * OpenCode 1 puts it in the command's own turn): people type the command to
+ * teach their agent the Inbox (the owner, 2026-10-28), so the agent reads
+ * this from then on, unseen by the person, beside the address they see. The
+ * same guide as the command copies an agent reads itself (apps/skills/*,
+ * Gemini, Droid; tests/inbox-guidance-parity.test.ts), without their "tell
+ * the person the address" step. Host-neutral: it names the tool only where
+ * one may be registered, and lets send_message's result say whether a reply
+ * comes back by itself.
+ */
+export const INBOX_COMMAND_BRIEFING = [
+  'The person opened their Plannotator Inbox with /plannotator-inbox and has its address. The Plannotator Inbox is one window on this computer where you leave the person messages, `:::question` blocks they answer with a click, and files. They answer when they can. Nothing blocks: you send, then keep working or end your turn.',
+  '',
+  `- ${INBOX_USE_RULE}`,
+  '- Send with a `plannotator_inbox` tool when you have one (it can be listed with a prefix and may need loading through tool search first): `action` `send_message`, with a markdown `body`. Otherwise call `send_message` on the Inbox\'s MCP server, `plannotator inbox mcp`.',
+  "- send_message's result says whether the person's reply arrives in this session by itself. When it does, do not wait or poll for it: end your turn or go on with other work. When it does not, call wait_for_reply when you need the answer.",
+  `- ${INBOX_CHANNEL_RULE}`,
+  `- ${INBOX_FOLLOW_THROUGH_RULE}`,
+  `- ${INBOX_BRIEFING_NEVER_RUN}`,
+  '- Before your first send, run `plannotator inbox --help` and read it: every field, the full question syntax, and how to connect the MCP server.',
+  '- The `plannotator` skill, where you have it, has more.',
+  '',
+  `Opening the Inbox asks for no work by itself. ${INBOX_BRIEFING_FROM_NOW_ON}`,
+].join('\n')
+
+/** The briefing naming the tool as the host registered it (Claude Code: `mcp__plannotator__plannotator_inbox`), like the reminder. */
+export function inboxCommandBriefing(toolName: string = INBOX_TOOL_NAME): string {
+  return INBOX_COMMAND_BRIEFING.replace(INBOX_TOOL_NAME, toolName)
 }
 
 /**
@@ -678,6 +774,27 @@ export interface InboxReplyCommand {
    */
   also_tagged?: string[]
   /**
+   * With `tagged`, on a reply that tags a session the person ADDED to the
+   * thread ("Add instead", approval "inbox-tag-handoff"): it works alongside
+   * the owner and gets the person's later replies there too. The wake takes
+   * INBOX_ADDED_INSTRUCTION and `inboxAddedLine`. An older connection words
+   * it as a tag, which stays true for this one reply. Absent otherwise.
+   */
+  added?: boolean
+  /**
+   * On a reply that hands the thread to this session ("Hand off instead"):
+   * the former owner's agent, named from its host. The wake takes
+   * INBOX_HANDOFF_INSTRUCTION and `inboxHandoffLine`. An older connection
+   * words it as a reply to it, which is true. Absent otherwise.
+   */
+  handoff?: { from: string }
+  /**
+   * The former owner's notice on a hand-off: the new owner's agent, named
+   * from its host. The body is `inboxHandedAwayLine` (so an older connection
+   * still says it), and the wake is that line alone. Absent otherwise.
+   */
+  handed_away?: { to: string }
+  /**
    * On the person's Re-ask note (approval "inbox-reask"): they asked the
    * session to ask its open questions in the thread again, together in one
    * message. The wake takes INBOX_REASK_INSTRUCTION instead of the reply's
@@ -703,6 +820,14 @@ export interface InboxReplyCommand {
    * the wake in the plural, while the body still names the one question.
    */
   reask_one?: boolean
+  /**
+   * On the person's Tidy (2026-10-28): the body is the whole wake under its
+   * first line (it opens with the Tidy instruction and lists the session's
+   * threads), so the wake adds no instruction line and names no one thread.
+   * The command is a `message`, so an older connection words it as a New
+   * message and the body still says what it is. Absent on every other command.
+   */
+  tidy?: boolean
 }
 
 /**
@@ -735,13 +860,42 @@ export function inboxAlsoTaggedLine(names: readonly string[]): string {
 }
 
 /**
+ * The fixed second line of the wake of a session the person added to a
+ * thread another session owns ("Add instead", approval "inbox-tag-handoff").
+ */
+export const INBOX_ADDED_INSTRUCTION =
+  "The person added you to a Plannotator Inbox thread that another session owns: you work on it alongside that session, and their later replies in it come to you too. Their reply follows as they wrote it; parts of it may be meant for the other session."
+
+/** The line under INBOX_ADDED_INSTRUCTION: whose thread it is, read it first, answer in it. */
+export function inboxAddedLine(owner: string, id: string): string {
+  return `The thread's owner is ${owner}. If you have not read the thread yet, read it first with read_thread (message_id ${id}). Answer your part in the same thread: plannotator_inbox send_message with reply_to ${id}.`
+}
+
+/**
+ * The fixed second line of the wake of a session the person handed a thread
+ * to ("Hand off instead", approval "inbox-tag-handoff").
+ */
+export const INBOX_HANDOFF_INSTRUCTION =
+  "The person handed you this Plannotator Inbox thread: it is yours now, and their later replies in it come to you. Their reply follows as they wrote it."
+
+/** The line under INBOX_HANDOFF_INSTRUCTION: who had it, read it first, answer in it. */
+export function inboxHandoffLine(from: string, id: string): string {
+  return `Another session (${from}) had this thread before; you have not seen it. Read it first with read_thread (message_id ${id}), then answer in it: plannotator_inbox send_message with reply_to ${id}.`
+}
+
+/** The whole notice the former owner of a handed-off thread gets (and the body of its command). */
+export function inboxHandedAwayLine(to: string): string {
+  return `The person handed this thread to another session (${to}); their later replies in it go there. Stop work on it, and write in it only if they ask you to.`
+}
+
+/**
  * The only agent names a wake line may carry about ANOTHER agent (the owner
  * a tagged session is told about, the sessions also tagged, the session that
  * asked a redirected reply): the hosts' own names. An agent chooses its own
  * host string, and these lines go into another session's prompt, so any
  * other value reads as "another agent" (`agent` in the redirected line).
  */
-export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build']
+export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code']
 
 /** An agent name a wake line carries: one of INBOX_WAKE_AGENT_NAMES (spacing folded), else '' (the caller says "another agent"). */
 function wakeName(value: unknown): string {
@@ -936,12 +1090,20 @@ export function inboxWakeText(
     ack_of?: string
     tagged?: { owner?: unknown } | null
     also_tagged?: unknown
+    added?: unknown
+    handoff?: { from?: unknown } | null
+    handed_away?: { to?: unknown } | null
     reask?: boolean
     reask_items?: unknown
     reask_one?: unknown
+    tidy?: boolean
   },
   toolName: string = INBOX_TOOL_NAME,
 ): string {
+  // Tidy: the body is the wake; it spans threads, so the closing line names none.
+  if (command.tidy === true) {
+    return `Plannotator Inbox: ${(command.subject ?? '').replace(/\s+/g, ' ').trim() || 'Tidy'} (${command.id})\n${command.body}\n\n${inboxWakeClosingLine(null, toolName)}`
+  }
   if (typeof command.ack_of === 'string' && command.ack_of !== '') {
     const ackSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
     const thread = wakeThreadId(command.thread_id)
@@ -949,9 +1111,22 @@ export function inboxWakeText(
   }
   const closing = `\n\n${inboxWakeClosingLine(command.thread_id, toolName)}`
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
+  // The thread was handed to another session: the notice alone.
+  if (command.handed_away && typeof command.handed_away === 'object') {
+    const to = wakeName(command.handed_away.to) || 'another agent'
+    return `Plannotator Inbox: ${subject} (${command.id})\n${inboxHandedAwayLine(to)}${closing}`
+  }
+  // Handed this thread: it is this session's now; read it first.
+  if (command.handoff && typeof command.handoff === 'object') {
+    const from = wakeName(command.handoff.from) || 'another agent'
+    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_HANDOFF_INSTRUCTION}\n${inboxHandoffLine(from, command.id)}\n\n${command.body}${closing}`
+  }
   // Tagged into a thread another session owns: what it is, then read the thread first.
   if (command.tagged && typeof command.tagged === 'object') {
     const owner = wakeName(command.tagged.owner) || 'another agent'
+    if (command.added === true) {
+      return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_ADDED_INSTRUCTION}\n${inboxAddedLine(owner, command.id)}\n\n${command.body}${closing}`
+    }
     return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_TAGGED_INSTRUCTION}\n${inboxTaggedLine(owner, command.id)}\n\n${command.body}${closing}`
   }
   const others = Array.isArray(command.also_tagged)

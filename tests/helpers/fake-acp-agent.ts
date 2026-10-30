@@ -208,7 +208,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 new AgentSideConnection((conn): Agent => ({
   async initialize(params) {
-    log({ event: "initialize", pid: process.pid, clientCapabilities: params.clientCapabilities, clientInfo: params.clientInfo });
+    // The variables that make the real adapters run the user's own CLI instead of their bundled one.
+    const cliEnv = { CLAUDE_CODE_EXECUTABLE: process.env.CLAUDE_CODE_EXECUTABLE ?? null, CODEX_PATH: process.env.CODEX_PATH ?? null };
+    log({ event: "initialize", pid: process.pid, clientCapabilities: params.clientCapabilities, clientInfo: params.clientInfo, cliEnv });
     // Like claude-agent-acp: terminal sign-ins only for a client that can run them.
     const authMethods = params.clientCapabilities?.auth?.terminal
       ? [{ id: "claude-ai-login", name: "Claude Subscription", type: "terminal" as const, args: ["--cli", "auth", "login", "--claudeai"] }]

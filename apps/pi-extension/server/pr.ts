@@ -25,6 +25,7 @@ import {
 	fetchPR as fetchPRCore,
 	fetchPRFileContent as fetchPRFileContentCore,
 	fetchPRFileBytes as fetchPRFileBytesCore,
+	fetchPRTree as fetchPRTreeCore,
 	fetchPRViewedFiles as fetchPRViewedFilesCore,
 	fetchPRStack as fetchPRStackCore,
 	fetchPRList as fetchPRListCore,
@@ -125,6 +126,10 @@ export function fetchPRFileContent(ref: PRRef, sha: string, filePath: string) {
 }
 export function fetchPRFileBytes(ref: PRRef, sha: string, filePath: string, maxBytes: number) {
 	return fetchPRFileBytesCore(prRuntime, ref, sha, filePath, maxBytes);
+}
+/** Every file of one commit from the platform tree API (All files without a checkout). */
+export function fetchPRTree(ref: PRRef, sha: string) {
+	return fetchPRTreeCore(prRuntime, ref, sha);
 }
 /** Submit a review through the Pi Node.js command runtime. */
 export function submitPRReview(

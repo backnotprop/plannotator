@@ -7,7 +7,7 @@
  */
 
 import os from "node:os";
-import { loadConfig, resolveUrlHost } from "@plannotator/shared/config";
+import { loadConfig, resolvePublicUrl, resolveUrlHost } from "@plannotator/shared/config";
 import {
   ALLOWED_HOSTS_ENV,
   forwardedPortHostPatterns,
@@ -38,13 +38,17 @@ export function resetServedHostnamesForTests(): void {
   servedHostnames.clear();
 }
 
-/** Remote-mode names: the configured urlHost (auto resolved) and this machine's hostname. */
+/** Remote-mode names: the configured urlHost (auto resolved), the public URL's host and this machine's hostname. */
 function remoteExtraHosts(): string[] {
   const hosts = machineHostnames(os.hostname());
   try {
-    const urlHost = resolveUrlHost(loadConfig());
+    const config = loadConfig();
+    const urlHost = resolveUrlHost(config);
     const resolved = urlHost && isAutoUrlHost(urlHost) ? resolveAutoHostCached() : urlHost;
     if (resolved) hosts.push(resolved);
+    // A reverse proxy in front of PLANNOTATOR_PUBLIC_URL may forward the browser's Host.
+    const publicUrl = resolvePublicUrl(config);
+    if (publicUrl) hosts.push(new URL(publicUrl).hostname);
   } catch {
     // A broken config never widens the allowlist.
   }

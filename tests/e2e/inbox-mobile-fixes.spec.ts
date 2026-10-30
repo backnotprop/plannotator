@@ -285,11 +285,19 @@ for (const phone of PHONES) {
       await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
       const box = pane.locator('.ib-rbox');
       await box.getByRole('textbox').fill(`From the ${phone.tag}: the header on my phone.`);
-      const attach = pane.locator('[data-reply-attach]');
+      // The paperclip sits in the box's toolbar, as on a desktop (approval "inbox-reply-attach"): 36 px drawn, a 44 px tap area.
+      const attach = box.locator('.ib-rfoot [data-reply-attach]');
       await expect(attach).toHaveCount(1);
-      const target = await pane.locator('.ib-rattach').boundingBox();
-      expect(target!.width).toBeGreaterThanOrEqual(44);
-      expect(target!.height).toBeGreaterThanOrEqual(44);
+      const clip = box.locator('.ib-rfoot .ib-rclip');
+      const target = (await clip.boundingBox())!;
+      expect(target.width).toBe(36);
+      expect(target.height).toBe(36);
+      const tapArea = await clip.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = (x: number, y: number) => el.contains(document.elementFromPoint(x, y));
+        return { left: hit(r.left - 3, r.top + r.height / 2), above: hit(r.left + r.width / 2, r.top - 3), below: hit(r.left + r.width / 2, r.bottom + 3) };
+      });
+      expect(tapArea).toEqual({ left: true, above: true, below: true });
       // What the photo library hands over: a file named image.png (iOS) with no name a person chose.
       await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
       await expect(box.locator('[data-compose-file="done"]')).toHaveCount(1);

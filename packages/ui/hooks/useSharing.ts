@@ -9,7 +9,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Annotation, type ImageAttachment } from '../types';
+import { Annotation, type DocumentRenderAs, type ImageAttachment } from '../types';
 import {
   type SharePayload,
   parseShareHash,
@@ -109,8 +109,10 @@ export function useSharing(
   resolveRawHtmlForShare?: () => Promise<string | null>,
   setRawHtml?: (h: string) => void,
   setShareHtml?: (h: string) => void,
-  setRenderAs?: (m: 'markdown' | 'html') => void,
+  setRenderAs?: (m: DocumentRenderAs) => void,
   contentRevision = 0,
+  /** Render kind of the shared document; `asciidoc` travels as `r: 'asciidoc'`. */
+  renderAs?: DocumentRenderAs,
 ): UseSharingResult {
   const [isSharedSession, setIsSharedSession] = useState(false);
   const [isLoadingShared, setIsLoadingShared] = useState(true);
@@ -136,6 +138,7 @@ export function useSharing(
     pasteApiUrl,
     rawHtml,
     contentRevision,
+    renderAs,
   ]);
   const latestShareRequestContextRef = useRef(shareRequestContext);
   latestShareRequestContextRef.current = shareRequestContext;
@@ -178,7 +181,7 @@ export function useSharing(
             setMarkdown('');
           } else {
             setMarkdown(payload.p);
-            setRenderAs?.('markdown');
+            setRenderAs?.(payload.r === 'asciidoc' ? 'asciidoc' : 'markdown');
             setRawHtml?.('');
             setShareHtml?.('');
           }
@@ -226,7 +229,7 @@ export function useSharing(
           setMarkdown('');
         } else {
           setMarkdown(payload.p);
-          setRenderAs?.('markdown');
+          setRenderAs?.(payload.r === 'asciidoc' ? 'asciidoc' : 'markdown');
           setRawHtml?.('');
           setShareHtml?.('');
         }
@@ -290,7 +293,7 @@ export function useSharing(
   const refreshShareUrl = useCallback(async () => {
     const requestContext = shareRequestContext;
     try {
-      const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl, rawHtml);
+      const url = await generateShareUrl(markdown, annotations, globalAttachments, shareBaseUrl, rawHtml, renderAs);
       if (latestShareRequestContextRef.current !== requestContext) return;
       setShareUrl(url ?? '');
       setShareUrlSize(url ? formatUrlSize(url) : '');
@@ -300,7 +303,7 @@ export function useSharing(
       setShareUrl('');
       setShareUrlSize('');
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, rawHtml, shareRequestContext]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, rawHtml, renderAs, shareRequestContext]);
 
   // Auto-refresh share URL when dependencies change
   useEffect(() => {
@@ -372,6 +375,7 @@ export function useSharing(
         globalAttachments,
         { pasteApiUrl, shareBaseUrl },
         htmlForShare,
+        renderAs,
       );
 
       if (latestShareRequestContextRef.current !== requestContext) return null;
@@ -398,7 +402,7 @@ export function useSharing(
     } finally {
       if (latestShareRequestContextRef.current === requestContext) setIsGeneratingShortUrl(false);
     }
-  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare, shareRequestContext]);
+  }, [markdown, annotations, globalAttachments, shareBaseUrl, pasteApiUrl, rawHtml, resolveRawHtmlForShare, renderAs, shareRequestContext]);
 
   // Import annotations from a teammate's share URL (supports both hash-based and short /p/<id> URLs)
   const importFromShareUrl = useCallback(async (url: string): Promise<ImportResult> => {

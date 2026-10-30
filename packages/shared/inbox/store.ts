@@ -39,6 +39,7 @@ import {
   derivePersonThreadSubject,
   inboxQuestionState,
   inboxQuestionWaitsOnPerson,
+  inboxRowWaits,
   isInboxQuestionSupersedable,
   parseInboxQuestionBlocks,
   parseInboxSupersedeRef,
@@ -308,6 +309,15 @@ export interface InboxReplyInput {
    * (it gets the reply anyway). Absent or empty: nobody is tagged.
    */
   tags?: unknown;
+  /**
+   * "Hand off instead" (approval "inbox-tag-handoff", A2): this reply hands
+   * the thread to `to` (a live session the server checked), which then owns
+   * it: the reply is addressed to it, and so is every later reply in the
+   * thread. `from` is the thread's owner until now, as the server read it,
+   * with whether its connection wakes it (only then is it sent a notice).
+   * Held for the Undo window (`settleHandoffs`, `undoHandoff`).
+   */
+  handoff?: { to: InboxAddressee; label?: string | null; from: { host: string | null; session: string; wakes: boolean; label?: string | null } | null };
 }
 
 /** The person's Re-ask (approval "inbox-reask"): ask the agent for its open questions again, in one message. */
@@ -430,7 +440,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   const out: InboxTag[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
-    const { host, session, name, wakes, label } = entry as Record<string, unknown>;
+    const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
     if (typeof session !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
@@ -449,9 +459,21 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
       ...(typeof name === "string" && name ? { name } : {}),
       ...(typeof label === "string" && label.trim() ? { label: label.trim() } : {}),
       wakes,
+      // "Add instead": the session joins the thread (later replies go to it too).
+      ...(joined === true ? { joined: true } : {}),
     });
   }
   return out;
+}
+
+/** A hand-off still inside its Undo window: nobody is handed the reply yet. */
+function handoffHeld(message: InboxMessage): boolean {
+  return !!message.handoff && !message.handoff.settled_at && !message.handoff.undone_at;
+}
+
+/** A hand-off that moved the thread (not taken back). */
+function handoffActive(message: InboxMessage): boolean {
+  return message.author.kind === "person" && !!message.handoff && !message.handoff.undone_at && !!message.to;
 }
 
 /** The most ids one send may supersede. */
@@ -1229,7 +1251,8 @@ export class InboxStore {
     if (!root || root.thread_id !== threadId) return null;
     // The note carrying a 👍 is not a message of the thread as the person sees it.
     const messages = this.threadMessages(threadId).filter((m) => !isAckNote(m));
-    const last = messages[messages.length - 1] ?? root;
+    // A Tidy note never moves the row: its time and author are the message before it.
+    const last = [...messages].reverse().find((m) => !m.tidy) ?? root;
     // The Inbox's own notes are not the person's reply: the last word is the last other message's.
     const lastWord = lastNonNote(messages) ?? root;
     const questions = messages.flatMap((m) => this.questionsOf(m.id));
@@ -1326,6 +1349,9 @@ export class InboxStore {
           }
         : null;
     const participants = this.participantsOf(messages);
+    const waits = summary.questions.stopped || summary.questions.holds_up.length > 0
+      ? inboxRowWaits(messages.filter((m) => !isAckNote(m)).flatMap((m) => this.questionsOf(m.id)))
+      : [];
     // An agent wrote after the person archived the thread (mail apps' rule):
     // it comes back to the list while something there waits (an agent
     // message after the archive the person has not looked at, a live
@@ -1396,6 +1422,8 @@ export class InboxStore {
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
       ...(participants.length > 1 ? { participants } : {}),
+      // What the Stopped / Holds up badge holds (approval "inbox-row-badges"): the window's hover card.
+      ...(waits.length > 0 ? { waits } : {}),
     };
     // An action item's report that lands after agent news the person has not looked at: the row shows the news
     // (New), not Sent; `sent` stays on the row for its delivery tick.
@@ -2275,6 +2303,121 @@ export class InboxStore {
     return out;
   }
 
+  /**
+   * The session that owns a thread now (the one the person's plain reply
+   * goes to): the new owner of its latest hand-off that was not taken back,
+   * else today's rule (the latest agent writer, else the session a thread
+   * the person started is addressed to). Null when there is none.
+   */
+  threadOwner(threadId: string): { host: string | null; session: string } | null {
+    const messages = this.threadMessages(threadId);
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index]!;
+      if (handoffActive(message)) return { host: message.to!.host, session: message.to!.session };
+    }
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index]!;
+      if (message.author.kind === "agent" && message.author.session) return { host: message.author.host ?? null, session: message.author.session };
+    }
+    const root = messages[0];
+    return root?.to ? { host: root.to.host, session: root.to.session } : null;
+  }
+
+  /**
+   * The sessions the person added to a thread ("Add instead"): each joined
+   * tag of the person's messages, once, as a tag a later reply carries again
+   * (no delivery, no Send now, no read).
+   */
+  addedSessions(threadId: string): InboxTag[] {
+    const out: InboxTag[] = [];
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind !== "person") continue;
+      for (const tag of message.tags ?? []) {
+        if (!tag.joined || out.some((t) => t.session === tag.session)) continue;
+        out.push({ host: tag.host, session: tag.session, ...(tag.name ? { name: tag.name } : {}), ...(tag.label ? { label: tag.label } : {}), wakes: tag.wakes, joined: true });
+      }
+    }
+    return out;
+  }
+
+  /** Whether a person's message is a hand-off still inside its Undo window. */
+  handoffHeld(message: InboxMessage): boolean {
+    return handoffHeld(message);
+  }
+
+  /** Hand-offs still inside their Undo window (or that a stop interrupted). */
+  handoffsPending(): number {
+    let count = 0;
+    for (const message of this.messages.values()) if (handoffHeld(message)) count++;
+    return count;
+  }
+
+  /**
+   * Hand-offs whose Undo window passed: each gets `settled_at` (a new
+   * snapshot), so the new owner and the former one are handed it.
+   */
+  settleHandoffs(afterMs: number): InboxMessage[] {
+    const now = this.now().getTime();
+    const out: InboxMessage[] = [];
+    for (const message of [...this.messages.values()]) {
+      if (!handoffHeld(message) || Date.parse(message.handoff!.at) + afterMs > now) continue;
+      const at = this.stamp();
+      const settled: InboxMessage = { ...message, handoff: { ...message.handoff!, settled_at: at } };
+      this.appendMessage(settled, at);
+      out.push(settled);
+    }
+    return out;
+  }
+
+  /** Settle now every hand-off still held in one thread: the person wrote again in it. */
+  settleHandoffsIn(threadId: string): InboxMessage[] {
+    const out: InboxMessage[] = [];
+    for (const message of this.threadMessages(threadId)) {
+      if (!handoffHeld(message)) continue;
+      const at = this.stamp();
+      const settled: InboxMessage = { ...message, handoff: { ...message.handoff!, settled_at: at } };
+      this.appendMessage(settled, at);
+      out.push(settled);
+    }
+    return out;
+  }
+
+  /**
+   * The person took a hand-off back inside its Undo window: the reply goes
+   * as an Ask instead. A new snapshot: addressed as it would have been
+   * without the hand-off, the new owner tagged (this message only), no
+   * notice for the former owner, and `undone_at` set (so nothing waits for
+   * the window). Refused once it settled (`handoff_settled`): by then the
+   * sessions were told.
+   */
+  undoHandoff(messageId: string): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person" || !message.handoff) throw new InboxError("message_not_found", `No hand-off ${messageId}.`);
+    if (message.handoff.undone_at) return message;
+    if (message.handoff.settled_at) {
+      throw new InboxError("handoff_settled", "The hand-off already went: both sessions were told. Hand the thread back with a new reply instead.");
+    }
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    const before = asked?.author.kind === "person" && asked.to ? asked.to : null;
+    const owner = before?.session ?? (asked?.author.kind === "agent" ? (asked.author.session ?? null) : null);
+    const handedTo = message.to!;
+    const kept = (message.tags ?? []).filter((t) => !t.handed_away && t.session !== handedTo.session);
+    const tags: InboxTag[] =
+      handedTo.session === owner
+        ? kept
+        : [{ host: handedTo.host, session: handedTo.session, ...(message.handoff.label ? { label: message.handoff.label } : {}), wakes: true }, ...kept];
+    const { to: _to, tags: _tags, ...rest } = message;
+    const at = this.stamp();
+    const undone: InboxMessage = {
+      ...rest,
+      ...(before ? { to: { host: before.host, session: before.session } } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+      handoff: { ...message.handoff, undone_at: at },
+    };
+    this.appendMessage(undone, at);
+    return undone;
+  }
+
   /** Acks not settled yet (still inside their Undo window, or a stop interrupted it). */
   acksPending(): number {
     let count = 0;
@@ -2301,11 +2444,15 @@ export class InboxStore {
         // Who a reply tagged (approval "inbox-tag-agents"), as an agent reads it: the agents and, for
         // the reader, that it was tagged. Delivery state is the person's view, not the agent's.
         if (message.tags && message.tags.length > 0) {
-          const { tags, ...rest } = out;
-          const taggedYou = caller !== null && !this.isOwner(message, caller) && tags!.some((t) => t.session === caller);
+          // A hand-off's stop notice to the former owner is not a tag (approval "inbox-tag-handoff").
+          const { tags: all, ...rest } = out;
+          const tags = all!.filter((t) => !t.handed_away);
+          const taggedYou = caller !== null && !this.isOwner(message, caller) && tags.some((t) => t.session === caller);
           out = {
             ...rest,
-            tagged: tags!.map((t) => ({ agent: t.name || (t.host ? inboxAgentName({ kind: "agent", host: t.host, name: null }) : "An agent"), session: t.session })),
+            ...(tags.length > 0
+              ? { tagged: tags.map((t) => ({ agent: t.name || (t.host ? inboxAgentName({ kind: "agent", host: t.host, name: null }) : "An agent"), session: t.session })) }
+              : {}),
             ...(taggedYou ? { tagged_you: true } : {}),
           } as unknown as InboxMessageWire;
         }
@@ -3375,8 +3522,24 @@ export class InboxStore {
     // on a message of the person's own (a thread they started, before the agent
     // answered), the session that message is addressed to now. Stamped on the
     // line, so only that session is handed it and only its delivery settles it.
-    const to = input.to ?? (message.author.kind === "person" && message.to ? message.to : undefined);
-    const tags = normalizeInboxTags(input.tags, to?.session ?? (message.author.kind === "agent" ? (message.author.session ?? null) : null));
+    const handoff = input.handoff ?? null;
+    const to = handoff ? handoff.to : (input.to ?? (message.author.kind === "person" && message.to ? message.to : undefined));
+    const recipient = to?.session ?? (message.author.kind === "agent" ? (message.author.session ?? null) : null);
+    const typed = normalizeInboxTags(input.tags, recipient);
+    // The former owner of a handed-off thread is told (a notice), when its connection wakes it.
+    const notice: InboxTag[] =
+      handoff?.from && handoff.from.wakes && handoff.from.session !== recipient && !typed.some((t) => t.session === handoff.from!.session)
+        ? [{ host: handoff.from.host, session: handoff.from.session, ...(handoff.from.label ? { label: handoff.from.label } : {}), wakes: true, handed_away: true }]
+        : [];
+    // The sessions the person added to this thread ("Add instead") get every later reply that carries
+    // the person's words or files too, tagged again; never the reply's owner or the former owner.
+    const carriesWords = words.trim() !== "" || attachments.length > 0;
+    const members = carriesWords
+      ? this.addedSessions(message.thread_id).filter(
+          (m) => m.session !== recipient && m.session !== handoff?.from?.session && !typed.some((t) => t.session === m.session),
+        )
+      : [];
+    const tags = [...typed, ...members, ...notice];
     const reply: InboxMessage = {
       id: replyId,
       project_id: message.project_id,
@@ -3391,7 +3554,14 @@ export class InboxStore {
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
       ...(tags.length > 0 ? { tags } : {}),
+      ...(handoff
+        ? { handoff: { from: handoff.from ? { host: handoff.from.host, session: handoff.from.session } : null, ...(handoff.label ? { label: handoff.label } : {}), at } }
+        : {}),
     };
+    // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
+    // a later reply never reaches the new owner before the hand-off does, and Undo can no longer
+    // send the thread back past a reply the new owner already has.
+    this.settleHandoffsIn(message.thread_id);
     try {
       for (const record of [...updated, ...actionsSent]) this.appendQuestion(record, at);
       for (const record of carried) this.appendAnnotation({ ...record, sent_reply_id: replyId, updated_at: at }, at);
@@ -4169,13 +4339,17 @@ export class InboxStore {
   }
 
   /**
-   * The Send that carried the reply box's words: drop the draft only while it is
-   * still the one those words were saved as (`updated_at`), so a newer draft
-   * another window saved meanwhile stays. True when it went.
+   * The Send that carried the reply box's words: drop the draft while it is
+   * still the one those words were saved as (`updated_at`), or while it holds
+   * exactly those words (`words`: the window may not know the `updated_at` of a
+   * save whose answer it never read). A newer, different draft another window
+   * saved meanwhile stays. True when it went.
    */
-  clearSentReplyDraft(threadId: string, updatedAt: string): boolean {
+  clearSentReplyDraft(threadId: string, updatedAt: string, words?: string): boolean {
     const existing = this.replyDrafts.get(threadId);
-    if (!existing || existing.updated_at !== updatedAt) return false;
+    if (!existing) return false;
+    const sameWords = words !== undefined && words.trim() !== "" && existing.body.trim() === words.trim();
+    if (existing.updated_at !== updatedAt && !sameWords) return false;
     return this.deleteReplyDraft(threadId);
   }
 
@@ -4376,10 +4550,14 @@ export class InboxStore {
 
   /** Whether a person's `message` waits for `session` (the rules of `pendingReplies`). */
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
+    // A hand-off inside its Undo window goes to nobody yet.
+    if (handoffHeld(message)) return false;
     const owner = this.isOwner(message, session);
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
     if (message.delivery || !owner) return false;
+    // A Tidy note in a thread other than the one carrying the session's wake is never delivered.
+    if (message.tidy && !message.tidy.wake) return false;
     // A 👍 taken back before it went is never delivered.
     if (isAckNote(message) && !this.ackNoteLive(message)) return false;
     const seq = this.messageSeq.get(message.id) ?? 0;
@@ -4474,7 +4652,8 @@ export class InboxStore {
     for (const message of this.messages.values()) {
       if (message.author.kind !== "person" || this.isOwner(message, session)) continue;
       const tag = tagOf(message, session);
-      if (tag && !tag.delivery) out.add(message.thread_id);
+      // A hand-off's stop notice is not a tag: the former owner was not tagged here.
+      if (tag && !tag.delivery && !tag.handed_away) out.add(message.thread_id);
     }
     return [...out];
   }
@@ -4621,6 +4800,8 @@ export class InboxStore {
     for (const item of this.pendingReplies(session, { tags: options.tags })) {
       if ((item.set_aside?.length ?? 0) > 0 || (item.reopened?.length ?? 0) > 0) continue;
       if (!INBOX_AUTO_SEND_ACK_NOTES && item.ack_of) continue;
+      // Tidy goes to a busy session when its turn ends, never into it.
+      if (item.tidy) continue;
       const clock = options.clockOf(item.id);
       if (!clock || clock.autoSince === null || clock.autoSince + options.afterMs > now) continue;
       const owner = this.isOwner(item, session);
@@ -4715,6 +4896,52 @@ export class InboxStore {
     this.appendMessage(message, at);
     return { message, replayed: false };
   }
+  // ──────────── Tidy ────────────
+
+  /**
+   * The person's Tidy for one session (owner-approved design, 2026-10-28):
+   * one Inbox note per thread, addressed to the session (`to`), the first
+   * carrying its wake (`tidy.wake`, the only one `pendingReplies` hands
+   * out). They are Inbox notes, so no row moves. The same `idempotency_key`
+   * for the same session answers the notes it wrote and writes nothing.
+   * Whether the session may be asked is the server's check.
+   */
+  sendTidy(input: { run: string; to: InboxAddressee; threadIds: readonly string[]; body: string; idempotency_key: string }): { notes: InboxMessage[]; replayed: boolean } {
+    const key = input.idempotency_key.trim();
+    if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Tidy.", { field: "idempotency_key" });
+    const done = this.tidyNotes().filter((m) => m.idempotency_key === key && m.to?.session === input.to.session);
+    if (done.length > 0) return { notes: done, replayed: true };
+    const notes: InboxMessage[] = [];
+    for (const threadId of new Set(input.threadIds)) {
+      const root = this.messages.get(threadId);
+      if (!root || root.thread_id !== threadId) continue;
+      const at = this.stamp();
+      const note: InboxMessage = {
+        id: inboxId("msg"),
+        project_id: root.project_id,
+        thread_id: threadId,
+        reply_to: null,
+        author: { kind: "person" },
+        subject: null,
+        body: input.body,
+        created_at: at,
+        resolved_at: null,
+        idempotency_key: key,
+        to: { host: input.to.host, session: input.to.session },
+        tidy: { id: input.run, wake: notes.length === 0 },
+      };
+      this.appendMessage(note, at);
+      notes.push(note);
+    }
+    return { notes, replayed: false };
+  }
+
+  /** Every Tidy note, oldest first. */
+  tidyNotes(): InboxMessage[] {
+    const out = [...this.messages.values()].filter((m) => m.tidy);
+    return out.sort((a, b) => (this.messageSeq.get(a.id) ?? 0) - (this.messageSeq.get(b.id) ?? 0));
+  }
+
   // ──────────── Compose: a thread the person starts with a live agent ────────────
 
   /**

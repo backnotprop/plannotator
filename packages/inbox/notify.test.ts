@@ -27,6 +27,10 @@ describe('askKind', () => {
     expect(askKind(saved('http://localhost:52817'), 'default', 'http://localhost:61000')).toBe('moved');
     expect(askKind(saved('http://127.0.0.1:52817'), 'default', 'http://localhost:61000')).toBe('moved');
   });
+  test('moving to plannotator.localhost (the cookie switch, #2184) reads as moved, at once', () => {
+    expect(askKind(saved('http://localhost:52817'), 'default', 'http://plannotator.localhost:52817', false)).toBe('moved');
+    expect(askKind(saved('http://plannotator.localhost:52817'), 'default', 'http://localhost:61000')).toBe('moved');
+  });
   test('the tailnet address and back again are each a plain ask, not "moved"', () => {
     expect(askKind(saved('http://localhost:52817'), 'default', 'https://studio.tail0000.ts.net:52817')).toBe('ask');
     expect(askKind(saved('https://studio.tail0000.ts.net:52817'), 'default', 'http://localhost:52817')).toBe('ask');

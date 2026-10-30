@@ -147,6 +147,17 @@ export function atFit(view: ZoomViewport, limits: ZoomLimits | number): boolean 
   return Math.abs(view.scale - fit) < 1e-3;
 }
 
+/**
+ * Whether the part of an image on screen (`visibleBox`, its own pixels) can
+ * still pan sideways: `1` shows more of its right (the finger moving left),
+ * `-1` more of its left. A swipe that way pans first, and steps once the
+ * image is at its edge (approval "inbox-image-swipe").
+ */
+export function canPanToward(box: Pick<NaturalBox, 'x' | 'w'> | null, naturalWidth: number, dir: 1 | -1): boolean {
+  if (!box || !(naturalWidth > 0)) return false;
+  return dir > 0 ? box.x + box.w < naturalWidth - 1 : box.x > 1;
+}
+
 /** The share of a stage that leaves `padding` CSS pixels on every side (at least a tenth). */
 export function paddingInset(stage: ZoomSize, padding: number): ZoomInset {
   if (!valid(stage) || padding <= 0) return FULL;

@@ -26,7 +26,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const FAKE_AGENT_BINS = ["codex", "gemini", "devin", "amp", "cline", "pi", "opencode", "cursor-agent", "kiro-cli"] as const;
+export const FAKE_AGENT_BINS = ["codex", "gemini", "qwen", "devin", "amp", "cline", "pi", "opencode", "cursor-agent", "kiro-cli"] as const;
 export type FakeAgentBin = (typeof FAKE_AGENT_BINS)[number];
 
 export interface FakeAgents {
@@ -67,13 +67,15 @@ const list = (v) => (v || "").split(",").filter(Boolean);
 if (args[0] === "--fake-grandchild") setTimeout(() => {}, 30000);
 else start();
 function start() {
+  // FAKE_AGENT_CWD_LOG: every run (--version too) with the folder it ran in.
+  if (process.env.FAKE_AGENT_CWD_LOG) fs.appendFileSync(process.env.FAKE_AGENT_CWD_LOG, JSON.stringify({ name, args, cwd: process.cwd() }) + "\n");
   // Each real CLI's --version line (FAKE_<NAME>_VERSION overrides it), answered before anything is recorded.
   if (args[0] === "--version") {
     if (list(process.env.FAKE_AGENT_HANG_VERSION).includes(name)) {
       setInterval(() => {}, 1000);
       return;
     }
-    const versions = { codex: "codex-cli 0.160.0", gemini: "0.43.0", devin: "devin 2026.7.16 (4723f912)", amp: "0.0.1781669741-g230fdd (released 2026-06-17)", pi: "0.99.1" };
+    const versions = { codex: "codex-cli 0.160.0", gemini: "0.43.0", qwen: "0.26.2", devin: "devin 2026.7.16 (4723f912)", amp: "0.0.1781669741-g230fdd (released 2026-06-17)", pi: "0.99.1" };
     const override = process.env["FAKE_" + name.toUpperCase().replace(/-/g, "_") + "_VERSION"];
     process.stdout.write((override !== undefined ? override : versions[name] || "1.0.0") + "\n");
     process.exit(0);
@@ -132,6 +134,51 @@ function main() {
     else process.exit(code);
     return;
   }
+  // qwen sessions controllers add|list|remove (Qwen's trusted senders): kept in $QWEN_HOME/peer-controllers.json as Qwen
+  // does, with the token itself (Qwen keeps a hash) so a test can tell which token is still good.
+  // FAKE_QWEN_CONTROLLERS_FAIL=1 makes every call fail as a write error does.
+  // FAKE_QWEN_LIST_OUTPUT: what "list --json" prints instead (a shape a future Qwen might print).
+  // FAKE_QWEN_CONTROLLERS_SEE: files (path-delimiter separated) each call copies to <file>.<add|list|remove>.seen as it
+  // runs: what was on disk while Qwen was asked.
+  if (name === "qwen" && args[0] === "sessions" && args[1] === "controllers") {
+    const home = process.env.QWEN_HOME ? path.resolve(process.env.QWEN_HOME) : path.join(fakeHome, ".qwen");
+    const file = path.join(home, "peer-controllers.json");
+    const registry = readJson(file);
+    const grants = Array.isArray(registry.controllers) ? registry.controllers : [];
+    if (process.env.FAKE_QWEN_CONTROLLERS_FAIL === "1") {
+      process.stderr.write("Error: could not write " + file + ": EACCES: permission denied\n");
+      process.exit(1);
+    }
+    const save = () => writeJson(file, { schemaVersion: 1, controllers: grants });
+    for (const seen of (process.env.FAKE_QWEN_CONTROLLERS_SEE || "").split(path.delimiter).filter(Boolean)) {
+      try { fs.copyFileSync(seen, seen + "." + args[2] + ".seen"); } catch {}
+    }
+    if (args[2] === "add") {
+      const label = args[args.indexOf("--label") + 1] || "";
+      if (grants.some((g) => g.label.toLowerCase() === label.toLowerCase())) {
+        process.stderr.write("Error: A controller called \"" + label + "\" already exists. Labels are how you tell them apart when revoking, so pick another.\n");
+        process.exit(1);
+      }
+      const crypto = require("crypto");
+      const grant = { id: "c_" + crypto.randomBytes(4).toString("hex"), label, token: "qpc_" + crypto.randomBytes(32).toString("hex"), createdAt: Date.now() };
+      grants.push(grant);
+      save();
+      process.stdout.write(JSON.stringify(grant) + "\n");
+    } else if (args[2] === "list") {
+      if (process.env.FAKE_QWEN_LIST_OUTPUT !== undefined) process.stdout.write(process.env.FAKE_QWEN_LIST_OUTPUT);
+      else for (const g of grants) process.stdout.write(JSON.stringify({ id: g.id, label: g.label, createdAt: g.createdAt }) + "\n");
+    } else if (args[2] === "remove") {
+      const at = grants.findIndex((g) => g.id === args[3]);
+      if (at < 0) {
+        process.stderr.write("Error: no controller has the id \"" + args[3] + "\". Run \"qwen sessions controllers list\" to see them.\n");
+        process.exit(1);
+      }
+      grants.splice(at, 1);
+      save();
+      process.stdout.write("Removed controller.\n");
+    }
+    process.exit(0);
+  }
   if (args[0] !== "mcp") process.exit(0);
   switch (name) {
     case "codex": {
@@ -157,6 +204,30 @@ function main() {
     case "gemini":
       jsonAgent(path.join(fakeHome, ".gemini", "settings.json"), "mcpServers", 4, 5);
       break;
+    case "qwen": {
+      // As Qwen Code 0.26 does: it writes back every server as it resolved them, $VAR and \${VAR} filled in from
+      // its environment (so Plannotator never runs it on settings.json), and logs a failed write and exits 0.
+      const home = process.env.QWEN_HOME ? path.resolve(process.env.QWEN_HOME) : path.join(fakeHome, ".qwen");
+      const file = path.join(home, "settings.json");
+      const config = readJson(file);
+      const resolve = (v) =>
+        typeof v === "string"
+          ? v.replace(/\$\{(\w+)\}|\$(\w+)/g, (m, a, b) => process.env[a || b] ?? m)
+          : Array.isArray(v) ? v.map(resolve) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, resolve(x)])) : v;
+      const servers = resolve(config.mcpServers || {});
+      if (args[1] === "add") {
+        const words = args.slice(5);
+        servers[args[4]] = { command: words[0], args: words.slice(1) };
+      } else if (args[1] === "remove") delete servers[args[args.length - 1]];
+      config.mcpServers = servers;
+      try {
+        fs.mkdirSync(home, { recursive: true });
+        fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
+      } catch (error) {
+        process.stderr.write("Error saving user settings file: " + error.message + "\n");
+      }
+      break;
+    }
     case "devin":
       jsonAgent(path.join(xdg, "devin", "config.json"), "mcpServers", 4, 5);
       break;

@@ -168,7 +168,7 @@ export interface DeliveryLine {
 
 /** The parts of the "Undelivered" band at `now`: "Undelivered 3 min", and what happens next. */
 export interface UndeliveredWords {
-  /** "Undelivered 3 min" (whole minutes; "Undelivered" under one). */
+  /** "Undelivered 3 min" (whole minutes, then hours, then days; "Undelivered" under a minute). */
   label: string;
   /** "goes in by itself in 2 min" / "in under a minute", or "it gets this when its turn ends". */
   next: string;
@@ -176,10 +176,30 @@ export interface UndeliveredWords {
   auto: boolean;
 }
 
-/** "Undelivered 3 min": whole minutes, never seconds. */
-export function undeliveredLabel(since: string, now: number): string {
+/**
+ * How long a reply has waited, in the Inbox's age units (a board card's "5m", "3h", "2d"): whole minutes under an
+ * hour, whole hours under a day, then whole days; never seconds. Null under a minute.
+ */
+function undeliveredAge(since: string, now: number): { short: string; long: string } | null {
   const minutes = wholeMinutes(since, now);
-  return minutes < 1 ? 'Undelivered' : `Undelivered ${minutes} min`;
+  if (minutes < 1) return null;
+  if (minutes < 60) return { short: `${minutes}m`, long: `${minutes} min` };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { short: `${hours}h`, long: `${hours} hour${hours === 1 ? '' : 's'}` };
+  const days = Math.floor(hours / 24);
+  return { short: `${days}d`, long: `${days} day${days === 1 ? '' : 's'}` };
+}
+
+/** "Undelivered 3 min", "Undelivered 2 hours", "Undelivered 1 day" ("Undelivered" under a minute). */
+export function undeliveredLabel(since: string, now: number): string {
+  const age = undeliveredAge(since, now);
+  return age ? `Undelivered ${age.long}` : 'Undelivered';
+}
+
+/** The list row's short form (approval "inbox-row-byline", option A): "Undelivered 3m", "Undelivered 2h", "Undelivered 1d". */
+export function undeliveredShort(since: string, now: number): string {
+  const age = undeliveredAge(since, now);
+  return age ? `Undelivered ${age.short}` : 'Undelivered';
 }
 
 export function undeliveredWords(wait: NonNullable<DeliveryLine['wait']>, now: number): UndeliveredWords {

@@ -1,6 +1,6 @@
 /**
- * One Guides webview (a tab or the chapter side view): the HTML shell with a
- * strict CSP (scripts only from the extension, by nonce), the state it shows,
+ * One Guides webview (a tab): the HTML shell with a strict CSP (scripts only
+ * from the extension: its bundle by nonce, the diagram engine from its resources), the state it shows,
  * and the messages it sends. Agent text reaches it only as data, rendered
  * through DOMPurify in the webview.
  */
@@ -29,7 +29,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, m
 <link rel="stylesheet" href="${asset("codicons", "codicon.css")}">
 <link rel="stylesheet" href="${asset("guides-webview.css")}">
 </head>
-<body class="pn-mode-${mode}">
+<body class="pn-mode-${mode}" data-pn-diagram="${asset("reader", "diagram.js")}">
 <div id="root"></div>
 <script nonce="${nonce}" src="${asset("guides-webview.js")}"></script>
 </body>
@@ -100,7 +100,8 @@ export class WebviewHost {
       case "mermaidResult": {
         const done = this.mermaidChecks.get(msg.reqId);
         this.mermaidChecks.delete(msg.reqId);
-        done?.({ ok: msg.ok === true, message: typeof msg.message === "string" ? msg.message : undefined, line: typeof msg.line === "number" ? msg.line : undefined });
+        // No engine in that webview: it could not check (null, so another one is asked), not a refusal.
+        done?.(msg.unavailable === true ? null : { ok: msg.ok === true, message: typeof msg.message === "string" ? msg.message : undefined, line: typeof msg.line === "number" ? msg.line : undefined });
         return;
       }
     }

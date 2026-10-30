@@ -11,7 +11,7 @@
  * before it is opened, a Start that moves the card, a drop that never asks
  * for its reason, a phone that lays the lanes side by side.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';

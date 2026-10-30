@@ -18,8 +18,7 @@
  * (`onExtNotification`), never the params, and keeps no copy; extension
  * requests answer "method not found".
  *
- * Shared by the VS Code extension's Guides and the Inbox's ACP runner
- * (packages/server/inbox-acp-runner.ts).
+ * Used by Guided Reviews in the VS Code extension.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -54,6 +53,23 @@ export interface AgentLaunch {
   cwd: string;
   /** Added to the user's environment. */
   env?: Record<string, string>;
+  /**
+   * Added to the error when the agent fails before its first session is
+   * ready (start, `initialize`, `session/new`, `session/load`), except a
+   * sign-in error: Guides pointed the adapter at the user's own CLI, which
+   * may be older than the adapter expects.
+   */
+  startHint?: string;
+}
+
+/** The error with `hint` on a line of its own; its `code` (an ACP error code) is kept. */
+export function withStartHint(err: unknown, hint: string | undefined): unknown {
+  if (!hint || (err as { code?: unknown } | null)?.code === ACP_AUTH_REQUIRED_CODE) return err;
+  const message = err instanceof Error ? err.message : String(err);
+  const out = new Error(`${message}\n${hint}`);
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code !== undefined) Object.assign(out, { code });
+  return out;
 }
 
 export interface AcpClientHandlers {
@@ -73,7 +89,7 @@ export interface AcpClientHandlers {
 export interface AcpStartOptions {
   /** The environment the agent starts from (default: this process's). */
   env?: Readonly<Record<string, string | undefined>>;
-  /** Append the usual program folders to PATH (default true; the Inbox passes its own PATH as it is). */
+  /** Append the usual program folders to PATH (default true; a host with its own PATH passes it as it is). */
   augmentPath?: boolean;
   /**
    * Give up on an agent that does not answer `initialize` in this long: its
@@ -243,10 +259,13 @@ export class AcpClient {
   private readonly exitWaiters: Array<() => void> = [];
   private killTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  /** `AgentLaunch.startHint`, until a session is ready. */
+  private startHint: string | undefined;
   initializeResult: InitializeResponse | null = null;
 
-  private constructor(child: ChildProcess, private readonly handlers: AcpClientHandlers) {
+  private constructor(child: ChildProcess, private readonly handlers: AcpClientHandlers, startHint?: string) {
     this.child = child;
+    this.startHint = startHint;
     const input = Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>;
     const output = Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>;
     const stream = ndJsonStream(input, output);
@@ -335,7 +354,7 @@ export class AcpClient {
       child.once("spawn", () => resolve(null));
     });
     if (startError) throw new Error(`Could not start ${launch.command}: ${startError.message}`);
-    const client = new AcpClient(child, handlers);
+    const client = new AcpClient(child, handlers, launch.startHint);
     // An agent that hangs in `initialize` (a self-update, a sign-in waiting on a prompt) can still be stopped:
     // by a time limit, or by the caller's signal.
     const { signal, initializeTimeoutMs } = options;
@@ -364,7 +383,8 @@ export class AcpClient {
     } catch (err) {
       if (signal?.aborted && signal.reason === "kill") client.kill();
       else client.dispose();
-      throw err;
+      // A stop or time limit is the caller's, not the agent's CLI: it keeps its own class and message.
+      throw err instanceof AcpStartAbortedError ? err : withStartHint(err, launch.startHint);
     } finally {
       if (timer) clearTimeout(timer);
       if (onAbort) signal?.removeEventListener("abort", onAbort);
@@ -427,7 +447,18 @@ export class AcpClient {
   }
 
   newSession(cwd: string, mcpServers: McpServer[], meta?: Record<string, unknown>): Promise<NewSessionResponse> {
-    return this.raceExit(this.connection.newSession({ cwd, mcpServers, ...(meta && { _meta: meta }) }), "session/new");
+    return this.firstSession(this.raceExit(this.connection.newSession({ cwd, mcpServers, ...(meta && { _meta: meta }) }), "session/new"));
+  }
+
+  /** Until a session is ready, a failure carries the launch's `startHint`; after, it never does. */
+  private async firstSession<T>(request: Promise<T>): Promise<T> {
+    try {
+      const result = await request;
+      this.startHint = undefined;
+      return result;
+    } catch (err) {
+      throw withStartHint(err, this.startHint);
+    }
   }
 
   /**
@@ -436,7 +467,7 @@ export class AcpClient {
    * notifications before it answers.
    */
   loadSession(sessionId: string, cwd: string, mcpServers: McpServer[]): Promise<LoadSessionResponse> {
-    return this.raceExit(this.connection.loadSession({ sessionId, cwd, mcpServers }), "session/load");
+    return this.firstSession(this.raceExit(this.connection.loadSession({ sessionId, cwd, mcpServers }), "session/load"));
   }
 
   async setConfigOption(sessionId: string, configId: string, value: string): Promise<SessionConfigOption[]> {
@@ -519,7 +550,8 @@ export class AcpClient {
     if (!this.exited) return message;
     const tail = this.stderrTail.trim().split("\n").slice(-6).join("\n");
     const code = this.exitInfo?.code != null ? ` with code ${this.exitInfo.code}` : this.exitInfo?.signal ? ` (${this.exitInfo.signal})` : "";
-    return `The agent exited${code}.${tail ? `\n${tail}` : ""}`;
+    const hint = this.startHint && (err as { code?: unknown } | null)?.code !== ACP_AUTH_REQUIRED_CODE ? `\n${this.startHint}` : "";
+    return `The agent exited${code}.${tail ? `\n${tail}` : ""}${hint}`;
   }
 
   waitForExit(timeoutMs: number): Promise<boolean> {

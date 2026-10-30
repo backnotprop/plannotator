@@ -3,17 +3,18 @@
  * window draws them: the whole window (InboxApp) over a REAL Inbox server in
  * a temp data dir (its own process, tests/helpers/inbox-dom-server.ts). What
  * is proved: Pin thread leads the row menu and puts the thread in a Pinned
- * section above Projects (and a pin on its list row); the header's toggle
- * pins and unpins; the pinned row's state (a Stopped pill, a question count)
+ * section above Projects (and a pin on its list row); the header ⋯
+ * menu's Pin thread and Unpin thread pin and unpin (no pin button in the header); the pinned row's state (a Stopped pill, a question count)
  * and its name; a click opens the thread and keeps the project filter; the
  * pinned row's ⋯ offers Unpin, Move up, Move down and Copy link, and the
  * moves change the order with focus kept on that row's ⋯; Unpin's toast and
  * its Undo putting the pin back at its old place (a restore of that one
  * thread with its original pinned_at); a quick pin-then-unpin on the
- * header's toggle sending both in order; an archived thread stays
- * pinned and opens as an archived thread; no section when nothing is pinned.
+ * header menu sending both in order; an archived thread stays
+ * pinned and opens as an archived thread; no section when nothing is pinned;
+ * pinning from the header menu while Pinned is closed opens it.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -27,6 +28,10 @@ import type { InboxListRow } from '@plannotator/core/inbox-types';
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 const { movePin, pinnedState, unpinnedWhere } = await import('./pins');
+const { SIDEBAR_CLOSED_COOKIE } = await import('./sidebarSections');
+const { storage, setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+// Which sidebar sections are closed persists through Plannotator's storage (cookies in the app); a map stands in here.
+const stored = new Map<string, string>();
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
@@ -74,7 +79,7 @@ async function serverPin(threadId: string, pinned: boolean) {
   expect(answer.status).toBe(200);
 }
 
-const TESTS = 9;
+const TESTS = 10;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -133,6 +138,12 @@ beforeEach(async () => {
   posted = [];
   clipboard = [];
   window.location.hash = '';
+  stored.clear();
+  setStorageBackend({
+    getItem: (key) => stored.get(key) ?? null,
+    setItem: (key, value) => void stored.set(key, value),
+    removeItem: (key) => void stored.delete(key),
+  });
 });
 
 afterEach(() => {
@@ -146,6 +157,7 @@ afterEach(() => {
   if (savedClipboard) Object.defineProperty(navigator, 'clipboard', savedClipboard);
   else delete (navigator as unknown as Record<string, unknown>).clipboard;
   document.body.innerHTML = '';
+  resetStorageBackend();
 });
 
 async function until(check: () => boolean | Promise<boolean>, what: string) {
@@ -192,6 +204,25 @@ async function press(el: HTMLElement) {
   });
 }
 
+const threadMenu = () => document.querySelector<HTMLElement>('[data-thread-menu]');
+
+/** The open thread's header ⋯ menu, opened; its first item is the pin. */
+async function openThreadMenu() {
+  await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
+  await press(document.querySelector<HTMLElement>('[data-thread-more]')!);
+  await until(() => !!threadMenu()?.querySelector('[data-thread-pin-item]'), 'the thread menu');
+  return threadMenu()!.querySelector<HTMLElement>('[data-thread-pin-item]')!;
+}
+
+/** Choose the header menu's pin item; the label it had says which way it went. */
+async function chooseThreadPin() {
+  const item = await openThreadMenu();
+  const label = item.textContent;
+  await act(async () => item.click());
+  await until(() => !threadMenu(), 'the menu to close');
+  return label;
+}
+
 async function openPinMenu(id: string) {
   await press(pinMore(id)!);
   await until(() => pinMenu()?.getAttribute('data-pin-menu') === id, 'the pinned row menu');
@@ -232,7 +263,7 @@ test('the order a move makes, the state a pinned row shows, and the toast words'
 test.skipIf(!hasDom)('no section when nothing is pinned; Pin thread leads the row menu and the thread appears in Pinned, above Projects', async () => {
   await renderApp();
   expect(pinnedSection()).toBeNull();
-  expect(document.querySelector('.ib-side-label')!.textContent).toBe('Projects');
+  expect(document.querySelector('.ib-side-sec-l')!.textContent).toBe('Projects');
   await act(async () => {
     rowButton(ids.stopped)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
   });
@@ -246,10 +277,10 @@ test.skipIf(!hasDom)('no section when nothing is pinned; Pin thread leads the ro
   });
   await until(() => pinnedOrder().length === 1, 'the pinned row');
   expect(await serverPins()).toEqual([ids.stopped]);
-  // Above Projects, labelled Pinned.
-  const labels = [...document.querySelectorAll('.ib-side-label')].map((el) => el.textContent);
+  // Above Projects, labelled by its header, Pinned.
+  const labels = [...document.querySelectorAll('.ib-side-sec-l')].map((el) => el.textContent);
   expect(labels).toEqual(['Pinned', 'Projects']);
-  expect(pinnedSection()!.getAttribute('aria-labelledby')).toBe(document.querySelector('.ib-side-label')!.id);
+  expect(pinnedSection()!.getAttribute('aria-labelledby')).toBe(document.querySelector('[data-sidebar-section="pinned"]')!.id);
   // The Count variant: Stopped as a pill; the name says subject, project, state; bold (it waits on the person).
   const pin = pinnedRow(ids.stopped)!;
   expect(pin.querySelector('.ib-spill')!.textContent).toBe('Stopped');
@@ -266,46 +297,56 @@ test.skipIf(!hasDom)('no section when nothing is pinned; Pin thread leads the ro
   await until(() => !!rowMenu()?.querySelector('[data-row-action="unpin"]'), 'Unpin thread');
 });
 
-test.skipIf(!hasDom)("the header's pin toggle pins and unpins the open thread", async () => {
+test.skipIf(!hasDom)("the header ⋯ menu's Pin thread pins and Unpin thread unpins the open thread, and the header has no pin button", async () => {
   await renderApp(`#thread=${ids.waiting}`);
-  await until(() => !!document.querySelector('[data-pin-toggle]'), 'the header toggle');
-  const toggle = () => document.querySelector<HTMLElement>('[data-pin-toggle]')!;
-  expect(toggle().getAttribute('aria-pressed')).toBe('false');
-  expect(toggle().getAttribute('aria-label')).toBe('Pin to the sidebar');
-  expect(toggle().hasAttribute('title')).toBe(false);
-  await act(async () => toggle().click());
+  await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
+  expect(document.querySelector('[data-pin-toggle]')).toBeNull();
+  // First in the menu, in its own group, as the row menu leads with it.
+  const first = await openThreadMenu();
+  expect(threadMenu()!.querySelector('[role="menuitem"]')).toBe(first);
+  expect(first.nextElementSibling?.getAttribute('role')).toBe('separator');
+  await act(async () => first.click());
+  await until(() => !threadMenu(), 'the menu to close');
   await until(() => pinnedOrder().includes(ids.waiting), 'the pinned row');
-  await until(() => toggle().getAttribute('aria-pressed') === 'true', 'the toggle pressed');
-  // One fixed name whatever the state: aria-pressed says it (as Mark read keeps its key); only the tooltip's words change.
-  expect(toggle().getAttribute('aria-label')).toBe('Pin to the sidebar');
   // The open thread's pinned row wears the selection pill and aria-current, not the current page's card.
   expect(pinnedRow(ids.waiting)!.getAttribute('aria-current')).toBe('true');
   expect(pinnedRow(ids.waiting)!.classList.contains('ib-on')).toBe(true);
   // A question count, as a project's.
   expect(pinnedRow(ids.waiting)!.querySelector('.ib-n')!.textContent).toBe('1');
-  await act(async () => toggle().click());
+  expect(await chooseThreadPin()).toBe('Unpin thread');
   await until(() => pinnedSection() === null, 'the section to go');
   await until(() => !!toast(), 'the Unpinned toast');
   expect(toast()!.textContent).toContain('Unpinned');
   expect(toast()!.textContent).toContain('Still in Waiting on you');
 });
 
-test.skipIf(!hasDom)("a quick pin-then-unpin on the header's toggle sends both, in order, and ends unpinned", async () => {
+test.skipIf(!hasDom)('pinning from the header menu while Pinned is closed opens Pinned, so the new pin is seen', async () => {
+  await serverPin(ids.stopped, true);
+  storage.setItem(SIDEBAR_CLOSED_COOKIE, 'pinned');
+  await renderApp(`#thread=${ids.waiting}`);
+  const header = () => document.querySelector<HTMLElement>('[data-sidebar-section="pinned"]')!;
+  await until(() => pinnedSection() !== null, 'Pinned');
+  // Closed: the pin that is not on screen is not drawn; its Stopped counts on the header.
+  expect(header().getAttribute('aria-expanded')).toBe('false');
+  expect(pinnedOrder()).toEqual([]);
+  expect(header().querySelector('.ib-n')!.textContent).toContain('1');
+  expect(await chooseThreadPin()).toBe('Pin thread');
+  await until(() => pinnedOrder().length === 2, 'both pinned rows');
+  expect(header().getAttribute('aria-expanded')).toBe('true');
+  expect(storage.getItem(SIDEBAR_CLOSED_COOKIE)).toBeNull();
+});
+
+test.skipIf(!hasDom)("a quick pin-then-unpin from the header menu sends both, in order, and ends unpinned", async () => {
   await renderApp(`#thread=${ids.mixed}`);
-  await until(() => !!document.querySelector('[data-pin-toggle]'), 'the header toggle');
-  const toggle = () => document.querySelector<HTMLElement>('[data-pin-toggle]')!;
-  // Two clicks before the first request answers: the second shows at once and is not lost.
-  await act(async () => {
-    toggle().click();
-    toggle().click();
-  });
-  expect(toggle().getAttribute('aria-pressed')).toBe('false');
+  // Two choices before the first request answers: the second is not lost.
+  expect(await chooseThreadPin()).toBe('Pin thread');
+  expect(await chooseThreadPin()).toBe('Unpin thread');
   await until(() => posted.filter((p) => p.path.endsWith(`/threads/${ids.mixed}/pin`)).length === 2, 'both requests');
   expect(posted.filter((p) => p.path.endsWith(`/threads/${ids.mixed}/pin`)).map((p) => p.body.pinned)).toEqual([true, false]);
   await until(() => !!toast(), 'the Unpinned toast');
   expect(await serverPins()).toEqual([]);
   expect(pinnedSection()).toBeNull();
-  expect(toggle().getAttribute('aria-pressed')).toBe('false');
+  expect((await openThreadMenu()).textContent).toBe('Pin thread');
 });
 
 test.skipIf(!hasDom)('a click opens the thread and keeps the project filter; the open thread\'s pinned row does nothing', async () => {
@@ -390,7 +431,7 @@ test.skipIf(!hasDom)('an archived thread stays pinned, shown archived, and opens
   expect(pinnedRow(ids.same)!.classList.contains('ib-calm')).toBe(true);
   await act(async () => pinnedRow(ids.same)!.click());
   await until(() => window.location.hash.includes(`thread=${ids.same}`), 'the thread');
-  await until(() => !!document.querySelector('[data-pin-toggle][aria-pressed="true"]'), 'the thread open, pinned');
+  await until(async () => (await openThreadMenu()).textContent === 'Unpin thread', 'the thread open, pinned');
 });
 
 test.skipIf(!hasDom)('many pins: every one drawn in the shared scroll area with Projects', async () => {

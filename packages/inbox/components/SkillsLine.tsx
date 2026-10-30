@@ -1,45 +1,30 @@
 /**
- * The quiet "Skills: …" line under a person's message (approval
- * "inbox-skill-references", the Quiet look): the skills block the window
- * pasted at the end of the message when it was sent, folded behind one muted
- * line. Open, it shows the block exactly as the agent received it: the list,
- * and each human-only skill's SKILL.md between its markers. Only the person's
- * own messages are read this way (Thread.tsx's MessageBody); an agent's
- * message is shown whole.
+ * The quiet skills line under a person's message (approval
+ * "inbox-skills-line", option B, 2026-10-29): the box icon, then the names of
+ * the skills the reply used as a comma list. Nothing to open: no label, no
+ * size, no Show. The block the window pasted at the end of the message is
+ * split off by Thread.tsx's MessageBody; the agent's text is shown whole.
+ * The line sits in the message body, above the Delivered line, so it is in
+ * the same place whatever the state (sent, queued, answered). A long list
+ * wraps between names, never inside one.
  */
 import type { InboxSkillsSplit } from '@plannotator/core/skill-reference-block';
 
-/** "0.4 KB": the size of the instructions that went with the message. */
-function kilobytes(bytes: number): string {
-  return `${(bytes / 1024).toFixed(1)} KB`;
-}
-
-/** "readback's instructions went with this reply (0.4 KB)", or '' when none did. */
-export function skillsLineDetail(split: InboxSkillsSplit): string {
-  const included = split.skills.filter((s) => s.included);
-  if (included.length === 0) return '';
-  const bytes = included.reduce((sum, s) => sum + s.bytes, 0);
-  const what = included.length === 1 ? `${included[0]!.name}'s instructions` : `the instructions for ${included.map((s) => s.name).join(', ')}`;
-  return `${what} went with this ${split.subject} (${kilobytes(bytes)})`;
-}
-
 export function SkillsLine({ split }: { split: InboxSkillsSplit }) {
   const names = split.skills.map((s) => s.name).join(', ');
-  const detail = skillsLineDetail(split);
   return (
-    <details className="ib-skills" data-skills-line="">
-      <summary>
-        <SkillCube />
-        <span className="ib-skills-l">
-          Skills: <span className="ib-skills-n">{names}</span>
-          {detail ? <span className="ib-skills-d"> · {detail}</span> : null}
-        </span>
-        <span className="ib-skills-t" aria-hidden="true" />
-      </summary>
-      <pre className="ib-skills-block" data-skills-block="" tabIndex={0} aria-label={`What went with this ${split.subject}`}>
-        {split.block}
-      </pre>
-    </details>
+    <div className="ib-skills" data-skills-line="" title={`Skills you referenced: ${names}`}>
+      <SkillCube />
+      <span className="ib-sr">Skills: </span>
+      <span className="ib-skills-n">
+        {split.skills.map((s, i) => (
+          <span key={s.name}>
+            <span className="ib-skill-nm" data-skill-name="">{s.name}</span>
+            {i < split.skills.length - 1 ? ', ' : ''}
+          </span>
+        ))}
+      </span>
+    </div>
   );
 }
 

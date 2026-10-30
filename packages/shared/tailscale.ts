@@ -94,8 +94,53 @@ export const runTailscale: TailscaleRunner = (args, timeoutMs) => {
   };
 };
 
+/**
+ * A failure whose cause is Tailscale's own state on this computer or tailnet,
+ * in plain words with the next step, from what the CLI printed. Undefined for
+ * anything else (the caller shows Tailscale's own text).
+ *
+ * Serve off for the tailnet (or its HTTPS certificates off): `tailscale serve`
+ * prints Tailscale's text ("Serve is not enabled on your tailnet. To enable,
+ * visit:") and an admin link on stdout, then either exits 0 or waits for the
+ * user to turn it on (we time out). Either way that link is the next step:
+ * Tailscale's "Start using Serve" page, where one Enable HTTPS press (HTTPS
+ * certificates ticked, Funnel optional) turns it on for the whole tailnet.
+ * The rest is `tailscale` refusing to run: stopped, signed out, waiting for
+ * approval (cmd/tailscale/cli isRunningOrStarting), or no daemon to talk to.
+ */
+export function explainTailscaleSetup(result: TailscaleRunResult): string | undefined {
+  const output = `${result.stdout}\n${result.stderr}`;
+  const links = output.match(/https:\/\/[^\s"'<>]+/g) ?? [];
+  const enableLink = links.find((link) => /\/f\/(?:serve|https)\b/.test(link));
+  if (enableLink || /\b(?:serve|https)\b[^\n]*\bnot enabled\b/i.test(output)) {
+    const link = enableLink ?? links.find((candidate) => /login\.tailscale\.com/.test(candidate));
+    return (
+      "Tailscale Serve is off for your tailnet. That is a one-time Tailscale setting, not a Plannotator bug.\n" +
+      (link
+        ? `Open ${link} and press Enable HTTPS (keep "HTTPS certificates" ticked; Funnel is not needed), then try again.`
+        : "Turn on HTTPS certificates in the Tailscale admin console (https://login.tailscale.com/admin/dns), then try again.")
+    );
+  }
+  if (/\bLogged out\b/.test(output)) {
+    const login = /Log in at:\s*(https:\/\/\S+)/.exec(output)?.[1];
+    return `Tailscale is signed out on this computer. Sign in ${login ? `at ${login}` : "with `tailscale up` or the Tailscale app"}, then try again.`;
+  }
+  if (/Tailscale is stopped/.test(output)) {
+    return "Tailscale is turned off on this computer. Turn it on with `tailscale up` or the Tailscale app, then try again.";
+  }
+  if (/not yet approved/i.test(output)) {
+    return "This computer is waiting for approval in the Tailscale admin console (Machines). Approve it, then try again.";
+  }
+  if (/Failed to connect to local Tailscale|not running\?|tailscaled\.service not running/i.test(output)) {
+    return "Tailscale is not running on this computer. Open the Tailscale app (or start tailscaled), then try again.";
+  }
+  return undefined;
+}
+
 /** Turn a failed CLI invocation into one actionable sentence. */
 export function describeTailscaleFailure(result: TailscaleRunResult): string {
+  const explained = explainTailscaleSetup(result);
+  if (explained) return explained;
   if (result.error) {
     const code = (result.error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {

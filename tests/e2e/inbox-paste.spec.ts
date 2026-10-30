@@ -13,7 +13,11 @@
  *  2. The reply box: two pasted images (one held mid-upload for the picture),
  *     Send carries both; the agent's wait_for_reply names them; the sent reply
  *     shows them in the thread's tiles.
- *  3. A phone: the tiles fit the reply box at 390 and 320 px.
+ *  3. The reply box's paperclip and drops (approval "inbox-reply-attach"):
+ *     files dropped on the thread with the reply closed open it holding them,
+ *     the paperclip and a drop on the box add more with their own names, a
+ *     text drag is not taken, and Send carries them all to the agent.
+ *  4. A phone: the tiles fit the reply box at 390 and 320 px.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs land in .local/proof/paste-images/ (and PASTE_SHOTS_DIR when set).
@@ -248,6 +252,87 @@ test('the reply box: two pasted images (one still uploading), Send carries both 
   const body = (answer.reply as { body: string }).body;
   expect(body).toContain('The legend sits on top of the axis labels.');
   for (const name of names) expect(body).toMatch(new RegExp(`\\nAttached: ${name.replace(/\./g, '\\.')} \\(/.+/inbox/uploads/att_[0-9A-Z]+/${name.replace(/\./g, '\\.')}\\)`));
+  expect(world.errors).toEqual([]);
+});
+
+/**
+ * A real DragEvent of `type` on the first element `selector` matches, its
+ * dataTransfer carrying `files` (as the file manager hands them over) or text.
+ * Returns whether the page took it.
+ */
+async function dragOn(page: Page, selector: string, type: 'dragenter' | 'dragover' | 'drop', content: { files?: { name: string; type: string; b64: string }[]; text?: string }): Promise<boolean> {
+  return page.evaluate(
+    ({ selector, type, files, text }) => {
+      const data = new DataTransfer();
+      for (const file of files) data.items.add(new File([Uint8Array.from(atob(file.b64), (c) => c.charCodeAt(0))], file.name, { type: file.type }));
+      if (text !== null) data.setData('text/plain', text);
+      const target = document.querySelector(selector)!;
+      const r = target.getBoundingClientRect();
+      const event = new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    },
+    { selector, type, files: content.files ?? [], text: content.text ?? null },
+  );
+}
+
+test('the reply box: files dropped on the thread open the reply holding them; the paperclip and a drop on the box add more; Send carries them all', async () => {
+  const { page, agent } = world;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${world.url}#thread=${world.threadId}`);
+  const pane = page.locator('section.ib-pane');
+  await expect(pane.getByRole('button', { name: 'Reply', exact: true }).last()).toBeVisible();
+  await expect(pane.locator('.ib-rbox')).toHaveCount(0);
+  const picture = await screenshotBytes(page, { x: 0, y: 0, width: 640, height: 360 });
+  const png = { name: 'ledger-q3-export.png', type: 'image/png', b64: picture.toString('base64') };
+
+  // A link dragged over the thread: not taken, no target.
+  expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'dragover', { text: 'https://example.com/q3' })).toBe(false);
+  await expect(pane.locator('[data-pane-drop]')).toHaveCount(0);
+  // Files over the thread: the whole pane is the target.
+  expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'dragenter', { files: [png] })).toBe(true);
+  expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'dragover', { files: [png] })).toBe(true);
+  await expect(pane.locator('[data-pane-drop]')).toBeVisible();
+  await shot(page, '05-reply-dragover-pane', ['dark']);
+  expect(await dragOn(page, 'section.ib-pane .ib-pbody', 'drop', { files: [png] })).toBe(true);
+  await expect(pane.locator('[data-pane-drop]')).toHaveCount(0);
+  // The drop opened the reply box with the file.
+  const box = pane.locator('.ib-rbox');
+  await expect(box.locator('[data-compose-file="done"][data-compose-file-name="ledger-q3-export.png"]')).toHaveCount(1);
+
+  // The paperclip, first in the box's toolbar: any file, its own name kept.
+  const clip = box.locator('.ib-rfoot > label:first-child');
+  await expect(clip).toHaveAccessibleName('Attach files');
+  await box.locator('[data-reply-attach]').setInputFiles({ name: 'currency-notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Currency\n\nEUR rows lose the column.\n') });
+  await expect(box.locator('[data-compose-file="done"][data-compose-file-name="currency-notes.md"]')).toHaveCount(1);
+
+  // A drop on the box itself: a dashed "Drop to attach", the pane's target off.
+  const zip = { name: 'exports-2026-10.zip', type: 'application/zip', b64: Buffer.from('PK\u0005\u0006' + '\u0000'.repeat(18), 'binary').toString('base64') };
+  expect(await dragOn(page, 'section.ib-pane .ib-rbox textarea', 'dragover', { files: [zip] })).toBe(true);
+  await expect(box).toHaveAttribute('data-drop-over', '');
+  await expect(box.locator('[data-box-drop]')).toBeVisible();
+  await expect(pane.locator('[data-pane-drop]')).toHaveCount(0);
+  await shot(page, '06-reply-dragover-box', ['dark']);
+  expect(await dragOn(page, 'section.ib-pane .ib-rbox textarea', 'drop', { files: [zip] })).toBe(true);
+  await expect(box).not.toHaveAttribute('data-drop-over', /.*/);
+  await expect(box.locator('[data-compose-file="done"]')).toHaveCount(3);
+  await box.getByRole('textbox').fill('Here is the Q3 export, my notes and the raw files.');
+  await shot(page, '07-reply-attached-chips', ['dark']);
+
+  await pane.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(box).toHaveCount(0);
+  const names = ['ledger-q3-export.png', 'currency-notes.md', 'exports-2026-10.zip'];
+  const reply = pane.locator('article.ib-message').last();
+  for (const name of names) await expect(reply.locator(`.ib-att-t[data-attachment-name="${name}"]`)).toBeVisible();
+  // The agent may not have read the earlier test's reply yet: read on until this one.
+  let body = '';
+  let cursor: number | undefined;
+  for (let i = 0; i < 3 && !body.includes('Here is the Q3 export'); i++) {
+    const answer = await agent.waitForReply(world.threadId, 10, cursor);
+    body = (answer.reply as { body: string }).body;
+    cursor = answer.cursor as number | undefined;
+  }
+  for (const name of names) expect(body).toContain(`Attached: ${name} (`);
   expect(world.errors).toEqual([]);
 });
 

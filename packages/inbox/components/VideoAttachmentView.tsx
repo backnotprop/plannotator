@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { forwardRef, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { formatInboxVideoTime, inboxVideoMeta, readInboxVideoTime, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
@@ -10,6 +10,7 @@ import { formatBytes, plural } from '../format';
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { Tip } from './Tip';
+import { FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
@@ -101,6 +102,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   /** The window's toast ("Markup added to your reply · Undo"). */
   onNotice?: Notice;
 }>(function VideoAttachmentView({ attachment, version, annotations, selectedId, onSelect, readOnly, onSave, onError, phone, poster, suggestion, onRemove, onNotice }, ref) {
+  /** Full screen's composer (the pane gives it there): the comment row goes inside it. */
+  const fullComposer = useContext(FullScreenComposerContext);
   const source = useInboxFileSource();
   const suggested = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -328,70 +331,97 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       </span>
     );
 
-  const composer = !readOnly && (!phone || composing) && (
-    <div className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
-      <div className="ib-ccard">
-        {chip}
-        {kept ? (
-          <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} wide />
-        ) : (
-          (markup || frame) && (
-            // `ib-markup` on a drawing: the pane's unsaved-comment question (unsavedComposer) knows a drawing not yet commented.
-            <Tip content={markup ? 'Your marked-up frame rides this comment' : `The frame at ${formatInboxVideoTime(shownTime)} rides this comment`}>
-              <span className={`ib-vframe${markup ? ' ib-markup' : ''}`} data-video-frame="">
-                <img src={markup ? getImageSrc(markup.path) : frame!.url} alt="" />
-                {markup && (
-                  <span className="ib-vpen" aria-hidden="true">
-                    <Icon name="pen" size={9} />
-                  </span>
-                )}
-              </span>
-            </Tip>
-          )
-        )}
-        <textarea
-          ref={textRef}
-          className="ib-ta"
-          rows={1}
-          value={text}
-          placeholder={kept ? 'Note (optional)' : `Comment at ${formatInboxVideoTime(shownTime)}…`}
-          aria-label={kept ? `A note with your drawing at ${formatInboxVideoTime(kept.time)}` : `Comment on ${attachment.name} at ${formatInboxVideoTime(shownTime)}`}
-          onChange={(event) => {
-            const value = event.target.value;
-            setText(value);
-            // Typing pauses the film and pins the moment; clearing the words lets the moment follow the film again.
-            if (value.trim() !== '' && pinned === null) void pin();
-            else if (value.trim() === '' && !markup && !kept && !phone) {
-              setPinned(null);
-              replaceFrame(null);
-            }
-          }}
-          onKeyDown={(event) => {
-            if (isCommentSubmitKey(event, enterSavesComment)) {
-              event.preventDefault();
-              event.stopPropagation();
-              void submit();
-            }
-          }}
-        />
-        <Tip content="Draw on this frame (pen, arrow, circle)">
-          <button type="button" className="ib-btn ib-cbtn" onClick={() => void openMarkup()} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
-            <Icon name="pen" size={15} />
-            <span className="ib-cbtn-l" aria-hidden="true">
-              {markup || kept ? 'Redraw' : 'Mark up'}
+  // The comment row: under the film beside the thread (a phone opens it from "Comment at"), inside the
+  // full-screen composer's Comment tab in full screen.
+  const commentCard = (
+    <div className="ib-ccard">
+      {chip}
+      {kept ? (
+        <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} wide />
+      ) : (
+        (markup || frame) && (
+          // `ib-markup` on a drawing: the pane's unsaved-comment question (unsavedComposer) knows a drawing not yet commented.
+          <Tip content={markup ? 'Your marked-up frame rides this comment' : `The frame at ${formatInboxVideoTime(shownTime)} rides this comment`}>
+            <span className={`ib-vframe${markup ? ' ib-markup' : ''}`} data-video-frame="">
+              <img src={markup ? getImageSrc(markup.path) : frame!.url} alt="" />
+              {markup && (
+                <span className="ib-vpen" aria-hidden="true">
+                  <Icon name="pen" size={9} />
+                </span>
+              )}
             </span>
-          </button>
-        </Tip>
-        {phone && (
-          <button type="button" className="ib-btn ib-ccancel" onClick={reset} data-video-cancel="">
-            Cancel
-          </button>
-        )}
-        <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={!canSave} data-video-comment-save="">
-          {kept ? 'Add note' : 'Comment'}
+          </Tip>
+        )
+      )}
+      <textarea
+        ref={textRef}
+        className="ib-ta"
+        rows={1}
+        value={text}
+        placeholder={kept ? 'Note (optional)' : `Comment at ${formatInboxVideoTime(shownTime)}…`}
+        aria-label={kept ? `A note with your drawing at ${formatInboxVideoTime(kept.time)}` : `Comment on ${attachment.name} at ${formatInboxVideoTime(shownTime)}`}
+        onChange={(event) => {
+          const value = event.target.value;
+          setText(value);
+          // Typing pauses the film and pins the moment; clearing the words lets the moment follow the film again
+          // (a phone's row opened from "Comment at" keeps its moment until Cancel; full screen's composer has no
+          // Cancel, so there clearing the words lets go of it, and the next moment is pinned as before).
+          if (value.trim() !== '' && pinned === null) void pin();
+          else if (value.trim() === '' && !markup && !kept && (!phone || fullComposer)) {
+            setPinned(null);
+            replaceFrame(null);
+          }
+        }}
+        onFocus={() => {
+          // A phone in full screen's composer: a tap in the comment field is "Comment at" (that button is gone
+          // there), so the film pauses and the moment pins as the field takes focus, not at the first keystroke.
+          if (phone && fullComposer && pinned === null && !kept && !markup) void pin();
+        }}
+        onKeyDown={(event) => {
+          if (isCommentSubmitKey(event, enterSavesComment)) {
+            event.preventDefault();
+            event.stopPropagation();
+            void submit();
+          }
+        }}
+      />
+      <Tip content="Draw on this frame (pen, arrow, circle)">
+        <button type="button" className="ib-btn ib-cbtn" onClick={() => void openMarkup()} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
+          <Icon name="pen" size={15} />
+          <span className="ib-cbtn-l" aria-hidden="true">
+            {markup || kept ? 'Redraw' : 'Mark up'}
+          </span>
         </button>
-      </div>
+      </Tip>
+      {phone && !fullComposer && (
+        <button type="button" className="ib-btn ib-ccancel" onClick={reset} data-video-cancel="">
+          Cancel
+        </button>
+      )}
+      <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={!canSave} data-video-comment-save="">
+        {kept ? 'Add note' : 'Comment'}
+      </button>
     </div>
+  );
+  const composer = fullComposer ? (
+    <FullScreenComposer
+      value={fullComposer}
+      noun="video"
+      comment={
+        readOnly ? null : (
+          <div className="ib-fcomp-comment" data-video-composer="" data-image-composer="">
+            {commentCard}
+          </div>
+        )
+      }
+    />
+  ) : (
+    !readOnly &&
+    (!phone || composing) && (
+      <div className="ib-imgcompose ib-vidcompose" data-video-composer="" data-image-composer="">
+        {commentCard}
+      </div>
+    )
   );
 
   const meta = inboxVideoMeta(attachment);
@@ -429,7 +459,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
             }}
             onPause={() => {
               // The first pause, with nothing written yet: the suggestion fills the box, and the moment pins.
-              if (!suggestion || suggested.current || readOnly || text.trim() !== '' || phone) return;
+              // A phone shows the row only from "Comment at", or in full screen's composer (always there).
+              if (!suggestion || suggested.current || readOnly || text.trim() !== '' || (phone && !fullComposer)) return;
               suggested.current = true;
               setText(suggestion.comment);
               void pin();
@@ -510,7 +541,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
         )}
       </div>
       {composer}
-      {phone && !readOnly && !composing && (
+      {phone && !readOnly && !composing && !fullComposer && (
         <div className="ib-vbar" data-file-foot="">
           <button
             type="button"

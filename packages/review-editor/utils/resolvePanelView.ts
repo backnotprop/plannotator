@@ -1,4 +1,4 @@
-import type { ReviewPanelView } from '../components/PanelViewToggle';
+import type { ReviewPanelView } from '../components/ReviewPanelHeader';
 
 /**
  * Resolve the SELECTED panel view (session ?? last-used ?? persisted) into

@@ -15,7 +15,7 @@
  * review would undo it), config.json's layout not adopted on load, and a
  * phone drawing two narrow columns or rewriting the person's setting.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { plugin } from 'bun';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, test } from 'bun:test';

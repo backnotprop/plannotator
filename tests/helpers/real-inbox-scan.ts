@@ -150,7 +150,7 @@ export function homePathFindings(source: string): string[] {
 }
 
 /** The agents' own folders the Inbox writes to (packages/server/inbox-agents.ts, its notes). */
-const AGENT_DIR = String.raw`(?:\.claude|\.codex|\.gemini|\.cursor|\.kiro|\.pi|\.vibe|\.copilot|\.config["'\`]?\s*,\s*["'\`](?:opencode|amp|devin|Claude)|\.config[/\\](?:opencode|amp|devin|Claude)|Library[/\\]Application Support[/\\]Claude|Library["'\`]\s*,\s*["'\`]Application Support)(?![\w.-])`;
+const AGENT_DIR = String.raw`(?:\.claude|\.codex|\.gemini|\.qwen|\.cursor|\.kiro|\.pi|\.vibe|\.copilot|\.config["'\`]?\s*,\s*["'\`](?:opencode|amp|devin|Claude)|\.config[/\\](?:opencode|amp|devin|Claude)|Library[/\\]Application Support[/\\]Claude|Library["'\`]\s*,\s*["'\`]Application Support)(?![\w.-])`;
 
 /**
  * A path from the real home directory to an agent's own folder (`~/.codex`,

@@ -120,10 +120,12 @@ export function openAttachmentTitle(displayPath: string): string {
  * route the window reads (`#thread=…&file=…`), so "Open in new tab", drag
  * and copy land on the file rather than on a path the Inbox does not serve.
  */
-export function attachmentDeepLink(threadId: string, attachmentId: string): string {
+export function attachmentDeepLink(threadId: string, attachmentId: string, version: 'current' | 'sent' = 'current'): string {
   const params = new URLSearchParams();
   params.set('thread', threadId);
   params.set('file', attachmentId);
+  // The route's own parameter for the version the agent sent (App.tsx routeOf / hashOf).
+  if (version === 'sent') params.set('v', 'sent');
   return `#${params.toString()}`;
 }
 

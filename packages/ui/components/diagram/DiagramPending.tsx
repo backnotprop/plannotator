@@ -48,12 +48,22 @@ export const DiagramPending: React.FC<{ block: Block; kind: DiagramKind }> = ({ 
  * The same pending state inside the boxes the block itself renders it in
  * (the block wrapper, the inline host, the viewer's fallback slot), so the
  * Suspense fallback occupies the same space the block will.
+ *
+ * With `notice` (the block's chunk failed to load, `LazyBlockBoundary`) the
+ * notice takes the status line's place over the same source.
  */
-export const DiagramBlockPending: React.FC<{ block: Block; kind: DiagramKind }> = ({ block, kind }) => (
+export const DiagramBlockPending: React.FC<{ block: Block; kind: DiagramKind; notice?: React.ReactNode }> = ({ block, kind, notice }) => (
   <div className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
     <div data-diagram-inline="">
       <div data-diagram-fallback="" className="h-full min-h-0 w-full">
-        <DiagramPending block={block} kind={kind} />
+        {notice === undefined ? (
+          <DiagramPending block={block} kind={kind} />
+        ) : (
+          <>
+            {notice}
+            <DiagramInlineSource block={block} kind={kind} />
+          </>
+        )}
       </div>
     </div>
   </div>

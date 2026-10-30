@@ -241,6 +241,8 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
 
   // A host's control in a tab on this card (the Inbox's diff layout, on the first card); nothing otherwise.
   const tab = host.renderSectionTab?.(index) ?? null;
+  // A host's content at the foot of the prose column (VS Code: ask about this chapter); nothing otherwise.
+  const footer = host.renderSectionFooter?.(index) ?? null;
   const tabbed = tab !== null && tab !== undefined && tab !== false;
   const withTab = (card: React.ReactNode, fill: string) =>
     tabbed ? (
@@ -346,6 +348,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 ))}
               </div>
             )}
+            {footer && <div className="mt-4 md:flex-none">{footer}</div>}
           </div>
         </div>
 

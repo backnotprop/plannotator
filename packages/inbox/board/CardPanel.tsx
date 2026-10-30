@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
@@ -13,8 +13,10 @@ import {
   type InboxCardWire,
   type InboxListRow,
 } from '@plannotator/core/inbox-types';
+import type { InboxProjectRepo } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
-import { checksText } from '@plannotator/ui/components/RefHoverCard';
+import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
+import { checksText, useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
@@ -28,6 +30,8 @@ export interface CardPanelProps {
   /** The card's links resolved (null while they are read; a failure keeps the reference quiet). */
   refs: { ref: InboxCardRef; result: ForgeRefCardResult }[] | null;
   projectName: string;
+  /** The card's own project's repo: bare `#123` in its text links there (null: unknown, or not read yet). */
+  repo?: InboxProjectRepo | null;
   /** The agent's session now: working, idle, ended (not live), or unknown (null: no agent, or not read yet). */
   state: 'working' | 'idle' | 'ended' | null;
   /** Whether "Ask for an update" and "Create thread" have a live session to go to (the card's agent, else one in its project). */
@@ -77,6 +81,11 @@ export function CardPanel(props: CardPanelProps) {
   const heading = useRef<HTMLHeadingElement>(null);
   // Focus goes into the panel when a card opens (another card: the new one's title).
   useEffect(() => heading.current?.focus(), [card.id]);
+  // The card's words (You, notes, what was said) render as a thread message's
+  // do: refs and URLs link, with hover cards on issue and PR links.
+  const body = useRef<HTMLDivElement>(null);
+  const refCard = useRefHoverCards(body);
+  const text = (words: string) => <CardText text={words} repo={props.repo ?? null} />;
   const foot = cardFoot(card);
   const sent = sentTo(card);
   const refs = inboxCardRefsOf(card);
@@ -134,7 +143,8 @@ export function CardPanel(props: CardPanelProps) {
           </Tip>
         )}
       </div>
-      <div className="ib-crdp-body">
+      {refCard}
+      <div className="ib-crdp-body" ref={body}>
         <h2 id={headingId} ref={heading} tabIndex={-1} dir="auto" className="ib-crdp-h">
           {card.title}
         </h2>
@@ -170,7 +180,7 @@ export function CardPanel(props: CardPanelProps) {
         </div>
         {you && (
           <p className="ib-crdp-you" data-card-you="" id={`${headingId}-you`}>
-            <b>You:</b> {you}
+            <b>You:</b> {text(you)}
           </p>
         )}
         {card.column === 'dropped' && card.dropped && (
@@ -179,7 +189,7 @@ export function CardPanel(props: CardPanelProps) {
             {card.dropped.reason ? `: ${card.dropped.reason}` : ''}
           </p>
         )}
-        <Notes card={card} onSave={props.onNotes} />
+        <Notes card={card} onSave={props.onNotes} text={text} />
         {card.threads.length > 0 && (
           <section className="ib-crdp-sec" aria-label="Threads">
             <h3>
@@ -235,7 +245,7 @@ export function CardPanel(props: CardPanelProps) {
                       {words.after}
                       {words.quote && (
                         <span className="ib-crdp-hq" dir="auto">
-                          {words.quote}
+                          {text(words.quote)}
                         </span>
                       )}
                     </span>
@@ -460,7 +470,7 @@ function CreateThreadButton({ primary, disabled, onCreate }: { primary: boolean;
 }
 
 /** The person's notes: shown, and edited in place (Save keeps them; empty clears them). */
-function Notes({ card, onSave }: { card: InboxCardWire; onSave: (notes: string | null) => Promise<boolean> }) {
+function Notes({ card, onSave, text: render }: { card: InboxCardWire; onSave: (notes: string | null) => Promise<boolean>; text: (words: string) => ReactNode }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(card.notes ?? '');
   const [failed, setFailed] = useState(false);
@@ -526,7 +536,7 @@ function Notes({ card, onSave }: { card: InboxCardWire; onSave: (notes: string |
       {card.notes ? (
         card.notes.split(/\n{2,}/).map((para, index) => (
           <p key={index} dir="auto">
-            {para}
+            {render(para)}
           </p>
         ))
       ) : (
@@ -583,6 +593,15 @@ function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolve
       )}
     </li>
   );
+}
+
+/**
+ * A line of the card's words, through the same inline markdown as a thread
+ * message: a bare `#123` links into the card's project's repo, `owner/repo#123`
+ * and full URLs link as written. The lane cards keep plain text.
+ */
+function CardText({ text, repo }: { text: string; repo: InboxProjectRepo | null }) {
+  return <InlineMarkdown text={text} githubRepo={repo?.display} repoHost={repo?.host ?? undefined} />;
 }
 
 /** Link an issue or PR from the opened card. */

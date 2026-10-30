@@ -9,7 +9,7 @@
  * (which also carries the active document) printed the open document twice.
  * This module decides the split once, for every export path.
  */
-import type { Annotation, Block, ImageAttachment } from '@plannotator/ui/types';
+import type { Annotation, Block, DocumentRenderAs, ImageAttachment } from '@plannotator/ui/types';
 import type { FeedbackDocuments } from '@plannotator/ui/hooks/useLinkedDoc';
 import {
   diagramDocumentBlocks,
@@ -21,19 +21,23 @@ import {
   type LinkedDocExportHeading,
   type MessageAnnotationEntry,
 } from '@plannotator/ui/utils/parser';
-import { diagramRenderKindForPath, isDiagramRenderKind, shouldStripFrontmatter } from '@plannotator/shared/annotatable';
+import { parseAsciidocToBlocks } from '@plannotator/ui/utils/asciidocParser';
+import { documentRenderKindForPath, isDiagramRenderKind, shouldStripFrontmatter } from '@plannotator/shared/annotatable';
 
 /**
- * Blocks for a document identified by path: a diagram source (.mmd/.dot) is
- * ONE diagram block over its raw text, everything else is the markdown parse
- * with that path's frontmatter rule.
+ * Blocks for a document body rendered as `renderAs`: a diagram source
+ * (.mmd/.dot) is ONE diagram block over its raw text, AsciiDoc goes through
+ * the AsciiDoc parser, everything else is the markdown parse.
  */
-export const blocksForDocument = (filepath: string, text: string): Block[] => {
-  const kind = diagramRenderKindForPath(filepath);
-  return kind !== null
-    ? diagramDocumentBlocks(text, kind)
-    : parseMarkdownToBlocks(text, { frontmatter: shouldStripFrontmatter(filepath) });
+export const blocksForRenderAs = (text: string, renderAs: DocumentRenderAs | undefined, frontmatter: boolean): Block[] => {
+  if (isDiagramRenderKind(renderAs)) return diagramDocumentBlocks(text, renderAs);
+  if (renderAs === 'asciidoc') return parseAsciidocToBlocks(text);
+  return parseMarkdownToBlocks(text, { frontmatter });
 };
+
+/** Blocks for a document identified by path, with that path's frontmatter rule. */
+export const blocksForDocument = (filepath: string, text: string): Block[] =>
+  blocksForRenderAs(text, documentRenderKindForPath(filepath) ?? 'markdown', shouldStripFrontmatter(filepath));
 
 /**
  * Merge local annotations with SSE-delivered external ones, dropping
@@ -96,9 +100,7 @@ export function resolveFeedbackSections(input: FeedbackSectionsInput): FeedbackS
     annotations = mergeExternalAnnotations(root.annotations, input.externalAnnotations);
     globalAttachments = root.globalAttachments;
     const markdown = root.markdown ?? '';
-    blocks = isDiagramRenderKind(root.renderAs)
-      ? diagramDocumentBlocks(markdown, root.renderAs)
-      : parseMarkdownToBlocks(markdown, { frontmatter: shouldStripFrontmatter(input.sourceFilePath) });
+    blocks = blocksForRenderAs(markdown, root.renderAs, shouldStripFrontmatter(input.sourceFilePath));
   }
 
   const order = input.bundleOrder ?? null;

@@ -19,7 +19,7 @@
  * loud; the agent's own done hiding the person's note; the old "Add note…"
  * and "10 s" words coming back.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -27,9 +27,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection, InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import { parseInboxActionBlocks } from '@plannotator/core/inbox-actions';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 
 const hasDom = typeof document !== 'undefined';
-const { ActionChecklist } = (hasDom ? await import('./components/ActionChecklist') : {}) as typeof import('./components/ActionChecklist');
+const { ActionChecklist, taskMarkdown } = (hasDom ? await import('./components/ActionChecklist') : {}) as typeof import('./components/ActionChecklist');
 const { MessageBody } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
@@ -196,6 +198,20 @@ test.skipIf(!hasDom)('adjacent `:::action` blocks are one card; blocks separated
   // The block's own lines are never drawn as a callout beside the card.
   expect(text).not.toContain('Where: https://github.com');
   expect(text).not.toContain('Run: ');
+});
+
+test.skipIf(!hasDom)('refs in a task stay plain text in its toggle (a button); its why links them into the thread repo', () => {
+  const action = record(0, { prompt: 'Merge acme/web#12 and #3, not `acme/web#13`', context: 'Then team/app#4 can ship.' });
+  const el = mount(<ActionChecklist actions={[action]} agent="Claude Code" refRepo={{ display: 'group/web', host: 'gitlab.example.com' }} onMark={async () => true} />);
+  const toggle = el.querySelector('[data-action-toggle]')!;
+  expect(toggle.querySelector('a')).toBeNull();
+  expect(toggle.textContent).toContain('Merge acme/web#12 and #3, not acme/web#13');
+  const why = el.querySelector('[data-action-why]')!;
+  expect([...why.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'))).toContain('https://gitlab.example.com/team/app/-/issues/4');
+  // The task's text holds no link even where refs would link (a renderer given a repo).
+  const html = renderToStaticMarkup(<InlineMarkdown text={taskMarkdown(action.prompt)} githubRepo="group/web" repoHost="gitlab.example.com" />);
+  expect(html).not.toContain('acme/web/-/issues/12');
+  expect(html).not.toContain('`');
 });
 
 test.skipIf(!hasDom)('the header: how many, how many done, one badge (Holds up sums; Stopped wins); the watching line once, no timer words', () => {
@@ -665,7 +681,7 @@ test.skipIf(!hasDom)("Copy is named by its visible words, and its result is said
   expect(['Command copied.', "Couldn't copy the command."]).toContain(status.textContent!);
 });
 
-test.skipIf(!hasDom)('the row says "1 action item", or "1 question, 1 action item", as plain text', () => {
+test.skipIf(!hasDom)('the row draws open action items as the box pill and open questions as the speech bubble, wide, beside a thread and on a phone; none draws nothing', () => {
   expect(waitCount(1, 1)).toBe('1 action item');
   expect(waitCount(2, 1)).toBe('1 question, 1 action item');
   expect(waitCount(3, 1)).toBe('2 questions, 1 action item');
@@ -693,13 +709,56 @@ test.skipIf(!hasDom)('the row says "1 action item", or "1 question, 1 action ite
     sent: null,
     guide: false,
   });
-  const sections: InboxListSection[] = [{ id: 'stopped', label: 'Stopped on you', threads: [row('msg_a', 1, 1), row('msg_b', 2, 1)] }];
-  const el = mount(
+  const answered = { ...row('msg_e', 2, 1), answered_not_sent: true };
+  const sections: InboxListSection[] = [{ id: 'stopped', label: 'Stopped on you', threads: [row('msg_a', 1, 1), row('msg_b', 3, 1), row('msg_c', 2, 0), row('msg_d', 14, 12), row('msg_f', 256, 128), answered] }];
+  const list = (narrow: boolean, phone: boolean) => (
     <SidebarProvider>
-      <InboxList title="Inbox" path={null} sections={sections} filtered={false} narrow={false} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={false} />
-    </SidebarProvider>,
+      <InboxList title="Inbox" path={null} sections={sections} filtered={false} narrow={narrow} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={phone} />
+    </SidebarProvider>
   );
-  const count = (id: string) => el.querySelector(`[data-thread-id="${id}"] .ib-c`)?.textContent;
-  expect(count('msg_a')).toBe('1 action item');
-  expect(count('msg_b')).toBe('1 question, 1 action item');
+  const el = mount(list(false, false));
+  // What a row draws for its open counts (approval "inbox-row-action-icon", 2026-10-29): the action pill (the
+  // drawn number, its accessible words, its icon the checklist's box with no tick) and `?N` (the drawn number,
+  // its words, its icon). Read off the row's open counts only, in the order they sit.
+  const box = 'M6.75 3.75h10.5a3 3 0 0 1 3 3v10.5a3 3 0 0 1-3 3H6.75a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3Z';
+  // Pinned on purpose: the owner's pick for the question count is Q3, Lucide's message-circle-question-mark.
+  const bubble = 'M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01';
+  const counts = (scope: Element) =>
+    [...scope.querySelectorAll('[data-action-count], .ib-qn')].map((c) => ({
+      kind: c.matches('[data-action-count]') ? 'action' : 'question',
+      pill: c.classList.contains('ib-badge'),
+      drawn: c.querySelector('[aria-hidden="true"]:not(svg)')!.textContent,
+      name: c.querySelector('.ib-sr')!.textContent!.trim(),
+      icon: c.querySelector('svg path')!.getAttribute('d') === (c.matches('[data-action-count]') ? box : bubble),
+    }));
+  const pill = (n: string, name: string) => ({ kind: 'action', pill: true, drawn: n, name, icon: true });
+  const q = (n: string, name: string) => ({ kind: 'question', pill: false, drawn: n, name, icon: true });
+  const expected: Record<string, unknown[]> = {
+    msg_a: [pill('1', '1 action to do')],
+    msg_b: [pill('1', '1 action to do'), q('2', '2 questions')],
+    msg_c: [q('2', '2 questions')],
+    msg_d: [pill('12', '12 actions to do'), q('2', '2 questions')],
+    // Past 99 the drawn number is "99+" (both at full length would run over a wide row's badge); the words keep it exact.
+    msg_f: [pill('99+', '128 actions to do'), q('99+', '128 questions')],
+    msg_e: [],
+  };
+  const rowOf = (shape: string, id: string) => el.querySelector(`${shape}[data-thread-id="${id}"]`)!;
+  // A wide row: both sit in the open counts' column before the time; the words column says nothing for them.
+  for (const [id, want] of Object.entries(expected)) {
+    expect(counts(rowOf('.ib-row', id).querySelector('.ib-cq')!)).toEqual(want as never);
+    if (id !== 'msg_e') expect(rowOf('.ib-row', id).querySelector('.ib-cw')!.textContent).toBe('');
+  }
+  // Words of their own (here an older Inbox's "Answered") still take the place of the counts.
+  expect(rowOf('.ib-row', 'msg_e').querySelector('.ib-cw [data-count-words]')!.getAttribute('data-count-words')).toBe('Answered, not sent');
+  // The row's accessible name (its text less what is hidden from a screen reader) carries the counts' words apart.
+  const named = rowOf('.ib-row', 'msg_b').cloneNode(true) as Element;
+  named.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+  expect(named.textContent).toContain(' 1 action to do 2 questions');
+  // Beside a thread and on a phone: at line 2's end, the action pill then `?N`, after the marks and the badge.
+  for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l2'], [false, true, '.ib-mrow', '.ib-ml2']] as const) {
+    rerender(list(narrow, phone));
+    for (const [id, want] of Object.entries(expected)) expect(counts(rowOf(shape, id))).toEqual(want as never);
+    const tail = [...rowOf(shape, 'msg_b').querySelector(line)!.children].slice(-3).map((c) => (c.matches('[data-row-badge]') ? 'badge' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'question' : c.className));
+    expect(tail).toEqual(['badge', 'action', 'question']);
+  }
 });

@@ -391,20 +391,32 @@ test('text selected in a file to comment on: the paste is not taken to the reply
     await p.locator('section.ib-pane .ib-atts [data-attachment-id]').first().click();
     const text = p.locator('.ib-view').getByText('Retry with the same key');
     await expect(text).toBeVisible();
-    // The pane may still be sliding in: measure once it stands still.
-    await p.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
     // Drag across the words, as a person selects text to comment on (the rect of the words themselves).
-    const rect = await p.evaluate(() => {
-      const walker = document.createTreeWalker(document.querySelector('.ib-view')!, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!node.textContent?.includes('Retry with the same key')) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        const r = range.getBoundingClientRect();
-        return { x: r.x, y: r.y, width: r.width, height: r.height };
-      }
-      return null;
-    });
+    const wordsRect = () =>
+      p.evaluate(() => {
+        const walker = document.createTreeWalker(document.querySelector('.ib-view')!, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.includes('Retry with the same key')) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const r = range.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        }
+        return null;
+      });
+    // The pane may still be sliding in and widening after the text shows (not every step of it is
+    // a running animation, and on a loaded runner it ends late): measure once the words stand
+    // still, two reads 250 ms apart in the same place. A drag measured mid-slide can miss the words
+    // (the pane moves under the mouse) and select nothing, so no toolbar comes.
+    let rect = await wordsRect();
+    await expect
+      .poll(async () => {
+        const before = rect;
+        await p.waitForTimeout(250);
+        rect = await wordsRect();
+        return before !== null && JSON.stringify(before) === JSON.stringify(rect);
+      })
+      .toBe(true);
     expect(rect).not.toBeNull();
     await p.mouse.move(rect!.x + 2, rect!.y + rect!.height / 2);
     await p.mouse.down();

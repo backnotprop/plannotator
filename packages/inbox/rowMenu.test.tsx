@@ -7,10 +7,11 @@
  * Inbox's one address plus `#thread=`) and Copy thread ID its id, each with
  * a toast, a copy that fails saying so, Mark read and Archive with the
  * row's own toasts, Move back on a row marked read, Escape putting focus
- * back on the row, the row's muted background while the menu is open, and a
- * touch never opening it.
+ * back on the row, the row's muted background while the menu is open, a
+ * touch never opening it, and Copy thread reading a thread that is not open
+ * and copying its Markdown.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
@@ -62,7 +63,7 @@ async function serverSections(): Promise<Map<string, string>> {
   return new Map(model.sections.flatMap((s) => s.threads.map((r) => [r.thread_id, s.id] as const)));
 }
 
-const TESTS = 14;
+const TESTS = 15;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -203,6 +204,8 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
   // Over the tailnet the page's own origin: the address the device it is on can open.
   expect(threadLink('msg_1', { url: 'http://localhost:4321/', via: 'tailnet' }, 'https://box.ts.net:4321')).toBe('https://box.ts.net:4321/#thread=msg_1');
   expect(threadLink('msg_1', null, 'http://localhost:4321')).toBe('http://localhost:4321/#thread=msg_1');
+  // One message of the thread: the address a search result lands with (`&msg=`).
+  expect(threadLink('msg_1', { url: 'http://localhost:4321/', via: 'local' }, 'http://127.0.0.1:4321', 'msg_2')).toBe('http://localhost:4321/#thread=msg_1&msg=msg_2');
   const base = {
     thread_id: 'msg_1',
     section: 'waiting',
@@ -213,20 +216,27 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
     back_from_archive: false,
     agent_after_archive: false,
   } as unknown as Parameters<typeof rowMenuActions>[0];
-  expect(rowMenuActions(base, true)).toEqual(['copy-link', 'copy-id', 'read', 'archive']);
-  expect(rowMenuActions({ ...base, section: 'quiet', read_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-link', 'copy-id', 'unread', 'archive']);
-  expect(rowMenuActions({ ...base, section: 'sent' }, true)).toEqual(['copy-link', 'copy-id', 'archive']);
+  expect(rowMenuActions(base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
+  expect(rowMenuActions({ ...base, section: 'quiet', read_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'unread', 'archive']);
+  expect(rowMenuActions({ ...base, section: 'sent' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
   // Archived (held in place while a thread is open): only the copies.
-  expect(rowMenuActions({ ...base, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-link', 'copy-id']);
+  expect(rowMenuActions({ ...base, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id']);
   // An Inbox that keeps pins (approval "inbox-pinned-threads"): Pin or Unpin leads, an archived row's too.
-  expect(rowMenuActions(base, true, false)).toEqual(['pin', 'copy-link', 'copy-id', 'read', 'archive']);
-  expect(rowMenuActions({ ...base, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, true)).toEqual(['unpin', 'copy-link', 'copy-id']);
+  expect(rowMenuActions(base, true, false)).toEqual(['pin', 'copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
+  expect(rowMenuActions({ ...base, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, true)).toEqual(['unpin', 'copy-thread', 'copy-link', 'copy-id']);
+  // A seen update the held list still draws in New keeps Mark read; drawn in Quiet, or marked read, or archived, it does not.
+  const seen = { ...base, section: 'quiet' } as typeof base;
+  expect(rowMenuActions(seen, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
+  expect(rowMenuActions(seen, true, null, 'quiet')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
+  expect(rowMenuActions(seen, false, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
+  expect(rowMenuActions({ ...seen, read_at: '2026-10-20T00:00:00Z' }, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'unread', 'archive']);
+  expect(rowMenuActions({ ...seen, resolved_at: '2026-10-20T00:00:00Z' }, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id']);
 });
 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -253,6 +263,25 @@ test.skipIf(!hasDom)('Copy thread ID writes the id; a copy that fails says so', 
   expect(clipboard).toEqual([ids.stopped]);
 });
 
+test.skipIf(!hasDom)('Copy thread on a row whose thread is not open reads it and copies its Markdown, leaving the row where it was', async () => {
+  await renderApp();
+  const before = (await serverSections()).get(ids.waiting);
+  await openMenu(ids.waiting);
+  fetched = [];
+  await choose('copy-thread');
+  await until(() => toast()?.textContent?.includes('Thread copied') === true, 'the toast');
+  expect(fetched).toContain(`/api/inbox/threads/${ids.waiting}`);
+  expect(clipboard).toHaveLength(1);
+  // The subject heading, then the agent's question as readable lines (copyMarkdown.ts).
+  expect(clipboard[0]).toStartWith('# ');
+  expect(clipboard[0]).toContain('**Q1.** Which search index should the docs use?');
+  expect(clipboard[0]).toContain('- Pagefind');
+  expect(toast()!.textContent).toContain('1 message');
+  // Reading the thread to copy it opens nothing and changes nothing.
+  expect(window.location.hash).not.toContain('thread=');
+  expect((await serverSections()).get(ids.waiting)).toBe(before);
+});
+
 test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu then offers Move back', async () => {
   await renderApp();
   await openMenu(ids.waiting);
@@ -268,7 +297,7 @@ test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu 
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy link', 'Copy thread ID', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Move back', 'Archive']);
   await choose('unread');
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the row back');
 });
@@ -427,14 +456,14 @@ test.skipIf(!hasDom)('with a thread open: Archive from another row keeps it in p
   expect(toast()!.textContent).toContain(`“${subject}”`);
   expect(posted.some((p) => p.path === `/api/inbox/messages/${ids.waiting}/resolve` && p.body.resolved === true)).toBe(true);
   // The list holds still while the thread is open: the row stays where it was, shown archived.
-  await until(() => rowButton(ids.waiting)?.querySelector('.ib-c')?.textContent === 'Archived', 'the row shown archived');
+  await until(() => rowButton(ids.waiting)?.querySelector('.ib-c .ib-cs')?.textContent === 'Archived', 'the row shown archived');
   expect(placed()).toEqual(before);
   expect(window.location.hash).toContain(`thread=${ids.stopped}`);
   await act(async () => {
     toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
   });
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the thread unarchived');
-  await until(() => rowButton(ids.waiting)?.querySelector('.ib-c')?.textContent !== 'Archived', 'the row no longer shown archived');
+  await until(() => rowButton(ids.waiting)?.querySelector('.ib-c .ib-cs')?.textContent !== 'Archived', 'the row no longer shown archived');
   expect(placed()).toEqual(before);
 });
 
@@ -458,7 +487,7 @@ test.skipIf(!hasDom)('with a thread open, Archive from the menu then a mouse clo
   const next = order[order.indexOf(ids.waiting) + 1]!;
   await openMenu(ids.waiting);
   await choose('archive');
-  await until(() => rowButton(ids.waiting)?.querySelector('.ib-c')?.textContent === 'Archived', 'the row shown archived');
+  await until(() => rowButton(ids.waiting)?.querySelector('.ib-c .ib-cs')?.textContent === 'Archived', 'the row shown archived');
   // A mouse close moves nothing (App's rule); the list settles and the archived row leaves.
   mouseClick(document.querySelector<HTMLElement>('section.ib-pane [aria-label="Close the thread"]')!);
   await until(() => !rowButton(ids.waiting), 'the archived row to leave once the thread closed');

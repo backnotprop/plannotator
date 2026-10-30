@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
 import { ImageZoomStage, type FitAxis, type ImageZoomStageHandle, type WheelHintGate, type ZoomMode } from '@plannotator/ui/components/ImageZoomStage';
+import { canPanToward } from '@plannotator/ui/components/imageZoom';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { ImageAnnotator } from '@plannotator/ui/components/ImageAnnotator';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
@@ -14,6 +15,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { markupWords, noteOnto } from '../markup';
 import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice } from './Markup';
+import { FullScreenComposer, FullScreenComposerContext } from './FullScreenComposer';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -22,6 +24,19 @@ function newId(): string {
 
 function stem(name: string): string {
   return name.replace(/\.[^.]+$/, '') || name;
+}
+
+/**
+ * What a phone's swipe over the image asks it (the pane's `useFileSwipe`,
+ * approval "inbox-image-swipe"): whether the image can still pan the way a
+ * swipe goes (zoomed, or a panorama: it pans to its edge first, then the
+ * next swipe that way steps), and whether a drag down may close it (at Fit,
+ * at its top).
+ */
+export interface ImageSwipeEdges {
+  /** 1: the finger moves left (the next file); -1: right. True while the image has more to show that way. */
+  keeps(dir: 1 | -1): boolean;
+  canDismiss(): boolean;
 }
 
 /** The scale beside Fit / Actual size: "37%", "250%". */
@@ -57,7 +72,10 @@ export function zoomPercent(scale: number): string {
  * from the top) and a panorama its height (read from the left); pinch out
  * shows the whole image. ← → and ] [ always step files, zoomed or not: the
  * focused stage takes only ↑ ↓, Page Up / Down, Home / End and Space to pan.
- * A horizontal swipe on the image shown at Fit steps (`onSwipe`), nowhere else.
+ * A horizontal swipe on the image shown at Fit steps (`onSwipe`), nowhere else;
+ * on a phone in full screen the pane's follow swipe does instead, asking the
+ * image whether it pans first (`edgesRef`) and hearing when it is shown
+ * (`onShown`).
  */
 export function ImageAttachmentView({
   attachment,
@@ -70,6 +88,8 @@ export function ImageAttachmentView({
   initialFit,
   onFitChange,
   onSwipe,
+  edgesRef,
+  onShown,
   wheelHint,
   suggestion,
   onSelect,
@@ -86,8 +106,12 @@ export function ImageAttachmentView({
   /** Fit or Actual size when it opens (the pane's memory of this file). */
   initialFit?: 'fit' | 'actual';
   onFitChange?: (fit: 'fit' | 'actual') => void;
-  /** A swipe across the fitted image: 1 next file, -1 previous. */
+  /** A swipe across the fitted image: 1 next file, -1 previous (where the pane's follow swipe is off: not a phone in full screen). */
   onSwipe?: (dir: 1 | -1) => void;
+  /** Filled with what the pane's follow swipe asks the image (`ImageSwipeEdges`); emptied when it goes. */
+  edgesRef?: MutableRefObject<ImageSwipeEdges | null>;
+  /** The image is on screen (loaded and laid out once), or could not be shown: a swipe's picture of it can go. */
+  onShown?: () => void;
   /** The pane's "⌘ + scroll to zoom" gate, so the hint shows once per viewer open, not once per file (#2127). */
   wheelHint?: WheelHintGate;
   /** A suggested comment the box opens with (the tour's): kept with one press, or written over. */
@@ -99,6 +123,8 @@ export function ImageAttachmentView({
   /** The window's toast ("Markup added to your reply · Undo"). */
   onNotice?: Notice;
 }) {
+  /** Full screen's composer (the pane gives it there): the comment row goes inside it. */
+  const composer = useContext(FullScreenComposerContext);
   const [mode, setMode] = useState<ZoomMode>(initialFit ?? 'fit');
   const [scale, setScale] = useState<number | null>(null);
   const enterSavesComment = useConfigValue('enterSavesComment');
@@ -142,6 +168,35 @@ export function ImageAttachmentView({
     setNatural(null);
     setFailed(false);
   }, [version]);
+
+  // The pane's follow swipe asks the image whether it pans first, and whether a drag down closes.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const naturalRef = useRef(natural);
+  naturalRef.current = natural;
+  useEffect(() => {
+    if (!edgesRef) return;
+    edgesRef.current = {
+      keeps: (dir) => canPanToward(zoomRef.current?.visibleBox() ?? null, naturalRef.current?.width ?? 0, dir),
+      canDismiss: () => {
+        if (modeRef.current !== 'fit') return false;
+        // A tall screenshot fitted to its width reads from the top: a drag down further down it is a pan back up.
+        const box = zoomRef.current?.visibleBox() ?? null;
+        return box === null || box.y <= 1;
+      },
+    };
+    return () => {
+      edgesRef.current = null;
+    };
+  }, [edgesRef]);
+  const onShownRef = useRef(onShown);
+  onShownRef.current = onShown;
+  useEffect(() => {
+    if (!natural && !failed) return;
+    // A frame after the image is laid out at its Fit, so nothing shows between a swipe's picture and the image.
+    const frame = requestAnimationFrame(() => onShownRef.current?.());
+    return () => cancelAnimationFrame(frame);
+  }, [natural, failed]);
 
   // A panorama fitted to the pane would be a sliver: Fit keeps a readable height (read from the left); a tall screenshot fits its width (read from the top).
   const wide = natural !== null && natural.width > natural.height * WIDE_IMAGE_RATIO;
@@ -269,6 +324,67 @@ export function ImageAttachmentView({
     if (!redraw) onNotice?.(markupAddedToast(() => removeKept(id)));
   };
 
+  // The comment row: at the image's foot beside the thread, inside the full-screen composer's Comment tab in full screen.
+  const commentCard = (
+    <div className="ib-ccard">
+      {kept && <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} />}
+      {markup && (
+        <Tip content="Your marked-up copy rides this comment">
+          <span className="ib-markup">
+            <img src={getImageSrc(markup.path)} alt="Your marked-up copy" />
+            <button type="button" onClick={() => setMarkup(null)} aria-label="Remove the marked-up copy">
+              <Icon name="x" size={10} />
+            </button>
+          </span>
+        </Tip>
+      )}
+      <textarea
+        ref={textRef}
+        className="ib-ta"
+        rows={1}
+        value={text}
+        placeholder={kept ? 'Note (optional)' : markup ? 'What should change?' : 'Comment on this image…'}
+        aria-label={kept ? `A note with your drawing on ${attachment.name}` : `Comment on ${attachment.name}`}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (isCommentSubmitKey(event, enterSavesComment)) {
+            event.preventDefault();
+            event.stopPropagation();
+            void submit();
+            return;
+          }
+          // Escape leaves the field first (approval "inbox-keyboard-shortcuts": one layer per Escape): focus goes
+          // to the file's pane, the words stay; the next Escape is the pane's. Full screen's Escape ladder has
+          // this rung already (AttachmentPane, "Left the comment box."); beside the thread it is this one.
+          if (event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented) {
+            const paneEl = event.currentTarget.closest<HTMLElement>('[data-attachment-pane]');
+            if (!paneEl || paneEl.closest('[data-full-view]')) return;
+            event.preventDefault();
+            event.stopPropagation();
+            paneEl.focus({ preventScroll: true });
+          }
+        }}
+      />
+      <Tip content="Draw on the image (pen, arrow, circle)">
+        <button type="button" className="ib-btn ib-cbtn" onClick={() => setAnnotating(true)} disabled={failed} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
+          <Icon name="pen" size={15} />
+          <span className="ib-cbtn-l" aria-hidden="true">
+            {markup || kept ? 'Redraw' : 'Mark up'}
+          </span>
+        </button>
+      </Tip>
+      <button
+        type="button"
+        className="ib-btn ib-pri ib-csave"
+        onClick={() => void submit()}
+        disabled={saving || (!text.trim() && !markup)}
+        data-image-comment-save=""
+      >
+        {kept ? 'Add note' : 'Comment'}
+      </button>
+    </div>
+  );
+
   return (
     <div className="ib-imgview" data-image-view={attachment.id}>
       <div
@@ -377,55 +493,14 @@ export function ImageAttachmentView({
           )
         )}
       </div>
-      {!readOnly && (
-        <div className="ib-imgcompose" data-image-composer="">
-          <div className="ib-ccard">
-            {kept && <KeptMarkup image={kept.image} onRedraw={() => setAnnotating(true)} onRemove={() => removeKept(kept.id)} />}
-            {markup && (
-              <Tip content="Your marked-up copy rides this comment">
-                <span className="ib-markup">
-                  <img src={getImageSrc(markup.path)} alt="Your marked-up copy" />
-                  <button type="button" onClick={() => setMarkup(null)} aria-label="Remove the marked-up copy">
-                    <Icon name="x" size={10} />
-                  </button>
-                </span>
-              </Tip>
-            )}
-            <textarea
-              ref={textRef}
-              className="ib-ta"
-              rows={1}
-              value={text}
-              placeholder={kept ? 'Note (optional)' : markup ? 'What should change?' : 'Comment on this image…'}
-              aria-label={kept ? `A note with your drawing on ${attachment.name}` : `Comment on ${attachment.name}`}
-              onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => {
-                if (isCommentSubmitKey(event, enterSavesComment)) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void submit();
-                }
-              }}
-            />
-            <Tip content="Draw on the image (pen, arrow, circle)">
-              <button type="button" className="ib-btn ib-cbtn" onClick={() => setAnnotating(true)} disabled={failed} data-markup-open="" aria-label={markup || kept ? 'Redraw' : 'Mark up'}>
-                <Icon name="pen" size={15} />
-                <span className="ib-cbtn-l" aria-hidden="true">
-                  {markup || kept ? 'Redraw' : 'Mark up'}
-                </span>
-              </button>
-            </Tip>
-            <button
-              type="button"
-              className="ib-btn ib-pri ib-csave"
-              onClick={() => void submit()}
-              disabled={saving || (!text.trim() && !markup)}
-              data-image-comment-save=""
-            >
-              {kept ? 'Add note' : 'Comment'}
-            </button>
+      {composer ? (
+        <FullScreenComposer value={composer} noun="image" comment={readOnly ? null : <div className="ib-fcomp-comment" data-image-composer="">{commentCard}</div>} />
+      ) : (
+        !readOnly && (
+          <div className="ib-imgcompose" data-image-composer="">
+            {commentCard}
           </div>
-        </div>
+        )
       )}
       <OverWindow>
         <ImageAnnotator

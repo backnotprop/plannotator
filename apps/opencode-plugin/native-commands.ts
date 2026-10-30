@@ -57,7 +57,7 @@ export const NATIVE_COMMANDS: ReadonlyArray<{ name: string; description: string 
   },
   {
     name: "plannotator-inbox",
-    description: "Open your Plannotator Inbox in the browser and show its address",
+    description: "Open your Plannotator Inbox in the browser, show its address, and brief the agent on it",
   },
 ];
 
@@ -118,6 +118,8 @@ export interface NativeCommandDeps {
    * its decision message names its session id.
    */
   launches?: OpenCodeLaunchRegistry;
+  /** The sessions that opened the Inbox with `/plannotator-inbox` (the Inbox briefing, server.ts). */
+  inboxBriefings?: { mark(sessionID: string): void };
 }
 
 /** Resolve the invocation's working directory, session location first. */
@@ -169,6 +171,7 @@ export async function runNativeCommand(
     // A slash command that fails shows why in the transcript; a tool launch
     // answers its failure as the tool result instead.
     ...(tool ? {} : { failureNotices: true }),
+    ...(!tool && deps.inboxBriefings && sessionID ? { onInboxOpened: () => deps.inboxBriefings!.mark(sessionID) } : {}),
   });
 
   // A slash command's own review is recorded like a tool launch, so the

@@ -14,7 +14,7 @@ import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
-import { INBOX_AGENT_FIELD_DESCRIPTIONS, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
 
@@ -465,6 +465,12 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(example!.parsed.choices.map((choice) => choice.recommended)).toEqual([true, false]);
     expect(agentTool.description).toContain("plannotator inbox --help");
     expect(agentTool.description.length).toBeLessThan(2048);
+    // Where a ref links (a bare #104 meant for another repo once linked into the thread's project):
+    // in both `body` descriptions, which reach the model whole; the capped texts above stay as they were.
+    const refRule = INBOX_REF_LINK_RULE;
+    expect(bodySchema.description).toContain(refRule);
+    expect(agentBody).toContain(refRule);
+    expect(INBOX_MCP_INSTRUCTIONS).not.toContain(refRule);
 
     const sendResult = await client.callTool({
       name: "send_message",

@@ -817,7 +817,7 @@ export async function getGitContext(
     diffOptions.push({ id: "merge-base", label: "Committed changes (PR view)" });
   }
 
-  diffOptions.push({ id: "all", label: "All files (HEAD)" });
+  diffOptions.push({ id: "all", label: "Every file (HEAD)" });
 
   const [worktrees, currentTreePathResult] = await Promise.all([
     getWorktrees(runtime, cwd),
@@ -1962,7 +1962,7 @@ export async function runGitDiff(
           `${emptyTree}..HEAD`,
         ];
         patch = await runBoundedTrackedDiff(runtime, allDiffArgs, cwd, fileIdentities);
-        label = "All files";
+        label = "Every file";
         break;
       }
 
@@ -2332,6 +2332,128 @@ export async function resolveDiffSideSources(
     default:
       return null;
   }
+}
+
+// --- The repository at the review's new side (All files, #explorer) ---------
+//
+// "All files" in the review tree lists the whole repository at the revision
+// the diff's new side reads: the working tree for uncommitted, unstaged,
+// since-base and local-vs-remote reviews, the index for staged, and a commit
+// otherwise. One table decides it (`resolveDiffSideSources`), so the tree
+// always shows the files the diff's own new side would read.
+
+/** Where the review's new side lives, for listing and reading any path. */
+export type RepoSideSource =
+  | { kind: "worktree"; cwd?: string }
+  | { kind: "index"; cwd?: string }
+  | { kind: "commit"; rev: string; cwd?: string };
+
+/** One revision of the repository as the tree names it. */
+export interface RepoRevisionInfo {
+  kind: "worktree" | "index" | "commit";
+  /** "working tree", "index", or a short commit id. */
+  label: string;
+}
+
+/** Every file of one revision, sorted, plus whether it can change while the review is open. */
+export interface RepoFileListing {
+  paths: string[];
+  revision: RepoRevisionInfo;
+  /** The working tree: files come and go while the review is open. */
+  live: boolean;
+  /** Repository root the paths are relative to (live watching); absent for remote listings. */
+  root?: string;
+  /**
+   * Where listed paths are files on disk (the working tree): a path under
+   * `prefix` is `root` joined with the rest. Absent: a single working-tree
+   * listing reads from `root` when `live`. A multi-repo workspace names each
+   * child that lists its working tree, so a child at a commit never reads disk.
+   */
+  diskRoots?: Array<{ prefix: string; root: string }>;
+  /** The listing is known to be incomplete (a platform API truncated it). */
+  truncated?: boolean;
+}
+
+const REPO_LIST_TIMEOUT_MS = 5 * 60_000;
+
+function splitNulList(output: string): string[] {
+  if (!output) return [];
+  const parts = output.split("\0");
+  if (parts[parts.length - 1] === "") parts.pop();
+  return parts;
+}
+
+/** Map a git diff type onto where its new side lives (null: no new side to list). */
+export async function resolveGitNewSide(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  cwd?: string,
+): Promise<RepoSideSource | null> {
+  // The path is irrelevant to which revision a side reads.
+  const sources = await resolveDiffSideSources(runtime, diffType, defaultBranch, "", undefined, cwd);
+  const side = sources?.new;
+  if (!side) return null;
+  if (side.kind === "worktree") return { kind: "worktree", cwd: sources.cwd };
+  if (side.rev === ":0") return { kind: "index", cwd: sources.cwd };
+  return { kind: "commit", rev: side.rev, cwd: sources.cwd };
+}
+
+/**
+ * List every file of one side, sorted. The working tree follows `.gitignore`
+ * (`ls-files --cached --others --exclude-standard`, minus files deleted on
+ * disk), so build output and dependencies never appear unless committed.
+ */
+export async function listGitSideFiles(
+  runtime: ReviewGitRuntime,
+  side: RepoSideSource,
+): Promise<RepoFileListing | null> {
+  const root = await resolveRepoToplevel(runtime, side.cwd);
+  const opts = { cwd: root, timeoutMs: REPO_LIST_TIMEOUT_MS };
+  let paths: string[];
+  let revision: RepoRevisionInfo;
+  if (side.kind === "worktree") {
+    const [listed, deleted] = await Promise.all([
+      runtime.runGit(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], opts),
+      runtime.runGit(["ls-files", "-z", "--deleted"], opts),
+    ]);
+    if (listed.exitCode !== 0 || deleted.exitCode !== 0) return null;
+    const removed = new Set(splitNulList(deleted.stdout));
+    // Unmerged entries are listed once per stage; the Set dedupes them.
+    paths = [...new Set(splitNulList(listed.stdout))].filter((path) => !removed.has(path));
+    revision = { kind: "worktree", label: "working tree" };
+  } else if (side.kind === "index") {
+    const listed = await runtime.runGit(["ls-files", "-z", "--cached"], opts);
+    if (listed.exitCode !== 0) return null;
+    paths = [...new Set(splitNulList(listed.stdout))];
+    revision = { kind: "index", label: "index" };
+  } else {
+    const [listed, short] = await Promise.all([
+      runtime.runGit(["ls-tree", "-r", "-z", "--name-only", "--full-tree", "--end-of-options", side.rev], opts),
+      runtime.runGit(["rev-parse", "--short", "--end-of-options", `${side.rev}^{commit}`], opts),
+    ]);
+    if (listed.exitCode !== 0) return null;
+    paths = splitNulList(listed.stdout);
+    revision = { kind: "commit", label: short.exitCode === 0 ? short.stdout.trim() : side.rev };
+  }
+  paths.sort(compareRepoPaths);
+  return { paths, revision, live: side.kind === "worktree", root };
+}
+
+/** The one sort order every listing uses (code-unit order, so prefix ranges are contiguous). */
+export function compareRepoPaths(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** List the repository at a git review's new side. */
+export async function listGitFilesForDiff(
+  runtime: ReviewGitRuntime,
+  diffType: DiffType,
+  defaultBranch: string,
+  cwd?: string,
+): Promise<RepoFileListing | null> {
+  const side = await resolveGitNewSide(runtime, diffType, defaultBranch, cwd);
+  return side ? listGitSideFiles(runtime, side) : null;
 }
 
 /** Read one side as text for hunk expansion (the 5 MB text cap applies). */

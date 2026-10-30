@@ -48,6 +48,10 @@ export class Uri {
     return new Uri("file", "", fsPath, "", "");
   }
 
+  static from(c: { scheme: string; authority?: string; path?: string; query?: string; fragment?: string }): Uri {
+    return new Uri(c.scheme, c.authority ?? "", c.path ?? "", c.query ?? "", c.fragment ?? "");
+  }
+
   static joinPath(base: Uri, ...segments: string[]): Uri {
     return new Uri(base.scheme, base.authority, [base.path.replace(/\/+$/, ""), ...segments].join("/"), base.query, base.fragment);
   }
@@ -96,6 +100,9 @@ export interface WebviewPanel {
   onDidDispose(listener: () => void): { dispose(): void };
 }
 
+/** Every panel `createWebviewPanel` made (tests read what it posted and send it messages). */
+export const createdWebviewPanels: Array<WebviewPanel & { posted: unknown[]; receive(message: unknown): void }> = [];
+
 export const ViewColumn = {
   Active: -1,
   Beside: -2,
@@ -132,11 +139,26 @@ export const window = {
     _options?: { enableScripts?: boolean; retainContextWhenHidden?: boolean },
   ): WebviewPanel {
     let disposeListener: (() => void) | null = null;
-    return {
+    const listeners: Array<(message: unknown) => void> = [];
+    const posted: unknown[] = [];
+    const panel = {
       webview: {
         html: "",
-        onDidReceiveMessage() { return { dispose() {} }; },
-        postMessage() { return Promise.resolve(true); },
+        cspSource: "https://file+.vscode-resource.vscode-cdn.net",
+        asWebviewUri: (uri: Uri) => Uri.parse(`https://file+.vscode-resource.vscode-cdn.net${uri.path}`),
+        onDidReceiveMessage(listener: (message: unknown) => void) {
+          listeners.push(listener);
+          return { dispose() { listeners.splice(listeners.indexOf(listener), 1); } };
+        },
+        postMessage(message: unknown) {
+          posted.push(message);
+          return Promise.resolve(true);
+        },
+      },
+      /** Test hooks: what the panel posted, and a message as if the webview sent it. */
+      posted,
+      receive: (message: unknown) => {
+        for (const l of [...listeners]) l(message);
       },
       reveal() {},
       dispose() {
@@ -147,6 +169,8 @@ export const window = {
         return { dispose() {} };
       },
     };
+    createdWebviewPanels.push(panel);
+    return panel;
   },
   createTextEditorDecorationType(_options: unknown) {
     return { dispose() {} };
@@ -238,6 +262,14 @@ export const languages = {
     return { dispose() {} };
   },
 };
+
+export class Position {
+  constructor(readonly line: number, readonly character: number) {}
+}
+
+export class Location {
+  constructor(readonly uri: Uri, readonly range: Range) {}
+}
 
 export class Range {
   start: { line: number; character: number };

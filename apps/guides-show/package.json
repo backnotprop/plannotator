@@ -17,8 +17,7 @@
     "test": "bun test worker share viewer build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:viewer": "tsc --noEmit -p tsconfig.viewer.json",
-    "sync:manifest": "bun run build/sync-manifest.ts",
-    "check:manifest": "bun run build/sync-manifest.ts --check"
+    "sync:manifest": "bun run build/sync-manifest.ts"
   },
   "dependencies": {
     "@pierre/diffs": "1.5.2",

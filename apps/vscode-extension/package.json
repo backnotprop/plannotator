@@ -2,7 +2,7 @@
   "name": "plannotator-webview",
   "displayName": "Plannotator",
   "description": "Opens Plannotator plan reviews inside VS Code tabs, and writes and reads Guided Reviews of your changes and pull requests",
-  "version": "0.16.8",
+  "version": "0.17.0",
   "publisher": "backnotprop",
   "license": "MIT",
   "homepage": "https://plannotator.ai",
@@ -197,50 +197,8 @@
         "icon": "$(sparkle)"
       },
       {
-        "command": "plannotator.guides.askAboutFile",
-        "title": "Ask the Agent About This File…",
-        "category": "Guided Reviews",
-        "icon": "$(sparkle)"
-      },
-      {
         "command": "plannotator.guides.openAnswer",
         "title": "Open Answer",
-        "category": "Guided Reviews"
-      },
-      {
-        "command": "plannotator.guides.askThreadSubmit",
-        "title": "Ask",
-        "category": "Guided Reviews"
-      },
-      {
-        "command": "plannotator.guides.askThreadCancel",
-        "title": "Cancel",
-        "category": "Guided Reviews"
-      },
-      {
-        "command": "plannotator.guides.askThreadClose",
-        "title": "Close",
-        "category": "Guided Reviews"
-      },
-      {
-        "command": "plannotator.guides.askThreadSettings",
-        "title": "Change the Agent, Model and Effort",
-        "category": "Guided Reviews",
-        "icon": "$(settings-gear)"
-      },
-      {
-        "command": "plannotator.guides.askThreadPick",
-        "title": "Ask a Suggested Question",
-        "category": "Guided Reviews"
-      },
-      {
-        "command": "plannotator.guides.askThreadAgain",
-        "title": "Ask Again",
-        "category": "Guided Reviews"
-      },
-      {
-        "command": "plannotator.guides.askThreadStop",
-        "title": "Stop Answering",
         "category": "Guided Reviews"
       },
       {
@@ -286,11 +244,6 @@
           "command": "plannotator-webview.deleteEditorAnnotation",
           "group": "inline",
           "when": "commentController == plannotator && commentThread == plannotator-thread"
-        },
-        {
-          "command": "plannotator.guides.askThreadSettings",
-          "group": "inline",
-          "when": "commentController =~ /^plannotator-guides-ask/"
         }
       ],
       "comments/commentThread/context": [
@@ -298,21 +251,6 @@
           "command": "plannotator-webview.submitComment",
           "group": "inline",
           "when": "commentController == plannotator"
-        },
-        {
-          "command": "plannotator.guides.askThreadSubmit",
-          "group": "inline@1",
-          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread != plannotator-ask-asking"
-        },
-        {
-          "command": "plannotator.guides.askThreadCancel",
-          "group": "inline@2",
-          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread == plannotator-ask-compose"
-        },
-        {
-          "command": "plannotator.guides.askThreadClose",
-          "group": "inline@2",
-          "when": "commentController =~ /^plannotator-guides-ask/ && commentThread == plannotator-ask-done"
         }
       ],
       "view/title": [
@@ -467,39 +405,7 @@
           "when": "plannotator.guides.editorInGuide"
         },
         {
-          "command": "plannotator.guides.askAboutFile",
-          "when": "plannotator.guides.editorInGuide"
-        },
-        {
           "command": "plannotator.guides.openAnswer",
-          "when": "false"
-        },
-        {
-          "command": "plannotator.guides.askThreadSubmit",
-          "when": "false"
-        },
-        {
-          "command": "plannotator.guides.askThreadCancel",
-          "when": "false"
-        },
-        {
-          "command": "plannotator.guides.askThreadClose",
-          "when": "false"
-        },
-        {
-          "command": "plannotator.guides.askThreadSettings",
-          "when": "false"
-        },
-        {
-          "command": "plannotator.guides.askThreadPick",
-          "when": "false"
-        },
-        {
-          "command": "plannotator.guides.askThreadAgain",
-          "when": "false"
-        },
-        {
-          "command": "plannotator.guides.askThreadStop",
           "when": "false"
         }
       ]
@@ -562,6 +468,12 @@
           "scope": "machine",
           "markdownDescription": "Install a missing ACP adapter automatically. Claude Code, Codex and Pi speak ACP through a separate npm adapter (`@agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp`, `pi-acp`). When it is not set in `#plannotator.guides.agentCommands#` and not on PATH, Guided Reviews installs the exact pinned version into the extension's own storage with npm (no global install, no install scripts), and reuses it. Needs npm. Agents that are their own program (OpenCode, Copilot CLI, Cursor, Kiro CLI, Kilo Code) are never installed for you."
         },
+        "plannotator.guides.useInstalledCli": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine",
+          "markdownDescription": "Run your own `claude` / `codex` (the one on PATH) through the Claude Code and Codex ACP adapters, by setting `CLAUDE_CODE_EXECUTABLE` / `CODEX_PATH` for them. Turn off to run the copy that comes with each adapter instead, for example when your CLI is older than the adapter expects. A `CLAUDE_CODE_EXECUTABLE` or `CODEX_PATH` already in your environment is always used as it is. On Windows only an `.exe` is used (an npm-installed `claude.cmd` cannot be started by the adapter)."
+        },
         "plannotator.guides.autoApprove": {
           "type": "string",
           "enum": [
@@ -613,12 +525,6 @@
         {
           "id": "plannotator.guides.tree",
           "name": "Reviews"
-        },
-        {
-          "type": "webview",
-          "id": "plannotator.guides.chapter",
-          "name": "Chapter",
-          "when": "plannotator.guides.readerOpen"
         }
       ]
     },
@@ -634,8 +540,9 @@
     "watch": "bun run ./scripts/watch.ts",
     "test": "bun test",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.guides.json && tsc --noEmit -p tsconfig.webview.json",
+    "typecheck:reader": "tsc --noEmit -p tsconfig.reader.json",
     "vsce-package": "vsce package --no-dependencies",
-    "package": "bun run build && bun run vsce-package",
+    "package": "bun run --cwd ../.. build:viewer-pin && bun run build && bun run vsce-package",
     "clean": "rm -rf ./dist"
   },
   "dependencies": {
@@ -647,10 +554,24 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@pierre/diffs": "1.5.2",
+    "@plannotator/core": "workspace:*",
+    "@plannotator/guide-viewer": "workspace:*",
+    "@plannotator/review-editor": "workspace:*",
+    "@plannotator/shared": "workspace:*",
+    "@plannotator/ui": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/bun": "latest",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/vscode": "1.85.0",
+    "@vitejs/plugin-react": "^5.0.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.2",
-    "typescript": "^5.0.0"
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.0.0",
+    "vite": "^6.2.0"
   }
 }

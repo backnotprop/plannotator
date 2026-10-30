@@ -25,6 +25,7 @@
  */
 
 import type { InboxAttachmentState, InboxGuideRef, InboxMessageWire } from '@plannotator/core/inbox-types';
+import { isInboxAnnotatableKind } from '@plannotator/core/inbox-types';
 import { agentName, whenTime } from './format';
 
 /** Who sent the message an artifact came in, and when, in the window's words. */
@@ -159,4 +160,18 @@ export function artifactOfFile(artifacts: readonly Artifact[], attachmentId: str
 /** How many messages the artifacts came from ("11 from 5 messages"). */
 export function artifactMessageCount(artifacts: readonly Artifact[]): number {
   return new Set(artifacts.map((a) => a.messageId)).size;
+}
+
+/**
+ * What `O` opens (approval "inbox-keyboard-shortcuts"): the newest message's
+ * first file that opens in the viewer (its tile says Open, not Download), the
+ * grid's order. Guided reviews open their own reader and a plain file or a PDF
+ * is a download, so neither is taken. Null: nothing to open.
+ */
+export function newestViewableFile(artifacts: readonly Artifact[]): FileArtifact | null {
+  for (const artifact of artifactsNewestFirst(artifacts)) {
+    if (artifact.type !== 'file') continue;
+    if (isInboxAnnotatableKind(artifact.attachment.kind)) return artifact;
+  }
+  return null;
 }

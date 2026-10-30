@@ -11,7 +11,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import type { McpServer, NewSessionResponse, RequestPermissionRequest, RequestPermissionResponse, SessionConfigOption, SessionNotification, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 import {
   GUIDE_BUILDER_TOOLS,
@@ -33,6 +33,7 @@ import { builderAutoAllow } from "./acp/permission-policy";
 import type { RelayHost, RelaySession } from "./mcp/relay-host";
 import type { ChangedFileInfo } from "./sources/git";
 import { buildGuidePrompt } from "./prompt";
+import { realFileInside } from "./safe-path";
 import {
   buildFinishedGuide,
   deleteDraftRecord,
@@ -173,6 +174,23 @@ export interface GenerationInput {
 const MAX_ACTIVITY = 400;
 const BUILDER_TITLE = /guide_(set_header|set_overview|add_chapter|update_chapter|move_chapter|remove_chapter|place_file|move_file|unplace_file|read|finish)(?![a-z_])/;
 
+/**
+ * The builder's `resolveFile` hook: whether a `code:` link's file is at the
+ * head and how many lines it has. Read only when it is a regular file inside
+ * the head once symlinks are followed; a symlink out of the repository reads
+ * as not there.
+ */
+export async function resolveHeadFile(headRoot: string, path: string): Promise<{ exists: false } | { exists: true; lineCount: number }> {
+  const real = realFileInside(headRoot, path);
+  if (!real) return { exists: false };
+  try {
+    const text = await readFile(real, "utf8");
+    return { exists: true, lineCount: text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0) };
+  } catch {
+    return { exists: false };
+  }
+}
+
 export class GuideGeneration {
   readonly state: GenerationState;
   private readonly listeners = new Set<(state: GenerationState) => void>();
@@ -257,17 +275,7 @@ export class GuideGeneration {
     const { files, source } = this.input;
     const headRoot = source.headRoot;
     return {
-      resolveFile: async ({ path }) => {
-        const full = resolve(headRoot, path);
-        const rel = relative(headRoot, full);
-        if (rel.startsWith("..") || isAbsolute(rel)) return { exists: false };
-        try {
-          const text = await readFile(full, "utf8");
-          return { exists: true, lineCount: text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0) };
-        } catch {
-          return { exists: false };
-        }
-      },
+      resolveFile: ({ path }) => resolveHeadFile(headRoot, path),
       resolveSymbol: ({ name, path }) => this.deps.resolveSymbol(name, path, files, headRoot),
       checkMermaid: async (src) => {
         const r = await this.deps.checkMermaid(src);

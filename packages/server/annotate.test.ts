@@ -1583,6 +1583,34 @@ describe("annotate server: client lease", () => {
     }
   });
 
+  test("a tailnet-published session never offers Save to Notion, even with NOTION_TOKEN", async () => {
+    // --tailscale keeps remote mode off, but the page is reachable from other
+    // devices, and the server would save with its own Notion token.
+    const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    const savedToken = process.env.NOTION_TOKEN;
+    const sandboxDataDir = mkdtempSync(join(tmpdir(), "plannotator-notion-tailnet-"));
+    process.env.PLANNOTATOR_DATA_DIR = sandboxDataDir;
+    process.env.NOTION_TOKEN = "secret-token";
+    const server = await startAnnotateServer({
+      markdown: "# Test",
+      filePath: join(tmpdir(), "notion-tailnet.md"),
+      htmlContent: MINIMAL_HTML,
+      tailnetPublished: true,
+    });
+
+    try {
+      const plan = await (await fetch(`${server.url}/api/plan`)).json() as { notion?: boolean };
+      expect(plan.notion).toBeUndefined();
+    } finally {
+      server.stop();
+      if (savedToken === undefined) delete process.env.NOTION_TOKEN;
+      else process.env.NOTION_TOKEN = savedToken;
+      if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+      rmSync(sandboxDataDir, { recursive: true, force: true });
+    }
+  });
+
   test("returns 404 for the client-lease stream when the capability is disabled", async () => {
     const server = await startAnnotateServer({
       markdown: "# Test",

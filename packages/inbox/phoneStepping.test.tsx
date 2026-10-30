@@ -10,11 +10,11 @@
  * it, resists at the last file and says the end note; and every case it
  * leaves alone: a vertical scroll, two fingers, selected text, a block that
  * scrolls sideways (and the same block at its edge, which steps), HTML pages,
- * images (their own swipe), a desktop, an open sheet; a typed comment asks
+ * a desktop, an open sheet (images follow the finger too: imageSwipe.test.tsx); a typed comment asks
  * first; reduced motion steps on release without following. The real-touch
  * proof is tests/e2e/inbox-phone-stepping.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act, useState } from 'react';
@@ -156,9 +156,9 @@ const area = () => host!.querySelector<HTMLElement>('.ib-docarea')!;
 const live = () => host!.querySelector('[data-step-live]')!.textContent;
 const card = () => host!.querySelector<HTMLElement>('[data-file-swipe-card]');
 
-/** The phone's width for the file (happy-dom lays nothing out). */
+/** The phone's width for the file and the body around it, where the swipe is heard (happy-dom lays nothing out). */
 function sized(el: HTMLElement, width = 390) {
-  el.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 700, width, height: 700, toJSON: () => ({}) }) as DOMRect;
+  for (const node of [el, el.parentElement!]) node.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 700, width, height: 700, toJSON: () => ({}) }) as DOMRect;
 }
 
 function reducedMotion(on: boolean) {
@@ -207,7 +207,7 @@ test('which files take the swipe', () => {
   expect(fileSwipeMode('file', false)).toBe('follow');
   // A text file too large to show is the download card.
   expect(fileSwipeMode('html', true)).toBe('follow');
-  expect(fileSwipeMode('image', false)).toBe('image');
+  expect(fileSwipeMode('image', false)).toBe('follow');
   for (const kind of ['html', 'mermaid', 'graphviz', 'video'] as const) expect(fileSwipeMode(kind, false)).toBe('none');
 });
 
@@ -290,6 +290,28 @@ test.skipIf(!hasDom)('a swipe on a document follows the finger with the "Next ·
   });
   await settle(SWIPE_SLIDE_MS + 60);
   expect(opened).toEqual([plan.id, notes.id]);
+});
+
+test.skipIf(!hasDom)('a finger that comes back while the file is still sliding away is heard: that step lands at once and the next swipe starts from it', async () => {
+  stubViews();
+  reducedMotion(false);
+  const opened = await render(notes);
+  sized(area());
+  await drag(area(), -200, 0);
+  // Still sliding off toward plan.txt; the file is off to the left, so the next finger lands on the body around it.
+  expect(area().style.transform).toBe('translateX(-390px)');
+  expect(opened).toEqual([]);
+  const body = area().parentElement!;
+  await act(async () => touchEvent(body, 'touchstart', [{ x: 200, y: 300 }]));
+  expect(opened).toEqual([plan.id]);
+  expect(area().style.transform).toBe('');
+  await act(async () => {
+    for (let i = 1; i <= 6; i++) touchEvent(body, 'touchmove', [{ x: 200 - (200 * i) / 6, y: 300 }]);
+  });
+  expect(area().style.transform).toBe('translateX(-200px)');
+  await act(async () => touchEvent(body, 'touchend', [{ x: 0, y: 300 }]));
+  await settle(SWIPE_SLIDE_MS + 60);
+  expect(opened).toEqual([plan.id, shot.id]);
 });
 
 test.skipIf(!hasDom)('short of the line it springs back; a vertical scroll and two fingers are left alone', async () => {
@@ -389,7 +411,7 @@ test.skipIf(!hasDom)('reduced motion: nothing follows the finger, the step happe
   expect(opened).toEqual([plan.id]);
 });
 
-test.skipIf(!hasDom)('an HTML page and an image take no swipe from the pane (the image keeps its own at Fit); an open sheet stops it', async () => {
+test.skipIf(!hasDom)('an HTML page takes no swipe from the pane; an image takes the pane\'s swipe (approval "inbox-image-swipe"); an open sheet stops it', async () => {
   stubViews();
   reducedMotion(true);
   const opened = await render(page);
@@ -402,12 +424,12 @@ test.skipIf(!hasDom)('an HTML page and an image take no swipe from the pane (the
   host?.remove();
 
   const fromImage = await render(shot);
-  expect(area().getAttribute('data-file-swipe')).toBe('image');
+  expect(area().getAttribute('data-file-swipe')).toBe('follow');
   sized(area());
-  // Over the pane's area but not the image: nothing (the image's own swipe sits on the image).
+  // Anywhere over the image's area, as over a document (its own touchend-only swipe is off here).
   await drag(area(), -200);
   await settle(80);
-  expect(fromImage).toEqual([]);
+  expect(fromImage).toEqual([page.id]);
   act(() => root?.unmount());
   host?.remove();
 

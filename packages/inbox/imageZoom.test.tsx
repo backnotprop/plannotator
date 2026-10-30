@@ -3,11 +3,12 @@
  * ImageZoomStage): Ctrl/⌘ + wheel and a pinch about the pointer, a plain
  * wheel, drag, double click, Fit / Actual size with the scale beside them, a
  * comment's drawing kept in the image's transform, Fit for tall and wide
- * images, and the swipe that steps only at Fit. The keys (← → always step)
+ * images, the swipe that steps only at Fit, and what a phone's follow swipe
+ * asks the image (pan to the edge first, a drag down only at Fit). The keys (← → always step)
  * are in attachmentStepping.test.tsx; the real browser proof is
  * tests/e2e/inbox-image-zoom.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  * happy-dom has no layout, so the stage's box and the image's own size are
  * given here.
  */
@@ -19,6 +20,7 @@ import type { Annotation } from '@plannotator/ui/types';
 
 const hasDom = typeof document !== 'undefined';
 const { ImageAttachmentView } = (hasDom ? await import('./components/ImageAttachmentView') : {}) as typeof import('./components/ImageAttachmentView');
+type ImageSwipeEdges = import('./components/ImageAttachmentView').ImageSwipeEdges;
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -263,6 +265,45 @@ describe.if(hasDom)('the Inbox image viewer zooms', () => {
     const wide = await load(6000, 1000);
     expect(outer().getAttribute('data-wide')).toBe('true');
     expect(view(wide.img)).toEqual({ x: 0, y: 0, scale: 0.6 });
+  });
+
+  test('what a phone\'s swipe asks the image (approval "inbox-image-swipe"): zoomed, it pans to its edge before a swipe steps; a drag down closes only at Fit', async () => {
+    const edges: { current: ImageSwipeEdges | null } = { current: null };
+    let shown = 0;
+    await mount({ edgesRef: edges, onShown: () => shown++ });
+    expect(shown).toBe(0);
+    const { stage } = await load();
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+    // Loaded and laid out: a swipe's picture of it can go.
+    expect(shown).toBe(1);
+    // At Fit the whole image shows: a swipe either way steps, and a drag down closes.
+    expect(edges.current!.keeps(1)).toBe(false);
+    expect(edges.current!.keeps(-1)).toBe(false);
+    expect(edges.current!.canDismiss()).toBe(true);
+    // Zoomed about the middle: more to see both ways, so a swipe pans; a drag down pans too.
+    await wheel(stage, -100, { ctrlKey: true });
+    expect(edges.current!.keeps(1)).toBe(true);
+    expect(edges.current!.keeps(-1)).toBe(true);
+    expect(edges.current!.canDismiss()).toBe(false);
+    // Panned to its right edge: the next swipe toward more of the right steps; back toward the left still pans.
+    await pointer(stage, 'pointerdown', 1, 900, 300);
+    await pointer(stage, 'pointermove', 1, -3000, 300);
+    await pointer(stage, 'pointerup', 1, -3000, 300);
+    expect(edges.current!.keeps(1)).toBe(false);
+    expect(edges.current!.keeps(-1)).toBe(true);
+    await act(async () => fitButton().click());
+    expect(edges.current!.keeps(1)).toBe(false);
+    expect(edges.current!.canDismiss()).toBe(true);
+    act(() => root!.unmount());
+    root = null;
+    host!.remove();
+    // A panorama at Fit reads from its left edge: a swipe toward more of it pans first, back the other way steps.
+    await mount({ edgesRef: edges });
+    await load(6000, 1000);
+    expect(edges.current!.keeps(1)).toBe(true);
+    expect(edges.current!.keeps(-1)).toBe(false);
   });
 
   test('a horizontal swipe steps only at Fit; a second finger is never a swipe', async () => {

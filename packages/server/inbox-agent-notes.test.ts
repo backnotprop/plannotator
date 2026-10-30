@@ -14,6 +14,7 @@ import {
   INBOX_NOTE_BLOCK,
   INBOX_NOTE_END,
   INBOX_NOTE_START,
+  INBOX_NOTE_VERSION,
   inboxNotesDisabled,
   noteStatus,
   noteTarget,
@@ -45,7 +46,7 @@ const read = (path: string) => readFileSync(path, "utf8");
 test("the block: markers on their own lines around the note", () => {
   expect(INBOX_NOTE_BLOCK.startsWith(`${INBOX_NOTE_START}\n## Plannotator Inbox\n`)).toBe(true);
   expect(INBOX_NOTE_BLOCK.endsWith(`\n${INBOX_NOTE_END}`)).toBe(true);
-  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v3 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
+  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v4 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
 });
 
 describe("where each agent's note goes", () => {
@@ -85,6 +86,25 @@ describe("where each agent's note goes", () => {
     expect(noteTarget("gemini", e).path).toBe(file(".gemini", "GEMINI.md"));
     write(file(".gemini", "settings.json"), '{ // mine\n "context": { "fileName": ["AGENTS.md", "GEMINI.md"] } }');
     expect(noteTarget("gemini", e).path).toBe(file(".gemini", "AGENTS.md"));
+  });
+
+  test("Qwen Code: its context.fileName, QWEN.md by default, in $QWEN_HOME (the folder itself)", () => {
+    expect(noteTarget("qwen", e)).toEqual({ path: file(".qwen", "QWEN.md"), create: true, reason: null });
+    write(file(".qwen", "settings.json"), '{ // mine\n "context": { "fileName": "CONTEXT.md" } }');
+    expect(noteTarget("qwen", e).path).toBe(file(".qwen", "CONTEXT.md"));
+    // A name with a folder in it is not a file name: the default.
+    write(file(".qwen", "settings.json"), '{ "context": { "fileName": ["../escape.md"] } }');
+    expect(noteTarget("qwen", e).path).toBe(file(".qwen", "QWEN.md"));
+    // QWEN_HOME replaces ~/.qwen (Gemini's GEMINI_CLI_HOME is a parent folder; Qwen's is not).
+    const home = join(fake.root, "qwen-home");
+    const moved = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, QWEN_HOME: home } });
+    write(join(home, "settings.json"), '{ "context": { "fileName": ["AGENTS.md", "QWEN.md"] } }');
+    expect(noteTarget("qwen", moved).path).toBe(join(home, "AGENTS.md"));
+    expect(addInboxNote("qwen", dataDir, moved)).toMatchObject({ ok: true, action: "created" });
+    expect(read(join(home, "AGENTS.md"))).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    expect(existsSync(file(".qwen", "AGENTS.md"))).toBe(false);
+    expect(removeInboxNote("qwen", dataDir, moved)).toMatchObject({ ok: true, action: "deleted" });
+    expect(existsSync(join(home, "AGENTS.md"))).toBe(false);
   });
 });
 
@@ -154,6 +174,7 @@ describe("the marked section", () => {
     const targets: [InboxNoteAgentId, string][] = [
       ["codex", file(".codex", "AGENTS.md")],
       ["gemini", file(".gemini", "GEMINI.md")],
+      ["qwen", file(".qwen", "QWEN.md")],
       ["pi", file(".pi", "agent", "AGENTS.md")],
       ["opencode", file(".config", "opencode", "AGENTS.md")],
     ];
@@ -271,14 +292,14 @@ describe("the marked section", () => {
     writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes: { [agent]: record } }));
   };
 
-  test("updating from v1: an untouched v1 note (with its record) is still on, and re-adding it writes v3 in place, every other byte kept", () => {
+  test("updating from v1: an untouched v1 note (with its record) is still on, and re-adding it writes this version in place, every other byte kept", () => {
     const path = file(".claude", "rules", "plannotator-inbox.md");
     write(path, `${V1_BLOCK}\n`);
     v1Record("claude-code", path);
     expect(noteStatus("claude-code", dataDir, e).state).toBe("added");
     expect(addInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
     expect(read(path)).toBe(`${INBOX_NOTE_BLOCK}\n`);
-    expect(readInboxAgentNotes(dataDir).notes["claude-code"]).toMatchObject({ version: 3, block_sha256: sha(INBOX_NOTE_BLOCK), created: true });
+    expect(readInboxAgentNotes(dataDir).notes["claude-code"]).toMatchObject({ version: INBOX_NOTE_VERSION, block_sha256: sha(INBOX_NOTE_BLOCK), created: true });
     // Switching it off afterwards still deletes the file the note was all of.
     expect(removeInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "deleted" });
     expect(existsSync(path)).toBe(false);
@@ -305,7 +326,7 @@ describe("the marked section", () => {
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
     expect(read(path)).toBe(`Shared.\n\n${INBOX_NOTE_BLOCK}\n`);
     expect(noteStatus("pi", dataDir, e).state).toBe("added");
-    expect(readInboxAgentNotes(dataDir).notes.pi).toMatchObject({ version: 3, block_sha256: sha(INBOX_NOTE_BLOCK) });
+    expect(readInboxAgentNotes(dataDir).notes.pi).toMatchObject({ version: INBOX_NOTE_VERSION, block_sha256: sha(INBOX_NOTE_BLOCK) });
     // And Off for both gives the file back as the person had it.
     expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-shared" });
     expect(removeInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
@@ -353,15 +374,19 @@ test("uninstall: every recorded note, plus a file with our markers whose record 
   write(file(".codex", "AGENTS.md"), "Mine.\n");
   addInboxNote("codex", dataDir, e);
   addInboxNote("gemini", dataDir, e);
+  // Qwen's note whose record is gone: found by its markers in the file Qwen reads.
+  write(file(".qwen", "QWEN.md"), `Qwen rules\n\n${INBOX_NOTE_BLOCK}\n`);
   write(file(".pi", "agent", "CLAUDE.md"), `Pi rules\n\n${INBOX_NOTE_BLOCK}\n`);
   const { items } = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);
   expect(items.map((item) => item.describe)).toEqual([
     "Note for Codex (~/.codex/AGENTS.md, marked section only)",
     "Note for Gemini CLI (~/.gemini/GEMINI.md, created by Plannotator: file removed if empty)",
+    "Note for Qwen Code (~/.qwen/QWEN.md, marked section only)",
     "Note for Pi (~/.pi/agent/CLAUDE.md, marked section only)",
   ]);
   for (const item of items) expect(item.apply().ok).toBe(true);
   expect(read(file(".codex", "AGENTS.md"))).toBe("Mine.\n");
+  expect(read(file(".qwen", "QWEN.md"))).toBe("Qwen rules\n");
   expect(existsSync(file(".gemini", "GEMINI.md"))).toBe(false);
   expect(read(file(".pi", "agent", "CLAUDE.md"))).toBe("Pi rules\n");
 });

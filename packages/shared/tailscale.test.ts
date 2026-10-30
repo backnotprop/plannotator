@@ -102,9 +102,9 @@ describe("detectTailnetHost", () => {
     expect("error" in result && result.error).toContain("not found on PATH");
   });
 
-  test("reports a not-signed-in daemon via stderr detail", () => {
+  test("reports a not-signed-in daemon in plain words", () => {
     const result = detectTailnetHost(() => ({ status: 1, stdout: "", stderr: "Logged out." }));
-    expect("error" in result && result.error).toContain("Logged out.");
+    expect("error" in result && result.error).toContain("signed out on this computer");
   });
 
   test("errors when neither DNSName nor a single IPv4 is available", () => {
@@ -119,6 +119,33 @@ describe("describeTailscaleFailure", () => {
     expect(describeTailscaleFailure({ status: 1, stdout: "", stderr: "" })).toContain(
       "tailscale up",
     );
+  });
+
+  // Tailscale's own words (cmd/tailscale/cli isRunningOrStarting, the local
+  // client's connect error, serve's enable prompt) -> the plain next step.
+  const failed = (stderr: string, stdout = "") => describeTailscaleFailure({ status: 1, stdout, stderr });
+
+  test("Serve off for the tailnet without a link points at the admin console", () => {
+    const text = failed("", "Serve is not enabled on your tailnet.\n");
+    expect(text).toContain("Tailscale setting, not a Plannotator bug");
+    expect(text).toContain("https://login.tailscale.com/admin/dns");
+  });
+
+  test("signed out: passes on Tailscale's login link when it gave one", () => {
+    expect(failed("Logged out.\nLog in at: https://login.tailscale.com/a/xyz\n")).toContain("Sign in at https://login.tailscale.com/a/xyz");
+    expect(failed("Logged out.\n")).toContain("signed out on this computer");
+  });
+
+  test("stopped, not running, and waiting for approval each name their fix", () => {
+    expect(failed("Tailscale is stopped.\n")).toContain("turned off on this computer");
+    expect(
+      failed("Failed to connect to local Tailscale daemon for /localapi/v0/serve-config; not running? Error: dial unix /var/run/tailscaled.socket: connect: no such file or directory\n"),
+    ).toContain("not running on this computer");
+    expect(failed("Machine is not yet approved by tailnet admin.\n")).toContain("waiting for approval");
+  });
+
+  test("anything else still shows Tailscale's own text", () => {
+    expect(failed("error enabling https feature: some control error\n")).toContain("error enabling https feature: some control error");
   });
 });
 

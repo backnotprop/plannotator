@@ -50,6 +50,9 @@ if (args[0] === "serve" && args[1] === "status") {
 }
 const port = /--https=(\\d+)/.exec(args.join(" "))?.[1];
 if (args[0] === "serve" && port && args.includes("off")) { delete serve[port]; writeFileSync(state, JSON.stringify(serve)); out(""); }
+if (args[0] === "serve" && port && args.includes("--bg") && mode === "serve-off") {
+  out("\\nServe is not enabled on your tailnet.\\nTo enable, visit:\\n\\n         https://login.tailscale.com/f/serve?node=nTEST\\n\\n");
+}
 if (args[0] === "serve" && port && args.includes("--bg")) {
   serve[port] = args.at(-1);
   writeFileSync(state, JSON.stringify(serve));
@@ -93,7 +96,7 @@ const mappings = (): Record<string, string> => (existsSync(statePath()) ? JSON.p
 /** Start `plannotator annotate notes.md [...flags]` as a host would, and wait for its ready line. */
 async function start(
   flags: string[],
-  options: { bridge?: boolean; mode?: "tagged"; argv?: string[]; cwd?: string } = {},
+  options: { bridge?: boolean; mode?: "tagged" | "serve-off"; argv?: string[]; cwd?: string } = {},
 ): Promise<{ port: number; ready: Json }> {
   rmSync(statePath(), { force: true });
   writeFileSync(
@@ -333,5 +336,24 @@ describe("nothing changes without --tailscale or without a bridge", () => {
     const calls = readFileSync(join(root, "calls.txt"), "utf8").trim().split("\n");
     expect(calls.some((line) => line.startsWith("status"))).toBe(false);
     expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).not.toContain("session-bridge");
+  });
+});
+
+describe("--tailscale when Tailscale Serve is off for the tailnet", () => {
+  unix("says it is a Tailscale setting, passes on Tailscale's link, and exits without leaving a mapping", async () => {
+    rmSync(join(root, "calls.txt"), { force: true });
+    let message = "";
+    try {
+      await start(["--tailscale"], { bridge: false, mode: "serve-off" });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("the CLI exited 1");
+    expect(message).toContain("Tailscale Serve is off for your tailnet");
+    expect(message).toContain("https://login.tailscale.com/f/serve?node=nTEST");
+    expect(message).toContain("without --tailscale");
+    expect(mappings()).toEqual({});
+    // Nothing was published, so there was nothing to take down.
+    expect(readFileSync(join(root, "calls.txt"), "utf8")).not.toContain("off");
   });
 });

@@ -2,17 +2,17 @@
  * GuideAsks on the vscode mock with the FAKE ACP agent (never a real one):
  * a second question while the first is getting ready is refused cleanly, and
  * a guide or answer deleted while it is being answered is not written back;
- * the question box under the lines (a comment thread) asks, shows the work,
- * opens the answer beside the diff and takes follow-ups.
+ * the Guide tab asks about selected lines and about a chapter, the answer
+ * opens beside it at once, and line answers become markers.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import * as vscode from "vscode";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLAUDE_CODE } from "@plannotator/acp-client/agents";
-import { answersPath, listAnswers } from "../ask/answers";
+import { answersPath, linesHash, listAnswers } from "../ask/answers";
 import { startRelayHost, type RelayHost } from "../mcp/relay-host";
 import { ReaderModel } from "../reader-model";
 import type { LoadedGuide } from "../store";
@@ -66,21 +66,22 @@ afterEach(() => {
   (vscode.window as unknown as Record<string, unknown>).showInformationMessage = original.info;
 });
 
-function world(askTurns: unknown[][], options: { gate?: Promise<void> } = {}) {
+function world(askTurns: unknown[][], options: { gate?: Promise<void>; rawPatch?: string; files?: string[]; setup?: (root: string) => void } = {}) {
   const root = mkdtempSync(join(work, "repo-"));
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src", "deliver.ts"), "export function deliver() {\n  return 1;\n}\n");
+  options.setup?.(root);
   const scriptPath = join(root, "script.json");
   const logPath = join(root, "agent.log");
   writeFileSync(scriptPath, JSON.stringify({ steps: [], askTurns }));
-  const rawPatch = "diff --git a/src/deliver.ts b/src/deliver.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/deliver.ts\n@@ -0,0 +1,3 @@\n+export function deliver() {\n+  return 1;\n+}\n";
+  const rawPatch = options.rawPatch ?? "diff --git a/src/deliver.ts b/src/deliver.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/deliver.ts\n@@ -0,0 +1,3 @@\n+export function deliver() {\n+  return 1;\n+}\n";
   const guide: LoadedGuide = {
     repoKey: REPO_KEY,
     id: GUIDE_ID,
     rawPatch,
     envelope: {
       version: 1, savedAt: 1, label: "local", title: "Retry failed webhook deliveries", engine: "claude",
-      guide: { title: "Retry failed webhook deliveries", intent: "Deliveries retry.", sections: [{ title: "The loop", overview: "It backs off.", diffs: [{ file: "src/deliver.ts", summary: "x" }] }] },
+      guide: { title: "Retry failed webhook deliveries", intent: "Deliveries retry.", sections: [{ title: "The loop", overview: "It backs off.", diffs: (options.files ?? ["src/deliver.ts"]).map((file) => ({ file, summary: "x" })) }] },
       reviewed: [false],
     } as unknown as LoadedGuide["envelope"],
     sidecar: { v: 1, fileTicks: [], focus: {}, agent: { id: CLAUDE_CODE.id, label: CLAUDE_CODE.label } },
@@ -217,188 +218,186 @@ describe("asking from VS Code", () => {
   });
 });
 
-type MockThread = { uri: vscode.Uri; comments: Array<{ body: { value: string }; author: { name: string; iconPath?: vscode.Uri }; label?: string }>; label?: string; state?: number; contextValue: string; canReply: boolean; disposed: boolean; controller: string };
-const threads = () => (vscode as unknown as { createdCommentThreads: MockThread[] }).createdCommentThreads.filter((t) => t.controller.startsWith("plannotator-guides-ask"));
-/** The box now: the newest thread still shown (a box moves to the conversation controller when its first question runs). */
-const current = () => threads().filter((t) => !t.disposed).at(-1)!;
-const bodies = (t: MockThread) => t.comments.map((c) => c.body.value);
-const selection = { kind: "selection" as const, chapter: 0, chapterTitle: "The loop", path: "src/deliver.ts", side: "head" as const, lines: { start: 1, end: 2 }, code: "export function deliver() {\n  return 1;" };
-
-describe("the question box under the lines", () => {
-  async function openBox(w: ReturnType<typeof world>, line = 0) {
-    const before = threads().length;
-    w.asks.threads.open(w.guide, selection, vscode.Uri.file(join(w.root, "src", "deliver.ts")), new vscode.Range(line, 0, line + 1, 0));
-    expect(threads()).toHaveLength(before + 1);
-    return threads().at(-1)!;
-  }
-
-  it("asks the typed question, shows the work in the box, then opens the answer beside the diff", async () => {
-    const w = world([[{ say: "Looking." }, { sleep: 400 }, answer("It returns one")]]);
-    const t = await openBox(w);
-    expect(t.label).toBe("Ask Claude Code · deliver.ts 1–2");
-    expect(t.contextValue).toBe("plannotator-ask-compose");
-    expect(t.canReply).toBe(true);
-    expect(t.comments).toHaveLength(1);
-    expect(t.comments[0].author.name).toBe("Plannotator");
-    // Resolved: nothing waits on it (comments.openView "firstFileUnresolved" leaves the panel closed).
-    expect(t.state).toBe(vscode.CommentThreadState.Resolved);
-    expect(bodies(t)[0]).toContain("Ask about **lines 1–2**");
-    expect(bodies(t)[0]).toContain("command:plannotator.guides.askThreadPick");
-
-    await w.asks.threads.submit({ thread: t, text: "  Why return a value?  " });
-    // The box moved to the conversation controller (its field asks a follow-up), on the same lines.
-    expect(t.disposed).toBe(true);
-    const c = current();
-    expect(c.controller).toBe("plannotator-guides-ask-conversation");
-    expect(c.uri).toBe(t.uri);
-    expect(c.label).toBe("Claude Code · deliver.ts 1–2");
-    expect(c.contextValue).toBe("plannotator-ask-asking");
-    expect(c.canReply).toBe(false);
-    expect(bodies(c)[0]).toBe("Why return a value?");
-    expect(bodies(c)[1]).toContain("command:plannotator.guides.askThreadStop");
-    // No tab yet: the box shows the work.
-    expect(w.panels).toHaveLength(0);
-
-    await waitFor(() => c.contextValue === "plannotator-ask-done");
-    expect(c.canReply).toBe(true);
-    expect(c.state).toBe(vscode.CommentThreadState.Resolved);
-    expect(bodies(c)[1]).toContain("Answer opened beside the diff");
-    // Avatars for the person and the agent; the agent's label adds the time and the cost.
-    // The person: initials; the agent: its own mark from images/agents/.
-    expect(c.comments[0].author.iconPath?.scheme).toBe("data");
-    expect(c.comments[0].author.iconPath?.path).toStartWith("image/svg+xml;base64,");
-    expect(c.comments[1].author.iconPath?.path).toEndWith("/ext/images/agents/claude-code.svg");
-    expect(c.comments[1].label).toMatch(/ · \d+s$/);
-    expect(w.panels).toEqual([{ title: "Answer: Why return a value?", preserveFocus: true }]);
-    const [record] = listAnswers(REPO_KEY, GUIDE_ID);
-    expect(record.about).toMatchObject({ kind: "selection", lines: { start: 1, end: 2 } });
-    expect(record.question).toBe("Why return a value?");
-    w.asks.dispose();
-  });
-
-  it("asks a follow-up in the same box, in the same conversation", async () => {
-    const w = world([[answer("First")], [answer("Second")]]);
-    const t = await openBox(w);
-    await w.asks.threads.submit({ thread: t, text: "Why?" });
-    const c = current();
-    await waitFor(() => c.contextValue === "plannotator-ask-done");
-    await w.asks.threads.submit({ thread: c, text: "And then?" });
-    // A follow-up stays in the same box.
-    expect(current()).toBe(c);
-    await waitFor(() => c.contextValue === "plannotator-ask-done" && c.comments.length === 4);
-    expect(bodies(c)[2]).toBe("And then?");
-    expect(bodies(c)[3]).toContain("Answer opened beside the diff");
-    const all = listAnswers(REPO_KEY, GUIDE_ID);
-    const [second, first] = all;
-    expect(second.followUpOf).toBe(first.id);
-    // One session answered both.
-    expect(w.log().filter((e) => e.event === "prompt")).toHaveLength(2);
-    expect(w.log().filter((e) => e.event === "newSession" || e.event === "loadSession")).toHaveLength(1);
-    w.asks.dispose();
-  });
-
-  it("asks a suggestion when its link is picked, and lists earlier questions about the file", async () => {
-    const w = world([[answer("Why")], [answer("Break")]]);
-    const t = await openBox(w);
-    const id = /askThreadPick\?([^\s)]+)/.exec(bodies(t)[0])![1];
-    const [threadId] = JSON.parse(decodeURIComponent(id));
-    await w.asks.threads.pick(threadId, 1);
-    await waitFor(() => current().contextValue === "plannotator-ask-done");
-    expect(listAnswers(REPO_KEY, GUIDE_ID)[0].question).toBe("What could break?");
-    const next = await openBox(w, 5);
-    expect(bodies(next)[0]).toContain("Asked before:  \n[What could break?](command:plannotator.guides.openAnswer");
-    w.asks.dispose();
-  });
-
-  it("says in the box when another question is being answered, and keeps the question to ask later", async () => {
-    let open!: () => void;
-    const gate = new Promise<void>((r) => (open = r));
-    const w = world([[answer("Chapter")], [answer("Box")]], { gate });
-    const chapter = w.ask("What does this chapter do?");
-    const t = await openBox(w);
-    await w.asks.threads.submit({ thread: t, text: "Why?" });
-    expect(t.contextValue).toBe("plannotator-ask-compose");
-    expect(bodies(t).at(-1)).toContain("Not asked: “Why?”");
-    expect(bodies(t).at(-1)).toContain("command:plannotator.guides.askThreadAgain");
-    expect(warnings).toEqual([]);
-    open();
-    await chapter;
+describe("asking from the Guide tab", () => {
+  it("asks about lines selected in a diff: their code goes with the question, the answer opens beside at once, and the lines get a marker", async () => {
+    const w = world([[{ say: "Looking…" }, answer("Why it returns 1")]]);
+    await w.asks.askAboutLines("src/deliver.ts", "new", 1, 2, "  Why does it return 1?  ");
+    // The tab opens at once (keeping the focus in the Guide tab) and shows the work.
+    expect(w.panels).toHaveLength(1);
+    expect(w.panels[0].title).toBe("Answering: Why does it return 1?");
+    expect(w.panels[0].preserveFocus).toBe(true);
     await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
-    const threadId = JSON.parse(decodeURIComponent(/askThreadAgain\?([^\s)]+)/.exec(bodies(t).at(-1)!)![1]))[0];
-    await w.asks.threads.again(threadId);
-    await waitFor(() => current().contextValue === "plannotator-ask-done");
-    expect(listAnswers(REPO_KEY, GUIDE_ID).map((r) => r.question)).toEqual(["Why?", "What does this chapter do?"]);
+    const [record] = listAnswers(REPO_KEY, GUIDE_ID);
+    expect(record.question).toBe("Why does it return 1?");
+    expect(record.about).toMatchObject({ kind: "selection", chapter: 0, path: "src/deliver.ts", side: "head", lines: { start: 1, end: 2 } });
+    expect(record.about.code).toBe("export function deliver() {\n  return 1;");
+    expect(w.asks.lineAnswers(w.guide)).toEqual([{ id: record.id, path: "src/deliver.ts", side: "new", start: 1, end: 2, question: "Why does it return 1?", status: "answered" }]);
+    // The chapter lists it too.
+    expect(w.asks.chapterAnswers(w.guide, 0).items.map((i) => i.question)).toEqual(["Why does it return 1?"]);
     w.asks.dispose();
   });
 
-  it("Cancel removes the box; a second unasked box replaces the first; closing the guide removes the rest", async () => {
-    const w = world([]);
-    const a = await openBox(w);
-    w.asks.threads.close({ thread: a, text: "" });
-    expect(a.disposed).toBe(true);
-    const b = await openBox(w);
-    const c = await openBox(w, 1);
-    expect(b.disposed).toBe(true);
-    expect(c.disposed).toBe(false);
-    // The same lines again: the open box is reused.
-    w.asks.threads.open(w.guide, selection, c.uri, new vscode.Range(1, 0, 2, 0));
-    expect(threads().at(-1)).toBe(c);
-    w.asks.onReaderChanged(null);
-    expect(c.disposed).toBe(true);
-    expect(w.asks.threads.size).toBe(0);
-    w.asks.dispose();
-  });
-
-  it("closing the guide while a box's question runs stops it, and no answer tab opens", async () => {
-    const w = world([[{ say: "Thinking…" }, { sleep: 1500 }, answer("Too late")]]);
-    const t = await openBox(w);
-    await w.asks.threads.submit({ thread: t, text: "Why?" });
-    const c = current();
-    await waitFor(() => w.log().some((e) => e.event === "prompt"));
-    w.asks.onReaderChanged(null);
-    expect(c.disposed).toBe(true);
-    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "stopped" && !!r.answeredAt));
-    await new Promise((r) => setTimeout(r, 300));
-    expect(w.panels).toEqual([]);
-    expect(w.log().some((e) => e.event === "cancel")).toBe(true);
-    w.asks.dispose();
-  });
-
-  it("asking again on lines that have a box gets that box back; a new box keeps a question that was not asked", async () => {
-    const w = world([[answer("One")]]);
-    const t = await openBox(w);
-    await w.asks.threads.submit({ thread: t, text: "Why?" });
-    const c = current();
-    await waitFor(() => c.contextValue === "plannotator-ask-done");
-    const before = threads().length;
-    w.asks.threads.open(w.guide, selection, c.uri, new vscode.Range(0, 0, 1, 0));
-    expect(threads()).toHaveLength(before);
-    expect(current()).toBe(c);
-    expect(c.disposed).toBe(false);
-
-    // A box whose question was not asked (another one was running) stays when a box opens elsewhere.
-    let open!: () => void;
-    const gate = new Promise<void>((r) => (open = r));
-    const w2 = world([[answer("Chapter")]], { gate });
-    const chapter = w2.ask("What does this chapter do?");
-    const kept = await openBox(w2, 5);
-    await w2.asks.threads.submit({ thread: kept, text: "Why?" });
-    expect(bodies(kept).at(-1)).toContain("Not asked");
-    const other = await openBox(w2, 9);
-    expect(kept.disposed).toBe(false);
-    expect(other.disposed).toBe(false);
-    open();
-    await chapter;
-    w.asks.dispose();
-    w2.asks.dispose();
-  });
-
-  it("an empty Ask asks nothing", async () => {
-    const w = world([]);
-    const t = await openBox(w);
-    await w.asks.threads.submit({ thread: t, text: "   " });
-    expect(t.contextValue).toBe("plannotator-ask-compose");
+  it("asks nothing for a file outside the guide or an empty question", async () => {
+    const w = world([[answer("Never")]]);
+    await w.asks.askAboutLines("src/other.ts", "new", 1, 1, "Why?");
+    await w.asks.askAboutLines("src/deliver.ts", "new", 1, 1, "   ");
+    expect(w.panels).toHaveLength(0);
     expect(listAnswers(REPO_KEY, GUIDE_ID)).toEqual([]);
+    w.asks.dispose();
+  });
+
+  const CHANGE = [
+    "diff --git a/src/deliver.ts b/src/deliver.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/deliver.ts",
+    "+++ b/src/deliver.ts",
+    "@@ -1,3 +1,3 @@",
+    " export function deliver() {",
+    '-  throw new Error("failed");',
+    "+  return 1;",
+    " }",
+    "diff --git a/src/old.ts b/src/old.ts",
+    "deleted file mode 100644",
+    "--- a/src/old.ts",
+    "+++ /dev/null",
+    "@@ -1,2 +0,0 @@",
+    "-export const old = 1;",
+    "-export const gone = 2;",
+    "diff --git a/src/link.ts b/src/link.ts",
+    "new file mode 120000",
+    "--- /dev/null",
+    "+++ b/src/link.ts",
+    "@@ -0,0 +1 @@",
+    "+../../secret.txt",
+    "\\ No newline at end of file",
+    "",
+  ].join("\n");
+  const changeWorld = (turns: unknown[][]) =>
+    world(turns, {
+      rawPatch: CHANGE,
+      files: ["src/deliver.ts", "src/old.ts", "src/link.ts"],
+      // The change adds a symlink out of the repository; the file it points at holds a secret.
+      setup: (root) => {
+        writeFileSync(join(root, "..", "secret.txt"), "aws_secret_access_key = SECRET\n");
+        symlinkSync(join(root, "..", "secret.txt"), join(root, "src", "link.ts"));
+      },
+    });
+
+  it("removed lines are asked about as the old version's lines, with the code the diff showed", async () => {
+    const w = changeWorld([[answer("It threw")]]);
+    await w.asks.askAboutLines("src/deliver.ts", "old", 1, 2, "Why did it throw?");
+    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
+    const [record] = listAnswers(REPO_KEY, GUIDE_ID);
+    expect(record.about).toMatchObject({ path: "src/deliver.ts", side: "base", lines: { start: 1, end: 2 } });
+    expect(record.about.code).toBe('export function deliver() {\n  throw new Error("failed");');
+    // The hash describes the lines asked about (the old version's), never the head file on disk.
+    expect(record.about.fileHash).toBeUndefined();
+    expect(record.about.codeHash).toBe(linesHash(record.about.code!));
+    // Its marker is on the old side of the diff.
+    expect(w.asks.lineAnswers(w.guide)[0]).toMatchObject({ side: "old", start: 1, end: 2 });
+    w.asks.dispose();
+  });
+
+  it("a deleted file's lines come from the diff (the file is gone from disk)", async () => {
+    const w = changeWorld([[answer("Gone")]]);
+    await w.asks.askAboutLines("src/old.ts", "old", 1, 2, "Why remove these?");
+    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
+    expect(listAnswers(REPO_KEY, GUIDE_ID)[0].about).toMatchObject({ side: "base", code: "export const old = 1;\nexport const gone = 2;" });
+    w.asks.dispose();
+  });
+
+  it("never sends what a symlink in the change points at: the code is the diff's own line", async () => {
+    const w = changeWorld([[answer("A link")]]);
+    await w.asks.askAboutLines("src/link.ts", "new", 1, 1, "What is this?");
+    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
+    const [record] = listAnswers(REPO_KEY, GUIDE_ID);
+    expect(record.about.code).toBe("../../secret.txt");
+    expect(JSON.stringify(record)).not.toContain("SECRET");
+    expect(record.about.fileHash).toBeUndefined();
+    expect(record.about.codeHash).toBe(linesHash("../../secret.txt"));
+    const prompts = w.log().filter((e) => e.event === "prompt").map((e) => JSON.stringify(e));
+    expect(prompts.length).toBeGreaterThan(0);
+    for (const p of prompts) expect(p).not.toContain("SECRET");
+    w.asks.dispose();
+  });
+
+  it("lines the diff does not show go without code (never read from disk)", async () => {
+    const w = changeWorld([[answer("Far")]]);
+    await w.asks.askAboutLines("src/deliver.ts", "new", 2, 40, "And below?");
+    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
+    expect(listAnswers(REPO_KEY, GUIDE_ID)[0].about.code).toBeUndefined();
+    w.asks.dispose();
+  });
+
+  it("an answer about lines is stale when those lines change on disk, not when the file changes elsewhere", async () => {
+    const w = world([[answer("Returns 1")]]);
+    await w.asks.askAboutLines("src/deliver.ts", "new", 2, 2, "Why 1?");
+    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
+    const [record] = listAnswers(REPO_KEY, GUIDE_ID);
+    expect(record.about.codeHash).toBe(linesHash("  return 1;"));
+    const staleNow = async () => {
+      await w.asks.openAnswer(record.id);
+      return (w.shown.at(-1) as { stale: string | null }).stale;
+    };
+    expect(await staleNow()).toBeNull();
+    writeFileSync(join(w.root, "src", "deliver.ts"), "export function deliver() {\n  return 1;\n} // edited below\n");
+    expect(await staleNow()).toBeNull();
+    writeFileSync(join(w.root, "src", "deliver.ts"), "export function deliver() {\n  return 2;\n}\n");
+    expect(await staleNow()).toBe("Written for 9b07e4d; these lines have changed since.");
+    w.asks.dispose();
+  });
+
+  it("removed lines of a renamed file are asked about under the old path", async () => {
+    const RENAME = [
+      "diff --git a/src/old-name.ts b/src/deliver.ts",
+      "similarity index 80%",
+      "rename from src/old-name.ts",
+      "rename to src/deliver.ts",
+      "--- a/src/old-name.ts",
+      "+++ b/src/deliver.ts",
+      "@@ -1,3 +1,3 @@",
+      " export function deliver() {",
+      "-  return 0;",
+      "+  return 1;",
+      " }",
+      "",
+    ].join("\n");
+    const w = world([[answer("Renamed")]], { rawPatch: RENAME });
+    await w.asks.askAboutLines("src/deliver.ts", "old", 2, 2, "What was 0?");
+    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
+    const [record] = listAnswers(REPO_KEY, GUIDE_ID);
+    expect(record.about).toMatchObject({ path: "src/deliver.ts", oldPath: "src/old-name.ts", side: "base", code: "  return 0;" });
+    const prompt = JSON.stringify(w.log().filter((e) => e.event === "prompt"));
+    expect(prompt).toContain("line 2 of src/old-name.ts (renamed to src/deliver.ts by the change) (the old version)");
+    w.asks.dispose();
+  });
+
+  it("a selection in an editor showing a symlink of the change that leads out of the repository is not asked about", async () => {
+    const w = changeWorld([[answer("Never")]]);
+    const infos: string[] = [];
+    (vscode.window as unknown as Record<string, unknown>).showInformationMessage = async (m: string) => void infos.push(m);
+    const doc = { uri: vscode.Uri.file(join(w.root, "src", "link.ts")), lineAt: () => ({ text: "aws_secret_access_key = SECRET" }), getText: () => "aws_secret_access_key = SECRET" };
+    const editor = { document: doc, selection: { isEmpty: false, start: { line: 0, character: 0 }, end: { line: 0, character: 10 } }, viewColumn: 1 };
+    Object.defineProperty(vscode.window, "activeTextEditor", { get: () => editor, configurable: true });
+    try {
+      await w.asks.askAboutSelection();
+    } finally {
+      Object.defineProperty(vscode.window, "activeTextEditor", { get: () => undefined, configurable: true });
+    }
+    expect(infos.join(" ")).toContain("leads out of the repository");
+    expect(w.panels).toHaveLength(0);
+    expect(listAnswers(REPO_KEY, GUIDE_ID)).toEqual([]);
+    w.asks.dispose();
+  });
+
+  it("asks about a chapter from its ask box", async () => {
+    const w = world([[answer("The loop")]]);
+    await w.asks.askChapter(1, "What does this chapter change?");
+    await waitFor(() => listAnswers(REPO_KEY, GUIDE_ID).some((r) => r.status === "answered"));
+    const [record] = listAnswers(REPO_KEY, GUIDE_ID);
+    expect(record.about).toMatchObject({ kind: "chapter", chapter: 0 });
+    // A chapter question is not about lines: no marker.
+    expect(w.asks.lineAnswers(w.guide)).toEqual([]);
     w.asks.dispose();
   });
 });

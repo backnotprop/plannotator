@@ -12,7 +12,7 @@
  * frame (a real JPEG in the Inbox's markups) and lists the comment with its
  * time; a dot on the rail and the panel's time pill seek back to it; Send
  * carries "At 0:02 (…)" and the frame's path, read back by wait_for_reply;
- * and the pane on a phone (the comments under the rail, "Comment at").
+ * and the pane on a phone (the comments under the rail, the row in full screen's composer).
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-video.spec.ts`.
@@ -274,7 +274,7 @@ test('Send carries the moment and the frame; the agent reads both', async () => 
   expect(world.errors).toEqual([]);
 });
 
-test('on a phone: the film on top, the comments under the rail, and "Comment at" opens the row', async ({ browser }) => {
+test('on a phone: the film on top, the comments under the rail, and the comment row in full screen\'s composer', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light' });
   const page = await context.newPage();
   try {
@@ -286,9 +286,32 @@ test('on a phone: the film on top, the comments under the rail, and "Comment at"
     await videoReady(page);
     await expect(pane.locator('[data-video-meta]')).toContainText('0 comments');
     await shot('8-phone-player', page);
-    await pane.locator('[data-video-compose]').click();
-    await expect(pane.locator('[data-video-composer] textarea')).toBeFocused();
+    // Full screen's composer (approval "inbox-fullscreen-composer") holds the row in its Comment tab: no "Comment at" step.
+    await expect(pane.locator('[data-video-compose]')).toHaveCount(0);
+    await expect(pane.locator('[data-fcomp] [role="radio"][data-fcomp-mode="comment"]')).toHaveAttribute('aria-checked', 'true');
+    // What "Comment at" did, kept: a tap in the comment field pauses the film and pins the moment it was at.
+    await page.evaluate(() => document.querySelector<HTMLVideoElement>('video[data-video-player]')!.play());
+    await page.waitForTimeout(300);
+    await seekTo(page, 2.2);
+    const field = pane.locator('[data-fcomp] [data-video-composer] textarea');
+    await field.tap();
+    await expect(field).toBeFocused();
+    const chip = pane.locator('[data-fcomp] [data-video-composer] [data-video-time]');
+    await expect(chip).toHaveAttribute('data-pinned', '');
+    await expect(chip).toHaveText('0:02');
+    expect(await page.evaluate(() => document.querySelector<HTMLVideoElement>('video[data-video-player]')!.paused)).toBe(true);
+    // And what its Cancel did: clearing the words lets go of the moment, so another can be picked.
+    await field.fill('The counter jumps here.');
+    await field.fill('');
+    await expect(chip).not.toHaveAttribute('data-pinned', '');
+    await seekTo(page, 3.4);
+    await field.fill('The counter jumps here.');
+    await expect(chip).toHaveAttribute('data-pinned', '');
+    await expect(chip).toHaveText('0:03');
     await shot('9-phone-compose', page);
+    await pane.locator('[data-fcomp] [data-video-comment-save]').tap();
+    await expect(pane.locator('[data-video-meta]')).toContainText('1 comment');
+    await expect(pane.locator('.ib-apanel [data-video-card-time]').first()).toHaveText('0:03');
   } finally {
     await context.close();
   }

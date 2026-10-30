@@ -196,7 +196,7 @@ export function parseEventStreamText(text: string): InboxEventFrame[] {
   }
   return frames;
 }
-const INBOX_EVENT_FRAME_NAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'runs'] as const;
+const INBOX_EVENT_FRAME_NAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins'] as const;
 
 async function defaultCatchUp(cursor: number): Promise<InboxEventFrame[]> {
   const res = await fetch(`/api/inbox/events?cursor=${cursor}&once=1`, { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });

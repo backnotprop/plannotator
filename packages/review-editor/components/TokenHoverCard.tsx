@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { modKey } from '@plannotator/ui/utils/platform';
@@ -46,6 +47,14 @@ export interface TokenHoverCardProps {
    * carried by that dialog's own labelled region instead.
    */
   inert?: boolean;
+  /**
+   * The card's contents, drawn in place of the search card's own. A host
+   * whose answers come from somewhere else (the VS Code extension's guide
+   * reader: the language server's hover, the guide's chapter) keeps this
+   * card's placement, pointer grace and scroll behavior and draws its own
+   * contents. Absent: the search card, exactly as before.
+   */
+  content?: React.ReactNode;
 }
 
 function locationLabel(filePath: string, line: number): string {
@@ -197,6 +206,7 @@ export function TokenHoverCard({
   onSelectLocation,
   layerClassName = 'fixed z-[60]',
   inert = false,
+  content,
 }: TokenHoverCardProps) {
   const { data, rect } = hover;
   const cardRef = useRef<HTMLDivElement>(null);
@@ -250,11 +260,13 @@ export function TokenHoverCard({
         visibility: placed ? 'visible' : 'hidden',
       }}
     >
-      <TokenHoverCardContent
-        data={data}
-        onSelectLocation={onSelectLocation}
-        interactive={!inert}
-      />
+      {content ?? (
+        <TokenHoverCardContent
+          data={data}
+          onSelectLocation={onSelectLocation}
+          interactive={!inert}
+        />
+      )}
     </div>,
     document.body,
   );

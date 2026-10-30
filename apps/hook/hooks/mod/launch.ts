@@ -456,7 +456,7 @@ export type CommandName = keyof typeof COMMANDS
  */
 export const INBOX_COMMAND = {
   name: 'plannotator-inbox',
-  description: 'Open your Plannotator Inbox in the browser and show its address.',
+  description: 'Open your Plannotator Inbox in the browser, show its address, and brief Claude on using it.',
 } as const
 
 /** How long `/plannotator-inbox` waits: the CLI waits up to 20 s for a starting Inbox. */
@@ -465,6 +465,11 @@ export const INBOX_OPEN_TIMEOUT_MS = 30_000
 /** The CLI argv `/plannotator-inbox` runs. */
 export function inboxOpenArgv(): string[] {
   return ['plannotator', 'inbox', '--open']
+}
+
+/** Whether `plannotator inbox --open` opened the Inbox (exit 0 with its address). */
+export function inboxOpened(result: { exitCode: number; stdout: string }): boolean {
+  return result.exitCode === 0 && /https?:\/\/\S+/.test(result.stdout)
 }
 
 /** What `/plannotator-inbox` shows for the CLI's answer. */

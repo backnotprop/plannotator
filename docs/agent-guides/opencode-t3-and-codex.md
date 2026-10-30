@@ -119,6 +119,26 @@ order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
 
+### OpenCode: in-process servers in `plannotator sessions` (#1567)
+
+The plugin's own servers (submit_plan's plan review, `/plannotator-review`,
+`/plannotator-annotate`, `/plannotator-last`) run inside OpenCode's process, so
+the plugin lists them itself (`apps/opencode-plugin/session-registry.ts`):
+`registerInProcessSession` in `packages/server/sessions.ts` writes
+`sessions/opencode/<pid>-<port>.json` with `host: "opencode"`, and the
+`plannotator sessions` table marks the row `(in OpenCode)` (`--json`: `host`).
+They do not run the binary, so they must never hold back its update: the
+entries live in a subfolder that `listSessions` / `listLiveSessions` never
+read, as no released binary does (every reader lists only the top folder's
+`*.json`), and `otherOpenSessions` and the Inbox update dialog also skip any
+entry with `host`. Removal: the decision or a throw (`decideListed`, before
+`stop()`), submit_plan's abort and timeout (`finally`), and process exit. No
+SIGINT/SIGTERM listener is added (it would change OpenCode's own signal
+handling); instead each registration deletes entries whose pid is dead, and
+`listInProcessSessions` drops and deletes an entry whose pid is dead, whose
+loopback port no longer accepts a connection, or that cannot be read. Commands
+list the project they detected (or `unknown`); only the plan review detects it.
+
 ### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the

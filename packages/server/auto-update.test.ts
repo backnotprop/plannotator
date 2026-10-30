@@ -142,6 +142,12 @@ describe("runAutoUpdateCheck gates", () => {
     expect(await runAutoUpdateCheck(deps())).toBe("launched");
   });
 
+  test("an OpenCode in-process session never holds an update back", async () => {
+    const opencode: SessionInfo = { ...session(200), host: "opencode" };
+    expect(autoUpdateCanInstall({ lockHeld: false, windowOpen: true, sessions: [opencode], ownPid: 100 })).toBe(true);
+    expect(await runAutoUpdateCheck(deps({ listSessions: () => [session(100), opencode] }))).toBe("launched");
+  });
+
   test("a skip for open sessions answers later starts from the cached release, not GitHub", async () => {
     const busy = deps({ listSessions: () => [session(100), session(200)] });
     expect(await runAutoUpdateCheck(busy)).toBe("sessions-open");

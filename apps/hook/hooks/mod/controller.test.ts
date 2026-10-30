@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { PlannotatorMod, STORE_LAUNCHES } from './controller'
 import { PLAN_APPROVAL_NEXT_STEP } from './delivery'
+import { inboxCommandBriefing } from './inbox-contract'
 import { CLASSIC_PLAN_REVIEW_TEXT } from './plan'
 import { PLANNOTATOR_BUNDLE_HINT_LINE, PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT } from './tool'
 import { fakeHost, type FakeHost, type RunCall } from './testing/fake-host'
@@ -1633,7 +1634,11 @@ describe('/plannotator-inbox', () => {
     host.onRun = (call) =>
       call.argv[1] === 'inbox' ? { exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: '' } : undefined
     const mod = new PlannotatorMod(host, SESSION)
-    const text = await mod.openInbox()
+    const { text, context } = await mod.openInbox('mcp__plannotator__plannotator_inbox')
+    // The model gets the Inbox briefing as the command's hidden context (no
+    // turn), naming the tool as this session registered it.
+    expect(context).toEqual([inboxCommandBriefing('mcp__plannotator__plannotator_inbox')])
+    expect(context![0]).toContain('`mcp__plannotator__plannotator_inbox` tool')
     const call = host.runs.find((run) => run.argv[1] === 'inbox')
     expect(call?.argv).toEqual(['plannotator', 'inbox', '--open'])
     expect(call?.env?.PLANNOTATOR_DATA_DIR).toBe('/data')
@@ -1645,7 +1650,7 @@ describe('/plannotator-inbox', () => {
   test('over SSH the CLI opens no browser and says how to reach the Inbox: the answer passes that on', async () => {
     const host = fakeHost()
     host.onRun = () => ({ exitCode: 0, stdout: 'http://localhost:59812/\n', stderr: 'No browser opened: this is a remote session. Forward the port (ssh -L 59812:127.0.0.1:59812 <this host>) and open the URL, or run plannotator inbox --tailscale.\n' })
-    const text = await new PlannotatorMod(host, SESSION).openInbox()
+    const { text } = await new PlannotatorMod(host, SESSION).openInbox()
     expect(text).toContain('http://localhost:59812/')
     expect(text).toContain('ssh -L 59812:127.0.0.1:59812')
   })
@@ -1653,10 +1658,11 @@ describe('/plannotator-inbox', () => {
   test('an older CLI without --open is told to update; any other failure says why', async () => {
     const host = fakeHost()
     host.onRun = () => ({ exitCode: 1, stdout: '', stderr: "Unknown inbox option: --open\nRun 'plannotator inbox --help' for usage.\n" })
-    expect(await new PlannotatorMod(host, SESSION).openInbox()).toContain('plannotator update')
+    // Not opened: the command's answer carries no briefing (register.ts).
+    expect(await new PlannotatorMod(host, SESSION).openInbox()).toEqual({ text: expect.stringContaining('plannotator update') })
 
     const failing = fakeHost()
     failing.onRun = () => ({ exitCode: 1, stdout: '', stderr: 'The Plannotator Inbox did not start; see /data/inbox/inbox.log.\n' })
-    expect(await new PlannotatorMod(failing, SESSION).openInbox()).toContain('/data/inbox/inbox.log')
+    expect((await new PlannotatorMod(failing, SESSION).openInbox()).text).toContain('/data/inbox/inbox.log')
   })
 })

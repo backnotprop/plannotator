@@ -12,7 +12,7 @@
  * without picking; a click on a picture picks it; Send; the agent's
  * wait_for_reply gets the plain label. Then an iPhone 15 in WebKit does the
  * same on a second question. Last, images the Inbox refuses to serve (a
- * hidden folder outside the project: 403 image_hidden; a missing file: 404)
+ * hidden folder of the home folder: 403 image_hidden; a missing file: 404)
  * show as their alt text, never a broken-image icon, and a card whose
  * pictures are refused falls back to text rows, on the desktop and on the
  * iPhone. Screenshots, light and dark, land in
@@ -149,9 +149,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'shots', 'drawer-a.png'), png(640, 480, [37, 99, 235]));
   writeFileSync(join(project, 'shots', 'drawer-b.png'), png(640, 480, [22, 163, 74]));
   writeFileSync(join(project, 'shots', 'both.png'), png(960, 400, [217, 119, 6]));
-  // Refused images: a hidden folder outside the project (the route answers 403 image_hidden).
-  mkdirSync(join(root, 'elsewhere', '.secret'), { recursive: true });
-  for (const name of ['shot.png', 'raw.png', 'both.png', 'a.png']) writeFileSync(join(root, 'elsewhere', '.secret', name), png(640, 480, [190, 18, 60]));
+  // Refused images: a hidden folder of the home folder, HOME being `root` (the route answers 403 image_hidden).
+  mkdirSync(join(root, '.secret'), { recursive: true });
+  for (const name of ['shot.png', 'raw.png', 'both.png', 'a.png']) writeFileSync(join(root, '.secret', name), png(640, 480, [190, 18, 60]));
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -274,9 +274,9 @@ test('iPhone (WebKit): two tiles across, a tap picks, Send, the agent gets the l
   }
 });
 
-/** A body naming images the Inbox refuses: a hidden folder outside the project, and a file that is not there. */
+/** A body naming images the Inbox refuses: a hidden folder of the home folder, and a file that is not there. */
 function refusedBody(root: string): string {
-  const hidden = (name: string) => join(root, 'elsewhere', '.secret', name);
+  const hidden = (name: string) => join(root, '.secret', name);
   return [
     'The screenshots are in my scratch folder.',
     '',
@@ -324,7 +324,7 @@ test('refused images show as their alt text, never a broken image; the card fall
   const messageId = (sent.message as { id?: string } | undefined)?.id ?? (sent.message_id as string);
   // The route really refuses them.
   const port = registry().port;
-  const hiddenAnswer = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${messageId}/image?path=${encodeURIComponent(join(root, 'elsewhere', '.secret', 'shot.png'))}`);
+  const hiddenAnswer = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${messageId}/image?path=${encodeURIComponent(join(root, '.secret', 'shot.png'))}`);
   expect(hiddenAnswer.status).toBe(403);
   expect(((await hiddenAnswer.json()) as { code: string }).code).toBe('image_hidden');
   const goneAnswer = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${messageId}/image?path=${encodeURIComponent(join(root, 'gone', 'missing.png'))}`);

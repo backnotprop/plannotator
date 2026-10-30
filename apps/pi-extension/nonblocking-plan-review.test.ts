@@ -21,9 +21,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import plannotator, { type PlannotatorExtensionDeps } from "./index.ts";
 import type { PlanReviewDecision } from "./plannotator-browser.ts";
+import { setPiHost } from "./pi-host.ts";
 
 const tempDirs: string[] = [];
 afterEach(() => {
+	setPiHost("pi");
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -43,7 +45,7 @@ interface FakeReview {
 	claimed: boolean;
 }
 
-function createHarness(cwd: string) {
+function createHarness(cwd: string, options: { host?: "pi" | "oh-my-pi"; idle?: boolean } = {}) {
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<any> }>();
 	const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
 	const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
@@ -53,6 +55,8 @@ function createHarness(cwd: string) {
 	const state = { activeTools: ["read", "bash", "edit", "write"] };
 
 	const pi = {
+		// What tells Oh My Pi's ExtensionAPI from Pi's (pi-host.ts).
+		...(options.host === "oh-my-pi" ? { arktype: () => undefined, pi: {} } : {}),
 		events: { on: () => undefined, emit: () => undefined },
 		on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
@@ -78,7 +82,7 @@ function createHarness(cwd: string) {
 		hasUI: true,
 		mode: "tui",
 		isProjectTrusted: () => true,
-		isIdle: () => true,
+		isIdle: () => options.idle ?? true,
 		hasPendingMessages: () => false,
 		abort: () => undefined,
 		model: undefined,
@@ -183,10 +187,10 @@ function createHarness(cwd: string) {
 
 const PLAN = "# Plan\n\n- [ ] Implement the change\n";
 
-async function plannedSession() {
+async function plannedSession(options?: Parameters<typeof createHarness>[1]) {
 	const cwd = makeTempDir("plannotator-nonblocking-");
 	writeFileSync(join(cwd, "PLAN.md"), PLAN);
-	const harness = createHarness(cwd);
+	const harness = createHarness(cwd, options);
 	await harness.start();
 	return { cwd, harness };
 }
@@ -220,6 +224,17 @@ describe("non-blocking plan review", () => {
 		// The file still holds the approved text: no unreviewed-edit warning.
 		expect(harness.sentUserMessages[0]!.text).not.toContain("has changed since the reviewer saw it");
 		expect(await harness.writeAttempt("src/app.ts")).toBeUndefined();
+	});
+
+	test("on an idle Oh My Pi the decision goes without deliverAs, so it starts a turn (Oh My Pi only queues a follow-up); busy, it is a follow-up", async () => {
+		for (const [idle, options] of [[true, undefined], [false, { deliverAs: "followUp" }]] as const) {
+			const { harness } = await plannedSession({ host: "oh-my-pi", idle });
+			await harness.submit("PLAN.md");
+			harness.reviews[0]!.decide({ approved: true });
+			await harness.settle(() => harness.sentUserMessages.length > 0);
+			expect(harness.sentUserMessages).toHaveLength(1);
+			expect(harness.sentUserMessages[0]!.options).toEqual(options);
+		}
 	});
 
 	test("a deny arrives as the denied prompt and keeps planning; an answers-only deny uses the answered prompt", async () => {

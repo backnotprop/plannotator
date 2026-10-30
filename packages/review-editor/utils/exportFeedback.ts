@@ -97,11 +97,11 @@ function describeDiff(ctx: FeedbackDiffContext): string {
     case "jj-current":   label = "Current change"; break;
     case "jj-last":      label = "Last change"; break;
     case "jj-line":      label = base ? `Line of work vs \`${base}\`` : "Line of work"; break;
-    case "jj-all":       label = "All files"; break;
+    case "jj-all":       label = "Every file"; break;
     case "since-base":   label = base ? `All changes since \`${base}\` (committed + uncommitted + untracked)` : "All changes since base (committed + uncommitted + untracked)"; break;
     case "branch":       label = base ? `Branch diff vs \`${base}\`` : "Branch diff"; break;
     case "merge-base":   label = base ? `Committed changes vs \`${base}\`` : "Committed changes"; break;
-    case "all":          label = "All files"; break;
+    case "all":          label = "Every file"; break;
     default:             label = mode; // p4-* or anything else — show raw
   }
   return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;
@@ -144,6 +144,18 @@ export const OUTDATED_ANNOTATION_LABEL = '[Outdated — the code changed after t
 
 function outdatedNote(ann: CodeAnnotation): string {
   return ann.outdated ? `${OUTDATED_ANNOTATION_LABEL}\n` : '';
+}
+
+/** The heading suffix of a comment on lines outside the diff (a file the
+ *  review does not change, or a changed file's lines outside its hunks). */
+export const OUTSIDE_DIFF_ANNOTATION_LABEL = '(not in the diff)';
+
+/** A comment outside the diff carries the code it was written on, fenced, so
+ *  the agent reads it without the diff around it. */
+function outsideDiffCodeBlock(ann: CodeAnnotation): string {
+  if (!ann.outsideDiff) return '';
+  const code = ann.anchorText ?? ann.originalCode;
+  return code ? `\n**Code:**\n${fenced(code)}` : '';
 }
 
 function gitButlerMismatchNote(ann: CodeAnnotation, current?: FeedbackDiffContext): string {
@@ -253,7 +265,7 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     const tokenSuffix = ann.tokenText
       ? ` — \`\`${ann.tokenText.replace(/`/g, '\\`')}\`\`${ann.charStart != null ? ` (chars ${ann.charStart}-${ann.charEnd})` : ''}`
       : '';
-    output += `${headingLevel} ${lineRange} (${ann.side})${tokenSuffix}\n`;
+    output += `${headingLevel} ${lineRange} (${ann.side})${tokenSuffix}${ann.outsideDiff ? ` ${OUTSIDE_DIFF_ANNOTATION_LABEL}` : ''}\n`;
     output += outdatedNote(ann);
     output += commitMismatchNote(ann, commitShaFromMode(currentDiff?.mode));
     output += gitButlerMismatchNote(ann, currentDiff);
@@ -268,7 +280,9 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     }
     output += formatCallFlowAnnotationTargets(ann);
     output += formatSelectedTextBlock(ann);
-    output += formatSuggestionBlocks(ann);
+    output += outsideDiffCodeBlock(ann);
+    // The code block already quotes the lines; a suggestion still shows what it replaces.
+    output += ann.outsideDiff && !ann.suggestedCode ? '' : formatSuggestionBlocks(ann);
     output += '\n';
   }
 

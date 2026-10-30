@@ -1,7 +1,7 @@
 /**
  * Finding an agent's program. Kept apart so the agent table, the spawn plan
- * and the client share one lookup. A host with its own idea of PATH (the
- * Inbox's agent environment) passes its own `find` instead.
+ * and the client share one lookup. A host with its own idea of PATH passes its
+ * own `find` instead.
  */
 
 import { existsSync, statSync } from "node:fs";

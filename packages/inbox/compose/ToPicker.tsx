@@ -3,7 +3,7 @@ import { HostMark, Icon } from '../icons';
 import { isTextCut, Tip } from '../components/Tip';
 import { tildePath } from '../format';
 import { splitPath } from '../agents';
-import { filterGroups, hostLabel, pickerRows, type ComposeGroup, type ComposeTarget, type StartChoice } from './model';
+import { filterGroups, hostLabel, pickerRows, type ComposeGroup, type ComposeTarget } from './model';
 
 /**
  * The To picker (compose; approval "inbox-compose-to-picker"): a filter field
@@ -17,10 +17,6 @@ import { filterGroups, hostLabel, pickerRows, type ComposeGroup, type ComposeTar
  * (the first row is the session last sent to: one Enter must not bring back
  * the auto-fill compose dropped); typing or an arrow key highlights the first row.
  * Focus stays in the filter (`aria-activedescendant`).
- *
- * After the live sessions, "New Grok Build session" rows (the ACP
- * runner): one per agent the Inbox can start and folder, the current project
- * first; typing searches every folder (`starts`).
  */
 export function ToPicker({
   groups,
@@ -29,8 +25,6 @@ export function ToPicker({
   phone,
   onPick,
   onClose,
-  starts,
-  onPickStart,
 }: {
   groups: readonly ComposeGroup[];
   selected: string | null;
@@ -38,20 +32,11 @@ export function ToPicker({
   phone: boolean;
   onPick: (target: ComposeTarget) => void;
   onClose: () => void;
-  /** The start rows for a filter (compose/model.ts `startChoices`); absent: none. */
-  starts?: (query: string) => StartChoice[];
-  onPickStart?: (choice: StartChoice) => void;
 }) {
   const [query, setQuery] = useState('');
   const shown = useMemo(() => filterGroups(groups, query), [groups, query]);
   const rows = useMemo(() => pickerRows(shown, groups), [shown, groups]);
-  const startRows = useMemo(() => starts?.(query) ?? [], [starts, query]);
-  // One list of options, the live sessions first: each by its id in To (a session id, or `start:<agent>:<project>`).
-  const options = useMemo(() => [...rows.map((row) => ({ session: row.target.session })), ...startRows.map((choice) => ({ session: choice.id }))], [rows, startRows]);
-  const pick = (index: number) => {
-    if (index < rows.length) onPick(rows[index]!.target);
-    else if (startRows[index - rows.length]) onPickStart?.(startRows[index - rows.length]!);
-  };
+  const options = useMemo(() => rows.map((row) => row.target), [rows]);
   // The highlight follows a session, not a row number: the list is read again
   // every 5 s, and a re-read that moves rows must not move the highlight.
   // `null`: no row highlighted (-1), only while To is empty and nothing was typed or arrowed.
@@ -111,7 +96,8 @@ export function ToPicker({
     if (event.key === 'Enter') {
       event.preventDefault();
       // Nothing highlighted: Enter picks nothing.
-      if (hl >= 0 && options[hl]) pick(hl);
+      const target = hl >= 0 ? options[hl] : undefined;
+      if (target) onPick(target);
     }
   };
 
@@ -144,8 +130,8 @@ export function ToPicker({
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      <div className="ib-cp-list" role="listbox" id={`ib-cp-list-${uid}`} aria-label="Agents: live sessions, and new sessions the Inbox starts">
-        {rows.length === 0 && startRows.length === 0 && <div className="ib-cp-none">No live session matches.</div>}
+      <div className="ib-cp-list" role="listbox" id={`ib-cp-list-${uid}`} aria-label="Live agent sessions">
+        {rows.length === 0 && <div className="ib-cp-none">No live session matches.</div>}
         {rows.map(({ target, started }, i) => {
           const folder = tildePath(target.project.root, home);
           return (
@@ -175,36 +161,6 @@ export function ToPicker({
               </Tip>
               <span className="ib-cp-check" aria-hidden="true">
                 {target.session === selected && <Icon name="check" size={15} />}
-              </span>
-            </div>
-          );
-        })}
-        {startRows.map((choice, j) => {
-          const i = rows.length + j;
-          const folder = tildePath(choice.place.root, home);
-          return (
-            <div
-              key={choice.id}
-              id={optionId(i)}
-              role="option"
-              aria-selected={i === hl}
-              aria-label={`Start a new ${choice.agent.label} session in ${choice.place.name}, ${folder}`}
-              className={`ib-cp-opt ib-cp-start${i === hl ? ' ib-hl' : ''}${j === 0 ? ' ib-cp-start-first' : ''}`}
-              data-compose-start={choice.id}
-              data-compose-project={choice.place.name}
-              onPointerMove={() => i !== hl && setHl(i)}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => pick(i)}
-            >
-              <HostMark host={choice.agent.id} />
-              <b className="ib-cp-oa">New {choice.agent.label} session</b>
-              <span className="ib-cp-op" dir="auto">
-                {choice.place.name}
-              </span>
-              <FolderPath path={folder} />
-              <span className="ib-cp-os" />
-              <span className="ib-cp-check" aria-hidden="true">
-                {choice.id === selected && <Icon name="check" size={15} />}
               </span>
             </div>
           );

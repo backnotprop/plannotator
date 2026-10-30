@@ -12,13 +12,25 @@ on:
 permissions:
   contents: read
 
+# The fast tier: every PR push runs this workflow and Security. The heavy
+# suites (Windows, Release dry run, Inbox e2e / Pi / Claude Code / relay) run on
+# a PR only once it has the `ci:full` label; see windows.yml.
+#
+# One run per PR at a time: a new push cancels the PR's older run, which no one
+# will merge. A push to main is never cancelled: deploy.yml runs after the Test
+# run of each main commit, so every one of them gets a group of its own.
+concurrency:
+  group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  test:
+  # Everything that is not a sharded test file: the checks that used to lead
+  # the single test job, and the two DOM steps that must run in processes of
+  # their own.
+  checks:
+    name: Checks (types, packages, own-process DOM tests, lane guards)
     runs-on: ubuntu-24.04
-    # A backstop, not a budget: green runs take 16-19 minutes. Some DOM tests
-    # run on fake timers, where bun's per-test timeout cannot fire, so a stuck
-    # await would otherwise idle until GitHub's 6-hour default.
-    timeout-minutes: 45
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -47,15 +59,19 @@ jobs:
         # from leaking into the manifest published to external consumers.
         run: bun run --cwd packages/ui smoke:package
 
+      # The smoke's pack (`prepack`) generates the bridge asset files, which are
+      # gitignored. This is the one job where they exist, so the check that the
+      # generated asset matches the current bridge source runs here; in the
+      # unit lanes it skips (no asset on a fresh checkout).
+      - name: Check the generated bridge asset against its source
+        run: bun test packages/ui/components/html-viewer/bridgeAsset.test.ts
+
       # The extension has its own tsconfig (Node libs, no DOM) and is not part
       # of the root typecheck, so nothing was checking it. A type error in the
       # panel cookie seed shipped that way; this is the step that would have
       # caught it.
       - name: Type check VS Code extension
         run: bun run --cwd apps/vscode-extension lint
-
-      - name: Run tests
-        run: bun test
 
       # The file-browser watcher test is timing-sensitive (a 120ms SSE debounce
       # asserted with real timers). Run it in its own process — matching the
@@ -65,17 +81,17 @@ jobs:
       - name: Run file-browser DOM test (isolated)
         run: DOM_TESTS=1 bun test packages/ui/hooks/useFileBrowser.test.tsx
 
-      # These two render against the REAL @pierre/diffs, because the defects
-      # they cover (a stale render cache served across a cacheKey collision;
-      # an empty stub card) only exist inside its renderer. A sibling in the
-      # list below, AllFilesCodeView.lifecycle.test.tsx, calls
+      # These render against the REAL @pierre/diffs, because the defects they
+      # cover (a stale render cache served across a cacheKey collision; an
+      # empty stub card) only exist inside its renderer. A file in the DOM list,
+      # AllFilesCodeView.lifecycle.test.tsx, calls
       # `mock.module('@pierre/diffs', ...)` with a hunk-less getSingularPatch
       # and `processFile: () => null` — and bun's module mocks are process
       # global with no restore, so in one shared process the real renderer is
       # not guaranteed to still be there by the time these load. That leak
       # reproduced on the Linux runner and not on macOS. Their own process
       # removes the coupling outright, same reasoning as the isolated step
-      # above.
+      # above. scripts/ci-test-lanes.test.ts keeps them out of the DOM list.
       - name: Run diff-renderer DOM tests (isolated, real @pierre/diffs)
         run: >-
           DOM_TESTS=1 bun test
@@ -87,410 +103,89 @@ jobs:
           packages/review-editor/components/DiffViewer.markdownPreview.test.tsx
           packages/review-editor/components/DiffViewer.changeNavigation.test.tsx
 
-      # Seam contracts + the remaining DOM-gated tests. Scoped to the DOM files
-      # (not the whole ui suite) to keep this process light. Files get isolated
-      # globals because theme, storage, and DOM test state must not leak between
-      # suites when Bun schedules them differently across platforms.
-      - name: Run UI seam-contract + DOM tests
-        run: >-
-          DOM_TESTS=1 bun test --isolate
-          packages/ui/markdownEditorFidelity.test.tsx
-          packages/ui/annotationDraftPersistence.test.tsx
-          packages/ui/codeAnnotationDraftPersistence.test.tsx
-          packages/ui/utils/richClipboard.test.ts
-          packages/ui/components/Viewer.richCopy.test.tsx
-          packages/ui/components/html-viewer/htmlRichCopy.test.tsx
-          packages/ui/components/html-viewer/srcdoc.test.ts
-          packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
-          packages/ui/components/html-viewer/htmlLiveProtocol.test.tsx
-          packages/ui/components/html-viewer/HtmlViewer.vimHud.test.tsx
-          packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
-          packages/ui/components/Viewer.vimMode.integration.test.tsx
-          packages/ui/components/CodeFilePopout.lineScroll.test.tsx
-          packages/ui/hooks/useVimSelection.test.tsx
-          packages/ui/hooks/useVimSelection.selectionScope.test.tsx
-          packages/ui/hooks/useModelCatalogs.dom.test.tsx
-          packages/ui/hooks/useAIProviderActivation.dom.test.tsx
-          packages/ui/components/ModelSourceHint.dom.test.tsx
-          packages/ui/components/ai/AIProviderBar.dom.test.tsx
-          packages/ui/components/ai/SessionAskNotice.dom.test.tsx
-          packages/ui/hooks/useAIChat.sessionAsk.test.tsx
-          packages/ui/hooks/useAIChat.newChat.test.tsx
-          packages/ui/components/ai/NewChatButton.dom.test.tsx
-          packages/review-editor/hooks/useAIChat.newChat.test.tsx
-          packages/ui/hooks/useAgentSettings.dom.test.tsx
-          packages/ui/utils/codeHighlight.test.ts
-          packages/ui/utils/htmlChrome.test.ts
-          packages/ui/utils/inputMethod.test.ts
-          packages/ui/utils/vimNavigation.test.ts
-          packages/ui/utils/clipboard.test.ts
-          packages/ui/utils/pasteInsert.test.ts
-          apps/vscode-extension/src/vscode-theme.test.ts
-          packages/ui/utils/vimScroll.test.ts
-          packages/ui/components/InlineMarkdown.resolveLinkedDoc.test.tsx
-          packages/ui/components/MarkdownDiff.frozen.test.tsx
-          packages/ui/components/MarkdownEditor.extensions.test.tsx
-          packages/ui/components/ThemeProvider.favicon.test.tsx
-          packages/ui/components/file-tree/FileTree.dom.test.tsx
-          packages/ui/components/Tooltip.dom.test.tsx
-          packages/ui/components/MermaidBlock.theme.test.tsx
-          packages/ui/components/DiagramBlock.anchor.test.tsx
-          packages/ui/components/DiagramBlock.askAI.test.tsx
-          packages/ui/components/Viewer.askAISelectionLine.test.tsx
-          packages/ui/components/Viewer.textComments.test.tsx
-          packages/ui/components/ImageLightbox.test.tsx
-          packages/ui/components/ImageZoomStage.wheelHint.test.tsx
-          packages/ui/components/Viewer.imageRegions.test.tsx
-          packages/ui/components/HostTitle.dom.test.tsx
-          packages/ui/components/RefHoverCard.dom.test.tsx
-          packages/inbox/images.test.tsx
-          packages/inbox/inlineImages.test.tsx
-          packages/inbox/refusedImages.test.tsx
-          packages/inbox/codeAttachment.test.tsx
-          packages/inbox/copyFile.test.tsx
-          packages/inbox/fileViewClean.test.tsx
-          packages/inbox/links.test.tsx
-          packages/inbox/issueRefs.test.tsx
-          packages/inbox/attachmentKinds.test.tsx
-          packages/inbox/updates.test.tsx
-          packages/inbox/whatsNewLink.test.tsx
-          packages/inbox/whatsNewHeader.test.tsx
-          packages/inbox/whatsNewImages.test.tsx
-          packages/inbox/replaced.test.tsx
-          packages/inbox/reask.test.tsx
-          packages/inbox/openQuestions.test.tsx
-          packages/inbox/decisionMode.test.tsx
-          packages/inbox/decisionCardContract.test.tsx
-          packages/inbox/threadFolding.test.tsx
-          packages/inbox/choiceLabels.test.tsx
-          packages/inbox/pasteTarget.test.ts
-          packages/inbox/seenOnSight.test.tsx
-          packages/inbox/projectList.test.tsx
-          packages/inbox/softQuietRows.test.tsx
-          packages/inbox/sidebarQuiet.test.tsx
-          packages/inbox/leakedSubject.test.tsx
-          packages/inbox/connectPromptRow.test.tsx
-          packages/inbox/boardPage.test.tsx
-          packages/inbox/boardSend.test.tsx
-          packages/inbox/boardOff.test.tsx
-          packages/inbox/soundIntro.test.tsx
-          packages/inbox/soundSettings.test.tsx
-          packages/inbox/notifyHook.test.tsx
-          packages/inbox/notificationStates.test.tsx
-          packages/inbox/attachmentStepping.test.tsx
-          packages/inbox/imageZoom.test.tsx
-          packages/inbox/fullView.test.tsx
-          packages/inbox/phoneStepping.test.tsx
-          packages/inbox/fullScreenThread.test.tsx
-          packages/inbox/sideBySide.test.tsx
-          packages/inbox/attachmentSteppingSave.test.tsx
-          packages/inbox/listColumn.test.tsx
-          packages/inbox/endedSession.test.tsx
-          packages/inbox/compose.test.tsx
-          packages/inbox/listHeaderCompose.test.tsx
-          packages/inbox/composeThread.test.tsx
-          packages/inbox/sendNow.test.tsx
-          packages/inbox/undelivered.test.tsx
-          packages/inbox/tagAgents.test.tsx
-          packages/inbox/restartWarning.test.tsx
-          packages/inbox/reloadHosts.test.tsx
-          packages/inbox/pasteFiles.test.tsx
-          packages/inbox/questionCardPhone.test.tsx
-          packages/inbox/markRead.test.tsx
-          packages/inbox/ack.test.tsx
-          packages/inbox/actionChecklist.test.tsx
-          packages/inbox/actionDraftSend.test.tsx
-          packages/inbox/actionNoteRefusal.test.tsx
-          packages/inbox/wordsOnlyTwoAsks.test.tsx
-          packages/inbox/firstRunNotifications.test.tsx
-          packages/inbox/tour.test.tsx
-          packages/inbox/sentReply.test.tsx
-          packages/inbox/skillHighlightSent.test.ts
-          packages/inbox/threadFoot.test.tsx
-          packages/inbox/replyDrafts.test.tsx
-          packages/inbox/skipNote.test.tsx
-          packages/inbox/picksWhileComposing.test.tsx
-          packages/inbox/projectMenu.test.tsx
-          packages/inbox/rowMenu.test.tsx
-          packages/inbox/pinnedThreads.test.tsx
-          packages/inbox/fileBack.test.tsx
-          packages/inbox/archived.test.tsx
-          packages/inbox/openStaysPut.test.tsx
-          packages/inbox/clickToRefresh.test.tsx
-          packages/inbox/pullToRefresh.test.tsx
-          packages/inbox/threadReadRetry.test.tsx
-          packages/inbox/tabCountWindow.test.tsx
-          packages/inbox/phoneList.test.tsx
-          packages/inbox/listLabels.test.tsx
-          packages/inbox/listRowMemo.test.tsx
-          packages/inbox/rowTicks.test.tsx
-          packages/inbox/guideDiffStyle.test.tsx
-          packages/inbox/componentTooltips.test.tsx
-          packages/inbox/toast.test.tsx
-          packages/inbox/attachmentsHeader.test.tsx
-          packages/inbox/threadArtifacts.test.tsx
-          packages/inbox/sentQuestionLocked.test.tsx
-          packages/inbox/themeToggle.test.tsx
-          packages/inbox/sidebarUpdateDot.test.tsx
-          packages/inbox/updateStuck.test.tsx
-          packages/inbox/palettePicker.test.tsx
-          packages/inbox/textSize.test.tsx
-          packages/inbox/runLine.test.tsx
-          packages/inbox/agentNoteDialog.test.tsx
-          packages/inbox/agentsSettings.test.tsx
-          packages/inbox/promptsSettings.test.tsx
-          packages/inbox/connectNextStep.test.tsx
-          packages/inbox/settingsSections.test.tsx
-          packages/inbox/searchPalette.test.tsx
-          packages/inbox/searchShortcut.test.tsx
-          packages/inbox/openIn.test.tsx
-          packages/inbox/htmlLinks.test.tsx
-          packages/inbox/videoAttachment.test.tsx
-          packages/inbox/markupAddsToReply.test.tsx
-          packages/inbox/commentSubmitKey.test.tsx
-          packages/inbox/skillReferences.test.tsx
-          packages/inbox/messageComments.test.tsx
-          packages/inbox/feedbackDialog.test.tsx
-          packages/ui/components/HumanOnlySkillNotice.test.tsx
-          packages/ui/components/MenuVersionSection.test.tsx
-          packages/ui/components/blocks/QuestionBlock.test.tsx
-          packages/ui/components/blocks/QuestionBlock.pictures.test.tsx
-          packages/ui/components/blocks/QuestionContext.lines.test.tsx
-          packages/ui/components/blocks/QuestionBlock.host.test.tsx
-          packages/ui/components/blocks/QuestionBlock.decisionToggle.test.tsx
-          packages/ui/components/blocks/QuestionBlock.decisionAnyQuestion.test.tsx
-          packages/ui/hooks/useAnnotationHighlighter.questionSkip.test.tsx
-          packages/ui/hooks/usePinpoint.question.test.tsx
-          packages/ui/utils/blockTargeting.blocks.test.tsx
-          packages/ui/components/blocks/BlockquoteBlock.test.tsx
-          packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
-          packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
-          packages/ui/components/AnnotationPanel.questions.test.tsx
-          packages/ui/hooks/useActiveSection.test.tsx
-          packages/editor/hooks/useQuestionAnswers.test.tsx
-          packages/ui/components/diagram/DiagramViewer.test.tsx
-          packages/ui/utils/diagramAnchor.test.ts
-          packages/ui/utils/diagramAnchorGraphviz.test.ts
-          packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
-          packages/ui/hooks/useAnnotationHighlighter.blankSelection.test.tsx
-          packages/ui/components/Viewer.diagramLazyRestore.test.tsx
-          packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
-          packages/ui/components/CommentPopover.skillReferences.test.tsx
-          packages/ui/components/commentSubmitKey.composers.test.tsx
-          packages/ui/components/CommentPopover.mentionChips.test.tsx
-          packages/ui/components/SkillReferenceMenu.placement.test.tsx
-          packages/ui/components/sidebar/FileBrowser.test.ts
-          packages/editor/editableDocumentsHook.test.tsx
-          packages/review-editor/components/ReviewSubmissionDialog.ui.test.tsx
-          packages/review-editor/App.panelView.test.tsx
-          packages/review-editor/App.agentTool.test.tsx
-          packages/review-editor/App.guideViewed.test.tsx
-          packages/review-editor/App.commitsJj.test.tsx
-          packages/review-editor/App.emptyDiffSwitch.test.tsx
-          packages/review-editor/App.planLookTwoTabs.test.tsx
-          packages/review-editor/components/AnnotationToolbar.placement.test.tsx
-          packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
-          packages/review-editor/components/FileHeader.edit.test.tsx
-          packages/review-editor/edit/useEditSession.recovery.test.tsx
-          packages/review-editor/edit/discardRestoreRender.test.tsx
-          packages/review-editor/edit/selectionActionPopover.test.ts
-          packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
-          packages/review-editor/components/AllFilesCodeView.generated.test.tsx
-          packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
-          packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
-          packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
-          packages/review-editor/components/AllFilesCodeView.changeNavigation.test.tsx
-          packages/review-editor/components/MarkdownFilePreview.test.tsx
-          packages/review-editor/components/guide/overviewDiagram.test.tsx
-          packages/review-editor/hooks/useMarkdownPreview.test.tsx
-          packages/review-editor/components/MarkdownViewMenu.test.tsx
-          packages/review-editor/components/DiffViewer.compactTouchSelection.test.tsx
-          packages/guide-viewer/GuideSectionCard.test.tsx
-          packages/guide-viewer/GuideSectionCard.fileKinds.test.tsx
-          packages/guide-viewer/GuideView.test.tsx
-          packages/guide-viewer/GuideViewportManager.test.tsx
-          packages/guide-viewer/GuideOverview.test.tsx
-          packages/review-editor/components/guide/GuideExportButton.test.tsx
-          packages/review-editor/hooks/useReviewSearch.test.tsx
-          packages/review-editor/hooks/useTokenHover.test.tsx
-          packages/review-editor/components/TokenHoverCard.test.tsx
-          packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
-          packages/review-editor/utils/stitchTokenIdentifier.test.ts
-          packages/review-editor/utils/diffSelection.test.ts
-          packages/review-editor/hooks/useAutoViewed.test.tsx
-          packages/review-editor/hooks/useReviewProgress.test.tsx
-          packages/review-editor/hooks/useCallFlowAnalysis.test.tsx
-          packages/review-editor/hooks/useCallFlowInstall.test.tsx
-          packages/review-editor/hooks/useCallFlowAutoInstall.test.tsx
-          packages/review-editor/dock/panels/ReviewCallFlowPanel.install.test.tsx
-          packages/review-editor/dock/panels/ReviewCallFlowPanel.raw.test.tsx
-          packages/review-editor/components/CallFlowFileBadge.interaction.test.tsx
-          packages/review-editor/components/CallFlowTreeView.interaction.test.tsx
-          packages/review-editor/components/PanelChrome.test.tsx
-          packages/review-editor/components/FileTree.search-placement.test.tsx
-          packages/review-editor/components/FileTree.fileKinds.test.tsx
-          packages/review-editor/components/FileHeader.fileKind.test.tsx
-          packages/review-editor/components/PackageChangesCard.test.tsx
-          packages/review-editor/components/FileTreeNode.controls.test.tsx
-          packages/ui/components/Settings.analysis.test.tsx
-          packages/ui/components/AnnotationPanel.props.test.tsx
-          packages/ui/components/AnnotationPanel.cardHeader.test.tsx
-          packages/ui/components/AnnotationPanel.editMentions.test.tsx
-          packages/ui/components/Viewer.consumer.test.tsx
-          packages/ui/components/Viewer.documentHeader.test.tsx
-          packages/ui/components/Viewer.codeBlockHighlightSwap.test.tsx
-          packages/ui/components/ImageAnnotator/ImageAnnotator.escape.test.tsx
-          packages/ui/components/ImageAnnotator/ImageAnnotator.layout.test.tsx
-          packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
-          packages/ui/utils/undoHistory.dom.test.ts
-          packages/ui/utils/codeBlockMark.test.ts
-          packages/ui/components/InlineMarkdown.seam.test.tsx
-          packages/ui/components/ImageThumbnail.seam.test.tsx
-          packages/ui/hooks/useAnnotationHighlighter.test.tsx
-          packages/ui/hooks/annotationRestoreVerify.test.tsx
-          packages/ui/hooks/useAnnotationDraft.seam.test.tsx
-          packages/ui/hooks/useExternalAnnotations.seam.test.tsx
-          packages/ui/hooks/useAIChat.seam.test.tsx
-          packages/ui/hooks/useAIChat.supersede.test.tsx
-          packages/ui/hooks/useFileBrowser.seam.test.tsx
-          packages/ui/hooks/usePlanDiff.test.tsx
-          packages/ui/hooks/useLinkedDoc.test.tsx
-          packages/ui/components/DocBadges.test.tsx
-          packages/editor/planDiffAutoExit.test.tsx
-          packages/editor/App.archiveReadOnly.test.tsx
-          packages/editor/App.refCards.test.tsx
-          packages/editor/App.htmlChrome.test.tsx
-          packages/editor/App.sidebarTabsAgentTerminal.test.tsx
-          packages/editor/App.htmlLinkDraft.test.tsx
-          packages/editor/App.decisionControl.test.tsx
-          packages/editor/App.planDecisionControl.test.tsx
-          packages/editor/App.planRevision.test.tsx
-          packages/editor/App.liveVersion.test.tsx
-          packages/editor/askSessionDrafts.test.tsx
-          packages/editor/askDocumentLatch.test.tsx
-          packages/review-editor/App.decisionControl.test.tsx
-          packages/ui/components/TerminalToolsAnnouncementDialog.test.tsx
-          packages/editor/App.terminalToolsAnnouncement.test.tsx
-          packages/ui/components/AskSessionAnnouncementDialog.test.tsx
-          packages/editor/App.askSessionAnnouncement.test.tsx
-          packages/ui/components/InboxAnnouncementDialog.test.tsx
-          packages/editor/App.inboxAnnouncement.test.tsx
-          packages/ui/components/AgentToolAnnouncementDialog.test.tsx
-          packages/ui/components/ServerSessionReplacedBanner.test.tsx
-          packages/editor/App.agentTool.test.tsx
-          packages/ui/hooks/useFirstRunAnnouncementWindow.test.tsx
-          packages/review-editor/components/ReviewSidebar.generalComment.test.tsx
-          packages/review-editor/components/commentSubmitKey.review.test.tsx
-          packages/review-editor/components/ReviewSidebar.outdated.test.tsx
-          packages/ui/components/HtmlSurfaceControls.test.tsx
-          packages/ui/components/AnnotationPanel.unanchored.test.tsx
-          packages/ui/components/AnnotationPanel.breakUi.test.tsx
-          packages/ui/hooks/useHtmlRefresh.test.tsx
-          packages/ui/hooks/useSharing.contentRevision.test.tsx
-          packages/ui/hooks/useSharing.shortUrlLifecycle.test.tsx
-          packages/ui/components/AnnotationToolbar.commentOnly.test.tsx
-          packages/ui/components/AnnotationToolbar.selectionActions.test.tsx
-          packages/ui/components/CommentPopover.mentionSource.test.tsx
-          packages/ui/components/Viewer.mentionSource.test.tsx
-          packages/ui/components/html-viewer/HtmlViewer.mentionSource.test.tsx
-          packages/ui/components/AnnotationToolstrip.test.tsx
-          packages/ui/components/StickyHeaderLane.test.tsx
-          packages/editor/actionsLabelMode.test.ts
-          packages/ui/webmcp/useToolset.seam.test.tsx
-          packages/ui/components/AnnotationPanel.inReplyTo.test.tsx
-          packages/editor/webmcp/useDocumentWebMcp.toggle.test.tsx
-          packages/editor/components/AppHeader.webmcpIndicator.test.tsx
-          packages/ui/components/MathBlock.firstPaint.test.tsx
-          packages/ui/components/DiagramBlock.lazyRetry.test.tsx
-          packages/ui/components/DecisionControl.test.tsx
-          packages/ui/components/DiffFileTree.test.tsx
-          packages/ui/components/ActionMenu.test.tsx
-          packages/ui/components/PlanHeaderMenu.mobile.test.tsx
-          packages/review-editor/components/ReviewHeaderMenu.mobile.test.tsx
-          packages/editor/App.editModeShortcut.test.tsx
-          packages/editor/App.editModeCrossBlockHighlights.test.tsx
-          packages/editor/App.markdownUnanchored.test.tsx
-          packages/editor/App.restoreAcrossEdit.test.tsx
-          packages/editor/App.documentDrafts.test.tsx
-          packages/editor/App.bundle.test.tsx
-          packages/editor/App.bundleBackScroll.test.tsx
-          packages/editor/annotationDraftStaleRetry.test.tsx
-          packages/ui/components/blocks/AlertBlock.title.test.tsx
-          packages/ui/components/blocks/AlertBlock.seam.test.tsx
-          packages/ui/hooks/useFenceTheme.seam.test.tsx
-          packages/ui/components/blocks/AlertBlock.annotation.test.tsx
-          packages/ui/components/Viewer.driftedRestore.test.tsx
-          packages/ui/components/Viewer.crossBlockRestore.test.tsx
-          packages/ui/components/Viewer.restoreMovedAnchors.test.tsx
-          packages/ui/components/Viewer.questionContract.test.tsx
-          packages/ui/components/Viewer.alertDraftRestore.test.tsx
-          packages/ui/components/Viewer.belowTitle.test.tsx
-          packages/ui/utils/belowTitleSlot.test.ts
-          packages/ui/components/AnnotationPanel.allFiles.test.tsx
-          packages/ui/hooks/useLinkedDoc.crossFile.test.tsx
-          packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
-          packages/ui/hooks/useLinkedDoc.reapplyFilter.test.tsx
-          packages/ui/hooks/useLinkedDoc.scrollRestore.test.tsx
-          packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
-          packages/editor/hooks/useAnnotationJump.test.tsx
-          packages/ui/components/TableOfContents.linkedDoc.test.tsx
-          packages/ui/components/CommentPopover.overlayGutter.test.tsx
-          packages/ui/components/CommentPopover.multiTarget.test.tsx
-          packages/ui/aiProviderConfigPersistence.test.tsx
-          packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
-          packages/ui/components/sidebar/FileBrowser.fileLimit.test.tsx
-          packages/ui/components/ui/mobile-foundation.test.tsx
-          packages/ui/components/Settings.vim.test.tsx
-          packages/ui/components/Settings.annotateParity.test.tsx
-          packages/ui/components/Settings.compactDisplay.test.tsx
-          packages/ui/components/Settings.customFont.test.tsx
-          packages/ui/components/Settings.documentTextSize.test.tsx
-          packages/ui/components/Settings.experimental.test.tsx
-          packages/ui/components/Settings.gridChoice.test.tsx
-          packages/editor/App.planLookNotice.test.tsx
-          packages/ui/config/documentTextSizeSetting.test.ts
-          packages/ui/utils/diffFonts.test.ts
-          packages/ui/components/Settings.agentTool.test.tsx
-          packages/ui/components/settings/QuickLabelsTab.test.tsx
-          packages/ui/components/AnnotationToolbar.touchTargets.test.tsx
-          packages/ui/components/AnnotationToolbar.modeShortcutGuard.test.tsx
-          packages/ui/components/PermissionModeSetup.mobile.test.tsx
-          packages/ui/components/html-viewer/useHtmlAnnotation.mintedIds.test.tsx
-          packages/ui/components/LookAndFeelAnnouncementDialog.test.tsx
-          packages/ui/components/CommentPopover.mobile.test.tsx
-          packages/ui/components/CommentPopover.forcedDialog.test.tsx
-          packages/ui/components/ConfirmDialog.mobile.test.tsx
-          packages/ui/components/ThemeProvider.test.tsx
-          packages/ui/components/MarkdownEditor.embedPicker.test.ts
-          packages/ui/hooks/useViewportEnvironment.test.tsx
-          packages/ui/hooks/useIsMobile.test.tsx
-          packages/ui/hooks/useVimDocumentFocus.test.tsx
-          packages/ui/hooks/useScrollKeyRouting.test.tsx
-          packages/ui/hooks/useScrollViewport.test.ts
-          packages/review-editor/components/ExpandedCommentDialog.mobile.test.tsx
-          packages/review-editor/components/DiffTypePicker.openState.test.tsx
-          packages/review-editor/components/EditModeAnnouncementDialog.test.tsx
-          packages/review-editor/components/DestinationSpotlight.test.tsx
-          packages/review-editor/dock/panels/PRArtifactGallery.test.tsx
-          packages/review-editor/dock/panels/artifactDocument.test.ts
-          packages/review-editor/dock/ReviewDockRightActions.test.tsx
-          packages/editor/skillPrimeRenderLoop.test.tsx
-          packages/editor/App.compactToc.mobile.test.tsx
-          packages/editor/App.permissionModeSetup.test.tsx
-          packages/editor/components/CompactPlanStage.test.tsx
-          packages/editor/components/FolderAnnotationEmptyState.test.tsx
-          packages/editor/components/AppHeader.mobile.test.tsx
-          packages/editor/components/AppHeader.documentName.test.tsx
-          packages/editor/components/CompactAnnotationControls.test.tsx
-          packages/editor/components/AnnotateAgentTerminalPanel.displayReset.test.tsx
+      # The DOM list (tests/dom-test-list.txt) is hand-maintained, and every
+      # feature that adds a DOM-gated test file has to remember it — which is
+      # exactly what stopped happening (34 tests guarding shipped controls never
+      # ran). This asserts that every DOM-gated test file in the repo is in the
+      # list or in one of the own-process steps above, so it cannot drift again.
+      # The lane guard holds the matrices below to scripts/ci-test-lane.ts, so
+      # no shard can be dropped without failing here.
+      - name: Guard the DOM test allowlist and the test lanes
+        run: bun test scripts/dom-test-allowlist.test.ts scripts/ci-test-lanes.test.ts
 
-      # The list above is hand-maintained, and every feature that adds a
-      # DOM-gated test file has to remember it — which is exactly what stopped
-      # happening (34 tests guarding shipped controls never ran). This asserts
-      # that every DOM-gated test file in the repo is named in one of the
-      # DOM_TESTS steps of this workflow, so the list cannot drift again.
-      - name: Guard the DOM test allowlist
-        run: bun test scripts/dom-test-allowlist.test.ts
+  # The plain `bun test` sweep, split across jobs (scripts/ci-test-lane.ts).
+  # It took 20-23 min as one process; each lane now takes about 4-7 min.
+  # Few lanes on purpose: every job of a run asks for a runner at once, and
+  # the account has about 20 concurrent runners for every workflow and PR.
+  # heavy-*: the files that drive real agent processes, one process each.
+  # unit-k: Bun's own --shard=k/N over every other discovered file, so a new
+  # test file always lands in some shard.
+  unit:
+    name: Unit tests (${{ matrix.lane }})
+    runs-on: ubuntu-24.04
+    # A backstop, not a budget: lanes take about 4-7 min. Some tests run on
+    # fake timers, where bun's per-test timeout cannot fire, so a stuck await
+    # would otherwise idle until GitHub's 6-hour default.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [heavy-mod, heavy-agents, unit-1, unit-2, unit-3]
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Pi extension shared copies
+        run: bash apps/pi-extension/vendor.sh
+
+      - name: Run tests
+        env:
+          LANE: ${{ matrix.lane }}
+        run: bun run scripts/ci-test-lane.ts "$LANE"
+
+  # DOM-gated tests: tests/dom-test-list.txt with happy-dom globals, split
+  # across jobs. Files get isolated globals (--isolate) because theme, storage,
+  # and DOM test state must not leak between suites when Bun schedules them
+  # differently across platforms; without it most of the list fails.
+  dom:
+    name: DOM tests (${{ matrix.lane }})
+    runs-on: ubuntu-24.04
+    # A backstop, not a budget: lanes take about 3-6 min. Some DOM tests run on
+    # fake timers, where bun's per-test timeout cannot fire.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [dom-1, dom-2, dom-3, dom-4]
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Generate Pi extension shared copies
+        run: bash apps/pi-extension/vendor.sh
+
+      - name: Run DOM tests
+        env:
+          LANE: ${{ matrix.lane }}
+        run: bun run scripts/ci-test-lane.ts "$LANE"
 
   opencode-v2:
     name: OpenCode 2 installed package
@@ -623,12 +318,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       # The release workflow (guides-show-deploy.yml) refuses to publish when
-      # the viewer build blows its size budgets or the checked-in manifest no
-      # longer matches it, but that gate fires at the tag. The manifest pin is
-      # compiled into the release binaries independently of the viewer deploy,
-      # so a budget or manifest break has to surface on the PR that causes it.
-      # Regenerate with `bun run --cwd apps/guides-show build:viewer &&
-      # bun run --cwd apps/guides-show sync:manifest`.
+      # the viewer build blows its size budgets, but that gate fires at the
+      # tag, so a budget break has to surface on the PR that causes it.
       - name: Build viewer
         if: steps.gate.outputs.run == 'true'
         run: bun run --cwd apps/guides-show build:viewer
@@ -637,513 +328,12 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: bun run --cwd apps/guides-show check:budgets
 
-      # The viewer build is deterministic across platforms at the pinned Bun and
-      # lockfile (macOS and Linux produce identical hashes from a clean install),
-      # but a drifted local environment silently builds different bytes: a bun
-      # store with stale duplicate package versions reproduced exactly that. This
-      # Linux build is the authority the pin must match, so publish its manifest;
-      # when the check below fails and a fresh local regen still disagrees,
-      # download this artifact to apps/guides-show/dist/viewer/manifest.json, run
-      # `bun run --cwd apps/guides-show sync:manifest`, commit the result, and
-      # rebuild your environment (rm -rf node_modules && bun install --frozen-lockfile).
-      - name: Publish built viewer manifest for pin regeneration
-        if: always() && steps.gate.outputs.run == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
-        with:
-          name: guide-viewer-manifest
-          path: apps/guides-show/dist/viewer/manifest.json
-          retention-days: 7
-
-      - name: Checked-in manifest matches this build
+      # The viewer pin (packages/core/guide-viewer-manifest.ts) is generated,
+      # never committed: every shipping build runs `bun run build:viewer-pin`.
+      # Prove the generator still turns this build into a module core accepts,
+      # since the release, the guides.show deploy and core's prepack rely on it.
+      - name: Generate the viewer pin from this build
         if: steps.gate.outputs.run == 'true'
-        run: bun run --cwd apps/guides-show check:manifest
-
-  uninstall-windows:
-    # Run the filesystem and path logic under real Windows path semantics.
-    # The tests inject temporary homes and process boundaries, so this job
-    # never touches the runner's actual agent installations or user data.
-    name: Uninstall lifecycle (Windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.4
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Run focused uninstall tests
-        run: bun test packages/server/uninstall.test.ts apps/hook/server/cli.test.ts packages/server/auto-update.test.ts
-
-  pi-extension-ai-runtime-windows:
-    # Exercises the Pi extension's Node/jiti server mirror on Windows with an
-    # npm-style `pi` shim pair. This catches regressions where `where pi`
-    # resolves the extensionless shim before pi.cmd and the Ask AI provider
-    # crashes before the plan review UI opens.
-    name: Pi extension AI runtime (Windows)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.4
-
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Generate Pi extension shared copies
-        shell: bash
-        run: bash apps/pi-extension/vendor.sh
-
-      - name: Run workspace symlink tests
-        run: bun test packages/server/review-workspace.test.ts --test-name-pattern discoverWorkspaceRepoPaths
-
-      - name: Build Pi AI runtime smoke
-        run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
-
-      - name: Run Pi AI runtime smoke
-        run: node "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
-
-  install-cmd-windows:
-    # End-to-end integration test for scripts/install.cmd on real cmd.exe.
-    # The unit tests in scripts/install.test.ts are file-content string checks
-    # that run on Linux and never exercise cmd's delayed-expansion parser or
-    # the embedded `node -e` Gemini merge — exactly where issue #506 lived.
-    # This job runs install.cmd end-to-end on Windows with a seeded ~/.gemini
-    # settings.json fixture so the Gemini merge path actually executes and
-    # any regression of #506 (or similar cmd-parser bugs) fails CI.
-    name: install.cmd (Windows integration)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Seed fake ~/.gemini/settings.json with pre-existing hook
-        shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.gemini" | Out-Null
-          # Fixture mirrors the shape of a real Gemini settings.json (top-level
-          # `hooks.BeforeTool` array plus unrelated sibling keys) but uses only
-          # obviously-fake values. Must NOT contain the literal string
-          # "plannotator" anywhere — install.cmd's Gemini block is gated on
-          # `findstr /c:"plannotator"` returning non-zero and would otherwise
-          # skip the merge entirely.
-          $fixture = @'
-          {
-            "theme": "ci-fixture-theme",
-            "hooks": {
-              "BeforeTool": [
-                {
-                  "matcher": "ci-fixture-existing-matcher",
-                  "hooks": [
-                    {
-                      "type": "command",
-                      "command": "ci-fixture-existing-command",
-                      "timeout": 1000
-                    }
-                  ]
-                }
-              ]
-            },
-            "general": {
-              "ciFixtureSentinel": true
-            }
-          }
-          '@
-          Set-Content -Path "$env:USERPROFILE\.gemini\settings.json" -Value $fixture -NoNewline
-
-      - name: Run install.cmd end-to-end # zizmor: ignore[misfeature]
-        # CMD is the subject of this regression test; replacing the shell would
-        # invalidate it. Owner: maintainers; reassess by 2027-08-11.
-        shell: cmd
-        # v0.17.1 is pinned intentionally. This test needs a real binary
-        # to download so it can exercise install.cmd end-to-end — SHA256
-        # verification, skills sparse-checkout, and (critically) the
-        # embedded `node -e` Gemini merge path that was the site of
-        # issue #506. Using `latest` would couple the Windows regression
-        # test to whatever version is currently released, so a bad
-        # release would retroactively break CI on every branch.
-        #
-        # v0.17.1 was the current release when the test was added and is
-        # locked in place by GitHub Immutable Releases. If you ever need
-        # to bump it (e.g. this version becomes too old to represent the
-        # install flow we care about), verify the replacement has:
-        #   - plannotator-win32-x64.exe attached
-        #   - plannotator-win32-x64.exe.sha256 attached
-        #   - the install.cmd and packages/shared/ layout your branch
-        #     under test expects to find in apps/skills/
-        # A missing or mismatched release asset surfaces as a curl 404
-        # in this step with no obvious connection to the test's purpose.
-        run: scripts\install.cmd v0.17.1 --skip-attestation
-
-      - name: install.cmd remembered its command-line flags
-        shell: pwsh
-        run: |
-          $f = Join-Path $env:USERPROFILE ".plannotator\install-flags.json"
-          if (-not (Test-Path $f)) { throw "install.cmd did not write $f" }
-          $flags = @((Get-Content -Raw $f | ConvertFrom-Json).flags)
-          if (($flags -join ",") -ne "skip-attestation") { throw "expected [skip-attestation], got: $(Get-Content -Raw $f)" }
-          Write-Host "✓ install.cmd wrote install-flags.json: $(Get-Content -Raw $f)"
-
-      - name: Verify Gemini settings.json was merged correctly
-        shell: pwsh
-        run: |
-          $path = "$env:USERPROFILE\.gemini\settings.json"
-          if (-not (Test-Path $path)) { throw "settings.json missing after install" }
-
-          # Must still parse as JSON after the merge (regression for #506,
-          # where cmd's delayed expansion corrupted the embedded node script
-          # and left settings.json in a broken state).
-          $s = Get-Content $path -Raw | ConvertFrom-Json
-
-          # The plannotator hook must have been added.
-          $plannotatorEntries = $s.hooks.BeforeTool | Where-Object {
-            $_.matcher -eq 'exit_plan_mode'
-          }
-          if (-not $plannotatorEntries) {
-            throw "plannotator hook was not added to BeforeTool"
-          }
-          $planCmd = $plannotatorEntries[0].hooks | Where-Object {
-            $_.command -eq 'plannotator'
-          }
-          if (-not $planCmd) {
-            throw "plannotator command entry missing inside the new hook"
-          }
-
-          # The pre-existing (fixture) hook must have survived the merge.
-          # The original buggy JS was `if(!s.hooks.BeforeTool)s.hooks.BeforeTool=[]`
-          # which — after cmd ate the `!` — wiped existing arrays. The fix
-          # (`s.hooks.BeforeTool = s.hooks.BeforeTool || []`) must preserve them.
-          $fixtureHook = $s.hooks.BeforeTool | Where-Object {
-            $_.matcher -eq 'ci-fixture-existing-matcher'
-          }
-          if (-not $fixtureHook) {
-            throw "pre-existing hook was wiped — merge clobbered existing data"
-          }
-
-          # Unrelated top-level keys must survive the merge.
-          if ($s.theme -ne 'ci-fixture-theme') {
-            throw "unrelated top-level field 'theme' was mangled"
-          }
-          if ($s.general.ciFixtureSentinel -ne $true) {
-            throw "unrelated top-level field 'general' was mangled"
-          }
-
-          Write-Host "✓ Gemini settings.json merge verified (issue #506 regression guard)"
-
-      - name: Attestation pre-flight rejects v0.17.1 on real cmd.exe
-        shell: pwsh
-        run: |
-          # Regression guard: the main feature of this PR (three-layer
-          # verification opt-in + MIN_ATTESTED_VERSION pre-flight +
-          # injection-safe $env:-based PowerShell version comparison) had
-          # no runtime coverage on Windows because the previous
-          # integration step passes --skip-attestation.
-          #
-          # We can't test the SUCCESS path (valid attested release)
-          # because v0.17.1 is the current latest and it predates the
-          # release.yml attestation step. Until the first post-merge
-          # release exists, the only realistic end-to-end test is the
-          # REJECTION path: invoke install.cmd with --verify-attestation
-          # against v0.17.1 and assert the pre-flight rejects with
-          # exit != 0 and stderr containing "predates".
-          #
-          # This exercises on a real cmd.exe:
-          #   - setlocal enabledelayedexpansion parser under the guard
-          #   - three-layer resolution reaching the CLI flag layer
-          #   - the :~1 substring (instead of :v= global substitution)
-          #   - the pre-release tag detection (negative — v0.17.1 is stable)
-          #   - the PowerShell shell-out with $env:TAG_NUM / $env:MIN_NUM
-          #     (injection-safe — the previous interpolation would have
-          #     allowed arbitrary PS execution via --version)
-          #   - the `[version] -ge` comparison returning false
-          #   - the "predates" error message block
-          $installedBinary = "$env:USERPROFILE\.local\bin\plannotator.exe"
-
-          # Capture the currently-installed binary's hash BEFORE running
-          # the rejection test. The earlier Gemini-merge integration step
-          # installed v0.17.1 at this path; we use the captured hash as
-          # a baseline so we can prove the rejected invocation left it
-          # untouched (no wasted download, no overwrite).
-          if (-not (Test-Path $installedBinary)) {
-            throw "Expected $installedBinary to exist from the earlier install.cmd step, but it's missing. Cannot baseline the preservation check."
-          }
-          $baselineHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
-          $baselineWriteTime = (Get-Item $installedBinary).LastWriteTime
-
-          $stderrFile = New-TemporaryFile
-          $p = Start-Process -Wait -PassThru -NoNewWindow cmd `
-            -ArgumentList '/c','scripts\install.cmd v0.17.1 --verify-attestation' `
-            -RedirectStandardError $stderrFile.FullName
-          $stderr = Get-Content $stderrFile.FullName -Raw -ErrorAction SilentlyContinue
-          Remove-Item $stderrFile.FullName -ErrorAction SilentlyContinue
-
-          if ($p.ExitCode -eq 0) {
-            throw "install.cmd v0.17.1 --verify-attestation should have been rejected by the MIN_ATTESTED_VERSION pre-flight, but exited 0. stderr: $stderr"
-          }
-          if ($stderr -notmatch 'predates') {
-            throw "install.cmd rejected with exit $($p.ExitCode), but not via the pre-flight guard. Expected 'predates' in stderr, got: $stderr"
-          }
-
-          # Assert the pre-flight ran BEFORE any download / install step.
-          # If the binary's hash or mtime changed, something downloaded
-          # and moved a new file into place — meaning the pre-flight
-          # rejection happened late (after the download step) instead
-          # of early (before it). Catches future regressions that re-
-          # introduce the post-download pre-flight pattern.
-          $postHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
-          $postWriteTime = (Get-Item $installedBinary).LastWriteTime
-          if ($postHash -ne $baselineHash) {
-            throw "Binary at $installedBinary was overwritten during the rejected --verify-attestation run. Baseline SHA256 $baselineHash, post SHA256 $postHash. The pre-flight must run before any download."
-          }
-          if ($postWriteTime -ne $baselineWriteTime) {
-            throw "Binary at $installedBinary had its LastWriteTime modified during the rejected --verify-attestation run. Baseline $baselineWriteTime, post $postWriteTime."
-          }
-
-          Write-Host "✓ MIN_ATTESTED_VERSION pre-flight rejected v0.17.1 via the expected code path"
-          Write-Host "✓ Installed binary was preserved (SHA256 and LastWriteTime both unchanged)"
-
-      - name: Verify Claude Code slash command files contain the shell-invocation prefix
-        shell: pwsh
-        run: |
-          # Claude Code commands are deprecated in favor of skills: the
-          # installer no longer writes ~/.claude/commands files AT ALL (the
-          # core skills in ~/.claude/skills provide the slash commands). The
-          # old `echo ^!` escape regression class is structurally gone — no
-          # command content is generated by the installer anymore. Guard the
-          # NEW contract: a fresh install must not create plannotator command
-          # files.
-          $cmdDir = "$env:USERPROFILE\.claude\commands"
-          foreach ($file in @("plannotator-review.md", "plannotator-annotate.md", "plannotator-last.md")) {
-            $path = Join-Path $cmdDir $file
-            if (Test-Path $path) {
-              throw "Installer wrote a deprecated Claude command file: $path. Commands were replaced by skills; the installer must not generate them."
-            }
-          }
-          Write-Host "✓ No deprecated Claude Code command files were written (skills are the slash commands now)"
-
-          # Gemini slash commands — `.toml` files with `!{plannotator ...}` invocation
-          # syntax, now COPIED VERBATIM from the sparse checkout (apps/gemini/commands
-          # at the pinned tag) instead of being generated by echo escapes. The earlier
-          # integration step seeded `~/.gemini/settings.json`, so install.cmd's Gemini
-          # block fired. The `!{plannotator` content check verifies the verbatim copy
-          # actually delivered intact files (and would catch a regression back to
-          # generated content that mangles the `!`).
-          $geminiDir = "$env:USERPROFILE\.gemini\commands"
-          foreach ($file in @("plannotator-review.toml", "plannotator-annotate.toml")) {
-            $path = Join-Path $geminiDir $file
-            if (-not (Test-Path $path)) {
-              throw "Expected Gemini command file missing: $path"
-            }
-            $content = Get-Content $path -Raw
-            if ($content -notmatch '!\{plannotator') {
-              throw "Gemini command file $file is missing the '!' shell-invocation prefix. Content: $content"
-            }
-          }
-          Write-Host "✓ Both Gemini slash command files contain the '!' prefix"
-
-      - name: Unknown flag is rejected with non-zero exit
-        shell: pwsh
-        run: |
-          # Regression guard for the review finding that install.cmd silently
-          # reinterpreted typoed flags as version strings. A leading-dash token
-          # that doesn't match a known flag must now produce a non-zero exit
-          # AND emit "Unknown option:" on stderr — the latter is the real
-          # discriminator between the guard triggering and some other failure
-          # mode (network, gh auth, pre-PR release without an attestation)
-          # that also happens to exit non-zero.
-          #
-          # `--verify-attesttion` below is INTENTIONALLY MISSPELLED. Do not
-          # "correct" it during a typo sweep — the valid spelling is a real
-          # flag and would bypass this guard. The stderr assertion below
-          # would catch the drift, but the comment is the first line of
-          # defense for future maintainers.
-          $stderrFile = New-TemporaryFile
-          $p = Start-Process -Wait -PassThru -NoNewWindow cmd `
-            -ArgumentList '/c','scripts\install.cmd --verify-attesttion' `
-            -RedirectStandardError $stderrFile.FullName
-          $stderr = Get-Content $stderrFile.FullName -Raw -ErrorAction SilentlyContinue
-          Remove-Item $stderrFile.FullName -ErrorAction SilentlyContinue
-
-          if ($p.ExitCode -eq 0) {
-            throw "install.cmd should have rejected --verify-attesttion but exited 0. stderr: $stderr"
-          }
-          if ($stderr -notmatch 'Unknown option:') {
-            throw "install.cmd exited $($p.ExitCode) but not via the unknown-flag guard. Expected 'Unknown option:' in stderr but got: $stderr"
-          }
-          Write-Host "✓ Unknown flag rejected with exit code $($p.ExitCode) via the unknown-flag guard"
-
-      - name: install.cmd resolves latest from the release page when the API is unreachable (#1994)
-        shell: pwsh
-        run: |
-          # Point api.github.com at this machine, where nothing listens on 443:
-          # the installer's API call fails the way a rate limit or a proxy that
-          # blocks the API makes it fail, while github.com (the releases/latest
-          # redirect, the download and its checksum) stays reachable.
-          $hostsFile = "$env:SystemRoot\System32\drivers\etc\hosts"
-          $original = Get-Content -Raw $hostsFile
-          Add-Content -Path $hostsFile -Value "`r`n127.0.0.1 api.github.com"
-          ipconfig /flushdns | Out-Null
-          try {
-            & curl.exe -fsS --max-time 10 -o NUL https://api.github.com/
-            if ($LASTEXITCODE -eq 0) { throw "api.github.com is still reachable, so this step would not exercise the fallback" }
-            $expected = (& curl.exe -fsSLI -o NUL -w "%{url_effective}" https://github.com/backnotprop/plannotator/releases/latest).Split('/')[-1]
-            if ($expected -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "could not read the latest tag from the release page: $expected" }
-            $out = @(& cmd /c 'scripts\install.cmd --skip-attestation --skip-skills --skip-claude-plugin 2>&1')
-            $code = $LASTEXITCODE
-            $out | ForEach-Object { Write-Host $_ }
-            if ($code -ne 0) { throw "install.cmd exited $code" }
-            if (-not ($out -match [regex]::Escape("Installing plannotator $expected..."))) { throw "install.cmd did not resolve latest to $expected" }
-            if (-not ($out -match 'SHA256 verified')) { throw "install.cmd did not report the checksum check" }
-            $installed = (& "$env:USERPROFILE\.local\bin\plannotator.exe" --version) -join ' '
-            if ($installed -notmatch [regex]::Escape($expected.TrimStart('v'))) { throw "installed binary reports '$installed', expected $expected" }
-            Write-Host "✓ install.cmd resolved latest to $expected through the release page and installed it"
-          } finally {
-            Set-Content -Path $hostsFile -Value $original -NoNewline
-            ipconfig /flushdns | Out-Null
-          }
-
-  install-ps1-windows:
-    # End-to-end integration test for scripts/install.ps1 on real PowerShell.
-    # This specifically covers PLANNOTATOR_DATA_DIR tilde expansion because
-    # installer config lookup happens before any shared runtime code is loaded.
-    name: install.ps1 (Windows integration)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Run install.ps1 end-to-end
-        shell: pwsh
-        run: .\scripts\install.ps1 v0.17.1 -SkipAttestation
-
-      - name: install.ps1 remembered its command-line switches
-        shell: pwsh
-        run: |
-          $f = Join-Path $env:USERPROFILE ".plannotator\install-flags.json"
-          if (-not (Test-Path $f)) { throw "install.ps1 did not write $f" }
-          $flags = @((Get-Content -Raw $f | ConvertFrom-Json).flags)
-          if (($flags -join ",") -ne "skip-attestation") { throw "expected [skip-attestation], got: $(Get-Content -Raw $f)" }
-          Write-Host "✓ install.ps1 wrote install-flags.json: $(Get-Content -Raw $f)"
-
-      - name: Config opt-in resolves PLANNOTATOR_DATA_DIR tilde paths
-        shell: pwsh
-        run: |
-          $configDir = Join-Path $env:USERPROFILE "plannotator-ci-config"
-          New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-          Set-Content -Path (Join-Path $configDir "config.json") -Value '{ "verifyAttestation": true }' -NoNewline
-
-          $installedBinary = "$env:LOCALAPPDATA\plannotator\plannotator.exe"
-          if (-not (Test-Path $installedBinary)) {
-            throw "Expected $installedBinary to exist from the earlier install.ps1 step, but it's missing."
-          }
-          $baselineHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
-          $baselineWriteTime = (Get-Item $installedBinary).LastWriteTime
-
-          $env:PLANNOTATOR_DATA_DIR = '~\plannotator-ci-config'
-          $stderrFile = New-TemporaryFile
-          $p = Start-Process -Wait -PassThru -NoNewWindow pwsh `
-            -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','.\scripts\install.ps1','v0.17.1' `
-            -RedirectStandardError $stderrFile.FullName
-          $stderr = Get-Content $stderrFile.FullName -Raw -ErrorAction SilentlyContinue
-          Remove-Item $stderrFile.FullName -ErrorAction SilentlyContinue
-
-          if ($p.ExitCode -eq 0) {
-            throw "install.ps1 should have found config.json via PLANNOTATOR_DATA_DIR=~\plannotator-ci-config and rejected v0.17.1, but exited 0."
-          }
-          if ($stderr -notmatch 'predates') {
-            throw "install.ps1 exited $($p.ExitCode), but not via the expected attestation pre-flight. Expected 'predates' in stderr, got: $stderr"
-          }
-
-          $postHash = (Get-FileHash $installedBinary -Algorithm SHA256).Hash
-          $postWriteTime = (Get-Item $installedBinary).LastWriteTime
-          if ($postHash -ne $baselineHash) {
-            throw "Binary at $installedBinary was overwritten during the rejected config-driven verifyAttestation run."
-          }
-          if ($postWriteTime -ne $baselineWriteTime) {
-            throw "Binary at $installedBinary had its LastWriteTime modified during the rejected config-driven verifyAttestation run."
-          }
-
-          Write-Host "✓ PLANNOTATOR_DATA_DIR tilde expansion found config.json"
-          Write-Host "✓ Config-driven verifyAttestation rejected before download/install"
-
-      - name: Reinstall while plannotator.exe is running (auto-update path)
-        shell: pwsh
-        run: |
-          # Background auto-update runs install.ps1 while a session may still be
-          # running the installed exe. Windows refuses to overwrite or delete a
-          # running .exe, so install.ps1 renames it aside first. Exercise that
-          # for real: keep the installed binary running, reinstall, and check
-          # the swap, the survivor, and the later .old sweep.
-          $installDir = "$env:LOCALAPPDATA\plannotator"
-          $exe = Join-Path $installDir "plannotator.exe"
-          $env:PLANNOTATOR_DATA_DIR = Join-Path $env:RUNNER_TEMP "plannotator-running-exe"
-          $env:PLANNOTATOR_BROWSER = "$env:SystemRoot\System32\whoami.exe"
-          $sentinel = Join-Path $installDir "plannotator.exe.older-notes.txt"
-          Set-Content -Path $sentinel -Value "not ours to delete"
-
-          $proc = Start-Process -PassThru -WindowStyle Hidden -FilePath $exe -ArgumentList 'annotate','README.md'
-          Start-Sleep -Seconds 5
-          if ($proc.HasExited) { throw "plannotator.exe exited early (code $($proc.ExitCode)); the running-exe case was not exercised" }
-          $locked = $false
-          try { [System.IO.File]::Delete($exe) } catch { $locked = $true }
-          if (-not $locked) { throw "Deleting the running exe succeeded, so this step does not cover the locked case" }
-
-          .\scripts\install.ps1 v0.17.1 -SkipAttestation
-          if (-not (Test-Path $exe)) { throw "plannotator.exe missing after reinstalling over a running binary" }
-          if ($proc.HasExited) { throw "the running plannotator.exe died during the reinstall" }
-          $aside = @(Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -File | Where-Object { $_.Name -ne (Split-Path $sentinel -Leaf) })
-          if ($aside.Count -ne 1) { throw "expected the running exe renamed aside once, found: $($aside.Name -join ', ')" }
-          if ((Get-Item $exe).Length -le 0) { throw "the newly installed plannotator.exe is empty" }
-
-          Stop-Process -Id $proc.Id -Force
-          $proc.WaitForExit()
-          Start-Sleep -Seconds 1
-          .\scripts\install.ps1 v0.17.1 -SkipAttestation
-          $left = @(Get-ChildItem -Path $installDir -Filter "plannotator.exe.old*" -File | Where-Object { $_.Name -ne (Split-Path $sentinel -Leaf) })
-          if ($left.Count -ne 0) { throw "stale renamed-aside exe not swept: $($left.Name -join ', ')" }
-          if (-not (Test-Path $sentinel)) { throw "the .old sweep deleted an unrelated file" }
-          Write-Host "✓ Reinstalled over a running plannotator.exe; the aside copy was swept later and nothing else was touched"
-
-      - name: install.ps1 resolves latest from the release page when the API is unreachable (#1994)
-        shell: pwsh
-        run: |
-          # Point api.github.com at this machine, where nothing listens on 443:
-          # the installer's API call fails the way a rate limit or a proxy that
-          # blocks the API makes it fail, while github.com (the releases/latest
-          # redirect, the download and its checksum) stays reachable.
-          $hostsFile = "$env:SystemRoot\System32\drivers\etc\hosts"
-          $original = Get-Content -Raw $hostsFile
-          Add-Content -Path $hostsFile -Value "`r`n127.0.0.1 api.github.com"
-          ipconfig /flushdns | Out-Null
-          try {
-            & curl.exe -fsS --max-time 10 -o NUL https://api.github.com/
-            if ($LASTEXITCODE -eq 0) { throw "api.github.com is still reachable, so this step would not exercise the fallback" }
-            $expected = (& curl.exe -fsSLI -o NUL -w "%{url_effective}" https://github.com/backnotprop/plannotator/releases/latest).Split('/')[-1]
-            if ($expected -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "could not read the latest tag from the release page: $expected" }
-            $out = @(& pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -SkipAttestation -SkipSkills -SkipClaudePlugin 2>&1)
-            $code = $LASTEXITCODE
-            $out | ForEach-Object { Write-Host $_ }
-            if ($code -ne 0) { throw "install.ps1 exited $code" }
-            if (-not ($out -match [regex]::Escape("Installing plannotator $expected..."))) { throw "install.ps1 did not resolve latest to $expected" }
-            if (-not ($out -match 'SHA256 verified')) { throw "install.ps1 did not report the checksum check" }
-            $installed = (& "$env:LOCALAPPDATA\plannotator\plannotator.exe" --version) -join ' '
-            if ($installed -notmatch [regex]::Escape($expected.TrimStart('v'))) { throw "installed binary reports '$installed', expected $expected" }
-            Write-Host "✓ install.ps1 resolved latest to $expected through the release page and installed it"
-          } finally {
-            Set-Content -Path $hostsFile -Value $original -NoNewline
-            ipconfig /flushdns | Out-Null
-          }
+          bun run --cwd apps/guides-show sync:manifest
+          cd packages/core && bunx tsc --noEmit -p tsconfig.json

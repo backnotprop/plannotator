@@ -9,7 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { resetImageSrcResolver, setImageSrcResolver } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { inboxImageSrcResolver, inboxMessageImageBase } from './images';
+import { inboxImageSrcResolver, inboxMarkdownImageBase, inboxMessageImageBase } from './images';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -69,8 +69,10 @@ test.skipIf(!hasDom)('a message image loads from /api/inbox/messages/<id>/image 
   expect(src('remote')).toBe('https://example.com/x.png');
 });
 
-test('the resolver routes only a message marker; anything else keeps the default URL', () => {
+test('the resolver routes only a message or Markdown attachment marker; anything else keeps the default URL', () => {
   expect(inboxImageSrcResolver('a.png', inboxMessageImageBase(ID))).toBe(`/api/inbox/messages/${ID}/image?path=a.png`);
+  // An image inside an attached Markdown file loads from that attachment's route, for the version on screen (#2228).
+  expect(inboxImageSrcResolver('shots/a b.png', inboxMarkdownImageBase('att_01K7Z', 'sent'))).toBe('/api/inbox/attachments/att_01K7Z/markdown-image?path=shots%2Fa%20b.png&version=sent');
   expect(inboxImageSrcResolver('a.png', 'inbox-message:../../evil')).toBe('/api/image?path=a.png&base=inbox-message%3A..%2F..%2Fevil');
   expect(inboxImageSrcResolver('a.png')).toBe('/api/image?path=a.png');
 });

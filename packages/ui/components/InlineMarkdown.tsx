@@ -1,9 +1,8 @@
-import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { createPortal } from "react-dom";
+import React, { useState, useMemo } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { forgeRefLinks } from "@plannotator/core/forge-refs";
-import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
-import { useFenceTheme } from "../hooks/useFenceTheme";
+import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
+import { CodeSnippetPreview } from "./CodeSnippetPreview";
+import { useHoverPreview } from "../hooks/useHoverPreview";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
@@ -77,101 +76,6 @@ function gateCodePath(
   }
 }
 
-function extToLanguage(filepath: string): string | undefined {
-  const ext = filepath.split('.').pop()?.toLowerCase();
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java',
-    css: 'css', scss: 'scss', json: 'json', yml: 'yaml', yaml: 'yaml',
-    sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown',
-    html: 'html', xml: 'xml', toml: 'toml', swift: 'swift', kt: 'kotlin',
-  };
-  return ext ? map[ext] : undefined;
-}
-
-const CodeSnippetPreview: React.FC<{
-  anchorEl: HTMLElement | null;
-  contents: string;
-  filepath: string;
-  line: number;
-  lineEnd?: number;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-}> = ({ anchorEl, contents, filepath, line, lineEnd, onMouseEnter, onMouseLeave }) => {
-  const allLines = contents.split('\n');
-  const start = Math.max(0, line - 1);
-  const end = Math.min(allLines.length, (lineEnd ?? line));
-  const snippet = allLines.slice(start, end).join('\n');
-
-  const fenceTheme = useFenceTheme();
-  // Bumped once the grammar is attached, to re-run the memo below with the
-  // highlighter warm. Until then the snippet renders as plain text — no
-  // auto-detection, and an unknown extension simply stays plain.
-  const [highlighterGeneration, setHighlighterGeneration] = useState(0);
-  const lang = extToLanguage(filepath);
-
-  useEffect(() => {
-    if (!lang) return;
-    let cancelled = false;
-    void ensureHighlight(lang, fenceTheme).then((ok) => {
-      if (ok && !cancelled) setHighlighterGeneration((n) => n + 1);
-    });
-    return () => { cancelled = true; };
-  }, [lang, fenceTheme]);
-
-  const highlightedLines = useMemo(() => {
-    // Highlight the snippet as one unit so multi-line constructs (block
-    // comments, template literals) tokenise correctly, then split back into
-    // rows: the highlighter joins lines with "\n" and never emits one inside a
-    // span, so the split is exact.
-    const html = lang ? highlightToHtml(snippet, lang, fenceTheme) : null;
-    if (html !== null) return html.split('\n');
-    return snippet.split('\n').map(line =>
-      line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-    // highlighterGeneration is the "grammar just became available" signal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snippet, lang, fenceTheme, highlighterGeneration]);
-
-  if (!anchorEl) return null;
-
-  const rect = anchorEl.getBoundingClientRect();
-  const spaceBelow = window.innerHeight - rect.bottom;
-  const showAbove = spaceBelow < 200 && rect.top > spaceBelow;
-  const top = showAbove ? undefined : rect.bottom + 4;
-  const bottom = showAbove ? window.innerHeight - rect.top + 4 : undefined;
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - 520));
-
-  return createPortal(
-    <div
-      className="fixed z-[9999] rounded-lg border border-border bg-card shadow-xl flex flex-col"
-      style={{ top, bottom, left, maxWidth: 'min(600px, 90vw)', maxHeight: '300px' }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      <div className="px-3 py-1.5 border-b border-border/50 text-[10px] text-muted-foreground font-mono flex items-center justify-between gap-4 flex-shrink-0">
-        <span>{filepath.split('/').pop()}</span>
-        <span className="opacity-60">{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>
-      </div>
-      <div className="code-snippet-preview overflow-auto text-[12px] leading-5 min-h-0" style={{ padding: 0, background: 'var(--code-bg, #1e293b)' }}>
-        <table className="border-collapse w-full">
-          <tbody>
-            {snippet.split('\n').map((_, i) => (
-              <tr key={start + i} className="hover:bg-white/5">
-                <td className="select-none text-muted-foreground/40 text-right pr-3 pl-3 py-0 align-top font-mono w-8 whitespace-nowrap" style={{ userSelect: 'none' }}>{start + i + 1}</td>
-                <td
-                  className="font-mono pr-3 py-0 whitespace-pre"
-                  dangerouslySetInnerHTML={{ __html: highlightedLines[i] ?? '' }}
-                />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>,
-    document.body,
-  );
-};
-
 const CodeFileLink: React.FC<{
   candidate: string;
   display: string;
@@ -181,57 +85,16 @@ const CodeFileLink: React.FC<{
   const validation = useCodePathValidation();
   const gate = gateCodePath(candidate, validation);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [hoverPreview, setHoverPreview] = useState<{ contents: string; filepath: string } | null>(null);
-  const hoverPreviewRef = useRef(hoverPreview);
-  hoverPreviewRef.current = hoverPreview;
-  const anchorRef = useRef<HTMLElement | null>(null);
-  const showTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const parsed = parseCodePath(candidate);
   const hasLineRef = parsed.line != null;
-
-  const cancelHide = useCallback(() => {
-    if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
-  }, []);
-
-  const scheduleHide = useCallback(() => {
-    cancelHide();
-    hideTimerRef.current = setTimeout(() => {
-      setHoverPreview(null);
-    }, 200);
-  }, [cancelHide]);
-
-  const handleMouseEnter = useCallback(() => {
-    if (!hasLineRef || gate.render === 'plain') return;
-    cancelHide();
-    if (hoverPreviewRef.current) return;
-    showTimerRef.current = setTimeout(async () => {
-      try {
-        const data = await docPreviewFetcher(candidate, baseDir);
-        if (data?.contents) setHoverPreview({ contents: data.contents, filepath: data.filepath ?? candidate });
-      } catch {}
-    }, 150);
-  }, [candidate, hasLineRef, gate.render, cancelHide, baseDir]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (showTimerRef.current) { clearTimeout(showTimerRef.current); showTimerRef.current = null; }
-    scheduleHide();
-  }, [scheduleHide]);
-
-  const handlePreviewEnter = useCallback(() => {
-    cancelHide();
-  }, [cancelHide]);
-
-  const handlePreviewLeave = useCallback(() => {
-    scheduleHide();
-  }, [scheduleHide]);
-
-  useEffect(() => {
-    return () => {
-      if (showTimerRef.current) clearTimeout(showTimerRef.current);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, []);
+  const hover = useHoverPreview<{ contents: string; filepath: string }>(async () => {
+    const data = await docPreviewFetcher(candidate, baseDir);
+    return data?.contents ? { contents: data.contents, filepath: data.filepath ?? candidate } : null;
+  }, hasLineRef && gate.render !== 'plain');
+  const hoverPreview = hover.preview;
+  const anchorRef = hover.anchorRef;
+  const handleMouseEnter = hover.onEnter;
+  const handleMouseLeave = hover.onLeave;
 
   if (gate.render === 'plain') {
     return (
@@ -280,8 +143,7 @@ const CodeFileLink: React.FC<{
           filepath={hoverPreview.filepath}
           line={parsed.line!}
           lineEnd={parsed.lineEnd}
-          onMouseEnter={handlePreviewEnter}
-          onMouseLeave={handlePreviewLeave}
+          {...hover.previewHandlers}
         />
       )}
       {pickerOpen && isAmbiguous && (
@@ -350,6 +212,9 @@ function canRenderSpacedDollarMath(tex: string): boolean {
   const trimmed = normalizeMathTex(tex);
   if (!trimmed) return false;
   if (!/^\s|\s$/.test(tex)) return true;
+  // Padding must be symmetric (`$ y $`). In `$write-better on the copy, and $`
+  // the closing `$` is really the opener of the next `$skill` token.
+  if (/^\s/.test(tex) !== /\s$/.test(tex)) return false;
   return (
     /\\[a-zA-Z]+/.test(trimmed) ||
     /[=^_{}+\-*/<>|]/.test(trimmed) ||
@@ -609,6 +474,13 @@ export const InlineMarkdown: React.FC<{
   const resolveLocalLink = useLocalLinkResolver();
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
+  // Cross-repo `owner/repo#123` refs: only for a caller that names its
+  // project's repo (it knows the forge); otherwise they stay plain text, never
+  // a guessed github.com link. With a code-file handler, an `owner/repo` that
+  // is a code path not known to be missing stays the file (`src/app.js#12`).
+  const crossRepoProject = githubRepo ? { host: repoHost } : null;
+  const crossRepoAccept = (ref: CrossRepoRef): boolean =>
+    !(onOpenCodeFile && isCodeFilePathStrict(ref.path) && gateCodePath(ref.path, validation ?? null).render !== 'plain');
   const parts: React.ReactNode[] = [];
   let remaining = text;
   let key = 0;
@@ -714,6 +586,32 @@ export const InlineMarkdown: React.FC<{
           continue;
         }
       }
+    }
+
+    // Cross-repo ref: owner/repo#123, shown as written, linked on the
+    // project's forge host. Read before file-path detection, so
+    // `vercel/next.js#1` is a ref, not a path (unless the viewer knows that
+    // file, see crossRepoAccept); `docs/guide.md#2` stays a path.
+    const crossRepoRef = crossRepoProject ? matchCrossRepoRef(remaining, previousChar, crossRepoProject) : null;
+    if (crossRepoRef && crossRepoAccept(crossRepoRef)) {
+      parts.push(
+        crossRepoRef.href ? (
+          <a
+            key={key++}
+            href={crossRepoRef.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary font-medium hover:underline"
+          >
+            {crossRepoRef.label}
+          </a>
+        ) : (
+          crossRepoRef.label
+        ),
+      );
+      remaining = remaining.slice(crossRepoRef.label.length);
+      previousChar = crossRepoRef.label[crossRepoRef.label.length - 1];
+      continue;
     }
 
     // Autolinks: <https://url> or <email@domain.com>
@@ -1354,12 +1252,17 @@ export const InlineMarkdown: React.FC<{
     // chunk (`…/w/ws_01…` rendered a link to `…/w/ws`). Stop the chunk where
     // that URL starts instead, so the bare-URL branch above takes it whole.
     const chunkEnd = nextSpecial === -1 ? remaining.length : nextSpecial + 1;
-    const urlStart = bareUrlRunningPast(remaining, chunkEnd);
-    if (urlStart !== -1) {
-      const before = remaining.slice(0, urlStart);
+    // Same for an owner/repo#123 ref: `#` (and `_` in a name) ends a chunk, so
+    // stop before the ref and let the cross-repo branch above take it whole.
+    // A ref inside a URL never splits it: the URL starts first and wins.
+    const urlAt = bareUrlRunningPast(remaining, chunkEnd);
+    const refAt = crossRepoProject ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
+    const splitAt = refAt !== -1 ? refAt : urlAt;
+    if (splitAt !== -1) {
+      const before = remaining.slice(0, splitAt);
       emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
       previousChar = before[before.length - 1] || previousChar;
-      remaining = remaining.slice(urlStart);
+      remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);

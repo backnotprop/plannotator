@@ -8,7 +8,7 @@
  * posts the bridge's `step` itself, without the person's focus, never moves
  * the pane, and no bridge step moves it while the question row is open.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  * The diagram fixture and its geometry are DiagramBlock.askAI.test.tsx's.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';

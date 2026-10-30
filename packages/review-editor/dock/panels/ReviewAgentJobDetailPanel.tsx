@@ -6,10 +6,12 @@ import { jobMatchesReviewContext } from '@plannotator/ui/hooks/useAgentJobs';
 import { useReviewState } from '../ReviewStateContext';
 import { useJobLogs } from '../JobLogsContext';
 import { CopyButton } from '../../components/CopyButton';
+import { ExplainButton } from '../../components/CommentActions';
 import { LiveLogViewer } from '../../components/LiveLogViewer';
 import { ScrollFade } from '../../components/ScrollFade';
 import { exportReviewFeedback } from '../../utils/exportFeedback';
 import { annotationScope, commentCopyText } from '../../utils/annotationDisplay';
+import { isAgentGeneratedFinding } from '../../utils/explainFinding';
 
 // ---------------------------------------------------------------------------
 // Panel
@@ -229,7 +231,16 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
             ) : (
               <div className="space-y-2">
                 {displayAnnotations.map(({ annotation: ann, dismissed }) => (
-                  <AnnotationRow key={ann.id} annotation={ann} dismissed={dismissed} onClick={handleAnnotationClick} />
+                  <AnnotationRow
+                    key={ann.id}
+                    annotation={ann}
+                    dismissed={dismissed}
+                    onClick={handleAnnotationClick}
+                    onExplain={state.aiAvailable && isAgentGeneratedFinding(ann, state.agentFindingSources)
+                      ? state.onExplainAnnotation
+                      : undefined}
+                    explainDisabled={state.isAILoading}
+                  />
                 ))}
               </div>
             )}
@@ -492,10 +503,12 @@ function Disclosure({ title, copyText, nested, children }: {
 }
 
 
-function AnnotationRow({ annotation: ann, dismissed, onClick }: {
+function AnnotationRow({ annotation: ann, dismissed, onClick, onExplain, explainDisabled }: {
   annotation: CodeAnnotation;
   dismissed: boolean;
   onClick: (ann: CodeAnnotation) => void;
+  onExplain?: (id: string) => void;
+  explainDisabled: boolean;
 }) {
   const scope = annotationScope(ann);
   const copyText = ann.text ? commentCopyText(ann, scope) : '';
@@ -537,9 +550,10 @@ function AnnotationRow({ annotation: ann, dismissed, onClick }: {
         {dismissed && (
           <span className="px-1 py-0.5 rounded text-[10px] uppercase tracking-wider bg-muted text-muted-foreground/60">dismissed</span>
         )}
-        {!dismissed && copyText && (
-          <span className="ml-auto opacity-0 group-hover/finding:opacity-100 group-focus-within/finding:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-            <CopyButton text={copyText} variant="inline" />
+        {!dismissed && (copyText || onExplain) && (
+          <span className="ml-auto flex items-center gap-1 opacity-0 group-hover/finding:opacity-100 group-focus-within/finding:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+            {onExplain && <ExplainButton onExplain={() => onExplain(ann.id)} disabled={explainDisabled} />}
+            {copyText && <CopyButton text={copyText} variant="inline" />}
           </span>
         )}
       </div>

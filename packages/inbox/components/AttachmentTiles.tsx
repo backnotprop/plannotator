@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAttachmentKindLabel, inboxVideoMeta, isInboxAnnotatableKind, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { imageFitsWithin, readableVersion, WIDE_IMAGE_RATIO } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
@@ -161,6 +163,7 @@ export function AttachmentTiles({
   placement = 'foot',
   openIn,
   onOpenAs,
+  newestId = null,
 }: {
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
@@ -173,7 +176,10 @@ export function AttachmentTiles({
   openIn?: OpenInSurface;
   /** The tile ⋯'s "Open side by side" / "Open full screen": this file in that view, the remembered choice unchanged. Absent on a phone or a stacked window. */
   onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
+  /** The file `O` opens (artifacts.ts `newestViewableFile`): its tile shows the O keycap and names the key. */
+  newestId?: string | null;
 }) {
+  const newestKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'openNewest' });
   const source = useInboxFileSource();
   if (attachments.length === 0) return null;
   const header = placement === 'header';
@@ -276,12 +282,14 @@ export function AttachmentTiles({
               aria-label={isOpen ? `${attachment.name}, open beside the thread` : `${isVideo ? 'Play' : 'Open'} ${attachment.name}`}
               aria-current={isOpen ? 'true' : undefined}
               aria-describedby={detailId}
+              aria-keyshortcuts={attachment.id === newestId ? newestKeys : undefined}
               data-attachment-id={attachment.id}
               data-attachment-name={attachment.name}
               data-attachment-kind={readInboxAttachmentKind(attachment.kind)}
             >
               {icon}
               {text}
+              {attachment.id === newestId && <ShortcutHint scope={inboxThreadShortcuts} action="openNewest" className="ib-kbd ib-att-kbd" />}
               <span className="ib-open" aria-hidden="true">
                 {isOpen ? 'Open beside' : isVideo ? 'Play' : 'Open'}
               </span>

@@ -33,6 +33,7 @@ import {
   filtersSet,
   markedRuns,
   moreLabel,
+  projectNames,
   resultTarget,
   rowThreadChip,
   scopeWords,
@@ -87,19 +88,6 @@ interface Answered {
 }
 
 const FOCUSABLE = 'input:not([disabled]), button:not([disabled]):not([tabindex="-1"])';
-
-/** Project names as the person reads them: a second project with the same name gets its parent folder ("api · work"). */
-function projectNames(projects: readonly { id: string; name: string; root: string }[]): Map<string, string> {
-  const counts = new Map<string, number>();
-  for (const p of projects) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
-  const out = new Map<string, string>();
-  for (const p of projects) {
-    const parts = p.root.split(/[\\/]+/).filter(Boolean);
-    const parent = parts.length >= 2 ? parts[parts.length - 2] : null;
-    out.set(p.id, (counts.get(p.name) ?? 0) > 1 && parent ? `${p.name} · ${parent}` : p.name);
-  }
-  return out;
-}
 
 function Marked({ text, marks }: { text: string; marks: readonly [number, number][] }) {
   return (

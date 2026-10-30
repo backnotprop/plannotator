@@ -80,6 +80,8 @@ export async function runEmbeddedPlanReview(
 ): Promise<EmbeddedPlanReviewResult> {
   input.abortSignal?.throwIfAborted();
   const { startPlannotatorServer, handleServerReady } = await loadPlanServer();
+  const { listOpenCodeSession } = await import("./session-registry");
+  const { detectProjectName } = await import("@plannotator/server/project");
   const server = await startPlannotatorServer({
     plan: input.planContent,
     origin: "opencode",
@@ -103,7 +105,9 @@ export async function runEmbeddedPlanReview(
   });
 
   const timeoutMs = input.timeoutSeconds === null ? null : input.timeoutSeconds * 1000;
+  let unlist = () => {};
   try {
+    unlist = listOpenCodeSession(server, "plan", await detectProjectName().catch(() => null));
     const result = await waitForPlanReviewDecision({
       waitForDecision: server.waitForDecision,
       timeoutMs,
@@ -117,6 +121,7 @@ export async function runEmbeddedPlanReview(
     await waitForPlanReviewCloseDelay(1500, input.abortSignal);
     return result;
   } finally {
+    unlist();
     await server.stop();
   }
 }

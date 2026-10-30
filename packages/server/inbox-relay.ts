@@ -552,42 +552,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
   };
 
-  /**
-   * A push that is not a message's own (an agent the Inbox runs waits on a
-   * permission, inbox-acp-runner.ts): the same summary, its subject the
-   * words to show, no lock-screen answer. Collapsed per thread like the rest.
-   */
-  const pushText = async (input: { threadId: string | null; messageId: string | null; subject: string; agent: string }): Promise<void> => {
-    if (!mailbox || !input.threadId) return;
-    const root = store.message(input.threadId);
-    const summary: PushPlaintext = {
-      v: 1,
-      type: "push",
-      thread_id: input.threadId,
-      message_id: input.messageId ?? input.threadId,
-      subject: input.subject.slice(0, 300),
-      project: root ? (store.project(root.project_id)?.name ?? "") : "",
-      agent: input.agent,
-      question: null,
-    };
-    for (const device of devices.list()) {
-      if (!device.carriage) continue;
-      const secret = devices.secret(device.id);
-      if (!secret) continue;
-      try {
-        const { key, collapseKey } = await deriveRelayKeys(secret, device.id);
-        const ciphertext = await sizedEnvelope(summary, key);
-        const collapseId = createHmac("sha256", Buffer.from(collapseKey, "base64url")).update(input.threadId).digest("hex");
-        const answer = await call("POST", mailboxPath("/push"), mailbox.secret, { device_id: device.id, collapse_id: collapseId, ciphertext });
-        log(`push ${summary.message_id} ${device.id} ${answer.status}`);
-      } catch (error) {
-        log(`push ${summary.message_id} ${device.id} failed: ${error instanceof Error ? error.name : "error"}`);
-      }
-    }
-  };
-
   return {
-    pushText,
     /** A phone just paired: the mailbox (made now when there is none), its registration, the socket. Null when the relay cannot be reached. */
     async paired(device: InboxDevice): Promise<{ url: string; mailbox_id: string } | null> {
       const made = await ensureMailbox();

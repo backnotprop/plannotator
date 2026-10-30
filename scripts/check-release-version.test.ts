@@ -8,6 +8,7 @@ const temporaryRoots: string[] = [];
 const jsonVersionPaths = [
   "package.json",
   "apps/opencode-plugin/package.json",
+  "apps/dsh-plugin/package.json",
   "apps/pi-extension/package.json",
   "apps/hook/.claude-plugin/plugin.json",
   "apps/copilot/plugin.json",

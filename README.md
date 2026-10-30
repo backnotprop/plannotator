@@ -37,7 +37,7 @@
 
 # Plannotator
 
-Plannotator is a local, browser-based review surface for AI coding agents: Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Kiro, Droid, Amp, and Pi. 
+Plannotator is a local, browser-based review surface for AI coding agents: Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Kiro, Droid, Amp, DeepSeek Harness, and Pi. 
 
 **It plugs directly into your agent** through its hooks and commands. When the agent proposes a plan, html, or finishes writing code, the work opens in your browser and you mark it up, comment, and send feedback directly to the agent for it to act on it.
 
@@ -247,6 +247,7 @@ Then finish the step for your agent:
 | **Claude Code** | `/plugin marketplace add backnotprop/plannotator`, then `/plugin install plannotator@plannotator`. Restart Claude Code. | [README](apps/hook/README.md) |
 | **Codex** | Nothing. Plan review is enabled automatically via Codex's experimental `Stop` hook (macOS/Linux/WSL; on native Windows, Codex hooks are experimental and the installer prints manual setup steps). `$plannotator-review`, `$plannotator-annotate`, and `$plannotator-last` skills included. | [README](apps/codex/README.md) |
 | **Copilot CLI** | `/plugin marketplace add backnotprop/plannotator`, then `/plugin install plannotator-copilot@plannotator`. Restart. Plan review activates in plan mode (`Shift+Tab`). | [README](apps/copilot/README.md) |
+| **DeepSeek Harness** | Add `@plannotator/dsh` on DSH's Plugins page, or run `dsh plugin --profile <profile> add @plannotator/dsh`. Plan review opens on `exit_plan_mode`; review, annotate, and last come from the installed skills. | [README](apps/dsh-plugin/README.md) |
 | **Droid** | `droid plugin marketplace add https://github.com/backnotprop/plannotator`, then `droid plugin install plannotator@plannotator`. Commands only, no plan interception yet. | [README](apps/droid-plugin/README.md) |
 | **Gemini CLI** | Nothing. The hook, policy, and slash commands are configured automatically. Requires Gemini CLI 0.36.0+. | [README](apps/gemini/README.md) |
 | **Kiro CLI** | Nothing. Skills and an example agent are installed automatically. Try `kiro-cli chat --agent plannotator`. | [README](apps/kiro-cli/README.md) |
@@ -403,6 +404,8 @@ You run /plannotator-review
 
 **Bear**: Save plans as Bear notes with nested tags and project metadata.
 
+**Notion**: Save plans as Markdown child pages under a shared Notion page. Set `NOTION_TOKEN` in the environment that starts Plannotator, then configure the parent page in Settings.
+
 **GitHub / GitLab**: Pass any PR or MR URL to `/plannotator-review` and review it with the full diff viewer, annotations, and file tree.
 
 ---
@@ -541,10 +544,11 @@ bun run dev:vscode     # VS Code extension (watch mode)
 ### Build
 
 ```bash
-bun run build          # Main targets (hook + opencode)
+bun run build          # Main targets (hook + opencode + dsh)
 bun run build:hook     # Single-file HTML for the hook server
 bun run build:review   # Code review editor
 bun run build:opencode # OpenCode plugin
+bun run build:dsh      # DeepSeek Harness plugin
 bun run build:vscode   # VS Code extension
 ```
 

@@ -25,6 +25,33 @@ export function isPhone(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
 }
 
+/**
+ * A real touch phone: the phone layout on a screen whose main pointer is a finger (coarse, no hover). Single keys
+ * are off there (a stray key from a hardware keyboard or voice input acts on nothing shown); a desktop window
+ * narrower than 768 px has the phone layout but keeps its keys, as it always had (the owner's ruling on #2257).
+ */
+export const TOUCH_QUERY = '(pointer: coarse) and (hover: none)';
+
+export function isTouchPhone(): boolean {
+  return isPhone() && window.matchMedia(TOUCH_QUERY).matches;
+}
+
+function subscribeTouch(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  const off = subscribe(onChange);
+  const mql = window.matchMedia(TOUCH_QUERY);
+  mql.addEventListener('change', onChange);
+  return () => {
+    off();
+    mql.removeEventListener('change', onChange);
+  };
+}
+
+/** Whether the window is a real touch phone now, and again whenever that changes. */
+export function useTouchPhone(): boolean {
+  return useSyncExternalStore(subscribeTouch, isTouchPhone, () => false);
+}
+
 /** Whether the window is a phone now, and again whenever that changes (a rotation, a resize). */
 export function usePhone(): boolean {
   return useSyncExternalStore(subscribe, isPhone, () => false);

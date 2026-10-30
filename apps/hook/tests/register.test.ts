@@ -270,6 +270,8 @@ describe('register', () => {
     const inboxAnswer = await $.command.run({ command: 'plannotator-inbox', args: '', origin: { kind: 'composer' } })
     expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --open')).toBe(true)
     expect(inboxAnswer.text).toContain('http://localhost:5555/')
+    // Opened: the model gets the Inbox briefing as the answer's hidden context (no turn).
+    expect(inboxAnswer.context?.[0]).toContain('plannotator inbox --help')
     const other = await $.command.run({ command: 'frontend-status', args: '', origin: { kind: 'composer' } })
 
     expect(other.text).toBe('frontend-status ran beneath')

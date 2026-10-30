@@ -168,7 +168,9 @@ function dockTabs(): string[] {
   return Array.from(document.querySelectorAll(".dv-tab")).map((el) => el.textContent?.trim() ?? "");
 }
 
-const allFilesShown = () => dockTabs().some((title) => title.includes("All files"));
+// The every-change dock tab is titled "All changes" (approved design record
+// "review-sidebar-header"), so it never reads like the All files scope.
+const allFilesShown = () => dockTabs().some((title) => title.includes("All changes"));
 const noChangesShown = () => document.body.textContent?.includes("No changes") ?? false;
 
 function panelSegment(label: string): HTMLButtonElement | undefined {

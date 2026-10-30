@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, heldNotice, markHeldRowArchived, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -37,6 +37,15 @@ describe('heldNotice', () => {
     const shown = sections(work('a', '2026-10-07T10:00:00Z'));
     expect(heldNotice(shown, sections(work('a', '2026-10-07T10:00:00Z'), work('b', '2026-10-07T10:05:00Z'), home('c', '2026-10-07T10:06:00Z')))).toEqual({ count: 2, text: '2 new' });
     expect(heldNotice(shown, sections(work('a', '2026-10-07T10:00:00Z'), work('b', '2026-10-07T10:05:00Z')))).toEqual({ count: 1, text: '1 new in api' });
+  });
+
+  // The notice sits above rows that read the window's short name (projectLabels.ts): it names the project the same way.
+  test('the notice names its project as the window does, the server name only for a project the window has no name for', () => {
+    const repo = (id: string, at: string) => ({ ...row(id, 'x', at, 'agent'), project: { id: 'prj_repo', name: 'plannotator · plannotator' } }) as InboxListRow;
+    const shown = sections(repo('a', '2026-10-07T10:00:00Z'));
+    const latest = sections(repo('a', '2026-10-07T10:00:00Z'), repo('b', '2026-10-07T10:05:00Z'));
+    expect(heldNotice(shown, latest, undefined, null, new Map([['prj_repo', 'plannotator']])).text).toBe('1 new in plannotator');
+    expect(heldNotice(shown, latest, undefined, null, new Map()).text).toBe('1 new in plannotator · plannotator');
   });
 
   // The failure this guards: the Inbox's set-aside note is a person-authored
@@ -448,5 +457,33 @@ describe('adoptKeepingOpen', () => {
     expect(next[0]!.threads.map((r) => r.thread_id)).toEqual(['d', 'b', 'a', 'c']);
     expect(next[0]!.threads[2]).toBe(archivedRow);
     expect(next[0]!.threads[2]!.resolved_at).toBe('2026-10-20T10:05:00Z');
+  });
+});
+
+describe('putRowBack (Undo of Mark read on a seen update held in New)', () => {
+  const two = (newRows: InboxListRow[], quiet: InboxListRow[]): InboxListSection[] => [
+    { id: 'new', label: 'New since you looked', threads: newRows },
+    { id: 'quiet', label: 'Quiet', threads: quiet },
+  ];
+  const at = (id: string, time: string, section: 'new' | 'quiet') => ({ ...row(id, 'docs', time, 'agent'), section }) as InboxListRow;
+
+  test('Mark read moved it to Quiet; Undo puts it back between the same neighbours, the rest as on screen', () => {
+    // Held: a was read (its state says Quiet) and sits between x and y, out of time order.
+    const before = two([at('x', '2026-10-20T12:00:00Z', 'new'), at('a', '2026-10-20T08:00:00Z', 'quiet'), at('y', '2026-10-20T10:00:00Z', 'new')], []);
+    const latest = two([at('x', '2026-10-20T12:00:00Z', 'new'), at('y', '2026-10-20T10:00:00Z', 'new')], [at('a', '2026-10-20T08:00:00Z', 'quiet')]);
+    expect(drawnSection(before, 'a')).toBe('new');
+    const moved = settleThread(before, latest, 'a');
+    expect(drawnSection(moved, 'a')).toBe('quiet');
+    const back = putRowBack(moved, before, 'a');
+    expect(back[0]!.threads.map((r) => r.thread_id)).toEqual(['x', 'a', 'y']);
+    expect(back[1]!.threads).toEqual([]);
+  });
+
+  test('a row no longer on screen stays out', () => {
+    const before = two([at('a', '2026-10-20T08:00:00Z', 'quiet')], []);
+    const gone = two([], []);
+    expect(putRowBack(gone, before, 'a')).toEqual(gone);
+    expect(drawnSection(gone, 'a')).toBeNull();
+    expect(drawnSection(null, 'a')).toBeNull();
   });
 });

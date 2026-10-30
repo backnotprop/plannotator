@@ -353,6 +353,32 @@ describe('ThemeProvider', () => {
     expect(themeState().resolvedMode).toBe('dark');
   });
 
+  // Plannotator's packed pages set the scheme inline before any script runs
+  // (build/pack-app.ts), so the empty page never paints white under a dark
+  // theme. What regresses: the value goes stale after a theme switch (native
+  // controls and the page canvas in the wrong scheme), or a host page that set
+  // none suddenly gets one.
+  test.skipIf(!hasDom)('takes over an inline color-scheme set before it mounted, and adds none where there was none', async () => {
+    stored.set('plannotator-theme', 'system');
+    stored.set('plannotator-color-theme', 'plannotator');
+    const media = installMatchMedia(false);
+    document.documentElement.style.colorScheme = 'dark';
+    try {
+      await mountTheme();
+      expect(document.documentElement.style.colorScheme).toBe('dark');
+      await act(async () => media.setMatches(true));
+      expect(document.documentElement.style.colorScheme).toBe('light');
+
+      await unmountTheme();
+      document.documentElement.style.colorScheme = '';
+      await mountTheme();
+      await act(async () => media.setMatches(false));
+      expect(document.documentElement.style.colorScheme).toBe('');
+    } finally {
+      document.documentElement.style.colorScheme = '';
+    }
+  });
+
   test.skipIf(!hasDom)('flips between the two halves of the pair when the OS scheme changes', async () => {
     stored.set('plannotator-theme', 'system');
     stored.set('plannotator-light-theme', 'kanagawa-lotus');

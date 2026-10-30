@@ -6,18 +6,19 @@
  *
  *  - desktop beside the list: the thread's full screen ("Hide the sidebar and
  *    the list") leads, then Mark read; at the right, icons only (approval
- *    "inbox-thread-artifacts"): the pin to the sidebar (approval
- *    "inbox-pinned-threads"), the folder, Expand all, Archive, a hairline, the ×;
+ *    "inbox-thread-artifacts"): the folder, Expand all, Archive, ⋯ More (the
+ *    copy menu, design record "inbox-copy-message"), a hairline, the ×;
  *  - the thread in full screen (approval "inbox-files-tabs", amendment
  *    2026-10-30, B): the sidebar and the list hide, the thread keeps a centred
  *    760 px measure, ‹ Inbox leads in the button's place and there is no ×;
  *    ‹ Inbox or Escape brings them back (Escape leaves full screen before it
  *    closes the thread); a file opened there and closed again returns to it;
- *  - a stacked window (1000 px): ‹ Inbox leads, then Mark read; Archive ends it;
- *  - a file beside the thread: ‹ Inbox (closing the file), Mark read; the
- *    folder, lit, ends it where the × was (the pane's toggle);
+ *  - a stacked window (1000 px): ‹ Inbox leads, then Mark read; Archive, then
+ *    ⋯ More end it;
+ *  - a file beside the thread: ‹ Inbox (closing the file), Mark read; after
+ *    ⋯ More the folder, lit, ends it where the × was (the pane's toggle);
  *  - full screen: the file covers the thread;
- *  - a phone: ‹ Inbox, Mark read, then Archive at the right edge, 44 px targets;
+ *  - a phone: ‹ Inbox, Mark read, then Archive and ⋯ More at the right edge, 44 px targets;
  *  - a thread that came back from the archive, and an archived thread
  *    (Unarchive in its foot, the header's Archive button reading Unarchive).
  *
@@ -73,14 +74,14 @@ async function headerOrder(pane: Locator): Promise<string[]> {
       .map((b) =>
         b.hasAttribute('data-mark-read')
           ? 'mark-read'
-          : b.hasAttribute('data-pin-toggle')
-            ? 'pin'
           : b.hasAttribute('data-artifacts-button')
             ? 'artifacts'
           : b.hasAttribute('data-full-in')
             ? 'full'
           : b.hasAttribute('data-archive')
             ? 'archive'
+          : b.hasAttribute('data-thread-more')
+            ? 'more'
             : b.hasAttribute('data-expand-all')
               ? 'expand'
               : b.classList.contains('ib-pback')
@@ -151,31 +152,32 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop beside the list: Mark read leads, Archive sits beside the close; Tab follows that order', async () => {
+test('desktop beside the list: Mark read leads, Archive and ⋯ More sit beside the close; Tab follows that order', async () => {
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.invoices}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
   await expect(pane.locator('[data-mark-read]')).toBeVisible();
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await shot(page, '1-desktop', ['light', 'dark']);
-  expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'pin', 'artifacts', 'expand', 'archive', 'close']);
-  // Archive and the close are neighbours, with only the hairline between them (approval "inbox-thread-artifacts").
-  expect(await pane.locator('[data-archive]').evaluate((b) => b.nextElementSibling?.className)).toBe('ib-vsep');
-  expect(await pane.locator('[data-archive]').evaluate((b) => b.nextElementSibling?.nextElementSibling?.getAttribute('aria-label'))).toBe('Close the thread');
+  expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'artifacts', 'expand', 'archive', 'more', 'close']);
+  // Archive, then ⋯ More (design record "inbox-copy-message", option B), then only the hairline before the close
+  // (approval "inbox-thread-artifacts").
+  expect(await pane.locator('[data-archive]').evaluate((b) => b.nextElementSibling?.hasAttribute('data-thread-more'))).toBe(true);
+  expect(await pane.locator('[data-thread-more]').evaluate((b) => b.nextElementSibling?.className)).toBe('ib-vsep');
+  expect(await pane.locator('[data-thread-more]').evaluate((b) => b.nextElementSibling?.nextElementSibling?.getAttribute('aria-label'))).toBe('Close the thread');
   // Names and states are unchanged.
   await expect(pane.locator('[data-archive]')).toHaveAccessibleName('Archive the thread');
   await expect(pane.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'false');
   // The keyboard walks the header left to right.
   await pane.locator('[data-mark-read]').focus();
   await page.keyboard.press('Tab');
-  // The pin to the sidebar (approval "inbox-pinned-threads") sits before Artifacts.
-  await expect(pane.locator('[data-pin-toggle]')).toBeFocused();
-  await page.keyboard.press('Tab');
   await expect(pane.locator('[data-artifacts-button]')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(pane.locator('[data-expand-all]')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(pane.locator('[data-archive]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(pane.locator('[data-thread-more]')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(pane.getByRole('button', { name: 'Close the thread' })).toBeFocused();
 });
@@ -200,7 +202,7 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox and Es
   await expect(page.getByRole('complementary', { name: 'Inbox navigation' })).toBeHidden();
   await expect(leave).toBeFocused();
   await expect(leave).toHaveAccessibleName('Back to Inbox');
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'pin', 'artifacts', 'expand', 'archive']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'archive', 'more']);
   await expect(pane.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   const measure = await pane.locator('.ib-pbody').evaluate((b) => {
     const s = getComputedStyle(b);
@@ -244,7 +246,7 @@ test('the thread in full screen with a file: the file opens beside it; closing i
   await expect(view).not.toHaveClass(/ib-full/);
   // Beside a file the thread drops its measure (the file has the room); the folder is lit at the header's end.
   await expect(pane).not.toHaveAttribute('data-full', '');
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'pin', 'expand', 'archive', 'artifacts']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'expand', 'archive', 'more', 'artifacts']);
   await shot(page, '1c-thread-full-screen-with-file');
   // The file's last tab closed: back to the thread in full screen, not to the list.
   await page.locator('[data-tab-close]').first().click({ force: true });
@@ -267,7 +269,7 @@ test('the thread in full screen with a file: the file opens beside it; closing i
   await expect(pane.locator('[data-full-in]')).toBeVisible();
 });
 
-test('a stacked window: ‹ Inbox, then Mark read; Archive ends the header', async () => {
+test('a stacked window: ‹ Inbox, then Mark read; Archive and ⋯ More end the header', async () => {
   const { page, threads } = world;
   await page.setViewportSize({ width: 1000, height: 800 });
   try {
@@ -275,14 +277,14 @@ test('a stacked window: ‹ Inbox, then Mark read; Archive ends the header', asy
     const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
     await expect(pane.locator('[data-stack-back]')).toBeVisible();
     await shot(page, '2-stacked-1000');
-    expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'pin', 'artifacts', 'expand', 'archive']);
+    expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'archive', 'more']);
     await expect(pane.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   } finally {
     await page.setViewportSize({ width: 1440, height: 900 });
   }
 });
 
-test('a file beside the thread: ‹ Inbox, then Mark read; the lit folder ends the header; full screen covers it', async () => {
+test('a file beside the thread: ‹ Inbox, then Mark read; ⋯ More, then the lit folder ends the header; full screen covers it', async () => {
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.invoices}&file=${world.attachment}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
@@ -291,14 +293,14 @@ test('a file beside the thread: ‹ Inbox, then Mark read; the lit folder ends t
   await expect(pane.locator('[data-file-back]')).toBeVisible();
   await shot(page, '3-file-beside', ['light', 'dark']);
   // The folder is the pane's toggle: lit where the thread's × would be (approval "inbox-files-tabs", 2026-10-30).
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'pin', 'expand', 'archive', 'artifacts']);
-  await expect(pane.locator('[data-artifacts-button]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'expand', 'archive', 'more', 'artifacts']);
+  await expect(pane.locator('[data-artifacts-button]')).toHaveAttribute('aria-expanded', 'true');
   await view.getByRole('button', { name: 'Full screen' }).click();
   await expect(view).toHaveClass(/ib-full/);
   await shot(page, '4-file-full-screen');
   await view.getByRole('button', { name: 'Side by side' }).click();
   await expect(view).not.toHaveClass(/ib-full/);
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'pin', 'expand', 'archive', 'artifacts']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'expand', 'archive', 'more', 'artifacts']);
 });
 
 test('a thread that came back from the archive, and an archived one: the same order, Unarchive in the foot', async () => {
@@ -310,13 +312,13 @@ test('a thread that came back from the archive, and an archived one: the same or
   // A thread that came back is not resolved for the window, so Mark read is offered and leads. It has no artifact,
   // but it has a project folder: the folder button keeps its place (owner, 2026-10-27).
   await expect(backPane.locator('[data-artifacts-button]')).toHaveAccessibleName(/^Show files: project folder, /);
-  expect(await headerOrder(backPane)).toEqual(['full', 'mark-read', 'pin', 'artifacts', 'expand', 'archive', 'close']);
+  expect(await headerOrder(backPane)).toEqual(['full', 'mark-read', 'artifacts', 'expand', 'archive', 'more', 'close']);
 
   await page.goto(`${world.url}#thread=${threads.archived}`);
   const archivedPane = page.locator(`section.ib-pane[data-thread-id="${threads.archived}"]`);
   await expect(archivedPane.getByRole('button', { name: 'Unarchive' }).first()).toBeVisible();
   await shot(page, '6-archived');
-  expect((await headerOrder(archivedPane)).slice(-2)).toEqual(['archive', 'close']);
+  expect((await headerOrder(archivedPane)).slice(-3)).toEqual(['archive', 'more', 'close']);
   await expect(archivedPane.locator('[data-archive]')).toHaveAccessibleName('Unarchive the thread');
   await expect(archivedPane.locator('[data-mark-read]')).toHaveCount(0);
 });
@@ -325,7 +327,7 @@ for (const phone of [
   { name: 'Pixel 7', options: devices['Pixel 7'] },
   { name: '320 px', options: { ...devices['Pixel 7'], viewport: { width: 320, height: 640 } } },
 ]) {
-  test(`a phone (${phone.name}): ‹ Inbox, Mark read, then Archive at the right edge, 44 px targets`, async ({ browser }) => {
+  test(`a phone (${phone.name}): ‹ Inbox, Mark read, then Archive and ⋯ More at the right edge, 44 px targets`, async ({ browser }) => {
     const { threads } = world;
     const { defaultBrowserType: _ignored, ...options } = phone.options as typeof phone.options & { defaultBrowserType?: string };
     const context = await browser.newContext({ ...options, colorScheme: 'light' });
@@ -335,10 +337,11 @@ for (const phone of [
       const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
       await expect(pane.locator('[data-phone-back]')).toBeVisible();
       await shot(page, `7-phone-${phone.name.replace(/\W+/g, '-').toLowerCase()}`, ['light', 'dark']);
-      expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'pin', 'artifacts', 'expand', 'archive']);
+      expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'archive', 'more']);
       // Under 360 px Mark read shows its icon alone; its words stay its name.
       await expect(pane.locator('[data-mark-read]')).toHaveAccessibleName(/Mark read/);
-      await expect(pane.locator('[data-pin-toggle]')).toHaveAccessibleName('Pin to the sidebar');
+      // The pin lives in ⋯ More's menu (a phone's way to pin), not the header.
+      await expect(pane.locator('[data-pin-toggle]')).toHaveCount(0);
       // Every header control is a 44 px target and none overlaps another.
       // Measured against the header itself (the thread may still be sliding in).
       const boxes = await pane.locator('.ib-phead').evaluate((head) => {
@@ -353,7 +356,9 @@ for (const phone of [
       const sorted = [...boxes].sort((a, b) => a.x - b.x);
       for (let i = 1; i < sorted.length; i++) expect(sorted[i].x, `${sorted[i - 1].name} overlaps ${sorted[i].name}`).toBeGreaterThanOrEqual(sorted[i - 1].right - 0.5);
       expect(sorted.at(-1)!.right).toBeLessThanOrEqual(sorted.at(-1)!.head);
-      expect(sorted.at(-1)!.name).toBe('Archive the thread');
+      // ⋯ More (the copy menu, design record "inbox-copy-message") ends the row, after Archive.
+      expect(sorted.at(-1)!.name).toBe('More');
+      expect(sorted.at(-2)!.name).toBe('Archive the thread');
     } finally {
       await context.close();
     }

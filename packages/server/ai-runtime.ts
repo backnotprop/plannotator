@@ -12,13 +12,14 @@ import {
   type AIEndpoints,
   type PiSDKConfig,
   type PullSessionBridgeConfig,
+  type QwenSDKConfig,
   type SessionBridge,
   type SessionBridgeHost,
 } from "@plannotator/ai";
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { cameThroughTailscale } from "@plannotator/shared/tailnet-audience";
-import { isRemoteSession } from "./remote";
+import { getLocalUrlHostname, isRemoteSession } from "./remote";
 import type { SessionTailnetGate } from "./session-tailnet";
 
 export interface AIRuntime {
@@ -44,6 +45,13 @@ interface CreateAIRuntimeOptions {
    * (DNS-rebinding guard). Undefined (not bound yet) refuses bridge requests.
    */
   getServerPort?: () => number | undefined;
+  /**
+   * The localhost subdomain this session is advertised at (#2184): a page
+   * there asks with that Host, so the bridge accepts it beside the loopback
+   * names. Defaults to the configured one (getLocalUrlHostname), read here
+   * once; null accepts none.
+   */
+  localHostname?: string | null;
   /**
    * "Ask this session" for a host that launched this server as a SEPARATE
    * process (the OpenCode plugin, the Claude Code mod): the host long-polls
@@ -221,6 +229,24 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
     } catch {
       // OpenCode not available.
     }
+
+    try {
+      await import("@plannotator/ai/providers/qwen-sdk");
+      const rawQwenPath = Bun.which("qwen", { PATH: childPath() });
+      if (rawQwenPath) {
+        const provider = await createProvider({
+          type: "qwen-sdk",
+          cwd,
+          qwenExecutablePath: resolveWindowsCommandShim(rawQwenPath),
+        } as QwenSDKConfig);
+        const providerId = registry.register(provider);
+        // Discovery reads Qwen Code's settings.json (no process), and a
+        // session runs on qwen's own default model when none is picked.
+        deferModelDiscovery(providerId, provider, { blockSession: false });
+      }
+    } catch {
+      // Qwen Code not available.
+    }
   };
 
   // Off in remote mode, in-process or pulled: anyone who can reach the session
@@ -248,8 +274,9 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   // even in a session that was never published: a `--bg` serve mapping a
   // crashed `--tailscale` session left behind can point at a later local
   // session on the same port.
+  const localHostname = options.localHostname !== undefined ? options.localHostname : getLocalUrlHostname();
   const localBridgeRequest = (req: Request) =>
-    isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.()) && !cameThroughTailscale(req.headers);
+    isLoopbackHostHeader(req.headers.get("host"), options.getServerPort?.(), localHostname) && !cameThroughTailscale(req.headers);
   // A tailnet-published session with a bridge: who may ask the agent session
   // is decided per request. Without one (or without a bridge) the guard is
   // exactly the local one.

@@ -1,5 +1,5 @@
 /**
- * What the answer tab and the chapter view's answer list show, from a saved
+ * What the answer tab and the Guide tab's answer list show, from a saved
  * answer and, while it is being answered, the live run. No `vscode` here.
  */
 
@@ -15,10 +15,15 @@ function linesLabel(lines: { start: number; end: number }): string {
   return lines.start === lines.end ? `${lines.start}` : `${lines.start}–${lines.end}`;
 }
 
+/** The path the lines asked about have on their side: the old path of a renamed file on the old side. */
+function shownPath(about: AskAbout): string {
+  return about.side === "base" && about.oldPath ? about.oldPath : about.path ?? "";
+}
+
 /** "deliver.ts · lines 25–31", "deliver.ts", "Chapter 2". */
 export function aboutShort(about: AskAbout): string {
   if (about.kind === "chapter" || !about.path) return `Chapter ${about.chapter + 1}`;
-  if (about.kind === "selection" && about.lines) return `${base(about.path)} · ${about.lines.start === about.lines.end ? "line" : "lines"} ${linesLabel(about.lines)}${about.side === "base" ? " (old)" : ""}`;
+  if (about.kind === "selection" && about.lines) return `${base(shownPath(about))} · ${about.lines.start === about.lines.end ? "line" : "lines"} ${linesLabel(about.lines)}${about.side === "base" ? " (old)" : ""}`;
   return base(about.path);
 }
 
@@ -99,7 +104,7 @@ export function answerViewState(input: AnswerViewInput): AnswerViewState {
       ? { label: `Lines ${linesLabel(about.lines)}`, link: `code:${about.path}#L${about.lines.start}${about.lines.end !== about.lines.start ? `-L${about.lines.end}` : ""}` }
       : { label: base(about.path), link: `code:${about.path}` };
   const quote = about.kind === "selection" && about.code && about.lines
-    ? { header: `${about.path} · ${about.lines.start === about.lines.end ? "line" : "lines"} ${linesLabel(about.lines)}${about.side === "base" ? " · old version" : record.headSha ? ` · head ${record.headSha.slice(0, 7)}` : ""}`, start: about.lines.start, lines: about.code.split("\n").slice(0, 40) }
+    ? { header: `${shownPath(about)} · ${about.lines.start === about.lines.end ? "line" : "lines"} ${linesLabel(about.lines)}${about.side === "base" ? " · old version" : record.headSha ? ` · head ${record.headSha.slice(0, 7)}` : ""}`, start: about.lines.start, lines: about.code.split("\n").slice(0, 40) }
     : null;
   const page = run?.answer ?? (record.html && record.title ? { title: record.title, html: record.html } : null);
   return {

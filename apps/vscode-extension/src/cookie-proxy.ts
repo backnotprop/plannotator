@@ -82,7 +82,14 @@ export function createCookieProxy(
         function tryUpstreamRequest(attempt: number): void {
           const proxyReq = http.request(
             targetUrl.toString(),
-            { method: req.method, headers: proxyHeaders },
+            {
+              method: req.method,
+              headers: proxyHeaders,
+              // Browsers resolve *.localhost themselves; Node's OS resolver may not.
+              // Pin only the socket address, keeping the advertised Host and Origin.
+              // Plain `localhost` and every other name resolve as before.
+              ...upstreamConnectOptions(targetUrl.hostname),
+            },
             (proxyRes) => {
               const contentType = proxyRes.headers["content-type"] || "";
 
@@ -153,6 +160,18 @@ export function createCookieProxy(
 
     server.on("error", reject);
   });
+}
+
+/**
+ * How the proxy connects to its upstream. A session advertised at a
+ * localhost subdomain (`urlHost: "plannotator.localhost"`, #2184) is
+ * listening on 127.0.0.1, which a browser knows but Node's OS resolver may
+ * not (Linux without `*.localhost` in nss), so only that shape connects to
+ * the literal. `localhost` and every other name are resolved as they always
+ * were. The same rule as `isLocalhostSubdomain` in packages/shared/loopback-host.ts.
+ */
+export function upstreamConnectOptions(hostname: string): { hostname?: string } {
+  return /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+localhost$/i.test(hostname) ? { hostname: "127.0.0.1" } : {};
 }
 
 function buildSetCookieHeaders(savedCookies: string): string[] {
@@ -277,6 +296,73 @@ export function applyPanelCookieDefaults(
   return seeded;
 }
 
+/**
+ * The panel's clipboard bridge and key forwarder, as plain JavaScript source
+ * injected into the proxied page (and evaluated by the tests). It is a function
+ * `(win, doc, post) => { write, read }`, where `post` sends one message to the
+ * extension host.
+ *
+ * Clipboard: inside a nested cross-origin webview iframe the document never
+ * holds focus, so the async Clipboard API is rejected and native copy/cut/paste
+ * events never fire. Reads and writes go through the extension host (which owns
+ * the system clipboard), driven off keydown, the only input signal the iframe
+ * still receives.
+ *
+ * Key forwarding: every other key goes to VS Code so its keybindings keep
+ * working while the panel has focus, but only a key no handler on the page took.
+ * The listener is registered first (it runs in <head>), so it cannot read
+ * `defaultPrevented` when it runs; it reads it after the event has finished
+ * dispatching. That has to be a task, not a microtask: for a key the user
+ * presses, the browser runs microtasks between listener calls, so a microtask
+ * queued here would run before the app's own listeners.
+ */
+export const KEY_BRIDGE_SOURCE = `function(win,doc,post){
+  var readSeq=0,readPending={};
+  function write(text){post({type:"plannotator-clipboard-write",text:String(text==null?"":text)});}
+  function read(){return new Promise(function(resolve){var id=++readSeq;readPending[id]=resolve;post({type:"plannotator-clipboard-read",id:id});});}
+  function fieldSelection(el){
+    if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")&&el.selectionStart!=null&&el.selectionEnd>el.selectionStart){
+      return el.value.slice(el.selectionStart,el.selectionEnd);
+    }
+    return (win.getSelection&&win.getSelection().toString())||"";
+  }
+  win.addEventListener("message",function(e){var d=e.data;if(d&&d.type==="plannotator-clipboard-data"){var cb=readPending[d.id];if(cb){delete readPending[d.id];cb(d.text||"");}}});
+  win.addEventListener("keydown",function(e){
+    var k=(e.key||"").toLowerCase();
+    if((e.metaKey||e.ctrlKey)&&!e.altKey){
+      if(k==="c"||k==="x"){
+        var sel=fieldSelection(doc.activeElement);
+        if(sel){
+          e.preventDefault();
+          write(sel);
+          if(k==="x")doc.execCommand("delete");
+        }
+        return;
+      }
+      if(k==="v"){
+        e.preventDefault();
+        read().then(function(text){if(text)doc.execCommand("insertText",false,text);});
+        return;
+      }
+      // Undo/redo/select-all stay native; forwarding them would hijack them.
+      if(k==="a"||k==="z"||k==="y")return;
+    }
+    var ev={
+      key:e.key,code:e.code,keyCode:e.keyCode,which:e.which,location:e.location,
+      ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,metaKey:e.metaKey,repeat:e.repeat
+    };
+    // VS Code's own window keys (Quick Open, the Command Palette, close
+    // editor, switch editor) always reach VS Code, even when the page took
+    // them: inside the panel they must keep doing what they do everywhere.
+    var global=((e.metaKey||e.ctrlKey)&&!e.altKey&&(k==="p"||(k==="w"&&!e.shiftKey)))||(e.ctrlKey&&!e.metaKey&&!e.altKey&&e.key==="Tab");
+    setTimeout(function(){
+      if(e.defaultPrevented&&!global)return;
+      try{post({type:"plannotator-keydown",event:ev});}catch(err){}
+    },0);
+  });
+  return {write:write,read:read};
+}`;
+
 function injectScript(html: string, savedCookies: string): string {
   const initial = JSON.stringify(
     applyPanelCookieDefaults(parseCookieString(savedCookies)),
@@ -300,17 +386,11 @@ function injectScript(html: string, savedCookies: string): string {
       setTimeout(sc,500);setInterval(sc,2000);
       var ci=setInterval(function(){if(document.body&&document.body.textContent.indexOf("Your response has been sent")!==-1){clearInterval(ci);sc();fetch("/___ext/close",{method:"POST"});}},500);
       try{window.parent.postMessage("plannotator-ready","*");}catch(e){}
-      // Clipboard bridge: inside a nested cross-origin webview iframe the
-      // document never holds focus, so the async Clipboard API is rejected and
-      // native copy/cut/paste events never fire. Route reads and writes through
-      // the extension host (which owns the system clipboard) and drive them off
-      // keydown, the only input signal the iframe still receives.
-      var readSeq=0,readPending={};
-      function bridgeWrite(text){window.parent.postMessage({type:"plannotator-clipboard-write",text:String(text==null?"":text)},"*");}
-      function bridgeRead(){return new Promise(function(resolve){var id=++readSeq;readPending[id]=resolve;window.parent.postMessage({type:"plannotator-clipboard-read",id:id},"*");});}
+      // Clipboard bridge and key forwarding: see KEY_BRIDGE_SOURCE.
+      var keyBridge=(${KEY_BRIDGE_SOURCE})(window,document,function(msg){window.parent.postMessage(msg,"*");});
       try{Object.defineProperty(navigator,"clipboard",{configurable:true,value:{
-        writeText:function(t){bridgeWrite(t);return Promise.resolve();},
-        readText:function(){return bridgeRead();}
+        writeText:function(t){keyBridge.write(t);return Promise.resolve();},
+        readText:function(){return keyBridge.read();}
       }});}catch(err){}
       // External-link bridge (#1583): the webview sandbox has no allow-popups,
       // so window.open and target=_blank links do nothing in this frame. Route
@@ -328,38 +408,6 @@ function injectScript(html: string, savedCookies: string): string {
         if(!href)return;
         e.preventDefault();openExternal(href);
       },false);
-      function fieldSelection(el){
-        if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")&&el.selectionStart!=null&&el.selectionEnd>el.selectionStart){
-          return el.value.slice(el.selectionStart,el.selectionEnd);
-        }
-        return (window.getSelection&&window.getSelection().toString())||"";
-      }
-      window.addEventListener("message",function(e){var d=e.data;if(d&&d.type==="plannotator-clipboard-data"){var cb=readPending[d.id];if(cb){delete readPending[d.id];cb(d.text||"");}}});
-      window.addEventListener("keydown",function(e){
-        var k=(e.key||"").toLowerCase();
-        if((e.metaKey||e.ctrlKey)&&!e.altKey){
-          if(k==="c"||k==="x"){
-            var sel=fieldSelection(document.activeElement);
-            if(sel){
-              e.preventDefault();
-              bridgeWrite(sel);
-              if(k==="x")document.execCommand("delete");
-            }
-            return;
-          }
-          if(k==="v"){
-            e.preventDefault();
-            bridgeRead().then(function(text){if(text)document.execCommand("insertText",false,text);});
-            return;
-          }
-          // Undo/redo/select-all stay native; forwarding them would hijack them.
-          if(k==="a"||k==="z"||k==="y")return;
-        }
-        try{window.parent.postMessage({type:"plannotator-keydown",event:{
-          key:e.key,code:e.code,keyCode:e.keyCode,which:e.which,location:e.location,
-          ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,metaKey:e.metaKey,repeat:e.repeat
-        }},"*");}catch(err){}
-      });
     })();</script>`;
 
   const headMatch = html.match(/<head(\s[^>]*)?>/) ;

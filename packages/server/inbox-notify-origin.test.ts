@@ -97,10 +97,60 @@ test("nothing else redirects: no fetch metadata, a frame, APIs, the door, MCP, H
   expect((await raw(port, "/", { Host: `127.0.0.1:${port + 1}`, ...NAVIGATE })).status).toBe(200);
 });
 
+/** Run with PLANNOTATOR_URL_HOST set, restoring it after. */
+async function withUrlHost<T>(value: string, run: () => Promise<T>): Promise<T> {
+  const before = process.env.PLANNOTATOR_URL_HOST;
+  process.env.PLANNOTATOR_URL_HOST = value;
+  try {
+    return await run();
+  } finally {
+    if (before === undefined) delete process.env.PLANNOTATOR_URL_HOST;
+    else process.env.PLANNOTATOR_URL_HOST = before;
+  }
+}
+
+test("with a localhost subdomain configured (#2184), the Inbox opens there and localhost goes to it", async () => {
+  await withUrlHost("plannotator.localhost", async () => {
+    const { server } = await inbox();
+    const port = server.port;
+    expect(server.url).toBe(`http://plannotator.localhost:${port}/`);
+    for (const host of [`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`]) {
+      const answer = await raw(port, "/?from=agent", { Host: host, ...NAVIGATE });
+      expect(answer.status).toBe(307);
+      expect(answer.headers.location).toBe(`http://plannotator.localhost:${port}/?from=agent`);
+    }
+    const canonical = await raw(port, "/", { Host: `plannotator.localhost:${port}`, ...NAVIGATE });
+    expect(canonical.status).toBe(200);
+    expect(canonical.text).toContain("<title>Inbox</title>");
+    // Another subdomain is not this Inbox's name: answered where it asked, never redirected.
+    expect((await raw(port, "/", { Host: `other.localhost:${port}`, ...NAVIGATE })).status).toBe(200);
+    // MCP and the connection routes still answer only the plain loopback names.
+    const mcp = await raw(port, "/mcp", { Host: `plannotator.localhost:${port}`, "Content-Type": "application/json" }, "POST", "{}");
+    expect(mcp.status).toBe(403);
+    expect(JSON.parse(mcp.text).code).toBe("forbidden_host");
+  });
+});
+
+test("a url host that is not a localhost subdomain (a tailnet name) leaves the Inbox on localhost", async () => {
+  await withUrlHost("my-machine.tailnet.ts.net", async () => {
+    const { server } = await inbox();
+    expect(server.url).toBe(`http://localhost:${server.port}/`);
+  });
+});
+
+test("the redirect follows the start-time address, not the config now", () => {
+  const req = new Request("http://localhost:5555/", { headers: { Host: "localhost:5555", ...NAVIGATE } });
+  // Unset at start: localhost is the address, whatever the config says later.
+  expect(inboxCanonicalRedirect(req, new URL(req.url), "http://localhost:5555/", "local")).toBeNull();
+  expect(inboxCanonicalRedirect(req, new URL(req.url), "http://plannotator.localhost:5555/", "local")?.headers.get("location")).toBe(
+    "http://plannotator.localhost:5555/",
+  );
+});
+
 test("the tailnet listener is never redirected", () => {
   const req = new Request("http://127.0.0.1:5555/", { headers: { Host: "127.0.0.1:5555", ...NAVIGATE } });
-  expect(inboxCanonicalRedirect(req, new URL(req.url), 5555, "tailnet")).toBeNull();
-  expect(inboxCanonicalRedirect(req, new URL(req.url), 5555, "local")?.status).toBe(307);
+  expect(inboxCanonicalRedirect(req, new URL(req.url), "http://localhost:5555/", "tailnet")).toBeNull();
+  expect(inboxCanonicalRedirect(req, new URL(req.url), "http://localhost:5555/", "local")?.status).toBe(307);
 });
 
 /** Read an event stream until `until` matches, then stop. */

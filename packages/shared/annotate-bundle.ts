@@ -17,7 +17,7 @@
  */
 
 /** How one bundle file renders, the same values /api/doc names in `renderAs`. */
-export type AnnotateBundleRenderAs = "markdown" | "html" | "mermaid" | "graphviz";
+export type AnnotateBundleRenderAs = "markdown" | "html" | "mermaid" | "graphviz" | "asciidoc";
 
 /** One file of a bundle, in bundle order. `path` is absolute. */
 export interface AnnotateBundleFile {
@@ -25,7 +25,7 @@ export interface AnnotateBundleFile {
 	renderAs: AnnotateBundleRenderAs;
 }
 
-const RENDER_AS: readonly AnnotateBundleRenderAs[] = ["markdown", "html", "mermaid", "graphviz"];
+const RENDER_AS: readonly AnnotateBundleRenderAs[] = ["markdown", "html", "mermaid", "graphviz", "asciidoc"];
 
 function separatorFree(path: string): string {
 	return path.replace(/\\/g, "/");

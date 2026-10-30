@@ -1,0 +1,5 @@
+{
+  "name": "plannotator",
+  "version": "1.0.0",
+  "description": "Plannotator plan review: when the agent calls exit_plan_mode, the plan opens in your browser to approve or annotate. A deny sends your feedback to the agent; after an approve, Qwen Code asks you to confirm the plan once more in the terminal."
+}

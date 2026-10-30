@@ -64,10 +64,17 @@
  * selection stay on the textarea: the caret takes the foreground token, and
  * the selection uses a translucent primary wash so the overlay text stays
  * readable through it. During IME composition `.pn-ref-composing` restores
- * the native text so composition underlines render normally. */
+ * the native text so composition underlines render normally.
+ *
+ * No transition: the overlay's `visibility` flips instantly, so the global
+ * `*` 150ms color transition would fade the textarea's glyphs in (blank text
+ * at every composition start) and out (doubled text at every end). With
+ * Korean/Japanese/Chinese IMEs that swap happens on nearly every keystroke,
+ * and the whole field flickers. */
 .pn-ref-input {
   color: transparent;
   caret-color: var(--foreground);
+  transition: none;
 }
 .pn-ref-input::selection {
   background: color-mix(in oklab, var(--primary) 30%, transparent);
@@ -1832,7 +1839,7 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
   font-size: calc(12.5px * var(--doc-text-scale, 1));
 }
 /* Fenced code (`pre code.pn-code`, 0.8125rem in the app's stylesheet). */
-[data-doc-text-size] [data-doc-text-root] :is([data-block-id], [data-diff-block-index]):not([data-diagram-block], [data-diagram-block] *, [data-popout], [data-popout] *) pre code.pn-code {
+[data-doc-text-size] [data-doc-text-root] :is([data-block-id], [data-diff-block-index], [data-doc-text]):not([data-diagram-block], [data-diagram-block] *, [data-popout], [data-popout] *) pre code.pn-code {
   font-size: calc(0.8125rem * var(--doc-text-scale, 1));
 }
 /* A question card's context (QuestionContext's own stylesheet). */
@@ -1864,6 +1871,25 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
 }
 [data-doc-text-size] [data-doc-text-root] [data-question-control]:not(input) {
   font-size: calc(11px * var(--doc-text-scale, 1));
+}
+
+/* Document font (Settings → Display → Document font, #1657; see
+   utils/documentFont). The app sets data-doc-font and --doc-font-family on the
+   document element only away from the default, so at the default none of this
+   applies. Same scope as Text size: the outermost blocks of a document
+   container, leaving out diagrams and the popouts. Headings, lists, tables and
+   question cards inherit it; code keeps its monospace font because Tailwind's
+   preflight sets it on code / pre and font-mono marks inline code, the raw
+   diff and the gutters. In the base layer so a block's own font utility
+   (font-mono on the raw diff) still wins. */
+@layer base {
+  [data-doc-font] [data-doc-text-root] :is([data-block-id], [data-diff-block-index], [data-doc-text]):not([data-diagram-block], [data-diagram-block] *, [data-popout], [data-popout] *):not(:is([data-block-id], [data-diff-block-index], [data-doc-text]) *) {
+    font-family: var(--doc-font-family);
+  }
+  /* The HTML embed's and SVG fence's captions and Show more are controls. */
+  [data-doc-font] [data-doc-text-root] :is(figcaption, [data-html-embed-more]) {
+    font-family: var(--font-sans);
+  }
 }
 
 /* Reduced motion: Base UI popups (dialogs, menus, popovers, tooltips) animate

@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -6,7 +6,9 @@ import { ClaudeIcon, CodexIcon, OpenCodeIcon, PiIcon } from '@plannotator/ui/com
 import type { ProjectFolder } from '../api';
 import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
-import { Icon } from '../icons';
+import { Icon, type IconName } from '../icons';
+import { pinnedState } from '../pins';
+import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
 import { shownProjects, type ProjectAction } from '../projectMenu';
@@ -18,7 +20,9 @@ import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { CheckFailingRow, UpdateButton } from './Updates';
 import type { UpdateCheckFailing } from '../api';
-import { openSearchAriaKeys, openSearchHint } from '../search/searchShortcut';
+import { inboxSearchShortcuts } from '../search/searchShortcut';
+import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 
 export interface SidebarProps {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board';
@@ -32,6 +36,11 @@ export interface SidebarProps {
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
   projects: readonly ProjectFolder[];
+  /**
+   * The window's name for each project (`windowProjectNames`, App.tsx), shared with the rows so a project reads
+   * the same in both, the pins' tooltip and name too. Absent, or a project not in it: the server's name.
+   */
+  projectNames?: ReadonlyMap<string, string>;
   /** Rows waiting on the person, per project id. */
   projectCounts: ReadonlyMap<string, number>;
   /**
@@ -83,6 +92,8 @@ export interface SidebarProps {
   onInbox: () => void;
   onProject: (projectId: string) => void;
   onSettings: () => void;
+  /** The keyboard button beside light and dark: the shortcut map (ShortcutMap.tsx). Absent, or on a phone: no button. */
+  onShortcuts?: () => void;
   onUpdate: () => void;
   onWhatsNew: (version: string) => void;
   /**
@@ -104,6 +115,12 @@ export interface SidebarProps {
   connectPrompt?: boolean;
   /** Opens the Feedback dialog (components/FeedbackDialog.tsx): the row above Settings. Absent: no row. */
   onFeedback?: () => void;
+  /**
+   * Pinned and Projects open and close as this browser last left them (the
+   * cookie in sidebarSections.ts; default true). The onboarding tour's
+   * sidebar passes false: both start open whatever the cookie says.
+   */
+  rememberSections?: boolean;
 }
 
 /**
@@ -138,16 +155,28 @@ export function Sidebar(props: SidebarProps) {
   const restartAgents = props.restartAgents ?? restartAgentsOf(undefined, props.restartClaudeCode);
   const firstRun = props.projects.length === 0;
   const { setOpenMobile } = useSidebar();
+  const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
   const phone = usePhone();
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
-  const shown = shownProjects(props.projects, held);
+  // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
+  const shown = useMemo(
+    () => shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })),
+    [props.projects, props.projectNames, held],
+  );
   const pins = props.pins ?? [];
+  // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
+  const sections = useSidebarSections(props.rememberSections !== false);
+  const pinnedClosed = sections.closed('pinned');
+  const projectsClosed = sections.closed('projects');
+  const pinOn = (row: InboxListRow) => props.page === 'inbox' && props.openThreadId === row.thread_id;
+  // A closed Pinned counts the pins waiting on the person (a question, Stopped, Holds), so a Stopped thread never hides.
+  const pinsWaiting = pinnedClosed ? pins.filter((row) => ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
-  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}`);
+  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}`);
   /**
    * After a pin's menu acted: Move up or down keeps focus on that row's ⋯ in its new place; Unpin moves it to
-   * the next pinned row's ⋯, else the first project, else Inbox (never the page).
+   * the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox (never the page).
    */
   const pinFocus = useRef<{ id: string; index: number; fallback: string[]; until: number } | null>(null);
   useLayoutEffect(() => {
@@ -172,11 +201,12 @@ export function Sidebar(props: SidebarProps) {
       if (own && (lost() || document.activeElement === own)) own.focus({ preventScroll: true });
       return;
     }
-    // Unpinned: the next pinned row's ⋯, else the first project, else Inbox.
+    // Unpinned: the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox.
     if (!lost() && !root.contains(document.activeElement)) return;
     const next =
       want.fallback.map((id) => root.querySelector<HTMLElement>(`[data-pin-more="${CSS.escape(id)}"]`)).find((el) => el !== null) ??
       root.querySelector<HTMLElement>('.ib-proj') ??
+      root.querySelector<HTMLElement>('[data-sidebar-section="pinned"]') ??
       inboxRef.current;
     next?.focus({ preventScroll: true });
   });
@@ -185,6 +215,9 @@ export function Sidebar(props: SidebarProps) {
   const spinOf = (scope: string | null) => (props.refreshSpin && props.refreshSpin.scope === scope ? props.refreshSpin.key : null);
   const refreshHintId = useId();
   const pinnedLabelId = useId();
+  const pinnedBodyId = useId();
+  const projectsLabelId = useId();
+  const projectsBodyId = useId();
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -194,12 +227,36 @@ export function Sidebar(props: SidebarProps) {
     const active = document.activeElement;
     if (!active || active === document.body || !active.isConnected) inboxRef.current?.focus({ preventScroll: true });
   });
+  /**
+   * The section that last held keyboard focus in this sidebar. A closed section's one row (the open pinned
+   * thread, the project the list shows) goes when it stops being current (Escape closed the thread, Back left
+   * the project): focus then moves to that section's header, never the page. Runs after Unpin's and Archive
+   * all's own fallbacks, which move focus first.
+   */
+  const asideRef = useRef<HTMLElement>(null);
+  const focusedIn = useRef<SidebarSection | null>(null);
+  useEffect(() => {
+    const track = (event: FocusEvent) => {
+      const target = event.target instanceof Element && asideRef.current?.contains(event.target) ? event.target : null;
+      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('.ib-projs') ? 'projects' : null;
+    };
+    document.addEventListener('focusin', track);
+    return () => document.removeEventListener('focusin', track);
+  }, []);
+  useLayoutEffect(() => {
+    const section = focusedIn.current;
+    if (!section || !sections.closed(section)) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    focusedIn.current = null;
+    asideRef.current?.querySelector<HTMLElement>(`[data-sidebar-section="${section}"]`)?.focus({ preventScroll: true });
+  });
   const pick = (go: () => void) => () => {
     setOpenMobile(false);
     go();
   };
   return (
-    <aside className="ib-side" aria-label="Inbox navigation">
+    <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation">
       <div className="ib-brand">
         <TaterMark />
         <b>Plannotator</b>
@@ -212,7 +269,7 @@ export function Sidebar(props: SidebarProps) {
           className="ib-sp-entry"
           data-open-search=""
           aria-haspopup="dialog"
-          aria-keyshortcuts={openSearchAriaKeys()}
+          aria-keyshortcuts={searchKeys}
           onClick={(event) => {
             const opener = event.currentTarget;
             // On a phone the sheet closes first; the search sheet takes the screen.
@@ -222,10 +279,8 @@ export function Sidebar(props: SidebarProps) {
         >
           <Icon name="search" />
           Search
-          {/* The Inbox's one shortcut (search/searchShortcut.ts); the button's aria-keyshortcuts names it for a screen reader. */}
-          <kbd className="ib-kbd ib-sp-hint" aria-hidden="true" data-search-hint="">
-            {openSearchHint()}
-          </kbd>
+          {/* ⌘K / Ctrl K (search/searchShortcut.ts); the button's aria-keyshortcuts names it, and `/`, for a screen reader. */}
+          <ShortcutHint scope={inboxSearchShortcuts} action="openSearch" className="ib-kbd ib-sp-hint" />
         </button>
         {props.onCompose && (
           <Tip content="New message">
@@ -299,15 +354,23 @@ export function Sidebar(props: SidebarProps) {
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
         {pins.length > 0 && (
           <>
-            <div className="ib-side-label" id={pinnedLabelId}>
-              Pinned
-            </div>
-            <section className="ib-pins" aria-labelledby={pinnedLabelId} data-pinned-section="">
-              {pins.map((row, index) => (
+            <SectionHeader
+              section="pinned"
+              id={pinnedLabelId}
+              controls={pinnedBodyId}
+              label="Pinned"
+              icon="pin"
+              open={!pinnedClosed}
+              count={pinsWaiting}
+              onToggle={() => sections.toggle('pinned')}
+            />
+            <section className="ib-pins" id={pinnedBodyId} aria-labelledby={pinnedLabelId} data-pinned-section="" data-closed={pinnedClosed ? '' : undefined}>
+              {pins.map((row, index) => (pinnedClosed && !pinOn(row) ? null : (
                 <PinnedRow
                   key={row.thread_id}
                   row={row}
-                  on={props.page === 'inbox' && props.openThreadId === row.thread_id}
+                  project={props.projectNames?.get(row.project.id)}
+                  on={pinOn(row)}
                   first={index === 0}
                   last={index === pins.length - 1}
                   phone={phone}
@@ -322,23 +385,36 @@ export function Sidebar(props: SidebarProps) {
                     props.onPinAction?.(row, action);
                   }}
                 />
-              ))}
+              )))}
             </section>
           </>
         )}
-        <div className="ib-side-label">Projects</div>
-        <div className="ib-projs">
+        <SectionHeader
+          section="projects"
+          id={projectsLabelId}
+          controls={projectsBodyId}
+          label="Projects"
+          icon={projectsClosed ? 'folder' : 'folderOpen'}
+          open={!projectsClosed}
+          count={0}
+          onToggle={() => sections.toggle('projects')}
+        />
+        <div className="ib-projs" id={projectsBodyId} role="group" aria-labelledby={projectsLabelId} data-closed={projectsClosed ? '' : undefined}>
+          {/* Closed: only the project the list shows, if any; never the empty notes. */}
           {firstRun ? (
-            <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
+            !projectsClosed && <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
           ) : shown.length === 0 ? (
-            <div className="ib-side-empty" data-projects-hidden="">
-              {/* Projects whose threads were deleted rather than archived are not in Settings → Archived. */}
-              {props.projects.some((project) => (project.archived ?? 0) > 0) ? 'Nothing open. Archived projects are in Settings → Archived.' : 'Nothing open.'}
-            </div>
+            !projectsClosed && (
+              <div className="ib-side-empty" data-projects-hidden="">
+                {/* Projects whose threads were deleted rather than archived are not in Settings → Archived. */}
+                {props.projects.some((project) => (project.archived ?? 0) > 0) ? 'Nothing open. Archived projects are in Settings → Archived.' : 'Nothing open.'}
+              </div>
+            )
           ) : (
             shown.map((project) => {
               const n = props.projectCounts.get(project.id) ?? 0;
               const on = props.page === 'inbox' && props.projectId === project.id;
+              if (projectsClosed && !on) return null;
               if (!props.onProjectAction) {
                 return (
                   <ProjectTip key={project.id} name={project.name} root={project.root}>
@@ -402,17 +478,62 @@ export function Sidebar(props: SidebarProps) {
         <div className="ib-setrow">
           <button
             type="button"
-            className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}`}
+            className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}${props.onShortcuts && !phone ? ' ib-has-keys' : ''}`}
             onClick={pick(props.onSettings)}
             aria-current={props.page === 'settings' ? 'page' : undefined}
           >
             <Icon name="settings" />
             Settings
           </button>
+          {props.onShortcuts && !phone && <KeysButton onPress={props.onShortcuts} />}
           <ThemeToggle />
         </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * A section's header (owner's pick, direction C "The section is the folder"):
+ * a quiet row with the section's icon (a pin; a folder, open while the
+ * section is), its name, and a chevron that turns down while open. A click,
+ * Enter or Space anywhere on it opens or closes the section; no shortcut.
+ * Closed, Pinned shows how many pins wait on the person (the project rows'
+ * count style); the chevron takes the count's place on hover, and on a phone
+ * both show. Not navigation: the phone sheet stays open.
+ */
+function SectionHeader(props: {
+  section: SidebarSection;
+  id: string;
+  controls: string;
+  label: string;
+  icon: IconName;
+  open: boolean;
+  count: number;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      id={props.id}
+      className="ib-side-sec"
+      aria-expanded={props.open}
+      aria-controls={props.controls}
+      data-sidebar-section={props.section}
+      onClick={props.onToggle}
+    >
+      <Icon name={props.icon} />
+      <span className="ib-side-sec-l">{props.label}</span>
+      <span className="ib-side-sec-tail">
+        {props.count > 0 && (
+          <span className="ib-n">
+            {formatCount(props.count)}
+            <span className="ib-sr"> waiting on you</span>
+          </span>
+        )}
+        <Icon name="chevR" className="ib-side-sec-chev" />
+      </span>
+    </button>
   );
 }
 
@@ -513,6 +634,18 @@ function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | nul
  * goes back to matching the system). A click here never opens Settings and
  * never closes the phone sheet or the peek.
  */
+/** The shortcut map's button, left of light and dark (approval "inbox-keyboard-shortcuts"). */
+function KeysButton({ onPress }: { onPress: () => void }) {
+  const keys = useShortcutAria({ scope: inboxAppShortcuts, action: 'openMap' });
+  return (
+    <Tip content={withShortcut('Keyboard shortcuts', { scope: inboxAppShortcuts, action: 'openMap' })}>
+      <button type="button" className="ib-keys-tg" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-keyshortcuts={keys} onClick={onPress} data-shortcut-map-button="">
+        <Icon name="keyboard" />
+      </button>
+    </Tip>
+  );
+}
+
 function ThemeToggle() {
   const { shown, flip } = useInboxTheme();
   const next = shown === 'dark' ? 'light' : 'dark';

@@ -1,11 +1,11 @@
 /**
  * Core HTTP helpers for Pi extension servers.
- * parseBody, parseJsonBody, json, handleApiNotFound, html, send, toWebRequest
+ * parseBody, parseJsonBody, json, handleApiNotFound, serveApp, send, toWebRequest
  */
 
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { prepareAppHtml } from "../generated/app-html.ts";
+import type { PackedApp } from "../generated/packed-app.ts";
 
 /** The raw request body as text (for endpoints where an empty body is meaningful, e.g. all-optional JSON). */
 export function readBody(req: IncomingMessage): Promise<string> {
@@ -56,19 +56,22 @@ export function handleApiNotFound(
 }
 
 /**
- * Serve the single-file app HTML, compressed when the session is remote and the
- * client accepts br/gzip (#1617); local sessions get the page unchanged. Negotiation and the per-process compression cache are shared with
- * the Bun servers via generated/app-html.ts; identity sends the string as-is.
+ * Serve the built app to every route no other handler claimed: a chunk or
+ * asset packed into it under `/assets/`, else the page itself (SPA). Remote
+ * sessions get the page and text chunks compressed when the client accepts
+ * br/gzip (#1617); local sessions get them unchanged. Mirrors the Bun servers'
+ * `packedAppResponse` (generated/packed-app.ts, shared with them).
  */
-export async function html(
+export async function serveApp(
+	app: PackedApp,
 	req: IncomingMessage,
-	res: import("node:http").ServerResponse,
-	content: string,
+	res: ServerResponse,
+	pathname: string,
 	compress: boolean,
 ): Promise<void> {
-	const prepared = await prepareAppHtml(content, req.headers["accept-encoding"], compress);
-	res.writeHead(200, prepared.headers);
-	res.end(prepared.body);
+	const answer = await app.answer(pathname, req.method, req.headers["accept-encoding"], compress);
+	res.writeHead(answer.status, answer.headers);
+	res.end(answer.body);
 }
 
 export function send(

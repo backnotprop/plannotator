@@ -72,6 +72,48 @@ describe("handleSaveNotes", () => {
     expect(json.results.obsidian).toHaveProperty("error");
   });
 
+  describe("Notion", () => {
+    const originalToken = process.env.NOTION_TOKEN;
+    const originalFetch = globalThis.fetch;
+    let notionCalls = 0;
+
+    beforeEach(() => {
+      notionCalls = 0;
+      process.env.NOTION_TOKEN = "secret-token";
+      globalThis.fetch = (async () => {
+        notionCalls++;
+        return Response.json({ url: "https://www.notion.so/saved-plan" });
+      }) as unknown as typeof fetch;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.NOTION_TOKEN;
+      else process.env.NOTION_TOKEN = originalToken;
+    });
+
+    const notionBody = { notion: { plan: "# Test Plan", parentPageId: "parent-page-id" } };
+
+    test("saves when the server offers Notion, without returning the token", async () => {
+      const response = await handleSaveNotes(saveNotesRequest(notionBody), { notion: true });
+
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.results.notion).toEqual({ success: true, url: "https://www.notion.so/saved-plan" });
+      expect(JSON.stringify(json)).not.toContain("secret-token");
+      expect(notionCalls).toBe(1);
+    });
+
+    test("never calls Notion when the session does not offer it (remote, --tailscale)", async () => {
+      const response = await handleSaveNotes(saveNotesRequest(notionBody));
+
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.results.notion).toBeUndefined();
+      expect(notionCalls).toBe(0);
+    });
+  });
+
   test("an unparseable body returns a 500 JSON error (not SPA HTML)", async () => {
     const badRequest = new Request("http://localhost/api/save-notes", {
       method: "POST",
@@ -254,6 +296,17 @@ describe("handleServerReady", () => {
       else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // A reverse-proxy origin has no port to forward; the advice would be wrong.
+  test("a public proxy URL gets the device line, not the forwarding advice", async () => {
+    const url = "https://plannotator.example.com";
+    const { stderr } = await captureStreams(async () => {
+      await handleServerReady(url, true, 19432, { skipBrowserOpen: true });
+    });
+    expectSingleReadyLine(stderr, url);
+    expect(stderr).toContain("  Open it on your device (the URL above).\n");
+    expect(stderr).not.toContain("forward port");
   });
 
   // PLANNOTATOR_BROWSER=none (or --browser none) opens nothing: the reason

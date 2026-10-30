@@ -33,7 +33,7 @@ describe("inboxProjectLabels", () => {
     expect(labels.get("e")).toBe(long);
     // What the slug made of them, for the record: what the window showed before.
     expect(sanitizeTag("請求サービス")).toBeNull();
-    expect(sanitizeTag(long)).toBe("northwind-industries-holdings-");
+    expect(sanitizeTag(long)).toBe("northwind-industries-holdings");
   });
 
   test("two folders with one name each name their parent folder", () => {

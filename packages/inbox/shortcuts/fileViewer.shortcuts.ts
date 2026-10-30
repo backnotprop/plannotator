@@ -4,8 +4,7 @@ import { defineShortcutScope, htmlAnnotateShortcuts } from '@plannotator/ui/shor
  * The keys of an open file (AttachmentPane): beside the thread and full
  * screen. Wired with `useShortcutScope`; when each one stands down is in
  * `guards.ts`, `stepKeyIntent` (stepping.ts) and the Escape ladder
- * (escapeLadder.ts). No bare letter: the Inbox takes no new letter keys until
- * the shared shortcut system lists them (owner's standing rule).
+ * (escapeLadder.ts).
  */
 export const inboxFileViewerShortcuts = defineShortcutScope({
   id: 'inbox-file-viewer',

@@ -61,6 +61,16 @@ describe.if(hasDom)('PlanCleanDiffView seams (DOM)', () => {
     expect(el.textContent).toContain('Section 5');
   });
 
+  test('unchanged text sits in a document block too, so Text size and Document font reach it', async () => {
+    const { blocks } = computePlanDiff(OLD, NEW);
+    const el = await render(<PlanCleanDiffView blocks={blocks} wordLevel={false} />);
+    const text = Array.from(el.querySelectorAll('p, h2'));
+    expect(text.some((node) => node.closest('.plan-diff-unchanged'))).toBe(true);
+    for (const node of text) {
+      expect(node.closest('[data-block-id], [data-diff-block-index], [data-doc-text]')).not.toBeNull();
+    }
+  });
+
   test('lineGutter labels each block with its source lines', async () => {
     const { blocks } = computePlanDiff('Intro.\n\nOld line.\n\nGone.\n', 'Intro.\n\nNew line.\n\nTail.\n\nMore.\n');
     const el = await render(<PlanCleanDiffView blocks={blocks} wordLevel={false} lineGutter />);

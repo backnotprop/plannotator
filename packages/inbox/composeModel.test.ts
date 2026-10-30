@@ -92,10 +92,10 @@ describe('To', () => {
     expect(filtered.map((r) => [r.target.session, r.started !== null])).toEqual([['ses-pi', true]]);
   });
 
-  test('the status line says who takes it, or why nothing can be sent', () => {
+  test('the status line is empty once an agent is chosen (busy or idle), else says why nothing can be sent', () => {
     const [oc] = composeTargets(PROJECTS);
-    expect(statusLine({ target: oc!, anyLive: true, ended: null, projectName: null })).toBe('OpenCode is working; it takes this when its turn ends.');
-    expect(statusLine({ target: composeTargets(PROJECTS)[1]!, anyLive: true, ended: null, projectName: null })).toBe('Claude Code takes it as its next turn.');
+    expect(statusLine({ target: oc!, anyLive: true, ended: null, projectName: null })).toBe('');
+    expect(statusLine({ target: composeTargets(PROJECTS)[1]!, anyLive: true, ended: null, projectName: null })).toBe('');
     expect(statusLine({ target: null, anyLive: true, ended: null, projectName: 'ledger' })).toBe('Choose an agent to send it.');
     expect(statusLine({ target: null, anyLive: false, ended: null, projectName: 'ledger', loading: true })).toBe('Looking for live agents…');
     expect(statusLine({ target: null, anyLive: false, ended: null, projectName: 'ledger' })).toBe('No agent is running in ledger.');

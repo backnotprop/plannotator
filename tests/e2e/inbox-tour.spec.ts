@@ -50,6 +50,8 @@ function startWorld(name: string): World {
   const env: Record<string, string> = {
     // The system's own tools only: never the agents installed on the machine running the spec.
     PATH: '/usr/bin:/bin',
+    // The test sandbox: no agent CLI is looked up at all, not even the ChatGPT or Codex app's own on macOS.
+    PLANNOTATOR_TEST_SANDBOX: root,
     HOME: home,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,

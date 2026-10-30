@@ -464,15 +464,15 @@ describe("the device door, on the binary", () => {
     writeFileSync(join(w.project, "shots", "after.png"), ONE_PIXEL_PNG);
     writeFileSync(join(w.project, "shots", "mock.png"), ONE_PIXEL_PNG);
     writeFileSync(join(w.project, "shots", "not-shown.png"), ONE_PIXEL_PNG);
-    // Outside the project, in a hidden folder, referenced by `../`.
-    mkdirSync(join(w.project, "..", ".private"), { recursive: true });
-    writeFileSync(join(w.project, "..", ".private", "outside.png"), ONE_PIXEL_PNG);
+    // Outside the project, in a hidden folder of the home folder (as ~/.ssh), referenced by `../`.
+    mkdirSync(join(w.home, ".private"), { recursive: true });
+    writeFileSync(join(w.home, ".private", "outside.png"), ONE_PIXEL_PNG);
     const body = [
       "The page after the fix:",
       "",
       "![after](shots/after.png)",
       "",
-      "![up](../.private/outside.png)",
+      "![up](../home/.private/outside.png)",
       "",
       ":::question",
       "Keep the new header?",
@@ -519,8 +519,8 @@ describe("the device door, on the binary", () => {
     expect(unshown.status).toBe(403);
     expect(((await unshown.json()) as Json).code).toBe("image_not_referenced");
     expect(unshown.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'; style-src 'unsafe-inline'");
-    // Referenced, but in a hidden folder outside the project: the window's refusal.
-    const hidden = await img("../.private/outside.png");
+    // Referenced, but in a hidden folder of the home folder: the window's refusal.
+    const hidden = await img("../home/.private/outside.png");
     expect(hidden.status).toBe(403);
     expect(((await hidden.json()) as Json).code).toBe("image_hidden");
     // A person's reply posted from the phone keeps the project boundary: an image of the

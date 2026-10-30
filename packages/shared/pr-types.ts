@@ -509,6 +509,26 @@ export function getDisplayRepo(m: PRRef | PRMetadata): string {
   return m.projectPath;
 }
 
+/**
+ * A link to lines of a file at the PR's head commit, for comments the
+ * platform cannot take inline (lines outside the PR's diff): GitHub
+ * `blob/<sha>/<path>#L10-L11`, GitLab `-/blob/<sha>/<path>#L10-11`, Bitbucket
+ * `src/<sha>/<path>#lines-10:11`.
+ */
+export function prBlobPermalink(m: PRMetadata, path: string, lineStart: number, lineEnd: number): string {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const sha = encodeURIComponent(m.headSha);
+  const host = m.host.replace(/\/+$/, "");
+  const single = lineStart === lineEnd;
+  if (m.platform === "github") {
+    return `https://${host}/${m.owner}/${m.repo}/blob/${sha}/${encodedPath}#L${lineStart}${single ? "" : `-L${lineEnd}`}`;
+  }
+  if (m.platform === "gitlab") {
+    return `https://${host}/${m.projectPath}/-/blob/${sha}/${encodedPath}#L${lineStart}${single ? "" : `-${lineEnd}`}`;
+  }
+  return `https://${host}/${m.workspace}/${m.repo}/src/${sha}/${encodedPath}#lines-${lineStart}${single ? "" : `:${lineEnd}`}`;
+}
+
 /** Reconstruct a PRRef from metadata */
 export function prRefFromMetadata(m: PRMetadata): PRRef {
   if (m.platform === "github") {
@@ -602,6 +622,13 @@ export type PRFileBytesResult =
   | { kind: "ok"; bytes: Uint8Array; etag?: string }
   | { kind: "missing" }
   | { kind: "too-large"; size: number };
+
+/** Every file path of one commit from a platform tree API (All files without a checkout). */
+export interface PRTreeResult {
+  paths: string[];
+  /** The platform stopped listing before the end (GitHub's ~100k-entry cap). */
+  truncated: boolean;
+}
 
 /** Decode a platform API base64 payload (GitHub wraps it at 60 columns). */
 export function decodeBase64Bytes(value: string): Uint8Array {

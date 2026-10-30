@@ -10,14 +10,14 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
 import { browserNoneReason, resolveBrowserIntent } from "@plannotator/shared/browser-intent";
-import { isUrlHostOverridden } from "./remote";
+import { isLocalOnlyAdvertisedUrl } from "@plannotator/shared/advertised-url";
 import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
 import { CLASSIC_FAVICON_SVG, FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 import { getServerConfig } from "./config";
-import { saveToObsidian, saveToBear, saveToOctarine } from "./integrations";
-import type { ObsidianConfig, BearConfig, OctarineConfig, IntegrationResult } from "./integrations";
+import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
+import type { ObsidianConfig, BearConfig, OctarineConfig, NotionConfig, IntegrationResult } from "./integrations";
 import { listReferenceSkills, readReferenceSkillContent } from "./review-skill-loader";
 import { crossOriginRefusalBody } from "@plannotator/shared/request-origin";
 import { isSameOriginRequest } from "./request-origin-guard";
@@ -340,12 +340,12 @@ export async function handleServerReady(
   // A remote/SSH session can't pop a browser on the user's machine, so say
   // what to do with the URL, independently of whether URL sharing is enabled.
   if (isRemote && announce) {
-    // With an advertised-URL host override the link is directly reachable
-    // (e.g. over a tailnet), so the port-forwarding advice would be wrong.
-    if (isUrlHostOverridden()) {
+    // A non-local advertised URL (a tailnet host, a reverse-proxy origin) is
+    // directly reachable, so the port-forwarding advice would be wrong.
+    if (!isLocalOnlyAdvertisedUrl(url)) {
       process.stderr.write(`  Open it on your device (the URL above).\n`);
-      // The URL makes a device hop; a QR skips the retyping (TTY only). Only
-      // for overridden hosts: a QR of a localhost URL scans to nowhere.
+      // The URL makes a device hop; a QR skips retyping it (TTY only). A QR
+      // of a localhost URL would scan to nowhere, so only render one here.
       writeUrlQr(url);
     } else {
       process.stderr.write(`  Open it on your local machine (forward port ${port} if needed).\n`);
@@ -381,10 +381,12 @@ export interface HandleSaveNotesOptions {
    * is written or opened; a body without one is accepted.
    */
   serverSession?: string;
+  /** Notion saves run only when this session offers Notion (packages/shared/notion.ts isNotionAvailable). */
+  notion?: boolean;
 }
 
 /**
- * Save to external note apps (Obsidian, Bear, Octarine). Used by plan + annotate servers.
+ * Save to external note apps (Obsidian, Bear, Octarine, Notion). Used by plan + annotate servers.
  *
  * Writes a file into the vault the body names and opens `bear://` /
  * `octarine://` URLs, so it refuses another site's page (the servers also do
@@ -396,13 +398,14 @@ export async function handleSaveNotes(req: Request, options: HandleSaveNotesOpti
     return Response.json(crossOriginRefusalBody(), { status: 403 });
   }
 
-  const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult } = {};
+  const results: { obsidian?: IntegrationResult; bear?: IntegrationResult; octarine?: IntegrationResult; notion?: IntegrationResult } = {};
 
   try {
     const body = (await req.json()) as {
       obsidian?: ObsidianConfig;
       bear?: BearConfig;
       octarine?: OctarineConfig;
+      notion?: NotionConfig;
     };
 
     if (options.serverSession !== undefined && checkServerSession(body, options.serverSession) === "mismatch") {
@@ -418,6 +421,9 @@ export async function handleSaveNotes(req: Request, options: HandleSaveNotesOpti
     }
     if (body.octarine?.plan && body.octarine?.workspace) {
       promises.push(saveToOctarine(body.octarine).then(r => { results.octarine = r; }));
+    }
+    if (options.notion && body.notion?.plan && body.notion?.parentPageId) {
+      promises.push(saveToNotion(body.notion).then(r => { results.notion = r; }));
     }
     await Promise.allSettled(promises);
 

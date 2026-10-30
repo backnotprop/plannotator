@@ -9,7 +9,7 @@ import { storage } from './storage';
 
 const STORAGE_KEY = 'plannotator-default-notes-app';
 
-export type DefaultNotesApp = 'obsidian' | 'bear' | 'octarine' | 'download' | 'ask';
+export type DefaultNotesApp = 'obsidian' | 'bear' | 'octarine' | 'notion' | 'download' | 'ask';
 
 export function getDefaultNotesApp(): DefaultNotesApp {
   return (storage.getItem(STORAGE_KEY) as DefaultNotesApp) || 'ask';

@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { RefCli, RefCommandResult, RefRunner } from "./ref-cards";
+import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -62,7 +63,7 @@ function merged(number: number, title: string) {
   };
 }
 
-async function world() {
+async function world(options: { readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-board-routes-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -74,7 +75,7 @@ async function world() {
     calls.push({ cli, args });
     return ok(merged(12, "vite 8 for the review app"));
   };
-  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: run, phones: false, board: true });
+  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: run, phones: false, board: true, ...options });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
@@ -105,6 +106,22 @@ describe("the Board page's routes", () => {
     const answer = (await (await fetch(`${base}/api/inbox/cards/${card.id}`)).json()) as { card: { id: string }; history: { kind: string }[] };
     expect(answer.card.id).toBe(card.id);
     expect(answer.history.map((entry) => entry.kind)).toEqual(["moved", "created"]);
+  });
+
+  test("an opened card carries its own project's repo, so its text links #123 there", async () => {
+    const { server, base, project } = await world({
+      readProjectRepo: async (root) => (root.endsWith("/tui") ? { display: "backnotprop/plannotator-tui", host: "github.com" } : { display: "acme/web", host: "github.com" }),
+    });
+    const tui = server.store.ensureProject({ name: "tui", root: join(project.root, "..", "tui") });
+    const { card } = server.store.createCard({ project_id: tui.id, by: { kind: "person" }, title: "Hover cards" });
+    let repo: unknown;
+    // The repo resolves off the request path: the first read may still answer null.
+    for (let i = 0; i < 100; i++) {
+      repo = ((await (await fetch(`${base}/api/inbox/cards/${card.id}`)).json()) as { repo?: unknown }).repo;
+      if (repo) break;
+      await Bun.sleep(20);
+    }
+    expect(repo).toEqual({ display: "backnotprop/plannotator-tui", host: "github.com" });
   });
 
   test("the first-visit dialog: the first page to ask gets it, once per machine, kept in config.json", async () => {

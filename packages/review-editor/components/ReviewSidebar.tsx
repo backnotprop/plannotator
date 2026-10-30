@@ -24,6 +24,7 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { useConfigValue } from '@plannotator/ui/config';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
+import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
 export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
 
@@ -40,6 +41,8 @@ interface ReviewSidebarProps {
   /** Sidebar row click → select AND scroll the diff to the comment. */
   onNavigateToAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onExplainAnnotation?: (id: string) => void;
+  agentFindingSources?: ReadonlySet<string>;
   /** Edit an annotation's text from its sidebar card. Offered only on
    *  outdated comments (#1590), which are not drawn on the diff and so have
    *  no inline editor. */
@@ -257,6 +260,8 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onSelectAnnotation,
   onNavigateToAnnotation,
   onDeleteAnnotation,
+  onExplainAnnotation,
+  agentFindingSources,
   onEditAnnotationText,
   onAddGeneralComment,
   feedbackMarkdown,
@@ -448,6 +453,15 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                     Outdated
                   </span>
                 )}
+                {annotation.outsideDiff && (
+                  <span
+                    data-annotation-outside-diff="true"
+                    className="ml-1.5 font-sans text-[9px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-warning/15 text-warning"
+                    title="To the agent: sent with the file, lines and code. On a PR: goes in the review's main comment with the code quoted and a link, since the platform cannot post a comment outside the diff."
+                  >
+                    not in the diff
+                  </span>
+                )}
               </span>
             )
           }
@@ -500,6 +514,10 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             onEdit={annotation.outdated && onEditAnnotationText
               ? () => setEditingOutdated({ id: annotation.id, draft: annotation.text ?? '' })
               : undefined}
+            onExplain={isAgentGeneratedFinding(annotation, agentFindingSources) && onExplainAnnotation
+              ? () => onExplainAnnotation(annotation.id)
+              : undefined}
+            explainDisabled={isAICreatingSession || isAIStreaming}
             copyText={annotation.text ? commentCopyText(annotation, scope) : undefined}
             onDelete={() => onDeleteAnnotation(annotation.id)}
             selected={isSelected}

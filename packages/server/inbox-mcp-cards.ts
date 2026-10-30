@@ -27,6 +27,7 @@ import {
   type InboxCardWire,
   type InboxProject,
 } from "@plannotator/core/inbox-types";
+import { INBOX_REF_LINK_POINTER } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { shortTime } from "./inbox-mcp-read";
@@ -238,8 +239,8 @@ export function registerInboxCardTool(server: McpServer, context: InboxMcpContex
           card_id: z.string().optional().describe("The card (crd_…); not for create or list."),
           title: z.string().optional().describe("2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in say. Create with thread_id: pass one, as subjects run long."),
           column: z.enum([...INBOX_CARD_COLUMNS, "asked"]).optional().describe(CARD_COLUMN_DESCRIPTION),
-          say: z.string().optional().describe("Your last word: where the work is, one line."),
-          you: z.string().optional().describe("What the person owes, one line."),
+          say: z.string().optional().describe(`Your last word: where the work is, one line. ${INBOX_REF_LINK_POINTER}`),
+          you: z.string().optional().describe(`What the person owes, one line. ${INBOX_REF_LINK_POINTER}`),
           pr: z.string().optional().describe("owner/repo#123 or a PR URL."),
           ref: z.string().optional().describe("An issue or PR: owner/repo#123 or its URL."),
           reason: z.string().optional().describe("Why it is dropped."),

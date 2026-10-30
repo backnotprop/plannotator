@@ -276,7 +276,7 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2: the reload line, on the r
     expect(first.loaded).toBe("0.28.98");
     expect(first.installed).toBe(INBOX_VERSION);
     expect(first.fix).toBe("update_extension");
-    expect(first.update_command).toBe(`opencode2 plugin list && opencode2 plugin update ${NAME}@latest`);
+    expect(first.update_command).toBe(`opencode2 models && opencode2 plugin update ${NAME}@latest`);
     w.proof(`1. plugin 0.28.98 loaded and on disk, Inbox ${INBOX_VERSION}: outdated ${JSON.stringify(first)}`);
     await shootAgents(server.port, "real-opencode2-plugin-update", { sidebar: false });
 

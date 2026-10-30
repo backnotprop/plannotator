@@ -99,7 +99,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const home = join(root, 'home');
   mkdirSync(home);
   // PATH: this world's own bin and the system's tools, never the agents installed on the machine running the
-  // spec (the first-run screen speaks about the agents it finds: none here).
+  // spec (the first-run screen speaks about the agents it finds: none here). No test sandbox: Settings → Agents
+  // reads the Claude Code setup this spec writes under HOME, which the sandbox's agent home would hide.
   const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(dataDir);
@@ -337,7 +338,12 @@ test('a project folder filters the list and the sections still apply', async () 
 
   await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'docs-site' })).toBeVisible();
-  await expect(page.locator('.ib-path')).toHaveText(new RegExp(`docs-site$`));
+  // The header shows the name alone; the folder is the second line of the title's tooltip.
+  await expect(page.locator('.ib-lhead .ib-path')).toHaveCount(0);
+  await expect(page.locator('.ib-lhead')).not.toContainText('/');
+  await page.getByRole('heading', { level: 1, name: 'docs-site' }).hover();
+  await expect(page.locator('[data-project-tip] .ib-tip-path')).toHaveText(/docs-site$/);
+  await page.mouse.move(5, 5);
   await expect(page.locator('.ib-lbody [data-thread-id]')).toHaveCount(1);
   await expect(page.locator('.ib-band')).toHaveText([/^Holding up work\s*1$/]);
 
@@ -345,13 +351,17 @@ test('a project folder filters the list and the sections still apply', async () 
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
   // One project: no project column at all, and no empty block where it was. The
-  // agent mark starts where the project label did; a badge, when a row has one,
-  // starts there instead and the mark follows it.
+  // subject cell starts where the project label did, badge or not. The agents'
+  // marks, the badge and the count have their own columns before the time
+  // (approval "inbox-row-byline", the one-line row), each on one right edge for every row.
   await expect(page.locator('.ib-row .ib-p')).toHaveCount(0);
-  expect(await leftOf(page, `${named} .ib-mk`)).toBe(labelLeft);
-  expect(await leftOf(page, `${stoppedRow} .ib-badge`)).toBe(labelLeft);
-  const badgeBox = (await page.locator(`${stoppedRow} .ib-badge`).boundingBox())!;
-  expect(await leftOf(page, `${stoppedRow} .ib-mk`)).toBeLessThan(Math.round(badgeBox.x + badgeBox.width) + 16);
+  expect(await leftOf(page, `${named} .ib-subj`)).toBe(labelLeft);
+  expect(await leftOf(page, `${stoppedRow} .ib-subj`)).toBe(labelLeft);
+  await expect(page.locator('.ib-row .ib-subj :is(.ib-mk, .ib-badge)')).toHaveCount(0);
+  const rightOf = async (sel: string) => Math.round((await page.locator(sel).boundingBox())!.x + (await page.locator(sel).boundingBox())!.width);
+  for (const cell of ['.ib-cw', '.ib-mcol', '.ib-bcol', '.ib-cq']) expect(await rightOf(`${named} ${cell}`)).toBe(await rightOf(`${stoppedRow} ${cell}`));
+  expect(await rightOf(`${stoppedRow} .ib-bcol .ib-badge`)).toBe(await rightOf(`${stoppedRow} .ib-bcol`));
+  expect(await rightOf(`${named} .ib-cq`)).toBeLessThanOrEqual(await leftOf(page, `${named} .ib-t`));
   await shot('1.2-project-filter');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
   await expect(page.locator('.ib-lbody [data-thread-id]')).toHaveCount(3);
@@ -397,16 +407,18 @@ test('a pick is saved at once and the agent reads it through read_thread', async
   await expect(page.locator('.ib-pfoot [data-draft-foot]')).toHaveText('Draft, 2 picks');
   await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Send' })).toBeVisible();
   await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' })).toBeVisible();
-  // Answered, not sent: it waits only for Send. The row says "Draft · 2 picks".
+  // Answered, not sent: it waits only for Send. The row says "Draft" (approval "inbox-row-byline", option A), and
+  // "Draft · 2 picks" in its name.
   const row = page.locator(`.ib-nrow[data-thread-id="${world.threads.stopped}"]`);
   await expect(row).toHaveAttribute('data-section', 'new');
-  await expect(row.locator('[data-draft-label]')).toHaveText('Draft · 2 picks');
+  await expect(row.locator('[data-draft-label]')).toHaveText('Draft');
+  await expect(row).toHaveAccessibleName(/Draft · 2 picks/);
   await shot('3.1-answered-not-sent');
 
-  // "Draft · 2 picks" is wider than the wide row's 96px count column, and
-  // its text must end before the time's begins: in every project and in one,
+  // The row's draft words (a wide row's words column) must end before the time's
+  // begins: in every project and in one,
   // at full and narrower widths (every project below 900px of list draws the
-  // two-line row, which must hold the same). Measured on the text itself (a
+  // two-line row, whose count ends line 2 instead, inside the line). Measured on the text itself (a
   // Range), since overflowing text spills past its cell's box.
   const wide = page.locator(`.ib-lbody [data-thread-id="${world.threads.stopped}"]`);
   const textGap = () =>
@@ -416,9 +428,12 @@ test('a pick is saved at once and the agent reads it through read_thread', async
         range.selectNodeContents(cell);
         return range.getBoundingClientRect();
       };
-      const count = rect(el.querySelector('.ib-c')!);
+      const count = rect(el.querySelector('.ib-c .ib-cs')!);
       const time = rect(el.querySelector('.ib-t')!);
-      return { shape: el.className.split(' ')[0], text: el.querySelector('.ib-c')!.textContent, gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4 };
+      // A two-line row's count ends line 2 (approval "inbox-row-byline"), under the time: it must end inside that line.
+      const l2 = el.querySelector('.ib-l2');
+      const lineEnd = l2 ? Math.round(l2.getBoundingClientRect().right - count.right) : null;
+      return { shape: el.className.split(' ')[0], list: document.querySelector('.ib-lbody')!.clientWidth, text: el.querySelector('.ib-c .ib-cs')!.textContent, full: el.querySelector('.ib-c')!.getAttribute('data-count-words'), gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4, lineEnd, last: l2 ? l2.lastElementChild === el.querySelector('.ib-c') : null };
     });
   for (const [folder, narrowShape] of [[/^Inbox/, 'ib-nrow'], [/^billing-svc(?: \d+)?$/, 'ib-row']] as const) {
     await side(page).getByRole('button', { name: folder }).click();
@@ -439,9 +454,18 @@ test('a pick is saved at once and the agent reads it through read_thread', async
         }, where)
         .toBe(true);
       const measured = await textGap();
-      expect(measured.text).toBe('Draft · 2 picks');
-      expect(measured.sameLine).toBe(true);
-      expect(measured.gap, `count runs into the time ${where}`).toBeGreaterThanOrEqual(8);
+      // A wide row in a list of 1150px or more draws the full words (the owner, 2026-10-29); a two-line row, and one
+      // project's wide row in a narrower list, "Draft" (option A).
+      expect(measured.text).toBe(measured.shape === 'ib-row' && measured.list >= 1150 ? 'Draft · 2 picks' : 'Draft');
+      expect(measured.full).toBe('Draft · 2 picks');
+      if (measured.shape === 'ib-row') {
+        expect(measured.sameLine).toBe(true);
+        expect(measured.gap, `count runs into the time ${where}`).toBeGreaterThanOrEqual(8);
+      } else {
+        expect(measured.sameLine, `the count sits on line 2 ${where}`).toBe(false);
+        expect(measured.last, `the count ends line 2 ${where}`).toBe(true);
+        expect(measured.lineEnd!, `the count runs past line 2 ${where}`).toBeGreaterThanOrEqual(0);
+      }
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 });

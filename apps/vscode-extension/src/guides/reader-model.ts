@@ -49,8 +49,9 @@ export class ReaderModel {
     this.unplaced = guide.unplacedFiles ?? [];
     this.overview = guide.overview ?? null;
     this.reviewed = this.chapters.map((_, i) => loaded.envelope.reviewed[i] === true);
-    this.fileTicks = new Set(loaded.sidecar.fileTicks);
     for (const f of changedFilesFromPatch(loaded.rawPatch ?? "")) this.files.set(f.path, f);
+    // Ticks are for the guide's own files: anything else in the sidecar is dropped.
+    this.fileTicks = new Set(loaded.sidecar.fileTicks.filter((p) => this.isGuideFile(p)));
   }
 
   get id(): string {
@@ -98,7 +99,13 @@ export class ReaderModel {
    * ticked (SPEC 3.4) and unticks when one is unticked. Returns the chapter
    * ticks that changed.
    */
+  /** A file the guide shows (a changed file placed in a chapter or left unplaced). */
+  isGuideFile(path: string): boolean {
+    return this.files.has(path);
+  }
+
   setFileReviewed(path: string, reviewed: boolean): number[] {
+    if (!this.isGuideFile(path)) return [];
     if (reviewed) this.fileTicks.add(path);
     else this.fileTicks.delete(path);
     const chapter = this.chapterOf(path);

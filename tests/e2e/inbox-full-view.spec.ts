@@ -623,7 +623,11 @@ test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px 
       const viewport = page.viewportSize()!;
       const barBox = (await bar(page).boundingBox())!;
       expect(barBox.x + barBox.width).toBeGreaterThan(viewport.width - 40);
-      expect(barBox.y + barBox.height).toBeGreaterThan(viewport.height - 80);
+      // At the foot, just above full screen's composer (approval "inbox-fullscreen-composer"), which is the page's foot row.
+      const composerBox = (await pane(page).locator('[data-fcomp]').boundingBox())!;
+      expect(composerBox.y + composerBox.height).toBeGreaterThan(viewport.height - 40);
+      expect(barBox.y + barBox.height).toBeLessThanOrEqual(composerBox.y + 1);
+      expect(barBox.y + barBox.height).toBeGreaterThan(composerBox.y - 40);
       for (const control of ['[data-full-view-exit="back"]', '[data-full-view-pen]', '[data-full-view-comments]', '[data-full-view-position]', '[data-full-view-more]', '[data-full-view-hide]']) {
         const b = (await bar(page).locator(control).boundingBox())!;
         expect(b.width).toBeGreaterThanOrEqual(44);

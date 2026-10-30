@@ -141,7 +141,7 @@ Annotates the agent's most recent message. See the [annotate last docs](/docs/co
 
 ### `/plannotator-inbox`
 
-Opens your [Plannotator Inbox](/docs/reference/inbox/) in the browser, starting it if needed, and shows its address. Use it when you closed the Inbox tab.
+Opens your [Plannotator Inbox](/docs/reference/inbox/) in the browser, starting it if needed, and shows its address. Use it when you closed the Inbox tab. It also briefs Claude on using the Inbox for the rest of the session, without starting new work; with the plugin you see only the address and Claude gets the briefing unseen.
 
 Optional extra skills (compound planning, setup-goal, visual explainer) are not installed by default. Add them with:
 

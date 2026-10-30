@@ -21,8 +21,9 @@ export function sanitizeTag(name: string): string | null {
     .replace(/[\s_]+/g, "-")      // spaces/underscores -> hyphens
     .replace(/[^a-z0-9-]/g, "")   // remove special chars
     .replace(/-+/g, "-")          // collapse multiple hyphens
-    .replace(/^-|-$/g, "")        // trim leading/trailing hyphens
-    .slice(0, 30);                // max 30 chars
+    .replace(/^-/, "")            // trim leading hyphen
+    .slice(0, 30)                 // max 30 chars
+    .replace(/-$/, "");           // trim trailing hyphen, after the cut so the result is idempotent
 
   return sanitized.length >= 2 ? sanitized : null;
 }

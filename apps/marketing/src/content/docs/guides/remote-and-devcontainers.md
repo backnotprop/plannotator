@@ -49,6 +49,44 @@ Plannotator then advertises `http://my-machine.tailnet.ts.net:<port>` (the port 
 
 Note that the session is served over plain `http`, so some in-app features that require a secure context (such as creating short share links from the UI) are unavailable from other devices unless you put the session behind HTTPS (e.g. `tailscale serve`). The core review, annotate, and approve flows work over plain `http`.
 
+`plannotator review --tailscale` (also `annotate` and `last`) does that for you: it publishes the session over your tailnet with `tailscale serve`, over HTTPS and never publicly. It needs Tailscale Serve and HTTPS certificates turned on for your tailnet, a setting in Tailscale's admin console. If it is off, Plannotator says so and prints Tailscale's link to turn it on: a one-time page where you keep "HTTPS certificates" ticked and press **Enable HTTPS** (Funnel is not needed). The same command without `--tailscale` still works on this computer.
+
+## HTTPS reverse proxies
+
+When a reverse proxy exposes a fixed HTTPS origin and forwards it to Plannotator's local port, advertise the public origin separately:
+
+```bash
+export PLANNOTATOR_REMOTE=1
+export PLANNOTATOR_PORT=19432
+export PLANNOTATOR_PUBLIC_URL=https://plannotator.example.com
+```
+
+Plannotator then prints and opens `https://plannotator.example.com` while continuing to listen on local port `19432`. `PLANNOTATOR_PUBLIC_URL` changes only the address shown; the reverse proxy must route that origin to the configured local port. The server also answers on the public hostname, so a proxy that forwards the browser's `Host` header works without `PLANNOTATOR_ALLOWED_HOSTS`. A plain `http://` public URL behind a proxy that rewrites `Host` also needs its hostname in `PLANNOTATOR_ALLOWED_HOSTS`, or saving and approving are refused.
+
+The public URL is used only in remote mode, even when the tunnel runs on the same machine (cloudflared, code-server). `PLANNOTATOR_REMOTE=1` makes Plannotator listen on all network interfaces, not only localhost, and turns "Ask this session" off. Live app annotation is unavailable in remote mode, so it does not work through the public URL; use `--static`.
+
+A port range can keep additional sessions available through a directly reachable host while the reverse proxy continues to expose the first port:
+
+```bash
+export PLANNOTATOR_PORT=19432-19463
+export PLANNOTATOR_PUBLIC_URL=https://plannotator.example.com
+export PLANNOTATOR_URL_HOST=my-machine.tailnet.ts.net
+```
+
+The session on `19432` advertises the public origin. Sessions on later ports advertise `http://my-machine.tailnet.ts.net:<port>`. The public origin still exposes only the first session; concurrent public sessions require a proxy that routes each session separately.
+
+Only HTTP(S) origins are accepted. Paths are unsupported because Plannotator serves root-relative application and API routes. Protect internet-facing deployments with authentication at the reverse proxy; a Plannotator session exposes reviewed content and can submit approval or feedback.
+
+You can persist the same setting in `~/.plannotator/config.json`:
+
+```json
+{
+  "publicUrl": "https://plannotator.example.com"
+}
+```
+
+The `PLANNOTATOR_PUBLIC_URL` environment variable takes precedence.
+
 ## VS Code Remote / devcontainers
 
 VS Code sets the `BROWSER` environment variable in devcontainers to a helper script that opens URLs on your local machine. Plannotator respects this — in most cases, the browser opens automatically with no extra configuration.
@@ -105,7 +143,7 @@ docker run -e PLANNOTATOR_REMOTE=1 -e PLANNOTATOR_PORT=9999 -p 9999:9999 your-im
 
 ## Proxies and forwarded hostnames
 
-Plannotator answers only the hostnames it expects in the `Host` header: `localhost` and other loopback names everywhere, plus, in remote mode, IP addresses, this machine's hostname (and its `.local` name) and `PLANNOTATOR_URL_HOST`. Port forwarding (SSH, VS Code, `docker -p`) arrives as `localhost` or an IP address and needs nothing; so do GitHub Codespaces and VS Code dev tunnels, whose forwarders present `localhost` to the server. A code-server or Coder port proxy is recognized from the `VSCODE_PROXY_URI` it sets. If another proxy or tunnel forwards its own hostname (a reverse proxy, a Docker service name), Plannotator answers `403` and names the setting to change:
+Plannotator answers only the hostnames it expects in the `Host` header: `localhost` and other loopback names everywhere, plus, in remote mode, IP addresses, this machine's hostname (and its `.local` name), `PLANNOTATOR_URL_HOST` and the host of `PLANNOTATOR_PUBLIC_URL`. Port forwarding (SSH, VS Code, `docker -p`) arrives as `localhost` or an IP address and needs nothing; so do GitHub Codespaces and VS Code dev tunnels, whose forwarders present `localhost` to the server. A code-server or Coder port proxy is recognized from the `VSCODE_PROXY_URI` it sets. If another proxy or tunnel forwards its own hostname (a reverse proxy, a Docker service name), Plannotator answers `403` and names the setting to change:
 
 ```bash
 export PLANNOTATOR_ALLOWED_HOSTS=my-proxy.example.com

@@ -1,6 +1,6 @@
 import React from 'react';
 import type { CommitListEntry } from '@plannotator/shared/types';
-import { PanelViewToggle, type ReviewPanelView } from './PanelViewToggle';
+import { ReviewPanelHeader, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 import { Avatar } from './Avatar';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { formatRelativeTime } from '@plannotator/ui/utils/aiChatFormat';
@@ -30,10 +30,8 @@ interface CommitsPanelProps {
   onSelectCommit: (sha: string) => void;
   onShowMore: () => void;
   onRetry: () => void;
-  /** View switcher, same header slot as the other panels. */
-  onSelectPanelView: (view: ReviewPanelView) => void;
-  /** Whether the Git status segment is offered (since-base capable repos). */
-  showSectionsOption: boolean;
+  /** The top of the panel, the same header every view draws. */
+  header: ReviewPanelHeaderModel;
   /** Badge on the `isHead` row: `HEAD` for git, `@` (the working copy) for jj. */
   headLabel?: string;
 }
@@ -106,8 +104,7 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
   onSelectCommit,
   onShowMore,
   onRetry,
-  onSelectPanelView,
-  showSectionsOption,
+  header,
   headLabel = 'HEAD',
 }) => {
   // isPastBase is a suffix of the linear walk (reachability from the base is
@@ -120,17 +117,7 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
       className="border-r border-border/50 bg-card/30 flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: width ?? 256 }}
     >
-      {/* Header — the view toggle owns the entire top row (full width), same
-          layout as the other panel views. The loaded-commit count moves to its
-          own sub-row since nothing else shares the toggle row. */}
-      <div className="px-3 flex items-center border-b border-border/50 flex-shrink-0" style={{ height: 'var(--panel-header-h)' }}>
-        <PanelViewToggle
-          view="commits"
-          onSelect={onSelectPanelView}
-          showSections={showSectionsOption}
-          showCommits
-        />
-      </div>
+      <ReviewPanelHeader model={header} width={width ?? 256} />
       {commits.length > 0 && (
         <div className="px-3 py-1 border-b border-border/30 flex items-center justify-end flex-shrink-0">
           <span className="text-xs text-muted-foreground tabular-nums">

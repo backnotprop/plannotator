@@ -9,7 +9,7 @@
  * name that stops saying what the pill is for, or the agents' marks being
  * read aloud or dropped while it says "Copied".
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, jest, test } from 'bun:test';
 import { act } from 'react';

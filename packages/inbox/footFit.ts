@@ -108,6 +108,8 @@ export function fitFootRow(buttons: HTMLElement, candidates: readonly FootFit[],
 // other." With the draft status at the row's end (approval
 // "thread-foot-status-right"), the row shortens one step at a time before the
 // status takes its own line above the buttons:
+//   0. keys   the buttons' keycaps (R): drawn for the eye only, so they go before any words
+//             (approval "inbox-keyboard-shortcuts"; the key stays in aria-keyshortcuts and the map)
 //   1. skip   the skip chip: "1 question stays open · Skip it" → "1 open · Skip"
 //   2. edit   "Edit draft" → "Edit"
 //   3. oq     "2 open questions ⌄" → the icon, "2" and the chevron
@@ -120,10 +122,10 @@ export function fitFootRow(buttons: HTMLElement, candidates: readonly FootFit[],
 // visually hidden text (inbox.css), so names and descriptions are whole.
 
 /** One step of shortening; a level is the first N of them. */
-export type FootRowStep = 'skip' | 'edit' | 'oq' | 'draft' | 'tight' | 'icon';
+export type FootRowStep = 'keys' | 'skip' | 'edit' | 'oq' | 'draft' | 'tight' | 'icon';
 
 /** The steps every window takes. */
-export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['skip', 'edit', 'oq', 'draft', 'tight'];
+export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['keys', 'skip', 'edit', 'oq', 'draft', 'tight'];
 
 /** A phone's steps: the same, then Edit draft as its pencil. */
 export const PHONE_FOOT_ROW_STEPS: readonly FootRowStep[] = [...FOOT_ROW_STEPS, 'icon'];

@@ -7,7 +7,7 @@
  * The failure this catches: a reply sent to a session that is gone without
  * the person knowing, or sent somewhere they did not pick.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

@@ -189,6 +189,16 @@ const CodeInlineAnnotation: React.FC<{
           {lineLabel(annotation.lineStart, annotation.lineEnd)}
         </span>
         {annotation.author && <span className="truncate normal-case">by <bdi>{annotation.author}</bdi></span>}
+        {annotation.outsideDiff && (
+          <span
+            className="rounded px-1.5 py-0.5 normal-case font-medium"
+            style={{ background: 'color-mix(in oklab, var(--warning) 18%, transparent)', color: 'var(--warning)' }}
+            data-code-annotation-outside-diff=""
+            title="A comment on lines outside the diff"
+          >
+            not in the diff
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
           {onEdit && !isEditing && (
             <button
@@ -313,6 +323,26 @@ export interface CodeFileViewProps {
   lang?: string;
   /** Long lines: `'scroll'` sideways (the default) or `'wrap'` onto the next row, for a minified file. */
   overflow?: 'scroll' | 'wrap';
+  /** CSS added inside the file's shadow root after the theme (a host's line
+   *  marks, e.g. code review's change bars on `[data-column-number="12"]`). */
+  extraCss?: string;
+  /** Scroll this line to the middle and mark it, once per `token` (a jump to
+   *  a definition, a reference or a line). */
+  revealLine?: { line: number; token: number };
+  /** The token under the pointer (`enter` / `leave`) and the last one clicked
+   *  (`click`): a host's "go to definition" looks there. Turning it on wraps
+   *  the file's tokens (Pierre's token transformer). */
+  onTokenTarget?: (kind: 'enter' | 'leave' | 'click', target: CodeFileTokenTarget) => void;
+  /** Cmd/Ctrl-click (or Alt-click) on a token: a host's references. */
+  onTokenNavigate?: (target: CodeFileTokenTarget) => void;
+}
+
+/** A token of a file drawn by `CodeFileView` (Pierre's token event, file mode). */
+export interface CodeFileTokenTarget {
+  tokenText: string;
+  tokenElement: HTMLElement;
+  lineNumber: number;
+  lineCharStart: number;
 }
 
 /**
@@ -338,6 +368,10 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   className = 'flex-1 min-h-0',
   lang,
   overflow = 'scroll',
+  extraCss,
+  revealLine,
+  onTokenTarget,
+  onTokenNavigate,
 }) => {
   const { resolvedMode } = useTheme();
   const mode = resolvedMode ?? 'dark';
@@ -382,6 +416,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
       }));
   }, [annotations]);
 
+  // The line a host jumped to stays marked until a comment or a selection
+  // takes the mark (or the next jump moves it).
+  const [revealedLine, setRevealedLine] = useState<number | null>(null);
   const selectedLines = useMemo((): PierreSelectedLineRange | null => {
     if (pendingComment) {
       return { start: pendingComment.range.start, end: pendingComment.range.end };
@@ -389,11 +426,49 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     if (selectedCodeAnnotation) {
       return { start: selectedCodeAnnotation.lineStart, end: selectedCodeAnnotation.lineEnd };
     }
+    // A jump (Go to Definition, a reference) marks its line until a comment
+    // or a selection takes the mark; otherwise the host's line, if any.
+    if (revealedLine != null) return { start: revealedLine, end: revealedLine };
     if (line != null) {
       return { start: line, end: lineEnd ?? line };
     }
     return null;
-  }, [pendingComment, selectedCodeAnnotation, line, lineEnd]);
+  }, [pendingComment, selectedCodeAnnotation, revealedLine, line, lineEnd]);
+
+  useEffect(() => {
+    if (!revealLine) return;
+    setRevealedLine(revealLine.line);
+    // Pierre renders after mount (and again after highlighting): look for the
+    // line for a moment.
+    let frame = 0;
+    let attempts = 0;
+    const find = () => {
+      const root = fileAreaRef.current?.querySelector('diffs-container')?.shadowRoot;
+      const row = root?.querySelector(`[data-line="${revealLine.line}"]`);
+      if (row) {
+        // Vertically only: scrollIntoView would also scroll a long line sideways.
+        let node: Element | null = fileAreaRef.current;
+        while (node) {
+          if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) {
+            const box = node.getBoundingClientRect();
+            const rect = row.getBoundingClientRect();
+            node.scrollTop += rect.top - (box.top + box.height / 2) + rect.height / 2;
+            return;
+          }
+          node = node.parentElement;
+        }
+        row.scrollIntoView({ block: 'center', inline: 'nearest' });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 120) frame = requestAnimationFrame(find);
+    };
+    frame = requestAnimationFrame(find);
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealLine?.token, revealLine?.line]);
+  // Another file drops the mark (cleanups run before the next jump sets one).
+  useEffect(() => () => setRevealedLine(null), [filepath]);
   const effectivePrerenderedHTML = lineAnnotations.length === 0 ? prerenderedHTML : undefined;
 
   useEffect(() => {
@@ -501,6 +576,28 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     openCommentForRange({ start: range.start, end: range.end }, undefined, lastPointerRectRef.current ?? undefined);
   }, [onAddAnnotation, openCommentForRange]);
 
+  const tokenTargetOf = (props: { tokenText: string; tokenElement: HTMLElement; lineNumber: number; lineCharStart: number }): CodeFileTokenTarget => ({
+    tokenText: props.tokenText,
+    tokenElement: props.tokenElement,
+    lineNumber: props.lineNumber,
+    lineCharStart: props.lineCharStart,
+  });
+  const tokenOptions = onTokenTarget || onTokenNavigate
+    ? {
+        useTokenTransformer: true,
+        onTokenEnter: (props: CodeFileTokenTarget) => onTokenTarget?.('enter', tokenTargetOf(props)),
+        onTokenLeave: (props: CodeFileTokenTarget) => onTokenTarget?.('leave', tokenTargetOf(props)),
+        onTokenClick: (props: CodeFileTokenTarget, event: MouseEvent) => {
+          const target = tokenTargetOf(props);
+          onTokenTarget?.('click', target);
+          if (onTokenNavigate && (event.metaKey || event.ctrlKey || event.altKey)) {
+            suppressLineClickUntilRef.current = Date.now() + 300;
+            onTokenNavigate(target);
+          }
+        },
+      }
+    : {};
+
   const handleLineClick = useCallback((props: LineEventBaseProps & { event: PointerEvent }) => {
     if (!onAddAnnotation) return;
     if (Date.now() < suppressLineClickUntilRef.current) return;
@@ -540,7 +637,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           } as React.CSSProperties}
           options={{
             themeType: pierreTheme.type,
-            unsafeCSS: pierreTheme.css,
+            unsafeCSS: extraCss ? `${pierreTheme.css}\n${extraCss}` : pierreTheme.css,
             overflow,
             disableFileHeader: true,
             enableLineSelection: true,
@@ -548,6 +645,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
             lineHoverHighlight: onAddAnnotation ? 'line' : 'disabled',
             onLineClick: handleLineClick,
             onLineSelectionEnd: handleLineSelectionEnd,
+            ...tokenOptions,
           }}
         />
       </div>

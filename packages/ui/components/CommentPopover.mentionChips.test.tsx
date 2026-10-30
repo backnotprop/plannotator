@@ -11,6 +11,8 @@
  * overlay element existing at all when no host supplied a source.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MentionPerson, MentionSource } from '../utils/mentions';
@@ -258,6 +260,21 @@ describe.if(hasDom)('CommentPopover mention chips', () => {
     expect(submitted.length).toBe(1);
     expect(submitted[0]![0]).toBe('ping @Marcus Chen ');
     expect(submitted[0]![2]).toEqual(['user_1']);
+  });
+});
+
+// Not DOM-gated: the swap above is only flicker-free if the textarea's color
+// flips as instantly as the overlay's visibility. The global `*` rule in
+// theme.css animates `color` for 150ms, which blanked the text at every
+// composition start and doubled it at every end (Korean/Japanese/Chinese IMEs
+// swap on nearly every keystroke). happy-dom runs no transitions, so the CSS
+// itself is the thing to guard.
+describe('IME composition swap', () => {
+  test('the composer textarea opts out of the global color transition', () => {
+    const css = readFileSync(join(import.meta.dir, '..', 'theme.css'), 'utf8');
+    const rule = /(?:^|\n)\.pn-ref-input \{([^}]*)\}/.exec(css)?.[1];
+    expect(rule).toBeDefined();
+    expect(rule).toMatch(/(?:^|[\s;])transition:\s*none\s*;/);
   });
 });
 

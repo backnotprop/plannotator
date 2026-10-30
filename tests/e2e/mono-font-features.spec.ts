@@ -35,6 +35,7 @@ import { chromium, expect, firefox, test, webkit, type Locator, type Page } from
 import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { openPackedApp, type PackedApp } from '../../packages/shared/packed-app';
 
 const repo = resolve(__dirname, '../..');
 const pages: Record<string, string> = {
@@ -96,8 +97,19 @@ test.beforeAll(async () => {
   for (const file of Object.values(pages)) {
     if (!existsSync(file)) throw new Error(`${file} is missing: run bun run --cwd apps/review build && bun run build:hook`);
   }
-  server = createServer((req, res) => {
+  // Served as the CLI serves them: each page, and the chunks packed behind it.
+  const apps: PackedApp[] = Object.values(pages).map((file) => openPackedApp(readFileSync(file, 'utf8')));
+  server = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0];
+    if (path.startsWith('/assets/')) {
+      for (const app of apps) {
+        const asset = await app.answer(path, req.method, null, false);
+        if (asset.status !== 200) continue;
+        res.writeHead(200, asset.headers);
+        res.end(asset.body);
+        return;
+      }
+    }
     if (path === '/test-font' && ss02FontPath) {
       res.writeHead(200, { 'content-type': 'font/ttf' });
       res.end(readFileSync(ss02FontPath));
@@ -111,7 +123,7 @@ test.beforeAll(async () => {
       return;
     }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(readFileSync(file));
+    res.end(apps[Object.keys(pages).indexOf(path)].html);
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const address = server.address();

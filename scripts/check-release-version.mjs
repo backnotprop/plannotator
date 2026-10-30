@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 const JSON_VERSION_PATHS = [
   "package.json",
   "apps/opencode-plugin/package.json",
+  "apps/dsh-plugin/package.json",
   "apps/pi-extension/package.json",
   "apps/hook/.claude-plugin/plugin.json",
   "apps/copilot/plugin.json",

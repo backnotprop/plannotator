@@ -6,7 +6,7 @@
  * the first click or with the tab in front, a burst rings once, Play always
  * plays. Never audible: the AudioContext is a stub that only counts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';

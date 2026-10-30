@@ -262,6 +262,25 @@ export function resolvePlanLinkedDoc(
 	return isReadableFile(candidate) ? candidate : null;
 }
 
+/**
+ * Whether a real (symlink-resolved) absolute path is one of the documents the
+ * plan links beside its own file, as `resolvePlanLinkedDoc` would serve it.
+ * Plan review's per-document drafts accept exactly what `/api/doc` serves.
+ */
+export function isPlanLinkedDocPath(realPath: string, planFile: PlanFile | null | undefined): boolean {
+	if (!planFile || !realPath) return false;
+	for (const target of planFile.targets) {
+		const served = resolvePlanLinkedDoc(target, planFile.dir, planFile);
+		if (!served) continue;
+		try {
+			if (realpathSync(served) === realPath) return true;
+		} catch {
+			// Gone since it was linked: not this path.
+		}
+	}
+	return false;
+}
+
 export type ResolveAllowedDocPathResult =
 	| { kind: "resolved"; path: string }
 	| { kind: "denied" };

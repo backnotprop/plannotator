@@ -30,6 +30,7 @@ import {
   buildServeOffArgs,
   checkServeStatusPort,
   describeTailscaleFailure,
+  explainTailscaleSetup,
   extractServeHttpsUrl,
   runTailscale,
   serveStatusProxy,
@@ -147,10 +148,17 @@ export function enableTailscaleServe(
     );
   }
   const serve = run(buildServeArgs(port, httpsPort), TAILSCALE_SERVE_TIMEOUT_MS);
-  if (serve.error || serve.status !== 0) {
+  const failed = Boolean(serve.error) || serve.status !== 0;
+  const url = failed ? undefined : extractServeHttpsUrl(`${serve.stdout}\n${serve.stderr}`, httpsPort);
+  if (!url) {
+    // Serve off for the tailnet: Tailscale prints its link to turn it on, then
+    // exits 0 or waits (we time out). No mapping was made, so none to take down.
+    const explained = explainTailscaleSetup(serve);
+    if (explained) throw new TailscaleServeError("serve_failed", `--tailscale: ${explained}`);
+  }
+  if (failed) {
     throw new TailscaleServeError("serve_failed", `--tailscale: could not start tailscale serve. ${describeTailscaleFailure(serve)}`);
   }
-  const url = extractServeHttpsUrl(`${serve.stdout}\n${serve.stderr}`, httpsPort);
   if (!url) {
     // The mapping may exist even though we could not read a URL for our
     // port; take our own port back down rather than leak it.

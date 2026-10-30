@@ -137,6 +137,8 @@ export interface V2BridgeClient {
    * is, as a transcript notice that starts no model turn.
    */
   notifyInbox?: (input: { url: string; detail?: string }) => Promise<unknown>;
+  /** Present with `onInboxOpened`: `/plannotator-inbox` opened the Inbox (the session's briefing, `createInboxBriefings`). */
+  briefInbox?: () => void;
   app: {
     log: (entry: { level: "info" | "error"; message: string }) => void;
     agents: () => Promise<{ data: OpenCodeBridgeAgent[] }>;
@@ -569,15 +571,40 @@ export function inboxNoticeText(url: string, detail?: string): string {
 
 const INBOX_NOTICE_RE = /^Plannotator Inbox: https?:\/\/\S+[\s\S]*\n\n\(Plannotator notice for the person; not a request\.\)$/;
 
-/** Is this model-context message one of our transcript notices (session URL or command failure)? */
-function isSessionUrlNoticeMessage(message: unknown): boolean {
-  if (!isRecord(message) || message.role !== "user") return false;
+/** The text of a one-text-part user message, else undefined. */
+function userMessageText(message: unknown): string | undefined {
+  if (!isRecord(message) || message.role !== "user") return undefined;
   const content = message.content;
   const text = typeof content === "string"
     ? content
     : Array.isArray(content) && content.length === 1 && isRecord(content[0]) && content[0].type === "text"
       ? content[0].text
       : undefined;
+  return typeof text === "string" ? text : undefined;
+}
+
+/** Whether a request's messages hold `/plannotator-inbox`'s notice (the session opened the Inbox, maybe before a restart). */
+export function hasInboxNotice(messages: readonly unknown[]): boolean {
+  return messages.some((message) => INBOX_NOTICE_RE.test(userMessageText(message) ?? ""));
+}
+
+/**
+ * The OpenCode 2 sessions that opened the Inbox with `/plannotator-inbox`:
+ * from then on their requests carry the Inbox briefing (`addInboxBriefing` in
+ * server.ts), with no turn of its own. A session whose messages hold the
+ * command's notice counts too, so the briefing survives a restart.
+ */
+export function createInboxBriefings(): { mark(sessionID: string): void; wants(event: { sessionID: string; messages: readonly unknown[] }): boolean } {
+  const sessions = new Set<string>();
+  return {
+    mark: (sessionID) => void sessions.add(sessionID),
+    wants: (event) => sessions.has(event.sessionID) || hasInboxNotice(event.messages),
+  };
+}
+
+/** Is this model-context message one of our transcript notices (session URL or command failure)? */
+function isSessionUrlNoticeMessage(message: unknown): boolean {
+  const text = userMessageText(message);
   if (typeof text !== "string") return false;
   if (COMMAND_FAILURE_NOTICE_RE.test(text) || INBOX_NOTICE_RE.test(text)) return true;
   return text.startsWith(SESSION_URL_NOTICE_PREFIX)
@@ -837,6 +864,8 @@ export function createV2BridgeClient(input: {
    * the slash commands; a tool launch reports its failure as the tool result.
    */
   failureNotices?: boolean;
+  /** `/plannotator-inbox` opened the Inbox: mark the session for the Inbox briefing. */
+  onInboxOpened?: () => void;
 }): V2BridgeClient {
   const warn = input.warn ?? ((message: string) => console.error(message));
   const loggedUrls = new Set<string>();
@@ -867,6 +896,7 @@ export function createV2BridgeClient(input: {
     ...(notifyUrl && { notifyUrl }),
     ...(notifyFailure && { notifyFailure }),
     ...(notifyInbox && { notifyInbox }),
+    ...(input.onInboxOpened && { briefInbox: input.onInboxOpened }),
     dispose: notice.dispose,
     app: {
       agents: async () => ({ data: await input.getAgents() }),

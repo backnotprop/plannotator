@@ -33,6 +33,7 @@
 
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, utimesSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isNewerStableVersion } from "@plannotator/shared/update-check";
@@ -58,7 +59,7 @@ import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } fro
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
-import { inboxHostSessionFromEnv, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -601,6 +602,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
       hostSession: inboxHostSessionFromEnv(process.env),
+      qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
     });
     process.exit(0);
   }

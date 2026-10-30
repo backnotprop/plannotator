@@ -17,11 +17,14 @@ export function ContextMarkdown({
   messageId,
   onImage = noop,
   className,
+  refRepo = null,
   ...data
 }: {
   markdown: string;
   messageId: string;
   onImage?: (src: string, alt: string) => void;
+  /** The thread's repo, so `#123` and `owner/repo#123` link as in the message (none: they stay plain). */
+  refRepo?: { display: string; host?: string } | null;
   /** The wrapper's classes: `ib-body` plus the place's own. */
   className: string;
 } & { [attr: `data-${string}`]: string }) {
@@ -41,6 +44,7 @@ export function ContextMarkdown({
         maxWidth={null}
         stickyActions={false}
         disableCodePathValidation
+        refRepo={refRepo}
         imageBaseDir={inboxMessageImageBase(messageId)}
         onImageClick={onImage}
         questionDecisionLines={false}

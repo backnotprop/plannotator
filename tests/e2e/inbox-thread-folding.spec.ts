@@ -312,18 +312,18 @@ test('opening and folding a line keeps it where it was', async () => {
   }
 });
 
-test('keys: n goes to the first new message, k and j move between messages; never while typing', async () => {
+test('keys: n goes to the first new message, Shift+K and Shift+J move between messages; never while typing', async () => {
   const { page, ids } = world;
   await page.locator('h2.ib-subject').click({ force: true }).catch(() => {});
   await page.keyboard.press('n');
   await expect(page.locator(':focus')).toHaveAttribute('aria-label', /^Claude Code, .*, new\. Fold this message$/);
-  await page.keyboard.press('k');
+  await page.keyboard.press('Shift+K');
   await expect(page.locator(':focus')).toHaveAttribute('aria-label', new RegExp(`^You, `));
   expect(await page.locator(':focus').evaluate((el) => el.closest('[data-message-article]')?.getAttribute('data-message-article'))).toBe(ids[5]);
-  await page.keyboard.press('k');
+  await page.keyboard.press('Shift+K');
   expect(await page.locator(':focus').evaluate((el) => el.closest('[data-message-article]')?.getAttribute('data-message-article'))).toBe(ids[4]);
-  await page.keyboard.press('j');
-  await page.keyboard.press('j');
+  await page.keyboard.press('Shift+J');
+  await page.keyboard.press('Shift+J');
   expect(await page.locator(':focus').evaluate((el) => el.closest('[data-message-article]')?.getAttribute('data-message-article'))).toBe(ids[6]);
   // Enter folds the focused message; Enter again opens it.
   await page.keyboard.press('Enter');
@@ -334,8 +334,8 @@ test('keys: n goes to the first new message, k and j move between messages; neve
   // Typing in the reply box is typing.
   await pane().locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   const box = page.getByRole('textbox', { name: 'Reply to Claude Code' });
-  await box.pressSequentially('nj');
-  await expect(box).toHaveValue('nj');
+  await box.pressSequentially('njJ');
+  await expect(box).toHaveValue('njJ');
   await expect(box).toBeFocused();
   await pane().locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
 });

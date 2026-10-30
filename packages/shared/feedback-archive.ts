@@ -174,6 +174,9 @@ export interface FeedbackAnnotationRecord {
    *  (maintainer ruling on open question 2; additive per the field contract
    *  above). */
   scope?: string;
+  /** A code-review comment on lines outside the diff (a file the review does
+   *  not change, or a changed file outside its hunks). Absent otherwise. */
+  outsideDiff?: boolean;
   blockId?: string;
   diffContext?: string;
   severity?: string;
@@ -340,6 +343,7 @@ function normalizeAnnotation(raw: unknown): FeedbackAnnotationRecord {
   if (side) record.side = side;
   const scope = asString(a.scope);
   if (scope) record.scope = scope;
+  if (a.outsideDiff === true) record.outsideDiff = true;
   const blockId = asString(a.blockId);
   if (blockId) record.blockId = blockId;
   const diffContext = asString(a.diffContext);

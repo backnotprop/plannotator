@@ -51,6 +51,10 @@ export const REF_CARD_CLOSE_MS = 250;
 const CARD_WIDTH = 400;
 const EDGE = 12;
 const GAP = 6;
+/** The description box's tallest (border box), before it scrolls: about eight lines of a description. */
+const BODY_MAX = 216;
+/** The same once pinned: the person asked for it, so more of the description shows. */
+const BODY_MAX_PINNED = 340;
 
 // --- words ---
 
@@ -352,14 +356,19 @@ export interface RefCardViewProps {
   onClose?: () => void;
   /** The sheet on a touch screen (the body takes the height, larger targets). */
   sheet?: boolean;
+  /**
+   * Too little room for the whole card (a short window): the header and the description scroll
+   * together, so the description never shrinks to a line, and the footer (Open on GitHub) stays.
+   */
+  tight?: boolean;
 }
 
-export function RefCardView({ target, href, result, pinned, onClose, sheet }: RefCardViewProps) {
+export function RefCardView({ target, href, result, pinned, onClose, sheet, tight }: RefCardViewProps) {
   const repoName = `${target.owner}/${target.repo}`;
   const forge = forgeName(target.platform);
   const btn = sheet ? 'min-h-11 px-3' : 'h-7 px-2.5';
   const footer = (extra?: React.ReactNode) => (
-    <div className="flex flex-none items-center gap-2 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground">
+    <div className="flex flex-none items-center gap-2 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground" data-ref-card-foot="">
       <span className="min-w-0 flex-1 truncate">{extra}</span>
       {onClose && (pinned || sheet) ? (
         <button type="button" onClick={onClose} className={`${btn} rounded-md hover:bg-muted hover:text-foreground`} data-ref-card-close="">
@@ -417,113 +426,120 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet }: Re
   const state = stateOf(d);
   const ref = { platform: d.platform, kind: d.kind, number: d.number };
   const p = d.pull;
-  const bodyMax = sheet ? '' : pinned ? 'max-h-[260px]' : 'max-h-[132px]';
+  // One element scrolls: the description (its own height capped), or, when tight, the header and the description together.
+  const together = !!tight && !sheet;
+  const scroller = { 'data-ref-card-scroll': '', tabIndex: 0 };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="px-3.5 pt-3">
-        <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
-          <span className="truncate">{d.repo || repoName}</span>
-          <span aria-hidden="true">·</span>
-          <span className="flex-none">opened {timeAgo(d.createdAt)}</span>
-        </div>
-        <div className="mt-1.5 flex items-start gap-2">
-          <StateIcon kind={d.kind} tone={state.tone} className="mt-[3px]" />
-          <div className="min-w-0 flex-1 text-[14px] font-semibold leading-snug text-foreground [overflow-wrap:anywhere]" data-ref-card-title="">
-            {d.title} <span className="font-normal text-muted-foreground">{forgeRefLabel(ref)}</span>
+      <div
+        className={together ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain' : 'flex min-h-0 flex-1 flex-col'}
+        {...(together ? { ...scroller, 'aria-label': `${refKindName(ref)} details` } : {})}
+      >
+        <div className="flex-none px-3.5 pt-3" data-ref-card-head="">
+          <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+            <span className="truncate">{d.repo || repoName}</span>
+            <span aria-hidden="true">·</span>
+            <span className="flex-none">opened {timeAgo(d.createdAt)}</span>
           </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
-          <span className={`rounded-full px-2 py-[1px] text-[11px] font-semibold ${TONE_PILL[state.tone]}`} data-ref-card-state={d.state}>
-            {state.label}
-          </span>
-          {d.author ? (
-            <span className="inline-flex items-center gap-1">
-              <Avatar person={d.author} size={16} />
-              {d.author.login}
+          <div className="mt-1.5 flex items-start gap-2">
+            <StateIcon kind={d.kind} tone={state.tone} className="mt-[3px]" />
+            <div className="min-w-0 flex-1 text-[14px] font-semibold leading-snug text-foreground [overflow-wrap:anywhere]" data-ref-card-title="">
+              {d.title} <span className="font-normal text-muted-foreground">{forgeRefLabel(ref)}</span>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
+            <span className={`rounded-full px-2 py-[1px] text-[11px] font-semibold ${TONE_PILL[state.tone]}`} data-ref-card-state={d.state}>
+              {state.label}
             </span>
-          ) : null}
-          {d.closedAt && d.state !== 'open' && d.state !== 'draft' ? (
-            <span>
-              {d.state === 'merged' ? 'merged' : 'closed'} {timeAgo(d.closedAt)}
-            </span>
-          ) : (
-            <span>updated {timeAgo(d.updatedAt)}</span>
-          )}
-        </div>
-        {p ? (
-          <div className="mt-2 space-y-1 text-[11.5px]">
-            {p.base || p.head ? (
-              <div className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" data-ref-card-branch="">
-                {p.base} ← {p.head}
-              </div>
-            ) : null}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>
-                <span className="text-success">+{fmt(p.additions)}</span> <span className="text-destructive">−{fmt(p.deletions)}</span>
-                <span className="text-muted-foreground">
-                  {' '}
-                  · {fmt(p.files)} file{p.files === 1 ? '' : 's'}
-                </span>
+            {d.author ? (
+              <span className="inline-flex items-center gap-1">
+                <Avatar person={d.author} size={16} />
+                {d.author.login}
               </span>
-              {p.checks ? <ChecksLine checks={p.checks} platform={d.platform} /> : null}
-              {p.review ? (
-                <span className={REVIEW_TEXT[p.review].cls} data-ref-card-review={p.review}>
-                  {REVIEW_TEXT[p.review].text}
+            ) : null}
+            {d.closedAt && d.state !== 'open' && d.state !== 'draft' ? (
+              <span>
+                {d.state === 'merged' ? 'merged' : 'closed'} {timeAgo(d.closedAt)}
+              </span>
+            ) : (
+              <span>updated {timeAgo(d.updatedAt)}</span>
+            )}
+          </div>
+          {p ? (
+            <div className="mt-2 space-y-1 text-[11.5px]">
+              {p.base || p.head ? (
+                <div className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" data-ref-card-branch="">
+                  {p.base} ← {p.head}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>
+                  <span className="text-success">+{fmt(p.additions)}</span> <span className="text-destructive">−{fmt(p.deletions)}</span>
+                  <span className="text-muted-foreground">
+                    {' '}
+                    · {fmt(p.files)} file{p.files === 1 ? '' : 's'}
+                  </span>
+                </span>
+                {p.checks ? <ChecksLine checks={p.checks} platform={d.platform} /> : null}
+                {p.review ? (
+                  <span className={REVIEW_TEXT[p.review].cls} data-ref-card-review={p.review}>
+                    {REVIEW_TEXT[p.review].text}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          {d.labels.length > 0 || d.assignees.length > 0 ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              {d.labels.map((l) => (
+                <span key={l.name} className="inline-flex max-w-full items-center gap-1 rounded-full border border-border px-1.5 py-[1px] text-[10.5px] text-foreground">
+                  <span aria-hidden="true" className="h-2 w-2 flex-none rounded-full" style={{ background: `#${l.color}` }} />
+                  <span className="truncate">{l.name}</span>
+                </span>
+              ))}
+              {d.assignees.length > 0 ? (
+                <span className="ml-auto inline-flex items-center gap-1" role="img" aria-label={`Assigned to ${d.assignees.map((a) => a.login).join(', ')}`}>
+                  {d.assignees.map((a) => (
+                    <Avatar key={a.login} person={a} size={16} />
+                  ))}
                 </span>
               ) : null}
             </div>
-          </div>
-        ) : null}
-        {d.labels.length > 0 || d.assignees.length > 0 ? (
-          <div className="mt-2 flex flex-wrap items-center gap-1">
-            {d.labels.map((l) => (
-              <span key={l.name} className="inline-flex max-w-full items-center gap-1 rounded-full border border-border px-1.5 py-[1px] text-[10.5px] text-foreground">
-                <span aria-hidden="true" className="h-2 w-2 flex-none rounded-full" style={{ background: `#${l.color}` }} />
-                <span className="truncate">{l.name}</span>
-              </span>
-            ))}
-            {d.assignees.length > 0 ? (
-              <span className="ml-auto inline-flex items-center gap-1" role="img" aria-label={`Assigned to ${d.assignees.map((a) => a.login).join(', ')}`}>
-                {d.assignees.map((a) => (
-                  <Avatar key={a.login} person={a} size={16} />
-                ))}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
 
-      <div
-        className={`mt-2.5 min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border px-3.5 py-2.5 ${bodyMax}`}
-        data-ref-card-scroll=""
-        tabIndex={0}
-        aria-label={`${refKindName(ref)} description`}
-      >
-        {d.body.trim() ? <SafeMarkdown markdown={d.body} /> : <p className="text-[12px] italic text-muted-foreground">No description.</p>}
-        {d.bodyCut ? <p className="mt-1 text-[11px] text-muted-foreground">The rest is on {forge}.</p> : null}
-        {d.linked.length > 0 ? (
-          <div className="mt-2.5 space-y-1">
-            <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{d.kind === 'pull' ? 'Closes' : 'Closed by'}</div>
-            {d.linked.map((l) => (
-              <div key={l.number} className="flex items-center gap-1.5 text-[12px]">
-                <StateIcon kind={d.kind === 'pull' ? 'issue' : 'pull'} tone={l.state === 'open' ? 'open' : l.state === 'merged' || d.kind === 'pull' ? 'merged' : 'closed'} />
-                <span className="min-w-0 truncate">{l.title}</span>
-                <span className="flex-none text-muted-foreground">#{l.number}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {d.lastComment ? (
-          <div className="mt-2.5 rounded-md border border-border bg-muted/30 px-2.5 py-2" data-ref-card-comment="">
-            <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              {d.lastComment.author ? <Avatar person={d.lastComment.author} size={14} /> : null}
-              <span className="font-medium text-foreground">{d.lastComment.author?.login ?? 'someone'}</span>
-              <span>commented {timeAgo(d.lastComment.at)}</span>
-              <span className="ml-auto">latest</span>
+        <div
+          className={`mt-2.5 border-t border-border px-3.5 py-2.5 ${together ? '' : 'min-h-0 flex-1 overflow-y-auto overscroll-contain'}`}
+          style={sheet || together ? undefined : { maxHeight: pinned ? BODY_MAX_PINNED : BODY_MAX }}
+          data-ref-card-body=""
+          {...(together ? {} : { ...scroller, 'aria-label': `${refKindName(ref)} description` })}
+        >
+          {d.body.trim() ? <SafeMarkdown markdown={d.body} /> : <p className="text-[12px] italic text-muted-foreground">No description.</p>}
+          {d.bodyCut ? <p className="mt-1 text-[11px] text-muted-foreground">The rest is on {forge}.</p> : null}
+          {d.linked.length > 0 ? (
+            <div className="mt-2.5 space-y-1">
+              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{d.kind === 'pull' ? 'Closes' : 'Closed by'}</div>
+              {d.linked.map((l) => (
+                <div key={l.number} className="flex items-center gap-1.5 text-[12px]">
+                  <StateIcon kind={d.kind === 'pull' ? 'issue' : 'pull'} tone={l.state === 'open' ? 'open' : l.state === 'merged' || d.kind === 'pull' ? 'merged' : 'closed'} />
+                  <span className="min-w-0 truncate">{l.title}</span>
+                  <span className="flex-none text-muted-foreground">#{l.number}</span>
+                </div>
+              ))}
             </div>
-            <SafeMarkdown markdown={d.lastComment.body} />
-          </div>
-        ) : null}
+          ) : null}
+          {d.lastComment ? (
+            <div className="mt-2.5 rounded-md border border-border bg-muted/30 px-2.5 py-2" data-ref-card-comment="">
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                {d.lastComment.author ? <Avatar person={d.lastComment.author} size={14} /> : null}
+                <span className="font-medium text-foreground">{d.lastComment.author?.login ?? 'someone'}</span>
+                <span>commented {timeAgo(d.lastComment.at)}</span>
+                <span className="ml-auto">latest</span>
+              </div>
+              <SafeMarkdown markdown={d.lastComment.body} />
+            </div>
+          ) : null}
+        </div>
       </div>
       {footer(
         <span className="inline-flex items-center gap-1">
@@ -557,7 +573,25 @@ function firstControl(card: HTMLElement | null): HTMLElement | null {
   return card?.querySelector<HTMLElement>('a[href], button, [tabindex="0"]') ?? null;
 }
 
-function place(anchor: Element, card: HTMLElement): { left: number; top: number; maxHeight: number } {
+/**
+ * The card's height with nothing squeezed (the header, the description up to its cap, the footer)
+ * and the description's part of it. Measured from the parts, so it reads the same whether the card
+ * is tight or not (a tight card's description is uncapped, and its scroller clips the rest).
+ */
+function naturalHeight(card: HTMLElement, pinned: boolean): { natural: number; body: number } {
+  const head = card.querySelector<HTMLElement>('[data-ref-card-head]');
+  const body = card.querySelector<HTMLElement>('[data-ref-card-body]');
+  const foot = card.querySelector<HTMLElement>('[data-ref-card-foot]');
+  if (!head || !body || !foot) return { natural: card.scrollHeight, body: 0 };
+  const cs = getComputedStyle(body);
+  const bodyHeight = Math.min(body.scrollHeight + (parseFloat(cs.borderTopWidth) || 0), pinned ? BODY_MAX_PINNED : BODY_MAX);
+  return {
+    natural: head.offsetHeight + (parseFloat(cs.marginTop) || 0) + bodyHeight + foot.offsetHeight + (card.offsetHeight - card.clientHeight),
+    body: bodyHeight,
+  };
+}
+
+function place(anchor: Element, card: HTMLElement, pinned: boolean): Pos {
   const r = anchor.getBoundingClientRect();
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -565,11 +599,23 @@ function place(anchor: Element, card: HTMLElement): { left: number; top: number;
   const left = Math.min(Math.max(EDGE, r.left), vw - width - EDGE);
   const below = vh - r.bottom - GAP - EDGE;
   const above = r.top - GAP - EDGE;
-  const natural = card.scrollHeight;
+  const { natural, body } = naturalHeight(card, pinned);
   const downward = below >= Math.min(natural, 320) || below >= above;
   const maxHeight = Math.max(160, Math.min(520, downward ? below : above));
   const height = Math.min(natural, maxHeight);
-  return { left, top: downward ? r.bottom + GAP : r.top - GAP - height, maxHeight };
+  // Tight: the room left for the description is less than it shows unpinned (a pinned card that only
+  // lost some of its extra room keeps its header still, and its description scrolls as before).
+  const roomForBody = maxHeight - (natural - body);
+  const tight = natural > maxHeight + 1 && roomForBody < Math.min(body, BODY_MAX) - 1;
+  return { left, top: downward ? r.bottom + GAP : r.top - GAP - height, maxHeight, tight };
+}
+
+interface Pos {
+  left: number;
+  top: number;
+  maxHeight: number;
+  /** Too little room for the card's description: see `RefCardViewProps.tight`. */
+  tight: boolean;
 }
 
 /**
@@ -592,7 +638,7 @@ export function useRefHoverCards(
   const wanted = useRef<HTMLAnchorElement | null>(null);
   const dataOnly = useRef(onlyWithData);
   dataOnly.current = onlyWithData;
-  const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
+  const [pos, setPos] = useState<Pos | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const current = useRef<OpenCard | null>(null);
   current.current = card;
@@ -740,7 +786,7 @@ export function useRefHoverCards(
   const reposition = useCallback(() => {
     const c = current.current;
     if (!c || !cardRef.current || c.via === 'tap') return;
-    setPos(place(c.anchor, cardRef.current));
+    setPos(place(c.anchor, cardRef.current, c.pinned));
   }, []);
 
   // While open: Escape, a press outside, scrolling and resizing.
@@ -805,6 +851,7 @@ export function useRefHoverCards(
       data-ref-card=""
       data-ref-card-pinned={card.pinned ? '' : undefined}
       data-ref-card-sheet={sheet ? '' : undefined}
+      data-ref-card-tight={!sheet && pos?.tight ? '' : undefined}
       onPointerEnter={() => {
         if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
       }}
@@ -832,7 +879,7 @@ export function useRefHoverCards(
       }
     >
       {sheet ? <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 flex-none rounded-full bg-muted-foreground/30" /> : null}
-      <RefCardView target={card.target} href={card.href} result={card.result} pinned={card.pinned} sheet={sheet} onClose={() => close(true)} />
+      <RefCardView target={card.target} href={card.href} result={card.result} pinned={card.pinned} sheet={sheet} tight={!sheet && !!pos?.tight} onClose={() => close(true)} />
     </div>
   );
   return createPortal(

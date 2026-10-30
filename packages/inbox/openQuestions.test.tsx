@@ -14,7 +14,7 @@
  * nothing until its button, which saves what the card's own Skip saves.
  *
  * The pure rules (openQuestions.ts) run everywhere; the window's parts are
- * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -174,13 +174,13 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(onOneLine([553, 553, 605])).toBe(false);
   });
 
-  test('the whole row shortens in the owner\'s order before the status wraps: skip, Edit, the count, the draft words, tight', () => {
-    expect([0, 1, 2, 3, 4, 5].map((level) => footRowTokens(level))).toEqual(['', 'skip', 'skip edit', 'skip edit oq', 'skip edit oq draft', 'skip edit oq draft tight']);
+  test('the whole row shortens in the owner\'s order before the status wraps: the keycaps, skip, Edit, the count, the draft words, tight', () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((level) => footRowTokens(level))).toEqual(['', 'keys', 'keys skip', 'keys skip edit', 'keys skip edit oq', 'keys skip edit oq draft', 'keys skip edit oq draft tight']);
     // A phone has one more step: Edit draft as its pencil. Other windows stop at tight.
-    expect(footRowTokens(6, true)).toBe('skip edit oq draft tight icon');
-    expect(footRowTokens(6)).toBe('skip edit oq draft tight');
-    // The open questions button keeps its longest form until the third step, then shows its count.
-    expect([0, 1, 2, 3, 5].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'count', 'count']);
+    expect(footRowTokens(7, true)).toBe('keys skip edit oq draft tight icon');
+    expect(footRowTokens(7)).toBe('keys skip edit oq draft tight');
+    // The open questions button keeps its longest form until the oq step, then shows its count.
+    expect([0, 1, 2, 3, 4, 6].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'full', 'count', 'count']);
     expect(footRowOpenQuestionsForm(0, 'short')).toBe('short');
   });
 

@@ -475,6 +475,8 @@ export function windowedThread(
   if (!thread) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
   // A reply that tags agents names its owner as `to` (the session it goes to anyway), so the transcript says who it is for.
   const all = thread.messages.map((message) => {
+    // A Tidy note reads as one line here: its session had the whole list in its wake.
+    if (message.tidy) return { ...message, body: `Tidy: the person asked ${INBOX_HOST_NAMES[message.to?.host ?? ""] ?? "the agent"} to tidy its threads; this one was listed.` };
     if (message.to || !(message as { tagged?: unknown }).tagged) return message;
     const stored = store.message(message.id);
     const owner = stored ? store.recipientOf(stored) : null;

@@ -131,7 +131,7 @@ describe('Call flow endpoint capability guards', () => {
       if (runtime === 'Pi') process.env.PLANNOTATOR_PORT = String(await reservePort());
       const server = await startServer({
         rawPatch: '',
-        gitRef: 'All files',
+        gitRef: 'Every file',
         diffType: 'all',
         origin: runtime === 'Pi' ? 'pi' : 'claude-code',
         htmlContent: '<!doctype html><html><body>review</body></html>',

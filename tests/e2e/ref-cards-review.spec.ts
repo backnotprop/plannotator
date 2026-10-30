@@ -13,7 +13,10 @@
  * file's Read view shows its card. The keyboard (plan review): Tab to `#12`
  * opens its card, Tab moves into it, Escape closes it, returns the focus to
  * the link and stops there. A touch screen (plan review): a tap follows the
- * link (the opened tab is stubbed), with no card and no CLI run.
+ * link (the opened tab is stubbed), with no card and no CLI run. The card's
+ * height (code review): a long description shows about eight lines (a 216 px
+ * box) before it scrolls; in a window too short for the card (1440 by 480),
+ * the header scrolls with the description and Open on GitHub stays in view.
  *
  * Screenshots (light and dark) go to PLANNOTATOR_REF_CARD_REVIEW_SHOTS when it
  * is set. Build the binary first (see inbox.spec.ts), then
@@ -35,7 +38,36 @@ const shots = process.env.PLANNOTATOR_REF_CARD_REVIEW_SHOTS ?? '';
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 const person = (login: string) => ({ login, avatarUrl: null });
 
+const LONG_BODY = Array.from(
+  { length: 6 },
+  (_, i) => `Paragraph ${i + 1}. On a cold load the widget list renders, then jumps by one row height, then settles. It takes about a second and happens on every reload after the browser was closed.`,
+).join('\n\n');
+
 function seed(forge: FakeForge) {
+  forge.github(21, {
+    data: {
+      repository: {
+        nameWithOwner: 'acme/widgets',
+        issueOrPullRequest: {
+          __typename: 'Issue',
+          number: 21,
+          title: 'Widget list jitters after a cold load',
+          url: 'https://github.com/acme/widgets/issues/21',
+          state: 'OPEN',
+          stateReason: null,
+          createdAt: hoursAgo(80),
+          updatedAt: hoursAgo(3),
+          closedAt: null,
+          body: LONG_BODY,
+          author: person('sam'),
+          labels: { nodes: [{ name: 'bug', color: 'd73a4a' }] },
+          assignees: { nodes: [] },
+          comments: { totalCount: 0, nodes: [] },
+          closedByPullRequestsReferences: { nodes: [] },
+        },
+      },
+    },
+  });
   forge.github(12, {
     data: {
       repository: {
@@ -117,6 +149,8 @@ const DOC_AFTER = `# Doc
 Hello.
 
 Tracking: https://github.com/acme/widgets/pull/14
+
+Root cause: https://github.com/acme/widgets/issues/21
 `;
 
 interface Session {
@@ -198,14 +232,15 @@ async function start(kind: 'plan' | 'annotate' | 'review'): Promise<Session> {
   return { url, forge, close };
 }
 
-async function open(browser: Browser, url: string, scheme: 'light' | 'dark', extra: [string, string][] = []): Promise<Page> {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
+async function open(browser: Browser, url: string, scheme: 'light' | 'dark', extra: [string, string][] = [], height = 900): Promise<Page> {
+  const context = await browser.newContext({ viewport: { width: 1440, height }, colorScheme: scheme });
   const seen: [string, string][] = [
     ['plannotator-theme', scheme],
     ['plannotator-plan-look-choice-resolved', 'true'],
     ['plannotator-look-feel-announcement-seen', '2'],
     ['plannotator-edit-mode-announcement-seen', '3'],
     ['plannotator-announce-tui-herdr-seen', '1'],
+    ['plannotator-announce-inbox-seen', '1'],
     ['plannotator-announce-ask-session-seen', '1'],
     ['plannotator-announce-agent-tool-seen', '1'],
     ['plannotator-permission-mode-configured', 'true'],
@@ -380,6 +415,7 @@ test('plan review on a touch screen: a tap follows the link, shows no card and r
       ['plannotator-look-feel-announcement-seen', '2'],
       ['plannotator-edit-mode-announcement-seen', '3'],
       ['plannotator-announce-tui-herdr-seen', '1'],
+      ['plannotator-announce-inbox-seen', '1'],
       ['plannotator-announce-ask-session-seen', '1'],
       ['plannotator-announce-agent-tool-seen', '1'],
       ['plannotator-permission-mode-configured', 'true'],
@@ -404,6 +440,71 @@ test('plan review on a touch screen: a tap follows the link, shows no card and r
     await expect(page.locator('[data-ref-card]')).toHaveCount(0);
     expect(session.forge.calls()).toEqual([]);
     await context.close();
+  } finally {
+    await session.close();
+  }
+});
+
+test('code review: a long description shows about eight lines before it scrolls', async () => {
+  const session = await start('review');
+  try {
+    const page = await open(browser, session.url, 'light', [['plannotator-markdown-view', 'read']]);
+    await page.getByText('doc.md', { exact: true }).first().click();
+    await page.locator('a[href="https://github.com/acme/widgets/issues/21"]').first().hover();
+    const card = page.locator('[data-ref-card]');
+    await expect(card).toContainText('Widget list jitters after a cold load');
+    // Room enough below the link: the description is the one scroller.
+    const body = card.locator('[data-ref-card-scroll]');
+    const box = await body.evaluate((el) => ({ height: el.getBoundingClientRect().height, scrolls: el.scrollHeight > el.clientHeight }));
+    // Capped (it scrolls), at 216 px: 132 px (about five lines) before.
+    expect(box.scrolls).toBe(true);
+    expect(box.height).toBeGreaterThanOrEqual(212);
+    expect(box.height).toBeLessThanOrEqual(216);
+    await shot(page, 'code-review-long-issue-light');
+    await page.context().close();
+  } finally {
+    await session.close();
+  }
+});
+
+test('code review in a short window: the header scrolls with the description and Open on GitHub stays in view', async () => {
+  const session = await start('review');
+  try {
+    // 480: the card kept its footer but squeezed the description to a line. 400: the footer was cut off.
+    for (const height of [480, 400]) {
+      const page = await open(browser, session.url, 'light', [['plannotator-markdown-view', 'read']], height);
+      await page.getByText('doc.md', { exact: true }).first().click();
+      const link = page.locator('a[href="https://github.com/acme/widgets/pull/14"]').first();
+      await link.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+      await page.waitForTimeout(300);
+      await link.hover();
+      const card = page.locator('[data-ref-card]');
+      await expect(card).toContainText('One store for the widget cache');
+
+      const c = (await card.boundingBox())!;
+      expect(c.y).toBeGreaterThanOrEqual(0);
+      expect(c.y + c.height).toBeLessThanOrEqual(height);
+      // The footer's Open on GitHub sits whole inside the card (the card clips what does not fit).
+      const openBox = (await card.locator('[data-ref-card-open]').boundingBox())!;
+      expect(openBox.y).toBeGreaterThanOrEqual(c.y);
+      expect(openBox.y + openBox.height).toBeLessThanOrEqual(c.y + c.height);
+
+      // One scroller holds the title and the description, with all the room the footer leaves (not a line of it).
+      const scroller = card.locator('[data-ref-card-scroll]');
+      await expect(scroller.locator('[data-ref-card-title]')).toHaveCount(1);
+      const room = await scroller.evaluate((el) => ({ height: el.clientHeight, scrolls: el.scrollHeight > el.clientHeight }));
+      expect(room.scrolls).toBe(true);
+      expect(room.height).toBeGreaterThanOrEqual(c.height - (openBox.height + 24));
+      // Scrolling it brings the description's end and the comment into view, above the footer.
+      await scroller.hover();
+      await page.mouse.wheel(0, 600);
+      await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+      await expect(card).toBeVisible();
+      const comment = (await card.locator('[data-ref-card-comment]').boundingBox())!;
+      expect(comment.y + comment.height).toBeLessThanOrEqual(openBox.y);
+      await shot(page, `code-review-short-window-${height}-light`);
+      await page.context().close();
+    }
   } finally {
     await session.close();
   }

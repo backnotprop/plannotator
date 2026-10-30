@@ -8,6 +8,7 @@ import {
   modelSelectOptions,
   piCatalogFromRpc,
   piThinkingLevelsSupported,
+  qwenCatalogFromSettings,
   resolveEffortChoice,
   resolveModelChoice,
   type CatalogModel,
@@ -291,5 +292,42 @@ describe("piCatalogFromRpc", () => {
     expect(piThinkingLevelsSupported("1.0.0")).toBe(true);
     expect(piThinkingLevelsSupported("0.84.2")).toBe(false);
     expect(piThinkingLevelsSupported("garbage")).toBe(false);
+  });
+});
+
+describe("qwenCatalogFromSettings", () => {
+  const PROVIDERS = {
+    openai: [
+      { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus" },
+      { id: "gpt-local" },
+      { id: "qwen3-coder-plus", name: "Duplicate" },
+      { name: "no id" },
+      null,
+    ],
+    anthropic: [{ id: "claude-via-qwen", name: "Claude" }],
+  };
+
+  test("lists the selected auth type's models, the active model as default", () => {
+    expect(qwenCatalogFromSettings({ model: { name: "gpt-local" }, modelProviders: PROVIDERS })).toEqual([
+      { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus" },
+      { id: "gpt-local", label: "gpt-local", default: true },
+    ]);
+    // `qwen -m` resolves against the selected type only, so another type's models are not offered.
+    expect(
+      qwenCatalogFromSettings({ security: { auth: { selectedType: "anthropic" } }, modelProviders: PROVIDERS }),
+    ).toEqual([{ id: "claude-via-qwen", label: "Claude", default: true }]);
+  });
+
+  test("an active model the list does not name comes first; no settings means no models", () => {
+    expect(qwenCatalogFromSettings({ model: { name: "coder-model" }, modelProviders: PROVIDERS }).slice(0, 2)).toEqual([
+      { id: "coder-model", label: "coder-model", default: true },
+      { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus" },
+    ]);
+    expect(qwenCatalogFromSettings({ security: { auth: { selectedType: "qwen-oauth" } }, model: { name: "coder-model" } })).toEqual([
+      { id: "coder-model", label: "coder-model", default: true },
+    ]);
+    expect(qwenCatalogFromSettings({})).toEqual([]);
+    expect(qwenCatalogFromSettings(null)).toEqual([]);
+    expect(qwenCatalogFromSettings({ modelProviders: { openai: "not a list" } })).toEqual([]);
   });
 });

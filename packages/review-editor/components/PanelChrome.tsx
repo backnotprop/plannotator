@@ -6,11 +6,11 @@ import { Tooltip } from "@plannotator/ui/components/Tooltip";
 /**
  * Shared chrome for the left review panels (FileTree, SectionsPanel).
  *
- * The header's top row belongs to the PanelViewToggle alone (full width), so
- * the controls that used to share it — staged count, search, collapse-all,
- * hide-viewed, viewed counter — render as their own row directly above the
- * file list, below the "All files" entry. One source so both views keep the
- * same cluster in the same order.
+ * The controls under the shared header (ReviewPanelHeader) — staged count,
+ * search, collapse-all, hide-viewed, viewed counter — render as their own row
+ * directly above the file list, below the "All changes" entry. One source so
+ * both views keep the same cluster in the same order. In a narrow panel the
+ * icon cluster wraps onto a second line instead of drawing over the counter.
  */
 export function PanelControlsRow({
   stagedCount = 0,
@@ -72,12 +72,12 @@ export function PanelControlsRow({
 
   return (
     <div
-      className="flex items-center justify-between gap-2 pl-1 pr-2 py-1"
+      className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 pl-1 pr-2 py-1"
       data-panel-controls-row
     >
       {showViewedControls && (
         <div
-          className="flex min-w-0 items-center gap-1.5"
+          className="flex flex-shrink-0 items-center gap-1.5"
           data-panel-viewed-controls
         >
           {onToggleHideViewed && (

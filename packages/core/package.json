@@ -6,7 +6,6 @@
   "exports": {
     "./agents": "./agents.ts",
     "./product-feedback": "./product-feedback.ts",
-    "./inbox-acp": "./inbox-acp.ts",
     "./diff-paths": "./diff-paths.ts",
     "./diff-files": "./diff-files.ts",
     "./file-kind": "./file-kind.ts",
@@ -31,6 +30,7 @@
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
     "./embed-insert": "./embed-insert.ts",
+    "./html-embed": "./html-embed.ts",
     "./external-annotation": "./external-annotation.ts",
     "./extract-code-paths": "./extract-code-paths.ts",
     "./favicon": "./favicon.ts",
@@ -71,6 +71,9 @@
     "**/*.ts",
     "!**/*.test.ts"
   ],
+  "scripts": {
+    "prepack": "bun run --cwd ../.. build:viewer-pin"
+  },
   "dependencies": {},
   "devDependencies": {
     "typescript": "~5.8.2"

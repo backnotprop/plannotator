@@ -70,6 +70,18 @@ describe("start: an agent that hangs in initialize can be stopped", () => {
     expect(await gone(await pidOf(out), 6000)).toBe(true);
   }, 15_000);
 
+  it("a launch's startHint goes on an agent that fails initialize, never on a stop or time limit", async () => {
+    const hint = "HINT: the CLI may be old";
+    const exits = AcpClient.start({ command: process.execPath, args: ["-e", "process.exit(3)"], startHint: hint }, handlers, info, { augmentPath: false });
+    await expect(exits).rejects.toThrow(hint);
+    const out = join(dir, "pid-hint-timeout");
+    const hangs = AcpClient.start({ command: process.execPath, args: ["-e", HANG], env: { PID_OUT: out }, startHint: hint }, handlers, info, { initializeTimeoutMs: 500, augmentPath: false });
+    const err = await hangs.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AcpStartAbortedError);
+    expect((err as Error).message).not.toContain(hint);
+    expect(await gone(await pidOf(out), 6000)).toBe(true);
+  }, 15_000);
+
   it('an abort with "kill" rejects the start and kills its process group at once', async () => {
     const out = join(dir, "pid-abort");
     const controller = new AbortController();

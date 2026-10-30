@@ -103,11 +103,36 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
   }));
   const order = new Map(thread.messages.map((m, index) => [m.id, index]));
   targets.sort((a, b) => (order.get(a.message.id) ?? 0) - (order.get(b.message.id) ?? 0));
-  const latest = thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;
+  const latest = wordsMessage(thread);
   const words = targets.findIndex((t) => t.message.id === latest.id || sameSession(t.message, latest));
   if (words < 0) targets.push({ message: latest, questions: [], skip: [], actions: [] });
   else targets = [...targets.slice(0, words), ...targets.slice(words + 1), targets[words]!];
   return targets;
+}
+
+/**
+ * The message the person's words answer: the latest agent message, except
+ * in a thread handed to another session (approval "inbox-tag-handoff"): then
+ * the new owner's latest message after the hand-off, else the hand-off reply
+ * itself (a reply to it is addressed as it is, to the new owner). So the
+ * former owner writing again never takes the person's words back.
+ */
+export function wordsMessage(thread: InboxThread): InboxMessageWire {
+  let handedAt = -1;
+  for (let index = thread.messages.length - 1; index >= 0; index--) {
+    const m = thread.messages[index]!;
+    if (m.author.kind === 'person' && m.handoff && !m.handoff.undone_at && m.to) {
+      handedAt = index;
+      break;
+    }
+  }
+  if (handedAt >= 0) {
+    const handoff = thread.messages[handedAt]!;
+    const owner = handoff.to!.session;
+    const after = thread.messages.slice(handedAt + 1).filter((m) => m.author.kind === 'agent' && m.author.session === owner);
+    return after.at(-1) ?? handoff;
+  }
+  return thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;
 }
 
 /** The reply a message's questions ride: its session's, or its own when it has none. */

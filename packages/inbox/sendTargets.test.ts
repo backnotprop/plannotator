@@ -137,3 +137,25 @@ describe('a retried Send keeps or renews each reply\'s key', () => {
     expect(sendTargetAnswerIds(target!)).toEqual(['a:msg_1/q-msg_1-0', 'a:msg_2/q-msg_2-0', 's:msg_2/q-msg_2-1']);
   });
 });
+
+describe('the words after a hand-off (approval "inbox-tag-handoff")', () => {
+  const person = (id: string, extra: Partial<InboxMessageWire>): InboxMessageWire =>
+    ({ id, thread_id: 'msg_1', author: { kind: 'person' }, body: '', created_at: '2026-10-21T15:56:00.000Z', ...extra }) as unknown as InboxMessageWire;
+  const handoff = (id: string, undone = false) =>
+    person(id, { to: { host: 'claude-code', session: 'ses_new' }, handoff: { from: { host: 'claude-code', session: 'ses_old' }, at: '', ...(undone ? { undone_at: 'x' } : {}) } });
+
+  test('before the new owner writes, the words answer the hand-off reply itself (so they go to the new owner), even when the former owner writes after it', () => {
+    const m = [message('msg_1', 'ses_old', []), handoff('msg_2'), message('msg_3', 'ses_old', [])];
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_2']);
+  });
+
+  test("once the new owner writes, the words answer its latest message; the former owner's picks still go to it", () => {
+    const m = [message('msg_1', 'ses_old', ['picked']), handoff('msg_2'), message('msg_3', 'ses_new', []), message('msg_4', 'ses_old', [])];
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_1', 'msg_3']);
+  });
+
+  test('a hand-off taken back moves nothing: the latest agent writer gets the words, as before', () => {
+    const m = [message('msg_1', 'ses_old', []), handoff('msg_2', true), message('msg_3', 'ses_old', [])];
+    expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_3']);
+  });
+});

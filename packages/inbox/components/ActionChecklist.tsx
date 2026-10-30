@@ -21,6 +21,7 @@ import { useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 're
 import { inboxActionInDraft, inboxActionPersonMark, type InboxQuestion } from '@plannotator/core/inbox-types';
 import { INBOX_ACTION_NOTE_MAX } from '@plannotator/core/inbox-actions';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
+import { CROSS_REPO_REF_PATTERN } from '@plannotator/core/forge-refs';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { ContextMarkdown } from './ContextMarkdown';
 import { actionCardState, type ActionCardState } from '../actions';
@@ -42,6 +43,8 @@ export interface ActionChecklistProps {
   actions: readonly InboxQuestion[];
   /** The agent that asked, as the person sees it ("Claude Code"). */
   agent: string;
+  /** The thread's repo: refs in an item's why link into it. Never in the task (a button): its refs stay plain. */
+  refRepo?: { display: string; host?: string } | null;
   /** No Done (the thread is archived, a test). */
   readOnly?: boolean;
   /** Done or Can't do it into the reply draft (`mark`), or taking it back (`null`). Resolves false when it was refused. */
@@ -65,17 +68,24 @@ function isDoneState(action: InboxQuestion, state: ActionCardState): boolean {
   return state === 'pending' && action.action_result?.outcome === 'done';
 }
 
+const CROSS_REPO_REF_GLOBAL = new RegExp(CROSS_REPO_REF_PATTERN.source, 'g');
+
 /**
  * The task, for its row's toggle (a button): inline markdown as a question's
  * prompt draws it (bold, `code`), but never a link, which cannot sit inside a
  * button: `[label](url)` keeps its label, and a bare or `<…>` URL reads as
- * code. The row's Open button carries a `Where:` link.
+ * code. An `owner/repo#123` ref stays plain text (its `#` escaped). The row's
+ * Open button carries a `Where:` link.
  */
 export function taskMarkdown(prompt: string): string {
   return prompt
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/<(https?:\/\/[^>\s]+)>/g, '`$1`')
-    .replace(/(^|[^`\w])(https?:\/\/[^\s`]+)/g, '$1`$2`');
+    .replace(/(^|[^`\w])(https?:\/\/[^\s`]+)/g, '$1`$2`')
+    // Outside code spans only (an escape inside one would show).
+    .split(/(`[^`]*`)/)
+    .map((part, i) => (i % 2 ? part : part.replace(CROSS_REPO_REF_GLOBAL, (ref) => ref.replace('#', '\\#'))))
+    .join('');
 }
 
 /** A sentence's end, kept: "…appear" gets a period, "…appear." keeps its own. */
@@ -90,7 +100,7 @@ function nextOpen(actions: readonly InboxQuestion[], key: string): string | null
   return order.find((a) => a.key !== key && actionCardState(a) === 'open')?.key ?? null;
 }
 
-export function ActionChecklist({ actions, agent, readOnly = false, onMark }: ActionChecklistProps) {
+export function ActionChecklist({ actions, agent, refRepo = null, readOnly = false, onMark }: ActionChecklistProps) {
   const states = actions.map((a) => actionCardState(a));
   // Replaced items keep their rows (with a "Replaced" chip) but are counted apart, so the header never
   // contradicts the rows: "3 things only you can do · 1 of 3 done · 1 replaced", or, all replaced,
@@ -163,6 +173,7 @@ export function ActionChecklist({ actions, agent, readOnly = false, onMark }: Ac
           <ActionRow
             key={action.key}
             action={action}
+            refRepo={refRepo}
             state={states[i]!}
             agent={agent}
             readOnly={readOnly}
@@ -196,6 +207,7 @@ interface ActionRowProps {
   action: InboxQuestion;
   state: ActionCardState;
   agent: string;
+  refRepo: { display: string; host?: string } | null;
   readOnly: boolean;
   open: boolean;
   onToggle: () => void;
@@ -203,7 +215,7 @@ interface ActionRowProps {
   onMark: (mark: ActionMark | null, from: 'tick' | 'panel') => Promise<boolean>;
 }
 
-function ActionRow({ action, state, agent, readOnly, open, onToggle, toggleRef, onMark }: ActionRowProps) {
+function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, toggleRef, onMark }: ActionRowProps) {
   const facts = action.action ?? { where: null, where_url: null, run: null, watching: null };
   const result = action.action_result ?? null;
   const live = state === 'open';
@@ -369,7 +381,7 @@ function ActionRow({ action, state, agent, readOnly, open, onToggle, toggleRef, 
         />
       )}
       <div className="ib-chk-panel" id={panelId} hidden={!open} data-action-panel="">
-        {action.context && <ContextMarkdown className="ib-body ib-chk-why" data-action-why="" markdown={action.context} messageId={action.message_id} />}
+        {action.context && <ContextMarkdown className="ib-body ib-chk-why" data-action-why="" markdown={action.context} messageId={action.message_id} refRepo={refRepo} />}
         {live && action.stopped !== null && (
           <p className="ib-chk-holds" data-action-stopped="">
             <b>Stopped</b>

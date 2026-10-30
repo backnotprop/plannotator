@@ -62,13 +62,14 @@ function v1Records(entries: Record<string, string>): void {
 const results = (options?: Parameters<typeof refreshInboxNotes>[2]) => refreshInboxNotes(dataDir, e, options).map((r) => `${r.agent}:${r.result}`);
 
 test("every version's block is frozen: a released note's bytes never change without a new version", () => {
-  // v1 (0.28.x, on users' disks), v2 (never released), v3. A change here means notes on disk would read as
+  // v1 (0.28.x, on users' disks), v2 (never released), v3 (0.28.34, on users' disks), v4. A change here means notes on disk would read as
   // the person's edit and never be refreshed again: add a version instead (INBOX_NOTE_VERSION, the old block
   // into INBOX_NOTE_EARLIER_BLOCKS).
   expect([...INBOX_NOTE_EARLIER_BLOCKS, INBOX_NOTE_BLOCK].map(sha)).toEqual([
     "d148fe3c13935975729d19c64323b2ad75c1b2b76b7f22d62178695b8faab628",
     "af390369f084bb0a400a204dcb0d0492d566ece20a74c9c2f69ec543cfb9604a",
     "a37140d273d9e835a2c82de5dc920d79913e87e3b93d019986ceeaced1064e4e",
+    "9646e5636c62bc434e77889323b2aa2a5b08d5fd6d1fc5d1950764a13fbd2200",
   ]);
   expect(INBOX_NOTE_EARLIER_BLOCKS[0]).toBe(V1_BLOCK);
 });
@@ -102,6 +103,18 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
     writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes: { codex: { path: realpathSync(path), created: false, version: 2, block_sha256: sha(v2), at: "2026-10-27T00:00:00.000Z" } } }));
     expect(results()).toEqual(["codex:refreshed"]);
     expect(read(path)).toBe(`${INBOX_NOTE_BLOCK}\n`);
+  });
+
+  test("a v3 block (0.28.34, on users' disks) is Plannotator's own too: refreshed to this version", () => {
+    const path = file(".codex", "AGENTS.md");
+    // The frozen v3 block, whose hash the test above pins to what v3 builds wrote.
+    const v3 = INBOX_NOTE_EARLIER_BLOCKS[2]!;
+    expect(v3).toContain("start v3 ·");
+    write(path, `# Mine\n\n${v3}\n`);
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes: { codex: { path: realpathSync(path), created: false, version: 3, block_sha256: sha(v3), at: "2026-10-27T00:00:00.000Z" } } }));
+    expect(results()).toEqual(["codex:refreshed"]);
+    expect(read(path)).toBe(`# Mine\n\n${INBOX_NOTE_BLOCK}\n`);
   });
 
   test("no block (the person removed the note): never put back", () => {

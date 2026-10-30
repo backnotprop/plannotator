@@ -251,6 +251,8 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
       return { text: 'Connected', tone: 'on' };
     case 'removed':
       return { text: 'Removed outside Plannotator', tone: 'bad' };
+    case 'elsewhere':
+      return { text: 'Connected in another folder', tone: 'off' };
     case 'foreign':
       return { text: 'Has its own entry', tone: 'bad' };
     case 'unreadable':
@@ -339,7 +341,11 @@ function AgentGroup({
         the <code>plannotator_inbox</code> tool
       </>
     ) : reach.kind === 'mcp' ? (
-      reach.state === 'removed' ? (
+      reach.state === 'elsewhere' ? (
+        <span data-reach-elsewhere="">
+          Connected in <code>{reach.path}</code>. Turn on to move it here.
+        </span>
+      ) : reach.state === 'removed' ? (
         <>
           <code>plannotator-inbox</code> is no longer in <code>{reach.path}</code>. Plannotator won't add it back on its own; turn this on to add it.
         </>

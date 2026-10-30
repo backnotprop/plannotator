@@ -42,7 +42,9 @@ describe('iframe isolation', () => {
     const iframeStart = source.indexOf('<iframe');
     expect(iframeStart).toBeGreaterThan(0);
     const iframe = source.slice(iframeStart, source.indexOf('/>', iframeStart));
-    expect(iframe).toContain('sandbox: HTML_VIEWER_SANDBOX');
+    // The `sandbox` prop (a host's narrower value) defaults to that sandbox.
+    expect(iframe).toContain('sandbox: srcdocSandbox(sandbox, hostNavigates)');
+    expect(source).toContain('sandbox = HTML_VIEWER_SANDBOX,');
     expect(iframe).not.toMatch(/\ballow\s*[:=]/);
     // Only one iframe element in the viewer: the srcdoc/src branches share it.
     expect(source.indexOf('<iframe', iframeStart + 1)).toBe(-1);

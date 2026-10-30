@@ -16,7 +16,7 @@
  * (`<pre class="mermaid">`) are drawn beforehand with the Guide tab's engine.
  */
 
-import { renderMermaid } from "./diagram";
+import { renderMermaid } from "./diagram-loader";
 
 /** Theme colors the page can use, read from VS Code's variables. */
 const THEME_VARS: Array<[string, string, string]> = [

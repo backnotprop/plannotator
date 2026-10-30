@@ -766,6 +766,23 @@ export function DecisionMode(props: DecisionModeProps) {
     return reasons;
   };
 
+  /**
+   * The close question let go (Escape, Keep deciding): its buttons leave the page, so focus goes back to the Close
+   * button that asked it, never to the page itself (approval "inbox-keyboard-shortcuts", consistent Escape).
+   */
+  // Keep deciding puts focus on × once the confirm has gone (the effect below runs after that render, however late:
+  // a frame timer could run before it on a slow machine and focus a × still behind the confirm).
+  const focusCloseAfterConfirm = useRef(false);
+  const keepDeciding = () => {
+    focusCloseAfterConfirm.current = true;
+    setConfirm(false);
+  };
+  useEffect(() => {
+    if (confirm || !focusCloseAfterConfirm.current) return;
+    focusCloseAfterConfirm.current = false;
+    document.querySelector<HTMLElement>('[data-decision-mode] [data-decision-close]')?.focus();
+  }, [confirm]);
+
   const requestClose = () => {
     const now = closeReasons();
     if (now.half + now.ready + now.failed + now.drafts + now.sending > 0 || now.words) setConfirm(true);
@@ -813,7 +830,7 @@ export function DecisionMode(props: DecisionModeProps) {
   /** Escape: one layer at a time (a box with words in it is a layer: it lets go of focus first). */
   const escape = () => {
     if (lightbox) return;
-    if (confirm) return setConfirm(false);
+    if (confirm) return keepDeciding();
     if (fieldOpenRef.current?.()) return;
     if (overview) return setOverview(false);
     requestClose();
@@ -992,7 +1009,7 @@ export function DecisionMode(props: DecisionModeProps) {
           <div className="ib-dm-loading">Reading what waits on you…</div>
         )}
       </div>
-      {confirm && <CloseConfirm reasons={closeReasons()} closing={closing} onKeep={() => setConfirm(false)} onKeepDraft={keepDraft} onSend={sendAnswered} />}
+      {confirm && <CloseConfirm reasons={closeReasons()} closing={closing} onKeep={keepDeciding} onKeepDraft={keepDraft} onSend={sendAnswered} />}
       <div className="ib-sr" aria-live="polite" data-decision-live="">
         {said}
       </div>
@@ -1001,7 +1018,9 @@ export function DecisionMode(props: DecisionModeProps) {
           <ImageLightbox
             src={lightbox.pictures[lightbox.index]!.src}
             alt={lightbox.pictures[lightbox.index]!.name}
-            images={lightbox.pictures.length > 1 ? lightbox.pictures.map((p) => ({ src: p.src, alt: p.name })) : undefined}
+            // Each picture by its choice ("B · Quiet hover menu"), not its file's route; a finger swipes through them (approval "inbox-image-swipe").
+            images={lightbox.pictures.length > 1 ? lightbox.pictures.map((p) => ({ src: p.src, alt: p.alt ?? p.name, name: p.name })) : undefined}
+            swipe
             onClose={() => setLightbox(null)}
           />,
           dialogRef.current ?? document.body,
