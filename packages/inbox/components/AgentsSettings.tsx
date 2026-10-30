@@ -543,7 +543,19 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions]);
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.from_shell]);
+  // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
+  useEffect(() => {
+    if (!launch?.enabled) return;
+    let live = true;
+    inboxApi
+      .launchSettingsRead()
+      .then((read) => live && setLaunchState(read.launch))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [launch?.enabled]);
   const toggleFull = async () => {
     if (!launchState || launchBusy) return;
     setLaunchBusy(true);
@@ -559,8 +571,17 @@ export function AgentsSettings({
   const launchRow = launchState?.enabled ? (
     <Row
       k="Sessions you start"
-      v={launchState.full_permissions ? 'Full permissions' : 'Your default mode'}
-      sub="Start new sessions with full permissions: Claude Code you start from New message never stops to ask (bypass mode). Applies to the next session you start."
+      v={launchState.full_permissions ? 'Full permissions' : 'Auto mode'}
+      sub={
+        <>
+          Start new sessions with full permissions: Claude Code you start from New message never stops to ask (bypass mode). Otherwise it starts in auto mode. Applies to the next session you start.
+          {launchState.from_shell && (
+            <span className="block" data-launch-from-shell="">
+              Follows your shell's setting until you change it.
+            </span>
+          )}
+        </>
+      }
       data={{ 'data-launch-full-row': '' }}
       r={<Switch on={launchState.full_permissions} label="Start new sessions with full permissions" busy={launchBusy} onClick={() => void toggleFull()} />}
     />

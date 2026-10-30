@@ -69,11 +69,6 @@
 .pc-modes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .pn-inbox .pc-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 28%, transparent); text-underline-offset: 3px; cursor: pointer; }
 .pn-inbox .pc-link:hover { text-decoration-color: currentColor; }
-/* Off: plainly not a link next to the live Auto mode (no underline weight, faded, the not-allowed cursor). */
-.pn-inbox .pc-link[aria-disabled="true"] { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); text-decoration-style: dotted; text-decoration-color: color-mix(in oklch, var(--muted-foreground) 45%, transparent); cursor: not-allowed; }
-/* Why it is off: a line of its own under the mode line, in the flow (never over the answers). */
-.pc-why-off { margin: 6px 0 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
-.pc-why-off[hidden] { display: none; }
 .pc-foot .ib-error { margin: 10px 0 0; }
 
 .pn-inbox .pc-reason textarea { display: block; width: 100%; min-height: 64px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); resize: vertical; outline: none; }

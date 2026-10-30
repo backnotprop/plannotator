@@ -32,7 +32,6 @@ import { AuthorMark, Icon } from '../icons';
 import { useMinuteClock } from './Undelivered';
 
 /** Why Full permissions is off: the session did not start with them allowed. */
-export const FULL_PERMISSIONS_OFF = 'Start the session with full permissions allowed to use this';
 
 /** How long the answers ignore activation after the card appears or takes focus (not from a pointer). */
 export const ARM_MS = 600;
@@ -338,7 +337,6 @@ export function PermissionCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'answers' | 'reason' | 'confirmFull'>('answers');
-  const [why, setWhy] = useState(false);
   const [stopping, setStopping] = useState(false);
   const onceRef = useRef<HTMLButtonElement>(null);
   const live = waiting && run?.state === 'waiting_answer';
@@ -495,34 +493,18 @@ export function PermissionCard({
               </button>
             </div>
             {labels.includes(INBOX_PERMISSION_AUTO) && (
-              <>
-                <p className="pc-modes">
-                  <span>{phone ? 'Or allow and switch to' : 'Or allow this and switch the session to'}</span>
-                  <button type="button" className="pc-link" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_AUTO))} data-perm-mode="auto">
-                    Auto mode
-                  </button>
-                  <button
-                    type="button"
-                    className="pc-link"
-                    aria-disabled={fullOn ? undefined : true}
-                    aria-describedby={fullOn ? undefined : `pc-why-${message.id}`}
-                    disabled={busy}
-                    onClick={fullOn ? act(full) : () => setWhy((v) => !v)}
-                    onMouseEnter={() => !fullOn && setWhy(true)}
-                    onMouseLeave={() => setWhy(false)}
-                    onFocus={() => !fullOn && setWhy(true)}
-                    onBlur={() => setWhy(false)}
-                    data-perm-mode="full"
-                  >
+              <p className="pc-modes">
+                <span>{phone ? 'Or allow and switch to' : 'Or allow this and switch the session to'}</span>
+                <button type="button" className="pc-link" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_AUTO))} data-perm-mode="auto">
+                  Auto mode
+                </button>
+                {/* Every launch starts with --allow-dangerously-skip-permissions: Full is a choice of each of its questions. */}
+                {fullOn && (
+                  <button type="button" className="pc-link" disabled={busy} onClick={act(full)} data-perm-mode="full">
                     Full permissions
                   </button>
-                </p>
-                {!fullOn && (
-                  <p id={`pc-why-${message.id}`} role="note" className="pc-why-off" hidden={!why} data-perm-full-off="">
-                    {FULL_PERMISSIONS_OFF}
-                  </p>
                 )}
-              </>
+              </p>
             )}
           </>
         )}

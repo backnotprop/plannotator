@@ -158,6 +158,11 @@ function main() {
       setTimeout(() => process.exit(1), 40_000);
       return;
     }
+    // An account or a CLI without auto mode.
+    if (cfg.refuseAuto && flag("--permission-mode") === "auto") {
+      process.stderr.write("Error: Auto mode is not available for your account. Choose another --permission-mode.\n");
+      process.exit(1);
+    }
     const background = () => {
       const sessionId = crypto.randomUUID();
       const id = sessionId.replace(/-/g, "").slice(0, 8);
@@ -267,6 +272,11 @@ async function session(sessionId) {
 
   /** One permission prompt, as Claude Code plays it: the hook, then allow, deny, or blocked until answered locally. */
   const prompt = async (spec) => {
+    // Bypass mode: Claude Code asks nothing, and runs the tool.
+    if (agent.permissionMode === "bypassPermissions") {
+      fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output: null, exitCode: null, outcome: "ran", asked: false, ms: 0 })}\n`);
+      return { tool: spec.tool_name, outcome: "ran" };
+    }
     const event = {
       session_id: sessionId,
       transcript_path: path.join(STATE, `${sessionId}.jsonl`),

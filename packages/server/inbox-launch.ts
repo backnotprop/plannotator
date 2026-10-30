@@ -28,7 +28,9 @@
  * person's reply to a launched session that is not live respawns it
  * (`claude respawn`), once per reply; one that does not take reads failed.
  *
- * The person's login shell is read for a start only. Every other `claude`
+ * The person's login shell is read for a launch (its full permissions while
+ * the switch was never set, then its start) and for Settings → Agents while
+ * the switch was never set (what it follows). Every other `claude`
  * call runs with the Inbox's own env through the launch filter
  * (`launchPlainEnv`), and none of them kills a process group.
  *
@@ -39,6 +41,7 @@
  *   POST /api/inbox/launch/:id/delete    stop, rm, and the launch folder; the thread stays
  *   POST /api/inbox/launch/:id/retry     Try again after a failed start, respawn or connection
  *   POST /api/inbox/launch/settings      `{ full_permissions }` (Settings → Agents)
+ *   GET  /api/inbox/launch/settings      the switch as it stands (never set: what the login shell says)
  *
  * And one route for the launched session's own permission hook, guarded like
  * the bridge (inbox-launch-permission.ts):
@@ -59,7 +62,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentVersionRun, claudeCodeInboxToolOn, claudeCodePluginEnabled, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { claudeAttachCommand, claudeTrustCommand, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost } from "./inbox-launch-claude";
-import { launchPlainEnv, launchSettingsEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { launchFullPermissions, launchPlainEnv, launchSettingsEnv, launchSpawnEnv, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
 import { createLaunchPermissions } from "./inbox-launch-permission";
 
 const HOST = "claude-code";
@@ -155,6 +158,21 @@ export function createInboxLaunch(options: {
    * without running a shell.
    */
   let loginPath: string[] = [];
+
+  /**
+   * The person's login shell, read for a launch (its full permissions, then its start) and for Settings →
+   * Agents while the switch was never set (what it follows). Each read is kept: its PATH for the plain env,
+   * and whether it runs Claude in bypass mode.
+   */
+  let shellBypass: { value: boolean; at: number } | null = null;
+  const readLogin = async (): Promise<LaunchEnv> => {
+    const login = await options.loginEnv();
+    if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
+    shellBypass = { value: shellSkipsPermissions(login), at: now() };
+    return login;
+  };
+  /** A launch's login env read when it was made (to decide its full permissions), for its first start: one read per launch. */
+  const readForLaunch = new Map<string, { login: LaunchEnv; at: number }>();
   const environment = async (): Promise<AgentEnvironment> =>
     createAgentEnvironmentFor({
       platform: options.platform,
@@ -387,9 +405,10 @@ export function createInboxLaunch(options: {
     memo.busySeen = false;
     starting.add(launch.id);
     try {
-      // The person's own setup, read for this start only.
-      const login = await options.loginEnv();
-      if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
+      // The person's own setup, read for this start only (the first start uses the read made with the launch).
+      const early = readForLaunch.get(launch.id);
+      readForLaunch.delete(launch.id);
+      const login = early?.login ?? (await readLogin());
       // Full permissions from the launch record (fixed when it was made), never the live switch: a Try again
       // after the switch changed must start the session the card describes (inboxLaunchFullPermissions).
       const fullPermissions = inboxLaunchFullPermissions(launch);
@@ -397,8 +416,14 @@ export function createInboxLaunch(options: {
       const settingsPath = writeSettings(launch, login, fullPermissions, model);
       const name = root.thread_name ?? root.subject ?? "Inbox";
       const startEnvironment = createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: launchSpawnEnv(login, fullPermissions) });
-      const result = await host.start({ folder: launch.folder, shownFolder: options.displayFolder(launch.folder), name, settingsPath, fullPermissions, environment: startEnvironment });
+      // Full permissions: bypass mode from the start. Otherwise auto mode; prompts it still raises come to the thread.
+      const mode = fullPermissions ? "bypassPermissions" : "auto";
+      const result = await host.start({ folder: launch.folder, shownFolder: options.displayFolder(launch.folder), name, settingsPath, mode, environment: startEnvironment });
       startLog(launch.id, result.output);
+      if (result.modeRefused) {
+        startLog(launch.id, `auto mode refused, started with Claude Code's default mode: ${result.modeRefused}`);
+        log(`Inbox launch ${launch.id}: auto mode refused (${result.modeRefused}); started with Claude Code's default mode`);
+      }
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
         if (result.ok) {
@@ -474,12 +499,28 @@ export function createInboxLaunch(options: {
 
   // ── Routes ──
 
-  const settingsState = () => ({ enabled: enabled(), full_permissions: config().fullPermissions });
+  /**
+   * Settings → Agents' switch: the person's choice once set; never set, what their login shell says
+   * (`from_shell`: on because the shell runs Claude in bypass mode). `settingsState` uses the last read;
+   * the window's GET reads the shell again when that read is older than a minute.
+   */
+  const settingsState = () => {
+    const setting = config().fullPermissions;
+    const fromShell = setting === null && shellBypass?.value === true;
+    return { enabled: enabled(), full_permissions: setting ?? fromShell, from_shell: fromShell };
+  };
+  const SHELL_READ_FRESH_MS = 60_000;
 
   const route = async (req: Request, path: string, via: "local" | "tailnet" | string): Promise<Response | null> => {
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry))?$/.exec(path);
     if (!match) return null;
     if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+    // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
+    if (req.method === "GET" && match[1] === "settings" && !match[2]) {
+      if (via === "tailnet") return json({ error: "Only from this computer.", code: "owner_only" }, 403);
+      if (config().fullPermissions === null && (!shellBypass || now() - shellBypass.at > SHELL_READ_FRESH_MS)) await readLogin();
+      return json({ launch: settingsState() });
+    }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
     const body = await options.readBody(req);
     if (checkServerSession(body, options.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -611,7 +652,16 @@ export function createInboxLaunch(options: {
       lastAvailable = ok;
       if (!ok.ok) throw new InboxError("agent_unavailable", `${AGENT_NAME} can't be started here: ${ok.reason}. Nothing was sent.`);
       const id = inboxId("lch");
-      const launch: InboxLaunchRecord = { id, agent: HOST, session_ref: null, folder: project.root, scratch: false, started_at: new Date(now()).toISOString(), ...(config().fullPermissions ? { full_permissions: true } : {}) };
+      // Full permissions, fixed for this launch: the switch once set; never set, the login shell (read now, and reused by the start).
+      const setting = config().fullPermissions;
+      let login: LaunchEnv | null = null;
+      if (setting === null) {
+        login = await readLogin();
+        for (const [key, read] of readForLaunch) if (now() - read.at > 10 * 60_000) readForLaunch.delete(key);
+        readForLaunch.set(id, { login, at: now() });
+      }
+      const full = launchFullPermissions(setting, login);
+      const launch: InboxLaunchRecord = { id, agent: HOST, session_ref: null, folder: project.root, scratch: false, started_at: new Date(now()).toISOString(), ...(full ? { full_permissions: true } : {}) };
       return { project, to: { host: HOST, session: `launch:${id}` }, launch };
     },
 

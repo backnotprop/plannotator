@@ -43,6 +43,21 @@ export const CLAUDE_SKIP_PERMISSIONS_ENV = "CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SK
 
 export type LaunchEnv = Record<string, string>;
 
+/** Whether an env turns Claude Code's bypass mode on (the skip-permissions export set to a true value, as Claude reads it). */
+export function shellSkipsPermissions(env: Readonly<LaunchEnv> | null): boolean {
+  const value = env?.[CLAUDE_SKIP_PERMISSIONS_ENV]?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+/**
+ * Whether a launch starts with full permissions (`launch.full_permissions`, fixed when it is made): the
+ * person's Settings switch once they set it, either way; never set, their login shell's own export, so a
+ * person whose shell already runs Claude in bypass mode never gets a prompt from a launch.
+ */
+export function launchFullPermissions(setting: boolean | null, login: Readonly<LaunchEnv> | null): boolean {
+  return setting ?? shellSkipsPermissions(login);
+}
+
 /** `env` without Plannotator's names, Claude's per-session ones and the skip-permissions export; that is set only when `fullPermissions`. */
 export function launchSpawnEnv(env: Readonly<LaunchEnv>, fullPermissions = false): LaunchEnv {
   const out = Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV));
@@ -67,17 +82,15 @@ export function launchSettingsEnv(
 ): LaunchEnv {
   const out: LaunchEnv = {};
   for (const [name, value] of Object.entries(login)) {
-    // Bypass mode comes from the Settings switch alone, never from a shell export.
+    // Bypass mode comes from the launch record alone (`launchFullPermissions`), never copied from the shell.
     if (name.startsWith("CLAUDE_") && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV) out[name] = value;
   }
   if (input.dataDir) out.PLANNOTATOR_DATA_DIR = input.dataDir;
   out.PLANNOTATOR_LAUNCH = input.launchId;
   out.PLANNOTATOR_LAUNCH_KEY = input.key;
-  if (input.fullPermissions) {
-    out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
-    // The permission hook may switch this session back to Full permissions (it started with them).
-    out[INBOX_LAUNCH_FULL_PERMISSIONS_ENV] = "1";
-  }
+  // Every launch starts with --allow-dangerously-skip-permissions: its permission hook may switch it to Full permissions.
+  out[INBOX_LAUNCH_FULL_PERMISSIONS_ENV] = "1";
+  if (input.fullPermissions) out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
   return out;
 }
 

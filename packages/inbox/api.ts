@@ -318,8 +318,10 @@ export interface SettingsModel {
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). */
 export interface InboxLaunchSettings {
   enabled: boolean;
-  /** "Start new sessions with full permissions": Claude Code starts in bypass mode. */
+  /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
   full_permissions: boolean;
+  /** Never set by the person, and on because their login shell runs Claude in bypass mode. */
+  from_shell?: boolean;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
@@ -949,6 +951,8 @@ export const inboxApi = {
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
   launchDelete: (launchId: string) => post<{ ok: true }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
   launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
+  /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
+  launchSettingsRead: () => get<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(inboxUrl(`/messages/${encodeURIComponent(messageId)}/to`), { to }),

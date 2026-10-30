@@ -91,7 +91,7 @@ describe("the permission route", () => {
     expect(question.reply_to).toBe(root.id);
     expect(question.author).toEqual({ kind: "agent", host: "claude-code", session: `perm:${SESSION}`, name: "Claude Code" });
     expect(question.wakes).toBeUndefined();
-    expect(store.questionsOf(question.id)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode"]);
+    expect(store.questionsOf(question.id)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Allow and switch to Full permissions"]);
     // The same request again (the hook's first call answered, but the answer was lost): the same question.
     const again = await call({ key: KEY, request_id: "req-00000001", event: EVENT });
     expect(again.body.message_id).toBe(question.id);
@@ -127,7 +127,7 @@ describe("the permission route", () => {
     const event = { ...EVENT, tool_input: { command } };
     const { body } = await call({ key: KEY, request_id: "req-00000012", event });
     expect(body.status).toBe("waiting");
-    expect(store.questionsOf(body.message_id!).map((q) => q.choices.map((c) => c.label))).toEqual([["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode"]]);
+    expect(store.questionsOf(body.message_id!).map((q) => q.choices.map((c) => c.label))).toEqual([["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Allow and switch to Full permissions"]]);
     answer(body.message_id!, { selected: ["Deny"] });
     expect((await call({ key: KEY, request_id: "req-00000012", event, message_id: body.message_id })).body).toMatchObject({ status: "decided", choice: "deny" });
   });
@@ -169,14 +169,14 @@ describe("the permission route", () => {
     expect(response.body.status).toBe("withdrawn");
   });
 
-  test("the mode switches: Auto mode decides auto; Full permissions is offered and decided only in a launch with full permissions", async () => {
+  test("the mode switches: Auto mode decides auto; Full permissions is offered in every launch (each starts with bypass allowed) and confirmed the first time", async () => {
     const plain = setup();
     const asked = await plain.call({ key: KEY, request_id: "req-00000018", event: EVENT });
-    expect(plain.store.questionsOf(asked.body.message_id!)[0]!.choices.map((c) => c.label)).not.toContain("Allow and switch to Full permissions");
     plain.answer(asked.body.message_id!, { selected: ["Allow and switch to Auto mode"] });
     expect((await plain.call({ key: KEY, request_id: "req-00000018", event: EVENT, message_id: asked.body.message_id })).body).toMatchObject({ status: "decided", choice: "auto" });
 
-    const full = setup({ fullPermissions: true });
+    // A launch that did not start in bypass mode still offers it.
+    const full = setup();
     const fullAsked = await full.call({ key: KEY, request_id: "req-00000019", event: EVENT });
     expect(full.store.questionsOf(fullAsked.body.message_id!)[0]!.choices.map((c) => c.label).slice(-1)).toEqual(["Allow and switch to Full permissions"]);
     // The first time in the session, Full permissions needs the person's confirmation (the store's rule, not only the window's).

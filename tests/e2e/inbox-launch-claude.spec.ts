@@ -339,7 +339,8 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   const start = await waitFor('claude --bg', () => fake.starts()[0]);
   // The thread was written before --bg ran, and nothing of the message or the key is on argv.
   expect(start.threadExisted).toBe(true);
-  expect(start.argv).toEqual(['--bg', '--name', expect.any(String), '--settings', start.settingsPath!]);
+  // Every launch may switch to bypass later (the card's Full permissions); with the switch never set and no shell export, it starts in auto mode.
+  expect(start.argv).toEqual(['--bg', '--name', expect.any(String), '--settings', start.settingsPath!, '--allow-dangerously-skip-permissions', '--permission-mode', 'auto']);
   expect(start.argv.join(' ')).not.toContain('fuzzy');
   expect(start.argv.join(' ')).not.toContain(start.settings!.env!.PLANNOTATOR_LAUNCH_KEY!);
   expect(start.cwd).toBe(world.projects.plannotator);

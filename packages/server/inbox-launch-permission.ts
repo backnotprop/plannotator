@@ -41,7 +41,6 @@ import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
-  inboxLaunchFullPermissions,
   inboxPermissionAnswer,
   inboxPermissionQuestion,
   inboxPermissionSession,
@@ -198,15 +197,15 @@ export function createLaunchPermissions(options: {
     options.onChange();
   };
 
-  /** How a launch's questions read paths, and whether its session can switch to Full permissions. */
-  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: inboxLaunchFullPermissions(root.launch!) });
+  /** How a launch's questions read paths. Every launch starts with --allow-dangerously-skip-permissions: Full permissions is always a choice. */
+  const launchOptions: InboxPermissionOptions = { shownPath: options.displayFolder, fullPermissions: true };
 
   /** What the Inbox found at a file tool's path: a Write's file exists, does not, or is not known; where a link points. */
   type Target = Pick<InboxPermissionOptions, "overwrite" | "linksTo">;
 
   /** The question this prompt asks in a launch's thread. */
   const questionFor = (root: InboxMessage, event: InboxPermissionEvent, target: Target = {}): InboxPermissionQuestion =>
-    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root), ...target });
+    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...launchOptions, ...target });
 
   /** A file tool's path now (the card says "overwrite" or "create", and where a link points); nothing when it cannot tell. */
   const targetNow = async (root: InboxMessage, event: InboxPermissionEvent): Promise<Target> => {
@@ -303,7 +302,7 @@ export function createLaunchPermissions(options: {
       const event = readInboxPermissionEvent(body.event);
       if (!event) return json({ error: "event: Claude Code's PermissionRequest input.", code: "validation_error" }, 400);
       const requestId = typeof body.request_id === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.request_id) ? body.request_id : null;
-      const answerOptions = optionsFor(root);
+      const answerOptions = launchOptions;
       let messageId: string;
       if (typeof body.message_id === "string") {
         const message = store.message(body.message_id);

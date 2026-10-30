@@ -85,6 +85,20 @@ export function agentByShort(agents: readonly ClaudeAgent[], short: string): Cla
 
 export type ClaudeStartFailure = { code: "untrusted" | "failed"; text: string };
 
+/** The permission mode a launch starts in: bypass with full permissions, else auto (the person's chosen default for a launch). */
+export type ClaudeLaunchMode = "bypassPermissions" | "auto";
+
+/**
+ * A start Claude refused because of its permission mode (an account or a CLI without auto mode): its output
+ * names the mode. Such a start is made again with no `--permission-mode` (Claude's own default).
+ */
+export function refusedForMode(result: Pick<AgentRunResult, "exitCode" | "timedOut" | "stdout" | "stderr">): boolean {
+  if (result.exitCode === 0 || result.timedOut) return false;
+  const output = `${result.stderr}\n${result.stdout}`;
+  if (/workspace not trusted|not a trusted/i.test(output)) return false;
+  return /permission[- ]mode|\bauto\b[^\n]*\bmode\b|\bmode\b[^\n]*\bauto\b/i.test(output);
+}
+
 /** Why `claude --bg` did not start a session, in words for the run line (screen 14). */
 export function startFailureOf(result: Pick<AgentRunResult, "exitCode" | "timedOut" | "stdout" | "stderr">, folder: string): ClaudeStartFailure {
   const output = `${result.stderr}\n${result.stdout}`;
@@ -134,23 +148,33 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
     agents,
     /**
      * `claude --bg` in `folder` with the launch's settings file, then the full
-     * session id. `fullPermissions` adds bypass mode as the only flag; nothing
-     * else goes on argv. A failure names the folder as `shownFolder` (`~/…`).
+     * session id. Every launch may switch to bypass mode later
+     * (`--allow-dangerously-skip-permissions`: the card's Full permissions) and
+     * starts in `mode`; nothing else goes on argv. Auto mode refused (an
+     * account or a CLI without it): started again with no mode, and
+     * `modeRefused` says why. A failure names the folder as `shownFolder` (`~/…`).
      */
-    async start(input: { folder: string; shownFolder: string; name: string; settingsPath: string; fullPermissions: boolean; environment: AgentEnvironment }): Promise<
-      ({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string }
+    async start(input: { folder: string; shownFolder: string; name: string; settingsPath: string; mode: ClaudeLaunchMode; environment: AgentEnvironment }): Promise<
+      ({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }
     > {
       // A name that starts with "-" would read as a flag.
       const name = input.name.replace(/^-+/, "").trim() || "Inbox";
-      const argv = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.fullPermissions ? ["--permission-mode", "bypassPermissions"] : [])];
-      const { result, missing } = await run(argv, input.folder, START_TIMEOUT_MS, input.environment);
-      const output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
+      const base = ["--bg", "--name", name, "--settings", input.settingsPath, "--allow-dangerously-skip-permissions"];
+      let { result, missing } = await run([...base, "--permission-mode", input.mode], input.folder, START_TIMEOUT_MS, input.environment);
+      let output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
+      let modeRefused: string | undefined;
+      if (input.mode === "auto" && !missing && refusedForMode(result)) {
+        modeRefused = startFailureOf(result, input.shownFolder).text;
+        ({ result, missing } = await run(base, input.folder, START_TIMEOUT_MS, input.environment));
+        output = `${output}\n[auto mode refused; started again with no --permission-mode]\n${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
+      }
+      const more = modeRefused ? { modeRefused } : {};
       const started = result.exitCode === 0 ? parseBackgrounded(result.stdout) : null;
-      if (!started) return { ok: false, missing, ...startFailureOf(result, input.shownFolder), output };
+      if (!started) return { ok: false, missing, ...startFailureOf(result, input.shownFolder), output, ...more };
       // The supervisor lists the session as soon as `--bg` returns; a short retry covers a busy one.
       for (let attempt = 0; attempt < 5; attempt++) {
         const found = agentByShort((await agents(input.folder)) ?? [], started.short);
-        if (found) return { ok: true, session: found.sessionId, short: started.short, output };
+        if (found) return { ok: true, session: found.sessionId, short: started.short, output, ...more };
         await Bun.sleep(400);
       }
       // Never leave it running unseen (Try again would start a second one): stop and remove it first.

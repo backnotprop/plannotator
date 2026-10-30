@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CLAUDE_SKIP_PERMISSIONS_ENV, createLoginEnv, launchPlainEnv, launchSettingsEnv, launchSpawnEnv, parseMarkedEnv } from "./inbox-launch-env";
+import { CLAUDE_SKIP_PERMISSIONS_ENV, createLoginEnv, launchFullPermissions, launchPlainEnv, launchSettingsEnv, launchSpawnEnv, parseMarkedEnv } from "./inbox-launch-env";
 
 const login = {
   PATH: "/usr/bin:/bin",
@@ -51,7 +51,8 @@ describe("launchPlainEnv", () => {
 describe("launchSettingsEnv", () => {
   test("copies the shell's own CLAUDE_* values but never a session's, and adds the launch's markers", () => {
     const env = launchSettingsEnv(login, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false });
-    expect(env).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CONFIG_DIR: "/Users/me/.claude-work", PLANNOTATOR_LAUNCH: "lch_1", PLANNOTATOR_LAUNCH_KEY: "k" });
+    // Every launch may switch to Full permissions (it starts with them allowed): the hook's mark is always there.
+    expect(env).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CONFIG_DIR: "/Users/me/.claude-work", PLANNOTATOR_LAUNCH: "lch_1", PLANNOTATOR_LAUNCH_KEY: "k", PLANNOTATOR_LAUNCH_FULL_PERMISSIONS: "1" });
   });
 
   test("a non-default data dir and full permissions go in the file", () => {
@@ -62,7 +63,27 @@ describe("launchSettingsEnv", () => {
     expect(env.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBe("1");
   });
 
-  test("bypass mode comes from the switch alone: the shell's own skip-permissions export is dropped while it is off", () => {
+  test("full permissions: the switch once set wins either way; never set, the login shell's own skip-permissions export decides", () => {
+    const cases: [boolean | null, string | undefined, boolean][] = [
+      [null, undefined, false],
+      [null, "1", true],
+      [null, "true", true],
+      [null, "0", false],
+      [null, "", false],
+      [true, undefined, true],
+      [true, "1", true],
+      [false, undefined, false],
+      [false, "1", false],
+    ];
+    for (const [setting, shell, full] of cases) {
+      const env = shell === undefined ? { ...login } : { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: shell };
+      expect([setting, shell, launchFullPermissions(setting, env)]).toEqual([setting, shell, full]);
+    }
+    // No shell read at all (the switch set): only the switch.
+    expect(launchFullPermissions(null, null)).toBe(false);
+  });
+
+  test("bypass mode comes from the launch record alone: the shell's own skip-permissions export is never copied while it is off", () => {
     const shell = { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" };
     expect(launchSettingsEnv(shell, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false })[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
   });

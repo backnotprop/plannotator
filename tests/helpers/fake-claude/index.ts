@@ -24,6 +24,8 @@ export interface FakeClaudeConfig {
   version?: string;
   /** `untrusted`: `--bg` fails with Claude's untrusted-folder error. `slow`: it never answers in time. */
   fault?: "untrusted" | "slow" | null;
+  /** `--bg --permission-mode auto` fails as Claude does for an account or a CLI without auto mode. */
+  refuseAuto?: boolean;
   /** How long a turn takes before the answer (ms, default 800). */
   workMs?: number;
   /** Keep the turn running until cleared. */
@@ -62,6 +64,8 @@ export interface FakePermissionResult {
   output: { hookSpecificOutput?: { hookEventName?: string; decision?: { behavior: string; updatedInput?: unknown; updatedPermissions?: unknown[]; message?: string } } } | null;
   exitCode: number | null;
   outcome: "ran" | "denied" | "local" | "blocked";
+  /** False when the session's mode asked nothing (bypass mode). */
+  asked?: boolean;
   ms: number;
 }
 
@@ -100,6 +104,8 @@ export interface FakeClaude {
   osascript(): string[][];
   /** How many times the stand-in login shell ran (the Inbox reads it once per start). */
   logins(): number;
+  /** More names the stand-in login shell exports (a person's .zshrc), or none. */
+  setLoginExports(vars: Record<string, string> | null): void;
   /** The ids of the commands sessions took, in order. */
   delivered(): string[];
   /** Each permission prompt a session played, in order. */
@@ -133,7 +139,7 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
   const shell = join(bin, "login-shell");
   writeFileSync(
     shell,
-    `#!/bin/sh\necho run >> ${q(join(state, "logins.log"))}\n${FAKE_LOGIN_CLAUDE_VALUE.name}=${q(FAKE_LOGIN_CLAUDE_VALUE.value)}\nexport ${FAKE_LOGIN_CLAUDE_VALUE.name}\nPATH=${q(bin)}:"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`,
+    `#!/bin/sh\necho run >> ${q(join(state, "logins.log"))}\n[ -f ${q(join(state, "login-exports.sh"))} ] && . ${q(join(state, "login-exports.sh"))}\n${FAKE_LOGIN_CLAUDE_VALUE.name}=${q(FAKE_LOGIN_CLAUDE_VALUE.value)}\nexport ${FAKE_LOGIN_CLAUDE_VALUE.name}\nPATH=${q(bin)}:"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`,
     { mode: 0o755 },
   );
 
@@ -178,6 +184,11 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
     logins() {
       const file = join(state, "logins.log");
       return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
+    },
+    setLoginExports(vars) {
+      const file = join(state, "login-exports.sh");
+      if (!vars) rmSync(file, { force: true });
+      else writeFileSync(file, Object.entries(vars).map(([name, value]) => `${name}=${q(value)}\nexport ${name}\n`).join(""));
     },
     permissions: () => lines<FakePermissionResult>(join(state, "permissions.jsonl")),
     hooks: () => lines<ReturnType<FakeClaude["hooks"]>[number]>(join(state, "hooks.jsonl")),
