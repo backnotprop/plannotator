@@ -131,6 +131,13 @@ interface SettingsProps {
    */
   hideEnterSavesComment?: boolean;
   /**
+   * Hide General's "Hide the repository owner" row. Default false: the row
+   * shows. A host that never shows a repository label, or drives the
+   * `hideRepoOwner` setting itself, passes true. (Not `hide` + the setting's
+   * name, which would read `hideHideRepoOwner`.)
+   */
+  hideRepoOwnerSetting?: boolean;
+  /**
    * Show Display's Text size row (#2066). Default false: the row does
    * something only where the page applies the `documentTextSize` setting
    * (`hooks/useDocumentTextSize`), so a host opts in. Plannotator passes true
@@ -1294,7 +1301,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1331,6 +1338,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const documentFontFamily = useConfigValue('documentFontFamily');
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const enterSavesComment = useConfigValue('enterSavesComment');
+  const hideRepoOwner = useConfigValue('hideRepoOwner');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
   const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
   const agentTerminalSide = useConfigValue('agentTerminalSide');
@@ -1784,6 +1792,22 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             onChange={(v) => configStore.set('enterSavesComment', v)}
                             label="Enter saves a comment"
                             description={`Shift+Enter adds a new line. ${modKeyWord}+Enter still saves.`}
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {/* Hide the repository owner: opt-in, cookie-only. On names
+                        the repository alone (utils/repoLabel). */}
+                    {!hideRepoOwnerSetting && (
+                      <>
+                        <div className="border-t border-border" />
+                        <div data-repo-owner-setting="true">
+                          <ToggleSwitch
+                            checked={hideRepoOwner}
+                            onChange={(v) => configStore.set('hideRepoOwner', v)}
+                            label="Hide the repository owner"
+                            description="When on, documents, code review and tab titles name the repository without its owner. Hover the name to see the owner."
                           />
                         </div>
                       </>

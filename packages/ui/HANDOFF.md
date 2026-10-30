@@ -2575,6 +2575,15 @@ Settings → Display can show a **Document font** row beside Text size. Inert un
 
 `@plannotator/core/annotatable` gains `DocumentRenderKind` (`DiagramRenderKind | "asciidoc"`), `documentRenderKindForPath`, `isDocumentRenderKind` and `annotateDocumentRenderKind`; `.adoc`/`.asciidoc` join the annotatable sets. `@plannotator/ui` gains `utils/asciidocParser` (`parseAsciidocToBlocks`, the same Block model as the markdown parser), `DocumentRenderAs` widens to include `'asciidoc'`, and share payloads may carry `r: 'asciidoc'`. `useSharing` takes an optional trailing `renderAs` and its `setRenderAs` parameter widens to `DocumentRenderAs`, so a host whose state is typed `'markdown' | 'html'` must widen its setter. Publish core first.
 
+## Hide the repository owner (next ui release; additive, no core change)
+
+Settings → General gains a **Hide the repository owner** switch, off by default (today's `owner/repo`). On, the repository chip names the repository alone; its hover keeps `owner/repo`.
+
+- **`utils/repoLabel`** (new, import-free): **`repoLabel(display, hideOwner)`** returns `display`, or its last `/` segment when `hideOwner` is true.
+- **Setting `hideRepoOwner`** (`config/settings.ts`, cookie-only `plannotator-hide-repo-owner`, default false).
+- **`DocBadges`** and **`PlanDiffViewer`** read the setting for the repository chip's text. `repoInfo` is unchanged, and so is the chip at the default.
+- **`Settings`** gains **`hideRepoOwnerSetting?: boolean`** (default false) to hide the row.
+
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.
