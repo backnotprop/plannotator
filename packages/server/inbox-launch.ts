@@ -54,7 +54,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { INBOX_HOST_NAMES, inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -68,7 +68,7 @@ import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentVersionRun, claudeBypassSetup, claudeCodeInboxToolOn, claudeCodePluginEnabled, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
-import { claudeAttachCommand, claudeTrustCommand, claudeTrustFolder, claudeTrustsFolder, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost, type ClaudeLaunchMode } from "./inbox-launch-claude";
+import { claudeAttachCommand, claudeTrustCommand, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost, type ClaudeLaunchMode } from "./inbox-launch-claude";
 import { launchPlainEnv, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import { createLaunchPermissions } from "./inbox-launch-permission";
@@ -210,34 +210,45 @@ export function createInboxLaunch(options: {
 
   /** Where new scratch folders go: Settings → Agents' `inboxLaunch.scratchDir`, else `<dataDir>/scratch`. Moving it applies to new folders only. */
   const scratchRoot = () => config().scratchDir ?? join(options.dataDir, "scratch");
-  /** Claude Code trusts the root (or a folder above it), so every scratch folder in it starts without a trust prompt. */
-  const scratchTrusted = (root: string) => {
-    const files = claudeFiles();
-    let real = resolve(root);
+  /** A folder's identity (`<dev>:<ino>`), or null when it is not there. */
+  const inodeOf = (folder: string): string | null => {
     try {
-      real = realpathSync(root);
+      const stat = lstatSync(folder, { bigint: true });
+      return `${stat.dev}:${stat.ino}`;
     } catch {
-      // Not made yet: its path as set.
+      return null;
     }
-    return claudeTrustsFolder(files, real) || claudeTrustsFolder(files, resolve(root));
   };
   /**
    * A scratch folder is still the one the Inbox made: a real folder named as a slug, with no symbolic link
    * anywhere on its path, so it is still right inside the root's real path it was made in (the record holds
-   * that real path). Only then may Delete purge and remove it; anything else (a link swapped in, pointing out
-   * of the root, or a folder gone) is left alone.
+   * that real path), and the same folder (`inode`, recorded when it was made), never one made at that path
+   * since. Only then may Delete purge and remove it; anything else (a link swapped in, pointing out of the
+   * root, another folder, or none) is left alone.
    */
-  const scratchIntact = (folder: string): boolean => {
+  const scratchIntact = (folder: string, inode: string | undefined): boolean => {
     try {
-      return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(basename(folder)) && lstatSync(folder).isDirectory() && realpathSync(folder) === folder;
+      return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(basename(folder)) && lstatSync(folder).isDirectory() && realpathSync(folder) === folder && !!inode && inodeOf(folder) === inode;
     } catch {
       return false;
     }
   };
+  /**
+   * The git repository holding `path` (a `.git` in it or a folder above it), or null. A scratch root is never in
+   * one: each folder would join that repository's project, not its own.
+   */
+  const repositoryHolding = (path: string): string | null => {
+    for (let dir = resolve(path); ; dir = dirname(dir)) {
+      if (existsSync(join(dir, ".git"))) return dir;
+      if (dirname(dir) === dir) return null;
+    }
+  };
   const scratchRefused = (text: string) => new InboxError("scratch_unavailable", `${text} Nothing was sent.`, { field: "to.launch" });
   /** Make the new scratch folder for a thread name: the first free `<slug>`, `<slug>-2`, … under the root's real path. Never follows a link. */
-  const makeScratch = (name: string | null): string => {
+  const makeScratch = (name: string | null): { folder: string; inode: string } => {
     const root = scratchRoot();
+    const repository = repositoryHolding(root);
+    if (repository) throw scratchRefused(`${options.displayFolder(root)} is inside the git repository ${options.displayFolder(repository)}. Pick a scratch folder outside any repository in Settings → Agents.`);
     let realRoot: string;
     try {
       mkdirSync(root, { recursive: true });
@@ -245,9 +256,12 @@ export function createInboxLaunch(options: {
     } catch (error) {
       throw scratchRefused(`A scratch folder can't be made in ${options.displayFolder(root)} (${(error as NodeJS.ErrnoException).code ?? "error"}). Change it in Settings → Agents.`);
     }
+    // A path any launch (a deleted one too) was given is never given again: one folder path, one launch.
+    const given = new Set(roots().flatMap((m) => (m.launch!.scratch ? [m.launch!.folder] : [])));
     const slug = inboxScratchSlug(name);
     for (let n = 1; n <= SCRATCH_TRIES; n++) {
       const folder = join(realRoot, inboxScratchCandidate(slug, n));
+      if (given.has(folder)) continue;
       try {
         // Not recursive: a name already there (a folder, a file, a link, a dangling link) is taken, never followed.
         mkdirSync(folder);
@@ -255,11 +269,12 @@ export function createInboxLaunch(options: {
         if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
         throw scratchRefused(`A scratch folder can't be made in ${options.displayFolder(root)} (${(error as NodeJS.ErrnoException).code ?? "error"}).`);
       }
-      if (!scratchIntact(folder)) {
+      const inode = inodeOf(folder);
+      if (!inode || !scratchIntact(folder, inode)) {
         rmSync(folder, { recursive: true, force: true });
         throw scratchRefused(`The new scratch folder isn't inside ${options.displayFolder(root)}.`);
       }
-      return folder;
+      return { folder, inode };
     }
     throw scratchRefused(`Every scratch folder name for this thread is taken in ${options.displayFolder(root)}. Rename the thread.`);
   };
@@ -269,17 +284,20 @@ export function createInboxLaunch(options: {
    */
   const removeScratch = async (launch: InboxLaunchRecord): Promise<boolean> => {
     if (!launch.scratch) return false;
-    if (!scratchIntact(launch.folder)) {
-      log(`Inbox launch ${launch.id}: scratch folder ${launch.folder} kept (not the folder the Inbox made: a link, or gone)`);
+    const kept = () => {
+      log(`Inbox launch ${launch.id}: scratch folder ${launch.folder} kept (not the folder the Inbox made: a link, another folder, or gone)`);
       return false;
-    }
+    };
+    if (!scratchIntact(launch.folder, launch.scratch_inode)) return kept();
     const purge = await host.purge(launch.folder);
+    // The purge took a while: the folder is looked at again right before it goes.
+    if (!scratchIntact(launch.folder, launch.scratch_inode)) return kept();
     rmSync(launch.folder, { recursive: true, force: true });
-    log(`Inbox launch ${launch.id}: scratch folder removed (purge ${purge.exitCode})`);
+    log(`Inbox launch ${launch.id}: scratch folder removed (${purge.skipped ? `purge skipped: ${purge.skipped}` : `purge ${purge.exitCode}`})`);
     return true;
   };
-  /** The folder a start failure names and Open in Terminal trusts (the host's rule: a scratch launch's root, unless it became a repository). */
-  const trustFolderOf = (launch: InboxLaunchRecord) => claudeTrustFolder(launch.folder, launch.scratch);
+  /** The folder a start failure names and Open in Terminal trusts (the host's rule). */
+  const trustFolderOf = (launch: InboxLaunchRecord) => host.trustFolder(launch);
   /** How a launch made now would start (`launchStartOf`), from the switch, the person's Claude setup and the last shell read. */
   const startNow = (setup: ReturnType<typeof claudeSetup>) =>
     launchStartOf({ setting: config().fullPermissions, defaultMode: setup.defaultMode, shellSkips: shell?.skips ?? false, consent: setup.consent, disabled: setup.disabled });
@@ -291,7 +309,7 @@ export function createInboxLaunch(options: {
       homeDir: options.homeDir,
       env: launchPlainEnv(options.ownEnv(), [...loginPath, ...options.installDirs]),
     });
-  const host: ClaudeHost = createClaudeHost({ environment });
+  const host: ClaudeHost = createClaudeHost({ environment, files: claudeFiles });
 
   // ── Availability: `claude` on the plain env's PATH (the Inbox's, the last start's login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on ──
   let availability: { at: number; value: Promise<Availability> } | null = null;
@@ -657,10 +675,9 @@ export function createInboxLaunch(options: {
       own_mode: start.ownMode,
       bypass_off: start.wantsFull && setup.disabled,
       needs_consent: start.wantsFull && !setup.disabled && !setup.consent,
-      // Settings → Agents' "Scratch folders": where new ones go (`scratch_default`: never set, `<dataDir>/scratch`).
+      // Settings → Agents' "Scratch folders": where new ones go.
       scratch_dir: scratchRoot(),
       scratch_dir_shown: options.displayFolder(scratchRoot()),
-      scratch_default: config().scratchDir === null,
     };
   };
   const route = async (req: Request, path: string, via: "local" | "tailnet" | string): Promise<Response | null> => {
@@ -692,6 +709,10 @@ export function createInboxLaunch(options: {
         const typed = (raw ?? "").trim();
         const path = typed === "~" ? options.homeDir : typed.startsWith("~/") ? join(options.homeDir, typed.slice(2)) : typed;
         if (path && (!isAbsolute(path) || resolve(path) === resolve("/"))) throw new InboxError("validation_error", "Give a full path, such as ~/scratch.", { field: "scratch_dir" });
+        const repository = path ? repositoryHolding(path) : null;
+        if (repository) {
+          throw new InboxError("validation_error", `That folder is inside the git repository ${options.displayFolder(repository)}. Pick one outside any repository.`, { field: "scratch_dir" });
+        }
         const { scratchDir: _was, ...rest } = loadConfig().inboxLaunch ?? {};
         saveConfig({ inboxLaunch: { ...rest, ...(path ? { scratchDir: resolve(path) } : {}) } });
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
@@ -737,6 +758,8 @@ export function createInboxLaunch(options: {
         return json({ ok: true, command });
       }
       case "delete": {
+        // Deleted already (a second Delete, from a stale window): nothing more. Its folder path may be another launch's now.
+        if (launch.deleted_at) return json({ ok: true });
         // Still starting: `run` removes the session it makes once it sees `deleted_at`.
         if (launch.session_ref) {
           const stop = await host.stop(launch.session_ref);
@@ -746,12 +769,13 @@ export function createInboxLaunch(options: {
         permissions.withdrawAll(root);
         // A project folder: never `claude purge` (it clears every session of the folder, and this is the person's
         // project). A scratch folder the Inbox made: purged and removed, by `run` when it still starts.
-        const scratchRemoved = starting.has(launch.id) ? false : await removeScratch(launch);
+        const scratchRemoved = starting.has(launch.id) ? null : await removeScratch(launch);
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         store.settleLaunch(root.id, { deleted_at: new Date(now()).toISOString() });
         memos.delete(launch.id);
         options.onChange();
-        return json({ ok: true, ...(launch.scratch ? { scratch_removed: scratchRemoved } : {}) });
+        // `scratch_removed: false`: the folder was kept (not the one the Inbox made). Still starting: `run` removes it.
+        return json({ ok: true, ...(launch.scratch && scratchRemoved !== null ? { scratch_removed: scratchRemoved } : {}) });
       }
       case "retry": {
         if (starting.has(launch.id) || respawning.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
@@ -842,12 +866,13 @@ export function createInboxLaunch(options: {
       // for its own env). Send waits on the shell only to finish a read already under way (the composer's read
       // ahead, or another launch's start), or when no read ever finished (`warm` reads one at Inbox start).
       if (reading || shell === null) await readLogin();
-      const folder = chosen ? chosen.root : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));
+      const made = chosen ? null : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));
+      const folder = made ? made.folder : chosen!.root;
       let project: InboxProject;
       try {
         project = chosen ?? (await input.resolveProject(folder));
       } catch (error) {
-        if (!chosen) rmSync(folder, { recursive: true, force: true });
+        if (made) rmSync(folder, { recursive: true, force: true });
         throw error;
       }
       const start = startNow(claudeSetup(folder));
@@ -857,6 +882,7 @@ export function createInboxLaunch(options: {
         session_ref: null,
         folder,
         scratch: !chosen,
+        ...(made ? { scratch_inode: made.inode } : {}),
         started_at: new Date(now()).toISOString(),
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
@@ -865,9 +891,14 @@ export function createInboxLaunch(options: {
       return { project, to: { host: HOST, session: `launch:${id}` }, launch };
     },
 
-    /** The thread was not written after `prepare` (a failed write, or a replay that landed meanwhile): the scratch folder it made goes. */
-    abandon(launch: InboxLaunchRecord): void {
-      if (launch.scratch && scratchIntact(launch.folder)) rmSync(launch.folder, { recursive: true, force: true });
+    /**
+     * The thread was not written after `prepare` (a failed write, or a replay that landed meanwhile): the scratch
+     * folder it made goes, and the project made for it while no thread is in it.
+     */
+    abandon(launch: InboxLaunchRecord, project: InboxProject): void {
+      if (!launch.scratch) return;
+      if (scratchIntact(launch.folder, launch.scratch_inode)) rmSync(launch.folder, { recursive: true, force: true });
+      if (project.root === launch.folder && store.project(project.id) && store.listRows({ projectId: project.id }).length === 0) store.deleteProject(project.id);
     },
 
     /** The thread is written: start the agent in the background. */
@@ -891,7 +922,7 @@ export function createInboxLaunch(options: {
         .filter((p) => p.exists || !removed.has(p.root))
         .sort((a, b) => (recency.get(b.id) ?? "").localeCompare(recency.get(a.id) ?? "") || a.name.localeCompare(b.name));
       const root = scratchRoot();
-      return { agents: ok.ok ? [{ agent: HOST, name: AGENT_NAME }] : [], projects, scratch: { root, trusted: scratchTrusted(root) } };
+      return { agents: ok.ok ? [{ agent: HOST, name: AGENT_NAME, scratch_trusted: host.trusts(root) }] : [], projects, scratch: { root } };
     },
 
     /** The thread route's `run`: waits for a host read when one is due. */

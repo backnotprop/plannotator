@@ -820,6 +820,11 @@ export interface InboxLaunchRecord {
   folder: string;
   /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
   scratch: boolean;
+  /**
+   * A scratch folder's identity when the Inbox made it (`<dev>:<ino>`): Delete purges and removes the folder
+   * only while the same folder is still there, never one made later at that path.
+   */
+  scratch_inode?: string;
   started_at: string;
   /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
   full_permissions?: true;
@@ -2246,13 +2251,11 @@ export interface InboxComposeProject {
  * recently active first, each with whether its folder is still there.
  */
 export interface InboxComposeLaunch {
-  agents: { agent: InboxLaunchAgent; name: string }[];
+  /** `scratch_trusted: false`: the agent does not trust the scratch root yet (the folder menu's row reads "trust it once"). */
+  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean }[];
   projects: { id: string; name: string; root: string; exists: boolean }[];
-  /**
-   * The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents), and
-   * whether Claude Code trusts it already (else the row reads "trust it once"). Absent from an older Inbox.
-   */
-  scratch?: { root: string; trusted: boolean };
+  /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
+  scratch?: { root: string };
 }
 
 /**

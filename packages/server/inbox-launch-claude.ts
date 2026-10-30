@@ -22,10 +22,10 @@
  * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { readAgentFile } from "./agent-files";
-import { claudeGlobalConfigPath, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
+import { CLAUDE_JSON_MAX_BYTES, claudeGlobalConfigPath, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
 export const CLAUDE_LAUNCH_MIN_VERSION = "2.1.314";
@@ -122,12 +122,38 @@ export function claudeAttachCommand(folder: string, short: string): string {
   return `cd ${shellQuote(folder)} && claude attach ${short}`;
 }
 
-// ── Workspace trust, as Claude Code keys it (code.claude.com/docs permissions, "workspace trust"; the real-CLI
-// smoke). `--bg` and a restart both check it; only an interactive `claude` accepts it, or an edit of
-// `~/.claude.json`, which the Inbox never makes. ──
+// ── Workspace trust, as Claude Code keys it (code.claude.com/docs permissions, "workspace trust"; the launch's
+// real-CLI runs on 2.1.314: a plain child folder started under a trusted plain parent, and a child that was its
+// own repository was refused under one). `--bg` and a restart both check it; only an interactive `claude`
+// accepts it, or an edit of `~/.claude.json`, which the Inbox never makes. ──
 
-/** The most `.claude.json` the trust read reads (it holds per-project history and often passes 1 MiB). */
-const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
+type TrustTable = Record<string, { hasTrustDialogAccepted?: unknown } | undefined>;
+/** The last `projects` table read, per config path, kept while the file (inode, mtime, size) stays: compose asks every 5 s. */
+const trustTables = new Map<string, { key: string; table: TrustTable | null }>();
+function trustTableOf(path: string): TrustTable | null {
+  let key: string;
+  try {
+    const stat = statSync(path);
+    key = `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    trustTables.delete(path);
+    return null;
+  }
+  const cached = trustTables.get(path);
+  if (cached && cached.key === key) return cached.table;
+  let table: TrustTable | null = null;
+  const global = readAgentFile(path, CLAUDE_JSON_MAX_BYTES);
+  if (global.kind === "file") {
+    try {
+      const projects = (JSON.parse(global.text) as { projects?: unknown }).projects;
+      if (projects && typeof projects === "object") table = projects as TrustTable;
+    } catch {
+      // Unreadable: not trusted.
+    }
+  }
+  trustTables.set(path, { key, table });
+  return table;
+}
 
 /**
  * Whether Claude Code trusts `folder`: in a git repository, through the repository root's own entry only (a
@@ -135,16 +161,8 @@ const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
  * Read from `projects[<path>].hasTrustDialogAccepted` in its global config. Read only. Unreadable: not trusted.
  */
 export function claudeTrustsFolder(e: AgentEnvironment, folder: string): boolean {
-  const global = readAgentFile(claudeGlobalConfigPath(e), CLAUDE_JSON_MAX_BYTES);
-  if (global.kind !== "file") return false;
-  let projects: unknown;
-  try {
-    projects = (JSON.parse(global.text) as { projects?: unknown }).projects;
-  } catch {
-    return false;
-  }
-  if (!projects || typeof projects !== "object") return false;
-  const table = projects as Record<string, { hasTrustDialogAccepted?: unknown } | undefined>;
+  const table = trustTableOf(claudeGlobalConfigPath(e));
+  if (!table) return false;
   for (let dir = folder; ; dir = dirname(dir)) {
     if (table[dir]?.hasTrustDialogAccepted === true) return true;
     // A repository's root: only its own entry counts.
@@ -162,6 +180,18 @@ export function claudeTrustFolder(folder: string, scratch: boolean): string {
   return scratch && !existsSync(join(folder, ".git")) ? dirname(folder) : folder;
 }
 
+/**
+ * The repository a folder sits in below its root (a `.git` in a folder above it), or null. `claude purge <folder>`
+ * there also drops that repository's own `~/.claude.json` entry (its trust, history and MCP servers; the purge
+ * smoke on 2.1.314), so a scratch folder inside one is never purged.
+ */
+export function claudeRepositoryAbove(folder: string): string | null {
+  for (let dir = dirname(folder); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
 /** What Open in Terminal runs when no session exists yet (an untrusted folder): plain `claude`, so its trust prompt shows. */
 export function claudeTrustCommand(folder: string): string {
   return `cd ${shellQuote(folder)} && claude`;
@@ -172,7 +202,11 @@ export function claudeTrustCommand(folder: string): string {
  * stop, respawn, rm). The start brings its own: the person's login shell,
  * read for that launch only.
  */
-export function createClaudeHost(options: { environment: () => Promise<AgentEnvironment> }) {
+export function createClaudeHost(options: {
+  environment: () => Promise<AgentEnvironment>;
+  /** Where the person's own Claude files are (their HOME and CLAUDE_CONFIG_DIR): the trust read. */
+  files: () => AgentEnvironment;
+}) {
   const run = async (argv: string[], cwd: string | undefined, timeoutMs = COMMAND_TIMEOUT_MS, environment?: AgentEnvironment) => {
     const e = environment ?? (await options.environment());
     const claude = e.which("claude");
@@ -245,7 +279,24 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
      * `claude purge --yes <folder>`: every session, transcript and `~/.claude.json` entry Claude keeps for that folder
      * (`--yes`: no confirmation, which would wait on a terminal no one sees). Only ever a scratch folder.
      */
-    purge: async (folder: string) => (await run(["purge", "--yes", folder], undefined)).result,
+    purge: async (folder: string): Promise<AgentRunResult & { skipped?: string }> => {
+      const repository = claudeRepositoryAbove(folder);
+      if (repository) return { exitCode: 0, timedOut: false, stdout: "", stderr: "", skipped: `inside the repository ${repository}, whose own entry purge would remove` };
+      return (await run(["purge", "--yes", folder], undefined)).result;
+    },
+    /** Whether Claude Code trusts `folder` already (its real path or its path as given; read only). */
+    trusts(folder: string): boolean {
+      const files = options.files();
+      let real = resolve(folder);
+      try {
+        real = realpathSync(folder);
+      } catch {
+        // Not made yet: its path as given.
+      }
+      return claudeTrustsFolder(files, real) || claudeTrustsFolder(files, resolve(folder));
+    },
+    /** Where a launch's trust is accepted: its untrusted failure names it, and Open in Terminal runs `claude` there. */
+    trustFolder: (launch: { folder: string; scratch: boolean }) => claudeTrustFolder(launch.folder, launch.scratch),
   };
 }
 

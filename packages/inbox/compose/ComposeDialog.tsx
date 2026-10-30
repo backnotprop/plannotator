@@ -675,7 +675,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <FolderMenu
           projects={launch.projects}
           selected={start.project.id}
-          scratch={launch.scratch && scratchFolder ? { folder: tildePath(scratchFolder, home), trusted: launch.scratch.trusted } : null}
+          scratch={
+            launch.scratch && scratchFolder
+              ? {
+                  folder: tildePath(scratchFolder, home),
+                  root: tildePath(launch.scratch.root, home),
+                  // Trust is the agent's own: an agent that never asks for it (no `scratch_trusted`) trusts it.
+                  trusted: launch.agents.find((a) => a.agent === start.agent)?.scratch_trusted !== false,
+                  agentName: start.name,
+                }
+              : null
+          }
           onScratch={() => {
             setStartPick({ agent: start.agent, projectId: SCRATCH_PICK });
             setFolderMenu(false);

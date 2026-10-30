@@ -3483,6 +3483,8 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 /* Last, under a line: "New scratch folder" (· trust it once, while Claude Code does not trust its root). */
 .ib-cp-folders .ib-cp-list > .ib-cp-cap-line { grid-column: 1 / -1; margin: 4px 2px; }
 .ib-cp-scratch .ib-cp-trust { color: var(--muted-foreground); }
+/* Under an untrusted scratch row: what the first start asks (the root is the folder to trust). */
+.ib-cp-scratch-hint { grid-column: 2 / -1; padding: 0 8px 6px 0; margin-top: -4px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
 
 /* Notes under To: no agent running, or the session a draft was for has ended. */
 .ib-cp-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--ib-line); background: var(--ib-band); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }

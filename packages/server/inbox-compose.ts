@@ -168,14 +168,14 @@ export function createInboxCompose(options: {
       });
     } catch (error) {
       removeInboxAttachmentFiles(store.dir, attachments);
-      if (prepared) options.launch!.abandon(prepared.launch);
+      if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
       throw error;
     }
     // Another Send with this key landed while this one waited on the project:
     // its message stands, and the files (and a scratch folder) made for this one are not used.
     if (result.replayed) {
       removeInboxAttachmentFiles(store.dir, attachments);
-      if (prepared) options.launch!.abandon(prepared.launch);
+      if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
     else if (prepared) options.launch!.begin(result.message);
