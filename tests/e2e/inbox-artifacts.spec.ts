@@ -9,14 +9,18 @@
  * - The header's right side is icons only with component tooltips:
  *   Artifacts with its count (11), Expand all, Archive, then the close; Mark
  *   read keeps its label and its E.
- * - Artifacts swaps the messages for one grid, newest message first, each tile
- *   with its preview, name, kind and size, sender and time, "in text", the
- *   changed chip and the comment count; the address carries `&artifacts`.
- * - A tile opens the same viewer beside the grid, its tile ringed; the
- *   viewer's stepping keeps thread order and counts the files only ("of 10").
- * - Closing the file returns focus to its tile; Escape, the pressed button and
- *   "Back to the thread" return to the messages with focus on the button; a
- *   reload keeps the view; a guided review's Back returns to the grid.
+ * - On a desktop (approval "inbox-files-tabs", round 3) Artifacts opens the
+ *   pane beside the thread on its Artifacts tab: one grid, newest message
+ *   first, each tile with its preview, name, kind and size, sender and time,
+ *   "in text", the changed chip and the comment count; the messages stay; the
+ *   address carries `&artifacts`.
+ * - A tile opens the same viewer in a tab; the viewer's stepping keeps thread
+ *   order and counts the files only ("of 10").
+ * - A thread with no artifact keeps the button on a desktop for its project
+ *   folder (no count); a link to its grid says there is nothing yet.
+ * - Closing the file returns to the Artifacts tab with focus on its tile;
+ *   Escape and the pressed button close the pane with focus on the button; a
+ *   reload keeps the pane; a guided review's Back returns to the grid.
  * - A thread with nothing: no button; a link to `&artifacts` says so.
  * - A phone (iPhone 15, WebKit): a screen of its own, two columns, Back.
  *
@@ -230,40 +234,50 @@ test('an agent and the person fill one thread with eleven artifacts', async () =
   expect(empty.thread_id).not.toBe(world.threadId);
 });
 
-test('the header: icons on the right with component tooltips, Artifacts with its count; Mark read keeps its label', async () => {
+test('the header: icons on the right with component tooltips, the folder with its count; Mark read keeps its label', async () => {
   const page = world.page;
   await page.goto(`${world.url}#thread=${world.threadId}`);
   const button = artifactsButton();
   await expect(button).toBeVisible();
-  await expect(button).toHaveAttribute('aria-label', 'Artifacts, 11');
-  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  // On a desktop the button is the Files pane's toggle (approval "inbox-files-tabs", 2026-10-30).
+  await expect(button).toHaveAttribute('aria-label', 'Files (11)');
+  await expect(button).not.toHaveAttribute('aria-pressed');
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
   await expect(button).not.toHaveAttribute('title');
   await expect(header().locator('[data-mark-read]')).toContainText('Mark read');
   // Expand all is an icon now, named by its label.
   const expand = header().locator('[data-expand-all]');
   await expect(expand).toHaveAttribute('aria-label', /Expand all messages|Fold the earlier messages/);
   await expect(expand).toHaveText('');
-  // The order at the right: Artifacts, Expand, Archive, a hairline, the close.
+  // The order at the right: the folder, Expand, Archive, a hairline, the close (the thread's full screen and its
+  // hairline lead the header, before Mark read).
   const order = await header().evaluate((head) =>
     [...head.querySelectorAll('[data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map(
       (el) => el.getAttribute('data-artifacts-button') !== null ? 'artifacts' : el.hasAttribute('data-expand-all') ? 'expand' : el.hasAttribute('data-archive') ? 'archive' : el.classList.contains('ib-vsep') ? '|' : 'close',
     ),
   );
-  expect(order).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
+  expect(order.slice(-5)).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
   await button.hover();
-  await expect(page.locator('[data-pn-tooltip]')).toContainText('Artifacts: every file, image and guided review in this thread');
+  await expect(page.locator('[data-pn-tooltip]')).toContainText('Open the files: every file, image and guided review in this thread');
   await shot(page, '01-thread-header-desktop');
   await page.mouse.move(10, 600);
 });
 
-test('Artifacts swaps the messages for a grid, newest message first, with the address and focus moved to it', async () => {
+test('Artifacts opens beside the thread on its tab: a grid, newest message first, with the address and focus moved to it; the messages stay', async () => {
   const page = world.page;
   await artifactsButton().click();
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}&artifacts$`));
-  await expect(artifactsButton()).toHaveAttribute('aria-pressed', 'true');
+  await expect(artifactsButton()).toHaveAttribute('aria-expanded', 'true');
+  // Open, the folder is lit where the thread's × was, its name unchanged, with no count.
+  await expect(artifactsButton()).toHaveAttribute('data-files-door', 'open');
+  await expect(artifactsButton()).toHaveAccessibleName('Files (11)');
+  await expect(artifactsButton()).toHaveText('');
+  await expect(header().getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   await expect(page.locator('[data-artifacts-view] h2')).toBeFocused();
-  await expect(page.locator('section.ib-pane > .ib-pbody:not(.ib-artbody)')).toBeHidden();
-  await expect(page.locator('section.ib-pane > .ib-pfoot')).toBeHidden();
+  // The thread column is always the thread: the grid is beside it, on the Artifacts tab.
+  await expect(page.locator('section.ib-pane > .ib-pbody:not(.ib-artbody)')).toBeVisible();
+  await expect(page.locator('[data-files-pane="artifacts"] [data-artifacts-view]')).toBeVisible();
+  await expect(page.locator('[data-artifacts-tab]')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('[data-artifacts-summary]')).toHaveText('11 from 5 messages · newest first');
   await expect(tiles()).toHaveCount(11);
   const names = await tiles().evaluateAll((all) => all.map((t) => (t.getAttribute('aria-label') ?? '').replace(/^Download /, '').split(',')[0]));
@@ -307,30 +321,39 @@ test('Artifacts swaps the messages for a grid, newest message first, with the ad
   await shot(page, '02b-artifacts-desktop-end');
 });
 
-test('a tile opens the viewer beside the grid, ringed; stepping keeps thread order over the files only; closing returns to the tile', async () => {
+test('a tile opens the viewer in a tab; stepping keeps thread order over the files only; closing the last tab closes the pane', async () => {
   const page = world.page;
   const spec = tiles().nth(9);
   await spec.click();
   await expect(page.locator('[data-attachment-pane]')).toBeVisible();
-  await expect(page).toHaveURL(/&artifacts&file=/);
-  // The grid stays beside the file, its tile ringed.
-  await expect(tiles()).toHaveCount(11);
-  await expect(spec).toHaveAttribute('aria-current', 'true');
+  await expect(page).toHaveURL(/&file=/);
+  // The file has its tab; the Artifacts tab stays in the row.
+  await expect(page.locator('[data-file-tab]')).toHaveCount(1);
+  await expect(page.locator('[data-file-tab]')).toContainText('checkout-spec.md');
+  await expect(page.locator('[data-artifacts-tab]')).toHaveAttribute('aria-selected', 'false');
   // Stepping counts the files (the guide opens its own reader) in thread order: the screenshot first, then the spec.
   await expect(page.locator('[data-step-label]')).toHaveAttribute('aria-label', '2 of 10, checkout-spec.md. Show every file in this thread');
   await shot(page, '03-file-beside-grid-desktop');
   await page.locator('[data-attachment-pane]').click({ position: { x: 300, y: 300 } });
   await page.keyboard.press(']');
   await expect(page.locator('[data-step-label]')).toHaveAttribute('aria-label', /^3 of 10, checkout-drawer\.html/);
-  await expect(tiles().nth(10)).toHaveAttribute('aria-current', 'true');
-  // The file's own close: back on its tile in the grid.
+  // A step replaces the tab.
+  await expect(page.locator('[data-file-tab]')).toHaveCount(1);
+  await expect(page.locator('[data-file-tab]')).toContainText('checkout-drawer.html');
+  // The last tab's close: the pane closes, back to the thread alone even though Artifacts was shown first (the review
+  // of #2282), focus on the folder button.
   await page.locator('[data-attachment-pane]').getByRole('button', { name: 'Close checkout-drawer.html' }).click();
   await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}$`));
+  await expect(artifactsButton()).toBeFocused();
+  // The folder opens the pane again, on Artifacts.
+  await artifactsButton().click();
+  await expect(tiles()).toHaveCount(11);
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}&artifacts$`));
-  await expect(tiles().nth(10)).toBeFocused();
 });
 
-test('Escape, the pressed button and Back to the thread return to the messages, focus on the button; a reload keeps the view', async () => {
+test('Escape and the lit folder button close the pane, focus on the button; a reload keeps it', async () => {
   const page = world.page;
   await page.reload();
   await expect(tiles()).toHaveCount(11);
@@ -340,14 +363,10 @@ test('Escape, the pressed button and Back to the thread return to the messages, 
   await expect(page.locator('[data-artifacts-view]')).toHaveCount(0);
   await expect(artifactsButton()).toBeFocused();
   await expect(page.locator('section.ib-pane > .ib-pbody')).toBeVisible();
-  // The button again.
+  // The button again, then the lit folder: the pane closes.
   await artifactsButton().click();
   await expect(tiles()).toHaveCount(11);
   await artifactsButton().click();
-  await expect(page.locator('[data-artifacts-view]')).toHaveCount(0);
-  // Back to the thread.
-  await artifactsButton().click();
-  await page.locator('[data-artifacts-back]').click();
   await expect(page.locator('[data-artifacts-view]')).toHaveCount(0);
   await expect(artifactsButton()).toBeFocused();
   // One more Escape closes the thread, as before.
@@ -366,11 +385,12 @@ test("a guided review opens its reader; the reader's Back returns to the grid", 
   await expect(tiles()).toHaveCount(11);
 });
 
-test('a thread with no artifact: no button; a link to the view says so', async () => {
+test('a thread with no artifact: the button is its project folder\'s (no count); a link to the view says so', async () => {
   const page = world.page;
   await page.goto(`${world.url}#thread=${world.emptyThread}`);
   await expect(page.locator('section.ib-pane [data-archive]')).toBeVisible();
-  await expect(artifactsButton()).toHaveCount(0);
+  // On a desktop the thread's project folder keeps the button (owner, 2026-10-27): named for the folder, no count.
+  await expect(artifactsButton()).toHaveAttribute('aria-label', 'Files');
   await page.goto(`${world.url}#thread=${world.emptyThread}&artifacts`);
   await expect(page.locator('[data-artifacts-empty]')).toContainText('No artifacts in this thread yet');
   await shot(page, '04-empty-desktop');

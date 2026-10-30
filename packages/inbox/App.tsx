@@ -1512,6 +1512,8 @@ function Inbox() {
   // is open and comes back on leaving, without writing the person's stored choice. ⌘B there opens it
   // for this visit only.
   const [settingsSidebar, setSettingsSidebar] = useState(false);
+  // The thread in full screen (`full` below): Escape's ladder reads it.
+  const threadFullRef = useRef(false);
   useEffect(() => {
     if (route.page !== 'settings') setSettingsSidebar(false);
   }, [route.page]);
@@ -1538,7 +1540,12 @@ function Inbox() {
       if (selectionToolbarShowing()) return;
       // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
+      // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
+      if (!now.guide && !now.artifacts && threadFullRef.current) {
+        setThreadFull(false);
+        return;
+      }
       closeTo(now.guide ? { ...now, guide: null } : now.artifacts ? { ...now, artifacts: false } : { ...now, thread: null });
     };
     window.addEventListener('keydown', onKey);
@@ -1840,8 +1847,17 @@ function Inbox() {
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
+  // The thread in full screen (the header's "Hide the sidebar and the list"): the sidebar and the list hide, without
+  // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
+  // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
+  // as full screen (`full` below), so widening it again returns to full screen.
+  const [threadFull, setThreadFull] = useState(false);
+  useEffect(() => {
+    if (!route.thread) setThreadFull(false);
+  }, [route.thread]);
   sidebarHeldNow.current = sidebarHeld;
-  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld]);
+  // Full screen changes the sidebar's and the list's room without a route change: measured again too.
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
   useEffect(() => {
     if (!sidebarHeld) return;
     const check = () => {
@@ -2407,7 +2423,7 @@ function Inbox() {
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (target) {
       if (isEditableTarget(target)) return null;
-      if (target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], iframe, .ib-view, [data-step-guard]')) return null;
+      if (target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tree"], iframe, .ib-view, [data-step-guard]')) return null;
     }
     // With a file open beside the thread, only a key aimed at the thread or the list counts.
     if (routeRef.current.file && !target?.closest('section.ib-pane, .ib-listcol')) return null;
@@ -3272,9 +3288,14 @@ function Inbox() {
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
   const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  // The Files pane on its Artifacts tab takes the same room beside the thread (approval "inbox-files-tabs"); a phone
+  // and a stacked window keep the Artifacts view in place of the messages.
+  const filesBeside = fileOpen || (route.page === 'inbox' && !!route.thread && route.artifacts === true && !phone && !stack.file);
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
+  const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  threadFullRef.current = full;
   const backToCard = () => close({ page: 'board', project: route.boardProject ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
@@ -3706,7 +3727,7 @@ function Inbox() {
   } else {
     main = (
       <>
-        {!fileOpen && !fromCard && (
+        {!filesBeside && !fromCard && !full && (
         <InboxList
           scope={route.project}
           // One project's list: its window name, the path beside it.
@@ -3869,6 +3890,19 @@ function Inbox() {
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             artifacts={route.artifacts === true}
             onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, msg: null }) : close({ ...routeRef.current, artifacts: false }))}
+            // Files tabs (approval "inbox-files-tabs"): a tab's file side by side, the Artifacts tab, or the pane closed.
+            onFilesRoute={(next, options) => {
+              const now = routeRef.current;
+              const to: Route = {
+                ...now,
+                msg: null,
+                artifacts: next.artifacts,
+                file: next.file ? { id: next.file, version: 'current', focus: null, view: 'side' } : null,
+              };
+              if (options?.replace) writeRoute(to, { replace: true });
+              else if (!next.file && !next.artifacts) close(to);
+              else go(to);
+            }}
             // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
             // sitting is tucked into its pill (the pill's Resume is the way back to it).
             decide={decideInThread(thread.thread_id)}
@@ -3895,6 +3929,8 @@ function Inbox() {
             cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}
             phone={phone}
             stacked={stack.thread || !!fromCard}
+            threadAlone={full}
+            onFull={fromCard ? undefined : setThreadFull}
             fileStacked={stack.file}
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             onToast={(t) => showToast(t)}
@@ -3908,6 +3944,7 @@ function Inbox() {
                 const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
                 if (width >= room && width - sidebar < room) setSidebarHeld(true);
               }
+              setThreadFull(false);
               backFromFile.current = { thread: thread.thread_id, name: fileName, label: listTitle };
               closeTo({ ...routeRef.current, file: null });
             }}
@@ -3942,10 +3979,15 @@ function Inbox() {
       <SidebarShell
         className="ib-shell"
         toggleNotice={sidebarToggleNotice}
-        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld}
+        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !filesBeside && !sidebarHeld && !full}
         onOpenChange={(next) => {
           if (routeRef.current.page === 'settings') {
             setSettingsSidebar(next);
+            return;
+          }
+          // ⌘B in full screen leaves it (the sidebar and the list come back) and keeps the person's stored choice.
+          if (next && full) {
+            setThreadFull(false);
             return;
           }
           setSidebarHeld(false);

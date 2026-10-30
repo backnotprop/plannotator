@@ -205,7 +205,7 @@ test.skipIf(!hasDom)("Back from a linked page after a view switch goes back to t
   expect(params().get('view')).toBe('side');
   const entries = window.history.length;
   // Full screen, pressed on the linked page: a new entry over the linked page beside the thread (fullScreenOrigin.ts).
-  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
+  await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]')!.click());
   await until(() => el.querySelector('.ib-view')?.hasAttribute('data-full-view') === true, 'full screen');
   expect(params().get('view')).toBe('full');
   expect(window.history.length).toBe(entries + 1);

@@ -346,7 +346,7 @@ test('beside the thread: a sibling page opens over the page, Escape and the brow
     await frame.getByRole('link', { name: 'A: Story page' }).click();
     await expect(page.locator('[data-linked-page="A-story.html"]')).toBeVisible();
     // The band is a row above the page; the header's pen is gone (no comments here).
-    await expect(page.locator('.ib-vhead').getByRole('button', { name: /Annotate mode|Interact mode/ })).toHaveCount(0);
+    await expect(page.locator('.ib-vhead, [data-files-header]').getByRole('button', { name: /Annotate mode|Interact mode/ })).toHaveCount(0);
     await shot(page, '9-beside-thread-sibling-page');
     await page.frameLocator('.ib-linkedframe iframe').getByRole('link', { name: 'On to B' }).click();
     await expect(page.locator('[data-linked-page="B-cards.html"]')).toBeVisible();

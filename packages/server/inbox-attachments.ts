@@ -253,7 +253,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
   };
 
   /** Answers a request on one of these routes, or null when the path is not one of them. */
-  return async function handle(req: Request, url: URL): Promise<Response | null> {
+  async function handle(req: Request, url: URL): Promise<Response | null> {
     const path = url.pathname;
 
     const assets = await htmlAssets.handle(req, url);
@@ -580,5 +580,8 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
     }
 
     return null;
-  };
+  }
+
+  // The one HTML asset registry of the Inbox: the Files routes (inbox-files.ts) rewrite their pages through it too.
+  return Object.assign(handle, { htmlAssets });
 }

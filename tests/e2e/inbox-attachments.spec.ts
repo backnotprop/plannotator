@@ -494,6 +494,10 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   await expect(pane).not.toHaveClass(/ib-full/);
   await pane.getByRole('button', { name: 'Close admin-view.html' }).click();
   await expect(pane).toHaveCount(0);
+  // Beside the thread each open file has a tab ("inbox-files-tabs"): closing the last one goes back to the thread.
+  const tabClose = page.locator('[data-tab-close]');
+  while ((await tabClose.count()) > 0) await tabClose.first().click();
+  await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
   expect(page.url()).not.toContain('file=');
 });
 

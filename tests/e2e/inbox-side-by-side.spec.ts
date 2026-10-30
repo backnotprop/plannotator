@@ -74,7 +74,7 @@ async function shot(p: Page, name: string, schemes: ('light' | 'dark')[] = ['lig
 
 const pane = (p = world.page) => p.locator('[data-attachment-pane]');
 const bar = (p = world.page) => p.locator('[data-full-view-bar]');
-const header = (p = world.page) => pane(p).locator('.ib-vhead');
+const header = (p = world.page) => pane(p).locator('.ib-vhead, [data-files-header]');
 const toast = (p = world.page) => p.locator('.ib-toast');
 const choiceOf = async (context = world.context) => (await context.cookies()).find((c) => c.name === VIEW_COOKIE)?.value ?? null;
 const addressView = (p = world.page) => p.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('view'));
@@ -205,7 +205,7 @@ test('the next HTML page opens side by side too; a step keeps it; a reload keeps
   await shot(p, 'desktop-03-html-side-by-side');
 
   // ] from inside the file: steps.html, still beside the thread.
-  await pane().locator('.ib-vhead').click({ position: { x: 4, y: 4 } });
+  await pane().locator('.ib-vhead, [data-files-header]').first().click({ position: { x: 4, y: 4 } });
   await p.keyboard.press(']');
   await expect(pane()).toHaveAttribute('data-attachment-pane', world.ids['steps.html']!);
   await expect(pane()).not.toHaveClass(/ib-full/);
@@ -224,7 +224,9 @@ test('the next HTML page opens side by side too; a step keeps it; a reload keeps
 
 test("a tile's ⋯ opens one file full screen and leaves the choice alone; so does Escape's way out", async () => {
   const p = world.page;
-  await pane().getByRole('button', { name: /^Close / }).click();
+  // Every open file has its tab ("inbox-files-tabs"): closing the last one goes back to the thread.
+  const tabClose = p.locator('[data-tab-close]');
+  while ((await tabClose.count()) > 0) await tabClose.first().click();
   await expect(pane()).toHaveCount(0);
   const id = world.ids['steps.html']!;
   const tile = p.locator(`[data-open-in-tile="${id}"]`).last();

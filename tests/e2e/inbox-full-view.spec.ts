@@ -216,7 +216,7 @@ test('an HTML file opens full screen: the page fills the window, one toolbar is 
   await page.getByRole('button', { name: 'Open turnkey.html' }).click();
   await expect(pane()).toHaveClass(/ib-full/);
   await expect(pane()).toHaveAttribute('data-full-view', '');
-  await expect(pane().locator('.ib-vhead')).toHaveCount(0);
+  await expect(pane().locator('.ib-vhead, [data-files-header]')).toHaveCount(0);
   await expect(pane().locator('[data-view-foot]')).toHaveCount(0);
   await expect(page.locator('[data-html-tools-toggle]')).toHaveCount(0);
   await expect(frame().locator('#headline')).toHaveText('Send us your logs. Get back the record.');
@@ -331,10 +331,10 @@ test('⋯ holds Open in and Download; Side by side puts the file beside the thre
   await handle().click();
   await bar().getByRole('button', { name: 'Side by side' }).click();
   await expect(pane()).not.toHaveClass(/ib-full/);
-  await expect(pane().locator('.ib-vhead [data-view-side]')).toBeFocused();
+  await expect(pane().locator('.ib-vhead [data-view-side], [data-files-header] [data-view-side]')).toBeFocused();
   await expect(page.locator('[data-html-tools-toggle]')).toHaveCount(0);
   await shot(page, 'html-beside', ['dark']);
-  await pane().locator('.ib-vhead [data-full-screen-toggle]').focus();
+  await pane().locator('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]').focus();
   await page.keyboard.press('Enter');
   await expect(pane()).toHaveClass(/ib-full/);
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
@@ -361,11 +361,11 @@ test('× Exit full screen, just before », leaves full screen as Escape\'s last 
     await close.click();
     await expect(pane()).not.toHaveClass(/ib-full/);
     await expect(bar()).toHaveCount(0);
-    await expect(pane().locator('.ib-vhead [data-view-side]')).toBeFocused();
+    await expect(pane().locator('.ib-vhead [data-view-side], [data-files-header] [data-view-side]')).toBeFocused();
     // Not a pick, as with Escape: no view is remembered.
     expect((await world.context.cookies(world.url)).find((c) => c.name === 'plannotator-inbox-file-view')).toBeUndefined();
     // Back to full screen, then on to the next file.
-    await pane().locator('.ib-vhead [data-full-screen-toggle]').click();
+    await pane().locator('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]').click();
     await expect(pane()).toHaveAttribute('data-full-view', '');
     // That press was a pick: forgotten, so the next file's check starts clean.
     await forgetFileViewChoice(page);
@@ -376,8 +376,8 @@ test('× Exit full screen, just before », leaves full screen as Escape\'s last 
       await expect(tooltip()).toContainText('Exit full screen');
       await page.keyboard.press('Escape');
       await expect(bar()).toHaveCount(0);
-      await expect(pane().locator('.ib-vhead [data-view-side]')).toBeFocused();
-      await pane().locator('.ib-vhead [data-full-screen-toggle]').click();
+      await expect(pane().locator('.ib-vhead [data-view-side], [data-files-header] [data-view-side]')).toBeFocused();
+      await pane().locator('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]').click();
       await expect(pane()).toHaveAttribute('data-full-view', '');
       await forgetFileViewChoice(page);
     }
@@ -490,7 +490,7 @@ async function climbTheLadder(page: Page, from: 'side' | 'thread' = 'side') {
   await page.keyboard.press('Escape');
   if (from === 'side') {
     await expect(pane(page)).not.toHaveAttribute('data-full-view', '');
-    await expect(pane(page).locator('.ib-vhead [data-view-side]')).toBeFocused();
+    await expect(pane(page).locator('.ib-vhead [data-view-side], [data-files-header] [data-view-side]')).toBeFocused();
     await expect(page.locator('[data-step-live]')).toHaveText('Side by side: the file is beside the thread.');
   } else {
     await expect(pane(page)).toHaveCount(0);
@@ -503,7 +503,7 @@ test('Escape climbs one rung per press (a draft, typed words asked about, the dr
   const page = world.page;
   await climbTheLadder(page);
   // Back in full screen (the toolbar showing) for the chord.
-  await pane().locator('.ib-vhead [data-full-screen-toggle]').focus();
+  await pane().locator('.ib-vhead [data-full-screen-toggle], [data-files-header] [data-full-screen-toggle]').focus();
   await page.keyboard.press('Enter');
   await expect(pane()).toHaveAttribute('data-full-view', '');
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
