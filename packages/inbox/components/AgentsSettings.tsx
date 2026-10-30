@@ -543,7 +543,7 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.from_shell]);
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.own_mode]);
   // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
   useEffect(() => {
     if (!launch?.enabled) return;
@@ -571,13 +571,18 @@ export function AgentsSettings({
   const launchRow = launchState?.enabled ? (
     <Row
       k="Sessions you start"
-      v={launchState.full_permissions ? 'Full permissions' : 'Auto mode'}
+      v={launchState.full_permissions && !launchState.needs_consent ? 'Full permissions' : launchState.own_mode ? 'Your default mode' : 'Auto mode'}
       sub={
         <>
-          Start new sessions with full permissions: Claude Code you start from New message never stops to ask (bypass mode). Otherwise it starts in auto mode. Applies to the next session you start.
-          {launchState.from_shell && (
-            <span className="block" data-launch-from-shell="">
-              Follows your shell's setting until you change it.
+          Start new sessions with full permissions: Claude Code you start from New message never stops to ask (bypass mode). Otherwise it starts in your default mode, or auto mode. Applies to the next session you start.
+          {launchState.follows && (
+            <span className="block" data-launch-follows={launchState.follows}>
+              {launchState.follows === 'shell' ? "Follows your shell's setting until you change it." : 'Follows your Claude Code settings until you change it.'}
+            </span>
+          )}
+          {launchState.full_permissions && launchState.needs_consent && (
+            <span className="block" data-launch-needs-consent="">
+              Accept Claude Code's bypass notice once in Terminal to use this. Until then sessions start without it.
             </span>
           )}
         </>

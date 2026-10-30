@@ -320,8 +320,12 @@ export interface InboxLaunchSettings {
   enabled: boolean;
   /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
   full_permissions: boolean;
-  /** Never set by the person, and on because their login shell runs Claude in bypass mode. */
-  from_shell?: boolean;
+  /** Never set by the person, and on because their Claude settings (`claude`) or their shell (`shell`) run Claude in bypass mode. */
+  follows?: 'claude' | 'shell' | null;
+  /** A launch starts in the person's own Claude default mode (not auto). */
+  own_mode?: boolean;
+  /** Full permissions wanted, but Claude Code's bypass notice is not accepted on this computer: a launch starts without them. */
+  needs_consent?: boolean;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */

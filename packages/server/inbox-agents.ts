@@ -615,6 +615,39 @@ export function claudePluginStateFromScopes(
   return { state: registered ? "enabled" : "absent", managed: false };
 }
 
+/**
+ * What the person's own Claude Code setup says about permission modes, read-only (the values below only,
+ * nothing else kept): whether they recorded bypass consent (`skipDangerousModePermissionPrompt` in managed
+ * or user settings, or `bypassPermissionsModeAccepted` in the global config, `~/.claude.json` or
+ * `$CLAUDE_CONFIG_DIR/.claude.json`), whether managed settings disable bypass mode, and their own
+ * `permissions.defaultMode`. A background session honours `--allow-dangerously-skip-permissions` only
+ * with that consent; consent in a `--settings` file does not count, and the Inbox never writes it.
+ */
+export function claudeBypassSetup(e: AgentEnvironment): { consent: boolean; disabled: boolean; defaultMode: string | null } {
+  const scopes = claudeSettingsScopes(e);
+  const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+  const permissions = (settings: unknown) => record(record(settings).permissions);
+  const disabled = scopes.some((s) => {
+    if (s.scope !== "managed") return false;
+    const value = permissions(s.settings).disableBypassPermissionsMode;
+    return value === "disable" || value === true;
+  });
+  const configDir = envDir(e, "CLAUDE_CONFIG_DIR");
+  const global = readAgentFile(configDir ? join(configDir, ".claude.json") : join(e.homeDir, ".claude.json"));
+  let accepted = false;
+  if (global.kind === "file") {
+    try {
+      accepted = record(JSON.parse(global.text)).bypassPermissionsModeAccepted === true;
+    } catch {
+      accepted = false;
+    }
+  }
+  const consent = accepted || scopes.some((s) => record(s.settings).skipDangerousModePermissionPrompt === true);
+  // The strongest scope that sets a default mode decides (managed, then the user's local and main settings).
+  const mode = scopes.map((s) => permissions(s.settings).defaultMode).find((m): m is string => typeof m === "string" && m.trim() !== "");
+  return { consent, disabled, defaultMode: mode?.trim() ?? null };
+}
+
 /** Claude Code's managed (enterprise) settings file, per platform. */
 function claudeManagedSettingsPath(e: AgentEnvironment): string | null {
   // A test's agents never read the machine's own managed settings.

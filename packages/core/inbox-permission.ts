@@ -369,18 +369,20 @@ function purposeOf(event: InboxPermissionEvent): string | null {
 
 /**
  * Whether a launched session starts with full permissions (`--permission-mode
- * bypassPermissions` and Claude's skip-permissions env); otherwise it starts in
- * auto mode. The one source is the launch record, fixed when the launch is made
- * (Settings → Agents' "Start new sessions with full permissions" once the person
- * set it; never set, their login shell's own skip-permissions export): every
- * start and Try again of that launch reads it, never the live switch. Every
- * launch, either way, starts with `--allow-dangerously-skip-permissions`, so its
- * card always offers Full permissions and its hook honours it
- * (`INBOX_LAUNCH_FULL_PERMISSIONS_ENV` in each launch's settings file).
+ * bypassPermissions`, Claude's skip-permissions env, and no permission hook: it
+ * asks nothing, like the person's own bypass terminal); otherwise it starts in
+ * the person's own default mode (`own_mode`) or auto mode. The one source is the
+ * launch record, fixed when the launch is made (`launchStartOf` in
+ * packages/server/inbox-launch-env.ts): every start and Try again reads it, never
+ * the live switch or shell. Full permissions needs the person's own recorded
+ * bypass consent; with it (`bypass_available`) a launch also starts with
+ * `--allow-dangerously-skip-permissions`, so a launch that is not full offers
+ * Full permissions on its card and its hook honours it
+ * (`INBOX_LAUNCH_FULL_PERMISSIONS_ENV` in its settings file).
  */
 export const inboxLaunchFullPermissions = (launch: { full_permissions?: true }): boolean => launch.full_permissions === true;
 
-/** In every launch's settings file `env` (it started with bypass mode allowed): the hook honours "Full permissions" only then. */
+/** In a launch's settings file `env` when it started with bypass mode allowed (`bypass_available`): the hook honours "Full permissions" only then. */
 export const INBOX_LAUNCH_FULL_PERMISSIONS_ENV = "PLANNOTATOR_LAUNCH_FULL_PERMISSIONS";
 
 /** The answer that also switches the session's mode (Claude Code's `setMode`, destination `session`). */
@@ -390,7 +392,7 @@ export const INBOX_PERMISSION_FULL = "Allow and switch to Full permissions";
 export interface InboxPermissionOptions {
   /** A path as the person reads it (`~/…`). */
   shownPath?: (path: string) => string;
-  /** The session can switch to Full permissions (it started with them allowed: every launch). */
+  /** The session can switch to Full permissions (it started with them allowed: `bypass_available`). */
   fullPermissions?: boolean;
   /** A Write's file exists (true), does not (false), or is not known (undefined): "overwrite", "create" or "write". */
   overwrite?: boolean;

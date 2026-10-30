@@ -31,8 +31,6 @@ import { InboxApiError, inboxApi } from '../api';
 import { AuthorMark, Icon } from '../icons';
 import { useMinuteClock } from './Undelivered';
 
-/** Why Full permissions is off: the session did not start with them allowed. */
-
 /** How long the answers ignore activation after the card appears or takes focus (not from a pointer). */
 export const ARM_MS = 600;
 
@@ -365,14 +363,17 @@ export function PermissionCard({
 
   // Newest and waiting, and nothing has focus: Allow once takes it, so Enter answers it, with the answers
   // brought into view (never a button out of sight). Never taken from a control the person is on.
+  // One frame later than the thread's own: a card already there when the thread opens leaves Reply its focus.
   useEffect(() => {
     if (!newest || !waiting) return;
-    const frame = requestAnimationFrame(() => {
-      const button = onceRef.current;
-      const active = document.activeElement;
-      if (!button || (active && active !== document.body)) return;
-      button.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
-      (button.closest('footer') ?? button).scrollIntoView?.({ block: 'nearest' });
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const button = onceRef.current;
+        const active = document.activeElement;
+        if (!button || (active && active !== document.body)) return;
+        button.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
+        (button.closest('footer') ?? button).scrollIntoView?.({ block: 'nearest' });
+      });
     });
     return () => cancelAnimationFrame(frame);
   }, [newest, waiting, message.id]);
@@ -498,7 +499,7 @@ export function PermissionCard({
                 <button type="button" className="pc-link" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_AUTO))} data-perm-mode="auto">
                   Auto mode
                 </button>
-                {/* Every launch starts with --allow-dangerously-skip-permissions: Full is a choice of each of its questions. */}
+                {/* Only a launch whose person accepted Claude Code's bypass notice offers Full (its choices say so). */}
                 {fullOn && (
                   <button type="button" className="pc-link" disabled={busy} onClick={act(full)} data-perm-mode="full">
                     Full permissions

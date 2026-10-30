@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
-import { agentByShort, claudeAttachCommand, createClaudeHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast } from "./inbox-launch-claude";
+import { agentByShort, claudeAttachCommand, createClaudeHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
 
 describe("parseBackgrounded", () => {
   test("reads the short id and name from the line Claude Code 2.1.314 prints (bg-test RESULTS)", () => {
@@ -135,7 +135,7 @@ describe("the person's shared Claude supervisor survives our calls", () => {
     const plain = recording(() => listing);
     const host = createClaudeHost({ environment: async () => plain });
     const start = recording(() => "backgrounded · 4f1c9a2e · Smoke\n");
-    expect((await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", environment: start })).ok).toBe(true);
+    expect((await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", allowBypass: false, environment: start })).ok).toBe(true);
     await host.agents();
     await host.stop("4f1c9a2e");
     await host.respawn("4f1c9a2e");
@@ -158,7 +158,7 @@ test("a session --bg started but the supervisor never lists is stopped and remov
     },
   });
   const host = createClaudeHost({ environment: async () => env("[]") });
-  const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", environment: env("backgrounded · 4f1c9a2e · Smoke\n") });
+  const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", allowBypass: false, environment: env("backgrounded · 4f1c9a2e · Smoke\n") });
   expect(result.ok).toBe(false);
   expect(calls.slice(-2)).toEqual(["stop 4f1c9a2e", "rm 4f1c9a2e"]);
 });
@@ -183,35 +183,47 @@ describe("the start's permission mode", () => {
     };
     return { env, starts, host: createClaudeHost({ environment: async () => env }) };
   };
-  const base = ["--bg", "--name", "Smoke", "--settings", "/s.json", "--allow-dangerously-skip-permissions"];
+  const base = ["--bg", "--name", "Smoke", "--settings", "/s.json"];
+  const allow = "--allow-dangerously-skip-permissions";
+  const REFUSED = "error: option '--permission-mode <mode>' argument 'auto' is invalid. Allowed choices are acceptEdits, bypassPermissions, default, dontAsk, plan.";
 
-  test("every launch may switch to bypass later, and starts in auto mode or in bypass mode", async () => {
-    for (const mode of ["auto", "bypassPermissions"] as const) {
+  test("bypass allowed only with the person's consent; the mode flag for bypass or auto, none for their own default mode", async () => {
+    const cases: [ClaudeLaunchMode, boolean, string[]][] = [
+      ["auto", true, [...base, allow, "--permission-mode", "auto"]],
+      ["auto", false, [...base, "--permission-mode", "auto"]],
+      ["bypassPermissions", true, [...base, allow, "--permission-mode", "bypassPermissions"]],
+      [null, false, base],
+    ];
+    for (const [mode, allowBypass, argv] of cases) {
       const { env, starts, host } = cli(null);
-      const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode, environment: env });
+      const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode, allowBypass, environment: env });
       expect(result).toMatchObject({ ok: true });
       expect(result.modeRefused).toBeUndefined();
-      expect(starts).toEqual([[...base, "--permission-mode", mode]]);
+      expect(starts).toEqual([argv]);
     }
   });
 
-  test("auto mode refused (an account or a CLI without it): started again with no mode, and why is kept", async () => {
-    const { env, starts, host } = cli("Error: Auto mode is not available for your account.");
-    const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", environment: env });
-    expect(result).toMatchObject({ ok: true, modeRefused: "Error: Auto mode is not available for your account." });
-    expect(starts).toEqual([[...base, "--permission-mode", "auto"], base]);
+  test("auto mode refused (a CLI without it): the settings file is pinned first, started again with no mode, and why is kept", async () => {
+    const { env, starts, host } = cli(REFUSED);
+    let pinned = 0;
+    const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", allowBypass: true, environment: env, beforeRetry: () => void pinned++ });
+    expect(result).toMatchObject({ ok: true, modeRefused: REFUSED });
+    expect(pinned).toBe(1);
+    expect(starts).toEqual([[...base, allow, "--permission-mode", "auto"], [...base, allow]]);
     expect(result.output).toContain("auto mode refused");
   });
 
-  test("a failure that is not the mode's is never retried, and bypass mode is never dropped", async () => {
+  test("a failure that is not the flag's refusal is never retried, and bypass mode is never dropped", async () => {
     const untrusted = cli("Error: Workspace not trusted. Run `claude` in /p once.");
-    expect(await untrusted.host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", environment: untrusted.env })).toMatchObject({ ok: false, code: "untrusted" });
+    expect(await untrusted.host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", allowBypass: false, environment: untrusted.env })).toMatchObject({ ok: false, code: "untrusted" });
     expect(untrusted.starts).toHaveLength(1);
     expect(refusedForMode({ exitCode: 1, timedOut: false, stdout: "", stderr: "Error: Not logged in." })).toBe(false);
-    expect(refusedForMode({ exitCode: 1, timedOut: false, stdout: "", stderr: "error: option '--permission-mode <mode>' argument 'auto' is invalid." })).toBe(true);
+    // Any other line naming auto and a mode is not the refusal (an auto-update notice, a permission mode warning).
+    expect(refusedForMode({ exitCode: 1, timedOut: false, stdout: "", stderr: "Auto-update failed in background mode; check your permission mode." })).toBe(false);
+    expect(refusedForMode({ exitCode: 1, timedOut: false, stdout: "", stderr: REFUSED })).toBe(true);
     // Bypass mode refused: the launch fails as it is, never started in another mode than the one it records.
     const bypass = cli("Error: bypassPermissions mode is disabled by your organization.", "bypassPermissions");
-    const result = await bypass.host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "bypassPermissions", environment: bypass.env });
+    const result = await bypass.host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "bypassPermissions", allowBypass: true, environment: bypass.env });
     expect(result).toMatchObject({ ok: false, text: "Error: bypassPermissions mode is disabled by your organization." });
     expect(bypass.starts).toHaveLength(1);
   });

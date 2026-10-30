@@ -85,18 +85,17 @@ export function agentByShort(agents: readonly ClaudeAgent[], short: string): Cla
 
 export type ClaudeStartFailure = { code: "untrusted" | "failed"; text: string };
 
-/** The permission mode a launch starts in: bypass with full permissions, else auto (the person's chosen default for a launch). */
-export type ClaudeLaunchMode = "bypassPermissions" | "auto";
+/** The permission mode a launch starts in: bypass (full permissions), auto, or null (the person's own `defaultMode`, no flag). */
+export type ClaudeLaunchMode = "bypassPermissions" | "auto" | null;
 
 /**
- * A start Claude refused because of its permission mode (an account or a CLI without auto mode): its output
- * names the mode. Such a start is made again with no `--permission-mode` (Claude's own default).
+ * A start a CLI refused for `--permission-mode auto`: Claude's own refusal of the flag's value
+ * (`error: option '--permission-mode <mode>' argument 'auto' is invalid.`), a CLI without auto mode.
+ * Such a start is made again with no `--permission-mode`, in default mode.
  */
 export function refusedForMode(result: Pick<AgentRunResult, "exitCode" | "timedOut" | "stdout" | "stderr">): boolean {
   if (result.exitCode === 0 || result.timedOut) return false;
-  const output = `${result.stderr}\n${result.stdout}`;
-  if (/workspace not trusted|not a trusted/i.test(output)) return false;
-  return /permission[- ]mode|\bauto\b[^\n]*\bmode\b|\bmode\b[^\n]*\bauto\b/i.test(output);
+  return /option '--permission-mode <mode>' argument 'auto' is invalid/.test(`${result.stderr}\n${result.stdout}`);
 }
 
 /** Why `claude --bg` did not start a session, in words for the run line (screen 14). */
@@ -148,23 +147,33 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
     agents,
     /**
      * `claude --bg` in `folder` with the launch's settings file, then the full
-     * session id. Every launch may switch to bypass mode later
-     * (`--allow-dangerously-skip-permissions`: the card's Full permissions) and
-     * starts in `mode`; nothing else goes on argv. Auto mode refused (an
-     * account or a CLI without it): started again with no mode, and
+     * session id. `allowBypass` (the person recorded bypass consent) adds
+     * `--allow-dangerously-skip-permissions`, so the session may switch to
+     * bypass later (the card's Full permissions); `mode` adds `--permission-mode`
+     * (null: the person's own default mode). Nothing else goes on argv. Auto
+     * mode refused (a CLI without it): `beforeRetry` (the caller pins the
+     * settings file to default mode), then started again with no mode, and
      * `modeRefused` says why. A failure names the folder as `shownFolder` (`~/…`).
      */
-    async start(input: { folder: string; shownFolder: string; name: string; settingsPath: string; mode: ClaudeLaunchMode; environment: AgentEnvironment }): Promise<
-      ({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }
-    > {
+    async start(input: {
+      folder: string;
+      shownFolder: string;
+      name: string;
+      settingsPath: string;
+      mode: ClaudeLaunchMode;
+      allowBypass: boolean;
+      environment: AgentEnvironment;
+      beforeRetry?: () => void;
+    }): Promise<({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }> {
       // A name that starts with "-" would read as a flag.
       const name = input.name.replace(/^-+/, "").trim() || "Inbox";
-      const base = ["--bg", "--name", name, "--settings", input.settingsPath, "--allow-dangerously-skip-permissions"];
-      let { result, missing } = await run([...base, "--permission-mode", input.mode], input.folder, START_TIMEOUT_MS, input.environment);
+      const base = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.allowBypass ? ["--allow-dangerously-skip-permissions"] : [])];
+      let { result, missing } = await run([...base, ...(input.mode ? ["--permission-mode", input.mode] : [])], input.folder, START_TIMEOUT_MS, input.environment);
       let output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
       let modeRefused: string | undefined;
       if (input.mode === "auto" && !missing && refusedForMode(result)) {
         modeRefused = startFailureOf(result, input.shownFolder).text;
+        input.beforeRetry?.();
         ({ result, missing } = await run(base, input.folder, START_TIMEOUT_MS, input.environment));
         output = `${output}\n[auto mode refused; started again with no --permission-mode]\n${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
       }

@@ -60,9 +60,10 @@ import { getDefaultPlannotatorDataDir, getPlannotatorDataDir } from "@plannotato
 import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { agentVersionRun, claudeCodeInboxToolOn, claudeCodePluginEnabled, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
+import { agentVersionRun, claudeBypassSetup, claudeCodeInboxToolOn, claudeCodePluginEnabled, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { claudeAttachCommand, claudeTrustCommand, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost } from "./inbox-launch-claude";
-import { launchFullPermissions, launchPlainEnv, launchSettingsEnv, launchSpawnEnv, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
+import { launchPlainEnv, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
+import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import { createLaunchPermissions } from "./inbox-launch-permission";
 
 const HOST = "claude-code";
@@ -117,7 +118,7 @@ export function createInboxLaunch(options: {
   serverSession: string;
   homeDir: string;
   platform: NodeJS.Platform;
-  /** The person's login-shell env (inbox-launch-env.ts `createLoginEnv`): read once per start, never otherwise. */
+  /** The person's login-shell env (inbox-launch-env.ts `createLoginEnv`): read for a launch, and for Settings → Agents while the switch was never set. */
   loginEnv: () => Promise<LaunchEnv>;
   /** The Inbox's own env (the plain calls: status, stop, respawn, rm). */
   ownEnv: () => Readonly<Record<string, string | undefined>>;
@@ -160,18 +161,37 @@ export function createInboxLaunch(options: {
   let loginPath: string[] = [];
 
   /**
-   * The person's login shell, read for a launch (its full permissions, then its start) and for Settings →
-   * Agents while the switch was never set (what it follows). Each read is kept: its PATH for the plain env,
-   * and whether it runs Claude in bypass mode.
+   * The person's login shell, read for a launch (how it starts, then its start) and for Settings → Agents
+   * while the switch was never set (what it follows). One read at a time: callers meanwhile share it. Of a
+   * read only its PATH (for the plain env), whether it exports Claude's skip-permissions switch, and its
+   * CLAUDE_CONFIG_DIR are kept.
    */
-  let shellBypass: { value: boolean; at: number } | null = null;
-  const readLogin = async (): Promise<LaunchEnv> => {
-    const login = await options.loginEnv();
-    if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
-    shellBypass = { value: shellSkipsPermissions(login), at: now() };
-    return login;
+  let shell: { skips: boolean; configDir: string | undefined; at: number } | null = null;
+  let reading: Promise<LaunchEnv> | null = null;
+  const readLogin = (): Promise<LaunchEnv> => {
+    reading ??= (async () => {
+      try {
+        const login = await options.loginEnv();
+        if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
+        shell = { skips: shellSkipsPermissions(login), configDir: login.CLAUDE_CONFIG_DIR, at: now() };
+        return login;
+      } finally {
+        reading = null;
+      }
+    })();
+    return reading;
   };
-  /** A launch's login env read when it was made (to decide its full permissions), for its first start: one read per launch. */
+  /** The person's own Claude setup (bypass consent, a managed disable, their default mode), read from their files now. */
+  const claudeSetup = () => {
+    const configDir = shell?.configDir ?? options.ownEnv().CLAUDE_CONFIG_DIR;
+    return claudeBypassSetup(createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: configDir ? { CLAUDE_CONFIG_DIR: configDir } : {} }));
+  };
+  /** How a launch made now would start (`launchStartOf`), from the switch, the person's Claude setup and the last shell read. */
+  const startNow = () => {
+    const setup = claudeSetup();
+    return launchStartOf({ setting: config().fullPermissions, defaultMode: setup.defaultMode, shellSkips: shell?.skips ?? false, consent: setup.consent, disabled: setup.disabled });
+  };
+  /** A launch's login env read when it was made, for its first start (one read per launch); dropped after a minute. */
   const readForLaunch = new Map<string, { login: LaunchEnv; at: number }>();
   const environment = async (): Promise<AgentEnvironment> =>
     createAgentEnvironmentFor({
@@ -374,17 +394,30 @@ export function createInboxLaunch(options: {
 
   // ── Start ──
 
-  const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv, fullPermissions: boolean, model: string | null): string => {
+  /**
+   * The launch's settings file. A full launch gets no permission hook: it runs like the person's own bypass
+   * terminal (Claude's skip-permissions export waives bypass's leftover checks only without one). `pinDefault`:
+   * the start after auto mode was refused lands in default mode, never in a `defaultMode` of bypass from the
+   * person's or the repo's settings.
+   */
+  const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv, model: string | null, pinDefault = false): string => {
+    const fullPermissions = inboxLaunchFullPermissions(launch);
     const dir = launchDir(launch.id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const path = join(dir, "settings.json");
     const isDefaultDataDir = resolve(options.dataDir) === resolve(getDefaultPlannotatorDataDir(options.homeDir));
     const settings = {
       ...(model ? { model } : {}),
-      env: launchSettingsEnv(login, { launchId: launch.id, key: randomBytes(32).toString("hex"), dataDir: isDefaultDataDir ? null : options.dataDir, fullPermissions }),
-      permissions: { allow: [INBOX_TOOL_PERMISSION] },
-      // Permission prompts come to the launch thread as questions (inbox-launch-permission.ts).
-      hooks: launchPermissionHooks(options.selfCommand),
+      env: launchSettingsEnv(login, {
+        launchId: launch.id,
+        key: randomBytes(32).toString("hex"),
+        dataDir: isDefaultDataDir ? null : options.dataDir,
+        fullPermissions,
+        bypassAvailable: launch.bypass_available === true,
+      }),
+      permissions: { allow: [INBOX_TOOL_PERMISSION], ...(pinDefault ? { defaultMode: "default" } : {}) },
+      // Permission prompts come to the launch thread as questions (inbox-launch-permission.ts); a full launch asks none.
+      ...(fullPermissions ? {} : { hooks: launchPermissionHooks(options.selfCommand) }),
     };
     writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
     chmodSync(path, 0o600);
@@ -409,20 +442,29 @@ export function createInboxLaunch(options: {
       const early = readForLaunch.get(launch.id);
       readForLaunch.delete(launch.id);
       const login = early?.login ?? (await readLogin());
-      // Full permissions from the launch record (fixed when it was made), never the live switch: a Try again
-      // after the switch changed must start the session the card describes (inboxLaunchFullPermissions).
+      // How it starts comes from the launch record (fixed when it was made), never the live switch or shell:
+      // a Try again after either changed starts the session the card describes.
       const fullPermissions = inboxLaunchFullPermissions(launch);
       const { model } = config();
-      const settingsPath = writeSettings(launch, login, fullPermissions, model);
+      const settingsPath = writeSettings(launch, login, model);
       const name = root.thread_name ?? root.subject ?? "Inbox";
       const startEnvironment = createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: launchSpawnEnv(login, fullPermissions) });
-      // Full permissions: bypass mode from the start. Otherwise auto mode; prompts it still raises come to the thread.
-      const mode = fullPermissions ? "bypassPermissions" : "auto";
-      const result = await host.start({ folder: launch.folder, shownFolder: options.displayFolder(launch.folder), name, settingsPath, mode, environment: startEnvironment });
+      // Full permissions: bypass mode. The person's own default mode: no flag. Otherwise auto mode; its prompts come to the thread.
+      const mode = fullPermissions ? "bypassPermissions" : launch.own_mode ? null : "auto";
+      const result = await host.start({
+        folder: launch.folder,
+        shownFolder: options.displayFolder(launch.folder),
+        name,
+        settingsPath,
+        mode,
+        allowBypass: launch.bypass_available === true,
+        environment: startEnvironment,
+        beforeRetry: () => void writeSettings(launch, login, model, true),
+      });
       startLog(launch.id, result.output);
       if (result.modeRefused) {
-        startLog(launch.id, `auto mode refused, started with Claude Code's default mode: ${result.modeRefused}`);
-        log(`Inbox launch ${launch.id}: auto mode refused (${result.modeRefused}); started with Claude Code's default mode`);
+        startLog(launch.id, `auto mode refused, started in default mode: ${result.modeRefused}`);
+        log(`Inbox launch ${launch.id}: auto mode refused (${result.modeRefused}); started in default mode`);
       }
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
@@ -500,14 +542,24 @@ export function createInboxLaunch(options: {
   // ── Routes ──
 
   /**
-   * Settings → Agents' switch: the person's choice once set; never set, what their login shell says
-   * (`from_shell`: on because the shell runs Claude in bypass mode). `settingsState` uses the last read;
-   * the window's GET reads the shell again when that read is older than a minute.
+   * Settings → Agents' switch: the person's choice once set; never set, what their own setup says
+   * (`follows`: on because their Claude settings or their shell run Claude in bypass mode). `own_mode`: a
+   * launch starts in their own default mode; `needs_consent`: they want full permissions, and Claude Code's
+   * bypass notice is not accepted on this computer, so a launch starts without them. `settingsState` uses
+   * the last shell read; the window's GET reads the shell again when that read is older than a minute.
    */
   const settingsState = () => {
     const setting = config().fullPermissions;
-    const fromShell = setting === null && shellBypass?.value === true;
-    return { enabled: enabled(), full_permissions: setting ?? fromShell, from_shell: fromShell };
+    const start = startNow();
+    const setup = claudeSetup();
+    const follows = setting === null && start.wantsFull ? (setup.defaultMode === "bypassPermissions" ? "claude" : "shell") : null;
+    return {
+      enabled: enabled(),
+      full_permissions: setting ?? start.wantsFull,
+      follows,
+      own_mode: start.ownMode,
+      needs_consent: start.wantsFull && !start.bypass,
+    };
   };
   const SHELL_READ_FRESH_MS = 60_000;
 
@@ -518,7 +570,9 @@ export function createInboxLaunch(options: {
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
       if (via === "tailnet") return json({ error: "Only from this computer.", code: "owner_only" }, 403);
-      if (config().fullPermissions === null && (!shellBypass || now() - shellBypass.at > SHELL_READ_FRESH_MS)) await readLogin();
+      // Never another site's page: a read here may start the person's login shell.
+      if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+      if (config().fullPermissions === null && (!shell || now() - shell.at > SHELL_READ_FRESH_MS)) await readLogin();
       return json({ launch: settingsState() });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -652,16 +706,24 @@ export function createInboxLaunch(options: {
       lastAvailable = ok;
       if (!ok.ok) throw new InboxError("agent_unavailable", `${AGENT_NAME} can't be started here: ${ok.reason}. Nothing was sent.`);
       const id = inboxId("lch");
-      // Full permissions, fixed for this launch: the switch once set; never set, the login shell (read now, and reused by the start).
-      const setting = config().fullPermissions;
-      let login: LaunchEnv | null = null;
-      if (setting === null) {
-        login = await readLogin();
-        for (const [key, read] of readForLaunch) if (now() - read.at > 10 * 60_000) readForLaunch.delete(key);
-        readForLaunch.set(id, { login, at: now() });
-      }
-      const full = launchFullPermissions(setting, login);
-      const launch: InboxLaunchRecord = { id, agent: HOST, session_ref: null, folder: project.root, scratch: false, started_at: new Date(now()).toISOString(), ...(full ? { full_permissions: true } : {}) };
+      // How it starts, fixed for this launch (`launchStartOf`): the switch, the person's own Claude setup and
+      // their login shell (read now, and reused by the start). Only their recorded consent makes bypass available.
+      const login = await readLogin();
+      readForLaunch.set(id, { login, at: now() });
+      // The login env (tokens included) never lingers: gone after a minute even when the Send fails after this.
+      setTimeout(() => readForLaunch.delete(id), 60_000).unref?.();
+      const start = startNow();
+      const launch: InboxLaunchRecord = {
+        id,
+        agent: HOST,
+        session_ref: null,
+        folder: project.root,
+        scratch: false,
+        started_at: new Date(now()).toISOString(),
+        ...(start.full ? { full_permissions: true } : {}),
+        ...(start.ownMode ? { own_mode: true } : {}),
+        ...(start.bypass ? { bypass_available: true } : {}),
+      };
       return { project, to: { host: HOST, session: `launch:${id}` }, launch };
     },
 

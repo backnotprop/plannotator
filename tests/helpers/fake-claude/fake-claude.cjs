@@ -15,8 +15,9 @@
  *
  * Calls:
  *  --version                 "<version> (Claude Code)"
- *  --bg --name N --settings F [--permission-mode M]
+ *  --bg --name N --settings F [--allow-dangerously-skip-permissions] [--permission-mode M]
  *                            no prompt; faults: untrusted (Claude's error, exit 1),
+ *                            refuseAuto (commander's refusal of `auto`, exit 1),
  *                            slow (sleeps 40 s); else (after `bgDelayMs`) prints
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
  *                            and starts the session process.
@@ -31,8 +32,20 @@
  * Inbox's MCP `send_message` with `reply_to`, and goes idle. `waiting` makes
  * the host list it as waiting on a permission prompt meanwhile.
  *
+ * Permission modes, as Claude Code 2.1.314 runs a background session: with no
+ * --permission-mode, the flag settings' then the user's `permissions.defaultMode`
+ * (else default). Bypass needs the person's own recorded consent
+ * (`skipDangerousModePermissionPrompt` in ~/.claude/settings.json, or
+ * `bypassPermissionsModeAccepted` in ~/.claude.json; never the --settings file):
+ * without it the allow flag is ignored, a bypass start runs in default mode, and
+ * a hook's `setMode bypassPermissions` is ignored. In bypass mode a prompt is not
+ * asked, except a `safetyCheck` one (dangerous rm): that goes to the
+ * PermissionRequest hook when there is one, is waived when there is none and
+ * CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1, and else waits on the
+ * built-in dialog. A hook's setMode changes the session's mode for later prompts.
+ *
  * Permission prompts (`prompts`: a list of { tool_name, tool_input,
- * permission_suggestions }, played in each turn, in order): as Claude Code
+ * permission_suggestions, safetyCheck }, played in each turn, in order): as Claude Code
  * does, the session lists itself `waiting` on a "permission prompt" and runs
  * the settings file's PermissionRequest command (`/bin/sh -c`, matcher `*`)
  * with the real stdin JSON (bg-perm-test/RESULTS.md) and the settings' env.
@@ -158,16 +171,24 @@ function main() {
       setTimeout(() => process.exit(1), 40_000);
       return;
     }
-    // An account or a CLI without auto mode.
+    // A CLI without auto mode: commander refuses the flag's value.
     if (cfg.refuseAuto && flag("--permission-mode") === "auto") {
-      process.stderr.write("Error: Auto mode is not available for your account. Choose another --permission-mode.\n");
+      process.stderr.write("error: option '--permission-mode <mode>' argument 'auto' is invalid. Allowed choices are acceptEdits, bypassPermissions, default, dontAsk, plan.\n");
       process.exit(1);
     }
+    // The person's own recorded consent and default mode (never the --settings file's consent).
+    const home = process.env.HOME || "";
+    const user = readJson(path.join(home, ".claude", "settings.json"), {}) || {};
+    const global = readJson(path.join(home, ".claude.json"), {}) || {};
+    const consent = user.skipDangerousModePermissionPrompt === true || global.bypassPermissionsModeAccepted === true;
+    let permissionMode = flag("--permission-mode") || ((settings && settings.permissions) || {}).defaultMode || (user.permissions || {}).defaultMode || "default";
+    const bypassAvailable = consent && (args.includes("--allow-dangerously-skip-permissions") || permissionMode === "bypassPermissions");
+    if (permissionMode === "bypassPermissions" && !consent) permissionMode = "default";
     const background = () => {
       const sessionId = crypto.randomUUID();
       const id = sessionId.replace(/-/g, "").slice(0, 8);
       const name = flag("--name") || "session";
-      saveAgent({ id, sessionId, cwd: process.cwd(), name, kind: "background", startedAt: Date.now(), status: "idle", state: "running", settingsPath, permissionMode: flag("--permission-mode") || null });
+      saveAgent({ id, sessionId, cwd: process.cwd(), name, kind: "background", startedAt: Date.now(), status: "idle", state: "running", settingsPath, permissionMode, bypassAvailable });
       startSession(sessionId);
       process.stdout.write(`Starting background service…\nbackgrounded · ${id} · ${name} (idle — send a prompt to start)\n`);
     };
@@ -252,6 +273,8 @@ async function session(sessionId) {
     base = `http://127.0.0.1:${next.port}`;
     headers = { authorization: `Bearer ${next.token}`, "content-type": "application/json" };
   };
+  /** The session's permission mode now (a hook's setMode changes it). */
+  let mode = agent.permissionMode || "default";
   const startedAt = new Date(agent.startedAt).toISOString();
   let busy = false;
   let idleSince = new Date().toISOString();
@@ -272,9 +295,11 @@ async function session(sessionId) {
 
   /** One permission prompt, as Claude Code plays it: the hook, then allow, deny, or blocked until answered locally. */
   const prompt = async (spec) => {
-    // Bypass mode: Claude Code asks nothing, and runs the tool.
-    if (agent.permissionMode === "bypassPermissions") {
-      fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output: null, exitCode: null, outcome: "ran", asked: false, ms: 0 })}\n`);
+    const entry = (((settings.hooks || {}).PermissionRequest || [])[0] || { hooks: [] }).hooks[0];
+    // Bypass mode asks nothing, but a safety check: to the hook when there is one, waived by the export only without one.
+    const skipEnv = (env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS || process.env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS) === "1";
+    if (mode === "bypassPermissions" && (!spec.safetyCheck || (!(entry && entry.command) && skipEnv))) {
+      fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output: null, exitCode: null, outcome: "ran", asked: false, mode, ms: 0 })}\n`);
       return { tool: spec.tool_name, outcome: "ran" };
     }
     const event = {
@@ -282,14 +307,13 @@ async function session(sessionId) {
       transcript_path: path.join(STATE, `${sessionId}.jsonl`),
       cwd: agent.cwd,
       prompt_id: crypto.randomUUID(),
-      permission_mode: agent.permissionMode || "default",
+      permission_mode: mode,
       effort: { level: "low" },
       hook_event_name: "PermissionRequest",
       tool_name: spec.tool_name,
       tool_input: spec.tool_input || {},
       ...(spec.permission_suggestions ? { permission_suggestions: spec.permission_suggestions } : {}),
     };
-    const entry = (((settings.hooks || {}).PermissionRequest || [])[0] || { hooks: [] }).hooks[0];
     updateAgent(sessionId, { status: "waiting", waitingFor: "permission prompt" });
     const started = Date.now();
     let stdout = "";
@@ -326,10 +350,17 @@ async function session(sessionId) {
     } catch {}
     const decision = output && output.hookSpecificOutput && output.hookSpecificOutput.decision;
     let outcome = local ? "local" : decision ? (decision.behavior === "allow" ? "ran" : "denied") : "blocked";
+    // A switch of mode: bypass only when it is available (the person's consent and the allow flag), else ignored.
+    let modeIgnored = false;
+    for (const update of (decision && decision.behavior === "allow" && decision.updatedPermissions) || []) {
+      if (!update || update.type !== "setMode") continue;
+      if (update.mode === "bypassPermissions" && !agent.bypassAvailable) modeIgnored = true;
+      else mode = update.mode;
+    }
     // No decision: the built-in dialog stays until someone answers it locally.
     while (outcome === "blocked" && !stopped && !config().localAnswer) await sleep(150);
     if (outcome === "blocked" && config().localAnswer) outcome = "local";
-    fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, ms: Date.now() - started })}\n`);
+    fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, mode, modeIgnored, ms: Date.now() - started })}\n`);
     updateAgent(sessionId, { status: "busy", waitingFor: null });
     return { tool: spec.tool_name, outcome };
   };

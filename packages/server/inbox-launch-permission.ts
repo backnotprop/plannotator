@@ -197,15 +197,19 @@ export function createLaunchPermissions(options: {
     options.onChange();
   };
 
-  /** How a launch's questions read paths. Every launch starts with --allow-dangerously-skip-permissions: Full permissions is always a choice. */
-  const launchOptions: InboxPermissionOptions = { shownPath: options.displayFolder, fullPermissions: true };
+  /**
+   * How a launch's questions read paths, and whether Full permissions is a choice: only in a launch whose
+   * person recorded Claude Code's bypass consent (`bypass_available`, so it started with
+   * --allow-dangerously-skip-permissions). Claude ignores a switch to bypass without it; an older launch has no flag.
+   */
+  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: root.launch!.bypass_available === true });
 
   /** What the Inbox found at a file tool's path: a Write's file exists, does not, or is not known; where a link points. */
   type Target = Pick<InboxPermissionOptions, "overwrite" | "linksTo">;
 
   /** The question this prompt asks in a launch's thread. */
   const questionFor = (root: InboxMessage, event: InboxPermissionEvent, target: Target = {}): InboxPermissionQuestion =>
-    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...launchOptions, ...target });
+    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root), ...target });
 
   /** A file tool's path now (the card says "overwrite" or "create", and where a link points); nothing when it cannot tell. */
   const targetNow = async (root: InboxMessage, event: InboxPermissionEvent): Promise<Target> => {
@@ -302,7 +306,7 @@ export function createLaunchPermissions(options: {
       const event = readInboxPermissionEvent(body.event);
       if (!event) return json({ error: "event: Claude Code's PermissionRequest input.", code: "validation_error" }, 400);
       const requestId = typeof body.request_id === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.request_id) ? body.request_id : null;
-      const answerOptions = launchOptions;
+      const answerOptions = optionsFor(root);
       let messageId: string;
       if (typeof body.message_id === "string") {
         const message = store.message(body.message_id);

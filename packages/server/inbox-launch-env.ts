@@ -5,8 +5,9 @@
  * The Inbox may itself have been started by an agent session, so its own env
  * carries that session's markers. A launched agent instead gets the person's
  * LOGIN shell env: `$SHELL -ilc`, printed with `env -0` between markers, 5 s
- * at most, read once per launch and at no other time (never for a status
- * read, a stop or a respawn). The shell starts from the Inbox's env through
+ * at most, read once per launch (when it is made; its first start reuses
+ * it) and for Settings → Agents while the switch was never set, never for a
+ * status read, a stop or a respawn. The shell starts from the Inbox's env through
  * `launchSpawnEnv`, so what launchd and the session give (SSH_AUTH_SOCK,
  * `launchctl setenv` proxies, LC_*) stays, and the Inbox's markers do not.
  *
@@ -14,7 +15,7 @@
  *   one that starts the person's shared supervisor, whose env every later
  *   background session inherits, so no `PLANNOTATOR_*` name, no per-session
  *   Claude marker and no skip-permissions export passes (that one is set only
- *   when the full-permissions switch is on). The person's own `CLAUDE_*`
+ *   in the settings file of a launch with full permissions). The person's own `CLAUDE_*`
  *   settings (CLAUDE_CONFIG_DIR) stay. Unlike `askAiChildEnv`, the Inbox stays
  *   ON for a launched agent: its settings file says where the Inbox is.
  * - `launchPlainEnv`: every call but the start (status, stop, respawn, rm,
@@ -50,12 +51,26 @@ export function shellSkipsPermissions(env: Readonly<LaunchEnv> | null): boolean 
 }
 
 /**
- * Whether a launch starts with full permissions (`launch.full_permissions`, fixed when it is made): the
- * person's Settings switch once they set it, either way; never set, their login shell's own export, so a
- * person whose shell already runs Claude in bypass mode never gets a prompt from a launch.
+ * How a launch starts, fixed on its record when it is made (`full_permissions`, `own_mode`,
+ * `bypass_available`). In order: Settings → Agents' switch once the person set it (on: full; off: auto);
+ * never set, their own Claude `permissions.defaultMode` (bypass: full; any other: that mode, no
+ * `--permission-mode`), then their login shell's skip-permissions export (full), then auto mode.
+ * Full needs the person's own recorded bypass consent (Claude ignores bypass in a background session
+ * without it): without it a full launch starts in their own mode or auto. `bypass` says whether the
+ * session may switch to bypass later (the card's Full permissions).
  */
-export function launchFullPermissions(setting: boolean | null, login: Readonly<LaunchEnv> | null): boolean {
-  return setting ?? shellSkipsPermissions(login);
+export function launchStartOf(input: {
+  setting: boolean | null;
+  defaultMode: string | null;
+  shellSkips: boolean;
+  consent: boolean;
+  disabled: boolean;
+}): { full: boolean; wantsFull: boolean; ownMode: boolean; bypass: boolean } {
+  const bypass = input.consent && !input.disabled;
+  const own = input.defaultMode !== null && input.defaultMode !== "bypassPermissions";
+  const wantsFull = input.setting ?? (input.defaultMode === "bypassPermissions" || (!own && input.shellSkips));
+  const full = wantsFull && bypass;
+  return { full, wantsFull, ownMode: !full && input.setting === null && own, bypass };
 }
 
 /** `env` without Plannotator's names, Claude's per-session ones and the skip-permissions export; that is set only when `fullPermissions`. */
@@ -78,18 +93,19 @@ const stringsOf = (env: Readonly<Record<string, string | undefined>>): LaunchEnv
 
 export function launchSettingsEnv(
   login: Readonly<LaunchEnv>,
-  input: { launchId: string; key: string; dataDir: string | null; fullPermissions: boolean },
+  input: { launchId: string; key: string; dataDir: string | null; fullPermissions: boolean; bypassAvailable: boolean },
 ): LaunchEnv {
   const out: LaunchEnv = {};
   for (const [name, value] of Object.entries(login)) {
-    // Bypass mode comes from the launch record alone (`launchFullPermissions`), never copied from the shell.
+    // Bypass mode comes from the launch record alone (`launchStartOf`), never copied from the shell.
     if (name.startsWith("CLAUDE_") && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV) out[name] = value;
   }
   if (input.dataDir) out.PLANNOTATOR_DATA_DIR = input.dataDir;
   out.PLANNOTATOR_LAUNCH = input.launchId;
   out.PLANNOTATOR_LAUNCH_KEY = input.key;
-  // Every launch starts with --allow-dangerously-skip-permissions: its permission hook may switch it to Full permissions.
-  out[INBOX_LAUNCH_FULL_PERMISSIONS_ENV] = "1";
+  // A launch that may switch to bypass later (the person's consent recorded): its permission hook honours Full permissions.
+  if (input.bypassAvailable && !input.fullPermissions) out[INBOX_LAUNCH_FULL_PERMISSIONS_ENV] = "1";
+  // A full launch has no permission hook (inbox-launch.ts), so Claude's export waives bypass mode's leftover checks too.
   if (input.fullPermissions) out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
   return out;
 }

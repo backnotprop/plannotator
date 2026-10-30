@@ -29,23 +29,32 @@
  *     and nothing draws as a permission card.
  * 10. The approved card (approval "inbox-permission-prompt"): Bash by its
  *     session rule, Write by Allow once (focused, Enter), WebFetch denied with
- *     a reason, Edit allowed with a switch to Auto mode (setMode auto); Full
- *     permissions offered live (every launch starts with bypass allowed, in
- *     auto mode); four one-line records after.
- * 11. Full permissions: the launch record decides the start (Try again after
- *     the switch went off still starts in bypass mode, which asks nothing); in
- *     an auto-mode launch a confirm the first time, then setMode
- *     bypassPermissions; no confirm the second time.
+ *     a reason, Edit allowed with a switch to Auto mode (setMode auto); no Full
+ *     permissions (this person never accepted Claude Code's bypass notice);
+ *     four one-line records after.
+ * 11. Full permissions, with the person's bypass consent: the launch record
+ *     decides the start (Try again after the switch went off still starts in
+ *     bypass mode); a full launch has no permission hook and asks nothing, a
+ *     safety check included; in an auto-mode launch a confirm the first time,
+ *     then setMode bypassPermissions (the session switches); no confirm the
+ *     second time.
+ * 11b. Without that consent: Full permissions is never offered, the switch on
+ *     starts in auto mode with no allow flag, and Settings says why.
  * 12. A second Enter right after an answer never allows the prompt that just
  *     arrived: the card ignores activation until it has been on screen.
  * 13. A five-rule session choice shows every rule (desktop and phone, nothing
  *     clipped); a crafted link (a host that normalizes, a secret in the query,
  *     user info) is shown exactly as sent, with its real host.
- * 14. The switch never set, and the login shell runs Claude in bypass mode: the
- *     launch starts in bypass mode and no card appears; Settings → Agents shows
- *     the switch on, following the shell.
- * 15. Auto mode refused (an account or a CLI without it): started again with no
- *     permission mode, and its prompts still come to the card.
+ * 14. The switch never set, and the login shell runs Claude in bypass mode: with
+ *     consent the launch starts in bypass mode, no hook, no card; Settings →
+ *     Agents shows the switch on, following the shell (and why it does not
+ *     apply without consent).
+ * 15. Auto mode refused (a CLI without it), for a person whose own default mode
+ *     is bypass: started again with no permission mode and the launch's settings
+ *     pinned to default mode, so its prompts still come to the card.
+ * 16. A person whose Claude settings set a default mode: no permission mode on
+ *     argv (never forced to auto), before the shell's export; prompts come to
+ *     the card.
  *
  * Pictures: LAUNCH_PR2_SHOTS_DIR (default .local/proof/launch-pr2). Build the
  * binary first (see inbox.spec.ts), then
@@ -72,6 +81,11 @@ const BUILD: FakePermissionPrompt = {
   permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'bun run:*' }], behavior: 'allow', destination: 'localSettings' }],
 };
 const SESSION_CHOICE = 'Allow bun run for this session';
+/** A safety check (Claude Code asks even in bypass mode, unless no hook exists and its export waives it). */
+const RM_DIST: FakePermissionPrompt = { tool_name: 'Bash', tool_input: { command: 'rm -rf apps/inbox/dist' }, safetyCheck: true };
+/** The person accepted Claude Code's bypass notice once (their own user settings). */
+const CONSENT = { skipDangerousModePermissionPrompt: true };
+const NEEDS_CONSENT = "Accept Claude Code's bypass notice once in Terminal to use this. Until then sessions start without it.";
 
 interface World {
   root: string;
@@ -92,6 +106,11 @@ function git(dir: string): string {
   mkdirSync(dir, { recursive: true });
   spawnSync('/usr/bin/git', ['init', '-q'], { cwd: dir, env: { PATH: '/usr/bin:/bin', HOME: world.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
   return realpathSync(dir);
+}
+
+/** The person's own Claude user settings in the temp HOME (the plugin stays on): bypass consent, a default mode. */
+function claudeSettings(extra: Record<string, unknown>): void {
+  writeFileSync(join(world.home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true }, ...extra }));
 }
 
 function writeConfig(patch: Record<string, unknown>): void {
@@ -251,6 +270,8 @@ test.afterAll(async () => {
 test.afterEach(() => {
   // Each test starts from a quiet fake: no prompt, no local answer.
   world.fake.configure({ prompts: [], localAnswer: false, hold: false, workMs: 800, body: '', fault: null, refuseAuto: false });
+  // No bypass consent, no default mode of their own.
+  claudeSettings({});
 });
 
 test('allow once: the question in the launch thread, the waiting line and the foot; allow with the tool input only; the agent goes on; never a second turn', async ({ browser }) => {
@@ -620,10 +641,10 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
   expect(denied?.message).toContain('Their reason: No need, the chunk size is fine. Skip the docs and finish.');
   await expect(record(page, 'deny')).toContainText('You said: “No need, the chunk size is fine. Skip the docs and finish.”');
 
-  // 4. Edit: the change as removed and added lines. Full permissions is live in every launch (it started with bypass allowed); Auto mode allows and switches.
+  // 4. Edit: the change as removed and added lines. Auto mode allows and switches; no Full permissions without the person's bypass consent.
   await expect(card(page).locator('.pc-facts')).toHaveText('1 removed, 1 added', { timeout: 30_000 });
-  await expect(card(page).locator('[data-perm-mode="full"]')).toBeEnabled();
-  await expect(card(page).locator('[data-perm-mode="full"]')).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(card(page).locator('[data-perm-mode="auto"]')).toBeVisible();
+  await expect(card(page).locator('[data-perm-mode="full"]')).toHaveCount(0);
   await answer(page, { choice: 'Auto mode' });
   expect(await decision(3)).toEqual({
     behavior: 'allow',
@@ -642,8 +663,9 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
   expect(world.errors).toEqual([]);
 });
 
-test('Full permissions: the launch record decides the start (Try again after the switch went off still starts in bypass, and asks nothing); in an auto-mode launch the card asks to confirm the first time, then allows and switches', async () => {
+test('Full permissions, with the person\'s bypass consent: the launch record decides the start (Try again after the switch went off still starts in bypass); a full launch has no permission hook and asks nothing, a safety check included; in an auto-mode launch the card asks to confirm the first time, then allows and switches', async () => {
   const { page, fake } = world;
+  claudeSettings(CONSENT);
   writeConfig({ inboxLaunch: { enabled: true, fullPermissions: true } });
   try {
     // Made with Full permissions on; the start fails; the switch goes off; Try again.
@@ -653,26 +675,35 @@ test('Full permissions: the launch record decides the start (Try again after the
     const starts = fake.starts().length;
     const asked = fake.permissions().length;
     writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
-    fake.configure({ fault: null, prompts: [BUILD] });
+    fake.configure({ fault: null, prompts: [BUILD, RM_DIST] });
     await pane(page).locator('[data-run="failed"] [data-run-retry]').click();
     // The session the record describes: bypass mode on argv and Claude's switch in its settings; it asks nothing.
     const started = await waitFor('the start after Try again', () => fake.starts()[starts]);
     expect(started.argv.slice(-3)).toEqual(['--allow-dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']);
     expect(started.settings?.env?.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBe('1');
+    // No permission hook (Claude's export waives bypass's safety checks only without one); the Inbox tool stays allowed.
+    expect(started.settings?.hooks).toBeUndefined();
+    expect(started.settings?.env?.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBeUndefined();
+    expect(started.settings?.permissions?.allow).toEqual(['mcp__plannotator__plannotator_inbox']);
     expect(await waitFor('the build run', () => fake.permissions()[asked])).toMatchObject({ outcome: 'ran', asked: false });
+    expect(await waitFor('the safety check', () => fake.permissions()[asked + 1])).toMatchObject({ outcome: 'ran', asked: false });
     await expect(pane(page).locator('[data-permission]')).toHaveCount(0);
   } finally {
     writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
   }
 
-  // A launch in auto mode (the switch off): Full permissions is offered all the same.
+  // A launch in auto mode (the switch off), with bypass allowed: Full permissions is offered.
   const before = fake.permissions().length;
   const next = fake.starts().length;
-  fake.configure({ prompts: [BUILD, { tool_name: 'Bash', tool_input: { command: 'bun test packages/inbox' } }] });
+  fake.configure({ prompts: [BUILD, RM_DIST] });
   await launch(page, 'Run the Inbox tests, then switch me to full permissions.');
-  expect((await waitFor('the auto start', () => fake.starts()[next])).argv.slice(-2)).toEqual(['--permission-mode', 'auto']);
+  const auto = await waitFor('the auto start', () => fake.starts()[next]);
+  expect(auto.argv.slice(-3)).toEqual(['--allow-dangerously-skip-permissions', '--permission-mode', 'auto']);
+  expect(auto.settings?.env?.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBe('1');
   const c = card(page);
   await expect(c.locator('[data-perm-mode="full"]')).toBeEnabled({ timeout: 30_000 });
+  await page.mouse.move(0, 0);
+  await shot(page, 'full-offered');
   await armed(page);
   await c.locator('[data-perm-mode="full"]').click();
   // The first time: a confirm in place, nothing sent yet.
@@ -686,13 +717,49 @@ test('Full permissions: the launch record decides the start (Try again after the
     updatedInput: BUILD.tool_input,
     updatedPermissions: [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }],
   });
-  // The second time in the same session: no confirm.
-  await expect(card(page).locator('[data-perm-detail]')).toHaveText('bun test packages/inbox', { timeout: 30_000 });
+  // The session took the switch (bypass was allowed at its start).
+  expect(first).toMatchObject({ mode: 'bypassPermissions', modeIgnored: false });
+  // In bypass mode only a safety check still asks, and it comes to the card (the hook is there). The second time: no confirm.
+  await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist', { timeout: 30_000 });
   await armed(page);
   await card(page).locator('[data-perm-mode="full"]').click();
   const second = await waitFor('the second prompt decided', () => fake.permissions()[before + 1]);
   expect(second.output?.hookSpecificOutput?.decision?.updatedPermissions).toEqual([{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }]);
   await expect(record(page, 'full')).toHaveCount(2);
+});
+
+test('without the person\'s bypass consent: Full permissions is never offered, the switch on starts in auto mode, and Settings says why', async () => {
+  const { page, fake } = world;
+  writeConfig({ inboxLaunch: { enabled: true, fullPermissions: true } });
+  try {
+    const before = fake.permissions().length;
+    const next = fake.starts().length;
+    fake.configure({ prompts: [BUILD] });
+    await launch(page, 'Build the Inbox; no bypass on this computer.');
+    const start = await waitFor('the start', () => fake.starts()[next]);
+    // Claude would ignore the allow flag and a bypass start without the person's own consent: neither is sent.
+    expect(start.argv.slice(3)).toEqual(['--settings', start.settingsPath!, '--permission-mode', 'auto']);
+    expect(start.settings?.env?.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBeUndefined();
+    expect(start.settings?.env?.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBeUndefined();
+    await expect(card(page).locator('[data-perm-mode="auto"]')).toBeVisible({ timeout: 30_000 });
+    await expect(card(page).locator('[data-perm-mode="full"]')).toHaveCount(0);
+    await expect(pane(page).locator('[data-launched] [data-launch-full]')).toHaveCount(0);
+    await answer(page, { choice: 'Allow once' });
+    expect((await waitFor('the prompt decided', () => fake.permissions()[before])).outcome).toBe('ran');
+    // Settings → Agents: on, and why it does not apply yet; the line goes once the notice is accepted.
+    await page.goto(`${world.url}#settings/agents`);
+    const row = page.locator('[data-launch-full-row]');
+    await expect(row.getByRole('switch', { name: 'Start new sessions with full permissions' })).toHaveAttribute('aria-checked', 'true');
+    await expect(row.locator('[data-launch-needs-consent]')).toHaveText(NEEDS_CONSENT);
+    await row.scrollIntoViewIfNeeded();
+    await shot(page, 'settings-needs-consent');
+    claudeSettings(CONSENT);
+    await page.reload();
+    await expect(row.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+    await expect(row.locator('[data-launch-needs-consent]')).toHaveCount(0);
+  } finally {
+    writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
+  }
 });
 
 test('a second Enter never answers the prompt that arrives right after: the card ignores activation until it has been on screen a moment', async () => {
@@ -792,10 +859,11 @@ test('every rule a session choice grants is visible (five rules, desktop and pho
   await waitFor('the user-info link decided', () => fake.permissions()[before + 2]);
 });
 
-test('the switch never set and a login shell that runs Claude in bypass mode: the launch starts in bypass mode, no card appears, and Settings follows the shell', async () => {
+test('the switch never set and a login shell that runs Claude in bypass mode: with consent the launch starts in bypass mode with no hook and no card, and Settings follows the shell', async () => {
   const { page, fake } = world;
   const before = fake.permissions().length;
   const starts = fake.starts().length;
+  claudeSettings(CONSENT);
   writeConfig({ inboxLaunch: { enabled: true } });
   fake.setLoginExports({ CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' });
   try {
@@ -804,7 +872,7 @@ test('the switch never set and a login shell that runs Claude in bypass mode: th
     const start = await waitFor('the start', () => fake.starts()[starts]);
     expect(start.argv.slice(-3)).toEqual(['--allow-dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']);
     expect(start.settings?.env?.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBe('1');
-    expect(start.settings?.env?.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBe('1');
+    expect(start.settings?.hooks).toBeUndefined();
     // Claude Code asked nothing: the tool ran, the agent answered, and no card was ever drawn.
     const ran = await waitFor('the build run', () => fake.permissions()[before]);
     expect(ran).toMatchObject({ outcome: 'ran', asked: false });
@@ -816,10 +884,17 @@ test('the switch never set and a login shell that runs Claude in bypass mode: th
     await page.goto(`${world.url}#settings/agents`);
     const row = page.locator('[data-launch-full-row]');
     await expect(row.getByRole('switch', { name: 'Start new sessions with full permissions' })).toHaveAttribute('aria-checked', 'true');
-    await expect(row.locator('[data-launch-from-shell]')).toHaveText("Follows your shell's setting until you change it.");
+    await expect(row.locator('[data-launch-follows="shell"]')).toHaveText("Follows your shell's setting until you change it.");
+    await expect(row.locator('[data-launch-needs-consent]')).toHaveCount(0);
+    // Without the person's consent it still follows the shell, and says why it does not apply.
+    claudeSettings({});
+    await page.reload();
+    await expect(row.locator('[data-launch-follows="shell"]')).toBeVisible();
+    await expect(row.locator('[data-launch-needs-consent]')).toHaveText(NEEDS_CONSENT);
     await row.getByRole('switch').click();
     await expect(row.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
-    await expect(row.locator('[data-launch-from-shell]')).toHaveCount(0);
+    await expect(row.locator('[data-launch-follows]')).toHaveCount(0);
+    await expect(row.locator('[data-launch-needs-consent]')).toHaveCount(0);
     // Set off: the person's choice wins over the shell; the next launch starts in auto mode.
     const next = fake.starts().length;
     fake.configure({ prompts: [] });
@@ -831,19 +906,51 @@ test('the switch never set and a login shell that runs Claude in bypass mode: th
   }
 });
 
-test('auto mode refused (an account or a CLI without it): started again with no permission mode, and its prompts still come to the card', async () => {
+test('auto mode refused (a CLI without it), for a person whose own default mode is bypass: started again with no mode and pinned to default mode, so its prompts still come to the card', async () => {
   const { page, fake } = world;
   const before = fake.permissions().length;
   const starts = fake.starts().length;
+  // The switch off over the person's own bypass default: a launch starts in auto mode, never in their bypass.
+  claudeSettings({ ...CONSENT, permissions: { defaultMode: 'bypassPermissions' } });
+  writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
   fake.configure({ refuseAuto: true, prompts: [BUILD] });
   try {
     await launch(page, 'Build the Inbox, whatever the mode.');
     await expect(card(page).locator('[data-perm-detail]')).toHaveText('bun run --cwd apps/inbox build', { timeout: 30_000 });
     const tried = fake.starts().slice(starts);
     expect(tried.map((s) => s.argv.slice(5))).toEqual([['--allow-dangerously-skip-permissions', '--permission-mode', 'auto'], ['--allow-dangerously-skip-permissions']]);
+    // The fallback's settings pin default mode: the person's bypass default never applies to it.
+    expect((tried[0]!.settings?.permissions as { defaultMode?: string }).defaultMode).toBeUndefined();
+    expect((tried[1]!.settings?.permissions as { defaultMode?: string }).defaultMode).toBe('default');
     await answer(page, { choice: 'Allow once' });
-    expect((await waitFor('the prompt decided', () => fake.permissions()[before])).outcome).toBe('ran');
+    expect(await waitFor('the prompt decided', () => fake.permissions()[before])).toMatchObject({ outcome: 'ran', mode: 'default' });
   } finally {
     fake.configure({ refuseAuto: false });
+  }
+});
+
+test('a person whose Claude settings set a default mode: no permission mode on argv (never forced to auto, before the shell\'s export), and its prompts still come to the card', async () => {
+  const { page, fake } = world;
+  const before = fake.permissions().length;
+  const starts = fake.starts().length;
+  claudeSettings({ ...CONSENT, permissions: { defaultMode: 'acceptEdits' } });
+  writeConfig({ inboxLaunch: { enabled: true } });
+  fake.setLoginExports({ CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' });
+  try {
+    fake.configure({ prompts: [BUILD] });
+    await launch(page, 'Build the Inbox in my usual mode.');
+    const start = await waitFor('the start', () => fake.starts()[starts]);
+    expect(start.argv.slice(3)).toEqual(['--settings', start.settingsPath!, '--allow-dangerously-skip-permissions']);
+    expect(start.settings?.env?.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBeUndefined();
+    await expect(card(page).locator('[data-perm-detail]')).toHaveText('bun run --cwd apps/inbox build', { timeout: 30_000 });
+    await answer(page, { choice: 'Allow once' });
+    expect(await waitFor('the prompt decided', () => fake.permissions()[before])).toMatchObject({ outcome: 'ran', mode: 'acceptEdits' });
+    await page.goto(`${world.url}#settings/agents`);
+    const row = page.locator('[data-launch-full-row]');
+    await expect(row.getByRole('switch', { name: 'Start new sessions with full permissions' })).toHaveAttribute('aria-checked', 'false');
+    await expect(row).toContainText('Your default mode');
+  } finally {
+    fake.setLoginExports(null);
+    writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
   }
 });

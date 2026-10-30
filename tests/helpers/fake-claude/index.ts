@@ -24,7 +24,7 @@ export interface FakeClaudeConfig {
   version?: string;
   /** `untrusted`: `--bg` fails with Claude's untrusted-folder error. `slow`: it never answers in time. */
   fault?: "untrusted" | "slow" | null;
-  /** `--bg --permission-mode auto` fails as Claude does for an account or a CLI without auto mode. */
+  /** `--bg --permission-mode auto` fails as a CLI without auto mode does (commander's refusal of the value). */
   refuseAuto?: boolean;
   /** How long a turn takes before the answer (ms, default 800). */
   workMs?: number;
@@ -53,6 +53,8 @@ export interface FakePermissionPrompt {
   tool_name: string;
   tool_input?: Record<string, unknown>;
   permission_suggestions?: Record<string, unknown>[];
+  /** A check bypass mode still asks (a dangerous rm): to the hook, or waived by the export when there is no hook. */
+  safetyCheck?: boolean;
 }
 
 /** What a permission prompt came to (permissions.jsonl). */
@@ -66,6 +68,10 @@ export interface FakePermissionResult {
   outcome: "ran" | "denied" | "local" | "blocked";
   /** False when the session's mode asked nothing (bypass mode). */
   asked?: boolean;
+  /** The session's mode after the prompt (a hook's setMode changes it). */
+  mode?: string;
+  /** A hook's setMode to bypass that the session ignored (bypass not available: no consent). */
+  modeIgnored?: boolean;
   ms: number;
 }
 
@@ -75,7 +81,7 @@ export interface FakeClaudeCall {
   env: string[];
   at: number;
   settingsPath?: string;
-  settings?: { env?: Record<string, string>; permissions?: { allow?: string[] }; [key: string]: unknown } | null;
+  settings?: { env?: Record<string, string>; permissions?: { allow?: string[]; defaultMode?: string }; hooks?: Record<string, unknown>; [key: string]: unknown } | null;
   settingsMode?: number | null;
   threadExisted?: boolean;
 }
@@ -89,6 +95,8 @@ export interface FakeClaudeAgent {
   state: string;
   pid?: number | null;
   permissionMode: string | null;
+  /** Bypass is available to the session (the person's consent, and the allow flag or a bypass start). */
+  bypassAvailable?: boolean;
 }
 
 export interface FakeClaude {

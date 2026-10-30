@@ -822,6 +822,14 @@ export interface InboxLaunchRecord {
   started_at: string;
   /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
   full_permissions?: true;
+  /** Started in the person's own Claude `permissions.defaultMode` (no `--permission-mode`). Neither this nor full: auto mode. */
+  own_mode?: true;
+  /**
+   * The person recorded Claude Code's bypass consent when the launch was made: it starts with
+   * `--allow-dangerously-skip-permissions`, and its card offers Full permissions. Absent (an older launch
+   * too): no Full permissions.
+   */
+  bypass_available?: true;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
