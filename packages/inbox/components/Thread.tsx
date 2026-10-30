@@ -5113,6 +5113,15 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         onToast={onToast}
         onOpenAt={(attachmentId, version, focus) => onOpenFile({ id: attachmentId, version, focus, view: currentView, set: setFor(attachmentId) }, { replace: true })}
         onClose={() => {
+          // Beside the thread with Files tabs, closing the file (Escape that nothing else used, the unsaved-comment
+          // question's "Discard and close") closes the whole pane, exactly as the lit folder does: its tabs close and
+          // the thread's × comes back. Never back to Artifacts with the tabs kept. Focus follows main's keyboard rule
+          // for a closed file (the place O opened it from, its tile, a message head in view); the folder only when
+          // nothing else took it.
+          if (filesTabsOn && !shownFull) {
+            filesUi.closePaneFromFile();
+            return;
+          }
           onOpenFile(null);
         }}
         strip={{

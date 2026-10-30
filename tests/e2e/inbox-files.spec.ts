@@ -25,9 +25,10 @@
  *   change nothing outside it.
  * - Full screen stays as it was: no tab row.
  * - Beside the thread the header's line stays ("from <agent> in <project>",
- *   "in <project>" for a file of the folder); Escape beside the thread does
- *   not close a file (as before tabs: an open file owns Escape), and on an
- *   HTML page in Annotate it leaves Annotate and keeps the page; Close all
+ *   "in <project>" for a file of the folder); an Escape nothing else used
+ *   beside the thread closes the whole pane as the lit folder does (two tabs
+ *   or one; focus into the thread), but on an HTML page in Annotate the mode
+ *   takes it first: it leaves Annotate and keeps the page; Close all
  *   goes back to the thread; the folder button keeps a panel the person
  *   closed closed; the panel's open folders survive a full-screen round
  *   trip; a project HTML file opens full screen.
@@ -193,6 +194,8 @@ test.afterAll(async () => {
 
 const panel = () => world.page.locator('[data-files-panel]');
 const projectRow = (path: string) => panel().locator(`[role=tree][aria-label="ledger"] [role=treeitem][data-path="${path}"]`);
+/** After a keyboard close, focus is in the thread's messages (main's rule for a closed file), never left on the page. */
+const focusInThread = () => world.page.evaluate(() => !!document.activeElement?.closest('section.ib-pane .ib-pbody'));
 const fileTabs = () => world.page.locator('[data-file-tab]');
 
 test('the folder button opens Artifacts with the project listed like VS Code', async () => {
@@ -269,17 +272,46 @@ test('one file shows a tab row and its tools in a row of their own, as two do', 
   await expect(projectRow('docs')).toBeVisible();
 });
 
-test('Escape keeps the file beside the thread; Close all goes back to the thread; the button keeps a closed panel closed', async () => {
+test('two tabs open: Escape closes the whole pane as the lit folder does; the folder reopens it as after its own close', async () => {
   const { page } = world;
   await projectRow('README.md').click();
   await projectRow('docs/plan.md').click();
   await expect(fileTabs()).toHaveCount(2);
-  // Escape beside the thread closes nothing, as before tabs (an open file owns Escape; no new Inbox key).
+  // An Escape nothing else used (main's "Escape takes off the top layer"; the coordinator's call, 2026-10-29) closes the
+  // pane, never "back to Artifacts with the tabs kept": the thread's × is back and the folder shows its count. Focus
+  // follows main's keyboard rule for a closed file (approval "inbox-keyboard-shortcuts"): into the thread, never lost.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
+  await expect(page.locator('[data-files-tabs]')).toHaveCount(0);
+  await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => location.hash)).not.toMatch(/artifacts|file=/);
+  const head = page.locator('section.ib-pane .ib-phead');
+  await expect(head.getByRole('button', { name: 'Close the thread' })).toBeVisible();
+  const door = head.locator('[data-artifacts-button]');
+  await expect(door).toHaveAttribute('aria-expanded', 'false');
+  await expect(door.locator('[data-files-count]')).toBeVisible();
+  await expect.poll(focusInThread).toBe(true);
+  // The folder reopens the pane exactly as after its own close: on Artifacts, the tabs gone with the pane.
+  await door.click();
+  await expect(page.locator('[data-artifacts-tab]')).toHaveAttribute('aria-selected', 'true');
+  await expect(fileTabs()).toHaveCount(0);
+  await expect(panel()).toBeVisible();
+  // Focus inside the pane (on a file's tab): the same Escape closes it.
+  await projectRow('README.md').click();
+  await fileTabs().first().focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-files-tabs]')).toHaveCount(0);
+  await expect.poll(focusInThread).toBe(true);
+  // Left open on Artifacts with the panel, for the tests after this one.
+  await door.click();
+  await expect(panel()).toBeVisible();
+});
+
+test('Close all goes back to the thread; the button keeps a closed panel closed', async () => {
+  const { page } = world;
+  await projectRow('README.md').click();
+  await projectRow('docs/plan.md').click();
   await expect(fileTabs()).toHaveCount(2);
-  await expect.poll(() => page.evaluate(() => location.hash)).toContain('file=');
   // Close all: back to the thread alone.
   await page.locator('[data-tabs-menu]').click();
   await page.getByRole('menuitem', { name: 'Close all' }).click();
@@ -454,7 +486,8 @@ test('the panel keeps its open folders through full screen; a project HTML file 
   await expect(view).not.toHaveClass(/ib-full/);
   await expect(projectRow('docs')).toHaveAttribute('aria-expanded', 'true');
   await expect(projectRow('docs/mock.html')).toBeVisible();
-  // Escape on the page in Annotate (focus outside its frame): Annotate turns off and the page stays, as before tabs.
+  // Escape on the page in Annotate (focus outside its frame): the mode takes it first, Annotate turns off and the page
+  // stays (innermost first; main closed the file here, the viewer's own listener coming after the pane's).
   const pen = view.locator('[data-html-annotate-toggle]');
   await expect(pen).toHaveAttribute('aria-pressed', 'true');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -462,6 +495,12 @@ test('the panel keeps its open folders through full screen; a project HTML file 
   await expect(pen).toHaveAttribute('aria-pressed', 'false');
   await expect(view).toBeVisible();
   await expect.poll(() => page.evaluate(() => location.hash)).toContain('file=');
+  // In Interact nothing is active: the next Escape closes the pane; focus goes into the thread.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Escape');
+  await expect(view).toHaveCount(0);
+  await expect(page.locator('[data-files-tabs]')).toHaveCount(0);
+  await expect.poll(focusInThread).toBe(true);
   expect(world.errors).toEqual([]);
 });
 

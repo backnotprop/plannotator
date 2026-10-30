@@ -359,6 +359,9 @@ export function useFilesTabs(input: FilesTabsInput) {
     source,
     noteStep,
     toggleDoor,
+    /** The file asked to close (its Escape, or "Discard and close" after its unsaved-comment question): the whole pane
+     *  closes, as the lit folder closes it. The file has already been through its own leave, so no second question. */
+    closePaneFromFile: () => input.showArtifacts(false),
     paneTabs,
     aside,
     /** The panel itself: ThreadPane renders it while a pane holds `aside`. */

@@ -25,7 +25,9 @@
  *                 only be full screen (a phone, a narrow window).
  *
  * Beside the thread (not full screen) there is no ladder: each control keeps
- * its own Escape, as before.
+ * its own Escape, and an Escape nothing used closes the file (with Files tabs,
+ * the whole pane). Before that, AttachmentPane's `besideRung` lets an active
+ * mode take it: `popover`, `composer`, `annotate`, `question` (2026-10-29).
  */
 
 export type EscapeRung = 'popover' | 'composer' | 'field' | 'drawer' | 'linked' | 'annotate' | 'question' | 'leave';

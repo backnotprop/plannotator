@@ -972,7 +972,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   });
 
   // Beside the thread, an Escape nothing else used closes the file (approval "inbox-keyboard-shortcuts": Escape
-  // takes off the top layer). Last of all: on the window, bubbling, after the ladder, the thread and every control.
+  // takes off the top layer; with Files tabs the thread closes the whole pane, as its lit folder does). Last of all: on
+  // the window, bubbling, after the ladder, the thread and every control. An active mode inside the pane takes it
+  // first, innermost first, wherever focus is (`besideRung`): the peek or a menu, a comment being written, Annotate on
+  // an HTML page (to Interact, as before the keyboard system: the viewer's own window listener registers again on
+  // every render, so it came after this one and the file closed instead), the question about an unsaved comment.
   useShortcutScope({
     scope: inboxFileViewerShortcuts,
     handlers: {
@@ -983,10 +987,22 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           const target = keyTarget(event);
           return !(target && (isEditableTarget(target) || inOverlay(target) || target.closest('[role="menu"], [role="listbox"], [aria-expanded="true"]')));
         },
-        handle: () => close(),
+        handle: () => {
+          const rung = besideRung();
+          if (rung) climb(rung);
+          else close();
+        },
       },
     },
   });
+  /** Beside the thread: the mode an Escape ends before the file (or the Files pane) closes, or null. */
+  function besideRung(): EscapeRung | null {
+    if (menuOpen || moreOpen) return 'popover';
+    if (!props.readOnly && openComposer() !== null) return 'composer';
+    if (isHtml && armed && !props.readOnly) return 'annotate';
+    if (guard !== null) return 'question';
+    return null;
+  }
 
   /** The textarea of a composer this pane owns that holds unsaved words, when the key came from inside that composer. */
   function composerAskedAbout(target: Element | null): HTMLTextAreaElement | null {
