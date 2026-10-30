@@ -13,8 +13,8 @@ import { join } from "node:path";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { launchPermissionHooks } from "./inbox-launch";
-import { ANSWER_SETTLE_MS, createLaunchPermissions, fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
+import { ANSWER_SETTLE_MS, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
+import { fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
 import { readInboxPermissionBody } from "@plannotator/core/inbox-permission";
 
 const roots: string[] = [];
