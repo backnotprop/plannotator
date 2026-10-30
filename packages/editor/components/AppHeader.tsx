@@ -17,6 +17,7 @@ import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import type { CompactPlanAction } from '@plannotator/ui/components/PlanHeaderMenu';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
+import { StartCutPath } from '@plannotator/ui/components/StartCutPath';
 import { BundleSwitcher, type BundleSwitcherProps } from './BundleSwitcher';
 
 /** Plannotator's refresh strings for the published control: the document
@@ -65,7 +66,7 @@ interface AppHeaderProps {
   /** The open document's name beside the logo ("Plannotator / notes.md"),
    *  its full path or URL in a tooltip. Desktop only, and not drawn beside
    *  a `bundleSwitcher`, which already names the open file. */
-  documentName?: { name: string; title?: string };
+  documentName?: { name: string; title?: string; cutsFromStart?: boolean };
   // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
@@ -578,17 +579,19 @@ export const CompactPlanNavigatorTrigger = ({
 
 /** "/ notes.md" after the logo: the name cut with an ellipsis when the header
  *  runs short, the full path in the app's tooltip (and to screen readers).
- *  The tooltip wraps a long path rather than running off a narrow window. */
-const HeaderDocumentName: React.FC<{ name: string; title?: string }> = ({ name, title }) => {
+ *  A path (a folder session's folder) is cut from the start instead, so the
+ *  folder's own name stays whole. The tooltip wraps a long path rather than
+ *  running off a narrow window. */
+const HeaderDocumentName: React.FC<{ name: string; title?: string; cutsFromStart?: boolean }> = ({ name, title, cutsFromStart }) => {
   const descriptionId = React.useId();
   const label = (
     <span
       data-header-document-name="true"
-      className="min-w-0 truncate text-sm text-foreground/90 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className={`min-w-0 ${cutsFromStart ? 'flex' : 'truncate'} text-sm text-foreground/90 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
       tabIndex={title ? 0 : undefined}
       aria-describedby={title ? descriptionId : undefined}
     >
-      {name}
+      {cutsFromStart ? <StartCutPath path={name} /> : name}
     </span>
   );
   return (
