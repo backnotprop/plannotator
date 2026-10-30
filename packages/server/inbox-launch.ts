@@ -46,7 +46,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 import { INBOX_HOST_NAMES, inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -68,16 +68,6 @@ const INBOX_TOOL_PERMISSION = `mcp__plannotator__${INBOX_TOOL_NAME}`;
 const AVAILABLE_TTL_MS = 30_000;
 /** Claude Code's hook timeout for the permission hook: four days, as the plugin's ExitPlanMode hook. */
 const PERMISSION_HOOK_TIMEOUT_S = 345_600;
-
-/**
- * The argv that runs this same Plannotator: the compiled binary alone, or bun
- * plus the entry script in a source run (as `selfCommand` in apps/hook).
- */
-export function plannotatorSelfCommand(argv: readonly string[] = process.argv, execPath: string = process.execPath, exists: (path: string) => boolean = existsSync): string[] {
-  const script = argv[1];
-  if (script && /\.(?:[cm]?[jt]s)$/.test(script) && exists(script)) return [execPath, script];
-  return [execPath];
-}
 
 /** One shell word: single-quoted. */
 const shellWord = (word: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
@@ -134,8 +124,8 @@ export function createInboxLaunch(options: {
   json: (body: unknown, status?: number) => Response;
   /** The windows should read the list and open thread again (a start settled, a stop). */
   onChange: () => void;
-  /** The argv that runs this Plannotator (the permission hook's command); default `plannotatorSelfCommand()`. */
-  selfCommand?: readonly string[];
+  /** The argv that runs this Plannotator (the permission hook's command): the Inbox's own `selfCommand`. */
+  selfCommand: readonly string[];
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -332,7 +322,7 @@ export function createInboxLaunch(options: {
     rootOf: (launchId) => roots().find((root) => root.launch!.id === launchId && !root.launch!.deleted_at) ?? null,
     roots: () => roots().filter((root) => !root.launch!.deleted_at),
     displayFolder: options.displayFolder,
-    host: { stateOf: (ref) => hostStateOf(ref), readAt: () => hostView?.at ?? 0, refresh: () => void refreshHost() },
+    host: { stateOf: (ref) => hostStateOf(ref), readAt: () => hostView?.at ?? 0 },
     onChange: options.onChange,
     now,
     log,
@@ -349,7 +339,11 @@ export function createInboxLaunch(options: {
    * host's view fresh where a line could change.
    */
   const sweep = (watched: boolean) => {
-    if (!enabled()) return;
+    if (!enabled()) {
+      // Launch turned off: a question no one can answer any more is withdrawn (nothing to do once none is open).
+      for (const root of roots()) if (!root.launch!.deleted_at) permissions.withdrawAll(root);
+      return;
+    }
     const all = roots().filter((root) => !root.launch!.deleted_at);
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
@@ -371,7 +365,7 @@ export function createInboxLaunch(options: {
       env: launchSettingsEnv(login, { launchId: launch.id, key: randomBytes(32).toString("hex"), dataDir: isDefaultDataDir ? null : options.dataDir, fullPermissions }),
       permissions: { allow: [INBOX_TOOL_PERMISSION] },
       // Permission prompts come to the launch thread as questions (inbox-launch-permission.ts).
-      hooks: launchPermissionHooks(options.selfCommand ?? plannotatorSelfCommand()),
+      hooks: launchPermissionHooks(options.selfCommand),
     };
     writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
     chmodSync(path, 0o600);

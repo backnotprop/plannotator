@@ -110,6 +110,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { createInboxTidy } from "./inbox-tidy";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
@@ -2373,8 +2374,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const listener of deliveryListeners) listener();
     },
     log: (line) => process.stderr.write(`${line}\n`),
-    // The permission hook runs this Plannotator: the CLI's own argv when it gave one.
-    selfCommand: options.selfCommand?.length ? options.selfCommand : undefined,
+    // The permission hook runs this Plannotator.
+    selfCommand,
   });
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -3159,12 +3160,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ message: store.undoHandoff(handoffUndo[1]!) });
       }
 
+      /** Not a permission question, or a window's call: the page's own Origin (this Host) and this run's serverSession. */
+      const answeredFromWindow = (request: Request, body: Record<string, unknown>, target: InboxMessage | null | undefined): boolean => {
+        if (target?.author.kind !== "agent" || !isInboxPermissionSession(target.author.session)) return true;
+        const from = request.headers.get("origin");
+        let fromHost: string | null = null;
+        try {
+          fromHost = from ? new URL(from).host : null;
+        } catch {
+          fromHost = null;
+        }
+        return fromHost !== null && fromHost === (request.headers.get("host") ?? "") && body.serverSession === serverSession;
+      };
+
       const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|reask|resolve)$/.exec(path);
       if (messageMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const messageId = messageMatch[1]!;
+        // A launched session's permission prompt is answered from a window only: the page's own Origin and
+        // this run's serverSession, never a bare local call (an agent's curl). A tightening, not a secret:
+        // see "Permission prompts" in docs/agent-guides/inbox-launch.md.
+        if ((messageMatch[2] === "picks" || messageMatch[2] === "reply") && !answeredFromWindow(req, body, store.message(messageId))) {
+          return json({ error: "A permission prompt is answered in the Inbox window.", code: "window_only" }, 403);
+        }
         switch (messageMatch[2]) {
           case "picks": {
             // `unsent_only` (decision mode): a pick that raced the Send of its reply never reopens what went.

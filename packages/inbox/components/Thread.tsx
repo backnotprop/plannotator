@@ -316,7 +316,14 @@ export function MessageBody({
   pictureBadge,
   inlineRefOf,
   replyFiles,
+  permission = false,
 }: {
+  /**
+   * A Claude Code permission prompt of a launched thread, with launch on (the
+   * Inbox reserves the `perm:` author for its own permission route): "Permission"
+   * over the card, and its free-text row is the Deny's reason.
+   */
+  permission?: boolean;
   /**
    * The action items this person's message carried (approval
    * "inbox-action-items-in-reply"): listed as "You did 1 action item", and the
@@ -756,9 +763,6 @@ export function MessageBody({
     },
     [message.questions],
   );
-
-  // A Claude Code permission prompt (launch): "Permission" over it, and its free-text row is the Deny's reason.
-  const permission = message.author.kind === 'agent' && isInboxPermissionSession(message.author.session);
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
@@ -1204,6 +1208,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   const asker = startedTo ? hostName(startedTo.host) : agentName(root.author);
   // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
   const launched = root.launch ?? null;
+  // Launch is on for this thread (a launched thread whose read carries a run line).
+  const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const launchAct = async (action: () => Promise<unknown>, done?: string) => {
@@ -4458,6 +4464,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                 ) : (
                 <MessageBody
                   message={message}
+                  permission={launchOn && message.author.kind === 'agent' && isInboxPermissionSession(message.author.session)}
                   sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
                   sentActions={message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined}
                   replyFiles={message.author.kind === 'person' ? { files: allFiles, personMessageIds, onOpen: openFromReply } : undefined}

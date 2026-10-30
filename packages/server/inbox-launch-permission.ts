@@ -14,20 +14,22 @@
  * and without `wakes`: the person's answer is addressed to `perm:…`, which no
  * poll claims, so it never becomes a second turn. Each call is held up to
  * 25 s and answers `waiting` (call again with the message id), `decided`
- * (print the decision; the hook's call records the delivery) or `withdrawn`
- * (say nothing; Claude Code's own dialog stays).
+ * (`choice`: once, session or deny, and the reason; the hook builds the
+ * decision from its own event, and the call records the delivery) or
+ * `withdrawn` (say nothing; Claude Code's own dialog stays). A question whose
+ * stored choices are not exactly the three it was written with is withdrawn,
+ * never answered; one whose command is too long to show in full is never
+ * asked.
  *
  * A lease withdraws a question no hook holds any more: each call renews it
  * for 60 s, and a held call keeps it. When it runs out (the hook timed out,
  * crashed, or Claude Code ended it because the person answered in Terminal),
- * a one-line follow-up from the same identity supersedes the question:
- * "Answered in Terminal." when the host says the session went on, else
- * "No longer waiting.". A host read made since the question that says the
- * session went on (not waiting, not stopped) withdraws it at once as
- * answered in Terminal, hook or no hook: while the hook waits, the host
- * lists the session waiting on its prompt. Stop and Delete withdraw at
- * once. An Inbox restart forgets the leases: each open question gets a fresh
- * one, and the hook, retrying every 2 s, renews it.
+ * a one-line follow-up from the same identity supersedes the question,
+ * "No longer waiting.". With no call held, a host read made since the
+ * question that says the session went on (not waiting, not stopped)
+ * withdraws it at once as "Answered in Terminal.". Stop and Delete withdraw
+ * at once. An Inbox restart forgets the leases: each open question gets a
+ * fresh one, and the hook, retrying every 2 s, renews it.
  */
 
 import { timingSafeEqual } from "node:crypto";
@@ -35,14 +37,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
+  INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
-  inboxPermissionDecision,
+  inboxPermissionAnswer,
+  inboxPermissionChoices,
   inboxPermissionQuestion,
   inboxPermissionSession,
-  inboxPermissionSessionChoice,
   isInboxPermissionSession,
   readInboxPermissionEvent,
-  type InboxPermissionDecision,
+  type InboxPermissionChoice,
   type InboxPermissionEvent,
 } from "@plannotator/core/inbox-permission";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -53,8 +56,6 @@ export const PERMISSION_HOLD_MS = 25_000;
 export const PERMISSION_LEASE_MS = 60_000;
 /** A host read this long after the question was asked can say the session went on without it. */
 const HOST_SETTLE_MS = 5_000;
-/** An expired lease waits this long for a fresh host read to word its follow-up, then says "No longer waiting." */
-const EXPIRY_WORDING_WAIT_MS = 15_000;
 const CHECK_EVERY_MS = 200;
 
 const HOST = "claude-code";
@@ -62,12 +63,11 @@ const AGENT_NAME = "Claude Code";
 
 export type PermissionAnswer =
   | { status: "waiting"; message_id: string }
-  | { status: "decided"; message_id: string; decision: InboxPermissionDecision }
+  | { status: "decided"; message_id: string; choice: InboxPermissionChoice; reason: string | null }
   | { status: "withdrawn"; message_id: string | null };
 
 interface Lease {
   launchId: string;
-  threadId: string;
   /** When no held call renews it any more, it runs out at this time. */
   expires: number;
   /** Calls held open now: the lease does not run out while one is. */
@@ -96,8 +96,8 @@ export function createLaunchPermissions(options: {
   roots: () => InboxMessage[];
   /** A folder as the person reads it (`~/…`). */
   displayFolder: (path: string) => string;
-  /** The host's last word on a session (`claude agents --json --all`), when it was read, and a fresh read. */
-  host: { stateOf: (ref: string | null) => InboxRunHostState | null; readAt: () => number; refresh: () => void };
+  /** The host's last word on a session (`claude agents --json --all`) and when it was read. */
+  host: { stateOf: (ref: string | null) => InboxRunHostState | null; readAt: () => number };
   onChange: () => void;
   now?: () => number;
   log?: (line: string) => void;
@@ -139,6 +139,7 @@ export function createLaunchPermissions(options: {
       store.sendMessage({
         project_id: message.project_id,
         author: message.author,
+        permission: true,
         body: text,
         reply_to: messageId,
         supersedes: [messageId],
@@ -151,17 +152,25 @@ export function createLaunchPermissions(options: {
     options.onChange();
   };
 
+  /** Whether the stored question is exactly the one this prompt asks: one question, its choices the expected labels in order. */
+  const asksExactly = (messageId: string, event: InboxPermissionEvent): boolean => {
+    const questions = store.questionsOf(messageId);
+    const expected = inboxPermissionChoices(event, options.displayFolder);
+    const stored = questions[0]?.choices.map((choice) => choice.label) ?? [];
+    return questions.length === 1 && stored.length === expected.length && stored.every((label, i) => label === expected[i]);
+  };
+
   /** Where the question stands: decided (the delivery recorded), withdrawn, or still waiting (null). */
   const settled = (messageId: string, event: InboxPermissionEvent): PermissionAnswer | null => {
     const question = store.questionsOf(messageId)[0];
     if (!question || question.state === "superseded" || question.state === "closed") return { status: "withdrawn", message_id: messageId };
+    // Never answer a card that does not offer exactly this prompt's three choices: Claude Code's own dialog decides.
+    if (!asksExactly(messageId, event)) {
+      withdraw(messageId, INBOX_PERMISSION_ASK_IN_TERMINAL);
+      return { status: "withdrawn", message_id: messageId };
+    }
     if (question.state !== "sent") return null;
-    const shownPath = options.displayFolder;
-    const decision = inboxPermissionDecision(question.answer, {
-      event,
-      choices: question.choices.map((choice) => choice.label),
-      sessionUpdate: inboxPermissionSessionChoice(event, shownPath)?.update ?? null,
-    });
+    const { choice, reason } = inboxPermissionAnswer(question.answer, event, options.displayFolder);
     const message = store.message(messageId);
     if (question.sent_reply_id && message?.author.kind === "agent" && message.author.session) {
       try {
@@ -171,10 +180,11 @@ export function createLaunchPermissions(options: {
       }
     }
     leases.delete(messageId);
-    return { status: "decided", message_id: messageId, decision };
+    return { status: "decided", message_id: messageId, choice, reason };
   };
 
-  const ask = (root: InboxMessage, event: InboxPermissionEvent, requestId: string): string => {
+  /** The question's id, or null when this prompt is not asked here (its command is too long to show in full). */
+  const ask = (root: InboxMessage, event: InboxPermissionEvent, requestId: string): string | null => {
     // The same request again (its answer was lost on the way): the question it already wrote.
     const key = `perm-${requestId}`;
     for (const id of store.threadMessageIds(root.thread_id)) {
@@ -183,10 +193,15 @@ export function createLaunchPermissions(options: {
     }
     const folder = options.displayFolder(event.cwd ?? root.launch!.folder);
     const question = inboxPermissionQuestion(event, { agent: AGENT_NAME, folder, shownPath: options.displayFolder });
+    if (question.tooLong) {
+      log(`Inbox launch ${root.launch!.id}: a ${event.tool_name} prompt too long to show in full; left to Terminal`);
+      return null;
+    }
     const latest = store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
     const sent = store.sendMessage({
       project_id: root.project_id,
       author: { kind: "agent", host: HOST, session: inboxPermissionSession(event.session_id), name: AGENT_NAME },
+      permission: true,
       body: question.body,
       reply_to: latest,
       idempotency_key: key,
@@ -219,11 +234,13 @@ export function createLaunchPermissions(options: {
         messageId = message.id;
       } else {
         if (!requestId) return json({ error: "request_id: 8 to 80 letters, digits, - or _.", code: "validation_error" }, 400);
-        messageId = ask(root, event, requestId);
+        const asked = ask(root, event, requestId);
+        if (!asked) return json({ status: "withdrawn", message_id: null } satisfies PermissionAnswer);
+        messageId = asked;
       }
       const done = settled(messageId, event);
       if (done) return json(done);
-      const lease = leases.get(messageId) ?? { launchId, threadId: root.thread_id, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };
+      const lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };
       leases.set(messageId, lease);
       lease.holding += 1;
       const deadline = now() + holdMs;
@@ -261,7 +278,7 @@ export function createLaunchPermissions(options: {
       const t = now();
       for (const root of options.roots()) {
         for (const { message, at } of openPermissionQuestions(store, root.thread_id)) {
-          if (!leases.has(message.id)) leases.set(message.id, { launchId: root.launch!.id, threadId: root.thread_id, expires: t + leaseMs, holding: 0, askedAt: at });
+          if (!leases.has(message.id)) leases.set(message.id, { launchId: root.launch!.id, expires: t + leaseMs, holding: 0, askedAt: at });
         }
       }
       for (const [messageId, lease] of leases) {
@@ -274,23 +291,17 @@ export function createLaunchPermissions(options: {
           leases.delete(messageId);
           continue;
         }
-        const ref = root.launch!.session_ref;
-        const state = options.host.stateOf(ref);
+        // A held call is the hook, alive and waiting: never withdrawn under it.
+        if (lease.holding > 0) continue;
+        const state = options.host.stateOf(root.launch!.session_ref);
         const fresh = options.host.readAt() >= lease.askedAt + HOST_SETTLE_MS;
-        const wentOn = fresh && state !== null && state !== "absent" && state.status !== "waiting" && state.state !== "stopped" && state.state !== "done";
         // Claude Code went on without our answer (a host read since the question): the person answered in Terminal.
-        // While the hook waits, the host lists the session waiting on its prompt, so this never takes a live question.
-        if (wentOn) {
+        if (fresh && state !== null && state !== "absent" && state.status !== "waiting" && state.state !== "stopped" && state.state !== "done") {
           withdraw(messageId, INBOX_PERMISSION_ANSWERED_IN_TERMINAL);
           continue;
         }
-        if (lease.holding > 0 || t < lease.expires) continue;
-        // Ran out: word the follow-up from a host read made since.
-        if (options.host.readAt() < lease.expires && t < lease.expires + EXPIRY_WORDING_WAIT_MS) {
-          options.host.refresh();
-          continue;
-        }
-        withdraw(messageId, wentOn ? INBOX_PERMISSION_ANSWERED_IN_TERMINAL : INBOX_PERMISSION_NO_LONGER_WAITING);
+        if (t < lease.expires) continue;
+        withdraw(messageId, INBOX_PERMISSION_NO_LONGER_WAITING);
       }
     },
 

@@ -23,6 +23,10 @@
  *  6. The Inbox stops mid-wait and starts again: the hook keeps waiting, and the
  *     answer given after the restart decides; one question, never two.
  *  7. ExitPlanMode: the hook prints nothing at once, and no question appears.
+ *  8. Only the window answers: a local call with no page Origin is refused
+ *     (403 window_only) and decides nothing; the window still answers.
+ *  9. Launch turned off while a question waits: the question is withdrawn,
+ *     and nothing draws as a permission card.
  *
  * Pictures: LAUNCH_PR2_SHOTS_DIR (default .local/proof/launch-pr2). Build the
  * binary first (see inbox.spec.ts), then
@@ -137,7 +141,7 @@ async function launch(page: Page, words: string): Promise<{ threadId: string; la
   return { threadId: body.thread_id, launchId: body.launch.id };
 }
 
-type ThreadRead = { thread: { messages: { id: string; author: { kind: string; session?: string | null }; body: string; reply_to?: string | null; delivery?: { session: string } | null }[] }; run?: { state: string } | null };
+type ThreadRead = { serverSession: string; thread: { messages: { id: string; author: { kind: string; session?: string | null }; body: string; reply_to?: string | null; delivery?: { session: string } | null }[] }; run?: { state: string } | null };
 const readThread = (page: Page, threadId: string) => page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId) as Promise<ThreadRead>;
 
 /** The person's answer: a pick (or the reason typed on the free-text row), then Send in the thread's foot. */
@@ -218,8 +222,10 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   const c = card(page);
   await expect(c.locator('.text-muted-foreground').first()).toHaveText('Permission');
   await expect(c).toContainText('Claude Code wants to run a command');
-  await expect(c.locator('pre, code').first()).toContainText('bun run --cwd apps/inbox build');
-  await expect(c).toContainText('in ~/plannotator/plannotator');
+  // The command and the folder sit over the card (never inside its block, where a list line would read as a choice).
+  const body = pane(page).locator('[data-permission]').last();
+  await expect(body.locator('pre').first()).toContainText('bun run --cwd apps/inbox build');
+  await expect(body).toContainText('in ~/plannotator/plannotator');
   await expect(c.locator('[data-question-option]')).toHaveText(['Allow once', SESSION_CHOICE, 'Deny']);
   await expect(c.getByPlaceholder('Deny, and tell it why…')).toBeVisible();
   // The line, the foot and the row.
@@ -400,4 +406,58 @@ test('ExitPlanMode: the hook prints nothing at once and no question appears; pla
   // The plan was decided elsewhere (plan review); the fake goes on once it is.
   fake.configure({ localAnswer: true });
   expect(world.errors).toEqual([]);
+});
+
+test('only the window answers: a local call with no page Origin is refused, and nothing is decided', async () => {
+  const { page, fake } = world;
+  const before = fake.permissions().length;
+  fake.configure({ prompts: [BUILD] });
+  const { threadId } = await launch(page, 'One more build.');
+  await expect(card(page)).toBeVisible({ timeout: 30_000 });
+  const read = await readThread(page, threadId);
+  const question = read.thread.messages.find((m) => m.author.session?.startsWith('perm:'))! as { id: string; questions?: { key: string; revision: number; prompt: string }[] };
+  const q = question.questions![0]!;
+  const session = read.serverSession;
+  const pick = { key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: ['Allow once'] } };
+  // An agent's curl: this run's serverSession, no Origin. Refused for a permission question.
+  const refused = await fetch(`http://127.0.0.1:${world.port}/api/inbox/messages/${question.id}/reply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverSession: session, idempotency_key: 'curl-1', words: '', questions: [pick] }),
+  });
+  expect(refused.status).toBe(403);
+  expect(((await refused.json()) as { code: string }).code).toBe('window_only');
+  await page.waitForTimeout(1_000);
+  expect(fake.permissions().length).toBe(before);
+  // The window still answers.
+  await answer(page, { choice: 'Deny' });
+  const result = await waitFor('the prompt decided', () => fake.permissions()[before]);
+  expect(result.outcome).toBe('denied');
+});
+
+test('launch turned off while a question waits: the question is withdrawn, and nothing draws as a permission card', async () => {
+  const { page, fake } = world;
+  fake.configure({ prompts: [BUILD] });
+  const { threadId } = await launch(page, 'A build before the switch goes off.');
+  await expect(card(page)).toBeVisible({ timeout: 30_000 });
+  const read = await readThread(page, threadId);
+  const question = read.thread.messages.find((m) => m.author.session?.startsWith('perm:'))!;
+  writeConfig({ inboxLaunch: { enabled: false } });
+  try {
+    await expect
+      .poll(
+        async () => {
+          const now = await readThread(page, threadId);
+          return (now.thread.messages.find((m) => m.id === question.id) as { questions?: { state: string }[] } | undefined)?.questions?.[0]?.state;
+        },
+        { timeout: 30_000 },
+      )
+      .toBe('superseded');
+    await page.reload();
+    await expect(pane(page).locator('article.ib-message').first()).toBeVisible();
+    await expect(pane(page).locator('[data-permission]')).toHaveCount(0);
+  } finally {
+    writeConfig({ inboxLaunch: { enabled: true } });
+    fake.configure({ localAnswer: true });
+  }
 });

@@ -108,6 +108,7 @@ import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } fro
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
+import { INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { sanitizeTag } from "@plannotator/core/project";
 import {
   INBOX_ANNOTATION_CURRENT,
@@ -181,6 +182,12 @@ export type InboxListener = (line: InboxLine) => void;
 export interface InboxSendInput {
   project_id: string;
   author: Extract<InboxAuthor, { kind: "agent" }>;
+  /**
+   * Server only (launch's permission route): the author is a permission
+   * question's `perm:<session>` identity. Every other writer is refused that
+   * prefix, so a `perm:` author is always the Inbox's own permission card.
+   */
+  permission?: boolean;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -2708,6 +2715,9 @@ export class InboxStore {
    * store's log, so a replay routes the same way.
    */
   sendMessage(input: InboxSendInput): InboxSendResult {
+    if (input.permission !== true && isInboxPermissionSession(input.author.session)) {
+      throw new InboxError("validation_error", `agent_session: "${INBOX_PERMISSION_SESSION_PREFIX}" is reserved for the Inbox's own permission questions.`, { field: "agent_session" });
+    }
     const body = input.body;
     if (typeof body !== "string" || body.trim() === "") throw new InboxError("validation_error", "body: a message needs a body.", { field: "body" });
     // One line of plain text, checked before anything else (a reply ignores

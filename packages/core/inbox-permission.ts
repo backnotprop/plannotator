@@ -16,6 +16,9 @@
 
 import type { QuestionAnswer } from "./question-block";
 
+export const INBOX_PERMISSION_ALLOW_ONCE = "Allow once";
+export const INBOX_PERMISSION_DENY = "Deny";
+
 /** The author session of a permission question: `perm:<Claude Code session id>`. */
 export const INBOX_PERMISSION_SESSION_PREFIX = "perm:";
 
@@ -33,6 +36,8 @@ export const INBOX_PERMISSION_REASON_PLACEHOLDER = "Deny, and tell it why…";
 /** The follow-ups that withdraw a question no hook waits on any more. */
 export const INBOX_PERMISSION_ANSWERED_IN_TERMINAL = "Answered in Terminal.";
 export const INBOX_PERMISSION_NO_LONGER_WAITING = "No longer waiting.";
+/** The follow-up when a card could not offer exactly this prompt's choices: it is never answered here. */
+export const INBOX_PERMISSION_ASK_IN_TERMINAL = "This one can't be answered here. Answer it in Terminal.";
 
 /** The part of Claude Code's PermissionRequest stdin the Inbox reads. */
 export interface InboxPermissionEvent {
@@ -59,8 +64,15 @@ export function readInboxPermissionEvent(value: unknown): InboxPermissionEvent |
   };
 }
 
-/** ExitPlanMode stays with plan review: the hook says nothing for it. */
-export const isPlanModeExit = (event: { tool_name: string }): boolean => event.tool_name === "ExitPlanMode";
+/**
+ * Tools the hook never answers: ExitPlanMode stays with plan review, and
+ * AskUserQuestion with Claude Code's own dialog (an Allow there would carry no
+ * answers). The hook says nothing for them.
+ */
+export const isPassThroughTool = (event: { tool_name: string }): boolean => event.tool_name === "ExitPlanMode" || event.tool_name === "AskUserQuestion";
+
+/** The longest command, path or input the card shows. A longer one is never asked here: the person could not read all of it. */
+export const INBOX_PERMISSION_DETAIL_MAX = 8_000;
 
 /** A Bash rule's command, as the person reads it: `bun run:*` → `bun run`. */
 const ruleCommand = (content: string) => content.replace(/(?::\*|\s\*)$/, "").trim();
@@ -112,7 +124,7 @@ export function inboxPermissionSessionChoice(
   if (folders) {
     const dirs = (folders.directories as unknown[]).filter((d): d is string => typeof d === "string");
     const more = dirs.length > 1 ? ` and ${dirs.length - 1} more` : "";
-    return { label: `Allow work in ${code(shownPath(dirs[0]!))}${more} for this session`, update: session(folders) };
+    return { label: `Allow work in ${code(oneLine(shownPath(dirs[0]!), 120))}${more} for this session`, update: session(folders) };
   }
   return null;
 }
@@ -120,25 +132,29 @@ export function inboxPermissionSessionChoice(
 /** A tool's name as a noun in a sentence ("a file edit"); MCP tools by their own name. */
 function toolNoun(tool: string): string {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);
-  if (mcp) return `${mcp[2]} (${mcp[1]})`;
+  if (mcp) return oneLine(`${mcp[2]} (${mcp[1]})`);
   return { Edit: "file edit", MultiEdit: "file edit", Write: "file write", Read: "file read", WebFetch: "web page", WebSearch: "web search", NotebookEdit: "notebook edit" }[tool] ?? tool;
 }
 
-/** What the agent wants, as the card's prompt, and the detail under it (a command, a path, a link, the input). */
-function asked(event: InboxPermissionEvent, agent: string, shownPath: (path: string) => string): { prompt: string; detail: string | null } {
+/** What the agent wants, as the card's prompt, and the detail over it (a command, a path, a link, the input). */
+function asked(event: InboxPermissionEvent, agent: string, shownPath: (path: string) => string): { prompt: string; detail: string | null; tooLong: boolean } {
   const input = event.tool_input;
   const text = (key: string) => (typeof input[key] === "string" ? (input[key] as string) : null);
   const path = text("file_path") ?? text("notebook_path") ?? text("path");
+  let tooLong = false;
   const block = (body: string) => {
-    // A line that is only `:::` would close the card's block early (markdown-structure's directiveCloseIndex):
-    // a zero-width space keeps it on screen as written. Display only: the decision echoes the real input.
-    const shown = body.replace(/^(\s*):::(\s*)$/gm, "$1:​::$2");
-    const capped = shown.length > 2000 ? `${shown.slice(0, 1999)}…` : shown;
-    const longest = Math.max(2, ...(capped.match(/`{3,}/g) ?? []).map((run) => run.length));
+    if (body.length > INBOX_PERMISSION_DETAIL_MAX) tooLong = true;
+    // A line that starts with `:::` could read as a directive's edge: a zero-width space keeps it on screen as written.
+    // Display only: the hook echoes the real input.
+    const shown = body.replace(/^(\s*):::/gm, "$1:​::");
+    const longest = Math.max(2, ...(shown.match(/`{3,}/g) ?? []).map((run) => run.length));
     const fence = "`".repeat(longest + 1);
-    return `${fence}\n${capped}\n${fence}`;
+    return `${fence}\n${shown}\n${fence}`;
   };
   const json = () => (Object.keys(input).length > 0 ? block(JSON.stringify(input, null, 2)) : null);
+  const what = whatOf();
+  return { ...what, tooLong };
+  function whatOf(): { prompt: string; detail: string | null } {
   switch (event.tool_name) {
     case "Bash":
       return { prompt: `${agent} wants to run a command`, detail: text("command") ? block(text("command")!) : json() };
@@ -157,21 +173,19 @@ function asked(event: InboxPermissionEvent, agent: string, shownPath: (path: str
       return { prompt: `${agent} wants to search the web`, detail: text("query") ? code(oneLine(text("query")!, 200)) : json() };
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(event.tool_name);
-  if (mcp) return { prompt: `${agent} wants to use ${code(mcp[2]!)} from ${mcp[1]}`, detail: json() };
-  return { prompt: `${agent} wants to use ${code(event.tool_name)}`, detail: json() };
+  if (mcp) return { prompt: `${agent} wants to use ${code(oneLine(mcp[2]!))} from ${oneLine(mcp[1]!)}`, detail: json() };
+  return { prompt: `${agent} wants to use ${code(oneLine(event.tool_name))}`, detail: json() };
+  }
 }
 
 export interface InboxPermissionQuestion {
-  /** The message body: one `:::question` block. */
+  /** The message body: the detail and folder, then one `:::question` block holding only the prompt and the choices. */
   body: string;
   /** The choices in order: Allow once, the session choice when there is one, Deny. */
   choices: string[];
-  /** The session choice's update (Allow for this session), or null. */
-  sessionUpdate: Record<string, unknown> | null;
+  /** The detail is longer than the card shows in full: never ask this one here. */
+  tooLong: boolean;
 }
-
-export const INBOX_PERMISSION_ALLOW_ONCE = "Allow once";
-export const INBOX_PERMISSION_DENY = "Deny";
 
 /**
  * The question for one permission prompt: what the agent wants, where, and
@@ -183,15 +197,23 @@ export function inboxPermissionQuestion(
   options: { agent: string; folder: string; shownPath?: (path: string) => string },
 ): InboxPermissionQuestion {
   const shownPath = options.shownPath ?? ((path: string) => path);
-  const { prompt, detail } = asked(event, options.agent, shownPath);
-  const session = inboxPermissionSessionChoice(event, shownPath);
-  const choices = [INBOX_PERMISSION_ALLOW_ONCE, ...(session ? [session.label] : []), INBOX_PERMISSION_DENY];
-  const lines = [":::question", prompt, ""];
+  const { prompt, detail, tooLong } = asked(event, options.agent, shownPath);
+  const choices = inboxPermissionChoices(event, shownPath);
+  // The command (or path, or input) and the folder go OVER the block, never in it: inside, a line of the
+  // command that reads as a list item (`- Deny`, a commit message's bullets, `- [ ] x`) would become a choice.
+  // The block holds only the prompt and the choices, written as checkboxes.
+  const lines: string[] = [];
   if (detail) lines.push(detail, "");
-  lines.push(`in ${code(options.folder)}`, "");
-  for (const choice of choices) lines.push(`- ${choice}`);
+  lines.push(`in ${code(oneLine(options.folder, 200))}`, "", ":::question", prompt, "");
+  for (const choice of choices) lines.push(`- [ ] ${choice}`);
   lines.push(":::");
-  return { body: lines.join("\n"), choices, sessionUpdate: session?.update ?? null };
+  return { body: lines.join("\n"), choices, tooLong };
+}
+
+/** The choices a prompt's question must have, in order: Allow once, the session choice when there is one, Deny. */
+export function inboxPermissionChoices(event: InboxPermissionEvent, shownPath: (path: string) => string = (path) => path): string[] {
+  const session = inboxPermissionSessionChoice(event, shownPath);
+  return [INBOX_PERMISSION_ALLOW_ONCE, ...(session ? [session.label] : []), INBOX_PERMISSION_DENY];
 }
 
 /** Claude Code's PermissionRequest decision (`hookSpecificOutput.decision`). */
@@ -205,25 +227,51 @@ export function inboxPermissionDenyMessage(reason: string | null): string {
   return `The person denied this in the Plannotator Inbox. Do not retry it; go on with the next step without it.${why ? ` Their reason: ${why}` : ""}`;
 }
 
+/** What the person chose, as the Inbox hands it to the hook: never a decision's JSON. */
+export type InboxPermissionChoice = "once" | "session" | "deny";
+export interface InboxPermissionAnswer {
+  choice: InboxPermissionChoice;
+  /** The reason the person gave with a Deny, or null. */
+  reason: string | null;
+}
+
+/** The longest reason passed on to the agent. */
+export const INBOX_PERMISSION_REASON_MAX = 2_000;
+
 /**
- * The person's answer as Claude Code's decision. `choices` are the question's
- * choices as the store keeps them, in order (Allow once, [session], Deny); the
- * pick is matched by position. Free text with no pick, a Skip, or anything
- * unknown is a Deny; the free text (or a note) is the reason.
+ * The person's answer as one of three choices. The pick is matched by its
+ * exact label against the labels this prompt's event makes, never by
+ * position: "Allow once", the session label rebuilt from the event, and
+ * anything else (a Skip, free text with no pick, an unknown label) is a Deny.
+ * The free text (or a note) is the reason.
  */
-export function inboxPermissionDecision(
-  answer: QuestionAnswer | null,
-  input: { event: InboxPermissionEvent; choices: readonly string[]; sessionUpdate: Record<string, unknown> | null },
-): InboxPermissionDecision {
-  const reason = [answer?.other, answer?.note].map((t) => t?.trim()).filter(Boolean).join(" ") || null;
-  const picked = answer && !answer.skipped ? answer.selected[0] : undefined;
-  const index = picked === undefined ? -1 : input.choices.indexOf(picked);
-  const deny = input.choices.length - 1;
-  if (index === 0) return { behavior: "allow", updatedInput: input.event.tool_input };
-  if (index > 0 && index < deny && input.sessionUpdate) {
-    return { behavior: "allow", updatedInput: input.event.tool_input, updatedPermissions: [input.sessionUpdate] };
+export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: InboxPermissionEvent, shownPath: (path: string) => string = (path) => path): InboxPermissionAnswer {
+  const reason = [answer?.other, answer?.note].map((t) => t?.trim()).filter(Boolean).join(" ").slice(0, INBOX_PERMISSION_REASON_MAX) || null;
+  const picked = answer && !answer.skipped && answer.selected.length === 1 ? answer.selected[0] : undefined;
+  if (picked === INBOX_PERMISSION_ALLOW_ONCE) return { choice: "once", reason: null };
+  const session = inboxPermissionSessionChoice(event, shownPath);
+  if (session && picked === session.label) return { choice: "session", reason: null };
+  return { choice: "deny", reason };
+}
+
+/**
+ * The decision Claude Code reads, built by the hook from ITS OWN event: the
+ * tool input unchanged, and for "session" the update Claude Code itself
+ * suggested (destination `session`, never bypass mode). Null when the answer
+ * cannot be honoured (an unknown choice, or "session" with no suggestion):
+ * say nothing, and Claude Code's own dialog decides.
+ */
+export function inboxPermissionDecisionFor(event: InboxPermissionEvent, answer: { choice?: unknown; reason?: unknown }): InboxPermissionDecision | null {
+  if (answer.choice === "once") return { behavior: "allow", updatedInput: event.tool_input };
+  if (answer.choice === "session") {
+    const session = inboxPermissionSessionChoice(event);
+    return session ? { behavior: "allow", updatedInput: event.tool_input, updatedPermissions: [session.update] } : null;
   }
-  return { behavior: "deny", message: inboxPermissionDenyMessage(reason) };
+  if (answer.choice === "deny") {
+    const reason = typeof answer.reason === "string" ? answer.reason.slice(0, INBOX_PERMISSION_REASON_MAX) : null;
+    return { behavior: "deny", message: inboxPermissionDenyMessage(reason) };
+  }
+  return null;
 }
 
 /** The hook's stdout for a decision. */
