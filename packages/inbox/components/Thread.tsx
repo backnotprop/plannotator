@@ -743,6 +743,9 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
+  /** Study (throwaway): the thread in full screen (variant B). */
+  threadAlone?: boolean;
+  onFull?: (on: boolean) => void;
   /** A line under the subject, from the window (the tour's notifications ask, once more, in the first real thread). */
   notice?: React.ReactNode;
   thread: InboxThread;
@@ -1093,7 +1096,7 @@ function lastAgentMessageId(messages: readonly { id: string; author: { kind: str
   return '';
 }
 
-export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, runsVersion = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, onFilesRoute, decide = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, runsVersion = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, onFilesRoute, decide = null , threadAlone = false, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -3407,6 +3410,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     <section
       ref={sectionRef}
       className={`ib-pane${fileOpen || filesUi.artifactsTab ? ' ib-withfile' : ''}`}
+      data-full={threadAlone && !(fileOpen || filesUi.artifactsTab) ? '' : undefined}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
     >
@@ -3442,6 +3446,27 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                   <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} data-stack-back="">
                     <Icon name="chevL" size={16} />
                     <span className="ib-pback-l">{backLabel}</span>
+                  </button>
+                </Tip>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
+            {threadAlone && !stacked && !backBesideFile && (
+              <>
+                <Tip content="Show the sidebar and the list">
+                  <button type="button" className="ib-pback" onClick={() => onFull?.(false)} aria-label={`Back to ${backLabel}`} data-full-back="">
+                    <Icon name="chevL" size={16} />
+                    <span className="ib-pback-l">{backLabel}</span>
+                  </button>
+                </Tip>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
+            {!threadAlone && !stacked && !backBesideFile && onFull && (
+              <>
+                <Tip content="Hide the sidebar and the list">
+                  <button type="button" className="ib-iconbtn" onClick={() => onFull(true)} aria-label="Hide the sidebar and the list" data-full-in="">
+                    <Icon name="panelsHide" size={17} />
                   </button>
                 </Tip>
                 <span className="ib-vsep" aria-hidden="true" />
@@ -3519,12 +3544,12 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
                   onClick={expandAll}
                   aria-label={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
                 >
-                  <Icon name={allOpen ? 'collapse' : 'expand'} size={16} />
+                  <Icon name={allOpen ? 'fold' : 'unfold'} size={16} />
                 </button>
               </Tip>
             )}
             {archiveButton}
-            {phone || stacked || backBesideFile ? null : (
+            {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
                 <Tip content="Close">

@@ -5536,3 +5536,7 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 @media (forced-colors: active) {
   .pn-inbox .ib-fbk-cat[aria-pressed="true"] { border-color: Highlight; color: Highlight; }
 }
+
+/* Study (throwaway): the thread in full screen keeps a reading measure, centred. */
+.pn-inbox .ib-pane[data-full] .ib-pbody,
+.pn-inbox .ib-pane[data-full] .ib-pfoot { padding-inline: max(30px, calc((100% - 760px) / 2)); }
