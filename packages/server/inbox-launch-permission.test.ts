@@ -7,14 +7,14 @@
  * hook holds any more is withdrawn with the right words.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { launchPermissionHooks } from "./inbox-launch";
-import { createLaunchPermissions, type PermissionAnswer } from "./inbox-launch-permission";
+import { createLaunchPermissions, fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -200,6 +200,53 @@ describe("the permission route", () => {
     // Without `unsentOnly` too: a permission question is always unsent-only.
     expect(() => store.savePicks(id, [{ key: sent.key, revision: sent.revision, answer: deny }])).toThrow("already sent");
     expect(store.questionsOf(id)[0]).toMatchObject({ state: "sent", answer: { selected: ["Allow once"] } });
+  });
+
+  test("an answered prompt is never rewritten by a reply carrying its own answer: the words post, the answer stays", async () => {
+    const { store, call, answer } = setup();
+    const asked = await call({ key: KEY, request_id: "req-00000024", event: EVENT });
+    const id = asked.body.message_id!;
+    const first = answer(id, { selected: ["Allow once"] });
+    expect((await call({ key: KEY, request_id: "req-00000024", event: EVENT, message_id: id })).body).toMatchObject({ status: "decided", choice: "once" });
+    const sent = store.questionsOf(id)[0]!;
+    const deny = { v: 1 as const, key: sent.key, kind: "single" as const, prompt: sent.prompt, selected: ["Deny"] };
+    // A stale window or a phone sends Deny with words, at the current revision.
+    const late = store.sendReply(id, { idempotency_key: "late-deny", words: "Actually, no.", questions: [{ key: sent.key, revision: sent.revision, answer: deny }] }).reply!;
+    expect(late.body).toContain("Actually, no.");
+    expect(store.questionsOf(id)[0]).toMatchObject({ state: "sent", revision: sent.revision, answer: { selected: ["Allow once"] }, sent_reply_id: first.id });
+    // With no words, nothing is left to send: refused, and nothing is written.
+    const before = store.threadMessageIds(store.message(id)!.thread_id).length;
+    expect(() => store.sendReply(id, { idempotency_key: "late-deny-2", questions: [{ key: sent.key, revision: sent.revision, answer: deny }] })).toThrow("already sent");
+    expect(store.threadMessageIds(store.message(id)!.thread_id)).toHaveLength(before);
+    expect(store.questionsOf(id)[0]).toMatchObject({ answer: { selected: ["Allow once"] }, sent_reply_id: first.id });
+  });
+
+  test("a file path that is a symbolic link shows where it points, and the question keeps it when re-checked", async () => {
+    const { store, call, answer, launchDir } = setup();
+    const real = join(launchDir, "real.txt");
+    writeFileSync(real, "old");
+    const link = join(launchDir, "link.txt");
+    symlinkSync(real, link);
+    const event = { ...EVENT, tool_name: "Write", tool_input: { file_path: link, content: "new" } };
+    const asked = await call({ key: KEY, request_id: "req-00000025", event });
+    const id = asked.body.message_id!;
+    expect(store.questionsOf(id)[0]!.prompt).toBe("Claude Code wants to overwrite a file");
+    expect(store.message(id)!.body).toContain(`Links to \`${real}\``);
+    answer(id, { selected: ["Allow once"] });
+    expect((await call({ key: KEY, request_id: "req-00000025", event, message_id: id })).body).toMatchObject({ status: "decided", choice: "once" });
+    // A link to nothing: the write creates where it points.
+    const dangling = join(launchDir, "dangling.txt");
+    symlinkSync(join(launchDir, "missing.txt"), dangling);
+    expect(await fileTarget(dangling)).toEqual({ exists: false, linksTo: join(launchDir, "missing.txt") });
+  });
+
+  test("a path the Inbox cannot read in time (an unreachable network path) never holds the Inbox: the Write says \"write a file\"", async () => {
+    const hang = () => new Promise<never>(() => {});
+    const started = Date.now();
+    expect(await fileTarget("/Volumes/gone/a.txt", 50, { lstat: hang, stat: hang, readlink: hang })).toEqual({});
+    expect(Date.now() - started).toBeLessThan(1_000);
+    const denied = () => Promise.reject(Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    expect(await fileTarget("/root/a.txt", 50, { lstat: denied, stat: denied, readlink: denied })).toEqual({});
   });
 
   test("a Write says whether it creates or overwrites its file, and keeps the word it was asked with", async () => {

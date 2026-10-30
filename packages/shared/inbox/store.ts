@@ -3346,9 +3346,13 @@ export class InboxStore {
       // A launched session's permission question is always unsent-only: its answer already went to the hook, and
       // a stale window or phone must never reopen it or rewrite what the thread says Claude was told.
       const permission = message.author.kind === "agent" && isInboxPermissionSession(message.author.session);
-      if (mode === "pick" && (options.unsentOnly === true || permission) && record.answer !== null && record.revision > 0 && record.sent_revision === record.revision) {
+      const alreadySent = record.answer !== null && record.revision > 0 && record.sent_revision === record.revision;
+      if (mode === "pick" && (options.unsentOnly === true || permission) && alreadySent) {
         throw refusalError({ code: "question_already_sent", key: entry.key });
       }
+      // The same for a reply that carries its own answer: once the prompt is answered, the reply posts as text
+      // and leaves the answer record alone (sendReply refuses it when nothing else is left to send).
+      if (mode === "send" && permission && alreadySent) return;
       let answer: QuestionAnswer | null | undefined;
       if (entry.answer === null) {
         if (mode === "send") throw new InboxError("validation_error", `${field}.answer: a Send cannot clear a pick.`, { field: `${field}.answer` });
@@ -3463,6 +3467,11 @@ export class InboxStore {
       plan.push(...this.planAnswers(target, list.map((x) => x.entry), "send", list.map((x) => x.index)));
     }
     const feedback = typeof input.feedback === "string" ? input.feedback.trim() : "";
+    // Every listed answer was on an answered permission question (planAnswers leaves those alone) and the reply
+    // has no words of its own: say so, rather than "write a reply".
+    if (entries.length > 0 && plan.length === 0 && words.trim() === "" && feedback === "" && (input.attachments ?? []).length === 0) {
+      throw refusalError({ code: "question_already_sent", key: entries[0]!.key });
+    }
     const carried = this.planSentAnnotations(message.thread_id, input.annotation_ids);
     // Skips only what the person listed ("Skip them"), and only while still open.
     const planned = new Set(plan.map((p) => p.record.id));

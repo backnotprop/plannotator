@@ -34,7 +34,8 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { lstat, readlink, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
@@ -64,6 +65,47 @@ const CHECK_EVERY_MS = 200;
 
 const HOST = "claude-code";
 const AGENT_NAME = "Claude Code";
+
+/** How long the Inbox looks at a file's path before it asks (an unreachable network path never freezes it). */
+export const FILE_CHECK_MS = 300;
+
+/** The file checks `fileTarget` makes: node's, or a test's. */
+export interface FileChecks {
+  lstat: (path: string) => Promise<{ isSymbolicLink(): boolean }>;
+  stat: (path: string) => Promise<unknown>;
+  readlink: (path: string) => Promise<string>;
+}
+
+/** A promise's value or its error code, or `timeout` after `ms` (the call itself is left to finish on its own). */
+function within<T>(promise: Promise<T>, ms: number): Promise<{ value: T } | { error: string }> {
+  return new Promise((done) => {
+    const timer = setTimeout(() => done({ error: "timeout" }), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        done({ value });
+      },
+      (cause: unknown) => {
+        clearTimeout(timer);
+        done({ error: (cause as { code?: unknown } | null)?.code === "ENOENT" ? "ENOENT" : "error" });
+      },
+    );
+  });
+}
+
+/**
+ * What a file tool's path is now, read without blocking the Inbox: whether the file exists (the write
+ * goes through a link to where it points), and where it points when the path is a symbolic link.
+ * Anything not known in `ms` (an unreachable network path, an error) is left unknown: "Write a file".
+ */
+export async function fileTarget(path: string, ms = FILE_CHECK_MS, fs: FileChecks = { lstat, stat, readlink }): Promise<{ exists?: boolean; linksTo?: string }> {
+  const [own, through, link] = await Promise.all([within(fs.lstat(path), ms), within(fs.stat(path), ms), within(fs.readlink(path), ms)]);
+  if ("error" in own) return own.error === "ENOENT" ? { exists: false } : {};
+  if (!own.value.isSymbolicLink()) return { exists: true };
+  const linksTo = "value" in link ? link.value : undefined;
+  const exists = "value" in through ? true : through.error === "ENOENT" ? false : undefined;
+  return { ...(exists === undefined ? {} : { exists }), ...(linksTo ? { linksTo } : {}) };
+}
 
 export type PermissionAnswer =
   | { status: "waiting"; message_id: string }
@@ -159,26 +201,26 @@ export function createLaunchPermissions(options: {
   /** How a launch's questions read paths, and whether its session can switch to Full permissions. */
   const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: inboxLaunchFullPermissions(root.launch!) });
 
-  /** The question this prompt asks in a launch's thread (`overwrite`: a Write's file exists, does not, or is not known). */
-  const questionFor = (root: InboxMessage, event: InboxPermissionEvent, overwrite?: boolean): InboxPermissionQuestion =>
-    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root), overwrite });
+  /** What the Inbox found at a file tool's path: a Write's file exists, does not, or is not known; where a link points. */
+  type Target = Pick<InboxPermissionOptions, "overwrite" | "linksTo">;
 
-  /** Whether a Write's file exists now (the card says "overwrite" or "create"); undefined when it cannot tell. */
-  const writeTargetExists = (root: InboxMessage, event: InboxPermissionEvent): boolean | undefined => {
-    const path = event.tool_input.file_path;
-    if (event.tool_name !== "Write" || typeof path !== "string" || path === "") return undefined;
-    try {
-      return existsSync(isAbsolute(path) ? path : resolve(event.cwd ?? root.launch!.folder, path));
-    } catch {
-      return undefined;
-    }
+  /** The question this prompt asks in a launch's thread. */
+  const questionFor = (root: InboxMessage, event: InboxPermissionEvent, target: Target = {}): InboxPermissionQuestion =>
+    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root), ...target });
+
+  /** A file tool's path now (the card says "overwrite" or "create", and where a link points); nothing when it cannot tell. */
+  const targetNow = async (root: InboxMessage, event: InboxPermissionEvent): Promise<Target> => {
+    const path = event.tool_input.file_path ?? event.tool_input.notebook_path;
+    if (!["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(event.tool_name) || typeof path !== "string" || path === "") return {};
+    const found = await fileTarget(isAbsolute(path) ? path : resolve(event.cwd ?? root.launch!.folder, path));
+    return { ...(event.tool_name === "Write" ? { overwrite: found.exists } : {}), ...(found.linksTo ? { linksTo: options.displayFolder(found.linksTo) } : {}) };
   };
 
-  /** What a stored Write question said about its file when it was asked: the question is rebuilt with the same word. */
-  const askedOverwrite = (messageId: string, event: InboxPermissionEvent): boolean | undefined => {
-    if (event.tool_name !== "Write") return undefined;
-    const kind = readInboxPermissionBody(store.message(messageId)?.body ?? "").preview?.kind;
-    return kind === "overwrite" ? true : kind === "new" ? false : undefined;
+  /** What a stored question said about its file when it was asked: the question is rebuilt with the same words. */
+  const askedTarget = (messageId: string, event: InboxPermissionEvent): Target => {
+    const read = readInboxPermissionBody(store.message(messageId)?.body ?? "");
+    const kind = event.tool_name === "Write" ? read.preview?.kind : undefined;
+    return { overwrite: kind === "overwrite" ? true : kind === "new" ? false : undefined, ...(read.linksTo !== null ? { linksTo: read.linksTo } : {}) };
   };
 
   /**
@@ -272,12 +314,12 @@ export function createLaunchPermissions(options: {
         messageId = message.id;
       } else {
         if (!requestId) return json({ error: "request_id: 8 to 80 letters, digits, - or _.", code: "validation_error" }, 400);
-        const asked = ask(root, event, requestId, questionFor(root, event, writeTargetExists(root, event)));
+        const asked = ask(root, event, requestId, questionFor(root, event, await targetNow(root, event)));
         if (!asked) return json({ status: "withdrawn", message_id: null } satisfies PermissionAnswer);
         messageId = asked;
       }
-      // The question as asked: a Write's file may have appeared since, and the card keeps the word it was asked with.
-      const question = questionFor(root, event, askedOverwrite(messageId, event));
+      // The question as asked: a Write's file may have appeared since (or a link changed), and the card keeps the words it was asked with.
+      const question = questionFor(root, event, askedTarget(messageId, event));
       const done = settled(messageId, event, question, answerOptions);
       if (done) return json(done);
       const lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };

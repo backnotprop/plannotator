@@ -162,7 +162,7 @@ describe("the question", () => {
     const edit = inboxPermissionQuestion(event({ tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "let a = 1;", new_string: "let a = 2;\nlet b = 3;" } }), { agent: "Claude Code", folder: "/w" });
     expect(readInboxPermissionBody(edit.body).preview).toEqual({ kind: "diff", text: "-let a = 1;\n+let a = 2;\n+let b = 3;" });
     const bash = inboxPermissionQuestion(event({ tool_input: { command: "bun run build", description: "Build the Inbox bundle" } }), { agent: "Claude Code", folder: "~/p" });
-    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, leftover: null, purpose: "Build the Inbox bundle", folder: "~/p", unsandboxed: false });
+    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, leftover: null, purpose: "Build the Inbox bundle", folder: "~/p", unsandboxed: false, linksTo: null });
     const page = inboxPermissionQuestion(event({ tool_name: "WebFetch", tool_input: { url: "https://bun.sh/docs", prompt: "How does Bun split chunks?" } }), { agent: "Claude Code", folder: "~/p" });
     expect(readInboxPermissionBody(page.body).purpose).toBe("How does Bun split chunks?");
     // A purpose that cannot be shown on one line is left out (it is commentary, not the request).
@@ -185,7 +185,7 @@ describe("the question", () => {
 });
 
 describe("the request in full (what changes what is allowed)", () => {
-  const ask = (patch: Partial<InboxPermissionEvent>, options: { overwrite?: boolean } = {}) =>
+  const ask = (patch: Partial<InboxPermissionEvent>, options: { overwrite?: boolean; linksTo?: string } = {}) =>
     inboxPermissionQuestion(event({ permission_suggestions: [], ...patch }), { agent: "Claude Code", folder: "/w", ...options });
 
   test("a Write says create or overwrite only when the Inbox knows; never \"new\" when it does not", () => {
@@ -196,6 +196,21 @@ describe("the request in full (what changes what is allowed)", () => {
     expect(readInboxPermissionBody(ask(write, { overwrite: false }).body).preview?.kind).toBe("new");
     expect(ask(write).prompt).toBe("Claude Code wants to write a file");
     expect(readInboxPermissionBody(ask(write).body).preview?.kind).toBe("write");
+  });
+
+  test("a file path that is a symbolic link says where it points, and reads back the same", () => {
+    const write = { tool_name: "Write", tool_input: { file_path: "/w/config.json", content: "{}\n" } };
+    const q = ask(write, { overwrite: true, linksTo: "/etc/hosts" });
+    expect(q.body).toContain("Links to `/etc/hosts`");
+    const read = readInboxPermissionBody(q.body);
+    expect(read.linksTo).toBe("/etc/hosts");
+    // Rebuilt from what it reads back, the question is the same (the route's re-check).
+    expect(ask(write, { overwrite: true, linksTo: read.linksTo! }).body).toBe(q.body);
+    // A target holding backticks or a bidi control is shown as it is, never hidden.
+    const odd = readInboxPermissionBody(ask(write, { linksTo: "../a`b\u202E" }).body).linksTo;
+    expect(odd).toBe("../a`b⟨U+202E⟩");
+    // A command's text can never make that line: it is fenced.
+    expect(readInboxPermissionBody(ask({ tool_input: { command: "Links to `/etc/passwd`" } }).body).linksTo).toBeNull();
   });
 
   test("an Edit that replaces every occurrence says so", () => {

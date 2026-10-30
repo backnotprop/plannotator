@@ -394,7 +394,15 @@ export interface InboxPermissionOptions {
   fullPermissions?: boolean;
   /** A Write's file exists (true), does not (false), or is not known (undefined): "overwrite", "create" or "write". */
   overwrite?: boolean;
+  /** The file the tool writes is a symbolic link: where it points, as the person reads it ("Links to …" under the path; one line, so it reads back the same). */
+  linksTo?: string;
 }
+
+/** The line under a file's path when the path is a symbolic link. */
+const LINKS_TO = "Links to ";
+
+/** The file tools whose path can be a symbolic link the write goes through. */
+const WRITES_A_FILE = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
 export interface InboxPermissionQuestion {
   /** The message body: the detail, the preview, the purpose and the folder, then one `:::question` block holding only the prompt and the choices. */
@@ -422,6 +430,7 @@ export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { 
   const leftover = leftoverOf(event, detail, drawn?.keys ?? []);
   const purpose = purposeOf(event);
   const unsandboxed = event.tool_name === "Bash" && event.tool_input.dangerouslyDisableSandbox === true;
+  const linksTo = WRITES_A_FILE.has(event.tool_name) && options.linksTo ? options.linksTo : null;
   const choices = inboxPermissionChoices(event, options);
   // Everything taken from the tool's input goes OVER the block, never in it: inside, a line that reads
   // as a list item (`- Deny`, a commit message's bullets, `- [ ] x`) would become a choice.
@@ -429,6 +438,7 @@ export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { 
   const lines: string[] = [];
   if (unsandboxed) lines.push(INBOX_PERMISSION_UNSANDBOXED, "");
   if (shown) lines.push(shown, "");
+  if (linksTo) lines.push(`${LINKS_TO}${code(oneLine(linksTo, 1_000))}`, "");
   if (preview) lines.push(fenced(preview.text, preview.kind), "");
   if (leftover) lines.push(fenced(leftover, "input"), "");
   if (purpose) lines.push(`Purpose: ${purpose}`, "");
@@ -469,6 +479,8 @@ export interface InboxPermissionBody {
   folder: string | null;
   /** A Bash call that asks to run outside the sandbox. */
   unsandboxed: boolean;
+  /** Where the file's path points, when it is a symbolic link. */
+  linksTo: string | null;
 }
 
 /** Inline code back to its text (`code`). */
@@ -489,7 +501,7 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
   const lines = body.split("\n");
   const end = lines.indexOf(":::question");
   const head = end < 0 ? lines : lines.slice(0, end);
-  const out: InboxPermissionBody = { detail: null, preview: null, leftover: null, purpose: null, folder: null, unsandboxed: false };
+  const out: InboxPermissionBody = { detail: null, preview: null, leftover: null, purpose: null, folder: null, unsandboxed: false, linksTo: null };
   for (let i = 0; i < head.length; i++) {
     const line = head[i]!;
     const open = OPEN_FENCE.exec(line);
@@ -503,6 +515,7 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
       i = close;
     } else if (line === INBOX_PERMISSION_UNSANDBOXED) out.unsandboxed = true;
     else if (line.startsWith("in `")) out.folder = uncode(line.slice(3));
+    else if (line.startsWith(`${LINKS_TO}\``)) out.linksTo = uncode(line.slice(LINKS_TO.length));
     else if (line.startsWith("Purpose: ")) out.purpose = line.slice("Purpose: ".length);
     else if (line.startsWith("`")) {
       const text = uncode(line);

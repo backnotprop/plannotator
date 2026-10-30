@@ -132,7 +132,13 @@ function Link({ text }: { text: string }) {
 /** The exact request: a command with its purpose and folder, a file's content or change, a link and what Claude looks for, and anything else in the input. */
 function RequestBody({ read, kind, phone }: { read: InboxPermissionBody; kind: Kind; phone: boolean }) {
   const [all, setAll] = useState(false);
-  const { detail, preview, purpose, folder, leftover, unsandboxed } = read;
+  const { detail, preview, purpose, folder, leftover, unsandboxed, linksTo } = read;
+  // The path is a symbolic link: the write goes where it points.
+  const link = linksTo && (
+    <p className="pc-links-to" data-perm-links-to="">
+      Links to <span className="pc-path">{linksTo}</span>
+    </p>
+  );
   const rest = leftover && (
     <>
       <p className="pc-why">Also in the request:</p>
@@ -158,6 +164,7 @@ function RequestBody({ read, kind, phone }: { read: InboxPermissionBody; kind: K
             </span>
             <span className="pc-facts">{factsOf(preview.kind, lines)}</span>
           </div>
+          {link}
           <pre className="pc-lines">
             {(all ? lines : lines.slice(0, cap)).map((line, i) =>
               diff && line.startsWith('@@ ') ? (
@@ -208,6 +215,7 @@ function RequestBody({ read, kind, phone }: { read: InboxPermissionBody; kind: K
       <pre className="pc-code" data-perm-detail="">
         <code>{detail.on === 'line' && kind === 'file' ? rel(detail.text, folder) : detail.text}</code>
       </pre>
+      {link}
       {kind === 'bash' && (
         <p className="pc-why">
           {purpose && <span>{purpose.replace(/\.$/, '')}. </span>}

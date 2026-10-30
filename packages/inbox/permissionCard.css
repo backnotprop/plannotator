@@ -47,6 +47,8 @@
 
 /* A Write's content or an Edit's change: the path and its facts, then numbered lines. */
 .pc-file { border-radius: var(--ib-lr-md, 9px); background: var(--ib-raise, var(--muted)); overflow: hidden; }
+.pc-links-to { margin: 0; padding: 7px 14px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); border-bottom: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent); }
+.pc-code + .pc-links-to { padding: 0; border: 0; }
 .pc-file-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 9px 14px 8px; font-size: var(--ib-fs-12-5, 12.5px); border-bottom: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent); }
 .pc-facts { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .pc-lines { margin: 0; padding: 8px 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.6; color: var(--foreground); overflow-x: auto; }
