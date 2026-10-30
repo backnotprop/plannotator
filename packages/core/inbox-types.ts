@@ -859,8 +859,6 @@ export interface InboxRun {
   untrusted: boolean;
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
   attach_command: string | null;
-  /** A permission question the person allowed whose effect is not seen yet (the card says "sent", not "Allowed"). */
-  approval_check?: string | null;
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */

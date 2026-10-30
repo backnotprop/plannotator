@@ -3353,11 +3353,6 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     const by = m.questions?.[0]?.superseded_by?.message_id;
     return by ? (thread.messages.find((x) => x.id === by)?.body.trim() ?? null) : null;
   };
-  // The host's word that an answer sent from here did not take (a follow-up to an answered prompt; it withdraws nothing).
-  const permNotTaken = (m: InboxMessageWire): string | null => {
-    if (m.questions?.[0]?.state !== 'sent') return null;
-    return thread.messages.find((x) => x.reply_to === m.id && isPermMessage(x) && !(x.questions?.length))?.body.trim() ?? null;
-  };
   // The session already switched to Full permissions from an earlier prompt: no confirm again (the store's rule too).
   const permFullUsed = (m: InboxMessageWire): boolean => {
     const session = m.author.kind === 'agent' ? m.author.session : null;
@@ -4271,7 +4266,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} notTaken={permNotTaken(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
                   </div>
                 </article>,
               );

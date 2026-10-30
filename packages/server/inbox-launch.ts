@@ -331,12 +331,8 @@ export function createInboxLaunch(options: {
       });
     return hostFetch;
   };
-  /** Stale after 10 s, or sooner when an allow waits on a read made after it settled. */
-  const hostStale = () => {
-    if (!hostView || now() - hostView.at > HOST_TTL_MS) return true;
-    const due = permissions.hostDueAt();
-    return due !== null && now() >= due;
-  };
+  /** Stale after 10 s, or once an answer settled since the last read (one read then says where the session is). */
+  const hostStale = () => !hostView || now() - hostView.at > HOST_TTL_MS || permissions.readDue(hostView.at);
   const hostStateOf = (ref: string | null): InboxRunHostState | null => {
     if (!ref || !hostView?.agents) return null;
     const agent = hostView.agents.find((a) => a.id === ref || a.sessionId.startsWith(ref));
@@ -434,7 +430,6 @@ export function createInboxLaunch(options: {
       stoppedByPersonAt: memo.stoppedAt,
       attachCommand: launch.session_ref ? claudeAttachCommand(launch.folder, launch.session_ref) : null,
       permissionSince: permissions.openSince(root),
-      approvalCheck: permissions.checking(launch.id),
     });
   };
 
@@ -448,6 +443,9 @@ export function createInboxLaunch(options: {
     if (launch.deleted_at || launch.error || !launch.session_ref) return false;
     // A permission question waits: the host says whether the person answered it in Terminal meanwhile.
     if (permissions.holds(launch.id)) return true;
+    // An answer not yet read past: the host says whether the session went on or waits on its own dialog.
+    const settled = permissions.settledAfter(launch.id);
+    if (settled !== null && (hostView?.at ?? 0) < settled) return true;
     const cached = hostStateOf(launch.session_ref);
     if (cached && cached !== "absent" && cached.status === "waiting") return true;
     const memo = memoOf(launch);
@@ -491,9 +489,6 @@ export function createInboxLaunch(options: {
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
     permissions.sweep();
-    // An allow being checked reads the host once it settled, watched or not (one read per answer).
-    const due = permissions.hostDueAt();
-    if (due !== null && now() >= due) void refreshHost();
     if (!watched) return;
     if (lastAvailable === null || (availability && now() - availability.at > AVAILABLE_TTL_MS)) refreshAvailable();
     if (hostStale() && all.some(needsHost)) void refreshHost();
@@ -755,6 +750,7 @@ export function createInboxLaunch(options: {
           log(`Inbox launch ${launch.id}: deleted (stop ${stop.exitCode}, rm ${rm.exitCode})`);
         }
         permissions.withdrawAll(root);
+        permissions.forget(launch.id);
         // A project folder: never `claude purge` (it clears every session of the folder, and this is the person's
         // project). A scratch folder the Inbox made: purged and removed, by `run` when it still starts.
         const scratchRemoved = starting.has(launch.id) ? false : await removeScratch(launch);
@@ -956,7 +952,7 @@ export function createInboxLaunch(options: {
       return roots()
         .map((root) => {
           const line = runOfRoot(root);
-          return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}${line.approval_check ? `?${line.approval_check}` : ""}` : "-"}`;
+          return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
         })
         .join(",");
     },

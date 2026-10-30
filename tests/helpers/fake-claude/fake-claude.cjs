@@ -52,10 +52,12 @@
  * A hook's setMode changes the session's mode for later prompts.
  *
  * A `safetyCheck` prompt is for a person only, in any mode (Claude 2.1.314: the
- * ask does not let hooks allow it): the hook still runs, but its allow is
- * ignored (`ignoredAllow`, no setMode), the built-in dialog stays, and it blocks
- * the call on its own after `safetyBlockMs` (default 2 minutes; outcome
- * `autoblocked`) unless `localAnswer` answers it first. A hook's deny counts.
+ * ask does not let hooks allow it, and it awaits the hooks before its dialog):
+ * no dialog while the hook runs (`localAnswer` does not end it), a hook's deny
+ * counts, and an allow is ignored (`ignoredAllow`, no setMode). With no
+ * decision, or an ignored allow, the built-in dialog comes up then, and blocks
+ * the call on its own `safetyBlockMs` after the hook ended (default 2 minutes;
+ * outcome `autoblocked`) unless `localAnswer` answers it first.
  *
  * Permission prompts (`prompts`: a list of { tool_name, tool_input,
  * permission_suggestions, safetyCheck }, played in each turn, in order): as Claude Code
@@ -376,7 +378,8 @@ async function session(sessionId) {
       const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
       void exited.then(() => (done = true));
       while (!done && !stopped) {
-        if (config().localAnswer) {
+        // A safety check's dialog shows only after the hook: nothing to answer in Terminal meanwhile.
+        if (config().localAnswer && !spec.safetyCheck) {
           // Answered in `claude attach`: Claude Code closes the dialog and ends the hook.
           local = true;
           child.kill("SIGTERM");
@@ -406,8 +409,8 @@ async function session(sessionId) {
       else mode = update.mode;
     }
     // No decision (or an allow it ignored): the built-in dialog stays until someone answers it locally;
-    // a safety check's dialog blocks the call on its own after a while.
-    const blockAt = spec.safetyCheck ? started + (config().safetyBlockMs ?? 120_000) : Infinity;
+    // a safety check's dialog, up only now, blocks the call on its own after a while.
+    const blockAt = spec.safetyCheck ? Date.now() + (config().safetyBlockMs ?? 120_000) : Infinity;
     while (outcome === "blocked" && !stopped && !config().localAnswer && Date.now() < blockAt) await sleep(150);
     if (outcome === "blocked") outcome = config().localAnswer ? "local" : "autoblocked";
     fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, mode, modeIgnored, ignoredAllow, ms: Date.now() - started })}\n`);

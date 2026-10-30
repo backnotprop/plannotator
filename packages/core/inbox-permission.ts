@@ -35,7 +35,6 @@ export const INBOX_PERMISSION_NO_LONGER_WAITING = "No longer waiting.";
 /** The follow-up when a card could not offer exactly this prompt's choices: it is never answered here. */
 export const INBOX_PERMISSION_ASK_IN_TERMINAL = "This one can't be answered here. Answer it in Terminal.";
 
-
 /** The part of Claude Code's PermissionRequest stdin the Inbox reads. */
 export interface InboxPermissionEvent {
   session_id: string;
@@ -43,6 +42,8 @@ export interface InboxPermissionEvent {
   tool_input: Record<string, unknown>;
   cwd: string | null;
   permission_suggestions: Record<string, unknown>[];
+  /** The session's permission mode as Claude Code's common hook input says (`default`, `bypassPermissions`, …), or null. */
+  permission_mode: string | null;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -50,7 +51,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => !!value &
 /** The event from a hook's stdin JSON (or the route's body), or null when it is not one. */
 export function readInboxPermissionEvent(value: unknown): InboxPermissionEvent | null {
   if (!isRecord(value)) return null;
-  const { session_id, tool_name, tool_input, cwd, permission_suggestions } = value;
+  const { session_id, tool_name, tool_input, cwd, permission_suggestions, permission_mode } = value;
   if (typeof session_id !== "string" || session_id === "" || typeof tool_name !== "string" || tool_name === "") return null;
   return {
     session_id,
@@ -58,6 +59,7 @@ export function readInboxPermissionEvent(value: unknown): InboxPermissionEvent |
     tool_input: isRecord(tool_input) ? tool_input : {},
     cwd: typeof cwd === "string" && cwd !== "" ? cwd : null,
     permission_suggestions: Array.isArray(permission_suggestions) ? permission_suggestions.filter(isRecord) : [],
+    permission_mode: typeof permission_mode === "string" && permission_mode !== "" ? permission_mode : null,
   };
 }
 
@@ -389,6 +391,8 @@ export const INBOX_LAUNCH_FULL_PERMISSIONS_ENV = "PLANNOTATOR_LAUNCH_FULL_PERMIS
 /** The answer that also switches the session's mode (Claude Code's `setMode`, destination `session`). */
 export const INBOX_PERMISSION_AUTO = "Allow and switch to Auto mode";
 export const INBOX_PERMISSION_FULL = "Allow and switch to Full permissions";
+/** Hand the prompt to the host's own dialog (the hook says nothing): for a prompt the host takes only a deny for from here. */
+export const INBOX_PERMISSION_TERMINAL = "Approve in Terminal";
 
 export interface InboxPermissionOptions {
   /** A path as the person reads it (`~/…`). */
@@ -397,10 +401,12 @@ export interface InboxPermissionOptions {
   fullPermissions?: boolean;
   /** The session already runs in Full permissions (a launch made full): no mode switch is offered. */
   full?: boolean;
-  /** False when the host takes only a deny from here (its own dialog keeps the approval): the card offers Deny alone. */
+  /** False when the host takes only a deny from here (its own dialog keeps the approval): Deny, or hand it to Terminal. */
   allowHere?: boolean;
-  /** One plain line from the host the card shows over the answers (why only a deny is taken here), or null. */
+  /** One plain line from the host the card shows by the answers (why it is approved only in Terminal), or null. */
   note?: string | null;
+  /** One plain line from the host the record shows after Approve in Terminal (how long its dialog waits), or null. */
+  handoff?: string | null;
   /** A Write's file exists (true), does not (false), or is not known (undefined): "overwrite", "create" or "write". */
   overwrite?: boolean;
   /** The file the tool writes is a symbolic link: where it points, as the person reads it ("Links to …" under the path; one line, so it reads back the same). */
@@ -411,6 +417,8 @@ export interface InboxPermissionOptions {
 const LINKS_TO = "Links to ";
 /** The host's note line (`InboxPermissionOptions.note`). */
 const NOTE = "Note: ";
+/** The host's line for after Approve in Terminal (`InboxPermissionOptions.handoff`). */
+const HANDOFF = "Then: ";
 
 /** The file tools whose path can be a symbolic link the write goes through. */
 const WRITES_A_FILE = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
@@ -454,6 +462,7 @@ export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { 
   if (leftover) lines.push(fenced(leftover, "input"), "");
   if (purpose) lines.push(`Purpose: ${purpose}`, "");
   if (options.note) lines.push(`${NOTE}${oneLine(options.note, 300)}`, "");
+  if (options.handoff) lines.push(`${HANDOFF}${oneLine(options.handoff, 300)}`, "");
   lines.push(`in ${code(oneLine(options.folder, 200))}`, "", ":::question", prompt, "");
   for (const choice of choices) lines.push(`- [ ] ${choice}`);
   lines.push(":::");
@@ -468,10 +477,11 @@ export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { 
  * The choices a prompt's question must have, in order: Allow once, the
  * session choice when there is one, Deny, then the mode switches (Auto mode
  * always, Full permissions only when the session can switch to it). Deny
- * alone when the host takes no allow from here (`allowHere: false`).
+ * and Approve in Terminal when the host takes no allow from here
+ * (`allowHere: false`).
  */
 export function inboxPermissionChoices(event: InboxPermissionEvent, options: InboxPermissionOptions = {}): string[] {
-  if (options.allowHere === false) return [INBOX_PERMISSION_DENY];
+  if (options.allowHere === false) return [INBOX_PERMISSION_DENY, INBOX_PERMISSION_TERMINAL];
   const session = inboxPermissionSessionChoice(event, options.shownPath);
   return [
     INBOX_PERMISSION_ALLOW_ONCE,
@@ -494,8 +504,10 @@ export interface InboxPermissionBody {
   unsandboxed: boolean;
   /** Where the file's path points, when it is a symbolic link. */
   linksTo: string | null;
-  /** The host's note (why only a deny is taken here), or null. */
+  /** The host's note (why it is approved only in Terminal), or null. */
   note: string | null;
+  /** The host's line for after Approve in Terminal, or null. */
+  handoff: string | null;
 }
 
 /** Inline code back to its text (`code`). */
@@ -516,7 +528,7 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
   const lines = body.split("\n");
   const end = lines.indexOf(":::question");
   const head = end < 0 ? lines : lines.slice(0, end);
-  const out: InboxPermissionBody = { detail: null, preview: null, leftover: null, purpose: null, folder: null, unsandboxed: false, linksTo: null, note: null };
+  const out: InboxPermissionBody = { detail: null, preview: null, leftover: null, purpose: null, folder: null, unsandboxed: false, linksTo: null, note: null, handoff: null };
   for (let i = 0; i < head.length; i++) {
     const line = head[i]!;
     const open = OPEN_FENCE.exec(line);
@@ -533,6 +545,7 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
     else if (line.startsWith(`${LINKS_TO}\``)) out.linksTo = uncode(line.slice(LINKS_TO.length));
     else if (line.startsWith("Purpose: ")) out.purpose = line.slice("Purpose: ".length);
     else if (line.startsWith(NOTE)) out.note = line.slice(NOTE.length);
+    else if (line.startsWith(HANDOFF)) out.handoff = line.slice(HANDOFF.length);
     else if (line.startsWith("`")) {
       const text = uncode(line);
       if (text !== null) out.detail = { text, on: "line" };
@@ -552,8 +565,11 @@ export function inboxPermissionDenyMessage(reason: string | null): string {
   return `The person denied this in the Plannotator Inbox. Do not retry it; go on with the next step without it.${why ? ` Their reason: ${why}` : ""}`;
 }
 
-/** What the person chose, as the Inbox hands it to the hook: never a decision's JSON. `auto` and `full` allow and switch the session's mode. */
-export type InboxPermissionChoice = "once" | "session" | "deny" | "auto" | "full";
+/**
+ * What the person chose, as the Inbox hands it to the hook: never a decision's JSON. `auto` and `full` allow and
+ * switch the session's mode; `terminal` hands the prompt to the host's own dialog (the hook says nothing).
+ */
+export type InboxPermissionChoice = "once" | "session" | "deny" | "auto" | "full" | "terminal";
 export interface InboxPermissionAnswer {
   choice: InboxPermissionChoice;
   /** The reason the person gave with a Deny, or null. */
@@ -570,11 +586,17 @@ export const INBOX_PERMISSION_REASON_MAX = 2_000;
  * switches (Full permissions only when the session can switch to it; else,
  * a card from before that still shows it, Allow once: the person allowed), and
  * anything else (a Skip, free text with no pick, an unknown label) is a Deny.
- * The free text (or a note) is the reason.
+ * The free text (or a note) is the reason. Where the host takes no allow from
+ * here (`allowHere: false`), Approve in Terminal, and any allow from a card
+ * from before, hands it to Terminal.
  */
 export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: InboxPermissionEvent, options: InboxPermissionOptions = {}): InboxPermissionAnswer {
   const reason = [answer?.other, answer?.note].map((t) => t?.trim()).filter(Boolean).join(" ").slice(0, INBOX_PERMISSION_REASON_MAX) || null;
   const picked = answer && !answer.skipped && answer.selected.length === 1 ? answer.selected[0] : undefined;
+  if (options.allowHere === false) {
+    const allows = [INBOX_PERMISSION_TERMINAL, INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_FULL, inboxPermissionSessionChoice(event, options.shownPath)?.label];
+    return picked !== undefined && allows.includes(picked) ? { choice: "terminal", reason: null } : { choice: "deny", reason };
+  }
   if (picked === INBOX_PERMISSION_ALLOW_ONCE) return { choice: "once", reason: null };
   if (picked === INBOX_PERMISSION_AUTO) return { choice: options.full ? "once" : "auto", reason: null };
   if (picked === INBOX_PERMISSION_FULL) return { choice: options.fullPermissions ? "full" : "once", reason: null };
@@ -591,9 +613,10 @@ const setMode = (mode: "auto" | "bypassPermissions") => ({ type: "setMode", mode
  * tool input unchanged; for "session" the update Claude Code itself suggested
  * (destination `session`); for "auto" Auto mode for this session; for "full"
  * Full permissions (`bypassPermissions`) for this session, only when the
- * hook's own launch allows them (`fullPermissions`). Null when the answer
- * cannot be honoured (an unknown choice, "session" with no suggestion, "full"
- * not allowed): say nothing, and Claude Code's own dialog decides.
+ * hook's own launch allows them (`fullPermissions`). Null for "terminal" (the
+ * person approves in Claude Code's own dialog) and when the answer cannot be
+ * honoured (an unknown choice, "session" with no suggestion, "full" not
+ * allowed): say nothing, and Claude Code's own dialog decides.
  */
 export function inboxPermissionDecisionFor(
   event: InboxPermissionEvent,

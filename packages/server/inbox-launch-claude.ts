@@ -165,20 +165,33 @@ export function claudeTrustFolder(folder: string, scratch: boolean): string {
 
 /**
  * Claude Code 2.1.314 takes a PermissionRequest hook's allow only when the ask
- * lets hooks allow it; its own safety checks (removing the working folder, for
- * one) are for a person in Terminal: it ignores the hook's allow, keeps its
- * dialog up and blocks the call on its own after about 2 minutes. A deny always
- * counts. The hook's input marks nothing about this (tool_name, tool_input,
- * permission_suggestions and the base fields only), so the launch's mode
- * decides: in bypass mode (Full permissions) only such checks reach the hook.
+ * lets hooks allow it. Its own safety checks (removing the working folder, for
+ * one) do not: it awaits the hooks, ignores an allow, takes a deny, and only
+ * then shows its own dialog, which blocks the call by itself after about 2
+ * minutes. The hook's input does not mark such a check, but it carries the
+ * session's `permission_mode`, and in bypass mode only such checks reach the
+ * hook (one limit: a `permissions.ask` rule of the person's own, if Claude asks
+ * it in bypass mode, gets the same card although a hook could allow it). So a
+ * session in bypass mode is offered Deny, or Approve in Terminal: the hook says
+ * nothing, Claude's own dialog comes up, and the person approves it there.
  */
 export const CLAUDE_TERMINAL_ONLY = "Claude Code only accepts this approval in Terminal.";
-/** The follow-up when an allow from here did not take: the session still waits on its own dialog. */
-export const CLAUDE_APPROVAL_NOT_TAKEN = "Claude Code didn't take the approval from here: approve it in Terminal.";
+/** After Approve in Terminal: Claude's dialog waits about 2 minutes, then blocks the call. */
+export const CLAUDE_HANDOFF = "Approve it in Claude Code within 2 minutes.";
 
-/** What a launch's permission card may offer: a full launch takes only a deny from here, and its card says why. */
-export function claudePermissionTerms(launch: Pick<InboxLaunchRecord, "full_permissions">): { allowHere: boolean; note: string | null } {
-  return launch.full_permissions === true ? { allowHere: false, note: CLAUDE_TERMINAL_ONLY } : { allowHere: true, note: null };
+/** Whether the session runs in bypass mode: its hook input's `permission_mode`; the launch record only when the input has none. */
+export function claudeInBypass(launch: Pick<InboxLaunchRecord, "full_permissions">, event: { permission_mode: string | null }): boolean {
+  return event.permission_mode !== null ? event.permission_mode === "bypassPermissions" : launch.full_permissions === true;
+}
+
+/** What a permission card may offer: in bypass mode no mode switch, and no allow from here (Deny, or Approve in Terminal). */
+export function claudePermissionTerms(
+  launch: Pick<InboxLaunchRecord, "full_permissions">,
+  event: { permission_mode: string | null },
+): { full: boolean; allowHere: boolean; note: string | null; handoff: string | null } {
+  return claudeInBypass(launch, event)
+    ? { full: true, allowHere: false, note: CLAUDE_TERMINAL_ONLY, handoff: CLAUDE_HANDOFF }
+    : { full: false, allowHere: true, note: null, handoff: null };
 }
 
 /** What Open in Terminal runs when no session exists yet (an untrusted folder): plain `claude`, so its trust prompt shows. */
