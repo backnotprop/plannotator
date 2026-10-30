@@ -16,9 +16,12 @@
  *    process group, never the Inbox's (a time-out kills only our call anyway).
  *  The login shell ran once: for the start, never for the stop or respawn.
  *
- * Not covered here, on purpose: a real permission prompt (the person's own
- * default mode decides, and the settings file carries no permission rules;
- * the e2e and the run-line unit tests cover the line), an untrusted folder
+ * Not covered here, on purpose: a real permission prompt. This smoke runs
+ * none, so the `waiting_terminal` line has no real-CLI check in PR 1 (the
+ * person's own default mode decides, and the settings file carries no
+ * permission rules; the e2e and the run-line unit tests cover the line
+ * against the recorded bg-perm-test contract; PR 2's smoke runs one). Nor an
+ * untrusted folder
  * (the scratch folder sits in a trusted tree; the fake replays the recorded
  * error text) and Open in Terminal (it would open a window on the person's
  * screen; the e2e checks the osascript argument).

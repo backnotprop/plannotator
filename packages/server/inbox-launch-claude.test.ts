@@ -90,7 +90,7 @@ describe("the person's shared Claude supervisor survives our calls", () => {
     }
   };
 
-  /** A CLI that starts a daemon in its own process group (as `claude` starts `claude daemon run`), then hangs. */
+  /** A CLI that starts a background daemon (as `claude` may start `claude daemon run`), then hangs. `sleep 30 &` in a non-interactive sh stays in the CLI's process group: the case a group kill would take down. */
   const hangingCli = () => {
     const dir = mkdtempSync(join(tmpdir(), "launch-group-"));
     dirs.push(dir);
