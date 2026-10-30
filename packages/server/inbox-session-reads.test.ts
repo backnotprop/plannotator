@@ -195,8 +195,9 @@ describe("the connections' peek (the session's thread list)", () => {
     expect(peek.isError).toBeFalsy();
     expect(inboxSessionThreadsText(peek, "plannotator_inbox")).toBeNull();
     expect(server.store.listProjects()).toHaveLength(0);
-    // Without the mark the same list makes the project (as before): the mark is what keeps it out.
-    await call(client, "read_thread", params.arguments as Record<string, unknown>);
-    expect(server.store.listProjects()).toHaveLength(1);
+    // The agent's own list (no mark) makes none either: a read is not a write, as search.
+    const own = await call(client, "read_thread", params.arguments as Record<string, unknown>);
+    expect(own.isError).toBeFalsy();
+    expect(server.store.listProjects()).toHaveLength(0);
   });
 });

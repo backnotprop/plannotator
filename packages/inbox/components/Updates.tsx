@@ -331,16 +331,19 @@ export function UpdateDialog({ details, update, error, busy, onUpdateNow, onRemi
           <input
             type="checkbox"
             checked={auto.on}
-            disabled={auto.env !== null}
+            // Auto-update needs update checks: with them off it could never act (as Settings → About says).
+            disabled={auto.env !== null || details?.check.on === false}
             onChange={(event) => onAutoUpdate(event.target.checked)}
             data-auto-update-checkbox=""
           />
           <span>
             Install new versions automatically
             <small>
-              {auto.env !== null
-                ? `PLANNOTATOR_AUTO_UPDATE is set in this Inbox's environment, so it is ${auto.env ? 'on' : 'off'}.`
-                : 'At most once a day, never while another review is open. Change it in Settings.'}
+              {details?.check.on === false
+                ? `Needs update checks, which are off${details.check.env === false ? ': this Inbox started with PLANNOTATOR_UPDATE_CHECK=0' : ''}.`
+                : auto.env !== null
+                  ? `PLANNOTATOR_AUTO_UPDATE is set in this Inbox's environment, so it is ${auto.env ? 'on' : 'off'}.`
+                  : 'At most once a day, never while another review is open. Change it in Settings.'}
             </small>
           </span>
         </label>
@@ -813,6 +816,21 @@ export function checkStatusWords(details: UpdateDetails | null, news: boolean, n
 // ───────────────────────────── Settings → General ─────────────────────────────
 
 /**
+ * Why update checks are off and how to turn them back on (null: they are on).
+ * Off stops only the automatic checks: Check now and Update still work.
+ */
+export function checksOffWords(details: UpdateDetails | null): ReactNode {
+  if (!details || details.check.on) return null;
+  if (details.check.env === false)
+    return (
+      <>
+        Update checks are off: this Inbox started with <code>PLANNOTATOR_UPDATE_CHECK=0</code>. Restart it without that to turn them back on.
+      </>
+    );
+  return 'Update checks are off. Turn on "Tell me when a new version is out" in Settings → About to check again.';
+}
+
+/**
  * The first row of Settings → General (the owner, 2026-10-26: "the update
  * button to also show up in the general part of settings"): the version this
  * Inbox runs and the same action the sidebar's Update button offers, plus
@@ -842,6 +860,9 @@ export function GeneralUpdateRow({
 }) {
   const known = details?.latest && newerThan(details.latest.version, version) ? details.latest.version : null;
   const busy = restarting || update?.state === 'updating';
+  // Checks off: say why and how to turn them back on, under whatever the row offers.
+  const off = version === 'dev' ? null : checksOffWords(details);
+  let offLine = !!off;
   let status: ReactNode;
   if (version === 'dev') status = 'A development build';
   else if (restarting && update) status = `Restarting into ${update.version}…`;
@@ -858,7 +879,17 @@ export function GeneralUpdateRow({
       </>
     );
   else if (failing) status = checkFailingStatus(failing, details);
-  // A newer release known but not offered (checks off, or Remind me tomorrow): never "Up to date".
+  else if (off) {
+    // Nothing to offer: the reason is the status (a snoozed release still says it exists).
+    offLine = false;
+    status = (
+      <>
+        {known && `${known} is available · `}
+        {off}
+      </>
+    );
+  }
+  // A newer release known but not offered (Remind me tomorrow): never "Up to date".
   else status = [checkStatusWords(details, !!known), known && `${known} is available`].filter(Boolean).join(' · ');
   const label = restarting
     ? 'Restarting…'
@@ -881,6 +912,11 @@ export function GeneralUpdateRow({
             <span className="ib-desc" data-general-update-status="">
               {status}
             </span>
+            {offLine && (
+              <span className="ib-desc" data-general-checks-off="">
+                {off}
+              </span>
+            )}
           </span>
           <span className="ib-ctl">
             {label && (
@@ -1041,7 +1077,7 @@ export function AboutBlock({
           <Icon name="info" />
           {locked
             ? checks?.env !== null && checks?.env !== undefined
-              ? `PLANNOTATOR_UPDATE_CHECK is set in this Inbox's environment, so update checks are ${checks.env ? 'on' : 'off'}.`
+              ? `PLANNOTATOR_UPDATE_CHECK is set in this Inbox's environment, so update checks are ${checks.env ? 'on' : 'off'}. Restart the Inbox without it to change that.${checks.env ? '' : ' Check now and Update still work.'}`
               : `PLANNOTATOR_AUTO_UPDATE is set in this Inbox's environment, so automatic updates are ${auto?.env ? 'on' : 'off'}.`
             : 'Off makes no request to GitHub at all. Check now always asks.'}
         </div>

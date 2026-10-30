@@ -153,7 +153,7 @@ Every few minutes (at most once every ten minutes, and when the Inbox starts or 
 - plan review, annotate and code review show a short toast at most once a day, with **Update** (or the command to copy, on Pi: `pi update --extensions`), and the Options menu shows the right update command for your agent;
 - a review you started yourself in a terminal ends with one line: `Plannotator X is available (you have Y). Update: plannotator update`.
 
-Turn the check off with **Settings → General → Tell me when a new version is out** (the Inbox: **Settings → About**), with `{ "updateCheck": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_UPDATE_CHECK=0`. Off makes no automatic request to GitHub at all (and stops auto-update, which needs the check); `plannotator update` still checks when you run it.
+Turn the check off with **Settings → General → Tell me when a new version is out** (the Inbox: **Settings → About**), with `{ "updateCheck": false }` in `~/.plannotator/config.json` or `PLANNOTATOR_UPDATE_CHECK=0`. Off makes no automatic request to GitHub at all (and stops auto-update, which needs the check). You can still update: `plannotator update` and the Inbox's **Check now** check when you ask, and the Inbox keeps its **Update** button for a release it already knows of.
 
 ### Automatic updates (opt-in)
 

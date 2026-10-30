@@ -15,6 +15,7 @@
  * Remote images (`http(s)`, protocol-relative `//host/…`) are left as
  * written: the window's CSP (`img-src 'self' data: blob:`) does not load them.
  */
+import { inboxUrl } from './inboxUrl';
 import type { ImageSrcResolver } from '@plannotator/ui/configure';
 import { tourAssetUrl, tourMarkupUrl } from './tour/assets';
 
@@ -40,7 +41,7 @@ export function inboxMarkupName(path: string): string | null {
 /** Where a marked-up image a comment carries (its path in the data dir) is shown back, by its file name; null for any other path. */
 export function inboxMarkupUrl(path: string): string | null {
   const name = inboxMarkupName(path);
-  return name ? `/api/inbox/markups/${name}` : null;
+  return name ? inboxUrl(`/markups/${name}`) : null;
 }
 
 /** The `imageBaseDir` a message body is drawn with. */
@@ -50,7 +51,7 @@ export function inboxMessageImageBase(messageId: string): string {
 
 /** The URL an image in a message loads from. */
 export function inboxMessageImageUrl(messageId: string, src: string): string {
-  return `/api/inbox/messages/${encodeURIComponent(messageId)}/image?path=${encodeURIComponent(src)}`;
+  return inboxUrl(`/messages/${encodeURIComponent(messageId)}/image?path=${encodeURIComponent(src)}`);
 }
 
 /**
@@ -62,7 +63,7 @@ export function inlineImageRefFromSrc(src: string, messageId: string): string | 
   try {
     const base = typeof window !== 'undefined' && /^https?:/.test(window.location.href) ? window.location.href : 'http://localhost/';
     const url = new URL(src, base);
-    if (url.pathname !== `/api/inbox/messages/${encodeURIComponent(messageId)}/image`) return null;
+    if (url.pathname !== inboxUrl(`/messages/${encodeURIComponent(messageId)}/image`)) return null;
     return url.searchParams.get('path');
   } catch {
     return null;
@@ -88,11 +89,11 @@ export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
   }
   if (base === TOUR_IMAGE_BASE) {
     // A tour picture loads from the tour's read-only asset route; anything else in a tour message loads nothing.
-    return TOUR_ASSET_RE.test(path) ? tourAssetUrl(path) : `/api/inbox/tour/assets/none`;
+    return TOUR_ASSET_RE.test(path) ? tourAssetUrl(path) : inboxUrl(`/tour/assets/none`);
   }
   if (base?.startsWith(ATTACHMENT_BASE_PREFIX)) {
     const match = /^(att_[0-9A-Za-z]+):(current|sent)$/.exec(base.slice(ATTACHMENT_BASE_PREFIX.length));
-    if (match) return `/api/inbox/attachments/${match[1]}/markdown-image?path=${encodeURIComponent(path)}&version=${match[2]}`;
+    if (match) return inboxUrl(`/attachments/${match[1]}/markdown-image?path=${encodeURIComponent(path)}&version=${match[2]}`);
   }
   if (base?.startsWith(MESSAGE_BASE_PREFIX)) {
     const id = base.slice(MESSAGE_BASE_PREFIX.length);

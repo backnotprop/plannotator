@@ -61,7 +61,6 @@ function inboxButton() {
   return deriveInboxUpdate({
     current: "0.28.31",
     onDisk: null,
-    checksOn: true,
     managed: true,
     lockHeld: isUpdateLockHeld(dataDir),
     state: readUpdateState(dataDir),

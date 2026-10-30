@@ -2697,7 +2697,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (path === "/api/inbox/update") {
-          const result = updates.updateNow();
+          const result = await updates.updateNow();
           if (result.outcome === "launched") return json({ ok: true, version: result.version, update: updates.current() });
           const refused: Record<string, string> = {
             locked: "An update is already running.",

@@ -3,8 +3,11 @@
  * §4.2-4.4 and the owner's answers): one sidebar button whose state the
  * server works out from what is on this machine.
  *
- *   available   a newer stable release exists (the shared release check) and
- *               nothing newer is installed yet; not snoozed for that version.
+ *   available   a newer stable release is known (the shared release check, or
+ *               Check now) and nothing newer is installed yet; not snoozed for
+ *               that version. Shown whether or not update checks are on:
+ *               PLANNOTATOR_UPDATE_CHECK=0 stops only the automatic checks,
+ *               never the person's way to a release this machine knows of.
  *   updating    the install script runs (update.lock is held): the person
  *               pressed Update now, ran `plannotator update`, or auto-update
  *               started it.
@@ -15,8 +18,8 @@
  *               sidebar.
  *
  * The Inbox is long-lived and one per machine, so it also runs the release
- * check (never awaited by a request, never in a dev run, never while
- * PLANNOTATOR_UPDATE_CHECK is off): at start and on a page load when the
+ * check (never awaited by a request, never in a dev run, never on its own
+ * while PLANNOTATOR_UPDATE_CHECK is off; Check now always asks): at start and on a page load when the
  * answer is over a minute old, and on its health tick when it is over 10
  * minutes old. It re-reads the cache on that tick, so a check another process
  * made reaches it without a second request.
@@ -230,7 +233,6 @@ export async function probeBinaryVersion(binaryPath: string): Promise<string | n
 export function deriveInboxUpdate(input: {
   current: string;
   onDisk: string | null;
-  checksOn: boolean;
   managed: boolean;
   lockHeld: boolean;
   state: ReturnType<typeof readUpdateState>;
@@ -266,7 +268,11 @@ export function deriveInboxUpdate(input: {
   ) {
     return base(pendingVersion, "failed");
   }
-  if (!input.checksOn || !latest || !isNewerStableVersion(latest.version, current)) return null;
+  // Not gated on update checks: with them off the Inbox stops asking on its
+  // own, but a release it knows of (Check now, or a check before they were
+  // turned off) stays one click away. "X is available" with nothing to press
+  // left a person no way to update from the Inbox.
+  if (!latest || !isNewerStableVersion(latest.version, current)) return null;
   if (isSnoozed(input.state, latest.version, input.now)) return null;
   return base(latest.version, "available");
 }
@@ -342,7 +348,8 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     return known.some((v) => normalizeStableVersion(v) === version);
   };
 
-  const ensureNotes = (version: string): Promise<void> => {
+  /** `asked`: the person's Check now, which asks even with update checks off. */
+  const ensureNotes = (version: string, asked = false): Promise<void> => {
     const running = notesInFlight.get(version);
     if (running) return running;
     if (!fetchableVersion(version)) return Promise.resolve();
@@ -350,7 +357,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       version,
       dataDir: options.dataDir,
       now,
-      enabled: checksOn,
+      enabled: asked ? () => true : checksOn,
       ...(options.fetchReleaseTag && { fetchRelease: options.fetchReleaseTag }),
     })
       .then(() => undefined)
@@ -453,7 +460,6 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     return deriveInboxUpdate({
       current: options.version,
       onDisk,
-      checksOn: checksOn(),
       managed: isManaged(),
       lockHeld: isUpdateLockHeld(options.dataDir),
       state: readUpdateState(options.dataDir),
@@ -625,8 +631,21 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       if (tickTimer) clearInterval(tickTimer);
       if (fastTimer) clearTimeout(fastTimer);
     },
-    /** Update now: the install script for the newest release, once (update.lock). */
-    updateNow(): ManualUpdateOutcome {
+    /**
+     * Update now: the install script for the newest release, once (update.lock).
+     * With update checks off the known release may be weeks old, so the
+     * person's click asks GitHub once first and installs the newest answer;
+     * when that check fails (offline), the release already known is installed.
+     * With checks on, the cache is at most 10 minutes old and is used as is.
+     */
+    async updateNow(): Promise<ManualUpdateOutcome> {
+      if (release && !checksOn()) {
+        try {
+          await runReleaseCheck({ dataDir: options.dataDir, now, enabled: () => true, force: true, ...sources });
+        } catch {
+          // The known release stands.
+        }
+      }
       const outcome = startManualUpdate({
         currentVersion: release ? options.version : undefined,
         dataDir: options.dataDir,
@@ -656,6 +675,12 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
         force: true,
         ...sources,
       });
+      // The newer release's notes too (the update dialog's summary, What's
+      // new), part of the same explicit request; once per version, throttled.
+      const latest = knownLatestRelease(readUpdateState(options.dataDir))?.version;
+      if (latest && isNewerStableVersion(latest, options.version) && !hasReleaseNotesContent(readReleaseNotes(latest, options.dataDir))) {
+        void ensureNotes(latest, true);
+      }
       refresh();
       // In plain words, from both sources' answers as stored ("release page didn't answer as expected; GitHub API rate-limited").
       if (outcome.outcome !== "failed") return { ok: true };

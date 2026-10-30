@@ -15,6 +15,7 @@
  * thread card's own tiles (ui's `QuestionPictureTiles`): the picture picks and
  * the zoom button opens the viewer, never both.
  */
+import { inboxUrl } from '../inboxUrl';
 import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { QuestionPictureTiles } from '@plannotator/ui/components/blocks/QuestionBlock';
@@ -92,11 +93,11 @@ export function cardPictures(decision: InboxDecision): CardPicture[] {
       attachmentId: image.attachment_id,
       name: image.name,
       ref: image.ref,
-      src: `/api/inbox/attachments/${encodeURIComponent(image.attachment_id)}/image`,
+      src: inboxUrl(`/attachments/${encodeURIComponent(image.attachment_id)}/image`),
     }));
   for (const file of decision.pictures.attachments) {
     if (file.kind !== 'image') continue;
-    out.push({ attachmentId: file.attachment_id, name: file.name, ref: null, src: `/api/inbox/attachments/${encodeURIComponent(file.attachment_id)}/image` });
+    out.push({ attachmentId: file.attachment_id, name: file.name, ref: null, src: inboxUrl(`/attachments/${encodeURIComponent(file.attachment_id)}/image`) });
   }
   if (q.shows?.kind === 'image') {
     const src = q.shows.src;
@@ -110,7 +111,7 @@ export function cardPictures(decision: InboxDecision): CardPicture[] {
 /** Where a picture choice's picture loads from: its captured file, else the message's image route. */
 export function choicePictureUrl(decision: InboxDecision, src: string): string {
   const image = decision.pictures.inline.find((candidate) => candidate.ref === src);
-  return image ? `/api/inbox/attachments/${encodeURIComponent(image.attachment_id)}/image` : inboxMessageImageUrl(decision.message.id, src);
+  return image ? inboxUrl(`/attachments/${encodeURIComponent(image.attachment_id)}/image`) : inboxMessageImageUrl(decision.message.id, src);
 }
 
 /**

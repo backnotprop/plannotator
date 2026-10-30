@@ -10,6 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
+import { inboxUrl } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
@@ -150,7 +151,7 @@ configurePlannotatorUI({
   richCopy: true,
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
   refCardTransport: async (href, _ref, signal) => {
-    const res = await fetch(`/api/inbox/ref?url=${encodeURIComponent(href)}`, { signal, headers: { accept: 'application/json' } });
+    const res = await fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } });
     if (!res.ok) return null;
     return (await res.json()) as ForgeRefCardResult;
   },

@@ -29,6 +29,7 @@
  * answer never came (a lost answer, the keepalive as the page goes) is read
  * back, so the window's base follows what landed.
  */
+import { inboxUrl } from './inboxUrl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
 import { inboxApi, InboxApiError, pageServerSession } from './api';
@@ -233,7 +234,7 @@ export function useReplyDraft(threadId: string) {
       if (timer.current) clearTimeout(timer.current);
       if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId)) return;
       const session = pageServerSession();
-      void fetch(`/api/inbox/threads/${encodeURIComponent(next.threadId)}/draft`, {
+      void fetch(inboxUrl(`/threads/${encodeURIComponent(next.threadId)}/draft`), {
         method: 'POST',
         keepalive: true,
         headers: { 'Content-Type': 'application/json' },

@@ -16,9 +16,12 @@
  * The tool: each call re-reads the registry (never caching the port or
  * token), starts a stopped Inbox with `plannotator inbox --background` (it
  * detaches into its own session and never opens a browser), and proxies the
- * call to the Inbox's `/mcp` with `project_path` the session's working folder
- * (or the folder the agent named, resolved against it and checked to exist)
- * and `agent_session` the host's real session id.
+ * call to the Inbox's `/mcp` with `project_path` the session's project folder
+ * (`projectFolder`: where the session started, which a shell `cd` never
+ * moves; or the folder the agent named, resolved against the current working
+ * folder and checked to exist) and `agent_session` the host's real session
+ * id. A send from elsewhere than the project folder also says where the agent
+ * works now (INBOX_WORKING_FOLDER_META_KEY), for its relative paths.
  *
  * The wake: a 1 s tick long-polls `POST /api/inbox/bridge/poll` (bearer token,
  * no Origin) for the person's replies to this session's messages, with a 5 to
@@ -225,6 +228,22 @@ export function inboxReminderEnvValue(on: boolean, toolName: string | null, cust
  * milliseconds). Past it there is no list, never an error.
  */
 export const INBOX_SESSION_THREADS_TIMEOUT_MS = 1_500
+
+/**
+ * Whether a move of the session's root moves this session's Inbox project
+ * (`InboxLink.projectFolder`). A shell `cd` never does: the project is the
+ * session's root, `$.session.root()`, which moves only on Claude Code's own
+ * `/cd`, a host's directory change or a worktree move (EnterWorktree; a
+ * linked worktree folds into its main repository's project anyway). On: such
+ * a move is deliberate, so the project follows it (the plain reading; the
+ * owner's question on `/cd` is still open, 2026-10-29). Off: the folder the
+ * session started in stands for its whole life. The one switch for that
+ * question.
+ */
+export const INBOX_PROJECT_FOLLOWS_SLASH_CD = true
+
+/** The Inbox tools whose relative paths resolve against the folder the agent works in (INBOX_WORKING_FOLDER_META_KEY). */
+const INBOX_WORKING_FOLDER_ACTIONS: ReadonlySet<string> = new Set(['send_message', 'submit_guide'])
 
 /**
  * The session's open Inbox threads as a few short lines
@@ -448,12 +467,20 @@ export interface InboxLinkOptions {
    * queued with no turn running. Absent: Send now is never advertised.
    */
   steerableTurn?: () => string | null
-  /** The session's working folder, sent with each poll so New message can find the session by project. */
+  /**
+   * The session's working folder now (a shell `cd` moves it): an agent's
+   * relative `project_path` and a send's relative paths resolve against it.
+   * Also the project folder's last fallback, when no root answers.
+   */
   cwd?: () => Promise<string>
   /**
-   * The session's root (`$.session.root()`), read once when the link starts
-   * (a later /cd moves it) and sent as `session_folder`: the folder
-   * `claude --resume` runs in, for the Inbox's restart command.
+   * The session's root (`$.session.root()`: where it started; a shell `cd`
+   * never moves it; `/cd`, a host's directory change or a worktree move
+   * (EnterWorktree) does). Its first answer is sent as
+   * `session_folder`: the folder `claude --resume` runs in, for the Inbox's
+   * restart command. It is also the session's project folder
+   * (`projectFolder`), asked again each time while
+   * INBOX_PROJECT_FOLLOWS_SLASH_CD.
    */
   root?: () => Promise<string>
   /** Names this process in the lease and the claims. */
@@ -591,22 +618,38 @@ export class InboxLink {
 
   // --- The tool --------------------------------------------------------------
 
-  /** A `plannotator_inbox` call: the Inbox tool it stands for, through the Inbox's `/mcp`. */
+  /**
+   * A `plannotator_inbox` call: the Inbox tool it stands for, through the
+   * Inbox's `/mcp`. `cwd` is the session's working folder now; the project is
+   * `projectFolder()`'s unless the agent named one.
+   */
   async callTool(input: unknown, cwd: string): Promise<{ text: string } | { deny: string }> {
     await this.touch()
+    const project = (await this.projectFolder()) ?? cwd
     const call = inboxToolCall(input, this.tools, {
-      project_path: cwd,
+      project_path: project,
       agent_session: this.options.sessionId,
       agent_host: INBOX_HOST,
       agent_name: INBOX_AGENT_NAME,
     })
     if ('error' in call) return { deny: call.error }
+    let workingFolder: string | undefined
     if (call.projectPath !== undefined) {
       // The agent named the project: an existing folder, relative to the working folder, or nothing reaches the Inbox.
+      // Its relative paths stay relative to that folder, as before.
       const dir = await this.host.run(inboxProjectDirArgv(cwd, call.projectPath), { timeoutMs: 5_000 }).catch(() => null)
       const resolved = dir?.exitCode === 0 ? dir.stdout.replace(/\n$/, '') : ''
       if (!resolved.startsWith('/')) return { deny: `Invalid plannotator_inbox call: project_path ${call.projectPath} is not an existing folder.` }
       call.arguments.project_path = resolved
+    } else if (cwd.startsWith('/') && cwd !== project && INBOX_WORKING_FOLDER_ACTIONS.has(call.name)) {
+      // The project stays where the session started, the agent works here: its relative paths resolve here, as they did
+      // when the project followed the cd. Attachments are made absolute here too, so an older Inbox that ignores the
+      // working folder never resolves them against the project folder (a missing file, or another one of that name).
+      workingFolder = cwd
+      const attachments = call.arguments.attachments
+      if (Array.isArray(attachments)) {
+        call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !path.startsWith('/') ? `${cwd}/${path}` : path))
+      }
     }
     if (call.name === 'wait_for_reply') {
       const asked = typeof call.arguments.timeout_seconds === 'number' ? call.arguments.timeout_seconds : INBOX_WAIT_MAX_SECONDS
@@ -617,7 +660,7 @@ export class InboxLink {
     let answer: Awaited<ReturnType<typeof mcpCall>>
     try {
       // This session's wake delivers the reply as a turn: the send tools say to end the turn.
-      answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes: true }))
+      answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes: true, ...(workingFolder ? { workingFolder } : {}) }))
     } catch (error) {
       return { deny: `The Plannotator Inbox did not answer (${error instanceof Error ? error.message : String(error)}).` }
     }
@@ -726,7 +769,32 @@ export class InboxLink {
     return this.options.steerableTurn?.() ?? null
   }
 
-  /** Where the session started, asked once (the first answer stands; a later /cd moves `$.session.root()`). */
+  /**
+   * The folder this session files under in the Inbox: the `project_path` of
+   * its tool calls (unless the agent names one), of every poll (so the
+   * person's New message lands there too) and of the thread lists after a
+   * compaction or a resume. It is the session's root, where it started: a
+   * shell `cd` never moves it, so one session stays one project however far
+   * the agent wanders. Claude Code's own `/cd`, a host's directory change or
+   * a worktree move (EnterWorktree) moves the root, and the project with it
+   * while INBOX_PROJECT_FOLLOWS_SLASH_CD; otherwise the first answer stands.
+   * A root that no longer exists (a deleted scratch folder or worktree the
+   * session started in) gives way to the working folder, as before this rule,
+   * so plain sends and polls are not refused. With no root, the working
+   * folder. Null when nothing answers with an absolute path.
+   */
+  async projectFolder(): Promise<string | null> {
+    const usable = async (folder: string | null): Promise<boolean> =>
+      !!folder && folder.startsWith('/') && (await this.host.exists(folder).catch(() => false))
+    const live = INBOX_PROJECT_FOLLOWS_SLASH_CD && this.options.root ? await this.options.root().catch(() => null) : null
+    if (live && (await usable(live))) return live
+    const first = await this.folderNow()
+    if (first && (await usable(first))) return first
+    const cwd = this.options.cwd ? await this.options.cwd().catch(() => null) : null
+    return cwd && cwd.startsWith('/') ? cwd : null
+  }
+
+  /** Where the session started, asked once (the first answer stands; a later /cd, host directory change or worktree move moves `$.session.root()`). */
   private async folderNow(): Promise<string | null> {
     this.folder ??= (async () => {
       if (!this.options.root) return this.options.cwd ? await this.options.cwd().catch(() => null) : null
@@ -806,12 +874,13 @@ export class InboxLink {
    * whether a turn runs, for New message's live sessions (step 8).
    */
   private async pendingNow(waitMs: number): Promise<InboxReplyCommand[] | null> {
-    const cwd = this.options.cwd ? await this.options.cwd().catch(() => '') : ''
+    // The project folder, never the shell's cwd: New message files where this session's own sends do.
+    const project = await this.projectFolder()
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
-      ...(cwd ? { project_path: cwd } : {}),
+      ...(project ? { project_path: project } : {}),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).

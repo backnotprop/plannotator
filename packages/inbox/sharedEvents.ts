@@ -35,6 +35,7 @@
  * tailnet address never share (and a tab left on an old port has its own).
  */
 
+import { inboxUrl } from './inboxUrl';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
 
 /** The Web Lock the leader holds while it holds the stream. */
@@ -161,12 +162,12 @@ function defaultSendGone(windowId: string, unloading: boolean): void {
   const body = JSON.stringify({ window: windowId, gone: true });
   try {
     if (unloading && typeof navigator.sendBeacon === 'function') {
-      if (navigator.sendBeacon('/api/inbox/window', new Blob([body], { type: 'application/json' }))) return;
+      if (navigator.sendBeacon(inboxUrl('/window'), new Blob([body], { type: 'application/json' }))) return;
     }
   } catch {
     // Fall through to fetch.
   }
-  void fetch('/api/inbox/window', {
+  void fetch(inboxUrl('/window'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body,
@@ -199,7 +200,7 @@ export function parseEventStreamText(text: string): InboxEventFrame[] {
 const INBOX_EVENT_FRAME_NAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins'] as const;
 
 async function defaultCatchUp(cursor: number): Promise<InboxEventFrame[]> {
-  const res = await fetch(`/api/inbox/events?cursor=${cursor}&once=1`, { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
+  const res = await fetch(inboxUrl(`/events?cursor=${cursor}&once=1`), { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
   if (!res.ok) throw new Error(`catch-up: ${res.status}`);
   return parseEventStreamText(await res.text());
 }

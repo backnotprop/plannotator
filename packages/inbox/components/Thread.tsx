@@ -1,3 +1,4 @@
+import { inboxUrl } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
@@ -284,7 +285,7 @@ const NO_SENT_ANSWERS: readonly SentAnswerGroup[] = [];
 /** The URL of a fence's embed document: the Inbox keeps the page and serves it under its own policy. */
 async function inboxEmbedUrl(html: string): Promise<string | null> {
   const answer = await inboxApi.embed(html);
-  return typeof answer.url === 'string' && answer.url.startsWith('/api/inbox/embeds/') ? answer.url : null;
+  return typeof answer.url === 'string' && answer.url.startsWith(inboxUrl('/embeds/')) ? answer.url : null;
 }
 
 /** One message's text, with its question cards (exported for its DOM test). */
@@ -3977,13 +3978,15 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         {phone && artifactsOn ? null : (
           <>
             {markReadButton}
-            {one && !artifactsOn ? (
+            {one && !artifactsOn && !nameChip ? (
               <span className="ib-sp" />
             ) : (
-              // The subject, once it has scrolled away, and always over the Artifacts grid (the heading stays the one a screen reader reads).
-              <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
-                {thread.subject ?? '(no subject)'}
-              </span>
+              // The thread's name (the list's rule), always; with no name, the subject once it has scrolled away, so its words never show twice. Always over the Artifacts grid (the heading stays the one a screen reader reads).
+              <Tip content={nameChip ?? thread.subject ?? '(no subject)'} cut>
+                <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                  {nameChip ?? thread.subject ?? '(no subject)'}
+                </span>
+              </Tip>
             )}
             {artifactsButton && (
               <Tip content={artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
