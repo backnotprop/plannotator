@@ -17,9 +17,9 @@
  * (`choice`: once, session or deny, and the reason; the hook builds the
  * decision from its own event, and the call records the delivery) or
  * `withdrawn` (say nothing; Claude Code's own dialog stays). A question whose
- * stored choices are not exactly the three it was written with is withdrawn,
- * never answered; one whose command is too long to show in full is never
- * asked.
+ * stored body, prompt or choices are not exactly this prompt's is withdrawn,
+ * never answered; one whose detail cannot be shown in full and exactly (too
+ * long, or a path or link holding a line break or a control) is never asked.
  *
  * A lease withdraws a question no hook holds any more: each call renews it
  * for 60 s, and a held call keeps it. When it runs out (the hook timed out,
@@ -40,13 +40,13 @@ import {
   INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
   inboxPermissionAnswer,
-  inboxPermissionChoices,
   inboxPermissionQuestion,
   inboxPermissionSession,
   isInboxPermissionSession,
   readInboxPermissionEvent,
   type InboxPermissionChoice,
   type InboxPermissionEvent,
+  type InboxPermissionQuestion,
 } from "@plannotator/core/inbox-permission";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
@@ -152,20 +152,34 @@ export function createLaunchPermissions(options: {
     options.onChange();
   };
 
-  /** Whether the stored question is exactly the one this prompt asks: one question, its choices the expected labels in order. */
-  const asksExactly = (messageId: string, event: InboxPermissionEvent): boolean => {
+  /** The question this prompt asks in a launch's thread. */
+  const questionFor = (root: InboxMessage, event: InboxPermissionEvent): InboxPermissionQuestion =>
+    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), shownPath: options.displayFolder });
+
+  /**
+   * Whether the stored question is exactly the one this prompt asks: the body
+   * as written (the detail and the folder over the card), one question, its
+   * prompt, and its choices the expected labels in order.
+   */
+  const asksExactly = (messageId: string, expected: InboxPermissionQuestion): boolean => {
     const questions = store.questionsOf(messageId);
-    const expected = inboxPermissionChoices(event, options.displayFolder);
     const stored = questions[0]?.choices.map((choice) => choice.label) ?? [];
-    return questions.length === 1 && stored.length === expected.length && stored.every((label, i) => label === expected[i]);
+    return (
+      expected.askable &&
+      store.message(messageId)?.body === expected.body &&
+      questions.length === 1 &&
+      questions[0]!.prompt === expected.prompt &&
+      stored.length === expected.choices.length &&
+      stored.every((label, i) => label === expected.choices[i])
+    );
   };
 
   /** Where the question stands: decided (the delivery recorded), withdrawn, or still waiting (null). */
-  const settled = (messageId: string, event: InboxPermissionEvent): PermissionAnswer | null => {
+  const settled = (messageId: string, event: InboxPermissionEvent, expected: InboxPermissionQuestion): PermissionAnswer | null => {
     const question = store.questionsOf(messageId)[0];
     if (!question || question.state === "superseded" || question.state === "closed") return { status: "withdrawn", message_id: messageId };
-    // Never answer a card that does not offer exactly this prompt's three choices: Claude Code's own dialog decides.
-    if (!asksExactly(messageId, event)) {
+    // Never answer a card that is not exactly this prompt's (its detail, its prompt, its three choices): Claude Code's own dialog decides.
+    if (!asksExactly(messageId, expected)) {
       withdraw(messageId, INBOX_PERMISSION_ASK_IN_TERMINAL);
       return { status: "withdrawn", message_id: messageId };
     }
@@ -183,18 +197,16 @@ export function createLaunchPermissions(options: {
     return { status: "decided", message_id: messageId, choice, reason };
   };
 
-  /** The question's id, or null when this prompt is not asked here (its command is too long to show in full). */
-  const ask = (root: InboxMessage, event: InboxPermissionEvent, requestId: string): string | null => {
+  /** The question's id, or null when this prompt is not asked here (its detail cannot be shown in full and exactly). */
+  const ask = (root: InboxMessage, event: InboxPermissionEvent, requestId: string, question: InboxPermissionQuestion): string | null => {
     // The same request again (its answer was lost on the way): the question it already wrote.
     const key = `perm-${requestId}`;
     for (const id of store.threadMessageIds(root.thread_id)) {
       const earlier = store.message(id);
       if (earlier?.idempotency_key === key && earlier.author.kind === "agent" && isInboxPermissionSession(earlier.author.session)) return earlier.id;
     }
-    const folder = options.displayFolder(event.cwd ?? root.launch!.folder);
-    const question = inboxPermissionQuestion(event, { agent: AGENT_NAME, folder, shownPath: options.displayFolder });
-    if (question.tooLong) {
-      log(`Inbox launch ${root.launch!.id}: a ${event.tool_name} prompt too long to show in full; left to Terminal`);
+    if (!question.askable) {
+      log(`Inbox launch ${root.launch!.id}: a ${event.tool_name} prompt that cannot be shown in full and exactly; left to Terminal`);
       return null;
     }
     const latest = store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
@@ -224,6 +236,7 @@ export function createLaunchPermissions(options: {
       const event = readInboxPermissionEvent(body.event);
       if (!event) return json({ error: "event: Claude Code's PermissionRequest input.", code: "validation_error" }, 400);
       const requestId = typeof body.request_id === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.request_id) ? body.request_id : null;
+      const question = questionFor(root, event);
       let messageId: string;
       if (typeof body.message_id === "string") {
         const message = store.message(body.message_id);
@@ -234,11 +247,11 @@ export function createLaunchPermissions(options: {
         messageId = message.id;
       } else {
         if (!requestId) return json({ error: "request_id: 8 to 80 letters, digits, - or _.", code: "validation_error" }, 400);
-        const asked = ask(root, event, requestId);
+        const asked = ask(root, event, requestId, question);
         if (!asked) return json({ status: "withdrawn", message_id: null } satisfies PermissionAnswer);
         messageId = asked;
       }
-      const done = settled(messageId, event);
+      const done = settled(messageId, event, question);
       if (done) return json(done);
       const lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };
       leases.set(messageId, lease);
@@ -247,7 +260,7 @@ export function createLaunchPermissions(options: {
       try {
         while (now() < deadline && !req.signal.aborted) {
           await new Promise((resolve) => setTimeout(resolve, CHECK_EVERY_MS));
-          const answer = settled(messageId, event);
+          const answer = settled(messageId, event, question);
           if (answer) return json(answer);
         }
       } finally {

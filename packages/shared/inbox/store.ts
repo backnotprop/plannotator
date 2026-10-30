@@ -3663,6 +3663,11 @@ export class InboxStore {
     if (message.author.kind !== "agent") {
       throw new InboxError("validation_error", "Re-ask goes to an agent's message: the questions it asked.", { field: "message_id" });
     }
+    // A launched session's permission prompt is never asked again: its hook waits on this one question,
+    // and a Re-ask would send the person's unsent picks without their Send.
+    if (isInboxPermissionSession(message.author.session)) {
+      throw new InboxError("validation_error", "A permission prompt is not asked again: answer it here, or in Terminal.", { field: "message_id" });
+    }
     // The questions this session asked in the thread (only this message's
     // when the agent named no session), not one the archive closed.
     const asker = message.author.session ? message.author : null;

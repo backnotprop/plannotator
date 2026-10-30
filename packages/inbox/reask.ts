@@ -12,6 +12,7 @@
  */
 
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
+import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { agentName, plural } from './format';
 
 /** One session's part of a Re-ask. */
@@ -69,7 +70,8 @@ const isWaiting = (q: InboxQuestion) => q.state === 'open' || (q.state === 'pick
 export function reaskTargets(messages: readonly InboxMessageWire[], live: (message: InboxMessageWire) => boolean = () => true): ReaskTarget[] {
   const groups = new Map<string, InboxMessageWire[]>();
   for (const m of messages) {
-    if (m.author.kind !== 'agent' || !live(m)) continue;
+    // A launched session's permission prompt is never asked again (the store refuses it): it is answered, or answered in Terminal.
+    if (m.author.kind !== 'agent' || !live(m) || isInboxPermissionSession(m.author.session)) continue;
     // An agent that named no session: each message is its own.
     const key = m.author.session ? `${m.author.host ?? ''}\u0000${m.author.session}` : `\u0001${m.id}`;
     const list = groups.get(key) ?? [];

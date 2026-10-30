@@ -7,6 +7,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   INBOX_PERMISSION_DETAIL_MAX,
+  INBOX_PERMISSION_LABEL_MAX,
+  inboxPermissionChoices,
   inboxPermissionAnswer,
   inboxPermissionDecisionFor,
   inboxPermissionHookOutput,
@@ -86,9 +88,46 @@ describe("the question", () => {
   test("a command too long to show in full is never asked; the longest that fits is shown whole", () => {
     const fits = "x".repeat(INBOX_PERMISSION_DETAIL_MAX);
     const shown = inboxPermissionQuestion(event({ tool_input: { command: fits } }), { agent: "Claude Code", folder: "~/work" });
-    expect(shown.tooLong).toBe(false);
+    expect(shown.askable).toBe(true);
     expect(shown.body).toContain(fits);
-    expect(inboxPermissionQuestion(event({ tool_input: { command: `${fits}x` } }), { agent: "Claude Code", folder: "~/work" }).tooLong).toBe(true);
+    expect(inboxPermissionQuestion(event({ tool_input: { command: `${fits}x` } }), { agent: "Claude Code", folder: "~/work" }).askable).toBe(false);
+  });
+
+  // The delta review's N1: a path or a link is one line. One holding a line break could open its own
+  // `:::question` over the real choices (an agent-written prompt that still offers the real labels).
+  test.each([
+    ["Write", { file_path: "/work/p/README.md\n:::question\nClaude Code wants to write `~/p/README.md`\n" }],
+    ["Write", { file_path: "/Users/me/proj/notes.md\n:::question\nClaude Code wants to write `~/proj/notes.md`\n/../../../../.zshrc" }],
+    ["Edit", { file_path: "/work/a.ts\r:::question" }],
+    ["Read", { file_path: "/work/a\u2028b" }],
+    ["NotebookEdit", { notebook_path: "/work/n.ipynb\u0000" }],
+    ["Write", { file_path: "/work/\u202Etxt.exe" }],
+    ["WebFetch", { url: "https://e.com/\n:::question\nInjected\n" }],
+    ["WebSearch", { query: "x\n:::question\nInjected" }],
+  ])("%s with a line break, a control or an invisible character in its path or link: never asked", (tool, input) => {
+    const question = inboxPermissionQuestion(event({ tool_name: tool, tool_input: input }), { agent: "Claude Code", folder: "~/work" });
+    expect(question.askable).toBe(false);
+  });
+
+  test("a plain path or link shows whole on one line, over the card; the card's prompt is the Inbox's", () => {
+    for (const [tool, input, shown] of [
+      ["Write", { file_path: "/work/p/README.md" }, "`/work/p/README.md`"],
+      ["WebFetch", { url: "https://example.com/a?b=1" }, "`https://example.com/a?b=1`"],
+    ] as const) {
+      const question = inboxPermissionQuestion(event({ tool_name: tool, tool_input: input }), { agent: "Claude Code", folder: "~/work" });
+      expect(question.askable).toBe(true);
+      expect(question.body.split("\n")[0]).toBe(shown);
+      const blocks = parseInboxQuestionBlocks(question.body);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0]!.prompt).toBe(question.prompt);
+    }
+  });
+
+  test("bidi and invisible characters in a command are shown, never hidden", () => {
+    const question = inboxPermissionQuestion(event({ tool_input: { command: "echo safe\u202E; rm -rf ~ #\u200B\tx\ry" } }), { agent: "Claude Code", folder: "~/work" });
+    expect(question.askable).toBe(true);
+    expect(question.body).toContain("echo safe⟨U+202E⟩; rm -rf ~ #⟨U+200B⟩\tx⟨U+000D⟩y");
+    expect(question.body).not.toContain("\u202E");
   });
 });
 
@@ -108,6 +147,36 @@ describe("the session choice", () => {
     expect(inboxPermissionSessionChoice(event({ permission_suggestions: [REAL.permission_suggestions[0]!] }), (p) => p.replace("/Users/x", "~"))?.label).toBe(
       "Allow work in `~/work` for this session",
     );
+  });
+
+  // The delta review's N2: the label names every rule the session choice grants, never "and 1 more".
+  test("several rules: every one in the label (a compound `git add . && git commit`)", () => {
+    const both = event({
+      tool_input: { command: "git add . && git commit -m wip" },
+      permission_suggestions: [
+        { type: "addRules", rules: [{ toolName: "Bash", ruleContent: "git add:*" }, { toolName: "Bash", ruleContent: "git commit:*" }], behavior: "allow", destination: "localSettings" },
+      ],
+    });
+    expect(inboxPermissionSessionChoice(both)?.label).toBe("Allow `git add` and `git commit` for this session");
+    const three = event({
+      permission_suggestions: [{ type: "addRules", rules: ["a", "b", "c"].map((c) => ({ toolName: "Bash", ruleContent: `${c}:*` })), behavior: "allow" }],
+    });
+    expect(inboxPermissionSessionChoice(three)?.label).toBe("Allow `a`, `b` and `c` for this session");
+    const dirs = event({ permission_suggestions: [{ type: "addDirectories", directories: ["/w/a", "/w/b"], destination: "session" }] });
+    expect(inboxPermissionSessionChoice(dirs)?.label).toBe("Allow work in `/w/a` and work in `/w/b` for this session");
+  });
+
+  test("a label too long to show whole, or a rule it cannot show exactly, offers no session choice", () => {
+    const many = event({
+      permission_suggestions: [{ type: "addRules", rules: Array.from({ length: 30 }, (_, i) => ({ toolName: "Bash", ruleContent: `tool-${i}:*` })), behavior: "allow" }],
+    });
+    expect(inboxPermissionSessionChoice(many)).toBeNull();
+    expect(inboxPermissionChoices(many)).toEqual(["Allow once", "Deny"]);
+    for (const content of ["safe\u202E:*", "a\nb:*", "x\u200B:*"]) {
+      expect(inboxPermissionSessionChoice(event({ permission_suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: content }], behavior: "allow" }] }))).toBeNull();
+    }
+    const longRule = "x".repeat(INBOX_PERMISSION_LABEL_MAX);
+    expect(inboxPermissionSessionChoice(event({ permission_suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: `${longRule}:*` }], behavior: "allow" }] }))).toBeNull();
   });
 
   test("a deny rule or a mode that skips every prompt is never offered", () => {

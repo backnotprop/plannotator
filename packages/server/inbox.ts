@@ -693,6 +693,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
   const serverSession = createServerSessionNonce();
+  // The requests the phone's device door hands in, in-process, after it checked the device's token
+  // (inbox-devices.ts `toWindow`): the person's own paired device, which answers a permission prompt as a window does.
+  const fromDeviceDoor = new WeakSet<Request>();
   // Search (packages/server/inbox-search.ts): the index is built on the first search, not here.
   const search = createInboxSearchRoutes({ store, serverSession, index: options.searchIndex });
   // Mark read: the note to the asking agents goes once the Undo window has passed.
@@ -3160,9 +3163,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ message: store.undoHandoff(handoffUndo[1]!) });
       }
 
-      /** Not a permission question, or a window's call: the page's own Origin (this Host) and this run's serverSession. */
+      /**
+       * Not a permission question, or the person's own call: a window's (the page's own Origin, this Host, and this
+       * run's serverSession) or a paired device's through the device door (its token already checked).
+       */
       const answeredFromWindow = (request: Request, body: Record<string, unknown>, target: InboxMessage | null | undefined): boolean => {
         if (target?.author.kind !== "agent" || !isInboxPermissionSession(target.author.session)) return true;
+        if (fromDeviceDoor.has(request)) return true;
         const from = request.headers.get("origin");
         let fromHost: string | null = null;
         try {
@@ -3419,7 +3426,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       port: () => port,
       registry: () => registry,
       readBody,
-      dispatch: fetch,
+      // Only the door calls this, after the device's token: its requests may answer a permission prompt.
+      dispatch: (req) => {
+        fromDeviceDoor.add(req);
+        return fetch(req);
+      },
       now: options.now,
       tailscale: options.tailscale,
       probes: options.pairingProbes,
