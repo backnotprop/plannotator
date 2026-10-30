@@ -48,7 +48,7 @@ export interface FakeClaudeConfig {
   prompts?: FakePermissionPrompt[];
   /** The person answers the open dialog in `claude attach`: the hook is ended (SIGTERM) and the session goes on. */
   localAnswer?: boolean;
-  /** How long a safety check's own dialog waits before it blocks the call (ms; Claude's is about 2 minutes). */
+  /** How long a safety check's own dialog (up once the hook ended with no decision) waits before it blocks the call (ms; Claude's is about 2 minutes). */
   safetyBlockMs?: number;
 }
 
@@ -59,7 +59,8 @@ export interface FakePermissionPrompt {
   permission_suggestions?: Record<string, unknown>[];
   /**
    * Claude's own safety check (a dangerous rm), for a person only: bypass mode still asks it (to the hook, or waived by
-   * the export when no PermissionRequest hook exists at all), and in any mode a hook's allow is ignored (its deny counts).
+   * the export when no PermissionRequest hook exists at all), and in any mode a hook's allow is ignored (its deny counts);
+   * its own dialog comes up only after the hook ends.
    */
   safetyCheck?: boolean;
 }
