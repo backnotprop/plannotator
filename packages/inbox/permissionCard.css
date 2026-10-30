@@ -97,3 +97,6 @@
   .pc-modes > span:first-child { flex-basis: 100%; }
   .pc-rec-reason { padding-left: 14px; }
 }
+
+/* After Approve in Terminal: the host's line, and on a phone Copy attach command beside it. */
+.pc-term { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }

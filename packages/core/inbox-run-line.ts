@@ -38,7 +38,7 @@ export interface InboxRunEvidence {
   now: number;
   /** The latest start or respawn (ms); the launch's `started_at` after an Inbox restart. */
   startedAt: number;
-  /** That start was a reply's respawn or Try again. */
+  /** That start was a reply's respawn (a Try again of a start that never ran is a first start). */
   again: boolean;
   /** The CLI is gone from the login PATH (false), there (true), or not checked (null). */
   cliAvailable: boolean | null;

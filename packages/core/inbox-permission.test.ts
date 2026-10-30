@@ -162,7 +162,7 @@ describe("the question", () => {
     const edit = inboxPermissionQuestion(event({ tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "let a = 1;", new_string: "let a = 2;\nlet b = 3;" } }), { agent: "Claude Code", folder: "/w" });
     expect(readInboxPermissionBody(edit.body).preview).toEqual({ kind: "diff", text: "-let a = 1;\n+let a = 2;\n+let b = 3;" });
     const bash = inboxPermissionQuestion(event({ tool_input: { command: "bun run build", description: "Build the Inbox bundle" } }), { agent: "Claude Code", folder: "~/p" });
-    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, leftover: null, purpose: "Build the Inbox bundle", folder: "~/p", unsandboxed: false, linksTo: null });
+    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, leftover: null, purpose: "Build the Inbox bundle", folder: "~/p", unsandboxed: false, linksTo: null, note: null, handoff: null });
     const page = inboxPermissionQuestion(event({ tool_name: "WebFetch", tool_input: { url: "https://bun.sh/docs", prompt: "How does Bun split chunks?" } }), { agent: "Claude Code", folder: "~/p" });
     expect(readInboxPermissionBody(page.body).purpose).toBe("How does Bun split chunks?");
     // A purpose that cannot be shown on one line is left out (it is commentary, not the request).
@@ -393,6 +393,35 @@ describe("the answer and the decision", () => {
     expect(inboxPermissionChoices(e, { full: true, fullPermissions: true })).toEqual(inboxPermissionChoices(e).filter((l) => l !== "Allow and switch to Auto mode"));
     expect(inboxPermissionChoices(e, { full: true }).at(-1)).toBe("Deny");
     expect(inboxPermissionAnswer(answer(["Allow and switch to Auto mode"]), e, { full: true }).choice).toBe("once");
+  });
+
+  // Claude Code ignores a hook's allow for a check only a person may approve: such a card offers no allow at all.
+  test("a host that takes no allow from here: Deny or Approve in Terminal, its two lines over the block, read back for the card", () => {
+    expect(inboxPermissionChoices(e, { allowHere: false, fullPermissions: true })).toEqual(["Deny", "Approve in Terminal"]);
+    const note = "Claude Code only accepts this approval in Terminal.";
+    const handoff = "Approve it in Claude Code within 2 minutes.";
+    const question = inboxPermissionQuestion(e, { agent: "Claude Code", folder: "~/p", allowHere: false, note, handoff });
+    expect(question.choices).toEqual(["Deny", "Approve in Terminal"]);
+    expect(readInboxPermissionBody(question.body)).toMatchObject({ note, handoff });
+    // The block holds the prompt and its choices only: the lines never become choices.
+    expect(question.body.slice(question.body.indexOf(":::question"))).not.toContain(note);
+    expect(readInboxPermissionBody(inboxPermissionQuestion(e, { agent: "Claude Code", folder: "~/p" }).body)).toMatchObject({ note: null, handoff: null });
+  });
+
+  test("Approve in Terminal hands the prompt to the host's dialog: no decision; any allow there does the same, anything else denies", () => {
+    const terms = { allowHere: false } as const;
+    expect(inboxPermissionAnswer(answer(["Approve in Terminal"]), e, terms).choice).toBe("terminal");
+    // A card from before that still shows an allow: never an allow the host would ignore, the dialog instead.
+    expect(inboxPermissionAnswer(answer(["Allow once"]), e, terms).choice).toBe("terminal");
+    expect(inboxPermissionAnswer(answer(["Deny"]), e, terms)).toEqual({ choice: "deny", reason: null });
+    // Where allows count, Approve in Terminal is no choice: a deny.
+    expect(inboxPermissionAnswer(answer(["Approve in Terminal"]), e).choice).toBe("deny");
+    expect(inboxPermissionDecisionFor(e, { choice: "terminal" })).toBeNull();
+  });
+
+  test("the hook input's permission mode is read (Claude's common hook input), and absent is null", () => {
+    expect(readInboxPermissionEvent({ session_id: "s", tool_name: "Bash", tool_input: {}, permission_mode: "bypassPermissions" })?.permission_mode).toBe("bypassPermissions");
+    expect(readInboxPermissionEvent({ session_id: "s", tool_name: "Bash", tool_input: {} })?.permission_mode).toBeNull();
   });
 
   test("a mode switch allows this tool input and sets the session's mode, for this session only", () => {

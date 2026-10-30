@@ -115,6 +115,11 @@ export async function permissionHookOutput(deps: PermissionHookDeps): Promise<st
       messageId = body.message_id;
       continue;
     }
+    if (body.status === "decided" && body.choice === "terminal") {
+      // The person approves it in Claude Code's own dialog: no decision, so the dialog comes up.
+      log("plannotator inbox permission-hook: approve this prompt in Claude Code (Terminal).");
+      return null;
+    }
     if (body.status === "decided") {
       // Only the choice comes from the Inbox: the decision is built from this hook's own event, and Full
       // permissions only when this session's own settings file says its launch allows them.

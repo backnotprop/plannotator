@@ -14,7 +14,9 @@
  *     purpose and folder, Allow once / Allow `bun run` for this session / Deny),
  *     its header the run line, the foot "1 permission waiting", the row in
  *     Stopped on you; the hook prints allow with updatedInput and nothing more;
- *     the agent goes on; the answer never reaches the session's own poll.
+ *     the agent goes on; the answer never reaches the session's own poll;
+ *     the record states the answer ("You allowed this once"); at rest (no
+ *     line) the ⋯ menu still has Copy attach command.
  *  2. Allow for this session: updatedPermissions, destination session.
  *  3. Deny with a reason: deny, the reason in the message, and the agent goes on.
  *  4. Answered in Terminal: the hook is ended; the card shrinks to its record
@@ -36,9 +38,18 @@
  *     decides the start (Try again after the switch went off still starts in
  *     bypass mode); a full launch asks nothing but a safety check, and that
  *     comes to the card (the plugin's own PermissionRequest hook turns Claude's
- *     skip export off, so only the Inbox hook can carry it); in an auto-mode
- *     launch (pinned to default mode) a confirm the first time, then setMode
- *     bypassPermissions (the session switches); no confirm the second time.
+ *     skip export off, so only the Inbox hook can carry it). Claude takes no
+ *     allow for it from a hook, and shows its own dialog only once the hook
+ *     ended (the fake plays this), so the card, "waiting on a safety check",
+ *     offers Deny, Deny with a reason and Approve in Terminal. A Deny counts,
+ *     and the line never says "waiting on a permission prompt" after it.
+ *     Approve in Terminal: the hook prints nothing, Terminal opens attached,
+ *     the record states the choice and "within 2 minutes", and the run line
+ *     says the session waits on its dialog; approved there, the call goes on.
+ *     In an auto-mode launch (pinned to default mode) a confirm the first time,
+ *     then setMode bypassPermissions (the session switches); its next safety
+ *     check, the hook input now saying bypass mode, gets the same card, and
+ *     with no one in Terminal Claude's dialog blocks the call by itself.
  * 11b. Without that consent: Full permissions is never offered, the switch on
  *     starts in auto mode with no allow flag, and Settings says why (the notice
  *     to accept, or bypass turned off in Claude Code's settings).
@@ -85,6 +96,7 @@ const BUILD: FakePermissionPrompt = {
 const SESSION_CHOICE = 'Allow bun run for this session';
 /** A safety check (Claude Code asks even in bypass mode, unless no PermissionRequest hook exists at all, the plugin's included, and its export waives it). */
 const RM_DIST: FakePermissionPrompt = { tool_name: 'Bash', tool_input: { command: 'rm -rf apps/inbox/dist' }, safetyCheck: true };
+const RM_BUILD_DIR: FakePermissionPrompt = { tool_name: 'Bash', tool_input: { command: 'rm -rf packages/inbox/build' }, safetyCheck: true };
 /** The person accepted Claude Code's bypass notice once (their own user settings). */
 const CONSENT = { skipDangerousModePermissionPrompt: true };
 const NEEDS_CONSENT = "Accept Claude Code's bypass notice once in Terminal to use this. Until then sessions start without it.";
@@ -292,7 +304,8 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   await expect(c.locator('.pc-row button')).toHaveText(['Allow once', SESSION_CHOICE, 'Deny', 'Deny with a reason']);
   await expect(c.locator('.pc-modes')).toContainText('Or allow this and switch the session to');
   // The header is the run line while the session waits (no second line under the card), and the foot and the row.
-  await expect(c.locator('[data-run="waiting_answer"]')).toContainText(/Claude Code is waiting for your permission · \d+ min/, { timeout: 15_000 });
+  // Under a minute: no "· 1 min" yet.
+  await expect(c.locator('[data-run="waiting_answer"]')).toContainText(/Claude Code is waiting for your permission(?! · \d)/, { timeout: 15_000 });
   await expect(p.locator('[data-run]')).toHaveCount(1);
   await expect(p.locator('[data-run="waiting_answer"] [data-run-stop]')).toBeVisible();
   await expect(p.locator('[data-open-questions]')).toContainText('1 permission waiting');
@@ -334,10 +347,14 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   await expect(p.locator('[data-run]')).toHaveCount(0, { timeout: 30_000 });
   // Answered, the card is one framed line in its place; the reply that carried the answer is not shown.
   await expect(card(page)).toHaveCount(0);
-  await expect(record(page, 'once')).toContainText('Allowed once');
+  await expect(record(page, 'once')).toContainText('You allowed this once');
   await expect(record(page, 'once')).toContainText('bun run --cwd apps/inbox build');
   await expect(p.locator('article.ib-message[data-author="person"]')).toHaveCount(1);
   await shot(page, 'permission-answered');
+  // At rest there is no line, and ⋯ still has Copy attach command (a phone has no Open in Terminal).
+  await p.locator('[data-thread-more]').click();
+  await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Open in Terminal', 'Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
+  await page.keyboard.press('Escape');
   // The answer went to the permission identity (the hook's call recorded it), never to the session's poll.
   const after = await readThread(page, threadId);
   const reply = after.thread.messages.find((m) => m.author.kind === 'person' && m.reply_to === question.id)!;
@@ -596,7 +613,7 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
     updatedInput: BUILD.tool_input,
     updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'bun run:*' }], behavior: 'allow', destination: 'session' }],
   });
-  await expect(record(page, 'session')).toContainText('Allowed bun run for this session');
+  await expect(record(page, 'session')).toContainText('You allowed bun run for this session');
 
   // 2. Write: the path, "New file, 26 lines", ten numbered lines and the rest folded; Allow once has focus, so Enter answers it.
   const c = card(page);
@@ -613,7 +630,7 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
   await armed(page);
   await page.keyboard.press('Enter');
   expect(await decision(1)).toEqual({ behavior: 'allow', updatedInput: write.tool_input });
-  await expect(record(page, 'once')).toContainText('Allowed once');
+  await expect(record(page, 'once')).toContainText('You allowed this once');
   await expect(record(page, 'once')).toContainText('packages/inbox/search/fuzzy.ts');
 
   // 3. WebFetch: the link with its host, what Claude looks for; denied with a reason. The phone first.
@@ -627,7 +644,7 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
     await expect(card(mobile).locator('[data-perm-url]')).toBeVisible();
     // At 390 wide: the verdict keeps its line (the path truncates first), and the header's status is one short line.
     const verdict = record(mobile, 'once').last().locator('.pc-rec-verb');
-    await expect(verdict).toHaveText('Allowed once');
+    await expect(verdict).toHaveText('You allowed this once');
     expect(await oneLine(verdict)).toBe(true);
     const status = card(mobile).locator('.pc-head .pc-sub');
     await expect(status).toHaveText(/^waiting( · \d+ min)?$/);
@@ -654,7 +671,7 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
     updatedPermissions: [{ type: 'setMode', mode: 'auto', destination: 'session' }],
   });
   // What was asked of Claude Code, never that it switched (an account without Auto mode ignores it).
-  await expect(record(page, 'auto')).toContainText('Allowed, and asked Claude to switch to Auto mode');
+  await expect(record(page, 'auto')).toContainText('You allowed this and asked to switch to Auto mode');
 
   // Answered: four one-line records, no "You answered" replies, then Claude's answer.
   await expect(p.locator('article.ib-message[data-author="agent"]').last()).toContainText('Settings search now matches fuzzy', { timeout: 30_000 });
@@ -665,19 +682,20 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
   expect(world.errors).toEqual([]);
 });
 
-test('Full permissions, with the person\'s bypass consent: the launch record decides the start (Try again after the switch went off still starts in bypass); a full launch asks nothing but a safety check, which comes to the card; in an auto-mode launch the card asks to confirm the first time, then allows and switches', async () => {
+test('Full permissions, with the person\'s bypass consent: the launch record decides the start (Try again after the switch went off still starts in bypass); a full launch asks nothing but a safety check, which comes to the card; in an auto-mode launch the card asks to confirm the first time, then allows and switches', async ({ browser }) => {
   const { page, fake } = world;
   claudeSettings(CONSENT);
+  const phone = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
   writeConfig({ inboxLaunch: { enabled: true, fullPermissions: true } });
   try {
     // Made with Full permissions on; the start fails; the switch goes off; Try again.
     fake.configure({ fault: 'untrusted' });
-    await launch(page, 'Run the Inbox tests once the build is green.');
+    const { threadId } = await launch(page, 'Run the Inbox tests once the build is green.');
     await expect(pane(page).locator('[data-run="failed"]')).toBeVisible({ timeout: 30_000 });
     const starts = fake.starts().length;
     const asked = fake.permissions().length;
     writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
-    fake.configure({ fault: null, prompts: [BUILD, RM_DIST] });
+    fake.configure({ fault: null, prompts: [BUILD, RM_DIST, RM_BUILD_DIR] });
     await pane(page).locator('[data-run="failed"] [data-run-retry]').click();
     // The session the record describes: bypass mode on argv; the Inbox's hook all the same, never Claude's export.
     const started = await waitFor('the start after Try again', () => fake.starts()[starts]);
@@ -687,22 +705,68 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     expect(started.settings?.env?.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBeUndefined();
     expect(started.settings?.permissions).toEqual({ allow: ['mcp__plannotator__plannotator_inbox'] });
     expect(await waitFor('the build run', () => fake.permissions()[asked])).toMatchObject({ outcome: 'ran', asked: false });
-    // Bypass mode's safety check still asks (the plugin's hook keeps Claude from waiving it): it comes to the card,
-    // never to a Terminal dialog no one sees. Already full: no mode switch at all.
-    await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist', { timeout: 30_000 });
-    await expect(card(page).locator('.pc-modes, [data-perm-mode]')).toHaveCount(0);
+    // Bypass mode's safety check still asks (the plugin's hook keeps Claude from waiving it): it comes to the card.
+    // Claude takes no allow for it from a hook: Deny, Deny with a reason, or Approve in Terminal; no mode switch.
+    const c = card(page);
+    await expect(c.locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist', { timeout: 30_000 });
+    await expect(c.locator('.pc-head .pc-sub')).toHaveText('is waiting on a safety check');
+    await expect(c.locator('.pc-row button')).toHaveText(['Deny', 'Deny with a reason', 'Approve in Terminal']);
+    await expect(c.locator('[data-perm-mode], [data-perm="once"]')).toHaveCount(0);
+    await expect(c.locator('[data-perm-note]')).toHaveText('Claude Code only accepts this approval in Terminal.');
     await page.mouse.move(0, 0);
     await shot(page, 'full-launch-safety-check');
-    await answer(page, { choice: 'Allow once' });
-    expect(await waitFor('the safety check', () => fake.permissions()[asked + 1])).toMatchObject({ outcome: 'ran', mode: 'bypassPermissions' });
+    // The same card on a phone (390 wide).
+    const mobile = await phone.newPage();
+    await mobile.goto(page.url());
+    await expect(card(mobile).locator('.pc-row button')).toHaveText(['Deny', 'Deny with a reason', 'Approve in Terminal']);
+    await card(mobile).locator('footer').scrollIntoViewIfNeeded();
+    await shot(mobile, 'full-launch-safety-check-phone');
+    // A deny counts.
+    await answer(page, { choice: 'Deny' });
+    expect(await waitFor('the safety check', () => fake.permissions()[asked + 1])).toMatchObject({ outcome: 'denied', mode: 'bypassPermissions' });
+    await expect(record(page, 'deny')).toContainText('You denied this');
+    // The host's view from before the answer still shows the prompt: never "waiting on a permission prompt" after it.
+    for (let i = 0; i < 25; i++) {
+      await expect(pane(page).locator('[data-run="waiting_terminal"]')).toHaveCount(0, { timeout: 100 });
+      await page.waitForTimeout(200);
+    }
+    // Approve in Terminal: the hook says nothing, so Claude's own dialog comes up, and Terminal opens attached to it.
+    await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf packages/inbox/build', { timeout: 30_000 });
+    await armed(page);
+    const hooked = fake.hooks().length;
+    const opened = fake.osascript().length;
+    await card(page).locator('[data-perm="terminal"]').click();
+    expect(await waitFor('the hook ended', () => fake.hooks()[hooked])).toMatchObject({ stdout: '', exitCode: 0 });
+    const attach = ((await readThread(page, threadId)) as { attach_command?: string }).attach_command;
+    expect(attach).toMatch(new RegExp(`^cd '${world.project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}' && claude attach [0-9a-f]{8}$`));
+    expect((await waitFor('osascript', () => fake.osascript()[opened])).at(-1)).toBe(attach);
+    // The record states the person's choice and the host's limit; the run line (one set of Terminal actions) says the session waits on its dialog.
+    const handed = record(page, 'terminal');
+    await expect(handed).toContainText('You chose to approve this in Terminal');
+    await expect(handed.locator('[data-perm-handoff]')).toHaveText('Approve it in Claude Code within 2 minutes.');
+    await expect(pane(page).locator('[data-run="waiting_terminal"]')).toContainText('Claude Code is waiting on a permission prompt', { timeout: 20_000 });
+    await expect(handed.locator('[data-perm-open], [data-perm-attach]')).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await shot(page, 'approve-in-terminal');
+    await mobile.reload();
+    await expect(record(mobile, 'terminal')).toContainText('You chose to approve this in Terminal');
+    // On a phone the run line carries the attach command (no Open in Terminal): still one set.
+    await expect(pane(mobile).locator('[data-run="waiting_terminal"] [data-run-attach]')).toBeVisible({ timeout: 20_000 });
+    await expect(pane(mobile).locator('[data-run-open], [data-perm-attach]')).toHaveCount(0);
+    await shot(mobile, 'approve-in-terminal-phone');
+    // The person approves it in Claude Code's dialog: the call goes on.
+    fake.configure({ localAnswer: true });
+    expect(await waitFor('the safety check', () => fake.permissions()[asked + 2])).toMatchObject({ outcome: 'local', mode: 'bypassPermissions' });
+    fake.configure({ localAnswer: false });
   } finally {
     writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
+    await phone.close();
   }
 
   // A launch in auto mode (the switch off), with bypass allowed: Full permissions is offered.
   const before = fake.permissions().length;
   const next = fake.starts().length;
-  fake.configure({ prompts: [BUILD, RM_DIST] });
+  fake.configure({ prompts: [BUILD, RM_DIST], safetyBlockMs: 1_500 });
   await launch(page, 'Run the Inbox tests, then switch me to full permissions.');
   const auto = await waitFor('the auto start', () => fake.starts()[next]);
   expect(auto.argv.slice(-3)).toEqual(['--allow-dangerously-skip-permissions', '--permission-mode', 'auto']);
@@ -726,15 +790,21 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     updatedInput: BUILD.tool_input,
     updatedPermissions: [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }],
   });
-  // The session took the switch (bypass was allowed at its start).
+  // The session took the switch (bypass was allowed at its start). The record states the person's answer.
   expect(first).toMatchObject({ mode: 'bypassPermissions', modeIgnored: false });
-  // In bypass mode only a safety check still asks, and it comes to the card (the hook is there). The second time: no confirm.
+  await expect(record(page, 'full')).toContainText('You allowed this and asked to switch to Full permissions');
+  // Now in bypass mode (its hook input says so), this auto launch's safety check gets the bypass card too.
   await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf apps/inbox/dist', { timeout: 30_000 });
+  await expect(card(page).locator('.pc-row button')).toHaveText(['Deny', 'Deny with a reason', 'Approve in Terminal']);
+  await expect(card(page).locator('[data-perm-mode]')).toHaveCount(0);
   await armed(page);
-  await card(page).locator('[data-perm-mode="full"]').click();
-  const second = await waitFor('the second prompt decided', () => fake.permissions()[before + 1]);
-  expect(second.output?.hookSpecificOutput?.decision?.updatedPermissions).toEqual([{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }]);
-  await expect(record(page, 'full')).toHaveCount(2);
+  await card(page).locator('[data-perm="terminal"]').click();
+  // No one approves it: Claude's dialog, up only once the hook ended, blocks the call by itself (its own deadline).
+  const blocked = await waitFor('the safety check', () => fake.permissions()[before + 1]);
+  expect(blocked).toMatchObject({ outcome: 'autoblocked', mode: 'bypassPermissions' });
+  expect(blocked.output).toBeNull();
+  await expect(record(page, 'terminal')).toContainText('You chose to approve this in Terminal');
+  fake.configure({ safetyBlockMs: undefined });
 });
 
 test('without the person\'s bypass consent: Full permissions is never offered, the switch on starts in auto mode, and Settings says why', async () => {

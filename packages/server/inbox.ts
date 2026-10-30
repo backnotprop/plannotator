@@ -3022,10 +3022,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
         // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
+        // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
         const run = await launch.runOf(thread.thread_id);
         const row = store.listRow(thread.thread_id);
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run }) });
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);

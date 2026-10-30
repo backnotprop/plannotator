@@ -30,7 +30,16 @@
  * question that says the session went on (not waiting, not stopped)
  * withdraws it at once as "Answered in Terminal.". Stop and Delete withdraw
  * at once. An Inbox restart forgets the leases: each open question gets a
- * fresh one, and the hook, retrying every 2 s, renews it.
+ * fresh one, and the hook, retrying every 2 s, renews it. A question the host
+ * takes no allow for (Approve in Terminal) is never withdrawn as answered in
+ * Terminal: its dialog shows only after the hook ends, and may block the call
+ * by itself, so "No longer waiting." is all that is known.
+ *
+ * The card states the person's answer, never what Claude did with it: the run
+ * line says that ("waiting on a permission prompt" once a host read made after
+ * the answer settled still shows the session on its dialog). A read made
+ * before then still shows the prompt just answered, and counts for nothing
+ * (`settledAfter`).
  */
 
 import { timingSafeEqual } from "node:crypto";
@@ -41,6 +50,7 @@ import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
+  INBOX_PERMISSION_TERMINAL,
   inboxPermissionAnswer,
   inboxPermissionQuestion,
   inboxPermissionSession,
@@ -53,6 +63,7 @@ import {
   type InboxPermissionQuestion,
 } from "@plannotator/core/inbox-permission";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { claudePermissionTerms } from "./inbox-launch-claude";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -60,6 +71,8 @@ export const PERMISSION_HOLD_MS = 25_000;
 export const PERMISSION_LEASE_MS = 60_000;
 /** A host read this long after the question was asked can say the session went on without it. */
 const HOST_SETTLE_MS = 5_000;
+/** After an answer, a host read this much later says where the session is (earlier reads still show the prompt). */
+export const ANSWER_SETTLE_MS = 3_000;
 const CHECK_EVERY_MS = 200;
 
 const HOST = "claude-code";
@@ -155,6 +168,8 @@ export function createLaunchPermissions(options: {
   const holdMs = options.holdMs ?? PERMISSION_HOLD_MS;
   const leaseMs = options.leaseMs ?? PERMISSION_LEASE_MS;
   const leases = new Map<string, Lease>();
+  /** The latest answer handed to a hook, per launch. */
+  const answeredAt = new Map<string, number>();
 
   /** The key in the launch's settings file; null when there is no such file. */
   const keyOf = (launchId: string): string | null => {
@@ -202,14 +217,18 @@ export function createLaunchPermissions(options: {
    * person recorded Claude Code's bypass consent (`bypass_available`, so it started with
    * --allow-dangerously-skip-permissions). Claude ignores a switch to bypass without it; an older launch has no flag.
    */
-  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: root.launch!.bypass_available === true && root.launch!.full_permissions !== true, full: root.launch!.full_permissions === true });
+  const optionsFor = (root: InboxMessage, event: InboxPermissionEvent): InboxPermissionOptions => {
+    // The host's terms: in bypass mode (as its hook input says) no allow from here, and no mode switch.
+    const terms = claudePermissionTerms(root.launch!, event);
+    return { shownPath: options.displayFolder, fullPermissions: root.launch!.bypass_available === true && !terms.full, ...terms };
+  };
 
   /** What the Inbox found at a file tool's path: a Write's file exists, does not, or is not known; where a link points. */
   type Target = Pick<InboxPermissionOptions, "overwrite" | "linksTo">;
 
   /** The question this prompt asks in a launch's thread. */
   const questionFor = (root: InboxMessage, event: InboxPermissionEvent, target: Target = {}): InboxPermissionQuestion =>
-    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root), ...target });
+    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root, event), ...target });
 
   /** A file tool's path now (the card says "overwrite" or "create", and where a link points); nothing when it cannot tell. */
   const targetNow = async (root: InboxMessage, event: InboxPermissionEvent): Promise<Target> => {
@@ -306,7 +325,7 @@ export function createLaunchPermissions(options: {
       const event = readInboxPermissionEvent(body.event);
       if (!event) return json({ error: "event: Claude Code's PermissionRequest input.", code: "validation_error" }, 400);
       const requestId = typeof body.request_id === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.request_id) ? body.request_id : null;
-      const answerOptions = optionsFor(root);
+      const answerOptions = optionsFor(root, event);
       let messageId: string;
       if (typeof body.message_id === "string") {
         const message = store.message(body.message_id);
@@ -323,8 +342,13 @@ export function createLaunchPermissions(options: {
       }
       // The question as asked: a Write's file may have appeared since (or a link changed), and the card keeps the words it was asked with.
       const question = questionFor(root, event, askedTarget(messageId, event));
+      /** A decision: a host read before it settles still shows this prompt. */
+      const answered = (answer: PermissionAnswer) => {
+        if (answer.status === "decided") answeredAt.set(launchId, now());
+        return json(answer);
+      };
       const done = settled(messageId, event, question, answerOptions);
-      if (done) return json(done);
+      if (done) return answered(done);
       const lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };
       leases.set(messageId, lease);
       lease.holding += 1;
@@ -333,7 +357,7 @@ export function createLaunchPermissions(options: {
         while (now() < deadline && !req.signal.aborted) {
           await new Promise((resolve) => setTimeout(resolve, CHECK_EVERY_MS));
           const answer = settled(messageId, event, question, answerOptions);
-          if (answer) return json(answer);
+          if (answer) return answered(answer);
         }
       } finally {
         lease.holding -= 1;
@@ -380,9 +404,11 @@ export function createLaunchPermissions(options: {
         if (lease.holding > 0) continue;
         const state = options.host.stateOf(root.launch!.session_ref);
         const fresh = options.host.readAt() >= lease.askedAt + HOST_SETTLE_MS;
-        // Claude Code went on without our answer (a host read since the question): the person answered in Terminal.
+        // Claude Code went on without our answer (a host read since the question): the person answered in Terminal,
+        // unless the host takes no allow from here (its dialog may have blocked the call by itself: not known).
         if (fresh && state !== null && state !== "absent" && state.status !== "waiting" && state.state !== "stopped" && state.state !== "done") {
-          withdraw(messageId, INBOX_PERMISSION_ANSWERED_IN_TERMINAL);
+          const terminalOnly = store.questionsOf(messageId)[0]?.choices.some((c) => c.label === INBOX_PERMISSION_TERMINAL) === true;
+          withdraw(messageId, terminalOnly ? INBOX_PERMISSION_NO_LONGER_WAITING : INBOX_PERMISSION_ANSWERED_IN_TERMINAL);
           continue;
         }
         if (t < lease.expires) continue;
@@ -394,6 +420,24 @@ export function createLaunchPermissions(options: {
     holds(launchId: string): boolean {
       for (const lease of leases.values()) if (lease.launchId === launchId) return true;
       return false;
+    },
+
+    /** A host read made before this still shows the launch's last answered prompt (it counts for nothing), or null. */
+    settledAfter(launchId: string): number | null {
+      const at = answeredAt.get(launchId);
+      return at === undefined ? null : at + ANSWER_SETTLE_MS;
+    },
+
+    /** Whether a launch's answer has settled since the last host read (one more read says where the session is). */
+    readDue(readAt: number): boolean {
+      const t = now();
+      for (const at of answeredAt.values()) if (readAt < at + ANSWER_SETTLE_MS && t >= at + ANSWER_SETTLE_MS) return true;
+      return false;
+    },
+
+    /** A deleted launch: nothing kept for it. */
+    forget(launchId: string): void {
+      answeredAt.delete(launchId);
     },
   };
 }

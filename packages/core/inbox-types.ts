@@ -854,7 +854,7 @@ export interface InboxRun {
   folder: string;
   /** Since when: the start (starting), the turn (working), the prompt (waiting_answer, waiting_terminal), the stop. */
   since: string | null;
-  /** `starting` after a reply or Try again ("Starting … again"). */
+  /** `starting` after a reply's respawn ("Starting … again"). */
   again: boolean;
   /** `stopped`: the person pressed Stop (the line names the time). */
   stopped_by_person: boolean;

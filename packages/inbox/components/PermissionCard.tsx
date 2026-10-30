@@ -13,6 +13,13 @@
  * activation for `ARM_MS` after the card appears or takes focus (a browser
  * security dialog's delay), so a stray or second Enter never allows a prompt
  * the person has not seen.
+ *
+ * The record states the person's own answer ("You allowed this once"), never
+ * what the agent did with it: the run line says that. A prompt the host takes
+ * no allow for from here (its choices hold Approve in Terminal) offers Deny,
+ * Deny with a reason and Approve in Terminal, with the host's note; Approve in
+ * Terminal answers with no decision, so the host's own dialog comes up, and
+ * opens Terminal attached on a computer.
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -21,6 +28,7 @@ import {
   INBOX_PERMISSION_AUTO,
   INBOX_PERMISSION_DENY,
   INBOX_PERMISSION_FULL,
+  INBOX_PERMISSION_TERMINAL,
   inboxPermissionCodeSpans,
   readInboxPermissionBody,
   type InboxPermissionBody,
@@ -34,7 +42,9 @@ import { useMinuteClock } from './Undelivered';
 /** How long the answers ignore activation after the card appears or takes focus (not from a pointer). */
 export const ARM_MS = 600;
 
-type Outcome = 'once' | 'session' | 'auto' | 'full' | 'deny' | 'withdrawn' | 'closed';
+type Outcome = 'once' | 'session' | 'auto' | 'full' | 'deny' | 'terminal' | 'withdrawn' | 'closed';
+/** The thread's ways to the session in a terminal (its ⋯ menu's): Open in Terminal on a computer, Copy everywhere. */
+export type PermissionTerminal = { open: (() => void) | null; copyAttach: (() => void) | null };
 type Kind = 'bash' | 'file' | 'fetch' | 'search' | 'other';
 
 /** A label with its inline code as code, read exactly as Markdown reads it (``echo `id` `` stays "echo `id`"). */
@@ -60,7 +70,7 @@ const scopeOf = (label: string) => label.replace(/^Allow /, '').replace(/ for th
 
 /** The session choice: the one label that is none of the fixed ones. */
 const sessionLabelOf = (labels: string[]) =>
-  labels.find((l) => l !== INBOX_PERMISSION_ALLOW_ONCE && l !== INBOX_PERMISSION_DENY && l !== INBOX_PERMISSION_AUTO && l !== INBOX_PERMISSION_FULL) ?? null;
+  labels.find((l) => l !== INBOX_PERMISSION_ALLOW_ONCE && l !== INBOX_PERMISSION_DENY && l !== INBOX_PERMISSION_AUTO && l !== INBOX_PERMISSION_FULL && l !== INBOX_PERMISSION_TERMINAL) ?? null;
 
 function outcomeOf(q: InboxQuestion, labels: string[]): Outcome | null {
   if (q.state === 'superseded') return 'withdrawn';
@@ -70,6 +80,7 @@ function outcomeOf(q: InboxQuestion, labels: string[]): Outcome | null {
   if (picked === INBOX_PERMISSION_ALLOW_ONCE) return 'once';
   if (picked === INBOX_PERMISSION_AUTO) return 'auto';
   if (picked === INBOX_PERMISSION_FULL) return 'full';
+  if (picked === INBOX_PERMISSION_TERMINAL) return 'terminal';
   if (picked && picked === sessionLabelOf(labels)) return 'session';
   return 'deny';
 }
@@ -263,18 +274,22 @@ function Reason({ busy, onDeny, onCancel }: { busy: boolean; onDeny: (reason: st
 }
 
 /** The answered (or withdrawn) prompt: one framed line in the same place; open it to see the request again. */
-function Record({ message, q, outcome, read, title, time, kind, followUp }: { message: InboxMessageWire; q: InboxQuestion; outcome: Outcome; read: InboxPermissionBody; title: string; time: string; kind: Kind; followUp: string | null }) {
+function Record({ message, q, outcome, read, title, time, kind, followUp, run, terminal }: { message: InboxMessageWire; q: InboxQuestion; outcome: Outcome; read: InboxPermissionBody; title: string; time: string; kind: Kind; followUp: string | null; run: InboxRun | null; terminal: PermissionTerminal | null }) {
   const [open, setOpen] = useState(false);
   const labels = q.choices.map((c) => c.label);
-  // A mode switch says what was asked of Claude Code, not that it happened (an account without Auto mode ignores it).
+  // The person's own answer, as a fact; what the agent did with it is the run line's to say.
   const verb: ReactNode =
-    outcome === 'once' ? 'Allowed once'
-    : outcome === 'session' ? <>Allowed <Ticks text={scopeOf(sessionLabelOf(labels) ?? '')} /> for this session</>
-    : outcome === 'auto' ? 'Allowed, and asked Claude to switch to Auto mode'
-    : outcome === 'full' ? 'Allowed, and asked Claude to switch to Full permissions'
-    : outcome === 'deny' ? 'Denied'
+    outcome === 'once' ? 'You allowed this once'
+    : outcome === 'session' ? <>You allowed <Ticks text={scopeOf(sessionLabelOf(labels) ?? '')} /> for this session</>
+    : outcome === 'auto' ? 'You allowed this and asked to switch to Auto mode'
+    : outcome === 'full' ? 'You allowed this and asked to switch to Full permissions'
+    : outcome === 'deny' ? 'You denied this'
+    : outcome === 'terminal' ? 'You chose to approve this in Terminal'
     : outcome === 'closed' ? 'Not answered'
     : (followUp ?? 'No longer waiting').replace(/\.$/, '');
+  // After Approve in Terminal: the host's line, and on a phone (no Open in Terminal) Copy attach command until the
+  // run line, which carries the same command, shows the session on its dialog. One set of Terminal actions at a time.
+  const copyHere = outcome === 'terminal' && !terminal?.open && terminal?.copyAttach && run?.state !== 'waiting_terminal' ? terminal.copyAttach : null;
   const reason = outcome === 'deny' ? (q.answer?.other?.trim() || q.answer?.note?.trim() || null) : null;
   const allowed = outcome === 'once' || outcome === 'session' || outcome === 'auto' || outcome === 'full';
   return (
@@ -290,6 +305,16 @@ function Record({ message, q, outcome, read, title, time, kind, followUp }: { me
         <span className="pc-time">{time}</span>
       </button>
       {reason && <p className="pc-rec-reason">You said: “{reason}”</p>}
+      {outcome === 'terminal' && (read.handoff || copyHere) && (
+        <p className="pc-rec-reason pc-term" data-perm-handoff="">
+          {read.handoff && <span>{read.handoff}</span>}
+          {copyHere && (
+            <button type="button" className="pc-link" onClick={copyHere} data-perm-attach="">
+              Copy attach command
+            </button>
+          )}
+        </p>
+      )}
       {open && (
         <div className="pc-body">
           <p className="pc-title">{title}</p>
@@ -307,6 +332,7 @@ export function PermissionCard({
   phone,
   newest,
   followUp,
+  terminal,
   fullUsed,
   onChanged,
 }: {
@@ -319,6 +345,8 @@ export function PermissionCard({
   newest: boolean;
   /** The follow-up that withdrew it ("Answered in Terminal."), or null. */
   followUp: string | null;
+  /** Open in Terminal and Copy attach command, as the thread's ⋯ menu has them (Approve in Terminal opens it); null outside a launch. */
+  terminal: PermissionTerminal | null;
   /** The session already switched to Full permissions from an earlier prompt: no confirm again. */
   fullUsed: boolean;
   onChanged: () => void | Promise<void>;
@@ -331,6 +359,8 @@ export function PermissionCard({
   const labels = q?.choices.map((c) => c.label) ?? [];
   const session = sessionLabelOf(labels);
   const fullOn = labels.includes(INBOX_PERMISSION_FULL);
+  // The host takes no allow from here: Deny, or hand it to its own dialog in Terminal.
+  const terminalOnly = labels.includes(INBOX_PERMISSION_TERMINAL);
   const waiting = q?.state === 'open' || q?.state === 'picked';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -340,7 +370,8 @@ export function PermissionCard({
   const live = waiting && run?.state === 'waiting_answer';
   const now = useMinuteClock(waiting);
   const since = live ? run?.since : message.created_at;
-  const minutes = since ? Math.max(1, Math.floor((now - Date.parse(since)) / 60_000)) : null;
+  // Nothing under a minute (never "1 min" a few seconds in).
+  const minutes = since ? Math.floor((now - Date.parse(since)) / 60_000) : null;
 
   // The answers arm `ARM_MS` after the card appears, and again after it takes focus from anything but a pointer.
   const armedAt = useRef(Date.now());
@@ -380,10 +411,10 @@ export function PermissionCard({
 
   if (!q) return null;
   const outcome = outcomeOf(q, labels);
-  if (outcome) return <Record message={message} q={q} outcome={outcome} read={read} title={title} time={time} kind={kind} followUp={followUp} />;
+  if (outcome) return <Record message={message} q={q} outcome={outcome} read={read} title={title} time={time} kind={kind} followUp={followUp} run={run} terminal={terminal} />;
 
   /** One answer: the question's own label (or a Deny with words), picked and sent. Unsent-only: a stale window never reopens it. */
-  const answer = async (label: string | null, reason?: string, confirmFull = false) => {
+  const answer = async (label: string | null, reason?: string, confirmFull = false): Promise<boolean> => {
     setBusy(true);
     setError(null);
     const picked: QuestionAnswer = { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: label ? [label] : [], ...(reason ? { other: reason } : {}) };
@@ -392,9 +423,11 @@ export function PermissionCard({
       const revision = saved.questions.find((x) => x.key === q.key)?.revision ?? q.revision;
       await inboxApi.reply(message.id, { idempotency_key: crypto.randomUUID(), words: '', questions: [{ key: q.key, revision }] });
       await onChanged();
+      return true;
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : 'Your answer was not sent. Try again.');
       setBusy(false);
+      return false;
     }
   };
   /** An answer button's action, ignored while the card is not armed. */
@@ -427,8 +460,8 @@ export function PermissionCard({
         <AuthorMark author={message.author} />
         <span className="pc-app">Claude Code</span>{' '}
         <span className="pc-sub">
-          {phone ? 'waiting' : 'is waiting for your permission'}
-          {minutes ? ` · ${minutes} min` : ''}
+          {phone ? 'waiting' : terminalOnly ? 'is waiting on a safety check' : 'is waiting for your permission'}
+          {minutes && minutes >= 1 ? ` · ${minutes} min` : ''}
         </span>
         <span className="pc-sp" />
         {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (
@@ -473,6 +506,32 @@ export function PermissionCard({
               </button>
             </div>
           </div>
+        ) : terminalOnly ? (
+          <>
+            <div className="pc-row">
+              <button type="button" className="ib-btn" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_DENY))} data-perm="deny">
+                Deny
+              </button>
+              <button type="button" className="ib-btn ib-ghost" disabled={busy} onClick={act(() => setMode('reason'))} data-perm="reason">
+                Deny with a reason
+              </button>
+              {/* No decision from here: the host's own dialog comes up; on a computer, Terminal opens attached to it. */}
+              <button
+                type="button"
+                className="ib-btn"
+                disabled={busy}
+                onClick={act(() => void answer(INBOX_PERMISSION_TERMINAL).then((sent) => sent && terminal?.open?.()))}
+                data-perm="terminal"
+              >
+                Approve in Terminal
+              </button>
+            </div>
+            {read.note && (
+              <p className="pc-modes" data-perm-note="">
+                {read.note}
+              </p>
+            )}
+          </>
         ) : (
           <>
             <div className="pc-row">

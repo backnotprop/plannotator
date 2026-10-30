@@ -349,7 +349,8 @@ export function createInboxLaunch(options: {
       });
     return hostFetch;
   };
-  const hostStale = () => !hostView || now() - hostView.at > HOST_TTL_MS;
+  /** Stale after 10 s, or once an answer settled since the last read (one read then says where the session is). */
+  const hostStale = () => !hostView || now() - hostView.at > HOST_TTL_MS || permissions.readDue(hostView.at);
   const hostStateOf = (ref: string | null): InboxRunHostState | null => {
     if (!ref || !hostView?.agents) return null;
     const agent = hostView.agents.find((a) => a.id === ref || a.sessionId.startsWith(ref));
@@ -424,7 +425,9 @@ export function createInboxLaunch(options: {
     if (launch.deleted_at) return null;
     const memo = memoOf(launch);
     const live = liveOf(root, memo);
-    const hostState = hostStateOf(launch.session_ref);
+    // A host read from before the last answer settled still shows our own prompt: never "waiting on Terminal".
+    const settled = permissions.settledAfter(launch.id);
+    const hostState = settled !== null && (hostView?.at ?? 0) < settled ? null : hostStateOf(launch.session_ref);
     if (hostState && hostState !== "absent" && hostState.status === "waiting" && hostState.waitingFor) memo.waitingSince ??= now();
     else memo.waitingSince = null;
     const project = store.project(root.project_id)?.name ?? launch.folder;
@@ -458,6 +461,9 @@ export function createInboxLaunch(options: {
     if (launch.deleted_at || launch.error || !launch.session_ref) return false;
     // A permission question waits: the host says whether the person answered it in Terminal meanwhile.
     if (permissions.holds(launch.id)) return true;
+    // An answer not yet read past: the host says whether the session went on or waits on its own dialog.
+    const settled = permissions.settledAfter(launch.id);
+    if (settled !== null && (hostView?.at ?? 0) < settled) return true;
     const cached = hostStateOf(launch.session_ref);
     if (cached && cached !== "absent" && cached.status === "waiting") return true;
     const memo = memoOf(launch);
@@ -767,6 +773,7 @@ export function createInboxLaunch(options: {
           log(`Inbox launch ${launch.id}: deleted (stop ${stop.exitCode}, rm ${rm.exitCode})`);
         }
         permissions.withdrawAll(root);
+        permissions.forget(launch.id);
         // A project folder: never `claude purge` (it clears every session of the folder, and this is the person's
         // project). A scratch folder the Inbox made: purged and removed, by `run` when it still starts.
         const scratchRemoved = starting.has(launch.id) ? null : await removeScratch(launch);
@@ -790,11 +797,13 @@ export function createInboxLaunch(options: {
           // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
           if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
           if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, memo.respawn?.for ?? root.id);
-          else void run(root, true);
+          // No session was made: a first start, not "again".
+          else void run(root, false);
           return json({ run: runOfRoot(store.message(root.id)!) });
         }
         const cleared = store.settleLaunch(root.id, { error: null });
-        void run(cleared, true);
+        // The start never ran (untrusted, failed): Try again is its first real start, never "Starting … again".
+        void run(cleared, false);
         return json({ run: runOfRoot(cleared) });
       }
     }
@@ -933,6 +942,12 @@ export function createInboxLaunch(options: {
       if (lastAvailable === null) lastAvailable = await available();
       if (hostStale() && needsHost(root)) await refreshHost();
       return runOfRoot(store.message(threadId)!);
+    },
+
+    /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
+    attachOf(threadId: string): string | null {
+      const launch = store.message(threadId)?.launch;
+      return launch?.session_ref && !launch.deleted_at && !launch.error ? claudeAttachCommand(launch.folder, launch.session_ref) : null;
     },
 
     /** The list's row decorator, resolved once per list (one config read): the identity while launch is off. */

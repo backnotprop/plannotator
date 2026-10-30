@@ -14,7 +14,8 @@ import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { launchPermissionHooks } from "./inbox-launch";
-import { createLaunchPermissions, fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
+import { ANSWER_SETTLE_MS, createLaunchPermissions, fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
+import { readInboxPermissionBody } from "@plannotator/core/inbox-permission";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -188,10 +189,11 @@ describe("the permission route", () => {
     full.answer(again.body.message_id!, { selected: ["Allow and switch to Full permissions"] });
     expect((await full.call({ key: KEY, request_id: "req-00000020", event: EVENT, message_id: again.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
 
-    // A launch already in Full permissions (its safety checks still ask): no mode switch, neither Full nor Auto.
+    // A launch already in Full permissions (its hook input says no mode: the record decides): only Claude's own safety
+    // checks ask, and Claude takes no allow for them from a hook. Deny, or Approve in Terminal; no mode switch.
     const already = setup({ bypassAvailable: true, full: true });
     const safety = await already.call({ key: KEY, request_id: "req-00000022", event: EVENT });
-    expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny"]);
+    expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Deny", "Approve in Terminal"]);
   });
 
   test("an answered prompt is never reopened: a stale pick (Deny at the current revision) is refused, and the record stays", async () => {
@@ -398,6 +400,60 @@ describe("the lease", () => {
     permissions.sweep();
     expect(store.questionsOf(asked.body.message_id!)[0]!.state).toBe("open");
     expect((await held).body.status).toBe("waiting");
+  });
+});
+
+describe("bypass mode: Deny, or Approve in Terminal (the host's own dialog)", () => {
+  const BYPASS = { ...EVENT, permission_mode: "bypassPermissions" };
+  const labels = (t: ReturnType<typeof setup>, id: string) => t.store.questionsOf(id)[0]!.choices.map((c) => c.label);
+
+  test("the session's mode comes from the hook input: a full launch whose session says default still gets Allow once; bypass in any launch gets the hand-off", async () => {
+    const full = setup({ bypassAvailable: true, full: true });
+    const plain = await full.call({ key: KEY, request_id: "req-00000040", event: { ...EVENT, permission_mode: "default" } });
+    // (Its bypass consent stands: switching back to Full permissions is offered.)
+    expect(labels(full, plain.body.message_id!)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Allow and switch to Full permissions"]);
+    // An auto launch that switched to bypass: its safety check offers no allow, and says why.
+    const auto = setup({ bypassAvailable: true });
+    const safety = await auto.call({ key: KEY, request_id: "req-00000041", event: BYPASS });
+    expect(labels(auto, safety.body.message_id!)).toEqual(["Deny", "Approve in Terminal"]);
+    expect(readInboxPermissionBody(auto.store.message(safety.body.message_id!)!.body)).toMatchObject({
+      note: "Claude Code only accepts this approval in Terminal.",
+      handoff: "Approve it in Claude Code within 2 minutes.",
+    });
+  });
+
+  test("Approve in Terminal answers the hook with no decision (`terminal`), and a deny still counts", async () => {
+    const t = setup({ full: true });
+    const asked = await t.call({ key: KEY, request_id: "req-00000042", event: BYPASS });
+    t.answer(asked.body.message_id!, { selected: ["Approve in Terminal"] });
+    expect((await t.call({ key: KEY, request_id: "req-00000042", event: BYPASS, message_id: asked.body.message_id })).body).toMatchObject({ status: "decided", choice: "terminal" });
+    const next = await t.call({ key: KEY, request_id: "req-00000043", event: BYPASS });
+    t.answer(next.body.message_id!, { selected: ["Deny"] });
+    expect((await t.call({ key: KEY, request_id: "req-00000043", event: BYPASS, message_id: next.body.message_id })).body).toMatchObject({ status: "decided", choice: "deny" });
+  });
+
+  test("the hook gone and the session gone on: \"No longer waiting.\", never \"Answered in Terminal.\" (its dialog may have blocked the call by itself)", async () => {
+    const t = setup({ full: true });
+    const { body } = await t.call({ key: KEY, request_id: "req-00000044", event: BYPASS });
+    t.clock.now += 10_000;
+    t.host.state = { status: "busy", state: "running", waitingFor: null };
+    t.host.readAt = t.clock.now;
+    t.permissions.sweep();
+    expect(t.store.message(t.store.threadMessageIds(t.root.id).at(-1)!)!.body).toBe("No longer waiting.");
+  });
+
+  test("an answer makes host reads from before it settled count for nothing, and one read after it due", async () => {
+    const t = setup();
+    expect(t.permissions.settledAfter(LAUNCH)).toBeNull();
+    const asked = await t.call({ key: KEY, request_id: "req-00000045", event: EVENT });
+    t.answer(asked.body.message_id!, { selected: ["Deny"] });
+    await t.call({ key: KEY, request_id: "req-00000045", event: EVENT, message_id: asked.body.message_id });
+    const decidedAt = t.clock.now;
+    expect(t.permissions.settledAfter(LAUNCH)).toBe(decidedAt + ANSWER_SETTLE_MS);
+    expect(t.permissions.readDue(decidedAt)).toBe(false);
+    t.clock.now += ANSWER_SETTLE_MS;
+    expect(t.permissions.readDue(decidedAt)).toBe(true);
+    expect(t.permissions.readDue(t.clock.now)).toBe(false);
   });
 });
 
