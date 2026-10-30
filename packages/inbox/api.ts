@@ -22,6 +22,9 @@ import type {
   InboxTourState,
   InboxThread,
   InboxComposeProject,
+  InboxComposeLaunch,
+  InboxLaunchAgent,
+  InboxRun,
   InboxDraft,
   InboxReplyDraft,
   InboxReplyDraftRow,
@@ -142,6 +145,8 @@ export interface ThreadModel {
   thread: InboxThread;
   /** The thread's list row, an archived thread's too (the window's list leaves those out). Absent from an older Inbox. */
   row?: InboxListRow | null;
+  /** A launched thread's run line (inbox-launch.ts): null while the agent rests. Absent: not a launched thread, or launch is off. */
+  run?: InboxRun | null;
 }
 
 export interface ReplyResult {
@@ -294,6 +299,8 @@ export interface SettingsModel {
   tour?: InboxTourState;
   /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
   prompts?: InboxPromptsSettings;
+  /** Settings → Agents' launch switch: present only while `inboxLaunch.enabled`. */
+  launch?: InboxLaunchSettings;
   store: {
     dir: string;
     bytes: number;
@@ -305,6 +312,13 @@ export interface SettingsModel {
       threads: { thread_id: string; subject: string | null; bytes: number }[];
     }[];
   };
+}
+
+/** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). */
+export interface InboxLaunchSettings {
+  enabled: boolean;
+  /** "Start new sessions with full permissions": Claude Code starts in bypass mode. */
+  full_permissions: boolean;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
@@ -604,6 +618,8 @@ export interface ComposeSessionsModel {
   projects: InboxComposeProject[];
   /** Asked for with `?session=`: whether that session is still there (with the asker grace). */
   session?: { session: string; live: boolean };
+  /** Only while `inboxLaunch.enabled`: the agents To offers to start, and the folder menu's projects. */
+  launch?: InboxComposeLaunch;
 }
 
 /** A draft as the Drafts page lists it, with its chip. */
@@ -611,7 +627,8 @@ export type DraftView = InboxDraft & { status: InboxDraftStatus };
 
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
-  to: { host: string; session: string };
+  /** A live session, or (launch on) a new session of `agent` started in the project. */
+  to: { host: string; session: string } | { launch: { agent: InboxLaunchAgent; project_id: string } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -924,7 +941,13 @@ export const inboxApi = {
   composeSessions: (session?: string | null) =>
     get<ComposeSessionsModel>(`/api/inbox/sessions${session ? `?session=${encodeURIComponent(session)}` : ''}`),
   startThread: (input: StartThreadInput) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean }>('/api/inbox/messages', { ...input }),
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>('/api/inbox/messages', { ...input }),
+  // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
+  launchStop: (launchId: string) => post<{ run: InboxRun | null }>(`/api/inbox/launch/${encodeURIComponent(launchId)}/stop`, {}),
+  launchOpen: (launchId: string) => post<{ ok: true; command: string }>(`/api/inbox/launch/${encodeURIComponent(launchId)}/open`, {}),
+  launchDelete: (launchId: string) => post<{ ok: true }>(`/api/inbox/launch/${encodeURIComponent(launchId)}/delete`, {}),
+  launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(`/api/inbox/launch/${encodeURIComponent(launchId)}/retry`, {}),
+  launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>('/api/inbox/launch/settings', { full_permissions: fullPermissions }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(`/api/inbox/messages/${encodeURIComponent(messageId)}/to`, { to }),
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */

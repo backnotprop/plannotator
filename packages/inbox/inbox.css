@@ -3442,6 +3442,21 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-check { width: 16px; flex: none; color: var(--primary); display: inline-flex; }
 .ib-cp-none { grid-column: 1 / -1; padding: 14px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-cp-pickhead { display: none; }
+/* Launch (inboxLaunch.enabled): "Start a new session in <project>" under the live sessions, then one row per agent. */
+.ib-cp-cap { grid-column: 1 / -1; padding: 10px 8px 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-cp-cap b { color: var(--foreground); font-weight: 600; }
+.ib-cp-cap-line { margin-top: 4px; border-top: 1px solid var(--ib-line); }
+.ib-cp-ons { grid-column: 3 / -2; color: var(--muted-foreground); white-space: nowrap; }
+.ib-cp-start .ib-cp-check { grid-column: -2; }
+/* To as a sentence: "New Claude Code session ▾ in <project> ▾". */
+.ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
+/* The folder menu: under "in <project>", the picker's look; folder icon, name, path, check. */
+.ib-cp-picker.ib-cp-folders { left: 200px; width: min(480px, calc(100% - 210px)); }
+.ib-cp-folders .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }
+.ib-cp-fopt > svg.ib-ic { color: var(--muted-foreground); }
+.ib-cp-fopt s { color: var(--muted-foreground); }
 
 /* Notes under To: no agent running, or the session a draft was for has ended. */
 .ib-cp-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--ib-line); background: var(--ib-band); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
@@ -3667,6 +3682,26 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
 .ib-delivered .ib-dl-main { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .ib-delivered .ib-dl-main > svg { flex: none; margin-top: 2px; }
 .ib-delivered .ib-dl-text { min-width: 0; }
+/* A launched thread's run line (components/RunLine.tsx): the delivery line's place and look; Stop is a text button. */
+.ib-run { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-run-main { display: inline-flex; align-items: flex-start; gap: 7px; min-width: 0; }
+.ib-run-main > svg { flex: none; margin-top: 2px; color: var(--warning); }
+.ib-run[data-run="waiting_terminal"], .ib-run[data-run="failed"], .ib-run[data-run="missing"] { color: var(--foreground); flex-direction: column; align-items: flex-start; }
+.ib-run b { font-weight: 600; color: var(--foreground); }
+.ib-run-text { min-width: 0; line-height: 1.5; }
+.ib-run-sub { display: block; color: var(--muted-foreground); }
+.ib-run-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ib-run[data-run="waiting_terminal"] .ib-run-acts, .ib-run[data-run="failed"] .ib-run-acts { padding-left: 21px; }
+.pn-inbox .ib-run-btn { border: 0; background: none; padding: 2px 4px; color: var(--muted-foreground); font-size: inherit; border-radius: 5px; }
+.pn-inbox .ib-run-btn:hover:not(:disabled) { color: var(--foreground); background: color-mix(in oklch, var(--muted) 70%, transparent); }
+.ib-run-cmd { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: 6px; background: var(--muted); color: var(--foreground); }
+.ib-run-cmd code { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-run-spin { flex: none; width: 11px; height: 11px; margin-top: 3px; border-radius: 50%; border: 1.5px dashed currentColor; }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-run-spin { animation: ib-run-spin 2.4s linear infinite; }
+}
+@keyframes ib-run-spin { to { transform: rotate(360deg); } }
+.ib-run-stopmark { flex: none; width: 10px; height: 10px; margin-top: 3px; border-radius: 2px; border: 1.5px solid currentColor; }
 .pn-inbox .ib-sendnow { margin-left: 4px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; cursor: pointer; white-space: nowrap; }
 .pn-inbox .ib-sendnow:hover { background: var(--muted); }
 .pn-inbox .ib-sendnow:disabled { opacity: 0.6; cursor: progress; }

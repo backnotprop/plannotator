@@ -223,6 +223,8 @@ function countWords(row: InboxListRow, now: number): { short: ReactNode; long: R
   if (row.section === 'quiet' && (row.read_at ?? null) !== null) return same('Read');
   // An older Inbox (no `unsent`): its own words.
   if (row.answered_not_sent) return { short: 'Answered', long: 'Answered, not sent', full: 'Answered, not sent' };
+  // An agent the person started from New message (launch): one muted word while it starts or works.
+  if (row.run) return same(row.run === 'starting' ? 'Starting' : 'Working');
   if (row.section === 'sent' && row.addressee) return same(`To ${agentName(rowAgent(row))}`);
   return null;
 }

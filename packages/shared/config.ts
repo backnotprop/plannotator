@@ -468,6 +468,15 @@ export interface PlannotatorConfig {
    */
   inboxTailscaleAllow?: string[];
   /**
+   * Launch agents from the Inbox (compose's "New Claude Code session";
+   * packages/server/inbox-launch.ts). `enabled`: config only, default false,
+   * read on every request; off, compose, the thread and every route are as
+   * before. `fullPermissions`: Settings → Agents' "Start new sessions with
+   * full permissions" (bypass mode). `extraSettings`: config only, merged
+   * under each launch's settings file (the manual smoke's `model`).
+   */
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; extraSettings?: Record<string, unknown> };
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -1114,6 +1123,17 @@ export function resolveDefaultDiffTypeFor(
   if (vcsId !== 'jj') return resolveDefaultDiffType(cfg);
   const v = cfg?.reviewDefaults?.jj?.defaultDiffType;
   return v === 'jj-current' || v === 'jj-last' || v === 'jj-line' || v === 'jj-evolog' || v === 'jj-all' ? v : 'jj-current';
+}
+
+/** config.inboxLaunch, coerced: off unless `enabled` is true; `extraSettings` only as a plain object. */
+export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean; extraSettings: Record<string, unknown> } {
+  const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
+  const extra = value.extraSettings;
+  return {
+    enabled: coerceConfigBoolean(value.enabled, false),
+    fullPermissions: coerceConfigBoolean(value.fullPermissions, false),
+    extraSettings: extra && typeof extra === "object" && !Array.isArray(extra) ? extra : {},
+  };
 }
 
 /**

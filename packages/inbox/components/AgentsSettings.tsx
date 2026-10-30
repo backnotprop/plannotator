@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   INBOX_AGENT_LABELS,
   inboxToolCostText,
@@ -9,7 +9,7 @@ import {
   type InboxOpenSession,
   type InboxToolHostId,
 } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
+import { inboxApi, type InboxLaunchSettings } from '../api';
 import { CURSOR_RULES_PLACE, noteCopiedByHand, noteWithoutMarkers } from '../agents';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
@@ -317,8 +317,11 @@ function AgentGroup({
   busy,
   sessions,
   platform,
+  extra,
 }: {
   row: InboxAgentRow;
+  /** Rows after its own (Claude Code: "Start new sessions with full permissions", launch only). */
+  extra?: ReactNode;
   /** This computer's platform (the window's), for what wakes a session. */
   platform?: ConnectContext['platform'];
   noteText: string;
@@ -511,6 +514,7 @@ function AgentGroup({
       ) : NO_NOTE_FILE[row.id] ? (
         <Row k="Note in its instructions" v={NO_NOTE_FILE[row.id]} na />
       ) : null}
+      {extra}
       {sessions && sessions.running > 0 && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && (
         <OpenSessions id={row.id} sessions={sessions} />
       )}
@@ -525,7 +529,42 @@ function AgentGroup({
  * and Note in its instructions; the agents not found folded behind the
  * harness picker. Every change applies to that agent's next session.
  */
-export function AgentsSettings({ model, onModel, context }: { model: InboxAgentsModel; onModel: (next: InboxAgentsModel) => void; context: ConnectContext | null }) {
+export function AgentsSettings({
+  model,
+  onModel,
+  context,
+  launch,
+}: {
+  model: InboxAgentsModel;
+  onModel: (next: InboxAgentsModel) => void;
+  context: ConnectContext | null;
+  /** Starting agents from New message (`SettingsModel.launch`, only while `inboxLaunch.enabled`). Absent: no row. */
+  launch?: InboxLaunchSettings | null;
+}) {
+  const [launchState, setLaunchState] = useState(launch ?? null);
+  const [launchBusy, setLaunchBusy] = useState(false);
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions]);
+  const toggleFull = async () => {
+    if (!launchState || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      setLaunchState((await inboxApi.launchSettings(!launchState.full_permissions)).launch);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  const launchRow = launchState?.enabled ? (
+    <Row
+      k="Sessions you start"
+      v={launchState.full_permissions ? 'Full permissions' : 'Ask first, as in Terminal'}
+      sub="Start new sessions with full permissions: Claude Code you start from New message never stops to ask (bypass mode). Applies to the next session you start."
+      data={{ 'data-launch-full-row': '' }}
+      r={<Switch on={launchState.full_permissions} label="Start new sessions with full permissions" busy={launchBusy} onClick={() => void toggleFull()} />}
+    />
+  ) : null;
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
@@ -597,6 +636,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
             busy={busy.has(row.id)}
             onChange={(input) => void change(row.id, input)}
             {...(context ? { platform: context.platform } : {})}
+            {...(row.id === 'claude-code' && launchRow ? { extra: launchRow } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
         ))}

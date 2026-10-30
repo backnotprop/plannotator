@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 /** Tools the servers look up that are not agents: never stubbed (git, openssl and the rest must keep working). */
-const NOT_AGENTS = new Set(["node", "npm", "glimpseui", "dns-sd", "avahi-publish", "openssl", "git", "curl", "lsof", "rg", "pwsh", "pwsh.exe", "powershell.exe", "tailscale", "sh", "bash"]);
+const NOT_AGENTS = new Set(["node", "npm", "glimpseui", "dns-sd", "avahi-publish", "openssl", "git", "curl", "lsof", "rg", "pwsh", "pwsh.exe", "powershell.exe", "tailscale", "sh", "bash", "osascript"]);
 
 function sourceFiles(dir: string, found: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -112,7 +112,7 @@ describe("a stub", () => {
  * Specs that need the agents they set up under HOME found (the sandbox would hide them), so their PATH holds only
  * their own folder and the system's /usr/bin:/bin, never a folder that holds agents.
  */
-const OWN_FAKES = new Set(["inbox-first-run.spec.ts", "inbox.spec.ts"]);
+const OWN_FAKES = new Set(["inbox-first-run.spec.ts", "inbox.spec.ts", "inbox-launch-claude.spec.ts"]);
 
 describe("an e2e spec that builds its own PATH", () => {
   test("gives that Inbox the test sandbox (or keeps the runner's PATH, where the stubs come first)", () => {
