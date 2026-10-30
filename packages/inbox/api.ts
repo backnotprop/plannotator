@@ -772,10 +772,11 @@ export const inboxApi = {
   unarchiveProject: (projectId: string, threads: { resolved: readonly string[]; read: readonly string[] }) =>
     post<{ threads: InboxListRow[]; skipped: string[] }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/resolve`), { resolved: false, threads }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
-  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean } = {}) =>
+  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean } = {}) =>
     post<{ questions: InboxQuestion[] }>(inboxUrl(`/messages/${encodeURIComponent(messageId)}/picks`), {
       questions: [{ key, revision, answer }],
       ...(options.unsentOnly ? { unsent_only: true } : {}),
+      ...(options.confirmFull ? { confirm_full: true } : {}),
     }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),

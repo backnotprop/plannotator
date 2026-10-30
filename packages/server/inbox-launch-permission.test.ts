@@ -70,12 +70,12 @@ function setup(options: { holdMs?: number; startMs?: number; fullPermissions?: b
     const response = await permissions.handle(new Request(`http://127.0.0.1/api/inbox/launch/${LAUNCH}/permission`, { method: "POST", body: JSON.stringify(body) }), LAUNCH);
     return { status: response.status, body: (await response.json()) as PermissionAnswer & { code?: string } };
   };
-  const answer = (messageId: string, pick: { selected?: string[]; other?: string }) => {
+  const answer = (messageId: string, pick: { selected?: string[]; other?: string; confirmFull?: boolean }) => {
     const question = store.questionsOf(messageId)[0]!;
-    return store.sendReply(messageId, {
-      idempotency_key: `answer-${messageId}`,
-      questions: [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: "single", prompt: question.prompt, selected: pick.selected ?? [], ...(pick.other ? { other: pick.other } : {}) } }],
-    }).reply!;
+    const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: pick.selected ?? [], ...(pick.other ? { other: pick.other } : {}) };
+    // The window's way: the pick (with the person's confirmation when it says so), then the Send.
+    const saved = store.savePicks(messageId, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true, confirmFull: pick.confirmFull === true });
+    return store.sendReply(messageId, { idempotency_key: `answer-${messageId}`, questions: [{ key: question.key, revision: saved[0]!.revision }] }).reply!;
   };
   return { store, clock, root, host, launchDir, permissions, call, answer, deleteLaunch: () => (deleted = true) };
 }
@@ -179,8 +179,43 @@ describe("the permission route", () => {
     const full = setup({ fullPermissions: true });
     const fullAsked = await full.call({ key: KEY, request_id: "req-00000019", event: EVENT });
     expect(full.store.questionsOf(fullAsked.body.message_id!)[0]!.choices.map((c) => c.label).slice(-1)).toEqual(["Allow and switch to Full permissions"]);
-    full.answer(fullAsked.body.message_id!, { selected: ["Allow and switch to Full permissions"] });
+    // The first time in the session, Full permissions needs the person's confirmation (the store's rule, not only the window's).
+    expect(() => full.answer(fullAsked.body.message_id!, { selected: ["Allow and switch to Full permissions"] })).toThrow("confirm_full");
+    full.answer(fullAsked.body.message_id!, { selected: ["Allow and switch to Full permissions"], confirmFull: true });
     expect((await full.call({ key: KEY, request_id: "req-00000019", event: EVENT, message_id: fullAsked.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
+    // The next prompt of the same session: no confirmation again.
+    const again = await full.call({ key: KEY, request_id: "req-00000020", event: EVENT });
+    full.answer(again.body.message_id!, { selected: ["Allow and switch to Full permissions"] });
+    expect((await full.call({ key: KEY, request_id: "req-00000020", event: EVENT, message_id: again.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
+  });
+
+  test("an answered prompt is never reopened: a stale pick (Deny at the current revision) is refused, and the record stays", async () => {
+    const { store, call, answer } = setup();
+    const asked = await call({ key: KEY, request_id: "req-00000021", event: EVENT });
+    const id = asked.body.message_id!;
+    answer(id, { selected: ["Allow once"] });
+    expect((await call({ key: KEY, request_id: "req-00000021", event: EVENT, message_id: id })).body).toMatchObject({ status: "decided", choice: "once" });
+    const sent = store.questionsOf(id)[0]!;
+    const deny = { v: 1 as const, key: sent.key, kind: "single" as const, prompt: sent.prompt, selected: ["Deny"] };
+    // Without `unsentOnly` too: a permission question is always unsent-only.
+    expect(() => store.savePicks(id, [{ key: sent.key, revision: sent.revision, answer: deny }])).toThrow("already sent");
+    expect(store.questionsOf(id)[0]).toMatchObject({ state: "sent", answer: { selected: ["Allow once"] } });
+  });
+
+  test("a Write says whether it creates or overwrites its file, and keeps the word it was asked with", async () => {
+    const { store, call, answer, launchDir } = setup();
+    const existing = join(launchDir, "exists.txt");
+    writeFileSync(existing, "old");
+    const write = (file: string) => ({ ...EVENT, tool_name: "Write", tool_input: { file_path: file, content: "new" } });
+    const over = await call({ key: KEY, request_id: "req-00000022", event: write(existing) });
+    expect(store.questionsOf(over.body.message_id!)[0]!.prompt).toBe("Claude Code wants to overwrite a file");
+    const fresh = join(launchDir, "fresh.txt");
+    const created = await call({ key: KEY, request_id: "req-00000023", event: write(fresh) });
+    expect(store.questionsOf(created.body.message_id!)[0]!.prompt).toBe("Claude Code wants to create a file");
+    // The file appears before the answer: the question is still the one asked, and is answered (never withdrawn as a mismatch).
+    writeFileSync(fresh, "made meanwhile");
+    answer(created.body.message_id!, { selected: ["Allow once"] });
+    expect((await call({ key: KEY, request_id: "req-00000023", event: write(fresh), message_id: created.body.message_id })).body).toMatchObject({ status: "decided", choice: "once" });
   });
 
   test("a command too long to show in full is never asked: withdrawn at once, nothing written", async () => {

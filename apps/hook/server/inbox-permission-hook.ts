@@ -11,9 +11,12 @@
  *    and token from `<dataDir>/inbox/inbox.json`, read again on every try) with
  *    the launch's key. The Inbox asks the person in the launch thread.
  * 4. Print the decision in the shape Claude Code reads, built HERE from this
- *    hook's own event: the Inbox only says once, session or deny (and the
- *    reason). Whatever answers on the port can never pick the tool input or a
- *    permission update (never bypass mode, nothing Claude did not suggest).
+ *    hook's own event: the Inbox only says once, session, deny (and the
+ *    reason), auto or full. Whatever answers on the port can never pick the
+ *    tool input or a permission update: a session rule is only the one Claude
+ *    suggested, a mode switch only `auto` or `bypassPermissions` built from this
+ *    hook's own literals, and bypass mode only when this hook's own launch
+ *    settings carry PLANNOTATOR_LAUNCH_FULL_PERMISSIONS=1.
  *
  * The Inbox down (no answer, a refused connection, 5xx, a call cut off after
  * 35 s): try again every 2 s, and keep waiting (Claude Code's hook timeout,

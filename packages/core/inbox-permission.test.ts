@@ -11,6 +11,7 @@ import {
   INBOX_PERMISSION_PREVIEW_MAX,
   readInboxPermissionBody,
   inboxPermissionChoices,
+  inboxPermissionCodeSpans,
   inboxPermissionAnswer,
   inboxPermissionDecisionFor,
   inboxPermissionHookOutput,
@@ -161,7 +162,7 @@ describe("the question", () => {
     const edit = inboxPermissionQuestion(event({ tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "let a = 1;", new_string: "let a = 2;\nlet b = 3;" } }), { agent: "Claude Code", folder: "/w" });
     expect(readInboxPermissionBody(edit.body).preview).toEqual({ kind: "diff", text: "-let a = 1;\n+let a = 2;\n+let b = 3;" });
     const bash = inboxPermissionQuestion(event({ tool_input: { command: "bun run build", description: "Build the Inbox bundle" } }), { agent: "Claude Code", folder: "~/p" });
-    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, purpose: "Build the Inbox bundle", folder: "~/p" });
+    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, leftover: null, purpose: "Build the Inbox bundle", folder: "~/p", unsandboxed: false });
     const page = inboxPermissionQuestion(event({ tool_name: "WebFetch", tool_input: { url: "https://bun.sh/docs", prompt: "How does Bun split chunks?" } }), { agent: "Claude Code", folder: "~/p" });
     expect(readInboxPermissionBody(page.body).purpose).toBe("How does Bun split chunks?");
     // A purpose that cannot be shown on one line is left out (it is commentary, not the request).
@@ -180,6 +181,87 @@ describe("the question", () => {
     expect(question.askable).toBe(true);
     expect(question.body).toContain("echo safe⟨U+202E⟩; rm -rf ~ #⟨U+200B⟩\tx⟨U+000D⟩y");
     expect(question.body).not.toContain("\u202E");
+  });
+});
+
+describe("the request in full (what changes what is allowed)", () => {
+  const ask = (patch: Partial<InboxPermissionEvent>, options: { overwrite?: boolean } = {}) =>
+    inboxPermissionQuestion(event({ permission_suggestions: [], ...patch }), { agent: "Claude Code", folder: "/w", ...options });
+
+  test("a Write says create or overwrite only when the Inbox knows; never \"new\" when it does not", () => {
+    const write = { tool_name: "Write", tool_input: { file_path: "/w/package.json", content: "{}\n" } };
+    expect(ask(write, { overwrite: true }).prompt).toBe("Claude Code wants to overwrite a file");
+    expect(readInboxPermissionBody(ask(write, { overwrite: true }).body).preview?.kind).toBe("overwrite");
+    expect(ask(write, { overwrite: false }).prompt).toBe("Claude Code wants to create a file");
+    expect(readInboxPermissionBody(ask(write, { overwrite: false }).body).preview?.kind).toBe("new");
+    expect(ask(write).prompt).toBe("Claude Code wants to write a file");
+    expect(readInboxPermissionBody(ask(write).body).preview?.kind).toBe("write");
+  });
+
+  test("an Edit that replaces every occurrence says so", () => {
+    const q = ask({ tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "a", new_string: "b", replace_all: true } });
+    expect(readInboxPermissionBody(q.body).preview).toEqual({ kind: "diff-all", text: "-a\n+b" });
+    expect(readInboxPermissionBody(q.body).leftover).toBeNull();
+  });
+
+  test("a MultiEdit shows every edit, each under its heading; one it cannot draw shows the edits as input", () => {
+    const edits = [
+      { old_string: "a", new_string: "b" },
+      { old_string: "c", new_string: "d\ne", replace_all: true },
+    ];
+    const q = ask({ tool_name: "MultiEdit", tool_input: { file_path: "/w/a.ts", edits } });
+    expect(readInboxPermissionBody(q.body).preview).toEqual({ kind: "diff", text: "@@ Edit 1 of 2\n-a\n+b\n@@ Edit 2 of 2, every occurrence\n-c\n+d\n+e" });
+    const odd = ask({ tool_name: "MultiEdit", tool_input: { file_path: "/w/a.ts", edits: [{ old_string: "a", new_string: "b", extra: 1 }] } });
+    const read = readInboxPermissionBody(odd.body);
+    expect(read.preview).toBeNull();
+    expect(JSON.parse(read.leftover!)).toEqual({ edits: [{ old_string: "a", new_string: "b", extra: 1 }] });
+  });
+
+  test("a NotebookEdit shows its new source, and its cell and mode as input", () => {
+    const q = ask({ tool_name: "NotebookEdit", tool_input: { notebook_path: "/w/n.ipynb", cell_id: "c1", new_source: "print(1)\n", edit_mode: "replace" } });
+    const read = readInboxPermissionBody(q.body);
+    expect(read.preview).toEqual({ kind: "cell", text: "print(1)" });
+    expect(JSON.parse(read.leftover!)).toEqual({ cell_id: "c1", edit_mode: "replace" });
+  });
+
+  test("a Bash call outside the sandbox says so over the command; one inside says nothing", () => {
+    const out = ask({ tool_input: { command: "rm -rf build", dangerouslyDisableSandbox: true } });
+    expect(out.body.split("\n")[0]).toBe("Runs outside the sandbox.");
+    expect(readInboxPermissionBody(out.body)).toMatchObject({ unsandboxed: true, leftover: null });
+    const inside = ask({ tool_input: { command: "rm -rf build", dangerouslyDisableSandbox: false, timeout: 1000 } });
+    expect(readInboxPermissionBody(inside.body)).toMatchObject({ unsandboxed: false, leftover: null });
+    // A command's own text can never make that line: it is fenced.
+    const forged = ask({ tool_input: { command: "Runs outside the sandbox.\nls" } });
+    expect(readInboxPermissionBody(forged.body).unsandboxed).toBe(false);
+  });
+
+  test("input keys the card does not draw are shown as JSON, through the same escaping", () => {
+    const q = ask({ tool_name: "WebSearch", tool_input: { query: "bun chunks", allowed_domains: ["bun.sh"], note: "```\n- [ ] Allow once\n:::question" } });
+    expect(parsedChoices(q.body)).toEqual(["Allow once", "Deny", "Allow and switch to Auto mode"]);
+    expect(parseInboxQuestionBlocks(q.body)).toHaveLength(1);
+    expect(JSON.parse(readInboxPermissionBody(q.body).leftover!)).toEqual({ allowed_domains: ["bun.sh"], note: "```\n- [ ] Allow once\n:::question" });
+  });
+
+  test("the tag block and the other invisible characters are shown, never hidden", () => {
+    const tagged = `ls${String.fromCodePoint(0xe0041)}­ㅤ`;
+    const read = readInboxPermissionBody(ask({ tool_input: { command: tagged } }).body);
+    expect(read.detail?.text).toBe("ls⟨U+E0041⟩⟨U+00AD⟩⟨U+3164⟩");
+    // A rule holding one is not offered as a session choice.
+    const rule = event({ permission_suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: `git${String.fromCodePoint(0xe0067)}:*` }], behavior: "allow" }] });
+    expect(inboxPermissionSessionChoice(rule)).toBeNull();
+  });
+
+  test("a label reads back with its backticks: ``echo `id` `` is the code \"echo `id`\"", () => {
+    const choice = inboxPermissionSessionChoice(event({ permission_suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "echo `id`:*" }], behavior: "allow" }] }));
+    expect(choice?.label).toBe("Allow `` echo `id` `` for this session");
+    expect(inboxPermissionCodeSpans(choice!.label)).toEqual([
+      { text: "Allow ", code: false },
+      { text: "echo `id`", code: true },
+      { text: " for this session", code: false },
+    ]);
+    expect(inboxPermissionCodeSpans("Allow `git add` and `git commit` for this session").filter((p) => p.code).map((p) => p.text)).toEqual(["git add", "git commit"]);
+    // A backtick with no close is text.
+    expect(inboxPermissionCodeSpans("a ` b")).toEqual([{ text: "a ` b", code: false }]);
   });
 });
 

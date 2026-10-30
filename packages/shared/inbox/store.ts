@@ -108,7 +108,7 @@ import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } fro
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import { INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { sanitizeTag } from "@plannotator/core/project";
 import {
   INBOX_ANNOTATION_CURRENT,
@@ -3308,7 +3308,7 @@ export class InboxStore {
     mode: "pick" | "send",
     /** Each entry's index in the request's `questions` (a Send's entries are planned per message). */
     indices?: readonly number[],
-    options: { unsentOnly?: boolean } = {},
+    options: { unsentOnly?: boolean; confirmFull?: boolean } = {},
   ): { record: InboxQuestionRecord; answer: QuestionAnswer | null | undefined }[] {
     const records = new Map(this.questionRecords(message.id).map((r) => [r.key, r]));
     const seen = new Set<string>();
@@ -3343,7 +3343,10 @@ export class InboxStore {
       // revision matches when the pick raced the Send (read before it, saved after), and saving it would reopen an
       // answer the agent already has. Without it a sent question takes a pick again, as the thread-state model has
       // it (the window never offers one; adr/implementation/inbox-thread-state.md).
-      if (mode === "pick" && options.unsentOnly === true && record.answer !== null && record.revision > 0 && record.sent_revision === record.revision) {
+      // A launched session's permission question is always unsent-only: its answer already went to the hook, and
+      // a stale window or phone must never reopen it or rewrite what the thread says Claude was told.
+      const permission = message.author.kind === "agent" && isInboxPermissionSession(message.author.session);
+      if (mode === "pick" && (options.unsentOnly === true || permission) && record.answer !== null && record.revision > 0 && record.sent_revision === record.revision) {
         throw refusalError({ code: "question_already_sent", key: entry.key });
       }
       let answer: QuestionAnswer | null | undefined;
@@ -3359,15 +3362,40 @@ export class InboxStore {
         const checked = checkInboxAnswer(record, entry.answer, `${field}.answer`);
         if (!checked.ok) throw refusalError(checked.refusal);
         answer = checked.answer;
+        // Full permissions turns every later prompt off: the first time in a session it is picked only with the
+        // person's confirmation (`confirm_full`, the window's "Switch this session to Full permissions?").
+        // A consent step, not a control: the window that asks can send it.
+        if (permission && answer?.selected.includes(INBOX_PERMISSION_FULL) && !(mode === "pick" && options.confirmFull === true) && !this.fullPermissionsUsed(message)) {
+          throw new InboxError("validation_error", "Full permissions: confirm it first (confirm_full).", { field: "confirm_full" });
+        }
       }
       plan.push({ record, answer });
     });
     return plan;
   }
 
+  /**
+   * Whether the session that wrote this permission question already switched to Full permissions from an
+   * earlier one in the thread (its answer sent): only the first time asks for `confirm_full`.
+   */
+  private fullPermissionsUsed(message: InboxMessage): boolean {
+    if (message.author.kind !== "agent") return false;
+    const session = message.author.session;
+    for (const id of this.threadMessageIds(message.thread_id)) {
+      if (id === message.id) continue;
+      const earlier = this.message(id);
+      if (earlier?.author.kind !== "agent" || earlier.author.session !== session) continue;
+      for (const record of this.questionRecords(id)) {
+        if (record.answer?.selected.includes(INBOX_PERMISSION_FULL) && record.revision > 0 && record.sent_revision === record.revision) return true;
+      }
+    }
+    return false;
+  }
+
   /** Save picks at once (no reply is written): each revision goes up by one. */
   /** `unsentOnly`: refuse a pick on a question a reply already sent (`question_already_sent`), as decision mode asks. */
-  savePicks(messageId: string, entries: readonly InboxAnswerEntry[], options: { unsentOnly?: boolean } = {}): InboxQuestion[] {
+  /** `confirmFull`: the person confirmed Full permissions on a launched session's permission question. */
+  savePicks(messageId: string, entries: readonly InboxAnswerEntry[], options: { unsentOnly?: boolean; confirmFull?: boolean } = {}): InboxQuestion[] {
     const message = this.targetMessage(messageId);
     if (!Array.isArray(entries) || entries.length === 0) {
       throw new InboxError("validation_error", "questions: at least one question is required.", { field: "questions" });

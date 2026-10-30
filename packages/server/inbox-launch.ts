@@ -51,6 +51,7 @@ import { delimiter, join, resolve } from "node:path";
 import { INBOX_HOST_NAMES, inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
 import { loadConfig, resolveInboxLaunch, saveConfig } from "@plannotator/shared/config";
 import { getDefaultPlannotatorDataDir, getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
@@ -389,7 +390,10 @@ export function createInboxLaunch(options: {
       // The person's own setup, read for this start only.
       const login = await options.loginEnv();
       if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
-      const { fullPermissions, model } = config();
+      // Full permissions from the launch record (fixed when it was made), never the live switch: a Try again
+      // after the switch changed must start the session the card describes (inboxLaunchFullPermissions).
+      const fullPermissions = inboxLaunchFullPermissions(launch);
+      const { model } = config();
       const settingsPath = writeSettings(launch, login, fullPermissions, model);
       const name = root.thread_name ?? root.subject ?? "Inbox";
       const startEnvironment = createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: launchSpawnEnv(login, fullPermissions) });

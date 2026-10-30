@@ -9,15 +9,19 @@
  * (the Inbox reads it by exact label and hands the hook only the choice; the
  * hook builds the decision from its own event). Nothing here decides anything.
  * No keyboard shortcuts: Allow once takes focus when the prompt is the newest
- * item, so Enter answers it.
+ * item and nothing else has focus, so Enter answers it; the answers ignore any
+ * activation for `ARM_MS` after the card appears or takes focus (a browser
+ * security dialog's delay), so a stray or second Enter never allows a prompt
+ * the person has not seen.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
   INBOX_PERMISSION_ALLOW_ONCE,
   INBOX_PERMISSION_AUTO,
   INBOX_PERMISSION_DENY,
   INBOX_PERMISSION_FULL,
+  inboxPermissionCodeSpans,
   readInboxPermissionBody,
   type InboxPermissionBody,
 } from '@plannotator/core/inbox-permission';
@@ -30,16 +34,15 @@ import { useMinuteClock } from './Undelivered';
 /** Why Full permissions is off: the session did not start with them allowed. */
 export const FULL_PERMISSIONS_OFF = 'Start the session with full permissions allowed to use this';
 
-/** The sessions where the person already confirmed Full permissions once (until the window reloads). */
-const fullConfirmed = new Set<string>();
+/** How long the answers ignore activation after the card appears or takes focus (not from a pointer). */
+export const ARM_MS = 600;
 
 type Outcome = 'once' | 'session' | 'auto' | 'full' | 'deny' | 'withdrawn' | 'closed';
 type Kind = 'bash' | 'file' | 'fetch' | 'search' | 'other';
 
-/** "Allow `bun run` for this session" with its backticked parts as code. */
+/** A label with its inline code as code, read exactly as Markdown reads it (``echo `id` `` stays "echo `id`"). */
 function Ticks({ text }: { text: string }) {
-  const parts = text.split('`');
-  return <>{parts.map((part, i) => (i % 2 ? <code key={i}>{part}</code> : <span key={i}>{part}</span>))}</>;
+  return <>{inboxPermissionCodeSpans(text).map((part, i) => (part.code ? <code key={i}>{part.text}</code> : <span key={i}>{part.text}</span>))}</>;
 }
 
 const upFirst = (text: string) => (text.startsWith('`') ? text : text.charAt(0).toUpperCase() + text.slice(1));
@@ -48,7 +51,7 @@ const wantsOf = (prompt: string) => prompt.replace(/^.*? wants to /, '');
 function kindOf(prompt: string): Kind {
   const wants = wantsOf(prompt);
   if (wants === 'run a command') return 'bash';
-  if (/^(write|edit|read) a file$|^edit a notebook$/.test(wants)) return 'file';
+  if (/^(write|create|overwrite|edit|read) a file$|^edit a notebook$/.test(wants)) return 'file';
   if (wants === 'open a web page') return 'fetch';
   if (wants === 'search the web') return 'search';
   return 'other';
@@ -81,70 +84,127 @@ function whatOf(read: InboxPermissionBody, title: string): string {
   return read.detail.text.split('\n')[0] ?? title;
 }
 
-/** The exact request: a command with its purpose and folder, a file's content or change, a link and what Claude looks for. */
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** A file's facts over its lines: whether it is new or replaced, or what a change removes and adds. */
+function factsOf(kind: NonNullable<InboxPermissionBody['preview']>['kind'], lines: string[]): string {
+  const count = plural(lines.length, 'line', 'lines');
+  if (kind === 'new') return `New file, ${count}`;
+  if (kind === 'overwrite') return `Replaces the whole file, ${count}`;
+  if (kind === 'write' || kind === 'cell') return count;
+  const changes = `${lines.filter((l) => l.startsWith('-')).length} removed, ${lines.filter((l) => l.startsWith('+')).length} added`;
+  return kind === 'diff-all' ? `${changes}, every occurrence` : changes;
+}
+
+/** A link exactly as sent, wrapped, never shortened or cleaned; its host stressed only when the text starts with it, and named on its own line when it does not. */
+function Link({ text }: { text: string }) {
+  let origin: string | null = null;
+  let host: string | null = null;
+  try {
+    const url = new URL(text);
+    origin = `${url.protocol}//${url.host}`;
+    host = url.host;
+  } catch {
+    // Shown as it is.
+  }
+  const prefixed = origin !== null && text.startsWith(origin) && (text.length === origin.length || /[/?#]/.test(text.charAt(origin.length)));
+  return (
+    <>
+      <div className="pc-code pc-url" data-perm-url="">
+        {prefixed ? (
+          <>
+            <span className="pc-strong">{origin}</span>
+            <span className="pc-dim">{text.slice(origin!.length)}</span>
+          </>
+        ) : (
+          text
+        )}
+      </div>
+      {!prefixed && host !== null && (
+        <p className="pc-why" data-perm-host="">
+          Host: <span className="pc-path pc-strong">{host}</span>
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The exact request: a command with its purpose and folder, a file's content or change, a link and what Claude looks for, and anything else in the input. */
 function RequestBody({ read, kind, phone }: { read: InboxPermissionBody; kind: Kind; phone: boolean }) {
   const [all, setAll] = useState(false);
-  const { detail, preview, purpose, folder } = read;
+  const { detail, preview, purpose, folder, leftover, unsandboxed } = read;
+  const rest = leftover && (
+    <>
+      <p className="pc-why">Also in the request:</p>
+      <pre className="pc-code" data-perm-leftover="">
+        <code>{leftover}</code>
+      </pre>
+    </>
+  );
   if (preview && detail?.on === 'line') {
     const lines = preview.text.split('\n');
     const cap = phone ? 8 : 10;
-    const diff = preview.kind === 'diff';
+    const diff = preview.kind === 'diff' || preview.kind === 'diff-all';
     const path = rel(detail.text, folder);
     const cut = path.lastIndexOf('/') + 1;
-    return (
-      <div className="pc-file" data-perm-file="">
-        <div className="pc-file-head">
-          <span className="pc-path">
-            <span className="pc-dim">{path.slice(0, cut)}</span>
-            <span className="pc-strong">{path.slice(cut)}</span>
-          </span>
-          <span className="pc-facts">
-            {diff ? `${lines.filter((l) => l.startsWith('-')).length} removed, ${lines.filter((l) => l.startsWith('+')).length} added` : `New file, ${lines.length} ${lines.length === 1 ? 'line' : 'lines'}`}
-          </span>
-        </div>
-        <pre className="pc-lines">
-          {(all ? lines : lines.slice(0, cap)).map((line, i) => (
-            <span key={i} className="pc-line" data-sign={diff ? line[0] : undefined}>
-              <span className="pc-ln" aria-hidden="true">
-                {i + 1}
-              </span>
-              <code>{(diff ? line.slice(1) : line) || ' '}</code>
-            </span>
-          ))}
-        </pre>
-        {lines.length > cap && (
-          <button type="button" className="pc-more" onClick={() => setAll((a) => !a)} aria-expanded={all}>
-            {all ? 'Show less' : `Show ${lines.length - cap} more ${lines.length - cap === 1 ? 'line' : 'lines'}`}
-          </button>
-        )}
-      </div>
-    );
-  }
-  if (!detail) return null;
-  if (kind === 'fetch' && detail.on === 'line') {
-    let host = detail.text;
-    try {
-      const url = new URL(detail.text);
-      host = `${url.protocol}//${url.host}`;
-    } catch {
-      // Shown as it is.
-    }
+    let n = 0;
     return (
       <>
-        <div className="pc-code" data-perm-url="">
-          <span className="pc-strong">{host}</span>
-          <span className="pc-dim">{detail.text.slice(host.length)}</span>
+        <div className="pc-file" data-perm-file="">
+          <div className="pc-file-head">
+            <span className="pc-path">
+              <span className="pc-dim">{path.slice(0, cut)}</span>
+              <span className="pc-strong">{path.slice(cut)}</span>
+            </span>
+            <span className="pc-facts">{factsOf(preview.kind, lines)}</span>
+          </div>
+          <pre className="pc-lines">
+            {(all ? lines : lines.slice(0, cap)).map((line, i) =>
+              diff && line.startsWith('@@ ') ? (
+                <span key={i} className="pc-hunk" data-perm-hunk="">
+                  {line.slice(3)}
+                </span>
+              ) : (
+                <span key={i} className="pc-line" data-sign={diff ? line[0] : undefined}>
+                  <span className="pc-ln" aria-hidden="true">
+                    {++n}
+                  </span>
+                  <code>{(diff ? line.slice(1) : line) || ' '}</code>
+                </span>
+              ),
+            )}
+          </pre>
+          {lines.length > cap && (
+            <button type="button" className="pc-more" onClick={() => setAll((a) => !a)} aria-expanded={all}>
+              {all ? 'Show less' : `Show ${plural(lines.length - cap, 'more line', 'more lines')}`}
+            </button>
+          )}
         </div>
+        {rest}
+      </>
+    );
+  }
+  if (!detail) return rest || null;
+  if (kind === 'fetch' && detail.on === 'line') {
+    return (
+      <>
+        <Link text={detail.text} />
         {purpose && (
           <p className="pc-why">
             Looking for: <span className="pc-strong">{purpose}</span>
           </p>
         )}
+        {rest}
       </>
     );
   }
   return (
     <>
+      {unsandboxed && (
+        <p className="pc-warn" data-perm-unsandboxed="">
+          <Icon name="warn" size={14} /> Runs outside the sandbox
+        </p>
+      )}
       <pre className="pc-code" data-perm-detail="">
         <code>{detail.on === 'line' && kind === 'file' ? rel(detail.text, folder) : detail.text}</code>
       </pre>
@@ -158,6 +218,7 @@ function RequestBody({ read, kind, phone }: { read: InboxPermissionBody; kind: K
           )}
         </p>
       )}
+      {rest}
     </>
   );
 }
@@ -200,11 +261,12 @@ function Reason({ busy, onDeny, onCancel }: { busy: boolean; onDeny: (reason: st
 function Record({ message, q, outcome, read, title, time, kind, followUp }: { message: InboxMessageWire; q: InboxQuestion; outcome: Outcome; read: InboxPermissionBody; title: string; time: string; kind: Kind; followUp: string | null }) {
   const [open, setOpen] = useState(false);
   const labels = q.choices.map((c) => c.label);
+  // A mode switch says what was asked of Claude Code, not that it happened (an account without Auto mode ignores it).
   const verb: ReactNode =
     outcome === 'once' ? 'Allowed once'
     : outcome === 'session' ? <>Allowed <Ticks text={scopeOf(sessionLabelOf(labels) ?? '')} /> for this session</>
-    : outcome === 'auto' ? 'Allowed and switched to Auto mode'
-    : outcome === 'full' ? 'Allowed and switched to Full permissions'
+    : outcome === 'auto' ? 'Allowed, and asked Claude to switch to Auto mode'
+    : outcome === 'full' ? 'Allowed, and asked Claude to switch to Full permissions'
     : outcome === 'deny' ? 'Denied'
     : outcome === 'closed' ? 'Not answered'
     : (followUp ?? 'No longer waiting').replace(/\.$/, '');
@@ -240,6 +302,7 @@ export function PermissionCard({
   phone,
   newest,
   followUp,
+  fullUsed,
   onChanged,
 }: {
   message: InboxMessageWire;
@@ -251,6 +314,8 @@ export function PermissionCard({
   newest: boolean;
   /** The follow-up that withdrew it ("Answered in Terminal."), or null. */
   followUp: string | null;
+  /** The session already switched to Full permissions from an earlier prompt: no confirm again. */
+  fullUsed: boolean;
   onChanged: () => void | Promise<void>;
 }) {
   const q = message.questions?.[0] ?? null;
@@ -273,18 +338,34 @@ export function PermissionCard({
   const since = live ? run?.since : message.created_at;
   const minutes = since ? Math.max(1, Math.floor((now - Date.parse(since)) / 60_000)) : null;
 
-  // Newest and waiting: Allow once takes focus, so Enter answers it. Never from a field the person types in,
-  // nor from outside this thread (the list keeps its own focus). After the thread has placed itself (at the
-  // "New since you looked" divider), the answers are brought into view: Enter never answers a button out of sight.
+  // The answers arm `ARM_MS` after the card appears, and again after it takes focus from anything but a pointer.
+  const armedAt = useRef(Date.now());
+  const pointerAt = useRef(0);
+  const [armed, setArmed] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const arm = () => {
+    armedAt.current = Date.now();
+    setArmed(false);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setArmed(true), ARM_MS);
+  };
+  useEffect(() => {
+    arm();
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [message.id]);
+  const ready = () => Date.now() - armedAt.current >= ARM_MS;
+
+  // Newest and waiting, and nothing has focus: Allow once takes it, so Enter answers it, with the answers
+  // brought into view (never a button out of sight). Never taken from a control the person is on.
   useEffect(() => {
     if (!newest || !waiting) return;
     const frame = requestAnimationFrame(() => {
       const button = onceRef.current;
-      const active = document.activeElement as HTMLElement | null;
-      const pane = button?.closest('section.ib-pane');
-      const editable = !!active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
-      if (!button || editable || !(!active || active === document.body || (pane && pane.contains(active)))) return;
-      button.focus({ preventScroll: true });
+      const active = document.activeElement;
+      if (!button || (active && active !== document.body)) return;
+      button.focus({ preventScroll: true, focusVisible: false } as FocusOptions);
       (button.closest('footer') ?? button).scrollIntoView?.({ block: 'nearest' });
     });
     return () => cancelAnimationFrame(frame);
@@ -294,13 +375,13 @@ export function PermissionCard({
   const outcome = outcomeOf(q, labels);
   if (outcome) return <Record message={message} q={q} outcome={outcome} read={read} title={title} time={time} kind={kind} followUp={followUp} />;
 
-  /** One answer: the question's own label (or a Deny with words), picked and sent. */
-  const answer = async (label: string | null, reason?: string) => {
+  /** One answer: the question's own label (or a Deny with words), picked and sent. Unsent-only: a stale window never reopens it. */
+  const answer = async (label: string | null, reason?: string, confirmFull = false) => {
     setBusy(true);
     setError(null);
     const picked: QuestionAnswer = { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: label ? [label] : [], ...(reason ? { other: reason } : {}) };
     try {
-      const saved = await inboxApi.pick(message.id, q.key, q.revision, picked);
+      const saved = await inboxApi.pick(message.id, q.key, q.revision, picked, { unsentOnly: true, confirmFull });
       const revision = saved.questions.find((x) => x.key === q.key)?.revision ?? q.revision;
       await inboxApi.reply(message.id, { idempotency_key: crypto.randomUUID(), words: '', questions: [{ key: q.key, revision }] });
       await onChanged();
@@ -309,19 +390,32 @@ export function PermissionCard({
       setBusy(false);
     }
   };
-  const full = () => {
-    const sessionKey = message.author.kind === 'agent' ? (message.author.session ?? message.id) : message.id;
-    if (fullConfirmed.has(sessionKey)) void answer(INBOX_PERMISSION_FULL);
-    else setMode('confirmFull');
+  /** An answer button's action, ignored while the card is not armed. */
+  const act = (fn: () => void) => () => {
+    if (ready()) fn();
   };
-  const confirmFull = () => {
-    const sessionKey = message.author.kind === 'agent' ? (message.author.session ?? message.id) : message.id;
-    fullConfirmed.add(sessionKey);
-    void answer(INBOX_PERMISSION_FULL);
+  /** A held key repeats its keydown, and a repeated Enter or Space on a focused button would click it: never. */
+  const noRepeat = (e: KeyboardEvent) => {
+    if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
   };
+  const full = () => (fullUsed ? void answer(INBOX_PERMISSION_FULL) : setMode('confirmFull'));
 
   return (
-    <section className="pc-card" data-permission="" data-perm-kind={kind} aria-label={`Claude Code asks permission to ${wantsOf(prompt)}`}>
+    <section
+      className="pc-card"
+      data-permission=""
+      data-perm-kind={kind}
+      data-perm-armed={armed ? '' : undefined}
+      aria-label={`Claude Code asks permission to ${wantsOf(prompt)}`}
+      onPointerDownCapture={() => {
+        pointerAt.current = Date.now();
+      }}
+      onFocusCapture={() => {
+        // Focus from the keyboard or the window (not a click, which already aimed): the answers wait again.
+        if (Date.now() - pointerAt.current > 500) arm();
+      }}
+      onKeyDownCapture={noRepeat}
+    >
       <header className="pc-head" data-run={live ? 'waiting_answer' : undefined}>
         <AuthorMark author={message.author} />
         <span className="pc-app">Claude Code</span>{' '}
@@ -366,7 +460,7 @@ export function PermissionCard({
               <button type="button" className="ib-btn ib-ghost" disabled={busy} onClick={() => setMode('answers')}>
                 Cancel
               </button>
-              <button type="button" className="ib-btn" disabled={busy} onClick={confirmFull} data-perm-full-confirm="">
+              <button type="button" className="ib-btn" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_FULL, undefined, true))} data-perm-full-confirm="">
                 Allow and switch
               </button>
             </div>
@@ -374,35 +468,37 @@ export function PermissionCard({
         ) : (
           <>
             <div className="pc-row">
-              <button ref={onceRef} type="button" className="ib-btn ib-pri" disabled={busy} onClick={() => void answer(INBOX_PERMISSION_ALLOW_ONCE)} data-perm="once">
+              <button ref={onceRef} type="button" className="ib-btn ib-pri" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_ALLOW_ONCE))} data-perm="once">
                 Allow once
               </button>
               {session && (
-                <button type="button" className="ib-btn" disabled={busy} onClick={() => void answer(session)} data-perm="session">
-                  <Ticks text={session} />
+                <button type="button" className="ib-btn pc-session" disabled={busy} onClick={act(() => void answer(session))} data-perm="session">
+                  <span>
+                    <Ticks text={session} />
+                  </span>
                 </button>
               )}
-              <button type="button" className="ib-btn" disabled={busy} onClick={() => void answer(INBOX_PERMISSION_DENY)} data-perm="deny">
+              <button type="button" className="ib-btn" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_DENY))} data-perm="deny">
                 Deny
               </button>
-              <button type="button" className="ib-btn ib-ghost" disabled={busy} onClick={() => setMode('reason')} data-perm="reason">
+              <button type="button" className="ib-btn ib-ghost" disabled={busy} onClick={act(() => setMode('reason'))} data-perm="reason">
                 Deny with a reason
               </button>
             </div>
             {labels.includes(INBOX_PERMISSION_AUTO) && (
-              <p className="pc-modes">
-                <span>{phone ? 'Or allow and switch to' : 'Or allow this and switch the session to'}</span>
-                <button type="button" className="pc-link" disabled={busy} onClick={() => void answer(INBOX_PERMISSION_AUTO)} data-perm-mode="auto">
-                  Auto mode
-                </button>
-                <span className="pc-full">
+              <>
+                <p className="pc-modes">
+                  <span>{phone ? 'Or allow and switch to' : 'Or allow this and switch the session to'}</span>
+                  <button type="button" className="pc-link" disabled={busy} onClick={act(() => void answer(INBOX_PERMISSION_AUTO))} data-perm-mode="auto">
+                    Auto mode
+                  </button>
                   <button
                     type="button"
                     className="pc-link"
                     aria-disabled={fullOn ? undefined : true}
                     aria-describedby={fullOn ? undefined : `pc-why-${message.id}`}
                     disabled={busy}
-                    onClick={() => (fullOn ? full() : setWhy((v) => !v))}
+                    onClick={fullOn ? act(full) : () => setWhy((v) => !v)}
                     onMouseEnter={() => !fullOn && setWhy(true)}
                     onMouseLeave={() => setWhy(false)}
                     onFocus={() => !fullOn && setWhy(true)}
@@ -411,13 +507,13 @@ export function PermissionCard({
                   >
                     Full permissions
                   </button>
-                  {!fullOn && (
-                    <span id={`pc-why-${message.id}`} role="note" className="pc-why-off" hidden={!why} data-perm-full-off="">
-                      {FULL_PERMISSIONS_OFF}
-                    </span>
-                  )}
-                </span>
-              </p>
+                </p>
+                {!fullOn && (
+                  <p id={`pc-why-${message.id}`} role="note" className="pc-why-off" hidden={!why} data-perm-full-off="">
+                    {FULL_PERMISSIONS_OFF}
+                  </p>
+                )}
+              </>
             )}
           </>
         )}

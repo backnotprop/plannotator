@@ -3198,7 +3198,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (body.unsent_only !== undefined && typeof body.unsent_only !== "boolean") {
               throw new InboxError("validation_error", "unsent_only: a boolean.", { field: "unsent_only" });
             }
-            const questions = store.savePicks(messageId, body.questions as never, { unsentOnly: body.unsent_only === true });
+            // `confirm_full`: the person confirmed Full permissions on a launched session's permission question.
+            if (body.confirm_full !== undefined && typeof body.confirm_full !== "boolean") {
+              throw new InboxError("validation_error", "confirm_full: a boolean.", { field: "confirm_full" });
+            }
+            const questions = store.savePicks(messageId, body.questions as never, { unsentOnly: body.unsent_only === true, confirmFull: body.confirm_full === true });
             return json({ message_id: messageId, questions, reply: null });
           }
           case "reply": {

@@ -10,7 +10,7 @@ import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxListRow, type InboxSectionId, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -3349,6 +3349,13 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     const by = m.questions?.[0]?.superseded_by?.message_id;
     return by ? (thread.messages.find((x) => x.id === by)?.body.trim() ?? null) : null;
   };
+  // The session already switched to Full permissions from an earlier prompt: no confirm again (the store's rule too).
+  const permFullUsed = (m: InboxMessageWire): boolean => {
+    const session = m.author.kind === 'agent' ? m.author.session : null;
+    return permMessages.some(
+      (x) => x.id !== m.id && x.author.kind === 'agent' && x.author.session === session && (x.questions ?? []).some((q) => q.state === 'sent' && !!q.answer?.selected.includes(INBOX_PERMISSION_FULL)),
+    );
+  };
   const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).
@@ -4248,7 +4255,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} fullUsed={permFullUsed(message)} onChanged={onChanged} />
                   </div>
                 </article>,
               );

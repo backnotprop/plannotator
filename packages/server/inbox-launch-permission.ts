@@ -14,8 +14,9 @@
  * and without `wakes`: the person's answer is addressed to `perm:…`, which no
  * poll claims, so it never becomes a second turn. Each call is held up to
  * 25 s and answers `waiting` (call again with the message id), `decided`
- * (`choice`: once, session or deny, and the reason; the hook builds the
- * decision from its own event, and the call records the delivery) or
+ * (`choice`: once, session, deny, auto or full, and the reason; the hook
+ * builds the decision from its own event, and honours full only when its own
+ * launch allows it; the call records the delivery) or
  * `withdrawn` (say nothing; Claude Code's own dialog stays). A question whose
  * stored body, prompt or choices are not exactly this prompt's is withdrawn,
  * never answered; one whose detail cannot be shown in full and exactly (too
@@ -33,8 +34,8 @@
  */
 
 import { timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_ASK_IN_TERMINAL,
@@ -44,6 +45,7 @@ import {
   inboxPermissionQuestion,
   inboxPermissionSession,
   isInboxPermissionSession,
+  readInboxPermissionBody,
   readInboxPermissionEvent,
   type InboxPermissionChoice,
   type InboxPermissionEvent,
@@ -157,9 +159,27 @@ export function createLaunchPermissions(options: {
   /** How a launch's questions read paths, and whether its session can switch to Full permissions. */
   const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: inboxLaunchFullPermissions(root.launch!) });
 
-  /** The question this prompt asks in a launch's thread. */
-  const questionFor = (root: InboxMessage, event: InboxPermissionEvent): InboxPermissionQuestion =>
-    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root) });
+  /** The question this prompt asks in a launch's thread (`overwrite`: a Write's file exists, does not, or is not known). */
+  const questionFor = (root: InboxMessage, event: InboxPermissionEvent, overwrite?: boolean): InboxPermissionQuestion =>
+    inboxPermissionQuestion(event, { agent: AGENT_NAME, folder: options.displayFolder(event.cwd ?? root.launch!.folder), ...optionsFor(root), overwrite });
+
+  /** Whether a Write's file exists now (the card says "overwrite" or "create"); undefined when it cannot tell. */
+  const writeTargetExists = (root: InboxMessage, event: InboxPermissionEvent): boolean | undefined => {
+    const path = event.tool_input.file_path;
+    if (event.tool_name !== "Write" || typeof path !== "string" || path === "") return undefined;
+    try {
+      return existsSync(isAbsolute(path) ? path : resolve(event.cwd ?? root.launch!.folder, path));
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** What a stored Write question said about its file when it was asked: the question is rebuilt with the same word. */
+  const askedOverwrite = (messageId: string, event: InboxPermissionEvent): boolean | undefined => {
+    if (event.tool_name !== "Write") return undefined;
+    const kind = readInboxPermissionBody(store.message(messageId)?.body ?? "").preview?.kind;
+    return kind === "overwrite" ? true : kind === "new" ? false : undefined;
+  };
 
   /**
    * Whether the stored question is exactly the one this prompt asks: the body
@@ -241,7 +261,6 @@ export function createLaunchPermissions(options: {
       const event = readInboxPermissionEvent(body.event);
       if (!event) return json({ error: "event: Claude Code's PermissionRequest input.", code: "validation_error" }, 400);
       const requestId = typeof body.request_id === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.request_id) ? body.request_id : null;
-      const question = questionFor(root, event);
       const answerOptions = optionsFor(root);
       let messageId: string;
       if (typeof body.message_id === "string") {
@@ -253,10 +272,12 @@ export function createLaunchPermissions(options: {
         messageId = message.id;
       } else {
         if (!requestId) return json({ error: "request_id: 8 to 80 letters, digits, - or _.", code: "validation_error" }, 400);
-        const asked = ask(root, event, requestId, question);
+        const asked = ask(root, event, requestId, questionFor(root, event, writeTargetExists(root, event)));
         if (!asked) return json({ status: "withdrawn", message_id: null } satisfies PermissionAnswer);
         messageId = asked;
       }
+      // The question as asked: a Write's file may have appeared since, and the card keeps the word it was asked with.
+      const question = questionFor(root, event, askedOverwrite(messageId, event));
       const done = settled(messageId, event, question, answerOptions);
       if (done) return json(done);
       const lease = leases.get(messageId) ?? { launchId, expires: 0, holding: 0, askedAt: Date.parse(store.message(messageId)!.created_at) };

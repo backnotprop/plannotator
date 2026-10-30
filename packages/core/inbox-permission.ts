@@ -73,13 +73,19 @@ export const INBOX_PERMISSION_DETAIL_MAX = 8_000;
 /** The longest "for this session" label. A longer one is not offered: every rule it grants must be readable. */
 export const INBOX_PERMISSION_LABEL_MAX = 200;
 
-/** Bidi controls and invisible characters (a reversed or hidden part of a command, as in Trojan Source). */
-const INVISIBLE = "\\u061C\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\uFEFF";
+/**
+ * Bidi controls and invisible characters (a reversed or hidden part of a command, as in Trojan Source):
+ * the soft hyphen, the combining grapheme joiner, the Hangul fillers, the Mongolian vowel separator,
+ * zero-width and bidi marks, the word joiner and invisible operators, the variation selectors, the BOM,
+ * and the tag block (text a reader never sees).
+ */
+const INVISIBLE =
+  "\\u00AD\\u034F\\u061C\\u115F\\u1160\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\u3164\\uFE00-\\uFE0F\\uFEFF\\uFFA0\\u{E0000}-\\u{E007F}\\u{E0100}-\\u{E01EF}";
 /** Controls a multi-line block may not show as they are: every C0 but a tab and a line feed, C1, and the Unicode line and paragraph separators. */
 const BLOCK_CONTROL = "\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u2028\\u2029";
 /** Text that reads exactly as it is, on one line: no control (a tab or a line break neither), nothing invisible. */
-const PLAIN = new RegExp(`^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029${INVISIBLE}]*$`);
-const HIDDEN = new RegExp(`[${BLOCK_CONTROL}${INVISIBLE}]`, "g");
+const PLAIN = new RegExp(`^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029${INVISIBLE}]*$`, "u");
+const HIDDEN = new RegExp(`[${BLOCK_CONTROL}${INVISIBLE}]`, "gu");
 const plain = (text: string) => PLAIN.test(text);
 
 /**
@@ -98,6 +104,60 @@ function code(text: string): string {
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
   const fence = "`".repeat(longest + 1);
   return longest > 0 ? `${fence} ${text} ${fence}` : `${fence}${text}${fence}`;
+}
+
+/**
+ * A label's text and inline code, read the way Markdown reads it: a run of N
+ * backticks opens a span that only a run of exactly N closes, and a span that
+ * starts and ends with a space (the padding `code` adds) loses one of each. A
+ * run with no matching close is plain text. So ``echo `id` `` reads back as the
+ * code "echo `id`", never as "echo id".
+ */
+export function inboxPermissionCodeSpans(text: string): { text: string; code: boolean }[] {
+  const out: { text: string; code: boolean }[] = [];
+  const push = (part: string, isCode: boolean) => {
+    if (!part) return;
+    const last = out.at(-1);
+    if (last && !last.code && !isCode) last.text += part;
+    else out.push({ text: part, code: isCode });
+  };
+  let i = 0;
+  let plainFrom = 0;
+  while (i < text.length) {
+    if (text[i] !== "`") {
+      i++;
+      continue;
+    }
+    let n = 0;
+    while (text[i + n] === "`") n++;
+    let j = i + n;
+    let close = -1;
+    while (j < text.length) {
+      if (text[j] !== "`") {
+        j++;
+        continue;
+      }
+      let m = 0;
+      while (text[j + m] === "`") m++;
+      if (m === n) {
+        close = j;
+        break;
+      }
+      j += m;
+    }
+    if (close < 0) {
+      i += n;
+      continue;
+    }
+    push(text.slice(plainFrom, i), false);
+    let inner = text.slice(i + n, close);
+    if (inner.length > 1 && inner.startsWith(" ") && inner.endsWith(" ") && inner.trim() !== "") inner = inner.slice(1, -1);
+    push(inner, true);
+    i = close + n;
+    plainFrom = i;
+  }
+  push(text.slice(plainFrom), false);
+  return out;
 }
 
 /** One line, at most `max` characters, every control and invisible character shown. */
@@ -164,7 +224,7 @@ function toolNoun(tool: string): string {
 type Detail = { text: string; on: "block" | "line" };
 
 /** What the agent wants, as the card's prompt, and the detail to show over it (taken from the tool's input). */
-function asked(event: InboxPermissionEvent, agent: string, shownPath: (path: string) => string): { prompt: string; detail: Detail | null } {
+function asked(event: InboxPermissionEvent, agent: string, shownPath: (path: string) => string, overwrite?: boolean): { prompt: string; detail: Detail | null } {
   const input = event.tool_input;
   const text = (key: string) => (typeof input[key] === "string" ? (input[key] as string) : null);
   const json: Detail | null = Object.keys(input).length > 0 ? { text: JSON.stringify(input, null, 2), on: "block" } : null;
@@ -180,7 +240,7 @@ function asked(event: InboxPermissionEvent, agent: string, shownPath: (path: str
     case "MultiEdit":
       return { prompt: `${agent} wants to edit a file`, detail: file };
     case "Write":
-      return { prompt: `${agent} wants to write a file`, detail: file };
+      return { prompt: `${agent} wants to ${overwrite === true ? "overwrite" : overwrite === false ? "create" : "write"} a file`, detail: file };
     case "NotebookEdit":
       return { prompt: `${agent} wants to edit a notebook`, detail: file };
     case "Read":
@@ -218,21 +278,85 @@ function shownDetail(detail: Detail): string | null {
 /** The longest file content or change a card shows. A longer one is never asked here: the person could not read all of what they allow. */
 export const INBOX_PERMISSION_PREVIEW_MAX = 50_000;
 
-/** What Claude Code's own dialog shows besides the detail: a Write's content, an Edit's change (`-` and `+` lines). */
+/**
+ * What Claude Code's own dialog shows besides the detail. A Write's content: `new` (the file does not
+ * exist), `overwrite` (it does), `write` (not known). An Edit's change as `-` and `+` lines: `diff`, or
+ * `diff-all` when it replaces every occurrence; a MultiEdit's edits in one `diff`, each after a line
+ * `@@ Edit 2 of 3` (`, every occurrence` when it replaces all). A notebook cell's new source: `cell`.
+ */
 export interface InboxPermissionPreview {
-  kind: "write" | "diff";
+  kind: "new" | "overwrite" | "write" | "diff" | "diff-all" | "cell";
   text: string;
 }
 
-function previewOf(event: InboxPermissionEvent): InboxPermissionPreview | null {
+/** The fence info words a preview is written with (and the leftover input's, `input`). */
+const PREVIEW_KINDS = ["new", "overwrite", "write", "diff", "diff-all", "cell"] as const;
+const OPEN_FENCE = new RegExp(`^(\`{3,})(${[...PREVIEW_KINDS, "input"].join("|")})?$`);
+
+/** The line a Bash call that asks to run outside the sandbox carries over the card (`dangerouslyDisableSandbox: true`). */
+export const INBOX_PERMISSION_UNSANDBOXED = "Runs outside the sandbox.";
+
+/** A preview and the input keys it shows. */
+function previewOf(event: InboxPermissionEvent, overwrite?: boolean): { preview: InboxPermissionPreview; keys: string[] } | null {
   const input = event.tool_input;
   const text = (key: string) => (typeof input[key] === "string" ? (input[key] as string) : null);
-  if (event.tool_name === "Write" && text("content") !== null) return { kind: "write", text: text("content")!.replace(/\n$/, "") };
-  if (event.tool_name === "Edit" && text("old_string") !== null && text("new_string") !== null) {
-    const sign = (mark: string, body: string) => body.split("\n").map((line) => `${mark}${line}`);
-    return { kind: "diff", text: [...sign("-", text("old_string")!), ...sign("+", text("new_string")!)].join("\n") };
+  const sign = (mark: string, body: string) => body.split("\n").map((line) => `${mark}${line}`);
+  if (event.tool_name === "Write" && text("content") !== null) {
+    const kind = overwrite === true ? "overwrite" : overwrite === false ? "new" : "write";
+    return { preview: { kind, text: text("content")!.replace(/\n$/, "") }, keys: ["content"] };
   }
+  if (event.tool_name === "Edit" && text("old_string") !== null && text("new_string") !== null && (input.replace_all === undefined || typeof input.replace_all === "boolean")) {
+    const lines = [...sign("-", text("old_string")!), ...sign("+", text("new_string")!)];
+    return { preview: { kind: input.replace_all === true ? "diff-all" : "diff", text: lines.join("\n") }, keys: ["old_string", "new_string", "replace_all"] };
+  }
+  if (event.tool_name === "MultiEdit" && Array.isArray(input.edits) && input.edits.length > 0) {
+    const edits = input.edits as unknown[];
+    const lines: string[] = [];
+    for (const [i, edit] of edits.entries()) {
+      // An edit the card cannot draw exactly leaves every edit to the leftover input below.
+      if (!isRecord(edit) || typeof edit.old_string !== "string" || typeof edit.new_string !== "string") return null;
+      if (Object.keys(edit).some((k) => k !== "old_string" && k !== "new_string" && k !== "replace_all")) return null;
+      if (edit.replace_all !== undefined && typeof edit.replace_all !== "boolean") return null;
+      lines.push(`@@ Edit ${i + 1} of ${edits.length}${edit.replace_all === true ? ", every occurrence" : ""}`);
+      lines.push(...sign("-", edit.old_string), ...sign("+", edit.new_string));
+    }
+    return { preview: { kind: "diff", text: lines.join("\n") }, keys: ["edits"] };
+  }
+  if (event.tool_name === "NotebookEdit" && text("new_source") !== null) return { preview: { kind: "cell", text: text("new_source")!.replace(/\n$/, "") }, keys: ["new_source"] };
   return null;
+}
+
+/** The input keys each tool's card draws (as its detail, preview, purpose or sandbox line), or that change nothing it allows. */
+const DRAWN_KEYS: Record<string, string[]> = {
+  Bash: ["command", "description", "timeout", "run_in_background", "dangerouslyDisableSandbox"],
+  Write: ["file_path"],
+  Edit: ["file_path"],
+  MultiEdit: ["file_path"],
+  NotebookEdit: ["notebook_path"],
+  Read: ["file_path", "offset", "limit"],
+  WebFetch: ["url", "prompt"],
+  WebSearch: ["query"],
+};
+
+/**
+ * The rest of the input, when the card draws a tool's input in parts: every key it does not draw
+ * (a MultiEdit edit it cannot show as a change, a notebook cell's id and mode, a WebSearch's domain
+ * lists, anything a newer Claude Code adds), shown as JSON so nothing the person allows is hidden.
+ */
+function leftoverOf(event: InboxPermissionEvent, detail: Detail | null, previewKeys: string[]): string | null {
+  const drawn = DRAWN_KEYS[event.tool_name];
+  // A tool the card does not know, or one whose detail is the whole input already.
+  if (!drawn || detail === null || (detail.on === "block" && event.tool_name !== "Bash")) return null;
+  const input = event.tool_input;
+  const left = Object.fromEntries(
+    Object.entries(input).filter(([key, value]) => {
+      if (key === "dangerouslyDisableSandbox") return typeof value !== "boolean";
+      if (key === "description" || key === "prompt") return typeof value !== "string";
+      return !drawn.includes(key) && !previewKeys.includes(key);
+    }),
+  );
+  if (event.tool_name === "Bash" && typeof input.command !== "string") return null;
+  return Object.keys(left).length > 0 ? JSON.stringify(left, null, 2) : null;
 }
 
 /** What Claude says the call is for (a Bash call's description, a fetch's prompt): one plain line, or null. */
@@ -246,10 +370,13 @@ function purposeOf(event: InboxPermissionEvent): string | null {
 /**
  * Whether a launched session can switch to Full permissions (`bypassPermissions`):
  * Claude Code honours that switch only in a session started with them allowed.
- * Today that is a launch made with Settings → Agents' "Start new sessions with
- * full permissions" (`--permission-mode bypassPermissions`). If every launch
+ * The one source is the launch record, fixed when the launch is made from
+ * Settings → Agents' "Start new sessions with full permissions": every start
+ * and Try again of that launch reads it for `--permission-mode
+ * bypassPermissions` and the hook's `PLANNOTATOR_LAUNCH_FULL_PERMISSIONS`, and
+ * the card reads it for its offer, so the two always agree. If every launch
  * also passes `--allow-dangerously-skip-permissions` (the owner's open
- * question), this is where it says so.
+ * question), this and the start's flags change together.
  */
 export const inboxLaunchFullPermissions = (launch: { full_permissions?: true }): boolean => launch.full_permissions === true;
 
@@ -265,6 +392,8 @@ export interface InboxPermissionOptions {
   shownPath?: (path: string) => string;
   /** The session can switch to Full permissions (it started with them allowed). */
   fullPermissions?: boolean;
+  /** A Write's file exists (true), does not (false), or is not known (undefined): "overwrite", "create" or "write". */
+  overwrite?: boolean;
 }
 
 export interface InboxPermissionQuestion {
@@ -285,22 +414,31 @@ export interface InboxPermissionQuestion {
  */
 export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { agent: string; folder: string } & InboxPermissionOptions): InboxPermissionQuestion {
   const shownPath = options.shownPath ?? ((path: string) => path);
-  const { prompt, detail } = asked(event, options.agent, shownPath);
+  const overwrite = event.tool_name === "Write" ? options.overwrite : undefined;
+  const { prompt, detail } = asked(event, options.agent, shownPath, overwrite);
   const shown = detail === null ? null : shownDetail(detail);
-  const preview = previewOf(event);
+  const drawn = previewOf(event, overwrite);
+  const preview = drawn?.preview ?? null;
+  const leftover = leftoverOf(event, detail, drawn?.keys ?? []);
   const purpose = purposeOf(event);
+  const unsandboxed = event.tool_name === "Bash" && event.tool_input.dangerouslyDisableSandbox === true;
   const choices = inboxPermissionChoices(event, options);
   // Everything taken from the tool's input goes OVER the block, never in it: inside, a line that reads
   // as a list item (`- Deny`, a commit message's bullets, `- [ ] x`) would become a choice.
   // The block holds only the prompt and the choices, written as checkboxes.
   const lines: string[] = [];
+  if (unsandboxed) lines.push(INBOX_PERMISSION_UNSANDBOXED, "");
   if (shown) lines.push(shown, "");
   if (preview) lines.push(fenced(preview.text, preview.kind), "");
+  if (leftover) lines.push(fenced(leftover, "input"), "");
   if (purpose) lines.push(`Purpose: ${purpose}`, "");
   lines.push(`in ${code(oneLine(options.folder, 200))}`, "", ":::question", prompt, "");
   for (const choice of choices) lines.push(`- [ ] ${choice}`);
   lines.push(":::");
-  const askable = (detail === null || shown !== null) && (preview === null || preview.text.length <= INBOX_PERMISSION_PREVIEW_MAX);
+  const askable =
+    (detail === null || shown !== null) &&
+    (preview === null || preview.text.length <= INBOX_PERMISSION_PREVIEW_MAX) &&
+    (leftover === null || leftover.length <= INBOX_PERMISSION_DETAIL_MAX);
   return { body: lines.join("\n"), prompt, choices, askable };
 }
 
@@ -325,8 +463,12 @@ export interface InboxPermissionBody {
   /** The command or the input (a block), or the path, link or query (a line), as shown. */
   detail: { text: string; on: "block" | "line" } | null;
   preview: InboxPermissionPreview | null;
+  /** The input's keys the card does not draw in parts, as JSON, or null. */
+  leftover: string | null;
   purpose: string | null;
   folder: string | null;
+  /** A Bash call that asks to run outside the sandbox. */
+  unsandboxed: boolean;
 }
 
 /** Inline code back to its text (`code`). */
@@ -347,18 +489,20 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
   const lines = body.split("\n");
   const end = lines.indexOf(":::question");
   const head = end < 0 ? lines : lines.slice(0, end);
-  const out: InboxPermissionBody = { detail: null, preview: null, purpose: null, folder: null };
+  const out: InboxPermissionBody = { detail: null, preview: null, leftover: null, purpose: null, folder: null, unsandboxed: false };
   for (let i = 0; i < head.length; i++) {
     const line = head[i]!;
-    const open = /^(`{3,})(write|diff)?$/.exec(line);
+    const open = OPEN_FENCE.exec(line);
     if (open) {
       const close = head.indexOf(open[1]!, i + 1);
       if (close < 0) break;
       const text = head.slice(i + 1, close).join("\n").replace(/^(\s*):​::/gm, "$1:::");
-      if (open[2]) out.preview = { kind: open[2] as InboxPermissionPreview["kind"], text };
+      if (open[2] === "input") out.leftover = text;
+      else if (open[2]) out.preview = { kind: open[2] as InboxPermissionPreview["kind"], text };
       else out.detail = { text, on: "block" };
       i = close;
-    } else if (line.startsWith("in `")) out.folder = uncode(line.slice(3));
+    } else if (line === INBOX_PERMISSION_UNSANDBOXED) out.unsandboxed = true;
+    else if (line.startsWith("in `")) out.folder = uncode(line.slice(3));
     else if (line.startsWith("Purpose: ")) out.purpose = line.slice("Purpose: ".length);
     else if (line.startsWith("`")) {
       const text = uncode(line);
