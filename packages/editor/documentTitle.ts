@@ -45,6 +45,8 @@ export interface DocumentTitleInput {
 export interface DocumentHeaderName {
   name: string;
   title?: string;
+  /** `name` is a path: cut from the start when the header runs short, so its last name stays whole. */
+  cutsFromStart?: boolean;
 }
 
 const URL_PATTERN = /^https?:\/\//i;
@@ -148,6 +150,11 @@ function documentName(input: DocumentTitleInput): { name: string; title?: string
   if (input.liveAppUrl) {
     return { name: urlHost(input.liveAppUrl), title: scrubbedUrl(input.liveAppUrl), web: true };
   }
+  // A folder session is named by its folder whichever file is open, a document
+  // linked from one included: the folder is what the session is about.
+  if (input.annotateSource === 'folder' && input.folderPath && !input.bundle) {
+    return { name: `${annotateBundleBaseName(input.folderPath)}/`, title: input.folderPath, web: false };
+  }
   const path = openPath(input);
   if (path) {
     if (input.bundle && input.bundle.index >= 0) {
@@ -157,16 +164,14 @@ function documentName(input: DocumentTitleInput): { name: string; title?: string
     return { name: pathDisplayName(path), title: web ? scrubbedUrl(path) : path, web };
   }
   if (input.annotateSource === 'message') return { name: 'Last message', web: false };
-  if (input.annotateSource === 'folder' && input.folderPath) {
-    return { name: `${annotateBundleBaseName(input.folderPath)}/`, title: input.folderPath, web: false };
-  }
   return null;
 }
 
 /**
  * The browser tab's title, name first: `rollout-plan.md · acme/payments`,
- * `docs.stripe.com/refunds · Plannotator`, `Add partial refunds (plan) · …`.
- * Archive, goal setup, share links and an unnamed plan keep today's title.
+ * `docs.stripe.com/refunds · Plannotator`, `Add partial refunds (plan) · …`,
+ * and a folder session's folder, `docs/ · acme/payments`, whichever file is
+ * open. Archive, goal setup, share links and an unnamed plan keep today's title.
  */
 export function documentTabTitle(input: DocumentTitleInput): string {
   if (!input.apiMode || input.archiveMode || input.goalSetupMode) return defaultTabTitle(input.repo);
@@ -183,10 +188,18 @@ export function documentTabTitle(input: DocumentTitleInput): string {
  * The name beside the logo in the desktop header, or null when it shows
  * none: plan review, archive, goal setup, share links, and a review of
  * several files (its switcher already names the open file).
+ *
+ * A folder session's header names its folder, as a path, whichever file is
+ * open, a document linked from one included, as its tab does by name: the
+ * folder is what the session is about, and the open file is named by the file
+ * list's selected row and the chip at the top of the document.
  */
 export function documentHeaderName(input: DocumentTitleInput): DocumentHeaderName | null {
   if (!input.apiMode || !input.annotateMode || input.archiveMode || input.goalSetupMode) return null;
   if (input.bundle) return null;
+  if (input.annotateSource === 'folder' && input.folderPath) {
+    return { name: input.folderPath, title: input.folderPath, cutsFromStart: true };
+  }
   const named = documentName(input);
   if (!named) return null;
   return named.title ? { name: named.name, title: named.title } : { name: named.name };
