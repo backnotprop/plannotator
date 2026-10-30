@@ -15,18 +15,24 @@ import {
 	piSupportsAutoReload,
 	reloadBlockedBy,
 	setupAutoReload,
+	type AutoReloadController,
 	type QuietState,
 } from "./auto-reload.ts";
 import { AUTO_RELOAD_DEFAULT, resolveAutoReload } from "../../packages/shared/config.ts";
 
 const MARKER_KEY = "__plannotatorAutoReload_v1";
 const NOTICED_KEY = "__plannotatorUpdateNoticed_v1";
+const TRIED_KEY = "__plannotatorAutoReloadTried_v1";
 
-afterEach(() => {
+/** A fresh Pi process: what one instance leaves for the next (marker, notes, tries) is gone. */
+function freshProcess() {
 	const store = globalThis as unknown as Record<string, unknown>;
 	delete store[MARKER_KEY];
 	delete store[NOTICED_KEY];
-});
+	delete store[TRIED_KEY];
+}
+
+afterEach(freshProcess);
 
 const quiet = (over: Partial<QuietState> = {}): QuietState => ({
 	now: 1_000_000,
@@ -146,6 +152,8 @@ function fakeCtx(opts: { hasUI?: boolean } = {}) {
 	let keyHandler: (() => unknown) | null = null;
 	const ctx = {
 		hasUI: opts.hasUI ?? true,
+		/** Pi makes the old instance's context throw once a reload went through. */
+		stale: false,
 		idle: true,
 		pending: false,
 		editor: "",
@@ -159,7 +167,10 @@ function fakeCtx(opts: { hasUI?: boolean } = {}) {
 			return ctx.pending;
 		},
 		ui: {
-			notify: (message: string, kind: string) => notes.push({ message, kind }),
+			notify: (message: string, kind: string) => {
+				if (ctx.stale) throw new Error("This extension ctx is stale after session replacement or reload.");
+				notes.push({ message, kind });
+			},
 			getEditorText: () => ctx.editor,
 			onTerminalInput: (handler: () => unknown) => {
 				keyHandler = handler;
@@ -188,6 +199,7 @@ interface WorldOptions {
 }
 
 async function world(opts: WorldOptions = {}) {
+	freshProcess();
 	let t = 0;
 	let onDisk: string | null = "1.0.0";
 	const f = fakePi();
@@ -497,34 +509,83 @@ describe("setupAutoReload: the command checks again, the last moment before the 
 	});
 });
 
+/** Pi's reload: the old context goes stale and the instance Pi loads starts (same process). */
+function reloadInto(w: Awaited<ReturnType<typeof world>>, loaded: string, onDisk = loaded) {
+	const next = fakePi();
+	const { ctx, notes } = fakeCtx();
+	let controller: AutoReloadController | null = null;
+	w.ctx.onReload = () => {
+		w.ctx.stale = true;
+		controller = setupAutoReload(next.pi, {
+			host: "pi",
+			enabled: true,
+			plannotatorBusy: () => null,
+			piVersion: async () => "0.84.4",
+			readOnDisk: () => onDisk,
+			loaded,
+			now: () => w.now,
+			poll: false,
+		});
+		next.emit("session_start", { reason: "reload" }, ctx);
+	};
+	return {
+		next,
+		notes,
+		get controller() {
+			return controller!;
+		},
+	};
+}
+
 describe("setupAutoReload: what the person sees", () => {
-	test("the instance Pi loads says it once, as info, and the old note is not shown", async () => {
+	test("the instance Pi loads says it once, as info, at its first poll (after Pi's own status line)", async () => {
 		const w = await world();
 		w.landStable();
-		// The instance Pi loads on the reload: same process, the new version.
-		const next = fakePi();
-		const { ctx: nextCtx, notes } = fakeCtx();
-		w.ctx.onReload = () => {
-			const c = setupAutoReload(next.pi, {
-				host: "pi",
-				enabled: true,
-				plannotatorBusy: () => null,
-				piVersion: async () => "0.84.4",
-				readOnDisk: () => "1.1.0",
-				loaded: "1.1.0",
-				now: () => w.now,
-				poll: false,
-			});
-			next.emit("session_start", { reason: "reload" }, nextCtx);
-			// The new instance never announces the version it loaded.
-			expect(c.claimNotice("1.1.0")).toBe(false);
-		};
+		const n = reloadInto(w, "1.1.0");
 		await w.runCommand();
-		expect(notes).toEqual([{ message: autoReloadedText("1.1.0"), kind: "info" }]);
+		// Pi writes "Reloaded …" after session_start, and that status would replace a line sent there.
+		expect(n.notes).toEqual([]);
+		await n.controller.ready;
+		n.controller.check();
+		expect(n.notes).toEqual([{ message: autoReloadedText("1.1.0"), kind: "info" }]);
+		n.controller.check();
+		expect(n.notes).toHaveLength(1);
+		// The new instance never announces the version it loaded, and the old one says nothing.
+		expect(n.controller.claimNotice("1.1.0")).toBe(false);
 		expect(w.notes).toEqual([]);
 	});
 
-	test("a reload that loaded no new Plannotator (broken update, refused): the note with /reload, and no second try", async () => {
+	test("a reload that loaded another version: the new instance gives the note, and never tries again", async () => {
+		const w = await world();
+		w.landStable();
+		const n = reloadInto(w, "1.0.0", "1.1.0");
+		await w.runCommand();
+		await n.controller.ready;
+		n.controller.check();
+		expect(n.notes).toHaveLength(1);
+		expect(n.notes[0]!.kind).toBe("warning");
+		expect(n.notes[0]!.message).toContain("/reload");
+		// One try per version per process: the new instance does not reload again (no loop).
+		for (let i = 0; i < 10; i++) {
+			w.advance(STABLE_MS);
+			n.controller.check();
+		}
+		expect(n.next.sent).toEqual([]);
+		expect(n.notes).toHaveLength(1);
+	});
+
+	test("an update that fails to load: Pi says so; the stale old context is never used to speak", async () => {
+		const w = await world();
+		w.landStable();
+		w.ctx.onReload = () => {
+			w.ctx.stale = true;
+		};
+		await w.runCommand();
+		expect(w.ctx.reloads).toBe(1);
+		expect(w.notes).toEqual([]);
+	});
+
+	test("Pi refused the reload: the note with /reload, and no second try", async () => {
 		const w = await world();
 		w.landStable();
 		await w.runCommand();

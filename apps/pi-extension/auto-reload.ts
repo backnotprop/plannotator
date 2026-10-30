@@ -25,9 +25,17 @@
  *   - nothing typed for QUIET_MS, and an empty editor (Pi swaps the editor
  *     for its "Reloading..." box for a moment; keys typed then are lost).
  * All of it is checked on every poll and again inside the command, the last
- * moment before the reload. One try per version: a reload that fails leaves
- * Pi's own "Reload failed" line, and the note with `/reload` is shown instead
- * of a second try.
+ * moment before the reload. One try per version per process (it outlives
+ * the reload): a reload that loads no new Plannotator leaves Pi's own line
+ * ("Reload failed", "Failed to load extension"), and the note with `/reload`
+ * is shown instead of a second try.
+ *
+ * The line after a reload waits for the first poll of the new instance. Pi
+ * writes its own "Reloaded …" status after the extensions' session_start, and
+ * a status line written right after another one replaces it, so a line sent
+ * from session_start was gone from the screen a moment later (real host,
+ * Pi 0.84.4). After the reload, the old instance's context is stale (Pi
+ * throws on any use), so only the new instance can speak.
  *
  * Oh My Pi has no reload for extension code (its `/restart` restarts the
  * process and stops a running turn, and is not reachable from an extension),
@@ -58,6 +66,8 @@ export const MIN_PI_FOR_AUTO_RELOAD = "0.84.2";
 const MARKER_KEY = "__plannotatorAutoReload_v1";
 /** Versions already announced in this process, so a reload's new instance does not repeat it. */
 const NOTICED_KEY = "__plannotatorUpdateNoticed_v1";
+/** Versions Pi already reloaded for in this process: one try each, across reloads. */
+const TRIED_KEY = "__plannotatorAutoReloadTried_v1";
 
 interface ReloadMarker {
 	from: string | null;
@@ -69,13 +79,17 @@ function store(): Record<string, unknown> {
 	return globalThis as unknown as Record<string, unknown>;
 }
 
-function noticed(): Set<string> {
+function processSet(key: string): Set<string> {
 	const s = store();
-	const existing = s[NOTICED_KEY];
+	const existing = s[key];
 	if (existing instanceof Set) return existing as Set<string>;
 	const fresh = new Set<string>();
-	s[NOTICED_KEY] = fresh;
+	s[key] = fresh;
 	return fresh;
+}
+
+function noticed(): Set<string> {
+	return processSet(NOTICED_KEY);
 }
 
 function readMarker(): ReloadMarker | undefined {
@@ -183,7 +197,9 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 	let inputAt: number | null = null;
 	let lastKeyAt: number | null = null;
 	let candidate: { version: string; since: number } | null = null;
-	const attempted = new Set<string>();
+	const attempted = processSet(TRIED_KEY);
+	/** Shown at the first poll after a reload, below Pi's own "Reloaded …" line. */
+	let afterReload: { message: string; kind: "info" | "warning" } | null = null;
 	let timer: ReturnType<typeof setInterval> | null = null;
 	let stopKeys: (() => void) | null = null;
 
@@ -260,7 +276,12 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 
 	const tick = () => {
 		const c = ctx;
-		if (!c || !hasUI(c) || !decided) return;
+		if (!c || !hasUI(c)) return;
+		if (afterReload) {
+			notify(c, afterReload.message, afterReload.kind);
+			afterReload = null;
+		}
+		if (!decided) return;
 		const onDisk = readOnDisk();
 		if (!onDisk || !loaded || onDisk === loaded) {
 			candidate = null;
@@ -307,9 +328,11 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 				}
 			}
 			await cmdCtx.reload();
-			// The new instance takes the marker in its session_start, before reload() returns.
-			// Still here with the marker: the reload did not load a new Plannotator (Pi said why,
-			// "Reload failed: …"), so the person gets the note and loads it themselves.
+			// A new instance takes the marker in its session_start, before reload() returns.
+			// Still here with the marker: no Plannotator loaded. Either Pi refused the reload (its
+			// warning says why; this context still works, so the note follows it), or Pi reloaded
+			// and the update failed to load (Pi's "Failed to load extension" line; this context is
+			// stale and notify() drops the note).
 			const left = readMarker();
 			if (automatic && left) {
 				clearMarker();
@@ -326,9 +349,14 @@ export function setupAutoReload(pi: AutoReloadPi, options: AutoReloadOptions): A
 		compacting = false;
 		const marker = readMarker();
 		if (marker && now() - marker.at >= MARKER_MAX_AGE_MS) clearMarker();
-		else if (marker && (event as { reason?: string } | undefined)?.reason === "reload" && marker.to === loaded) {
+		else if (marker && (event as { reason?: string } | undefined)?.reason === "reload") {
 			clearMarker();
-			notify(c, autoReloadedText(marker.to), "info");
+			// The new version loaded: say so. Another one loaded (Pi read the package from
+			// elsewhere, or the files changed again): the note, since this was the one try.
+			if (marker.to === loaded) afterReload = { message: autoReloadedText(marker.to), kind: "info" };
+			else {
+				afterReload = { message: packageUpdatedMessage(loaded, marker.to, options.host), kind: "warning" };
+			}
 		}
 		if (!hasUI(c)) return;
 		stopKeys?.();
