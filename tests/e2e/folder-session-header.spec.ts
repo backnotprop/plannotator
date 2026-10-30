@@ -1,14 +1,15 @@
 /**
- * A folder session's header names the folder, and its tab names the open
- * file. Before, the header named the open file too (#2075), so the folder was
- * on screen only in the Files tab's root row, cut and in capitals.
+ * A folder session's header and tab name the folder, whichever file is open.
+ * Before, both named the open file once one was picked (#2075), so the folder
+ * was on screen only in the Files tab's root row, cut and in capitals.
  *
- * The header shows the folder's path cut from the start: when the header runs
- * short the parent folders give way and the folder's own name stays whole,
- * with the path in order up to it. Failures to catch: the header naming the
- * file again, the tab losing the file name (several tabs of one folder stay
- * apart only by it, #2061), the folder's name cut, and the path's separators
- * jumping to the far end (a right-to-left box without its isolate).
+ * The tab names the folder as `<folder>/ · <repository>`, the format #2075
+ * gave a folder session before a file is picked. The header shows the
+ * folder's path cut from the start: when the header runs short the parent
+ * folders give way and the folder's own name stays whole, with the path in
+ * order up to it. Failures to catch: the header or the tab naming the file
+ * again, the folder's name cut, and the path's separators jumping to the far
+ * end (a right-to-left box without its isolate).
  *
  * Annotate a folder at 1440 by 900 and in a 560 by 800 window. Against the
  * compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR, headless. Build
@@ -80,7 +81,7 @@ async function headerFit(page: Page): Promise<HeaderFit> {
   });
 }
 
-test('annotate a folder: the header names the folder, cut from the start, and the tab names the open file', async ({ browser }) => {
+test('annotate a folder: the header and the tab name the folder, the header cut from the start', async ({ browser }) => {
   expect(existsSync(binary), 'build the scratch binary first').toBe(true);
   const root = inboxScratch('plannotator-folder-session-header-e2e-');
   mkdirSync(join(root, 'data'), { recursive: true });
@@ -109,13 +110,14 @@ test('annotate a folder: the header names the folder, cut from the start, and th
     await page.getByText('proposal', { exact: true }).first().click();
     await expect(page.locator('article[data-print-region="article"]:visible h1')).toHaveText(/^Proposal/);
 
-    // Room for the whole path: the header names the folder, the tab the file.
+    // Room for the whole path: the header names the folder, and so does the tab, with a file open.
     let f = await headerFit(page);
     expect(f.text, '1440: the header names the folder, as its path').toBe(folder);
     expect(f.last).toBe(FOLDER);
     expect(f.lastCut, '1440: the folder name is whole').toBe(false);
     expect(f.inOrder, '1440: the path reads in order').toBe(true);
-    await expect(page).toHaveTitle(/^proposal\.md · /);
+    // The scratch folder is no git repository, so the folder sits beside Plannotator (#2075's rule).
+    await expect(page).toHaveTitle(`${FOLDER}/ · Plannotator`);
 
     // A narrow window: the parent folders give way, the folder's name stays whole.
     await page.setViewportSize({ width: 560, height: 800 });

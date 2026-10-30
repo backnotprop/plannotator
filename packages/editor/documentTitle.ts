@@ -150,6 +150,11 @@ function documentName(input: DocumentTitleInput): { name: string; title?: string
   if (input.liveAppUrl) {
     return { name: urlHost(input.liveAppUrl), title: scrubbedUrl(input.liveAppUrl), web: true };
   }
+  // A folder session is named by its folder whichever file is open, a document
+  // linked from one included: the folder is what the session is about.
+  if (input.annotateSource === 'folder' && input.folderPath && !input.bundle) {
+    return { name: `${annotateBundleBaseName(input.folderPath)}/`, title: input.folderPath, web: false };
+  }
   const path = openPath(input);
   if (path) {
     if (input.bundle && input.bundle.index >= 0) {
@@ -159,16 +164,14 @@ function documentName(input: DocumentTitleInput): { name: string; title?: string
     return { name: pathDisplayName(path), title: web ? scrubbedUrl(path) : path, web };
   }
   if (input.annotateSource === 'message') return { name: 'Last message', web: false };
-  if (input.annotateSource === 'folder' && input.folderPath) {
-    return { name: `${annotateBundleBaseName(input.folderPath)}/`, title: input.folderPath, web: false };
-  }
   return null;
 }
 
 /**
  * The browser tab's title, name first: `rollout-plan.md · acme/payments`,
- * `docs.stripe.com/refunds · Plannotator`, `Add partial refunds (plan) · …`.
- * Archive, goal setup, share links and an unnamed plan keep today's title.
+ * `docs.stripe.com/refunds · Plannotator`, `Add partial refunds (plan) · …`,
+ * and a folder session's folder, `docs/ · acme/payments`, whichever file is
+ * open. Archive, goal setup, share links and an unnamed plan keep today's title.
  */
 export function documentTabTitle(input: DocumentTitleInput): string {
   if (!input.apiMode || input.archiveMode || input.goalSetupMode) return defaultTabTitle(input.repo);
@@ -187,10 +190,9 @@ export function documentTabTitle(input: DocumentTitleInput): string {
  * several files (its switcher already names the open file).
  *
  * A folder session's header names its folder, as a path, whichever file is
- * open, a document linked from one included: the folder is what the session
- * is about, and the open file is named by the file list's selected row and the
- * chip at the top of the document. The tab title still names the open file,
- * so several tabs stay apart (#2061).
+ * open, a document linked from one included, as its tab does by name: the
+ * folder is what the session is about, and the open file is named by the file
+ * list's selected row and the chip at the top of the document.
  */
 export function documentHeaderName(input: DocumentTitleInput): DocumentHeaderName | null {
   if (!input.apiMode || !input.annotateMode || input.archiveMode || input.goalSetupMode) return null;
