@@ -3445,11 +3445,11 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         className="ib-iconbtn ib-artbtn"
         aria-label={
           filesDoorOpen
-            ? 'Close files'
+            ? 'Hide files'
             : folderOnly
-              ? `Open files: project folder, ${folderLabel(filesUi.folder!)}`
+              ? `Show files: project folder, ${folderLabel(filesUi.folder!)}`
               : filesTabsOn
-                ? `Open files (${artifactList.length})`
+                ? `Show files (${artifactList.length})`
                 : `Artifacts, ${artifactList.length}`
         }
         aria-pressed={filesTabsOn ? filesUi.paneOpen : artifactsOn}

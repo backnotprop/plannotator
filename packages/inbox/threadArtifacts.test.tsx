@@ -174,7 +174,7 @@ test.skipIf(!hasDom)('the header: the folder button with the count, icons at the
   const el = await openThread();
   const b = button(el)!;
   // Seven artifacts: the image in the text (also attached: one), the spec, the sketch, the after image, the ZIP, the guide, the SQL.
-  expect(b.getAttribute('aria-label')).toBe('Open files (7)');
+  expect(b.getAttribute('aria-label')).toBe('Show files (7)');
   expect(b.getAttribute('aria-pressed')).toBe('false');
   expect(b.getAttribute('aria-expanded')).toBe('false');
   expect(b.hasAttribute('title')).toBe(false);
@@ -194,7 +194,7 @@ test.skipIf(!hasDom)('the header: the folder button with the count, icons at the
   const plain = await renderApp(`#thread=${ids.waiting}`);
   await until(() => button(plain) !== null, 'the folder button on a thread with no artifact');
   const folderButton = button(plain)!;
-  expect(folderButton.getAttribute('aria-label')).toMatch(/^Open files: project folder, billing/);
+  expect(folderButton.getAttribute('aria-label')).toMatch(/^Show files: project folder, billing/);
   expect(folderButton.textContent).toBe('');
   act(() => folderButton.click());
   // The pane opens on the project folder: the files panel shows, focus in its filter, the empty grid points there.
@@ -263,7 +263,7 @@ test.skipIf(!hasDom)("the folder is the pane's toggle: lit in the ×'s place whi
   const lit = button(el)!;
   expect(lit.getAttribute('aria-pressed')).toBe('true');
   expect(lit.getAttribute('aria-expanded')).toBe('true');
-  expect(lit.getAttribute('aria-label')).toBe('Close files');
+  expect(lit.getAttribute('aria-label')).toBe('Hide files');
   expect(lit.querySelector('[data-files-count]')).toBeNull();
   expect(lit.textContent).toBe('');
   // Counts once: not on the Artifacts tab either.
@@ -272,7 +272,7 @@ test.skipIf(!hasDom)("the folder is the pane's toggle: lit in the ×'s place whi
   act(() => el.querySelector<HTMLButtonElement>('[data-files-close]')!.click());
   await until(() => view(el) === null, 'the pane closed by its ×');
   expect(headOrder(el).slice(-2)).toEqual(['|', 'close']);
-  expect(button(el)!.getAttribute('aria-label')).toBe('Open files (7)');
+  expect(button(el)!.getAttribute('aria-label')).toBe('Show files (7)');
   expect(button(el)!.getAttribute('aria-expanded')).toBe('false');
   expect(button(el)!.querySelector('[data-files-count]')?.textContent).toBe('7');
 });

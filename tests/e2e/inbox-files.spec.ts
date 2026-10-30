@@ -15,7 +15,7 @@
  *   Artifacts.
  * - The folder button is the pane's toggle: closed, it carries the thread's
  *   file count beside the header's icons and the thread's × shows; open, it
- *   sits lit (pressed, expanded, "Close files") where the × was, without the
+ *   sits lit (pressed, expanded, "Hide files") where the × was, without the
  *   count, and the × is gone. The folder or the pane's own × closes the pane,
  *   and the thread's × comes back, focus on the folder.
  * - The panel is the same on every tab: a folder opened beside a file is
@@ -307,7 +307,7 @@ test("the folder button is the pane's toggle: lit where the thread's × was whil
     await expect(closeThread).toBeVisible();
     await expect(door).toHaveAttribute('aria-pressed', 'false');
     await expect(door).toHaveAttribute('aria-expanded', 'false');
-    await expect(door).toHaveAccessibleName(/^Open files \(\d+\)$/);
+    await expect(door).toHaveAccessibleName(/^Show files \(\d+\)$/);
     const n = /\((\d+)\)/.exec((await door.getAttribute('aria-label'))!)![1];
     await expect(count).toHaveText(n);
     expect(await lastButton()).toBe('Close the thread');
@@ -318,10 +318,10 @@ test("the folder button is the pane's toggle: lit where the thread's × was whil
     await expect(closeThread).toHaveCount(0);
     await expect(door).toHaveAttribute('aria-pressed', 'true');
     await expect(door).toHaveAttribute('aria-expanded', 'true');
-    await expect(door).toHaveAccessibleName('Close files');
+    await expect(door).toHaveAccessibleName('Hide files');
     await expect(count).toHaveCount(0);
     // Where the thread's × was: the header's last control.
-    expect(await lastButton()).toBe('Close files');
+    expect(await lastButton()).toBe('Hide files');
   };
   await shut();
   // The folder opens the pane and takes the ×'s place, lit, with no count (the "1 of N" under a file says it).
@@ -403,7 +403,7 @@ test('a thread with no artifact: the button opens its project folder; none for t
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.plainThread}`);
   const door = page.locator('[data-artifacts-button]');
-  await expect(door).toHaveAttribute('aria-label', 'Open files: project folder, ledger');
+  await expect(door).toHaveAttribute('aria-label', 'Show files: project folder, ledger');
   await expect(door.locator('.ib-artbtn-n')).toHaveCount(0);
   await door.click();
   // The pane opens on the folder: the panel lists it, focus in its filter, the empty grid points there.
