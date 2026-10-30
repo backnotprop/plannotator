@@ -505,10 +505,15 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const sent = JSON.parse(named.text.slice(named.text.indexOf('{'))) as { thread_id: string; attachments: { kind: string }[] }
     expect((await thread(w, sent.thread_id)).project.root).toBe(w.project)
     expect(sent.attachments[0]?.kind).toBe('code')
-    const plain = await session.callInbox({ action: 'send_message', body: 'From the notes folder.' }, notes)
+    // Without it, the session's own project (where it started), wherever the shell stands; a relative attachment is
+    // still the file in the folder the agent works in.
+    writeFileSync(join(notes, 'minutes.md'), '# Minutes\n')
+    const plain = await session.callInbox({ action: 'send_message', body: 'From the notes folder.', attachments: ['minutes.md'] }, notes)
     if ('deny' in plain) throw new Error(plain.deny)
-    expect((await thread(w, JSON.parse(plain.text.slice(plain.text.indexOf('{'))).thread_id)).project.root).toBe(notes)
-    w.proof(`project_path "../refund-service" from ${notes} landed in ${w.project}; without it, in ${notes}`)
+    const plainSent = JSON.parse(plain.text.slice(plain.text.indexOf('{'))) as { thread_id: string; attachments: { name: string; kind: string }[] }
+    expect((await thread(w, plainSent.thread_id)).project.root).toBe(w.project)
+    expect(plainSent.attachments.map((a) => [a.name, a.kind])).toEqual([['minutes.md', 'markdown']])
+    w.proof(`project_path "../refund-service" from ${notes} landed in ${w.project}; without it, also in ${w.project} (the session's folder), with notes/minutes.md attached`)
 
     expect(await killInbox(w)).toBe(first.pid)
     for (const bad of ['../missing', join(w.project, 'replay.sh'), 'two\nlines']) {

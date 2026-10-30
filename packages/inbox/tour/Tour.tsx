@@ -8,6 +8,7 @@
  * tour's state (model.ts); nothing here calls a route that writes. The
  * person's own Inbox stays mounted in App, untouched, and comes back on exit.
  */
+import { inboxUrl } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxInlineImage, InboxMessageWire } from '@plannotator/core/inbox-types';
@@ -964,7 +965,7 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
   useEffect(() => {
     const onError = (event: Event) => {
       const img = event.target;
-      if (!(img instanceof HTMLImageElement) || !img.src.includes('/api/inbox/tour/assets/')) return;
+      if (!(img instanceof HTMLImageElement) || !img.src.includes(inboxUrl('/tour/assets/'))) return;
       requestAnimationFrame(() => {
         const card = document.querySelector('[data-tour-message="ask"] .question-block');
         if (card && !card.querySelector('[data-question-tiles]')) degradedRef.current?.({ pictures: true });

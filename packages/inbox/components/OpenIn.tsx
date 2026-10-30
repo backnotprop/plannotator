@@ -1,3 +1,4 @@
+import { inboxUrl } from '../inboxUrl';
 import { useEffect, useRef, useState } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
@@ -24,7 +25,7 @@ import { Tip } from './Tip';
 export type OpenInSurface = 'apps' | 'tab';
 
 /** The Inbox's own, local-only app list (GET; 403 through the tailnet). */
-export const INBOX_OPEN_IN_APPS_URL = '/api/inbox/open-in/apps';
+export const INBOX_OPEN_IN_APPS_URL = inboxUrl('/open-in/apps');
 
 const ERROR_MS = 4000;
 

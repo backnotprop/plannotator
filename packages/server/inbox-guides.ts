@@ -36,7 +36,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { buildAuthoredGuideSnapshot } from "./guide/guide-cli";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_WAITS_TEXT, SEND_ROUTING_FIELDS, senderWakes, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
-  namingLine, ok, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
+  callerWorkingFolder, namingLine, ok, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
 
 /** How to read the diff to send as `patch` (Workspaces' local-diff steps, for this machine). */
 export const GUIDE_DIFF_STEPS =
@@ -245,7 +245,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
           input.subject ??
           (input.body?.trim() || input.reply_to ? undefined : (displayInboxSubject(`Guided review: ${described.ref.title}`) ?? undefined));
         const wakes = await senderWakes(context, ctx, input);
-        const sent = await sendAgentMessage(context, project, { ...input, body, subject }, described.ref, wakes);
+        const sent = await sendAgentMessage(context, project, { ...input, body, subject, working_folder: callerWorkingFolder(ctx) }, described.ref, wakes);
         // The blob is written once the message has landed, in the same turn (nothing can ask for it
         // in between); a refused send writes none, and a retry answers the first message's guide.
         if (!sent.replayed) writeBlob(context.store.dir, described.ref.sha256, Buffer.from(described.text, "utf8"));

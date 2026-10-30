@@ -65,15 +65,17 @@ export type InboxFilledArguments = Record<(typeof INBOX_FILLED_ARGUMENTS)[number
 
 /**
  * The one filled argument an agent may set itself: the repository or folder
- * a call is about, when it is not the session's working folder (a session
- * started in a notes subfolder). Optional in the agent's schema; absent, the
- * working folder is filled as before. The connection resolves a relative path
- * against the working folder and refuses a path that is not an existing
- * folder before anything reaches the Inbox.
+ * a call is about, when it is not the folder the session started in (a
+ * message about another repository). Optional in the agent's schema; absent,
+ * the connection fills the session's folder (the Claude Code mod: where the
+ * session started, which a shell `cd` never moves). The connection resolves a
+ * relative path against the current working folder and refuses a path that
+ * is not an existing folder before anything reaches the Inbox.
  */
 export const INBOX_AGENT_PROJECT_PATH = 'project_path'
 
-export const INBOX_AGENT_PROJECT_PATH_DESCRIPTION = 'The repository or folder this is about; defaults to your working folder.'
+export const INBOX_AGENT_PROJECT_PATH_DESCRIPTION =
+  'The repository or folder this is about; defaults to the folder your session started in. Pass it only when the message is about another repository or folder.'
 
 /** Why an agent's `project_path` is refused before any folder is looked at, or null when its shape passes. */
 export function inboxProjectPathShapeRefusal(value: unknown): string | null {
@@ -93,9 +95,33 @@ export function inboxProjectPathShapeRefusal(value: unknown): string | null {
  */
 export const INBOX_WAKES_META_KEY = 'ai.plannotator/inbox-wakes'
 
-/** The `tools/call` params for an Inbox tool call: `wakes` when this session's replies arrive as turns. */
-export function inboxToolCallParams(call: { name: string; arguments: Record<string, unknown> }, options: { wakes: boolean }): Record<string, unknown> {
-  return { name: call.name, arguments: call.arguments, ...(options.wakes ? { _meta: { [INBOX_WAKES_META_KEY]: true } } : {}) }
+/**
+ * The `_meta` key a connection sets on a send (`send_message`,
+ * `submit_guide`) to the absolute folder the agent works in now, when that is
+ * not the `project_path` it filled: the Claude Code mod files a session's
+ * messages under the folder it started in, while a shell `cd` moves the
+ * agent. Relative `attachments`, and the body's relative images and links
+ * (the message's `base_path`), then resolve there, where they resolved before
+ * the project stopped following the `cd`. Never sent with a `project_path`
+ * the agent named (its relative paths stay relative to it). An older Inbox
+ * ignores it; the mod also makes relative attachments absolute itself.
+ */
+export const INBOX_WORKING_FOLDER_META_KEY = 'ai.plannotator/working-folder'
+
+/**
+ * The `tools/call` params for an Inbox tool call: `wakes` when this session's
+ * replies arrive as turns, `workingFolder` (INBOX_WORKING_FOLDER_META_KEY)
+ * when the agent works outside the filled `project_path`.
+ */
+export function inboxToolCallParams(
+  call: { name: string; arguments: Record<string, unknown> },
+  options: { wakes: boolean; workingFolder?: string },
+): Record<string, unknown> {
+  const meta: Record<string, unknown> = {
+    ...(options.wakes ? { [INBOX_WAKES_META_KEY]: true } : {}),
+    ...(options.workingFolder ? { [INBOX_WORKING_FOLDER_META_KEY]: options.workingFolder } : {}),
+  }
+  return { name: call.name, arguments: call.arguments, ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}) }
 }
 
 /**

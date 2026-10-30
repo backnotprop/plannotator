@@ -219,7 +219,7 @@ describe("read_thread's list over a folder with no project of its own", () => {
       // /work/herd is a string prefix of /work/herdr but holds no project: nothing is named, nothing is made.
       const prefixOnly = structured<{ projects_inside?: unknown }>(await client.callTool({ name: "read_thread", arguments: { project_path: join(root, "work", "herd") } }));
       expect(prefixOnly.projects_inside).toBeUndefined();
-      expect(server.store.listProjects().length).toBe(projects + 1); // read_thread's own project for the folder asked, as before; the hint makes none
+      expect(server.store.listProjects().length).toBe(projects); // a list never makes a project (not even for the folder asked), and the hint makes none
     } finally {
       for (const [key, value] of [["HOME", saved.HOME], ["PLANNOTATOR_INBOX_CONNECT", saved.CONNECT]] as const) {
         if (value === undefined) delete process.env[key];

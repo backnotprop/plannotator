@@ -1,7 +1,7 @@
 ## Inbox: files, annotations, and guided reviews
 
 **Attachments and annotation** (record 2.1 to 2.8; files shown as they are now, versioned; any kind and from anywhere since the owner's 2026-10-10 ruling, design record not in this repo: "make it very accessible and ergonomic for an agent to point out a file so it shows").
-- `send_message` takes `attachments: [path]`: absolute (anywhere the agent's user can read) or relative to `project_path`.
+- `send_message` takes `attachments: [path]`: absolute (anywhere the agent's user can read) or relative to `project_path`, or to the folder the agent works in when its connection names one (`INBOX_WORKING_FOLDER_META_KEY`, the Claude Code mod after a shell `cd`; see "A session's project" in `inbox-foundation.md`).
 - At send time, `recordInboxAttachments` (`packages/shared/inbox/attachments.ts`) resolves each path to its realpath and checks every file before committing anything, with no size bound. It refuses only:
   - a path that is not a regular file (a folder answers "attach the files in it, or a zip of them"; a FIFO or device is refused without blocking)
   - the dotenv family, by the named path's name and by its target's (`inboxAttachmentNameRefusal`, annotate's rule: `.env` and any name ending in `.env` such as `prod.env`, `.envrc`, and any `.env.` name outside the annotatable doc set, so `.env.example` stays)

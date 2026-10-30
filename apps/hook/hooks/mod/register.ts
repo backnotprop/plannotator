@@ -397,6 +397,23 @@ async function writeContextWorks($: Engine, value: boolean): Promise<void> {
 }
 
 /**
+ * The folder this session files under in the Inbox, for its thread lists
+ * after a compaction or a resume: the session's own link's project folder
+ * (`InboxLink.projectFolder`, where its sends and New message land), else the
+ * session's root, else `fallback` or the working folder. Never the shell's
+ * cwd while a root answers: after a `cd` the list would name another project.
+ */
+async function inboxProjectFolderOf($: Engine, fallback?: string): Promise<string> {
+  const sessionId = String(await $.session.id())
+  const link = mod && !mod.isDisposed && mod.session.sessionId === sessionId ? mod.inbox : null
+  const folder = link ? await link.projectFolder().catch(() => null) : null
+  if (folder) return folder
+  const root = await Promise.resolve($.session.root()).then(String, () => '')
+  if (root.startsWith('/')) return root
+  return fallback ?? String(await $.session.cwd())
+}
+
+/**
  * The instance for the session the process is in NOW. `session.start` does
  * not fire for `/clear` or an in-process resume (the process goes on under
  * another session id), so the id is checked here and a new instance is made
@@ -417,8 +434,10 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       dataDir: settings.dataDir,
       interactive: true,
       cwd: async () => String(await $.session.cwd()),
-      // The session's root (where it started; a shell cd does not move it): its
-      // `claude --resume` folder, and where a plan's history chain is also looked for (#2197).
+      // The session's root (where it started; a shell cd does not move it, a /cd,
+      // a host directory change or a worktree move does): its
+      // `claude --resume` folder, its Inbox project folder (InboxLink.projectFolder),
+      // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       ...(inboxTools
         ? {
@@ -635,7 +654,7 @@ export function register(on: On) {
             hostOf($, allowed.debugPath),
             allowed.dataDir,
             String(await $.session.id()),
-            String(await $.session.cwd()),
+            await inboxProjectFolderOf($),
             inboxToolName,
           )
           await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderWithThreads(reminder, threads))).catch(() => undefined)
@@ -667,8 +686,8 @@ export function register(on: On) {
       const threads = await withinMs($, SESSION_THREADS_RESUME_MS, async () => {
         if ((await reminderGateDecided($)) !== true || !allowed || !inboxToolName) return null
         const sessionId = typeof e.session_id === 'string' && e.session_id ? e.session_id : String(await $.session.id())
-        const cwd = typeof e.cwd === 'string' && e.cwd ? e.cwd : String(await $.session.cwd())
-        return readSessionThreads(hostOf($, allowed.debugPath), allowed.dataDir, sessionId, cwd, inboxToolName)
+        const folder = await inboxProjectFolderOf($, typeof e.cwd === 'string' && e.cwd ? e.cwd : undefined)
+        return readSessionThreads(hostOf($, allowed.debugPath), allowed.dataDir, sessionId, folder, inboxToolName)
       })
       if (!threads) return result
       // Another handler's context stays, a list or one string.

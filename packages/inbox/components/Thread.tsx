@@ -1,3 +1,4 @@
+import { inboxUrl } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
@@ -289,7 +290,7 @@ const permissionChrome = () => PERMISSION_CHROME;
 /** The URL of a fence's embed document: the Inbox keeps the page and serves it under its own policy. */
 async function inboxEmbedUrl(html: string): Promise<string | null> {
   const answer = await inboxApi.embed(html);
-  return typeof answer.url === 'string' && answer.url.startsWith('/api/inbox/embeds/') ? answer.url : null;
+  return typeof answer.url === 'string' && answer.url.startsWith(inboxUrl('/embeds/')) ? answer.url : null;
 }
 
 /** One message's text, with its question cards (exported for its DOM test). */

@@ -15,8 +15,8 @@
  *     ico apng, `isReviewImagePath`), before anything is read.
  *  3. A relative path resolves against the folder the agent sent from
  *     (`base_path`, kept on the message when it is a subfolder of the
- *     project or a linked worktree of its repository), else the project
- *     root; an absolute one is taken as it is. It may lead anywhere the
+ *     project or a linked worktree of its repository, or the working folder
+ *     its connection named, wherever it is), else the project root; an absolute one is taken as it is. It may lead anywhere the
  *     person's user can read, as an attachment may (owner ruling
  *     2026-10-16: no project boundary), except (`403 image_hidden`), judged
  *     on the path as named AND on its realpath, so a symlink into `~/.ssh`
