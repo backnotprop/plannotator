@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
-import { claudeTrustsFolder, createAgentEnvironmentFor } from "./inbox-agents";
+import { createAgentEnvironmentFor } from "./inbox-agents";
+import { claudeTrustsFolder } from "./inbox-launch-claude";
 
 const restore: (() => void)[] = [];
 afterEach(() => {

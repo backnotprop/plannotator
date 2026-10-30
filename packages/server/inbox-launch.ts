@@ -54,7 +54,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { INBOX_HOST_NAMES, inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -67,8 +67,8 @@ import { getDefaultPlannotatorDataDir, getPlannotatorDataDir } from "@plannotato
 import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { agentVersionRun, claudeBypassSetup, claudeCodeInboxToolOn, claudeCodePluginEnabled, claudeTrustsFolder, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
-import { claudeAttachCommand, claudeTrustCommand, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost, type ClaudeLaunchMode } from "./inbox-launch-claude";
+import { agentVersionRun, claudeBypassSetup, claudeCodeInboxToolOn, claudeCodePluginEnabled, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
+import { claudeAttachCommand, claudeTrustCommand, claudeTrustFolder, claudeTrustsFolder, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost, type ClaudeLaunchMode } from "./inbox-launch-claude";
 import { launchPlainEnv, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import { createLaunchPermissions } from "./inbox-launch-permission";
@@ -278,13 +278,8 @@ export function createInboxLaunch(options: {
     log(`Inbox launch ${launch.id}: scratch folder removed (purge ${purge.exitCode})`);
     return true;
   };
-  /**
-   * The folder a start failure names and Open in Terminal trusts. A scratch launch: its root, so one trust covers
-   * every scratch folder in it (the Inbox makes plain folders, never repositories). Claude keys trust on a
-   * repository's root and never lets a parent's trust cover a nested repository, so a scratch folder the agent
-   * made a repository (`git init`) is trusted on its own.
-   */
-  const trustFolderOf = (launch: InboxLaunchRecord) => (launch.scratch && !existsSync(join(launch.folder, ".git")) ? dirname(launch.folder) : launch.folder);
+  /** The folder a start failure names and Open in Terminal trusts (the host's rule: a scratch launch's root, unless it became a repository). */
+  const trustFolderOf = (launch: InboxLaunchRecord) => claudeTrustFolder(launch.folder, launch.scratch);
   /** How a launch made now would start (`launchStartOf`), from the switch, the person's Claude setup and the last shell read. */
   const startNow = (setup: ReturnType<typeof claudeSetup>) =>
     launchStartOf({ setting: config().fullPermissions, defaultMode: setup.defaultMode, shellSkips: shell?.skips ?? false, consent: setup.consent, disabled: setup.disabled });

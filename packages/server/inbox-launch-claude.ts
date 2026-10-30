@@ -22,7 +22,10 @@
  * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
-import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { readAgentFile } from "./agent-files";
+import { claudeGlobalConfigPath, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
 export const CLAUDE_LAUNCH_MIN_VERSION = "2.1.314";
@@ -117,6 +120,46 @@ export function shellQuote(value: string): string {
 /** The command that opens the session in a terminal (the ⋯ menu's Copy attach command). */
 export function claudeAttachCommand(folder: string, short: string): string {
   return `cd ${shellQuote(folder)} && claude attach ${short}`;
+}
+
+// ── Workspace trust, as Claude Code keys it (code.claude.com/docs permissions, "workspace trust"; the real-CLI
+// smoke). `--bg` and a restart both check it; only an interactive `claude` accepts it, or an edit of
+// `~/.claude.json`, which the Inbox never makes. ──
+
+/** The most `.claude.json` the trust read reads (it holds per-project history and often passes 1 MiB). */
+const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Whether Claude Code trusts `folder`: in a git repository, through the repository root's own entry only (a
+ * parent's trust never covers a nested repository); outside one, the folder's or any folder's above it.
+ * Read from `projects[<path>].hasTrustDialogAccepted` in its global config. Read only. Unreadable: not trusted.
+ */
+export function claudeTrustsFolder(e: AgentEnvironment, folder: string): boolean {
+  const global = readAgentFile(claudeGlobalConfigPath(e), CLAUDE_JSON_MAX_BYTES);
+  if (global.kind !== "file") return false;
+  let projects: unknown;
+  try {
+    projects = (JSON.parse(global.text) as { projects?: unknown }).projects;
+  } catch {
+    return false;
+  }
+  if (!projects || typeof projects !== "object") return false;
+  const table = projects as Record<string, { hasTrustDialogAccepted?: unknown } | undefined>;
+  for (let dir = folder; ; dir = dirname(dir)) {
+    if (table[dir]?.hasTrustDialogAccepted === true) return true;
+    // A repository's root: only its own entry counts.
+    if (existsSync(join(dir, ".git"))) return false;
+    if (dirname(dir) === dir) return false;
+  }
+}
+
+/**
+ * Where a launch's trust is accepted (its untrusted failure names it; Open in Terminal runs `claude` there). A
+ * scratch folder: the scratch root, so one trust covers every plain folder in it; but one the agent made a
+ * repository (`git init`) is keyed on its own root, which the root's trust does not cover.
+ */
+export function claudeTrustFolder(folder: string, scratch: boolean): string {
+  return scratch && !existsSync(join(folder, ".git")) ? dirname(folder) : folder;
 }
 
 /** What Open in Terminal runs when no session exists yet (an untrusted folder): plain `claude`, so its trust prompt shows. */
