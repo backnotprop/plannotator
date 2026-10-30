@@ -273,6 +273,8 @@ export interface AttachmentPaneProps {
    * closes the file, so the bar has no close. Full screen ignores it. Absent: today's header.
    */
   tabs?: { row: ReactNode; crumb: ReactNode };
+  /** The pane's id while it is drawn with `tabs`: the thread header's folder button discloses it (`aria-controls`). */
+  tabsId?: string;
   /** The files panel at the body's right edge (Files tabs): while it shows, the comments fold into the header's button. */
   aside?: ReactNode;
   /** The window's toast: a drawing added to the reply says so, with Undo. */
@@ -1614,6 +1616,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   return (
     <section
       ref={sectionRef}
+      id={props.tabs && !full ? props.tabsId : undefined}
       tabIndex={-1}
       className={`ib-view${full ? ' ib-full ib-fullview' : ''}${phone ? ' ib-phone' : ''}${folded && !phone ? ' ib-fold' : ''}${hasPanel ? '' : ' ib-nopanel'}${sheetMode && sheet ? ' ib-panel-open' : ''}${drawerMode && drawer && hasPanel ? ' ib-drawer' : ''}${props.tabs && !full ? ' ib-tabbed' : ''}${props.aside != null && !full ? ' ib-withtree' : ''}`}
       aria-label={multi ? `${attachment.name}, ${optionSet ? 'option' : 'file'} ${index + 1} of ${steps.length}` : attachment.name}
@@ -1703,7 +1706,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           shifted={drawerMode && drawer && hasPanel}
         />
       ) : props.tabs ? (
-        <div className="ib-ftop ib-ftop2" data-files-header="">
+        <div className="ib-ftop" data-files-header="">
           {props.tabs.row}
           {/* The file on screen: where it is and whose it is, its tools, then the view switch. */}
           <div className="ib-vhead ib-vslim">

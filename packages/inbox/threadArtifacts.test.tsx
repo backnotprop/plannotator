@@ -9,7 +9,7 @@
  * "inbox-files-tabs", round 3) the grid not opening beside the thread on the
  * Artifacts tab (or hiding the messages, which stay the thread), the order, a
  * tile opening something other than what its message tile opens or not as a
- * tab, Escape and the pressed button not closing the pane (or not with focus
+ * tab, Escape and the lit folder button not closing the pane (or not with focus
  * on the button); and the phone's screen of its own, which still swaps.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -174,9 +174,11 @@ test.skipIf(!hasDom)('the header: the folder button with the count, icons at the
   const el = await openThread();
   const b = button(el)!;
   // Seven artifacts: the image in the text (also attached: one), the spec, the sketch, the after image, the ZIP, the guide, the SQL.
-  expect(b.getAttribute('aria-label')).toBe('Show files (7)');
-  expect(b.getAttribute('aria-pressed')).toBe('false');
+  // A disclosure for the pane beside the thread: a name that does not change, expanded or not, no pressed state.
+  expect(b.getAttribute('aria-label')).toBe('Files (7)');
+  expect(b.hasAttribute('aria-pressed')).toBe(false);
   expect(b.getAttribute('aria-expanded')).toBe('false');
+  expect(b.hasAttribute('aria-controls')).toBe(false);
   expect(b.hasAttribute('title')).toBe(false);
   expect(b.textContent).toBe('7');
   const expand = el.querySelector<HTMLButtonElement>('[data-expand-all]')!;
@@ -194,7 +196,7 @@ test.skipIf(!hasDom)('the header: the folder button with the count, icons at the
   const plain = await renderApp(`#thread=${ids.waiting}`);
   await until(() => button(plain) !== null, 'the folder button on a thread with no artifact');
   const folderButton = button(plain)!;
-  expect(folderButton.getAttribute('aria-label')).toMatch(/^Show files: project folder, billing/);
+  expect(folderButton.getAttribute('aria-label')).toBe('Files');
   expect(folderButton.textContent).toBe('');
   act(() => folderButton.click());
   // The pane opens on the project folder: the files panel shows, focus in its filter, the empty grid points there.
@@ -209,7 +211,7 @@ test.skipIf(!hasDom)('the button opens the grid beside the thread on the Artifac
   act(() => button(el)!.click());
   await until(() => tiles(el).length === 7, 'the grid');
   expect(window.location.hash).toBe(`#thread=${ids.artifacts.thread}&artifacts`);
-  expect(button(el)!.getAttribute('aria-pressed')).toBe('true');
+  expect(button(el)!.getAttribute('aria-expanded')).toBe('true');
   // The thread column is always the thread: the grid is beside it, on its tab.
   expect(messagesBody(el).hidden).toBe(false);
   expect(el.querySelector('[data-files-pane="artifacts"] [data-artifacts-view]')).not.toBeNull();
@@ -257,13 +259,18 @@ test.skipIf(!hasDom)("the folder is the pane's toggle: lit in the ×'s place whi
   expect(button(el)!.querySelector('[data-files-count]')?.textContent).toBe('7');
   act(() => button(el)!.click());
   await until(() => tiles(el).length === 7, 'the grid');
-  // Open: the folder ends the header where the × was, pressed and expanded, named for what it does now, no count.
+  // Open: the folder ends the header where the × was, lit and expanded, its name unchanged, no count; it controls the pane.
   expect(headOrder(el).slice(-4)).toEqual(['expand', 'archive', '|', 'folder']);
   expect(headOrder(el)).not.toContain('close');
   const lit = button(el)!;
-  expect(lit.getAttribute('aria-pressed')).toBe('true');
+  expect(lit.hasAttribute('aria-pressed')).toBe(false);
   expect(lit.getAttribute('aria-expanded')).toBe('true');
-  expect(lit.getAttribute('aria-label')).toBe('Hide files');
+  expect(lit.getAttribute('data-files-door')).toBe('open');
+  expect(lit.getAttribute('aria-label')).toBe('Files (7)');
+  const controlled = lit.getAttribute('aria-controls');
+  expect(controlled).toBeTruthy();
+  expect(el.ownerDocument.getElementById(controlled!)?.getAttribute('data-files-pane')).toBe('artifacts');
+  expect(el.querySelector('[data-files-close]')!.getAttribute('aria-label')).toBe('Close files');
   expect(lit.querySelector('[data-files-count]')).toBeNull();
   expect(lit.textContent).toBe('');
   // Counts once: not on the Artifacts tab either.
@@ -272,12 +279,13 @@ test.skipIf(!hasDom)("the folder is the pane's toggle: lit in the ×'s place whi
   act(() => el.querySelector<HTMLButtonElement>('[data-files-close]')!.click());
   await until(() => view(el) === null, 'the pane closed by its ×');
   expect(headOrder(el).slice(-2)).toEqual(['|', 'close']);
-  expect(button(el)!.getAttribute('aria-label')).toBe('Show files (7)');
+  expect(button(el)!.getAttribute('aria-label')).toBe('Files (7)');
   expect(button(el)!.getAttribute('aria-expanded')).toBe('false');
+  expect(button(el)!.hasAttribute('aria-controls')).toBe(false);
   expect(button(el)!.querySelector('[data-files-count]')?.textContent).toBe('7');
 });
 
-test.skipIf(!hasDom)('Escape and the pressed button close the pane, with focus on the button', async () => {
+test.skipIf(!hasDom)('Escape and the lit folder button close the pane, with focus on the button', async () => {
   const el = await openThread();
   act(() => button(el)!.click());
   await until(() => tiles(el).length === 7, 'the grid');
@@ -289,7 +297,7 @@ test.skipIf(!hasDom)('Escape and the pressed button close the pane, with focus o
   act(() => button(el)!.click());
   await until(() => view(el) !== null, 'the grid again');
   act(() => button(el)!.click());
-  await until(() => view(el) === null, 'the pressed button closes it');
+  await until(() => view(el) === null, 'the lit folder button closes it');
   expect(document.activeElement).toBe(button(el));
   // With the pane closed, Escape closes the thread as before.
   press('Escape', document.body);

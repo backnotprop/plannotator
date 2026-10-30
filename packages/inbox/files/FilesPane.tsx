@@ -7,10 +7,11 @@
  */
 import type { ReactNode, Ref } from 'react';
 
-export function FilesPane({ tabRow, grid, aside, paneRef }: { tabRow: ReactNode; grid: ReactNode; aside?: ReactNode; paneRef?: Ref<HTMLElement> }) {
+export function FilesPane({ id, tabRow, grid, aside, paneRef }: { id?: string; tabRow: ReactNode; grid: ReactNode; aside?: ReactNode; paneRef?: Ref<HTMLElement> }) {
   return (
     <section
       ref={paneRef}
+      id={id}
       tabIndex={-1}
       className={`ib-view ib-nopanel ib-tabbed ib-filesart${aside != null ? ' ib-withtree' : ''}`}
       aria-label="Artifacts"

@@ -184,10 +184,6 @@ export function useFilesTabs(input: FilesTabsInput) {
     lastCurrent.current = null;
     setTabs([]);
   }, [paneOpen, setTabs]);
-  /** The pane has shown its Artifacts tab since it opened (the door, or the tab): closing the last file goes back there. */
-  const artifactsShown = useRef(false);
-  if (!paneOpen) artifactsShown.current = false;
-  else if (artifactsRoute && fileId === null) artifactsShown.current = true;
 
   const tabViews: FileTabView[] = tabs.map((id) => {
     const path = projectFilePath(id);
@@ -212,14 +208,15 @@ export function useFilesTabs(input: FilesTabsInput) {
       setTabs(result.tabs);
       if (fileId !== id) return;
       if (result.current) input.showFile(result.current, { replace: true });
-      // The last file: back to Artifacts when the pane has shown it, else the pane closes, as a file's × did before.
-      else input.showArtifacts(artifactsShown.current, { replace: true });
+      // The last file: the pane closes, back to the thread alone (in full screen when it came from there), even when
+      // the Artifacts tab was shown first. Its tab is one click away again on the folder button.
+      else input.showArtifacts(false, { replace: true });
     };
     if (id === fileId) input.leave(null, go);
     else go();
   };
   const closeOthers = () => setTabs(closeOtherTabs(tabsRef.current, fileId));
-  // Close all: back to the thread alone, as closing the last file does when Artifacts was never shown.
+  // Close all: back to the thread alone, as closing the last file does.
   const closeAll = () =>
     input.leave(null, () => {
       setTabs([]);
@@ -230,7 +227,7 @@ export function useFilesTabs(input: FilesTabsInput) {
     input.leave(null, () => input.showArtifacts(true, { replace: true }));
   };
 
-  /** The pane's × (and Escape's last step): back to the thread alone; its tabs close. */
+  /** The pane's × and the lit folder button: back to the thread alone; its tabs close. */
   const closePane = () => input.leave(null, () => input.showArtifacts(false));
   /**
    * The folder button in the thread header, the pane's toggle: closed, it opens the pane (on the last file shown, else

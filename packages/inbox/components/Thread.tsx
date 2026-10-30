@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -3820,6 +3820,8 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
   // with the header's icons and carries the thread's file count; open, it moves to where the thread's × was, lit and
   // without the count (the "1 of 3" under the file says it), and the × comes back when the pane closes.
   const filesDoorOpen = filesTabsOn && filesUi.paneOpen;
+  /** The pane beside the thread (the Artifacts tab's or a file's): what the folder button discloses (`aria-controls`). */
+  const filesPaneId = `ib-files-pane-${useId().replace(/:/g, '')}`;
   const artifactsButton = onArtifacts !== undefined && (hasArtifacts || artifactsOn || folderOnly || filesDoorOpen);
   // Files beside the thread ("inbox-files-tabs"): opening the pane on Artifacts focuses its heading; closing it
   // (Escape, the pressed button) returns focus to the button when it was in the pane or nowhere. A change only,
@@ -3926,11 +3928,13 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
 
   // The folder button (the Artifacts button where files cannot show beside the thread). One element, drawn in one of two
   // places: with the header's icons while the pane is closed, at the header's end (the thread's × place) while it is open.
+  // Beside the thread it is a disclosure for the pane (`aria-expanded`, `aria-controls`; lit by `data-files-door`), with
+  // a name that does not change: "Files (N)", or "Files" when the thread has only its project folder.
   const folderButton = (
     <Tip
       content={
         filesDoorOpen
-          ? 'Close the files'
+          ? 'Close files'
           : folderOnly
             ? `Project folder: ${filesUi.folder!.path}`
             : filesTabsOn
@@ -3944,17 +3948,10 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         ref={artifactsButtonRef}
         type="button"
         className="ib-iconbtn ib-artbtn"
-        aria-label={
-          filesDoorOpen
-            ? 'Hide files'
-            : folderOnly
-              ? `Show files: project folder, ${folderLabel(filesUi.folder!)}`
-              : filesTabsOn
-                ? `Show files (${artifactList.length})`
-                : `Artifacts, ${artifactList.length}`
-        }
-        aria-pressed={filesTabsOn ? filesUi.paneOpen : artifactsOn}
+        aria-label={folderOnly ? 'Files' : filesTabsOn ? `Files (${artifactList.length})` : `Artifacts, ${artifactList.length}`}
+        aria-pressed={filesTabsOn ? undefined : artifactsOn}
         aria-expanded={filesTabsOn ? filesUi.paneOpen : undefined}
+        aria-controls={filesDoorOpen ? filesPaneId : undefined}
         onClick={() => (filesTabsOn ? filesUi.toggleDoor() : onArtifacts?.(!artifactsOn))}
         data-artifacts-button=""
         data-files-door={filesTabsOn ? (filesUi.paneOpen ? 'open' : 'closed') : undefined}
@@ -5034,6 +5031,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     {filesUi.panelPortal}
     {filesUi.artifactsTab && (
       <FilesPane
+        id={filesPaneId}
         tabRow={filesUi.artifactsTabRow}
         grid={
           <ArtifactsView
@@ -5057,6 +5055,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       <InboxFileSourceProvider source={filesUi.source}>
       <AttachmentPane
         ref={paneRef}
+        tabsId={filesPaneId}
         tabs={shownFull ? undefined : filesUi.paneTabs(openAttachment)}
         aside={shownFull ? undefined : filesUi.aside}
         attachment={openAttachment}

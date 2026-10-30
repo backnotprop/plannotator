@@ -240,8 +240,8 @@ test('the header: icons on the right with component tooltips, the folder with it
   const button = artifactsButton();
   await expect(button).toBeVisible();
   // On a desktop the button is the Files pane's toggle (approval "inbox-files-tabs", 2026-10-30).
-  await expect(button).toHaveAttribute('aria-label', 'Show files (11)');
-  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await expect(button).toHaveAttribute('aria-label', 'Files (11)');
+  await expect(button).not.toHaveAttribute('aria-pressed');
   await expect(button).toHaveAttribute('aria-expanded', 'false');
   await expect(button).not.toHaveAttribute('title');
   await expect(header().locator('[data-mark-read]')).toContainText('Mark read');
@@ -267,9 +267,10 @@ test('Artifacts opens beside the thread on its tab: a grid, newest message first
   const page = world.page;
   await artifactsButton().click();
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threadId}&artifacts$`));
-  await expect(artifactsButton()).toHaveAttribute('aria-pressed', 'true');
-  // Open, the folder is lit where the thread's × was, named for closing, with no count.
-  await expect(artifactsButton()).toHaveAccessibleName('Hide files');
+  await expect(artifactsButton()).toHaveAttribute('aria-expanded', 'true');
+  // Open, the folder is lit where the thread's × was, its name unchanged, with no count.
+  await expect(artifactsButton()).toHaveAttribute('data-files-door', 'open');
+  await expect(artifactsButton()).toHaveAccessibleName('Files (11)');
   await expect(artifactsButton()).toHaveText('');
   await expect(header().getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   await expect(page.locator('[data-artifacts-view] h2')).toBeFocused();
@@ -383,7 +384,7 @@ test('a thread with no artifact: the button is its project folder\'s (no count);
   await page.goto(`${world.url}#thread=${world.emptyThread}`);
   await expect(page.locator('section.ib-pane [data-archive]')).toBeVisible();
   // On a desktop the thread's project folder keeps the button (owner, 2026-10-27): named for the folder, no count.
-  await expect(artifactsButton()).toHaveAttribute('aria-label', 'Show files: project folder, checkout-web');
+  await expect(artifactsButton()).toHaveAttribute('aria-label', 'Files');
   await page.goto(`${world.url}#thread=${world.emptyThread}&artifacts`);
   await expect(page.locator('[data-artifacts-empty]')).toContainText('No artifacts in this thread yet');
   await shot(page, '04-empty-desktop');

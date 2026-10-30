@@ -224,7 +224,8 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox and Es
   // Escape leaves full screen first (the thread stays), then closes the thread.
   await enter.click();
   await expect(page.locator('.ib-listcol')).toHaveCount(0);
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  // The keyboard's path: focus is on ‹ Inbox (its tooltip lets Escape through).
+  await expect(leave).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await expect(pane).toBeVisible();
@@ -260,6 +261,15 @@ test('the thread in full screen with a file: the file opens beside it; closing i
   await pane.locator('[data-artifacts-button]').click();
   await expect(page.locator('[data-files-pane]')).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
+  // Artifacts first, then a tile's file: closing that last tab still returns to the thread in full screen.
+  await pane.locator('[data-artifacts-button]').click();
+  await page.locator(`[data-files-pane="artifacts"] [data-artifact-tile][aria-label^="invoice-plan.md"]`).first().click();
+  await expect(view).toBeVisible();
+  await page.locator('[data-tab-close]').first().click({ force: true });
+  await expect(view).toHaveCount(0);
+  await expect(page.locator('[data-files-pane]')).toHaveCount(0);
+  await expect(pane).toHaveAttribute('data-full', '');
+  await expect(page.locator('.ib-listcol')).toHaveCount(0);
   // ‹ Inbox with a file open closes the file and leaves full screen: the list comes back.
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
   await expect(view).toBeVisible();
@@ -311,7 +321,7 @@ test('a thread that came back from the archive, and an archived one: the same or
   await shot(page, '5-came-back');
   // A thread that came back is not resolved for the window, so Mark read is offered and leads. It has no artifact,
   // but it has a project folder: the folder button keeps its place (owner, 2026-10-27).
-  await expect(backPane.locator('[data-artifacts-button]')).toHaveAccessibleName(/^Show files: project folder, /);
+  await expect(backPane.locator('[data-artifacts-button]')).toHaveAccessibleName('Files');
   expect(await headerOrder(backPane)).toEqual(['full', 'mark-read', 'artifacts', 'expand', 'archive', 'more', 'close']);
 
   await page.goto(`${world.url}#thread=${threads.archived}`);

@@ -146,8 +146,8 @@ export function FilesTabRow(props: FilesTabRowProps) {
         </DropdownMenu>
       )}
       {props.trailing}
-      <Tip content="Close the files">
-        <button type="button" className="ib-iconbtn ib-tclose" aria-label="Close the files" onClick={props.onClosePane} data-files-close="">
+      <Tip content="Close files">
+        <button type="button" className="ib-iconbtn ib-tclose" aria-label="Close files" onClick={props.onClosePane} data-files-close="">
           <Icon name="x" size={16} />
         </button>
       </Tip>

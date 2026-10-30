@@ -4588,7 +4588,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-pbody[hidden], .ib-pfoot[hidden] { display: none !important; }
 .pn-inbox .ib-iconbtn.ib-artbtn { width: auto; min-width: 30px; gap: 5px; padding: 0 7px; flex: none; }
 .ib-artbtn-n { font-size: var(--ib-fs-12, 12px); font-weight: 600; font-variant-numeric: tabular-nums; }
-.pn-inbox .ib-iconbtn.ib-artbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.pn-inbox .ib-iconbtn.ib-artbtn[aria-pressed="true"], .pn-inbox .ib-iconbtn.ib-artbtn[data-files-door="open"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 .ib-phead .ib-artbtn + .ib-iconbtn, .ib-phead .ib-artbtn + span + .ib-iconbtn { margin-left: 2px; }
 .ib-art-ph-title { margin-left: 4px; font-size: var(--ib-fs-15, 15px); font-weight: 650; white-space: nowrap; }
 .ib-art-ph-n { margin-left: 6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
@@ -5672,7 +5672,6 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-tsel:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-tl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-tcm { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); font-variant-numeric: tabular-nums; }
-.ib-tcm-q { color: var(--muted-foreground); font-weight: 500; }
 .ib-tend { position: relative; width: 22px; height: 34px; flex: none; display: inline-grid; place-items: center; margin-right: 3px; }
 .ib-tend .ib-tcm { grid-area: 1 / 1; pointer-events: none; }
 .ib-tx { grid-area: 1 / 1; width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); opacity: 0; cursor: pointer; }
