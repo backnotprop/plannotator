@@ -97,3 +97,6 @@
   .pc-modes > span:first-child { flex-basis: 100%; }
   .pc-rec-reason { padding-left: 14px; }
 }
+
+/* The ways to Terminal (a prompt the host takes only there, or an allow it did not take): links, side by side. */
+.pc-term { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; }

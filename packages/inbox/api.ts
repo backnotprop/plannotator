@@ -148,6 +148,8 @@ export interface ThreadModel {
   row?: InboxListRow | null;
   /** A launched thread's run line (inbox-launch.ts): null while the agent rests. Absent: not a launched thread, or launch is off. */
   run?: InboxRun | null;
+  /** With `run`: the command that attaches to the launched session in a terminal, also while it rests; null before it exists. */
+  attach_command?: string | null;
 }
 
 export interface ReplyResult {

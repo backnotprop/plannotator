@@ -162,7 +162,7 @@ describe("the question", () => {
     const edit = inboxPermissionQuestion(event({ tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "let a = 1;", new_string: "let a = 2;\nlet b = 3;" } }), { agent: "Claude Code", folder: "/w" });
     expect(readInboxPermissionBody(edit.body).preview).toEqual({ kind: "diff", text: "-let a = 1;\n+let a = 2;\n+let b = 3;" });
     const bash = inboxPermissionQuestion(event({ tool_input: { command: "bun run build", description: "Build the Inbox bundle" } }), { agent: "Claude Code", folder: "~/p" });
-    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, leftover: null, purpose: "Build the Inbox bundle", folder: "~/p", unsandboxed: false, linksTo: null });
+    expect(readInboxPermissionBody(bash.body)).toEqual({ detail: { text: "bun run build", on: "block" }, preview: null, leftover: null, purpose: "Build the Inbox bundle", folder: "~/p", unsandboxed: false, linksTo: null, note: null });
     const page = inboxPermissionQuestion(event({ tool_name: "WebFetch", tool_input: { url: "https://bun.sh/docs", prompt: "How does Bun split chunks?" } }), { agent: "Claude Code", folder: "~/p" });
     expect(readInboxPermissionBody(page.body).purpose).toBe("How does Bun split chunks?");
     // A purpose that cannot be shown on one line is left out (it is commentary, not the request).
@@ -393,6 +393,18 @@ describe("the answer and the decision", () => {
     expect(inboxPermissionChoices(e, { full: true, fullPermissions: true })).toEqual(inboxPermissionChoices(e).filter((l) => l !== "Allow and switch to Auto mode"));
     expect(inboxPermissionChoices(e, { full: true }).at(-1)).toBe("Deny");
     expect(inboxPermissionAnswer(answer(["Allow and switch to Auto mode"]), e, { full: true }).choice).toBe("once");
+  });
+
+  // Claude Code ignores a hook's allow for a check only a person may approve: such a card offers no allow at all.
+  test("a host that takes only a deny from here: Deny alone, and its note over the block, read back for the card", () => {
+    expect(inboxPermissionChoices(e, { allowHere: false, fullPermissions: true })).toEqual(["Deny"]);
+    const note = "Claude Code only accepts this approval in Terminal.";
+    const question = inboxPermissionQuestion(e, { agent: "Claude Code", folder: "~/p", allowHere: false, note });
+    expect(question.choices).toEqual(["Deny"]);
+    expect(readInboxPermissionBody(question.body).note).toBe(note);
+    // The block holds the prompt and Deny only: the note never becomes a choice.
+    expect(question.body.slice(question.body.indexOf(":::question"))).not.toContain(note);
+    expect(readInboxPermissionBody(inboxPermissionQuestion(e, { agent: "Claude Code", folder: "~/p" }).body).note).toBeNull();
   });
 
   test("a mode switch allows this tool input and sets the session's mode, for this session only", () => {

@@ -375,8 +375,8 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   expect(runNow.run?.state).toBe('starting');
   await expect(p.locator('[data-run="starting"]')).toBeVisible();
 
-  // 06: the session polls, takes the message as its first turn: "Claude Code is working · 1 min  Stop".
-  await expect(p.locator('[data-run="working"]')).toContainText(/^Claude Code is working · \d+ min/, { timeout: 20_000 });
+  // 06: the session polls, takes the message as its first turn: "Claude Code is working  Stop" (no "· 1 min" under a minute).
+  await expect(p.locator('[data-run="working"]')).toContainText(/^Claude Code is working(?! · \d)/, { timeout: 20_000 });
   await expect(p.locator('[data-run="working"] [data-run-stop]')).toBeVisible();
   await expect(page.locator(`[data-thread-id="${threadId}"] [data-count-words="Working"]`)).toBeVisible();
   await shot(page, '06-working');

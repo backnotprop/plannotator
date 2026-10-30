@@ -35,6 +35,7 @@ export const INBOX_PERMISSION_NO_LONGER_WAITING = "No longer waiting.";
 /** The follow-up when a card could not offer exactly this prompt's choices: it is never answered here. */
 export const INBOX_PERMISSION_ASK_IN_TERMINAL = "This one can't be answered here. Answer it in Terminal.";
 
+
 /** The part of Claude Code's PermissionRequest stdin the Inbox reads. */
 export interface InboxPermissionEvent {
   session_id: string;
@@ -396,6 +397,10 @@ export interface InboxPermissionOptions {
   fullPermissions?: boolean;
   /** The session already runs in Full permissions (a launch made full): no mode switch is offered. */
   full?: boolean;
+  /** False when the host takes only a deny from here (its own dialog keeps the approval): the card offers Deny alone. */
+  allowHere?: boolean;
+  /** One plain line from the host the card shows over the answers (why only a deny is taken here), or null. */
+  note?: string | null;
   /** A Write's file exists (true), does not (false), or is not known (undefined): "overwrite", "create" or "write". */
   overwrite?: boolean;
   /** The file the tool writes is a symbolic link: where it points, as the person reads it ("Links to …" under the path; one line, so it reads back the same). */
@@ -404,6 +409,8 @@ export interface InboxPermissionOptions {
 
 /** The line under a file's path when the path is a symbolic link. */
 const LINKS_TO = "Links to ";
+/** The host's note line (`InboxPermissionOptions.note`). */
+const NOTE = "Note: ";
 
 /** The file tools whose path can be a symbolic link the write goes through. */
 const WRITES_A_FILE = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
@@ -446,6 +453,7 @@ export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { 
   if (preview) lines.push(fenced(preview.text, preview.kind), "");
   if (leftover) lines.push(fenced(leftover, "input"), "");
   if (purpose) lines.push(`Purpose: ${purpose}`, "");
+  if (options.note) lines.push(`${NOTE}${oneLine(options.note, 300)}`, "");
   lines.push(`in ${code(oneLine(options.folder, 200))}`, "", ":::question", prompt, "");
   for (const choice of choices) lines.push(`- [ ] ${choice}`);
   lines.push(":::");
@@ -459,9 +467,11 @@ export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { 
 /**
  * The choices a prompt's question must have, in order: Allow once, the
  * session choice when there is one, Deny, then the mode switches (Auto mode
- * always, Full permissions only when the session can switch to it).
+ * always, Full permissions only when the session can switch to it). Deny
+ * alone when the host takes no allow from here (`allowHere: false`).
  */
 export function inboxPermissionChoices(event: InboxPermissionEvent, options: InboxPermissionOptions = {}): string[] {
+  if (options.allowHere === false) return [INBOX_PERMISSION_DENY];
   const session = inboxPermissionSessionChoice(event, options.shownPath);
   return [
     INBOX_PERMISSION_ALLOW_ONCE,
@@ -484,6 +494,8 @@ export interface InboxPermissionBody {
   unsandboxed: boolean;
   /** Where the file's path points, when it is a symbolic link. */
   linksTo: string | null;
+  /** The host's note (why only a deny is taken here), or null. */
+  note: string | null;
 }
 
 /** Inline code back to its text (`code`). */
@@ -504,7 +516,7 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
   const lines = body.split("\n");
   const end = lines.indexOf(":::question");
   const head = end < 0 ? lines : lines.slice(0, end);
-  const out: InboxPermissionBody = { detail: null, preview: null, leftover: null, purpose: null, folder: null, unsandboxed: false, linksTo: null };
+  const out: InboxPermissionBody = { detail: null, preview: null, leftover: null, purpose: null, folder: null, unsandboxed: false, linksTo: null, note: null };
   for (let i = 0; i < head.length; i++) {
     const line = head[i]!;
     const open = OPEN_FENCE.exec(line);
@@ -520,6 +532,7 @@ export function readInboxPermissionBody(body: string): InboxPermissionBody {
     else if (line.startsWith("in `")) out.folder = uncode(line.slice(3));
     else if (line.startsWith(`${LINKS_TO}\``)) out.linksTo = uncode(line.slice(LINKS_TO.length));
     else if (line.startsWith("Purpose: ")) out.purpose = line.slice("Purpose: ".length);
+    else if (line.startsWith(NOTE)) out.note = line.slice(NOTE.length);
     else if (line.startsWith("`")) {
       const text = uncode(line);
       if (text !== null) out.detail = { text, on: "line" };

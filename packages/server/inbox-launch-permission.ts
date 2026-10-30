@@ -31,6 +31,14 @@
  * withdraws it at once as "Answered in Terminal.". Stop and Delete withdraw
  * at once. An Inbox restart forgets the leases: each open question gets a
  * fresh one, and the hook, retrying every 2 s, renews it.
+ *
+ * An allow is checked, never assumed: Claude Code ignores a hook's allow for a
+ * check only a person may approve (its dangerous-removal safety check, for
+ * one) and keeps its own Terminal dialog up; a deny always counts. After an
+ * allow, the first host read `APPROVAL_SETTLE_MS` later decides: the session
+ * still waiting on a permission prompt (and no newer question of ours) means
+ * Claude did not take it, and a follow-up says so (`CLAUDE_APPROVAL_NOT_TAKEN`);
+ * anything else means it went on. Until then the card says the answer was sent.
  */
 
 import { timingSafeEqual } from "node:crypto";
@@ -53,6 +61,7 @@ import {
   type InboxPermissionQuestion,
 } from "@plannotator/core/inbox-permission";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { CLAUDE_APPROVAL_NOT_TAKEN, claudePermissionTerms } from "./inbox-launch-claude";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -60,6 +69,10 @@ export const PERMISSION_HOLD_MS = 25_000;
 export const PERMISSION_LEASE_MS = 60_000;
 /** A host read this long after the question was asked can say the session went on without it. */
 const HOST_SETTLE_MS = 5_000;
+/** After an answer, a host read this much later says whether Claude Code went on (earlier reads still show our prompt). */
+export const APPROVAL_SETTLE_MS = 3_000;
+/** An allow nothing could check within this long (no host read) is taken as it was given. */
+const APPROVAL_CHECK_MAX_MS = 60_000;
 const CHECK_EVERY_MS = 200;
 
 const HOST = "claude-code";
@@ -155,6 +168,12 @@ export function createLaunchPermissions(options: {
   const holdMs = options.holdMs ?? PERMISSION_HOLD_MS;
   const leaseMs = options.leaseMs ?? PERMISSION_LEASE_MS;
   const leases = new Map<string, Lease>();
+  /** Allows handed to a hook and not yet seen to take: question id → its launch and when. */
+  const checks = new Map<string, { launchId: string; at: number }>();
+  /** The latest answer handed to a hook, per launch (a host read before it settles still shows our prompt). */
+  const answeredAt = new Map<string, number>();
+  /** Questions whose answer was handed to a hook (once each). */
+  const answered = new Set<string>();
 
   /** The key in the launch's settings file; null when there is no such file. */
   const keyOf = (launchId: string): string | null => {
@@ -202,7 +221,12 @@ export function createLaunchPermissions(options: {
    * person recorded Claude Code's bypass consent (`bypass_available`, so it started with
    * --allow-dangerously-skip-permissions). Claude ignores a switch to bypass without it; an older launch has no flag.
    */
-  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({ shownPath: options.displayFolder, fullPermissions: root.launch!.bypass_available === true && root.launch!.full_permissions !== true, full: root.launch!.full_permissions === true });
+  const optionsFor = (root: InboxMessage): InboxPermissionOptions => ({
+    shownPath: options.displayFolder,
+    fullPermissions: root.launch!.bypass_available === true && root.launch!.full_permissions !== true,
+    full: root.launch!.full_permissions === true,
+    ...claudePermissionTerms(root.launch!),
+  });
 
   /** What the Inbox found at a file tool's path: a Write's file exists, does not, or is not known; where a link points. */
   type Target = Pick<InboxPermissionOptions, "overwrite" | "linksTo">;
@@ -264,7 +288,38 @@ export function createLaunchPermissions(options: {
       }
     }
     leases.delete(messageId);
+    if (message && !answered.has(messageId)) {
+      // Once per question: the hook may call again for an answer it lost.
+      answered.add(messageId);
+      const launchId = launchIdOf(message);
+      if (launchId) {
+        answeredAt.set(launchId, now());
+        if (choice !== "deny") checks.set(messageId, { launchId, at: now() });
+      }
+      options.onChange();
+    }
     return { status: "decided", message_id: messageId, choice, reason };
+  };
+
+  /** The launch a permission question belongs to (its thread's launched root). */
+  function launchIdOf(message: InboxMessage): string | null {
+    return options.roots().find((root) => root.thread_id === message.thread_id)?.launch?.id ?? null;
+  }
+
+  /** Whether Claude Code took an allow: a later question of ours, or the host gone on; null until a settled host read says. */
+  const tookAllow = (messageId: string, check: { launchId: string; at: number }): boolean | null => {
+    const root = options.rootOf(check.launchId);
+    if (!root) return true;
+    const asked = store.message(messageId);
+    // A newer question of ours: the session went on to its next prompt.
+    for (const id of store.threadMessageIds(root.thread_id)) {
+      const m = store.message(id);
+      if (m && m.id !== messageId && m.author.kind === "agent" && isInboxPermissionSession(m.author.session) && asked && Date.parse(m.created_at) > Date.parse(asked.created_at) && Date.parse(m.created_at) >= check.at) return true;
+    }
+    if (options.host.readAt() < check.at + APPROVAL_SETTLE_MS) return null;
+    const state = options.host.stateOf(root.launch!.session_ref);
+    if (state === null) return null;
+    return !(state !== "absent" && state.status === "waiting" && !!state.waitingFor && /permission/i.test(state.waitingFor));
   };
 
   /** The question's id, or null when this prompt is not asked here (its detail cannot be shown in full and exactly). */
@@ -361,6 +416,21 @@ export function createLaunchPermissions(options: {
      */
     sweep(): void {
       const t = now();
+      for (const [messageId, check] of checks) {
+        const took = tookAllow(messageId, check);
+        if (took === null && t - check.at < APPROVAL_CHECK_MAX_MS) continue;
+        checks.delete(messageId);
+        options.onChange();
+        if (took !== false) continue;
+        const message = store.message(messageId);
+        if (!message || message.author.kind !== "agent") continue;
+        try {
+          store.sendMessage({ project_id: message.project_id, author: message.author, permission: true, body: CLAUDE_APPROVAL_NOT_TAKEN, reply_to: messageId, idempotency_key: `perm-not-taken-${messageId}` });
+          log(`Inbox launch: the allow on ${messageId} did not take (Claude Code kept its own dialog)`);
+        } catch (error) {
+          log(`Inbox launch: could not record the allow on ${messageId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       for (const root of options.roots()) {
         for (const { message, at } of openPermissionQuestions(store, root.thread_id)) {
           if (!leases.has(message.id)) leases.set(message.id, { launchId: root.launch!.id, expires: t + leaseMs, holding: 0, askedAt: at });
@@ -390,10 +460,33 @@ export function createLaunchPermissions(options: {
       }
     },
 
-    /** Whether a lease is held for a launch now (the host's view is worth reading). */
+    /** Whether a lease is held, or an allow is checked, for a launch now (the host's view is worth reading). */
     holds(launchId: string): boolean {
       for (const lease of leases.values()) if (lease.launchId === launchId) return true;
+      for (const check of checks.values()) if (check.launchId === launchId) return true;
       return false;
+    },
+
+    /** The question of a launch whose allow is being checked (the card says "sent"), or null. */
+    checking(launchId: string): string | null {
+      for (const [messageId, check] of checks) if (check.launchId === launchId) return messageId;
+      return null;
+    },
+
+    /** A host read made before this still shows the launch's last answered prompt: never read as waiting on Terminal. */
+    settledAfter(launchId: string): number | null {
+      const at = answeredAt.get(launchId);
+      return at === undefined ? null : at + APPROVAL_SETTLE_MS;
+    },
+
+    /** When a host read is next due for an allow check (the earliest settle time not read yet), or null. */
+    hostDueAt(): number | null {
+      let due: number | null = null;
+      for (const check of checks.values()) {
+        const at = check.at + APPROVAL_SETTLE_MS;
+        if (options.host.readAt() < at) due = due === null ? at : Math.min(due, at);
+      }
+      return due;
     },
   };
 }
