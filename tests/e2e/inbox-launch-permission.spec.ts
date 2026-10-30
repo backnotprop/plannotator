@@ -45,7 +45,7 @@
  * binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-permission.spec.ts`.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -128,6 +128,13 @@ const card = (page: Page) => pane(page).locator('section.pc-card[data-permission
 const record = (page: Page, outcome: string) => pane(page).locator(`[data-perm-record="${outcome}"]`);
 /** The waiting card's answers are armed (they ignore activation for a moment after it appears or takes focus). */
 const armed = (page: Page) => expect(card(page)).toHaveAttribute('data-perm-armed', '', { timeout: 30_000 });
+/** Whether an element's text sits on one line (every line box at the same top). */
+const oneLine = (target: Locator) =>
+  target.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size === 1;
+  });
 /** An element's right edge inside the card's, and nothing of it clipped. */
 const fitsCard = (page: Page, selector: string) =>
   card(page).evaluate((c, sel) => {
@@ -589,6 +596,13 @@ test('the approved card: Write by Allow once (Enter), Bash by its session rule, 
     const mobile = await phone.newPage();
     await mobile.goto(page.url());
     await expect(card(mobile).locator('[data-perm-url]')).toBeVisible();
+    // At 390 wide: the verdict keeps its line (the path truncates first), and the header's status is one short line.
+    const verdict = record(mobile, 'once').last().locator('.pc-rec-verb');
+    await expect(verdict).toHaveText('Allowed once');
+    expect(await oneLine(verdict)).toBe(true);
+    const status = card(mobile).locator('.pc-head .pc-sub');
+    await expect(status).toHaveText(/^waiting( · \d+ min)?$/);
+    expect(await oneLine(status)).toBe(true);
     await card(mobile).locator('.pc-modes').scrollIntoViewIfNeeded();
     await shot(mobile, 'phone');
   } finally {
@@ -742,6 +756,7 @@ test('every rule a session choice grants is visible (five rules, desktop and pho
     const onPhone = card(mobile).locator('[data-perm="session"]');
     await expect(onPhone.locator('code')).toHaveText(rules, { timeout: 30_000 });
     expect(await fitsCard(mobile, '[data-perm="session"]')).toEqual({ inside: true, unclipped: true });
+    expect(await oneLine(card(mobile).locator('.pc-head .pc-sub'))).toBe(true);
     await onPhone.scrollIntoViewIfNeeded();
     await shot(mobile, 'session-rules-phone');
   } finally {

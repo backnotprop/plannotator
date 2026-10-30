@@ -428,7 +428,8 @@ export function PermissionCard({
         <AuthorMark author={message.author} />
         <span className="pc-app">Claude Code</span>{' '}
         <span className="pc-sub">
-          is waiting for your permission{minutes ? ` · ${minutes} min` : ''}
+          {phone ? 'waiting' : 'is waiting for your permission'}
+          {minutes ? ` · ${minutes} min` : ''}
         </span>
         <span className="pc-sp" />
         {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (

@@ -86,15 +86,17 @@
 .pn-inbox .pc-rec-line:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
 .pc-rec-icon { display: inline-flex; flex: none; color: var(--muted-foreground); }
 .pc-rec-icon[data-kind="allow"] { color: var(--success); }
+/* The verdict keeps its line: the path takes only the room left (basis 0) and truncates first; a verdict longer than the line wraps. */
 .pc-rec-verb { flex: 0 1 auto; font-weight: 500; }
-.pc-rec-what { flex-shrink: 100; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pc-rec-line > .pc-sp { display: none; }
+.pc-rec-what { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .pc-rec-reason { margin: -4px 0 0; padding: 0 14px 10px 60px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .pc-rec > .pc-body { border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
 
 /* Phone: the same card, its buttons stacked as 44 px targets. */
 @media (max-width: 640px) {
   .pc-card { max-width: none; }
-  .pc-sub { line-height: 1.35; }
+  .pc-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pc-row { flex-direction: column; align-items: stretch; }
   .pn-inbox .pc-row .ib-btn { min-height: 44px; justify-content: center; text-align: center; }
   .pc-modes > span:first-child { flex-basis: 100%; }
