@@ -104,6 +104,30 @@ test.skipIf(!hasDom)('General: available offers what the sidebar offers, Update 
   expect(calls).toEqual(['update', 'whats-new 0.28.32']);
 });
 
+test.skipIf(!hasDom)('General with update checks off (PLANNOTATOR_UPDATE_CHECK=0) and a newer release known: Update to X, and why checks are off', () => {
+  // The dead end on 0.28.38: "0.28.39 is available" with only Check now. The
+  // label is pinned on purpose: it is the action the person must always get.
+  const calls: string[] = [];
+  const off = details({ on: false, env: false }, { version: '0.28.32', fetched_at: new Date().toISOString(), published_at: null });
+  const el = row({ calls, details: off, update: update('available') });
+  const action = button(el, '[data-general-update]')!;
+  expect(action.textContent).toBe('Update to 0.28.32');
+  expect(action.disabled).toBe(false);
+  act(() => action.click());
+  expect(calls).toEqual(['update']);
+  expect(button(el, '[data-general-check]')).not.toBeNull();
+  // Why checks are off, naming the variable the Inbox started with.
+  expect(el.querySelector('[data-general-checks-off]')?.textContent).toContain('PLANNOTATOR_UPDATE_CHECK=0');
+  act(() => root!.unmount());
+  host!.remove();
+
+  // Nothing newer known: the reason is the status line itself, said once.
+  const quiet = row({ details: details({ on: false, env: false }) });
+  expect(quiet.querySelector('[data-general-update-status]')?.textContent).toContain('PLANNOTATOR_UPDATE_CHECK=0');
+  expect(quiet.querySelector('[data-general-checks-off]')).toBeNull();
+  expect(button(quiet, '[data-general-update]')).toBeNull();
+});
+
 test.skipIf(!hasDom)('General: ready restarts onto it; failed opens the failure (log, Try again); updating spins, disabled, with no Check now', () => {
   const calls: string[] = [];
   let el = row({ calls, update: update('ready') });
@@ -198,7 +222,7 @@ test.skipIf(!hasDom)('General says "Up to date" only after a recent successful c
     const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
     expect(status(details({}, { version: '0.28.31', fetched_at: hoursAgo(1), published_at: null }))).toMatch(/^Up to date · checked /);
     // Checks off: never "Up to date", whatever the last check said.
-    expect(status(details({ on: false }, { version: '0.28.31', fetched_at: hoursAgo(1), published_at: null }))).toBe('Update checks are off');
+    expect(status(details({ on: false }, { version: '0.28.31', fetched_at: hoursAgo(1), published_at: null }))).toMatch(/^Update checks are off/);
     // The latest attempt failed (not yet for hours): says so, with when.
     expect(status(details({ error: 'offline', last_failed_at: hoursAgo(0.5) }))).toMatch(/^Last check failed today .* \(offline\)$/);
     // Nothing ever checked.

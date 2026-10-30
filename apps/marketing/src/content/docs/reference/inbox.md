@@ -427,7 +427,7 @@ Browsers grant notifications per address (scheme, name and port). The Inbox alwa
 
 ### Update
 
-When a newer Plannotator release is out, the sidebar shows an **Update** button above **Settings**. The machine checks GitHub every few minutes and when the Inbox starts or the page is reloaded (never your browser), so a new release shows within minutes; turn this off in **Settings → About** ("Tell me when a new version is out"), with `{ "updateCheck": false }` in `~/.plannotator/config.json`, or `PLANNOTATOR_UPDATE_CHECK=0`.
+When a newer Plannotator release is out, the sidebar shows an **Update** button above **Settings**. The machine checks GitHub every few minutes and when the Inbox starts or the page is reloaded (never your browser), so a new release shows within minutes; turn this off in **Settings → About** ("Tell me when a new version is out"), with `{ "updateCheck": false }` in `~/.plannotator/config.json`, or `PLANNOTATOR_UPDATE_CHECK=0`. Off stops only the automatic checks: **Check now** still asks, a release already known still shows **Update to X**, and clicking it checks GitHub once more so you get the newest release (or, offline, the one already known). **Settings → General** says when checks are off and how to turn them back on.
 
 Click **Update to X** to see what's new and what will happen, then **Update now**: the install script runs for that version with the choices from your last install, the button reads **Updating…**, and when the new binary is in, the Inbox restarts on it and the page reloads. Open reviews keep running on the old version until you finish them. **Remind me tomorrow** hides the button for that version for a day. Tick **Install new versions automatically** to let Plannotator do this by itself from then on.
 

@@ -366,7 +366,8 @@ describe("Remind me tomorrow, Settings, What's new", () => {
     expect((await post(server, "/api/inbox/settings", { auto_update: "yes" })).status).toBe(422);
     expect((await post(server, "/api/inbox/settings", { update_check: false })).status).toBe(200);
     expect(loadConfig().updateCheck).toBe(false);
-    expect(await health(server)).toBeNull();
+    // Off stops the automatic checks only: the release already known stays one click away.
+    expect((await health(server))?.state).toBe("available");
   });
 
   test("What's new: the notes, and the releases skipped in between", async () => {
@@ -716,7 +717,6 @@ describe("deriveInboxUpdate", () => {
   const base = {
     current: "0.28.10",
     onDisk: null,
-    checksOn: true,
     managed: true,
     lockHeld: false,
     state: { latestRelease: { tag: "0.28.12", fetchedAt: NOW } },
@@ -728,13 +728,9 @@ describe("deriveInboxUpdate", () => {
     expect(deriveInboxUpdate({ ...base, lockHeld: true })?.state).toBe("updating");
     expect(deriveInboxUpdate({ ...base, lockHeld: true, onDisk: "0.28.12" })).toMatchObject({ state: "ready", version: "0.28.12" });
   });
-  test("nothing when up to date, checks off, or snoozed for this version", () => {
+  test("nothing when up to date, or snoozed for this version", () => {
     expect(deriveInboxUpdate({ ...base, current: "0.28.12" })).toBeNull();
-    expect(deriveInboxUpdate({ ...base, checksOn: false })).toBeNull();
     expect(deriveInboxUpdate({ ...base, state: { ...base.state, snooze: { version: "0.28.12", until: NOW + 1 } } })).toBeNull();
     expect(deriveInboxUpdate({ ...base, state: { ...base.state, snooze: { version: "0.28.12", until: NOW - 1 } } })?.state).toBe("available");
-  });
-  test("ready even with checks off: a newer binary is already installed", () => {
-    expect(deriveInboxUpdate({ ...base, checksOn: false, onDisk: "0.28.12" })?.state).toBe("ready");
   });
 });

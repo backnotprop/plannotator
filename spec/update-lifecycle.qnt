@@ -166,7 +166,9 @@ module updateLifecycle {
     else if (st.ibOnDisk != st.ibRuns) "ready"
     else if (lockHeldView(st)) "updating"
     else if (st.pendingPerson and st.pendingV > st.ibRuns and st.resultV == st.pendingV and st.resultCode != 0) "failed"
-    else if (not(st.checksOn) or st.latest <= st.ibRuns) "none"
+    // Not gated on checksOn: off stops the automatic checks only, never the
+    // way to a release this machine knows of (Check now, or an earlier check).
+    else if (st.latest <= st.ibRuns) "none"
     else "available"
 
   // ---------------------------------------------------------------------------
@@ -216,8 +218,9 @@ module updateLifecycle {
     v == st.ibRuns or v == st.latest or v == st.ibOnDisk or v == st.pendingV
 
   // The claim (update-check.ts:1101), the request leaves; notesAnswer comes later.
-  pure def notesClaim(st: Sys, v: int): Sys =
-    if (v <= 0 or st.ibInflight.get(v) or st.notes.get(v) == "content" or not(st.checksOn)
+  // `asked`: the person's Check now, which asks even with checks off.
+  pure def notesClaim(st: Sys, v: int, asked: bool): Sys =
+    if (v <= 0 or st.ibInflight.get(v) or st.notes.get(v) == "content" or (not(st.checksOn) and not(asked))
         or not(fetchable(st, v)) or not(notesDue(st, v))) st
     else
       val prev = st.nf.get(v)
@@ -230,7 +233,7 @@ module updateLifecycle {
         .with("ibInflight", st.ibInflight.set(v, true))
         .with("minNotesGap", if (st.lastNotesReq.get(v) < 0) st.minNotesGap else imin(st.minNotesGap, st.now - st.lastNotesReq.get(v)))
         .with("lastNotesReq", st.lastNotesReq.set(v, st.now))
-        .with("offFetch", st.offFetch or not(st.checksOn))
+        .with("offFetch", st.offFetch or (not(st.checksOn) and not(asked)))
 
   // GitHub answers releases/tags/v<v> as it is NOW (the body may have changed).
   pure def notesAnswered(st: Sys, v: int): Sys =
@@ -285,11 +288,11 @@ module updateLifecycle {
     val checked = releaseCheck(probed, fresh, probed.checksOn, false)        // :497
     val forLatest =                                                           // :507
       if (checked.latest > checked.ibRuns and checked.notes.get(checked.latest) != "content")
-        notesClaim(checked, checked.latest)
+        notesClaim(checked, checked.latest, false)
       else checked
     val forUpdated =                                                          // :512
       if (forLatest.ibUpdated > 0 and forLatest.notes.get(forLatest.ibUpdated) != "content")
-        notesClaim(forLatest, forLatest.ibUpdated)
+        notesClaim(forLatest, forLatest.ibUpdated, false)
       else forLatest
     markSeen(reap(forUpdated)                                                 // :519 refresh -> compute -> reap
       .with("ibLastTick", forUpdated.now)
@@ -421,15 +424,26 @@ module updateLifecycle {
   // A page load (nudge, inbox-updates.ts:598).
   action doPageLoad: bool = all { s.ibAlive, s' = (tick(s, START_FRESH)).with("act", "PageLoad") }
 
-  // Check now (inbox-updates.ts:629): explicit, allowed with checks off.
-  action doCheckNow: bool = all { s.ibAlive, s' = (releaseCheck(s, CHECK_INTERVAL, true, true)).with("act", "CheckNow") }
+  // Check now (inbox-updates.ts checkNow): explicit, allowed with checks off;
+  // it also claims the newer release's notes, as the person's own request.
+  pure def checkNow(st: Sys): Sys =
+    val checked = releaseCheck(st, CHECK_INTERVAL, true, true)
+    if (checked.latest > checked.ibRuns and checked.notes.get(checked.latest) != "content")
+      notesClaim(checked, checked.latest, true)
+    else checked
+  action doCheckNow: bool = all { s.ibAlive, s' = (checkNow(s)).with("act", "CheckNow") }
 
   // Update now in the sidebar (inbox-updates.ts:608): pressable when available or failed.
+  // With checks off the click asks GitHub once first (inbox-updates.ts updateNow)
+  // and installs the newest answer; a failed check keeps the release known.
+  pure def updateNowChecked(st: Sys): Sys =
+    val checked = if (st.checksOn) st else releaseCheck(st, CHECK_INTERVAL, true, true)
+    launch(checked, checked.latest, true)
   action doUpdateNow: bool = all {
     s.ibAlive,
     Set("available", "failed").contains(uiState(s)),
     s.latest > s.ibRuns,
-    s' = (launch(s, s.latest, true)).with("act", "UpdateNow"),
+    s' = (updateNowChecked(s)).with("act", "UpdateNow"),
   }
 
   // A review window's Update (auto-update.ts:1243) or `plannotator update`: no UI gate.

@@ -159,6 +159,32 @@ test.skipIf(!hasDom)('the automatic-updates checkbox reports the change; the env
   expect((el.querySelector('[data-auto-update-checkbox]') as HTMLInputElement).disabled).toBe(true);
 });
 
+test.skipIf(!hasDom)('update checks off: Update now still works, but the automatic-updates checkbox is locked, naming why', () => {
+  // Auto-update needs update checks (auto-update.ts), so with them off ticking it could never install anything.
+  let now = 0;
+  const changes: boolean[] = [];
+  const el = render(
+    <UpdateDialog
+      details={details({ check: { on: false, env: false, last_attempt_at: null, error: null } as ReturnType<typeof details>['check'] })}
+      update={update('available')}
+      error={null}
+      busy={false}
+      onUpdateNow={() => now++}
+      onRemindTomorrow={() => {}}
+      onCancel={() => {}}
+      onWhatsNew={() => {}}
+      onAutoUpdate={(next) => changes.push(next)}
+    />,
+  );
+  const box = el.querySelector('[data-auto-update-checkbox]') as HTMLInputElement;
+  expect(box.disabled).toBe(true);
+  act(() => box.click());
+  expect(changes).toEqual([]);
+  expect(box.closest('label')?.textContent).toContain('PLANNOTATOR_UPDATE_CHECK=0');
+  act(() => (el.querySelector('[data-update-now]') as HTMLButtonElement).click());
+  expect(now).toBe(1);
+});
+
 test.skipIf(!hasDom)('a binary the install script does not manage: the command, no Update now, no checkbox', () => {
   const el = render(
     <UpdateDialog

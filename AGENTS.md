@@ -15,6 +15,7 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
   - Tests never open a browser: set `NO_BROWSER` from `tests/helpers/no-browser.ts`, never `PLANNOTATOR_BROWSER=none` (or another sentinel).
   - Tests never run the real GitHub CLI, and never signal an Inbox except through `tests/helpers/inbox-process.ts`.
   - Every test guards a behavior that can regress: no copy snapshots of prose, no round-trip prop tests, no implementation echo.
+  - Test agent-facing instructions (tool text, skills, `--help`) clean room: a fresh agent with only that text, in a scratch folder outside this repo, given a real task. Judge what it does, not what it says.
 - **No new Inbox keyboard shortcuts without the owner's approval** (see the Inbox shortcuts note in [Keyboard Shortcuts](docs/agent-guides/guides-and-shared-ui.md#keyboard-shortcuts)). Shortcuts elsewhere go through the shortcut registry.
 - **Git:** never rebase or force-push a shared branch; merge main instead.
 - **Releases:** follow [`.agents/skills/release/SKILL.md`](.agents/skills/release/SKILL.md).

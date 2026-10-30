@@ -209,6 +209,16 @@ describe("plannotator update (seams)", () => {
     expect(await run(["--check"], { env: { HOME: "/home/u", PLANNOTATOR_UPDATE_CHECK: "0" } })).toBe(0);
     expect(err).toContain("Update checks are off (PLANNOTATOR_UPDATE_CHECK=0). Checking because you asked.");
   });
+
+  test("checks off: plannotator update still installs the newer release, through the same wrapper", async () => {
+    // Both sources stubbed: never the network.
+    let asked = 0;
+    const page = async (): Promise<FetchReleaseResult> => (asked++, { ok: true, release: { tag: "v0.28.11" } });
+    expect(await run([], { env: { HOME: "/home/u", PLANNOTATOR_UPDATE_CHECK: "0" }, fetchReleasePage: page })).toBe(0);
+    expect(asked).toBe(1);
+    expect(installs).toEqual(["v0.28.11"]);
+    expect(out).toContain("Updated to 0.28.11.");
+  });
 });
 
 // `plannotator update` from source (update-command-entry.ts, the function
