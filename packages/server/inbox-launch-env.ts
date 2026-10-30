@@ -14,8 +14,8 @@
  * - `launchSpawnEnv`: the env a `claude` call runs with. Our call may be the
  *   one that starts the person's shared supervisor, whose env every later
  *   background session inherits, so no `PLANNOTATOR_*` name, no per-session
- *   Claude marker and no skip-permissions export passes (that one is set only
- *   in the settings file of a launch with full permissions). The person's own `CLAUDE_*`
+ *   Claude marker and no skip-permissions export passes (a full launch is
+ *   bypass by its `--permission-mode`, never by the export). The person's own `CLAUDE_*`
  *   settings (CLAUDE_CONFIG_DIR) stay. Unlike `askAiChildEnv`, the Inbox stays
  *   ON for a launched agent: its settings file says where the Inbox is.
  * - `launchPlainEnv`: every call but the start (status, stop, respawn, rm,
@@ -70,14 +70,17 @@ export function launchStartOf(input: {
   const own = input.defaultMode !== null && input.defaultMode !== "bypassPermissions";
   const wantsFull = input.setting ?? (input.defaultMode === "bypassPermissions" || (!own && input.shellSkips));
   const full = wantsFull && bypass;
-  return { full, wantsFull, ownMode: !full && input.setting === null && own, bypass };
+  // Their own mode whenever the launch is not full: the switch off never widens an ask-every-time person to auto.
+  return { full, wantsFull, ownMode: !full && own, bypass };
 }
 
-/** `env` without Plannotator's names, Claude's per-session ones and the skip-permissions export; that is set only when `fullPermissions`. */
-export function launchSpawnEnv(env: Readonly<LaunchEnv>, fullPermissions = false): LaunchEnv {
-  const out = Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV));
-  if (fullPermissions) out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
-  return out;
+/**
+ * `env` without Plannotator's names, Claude's per-session ones and the skip-permissions export: never
+ * passed, a full launch included (its bypass is `--permission-mode bypassPermissions`; the export would be
+ * inert anyway, as Claude ignores it while any PermissionRequest hook exists, the plugin's included).
+ */
+export function launchSpawnEnv(env: Readonly<LaunchEnv>): LaunchEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV));
 }
 
 /** The Inbox's own env for the calls that are not a start: the same filter, `extraPath` after its PATH. */
@@ -105,8 +108,6 @@ export function launchSettingsEnv(
   out.PLANNOTATOR_LAUNCH_KEY = input.key;
   // A launch that may switch to bypass later (the person's consent recorded): its permission hook honours Full permissions.
   if (input.bypassAvailable && !input.fullPermissions) out[INBOX_LAUNCH_FULL_PERMISSIONS_ENV] = "1";
-  // A full launch has no permission hook (inbox-launch.ts), so Claude's export waives bypass mode's leftover checks too.
-  if (input.fullPermissions) out[CLAUDE_SKIP_PERMISSIONS_ENV] = "1";
   return out;
 }
 

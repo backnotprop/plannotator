@@ -385,8 +385,9 @@ describe("the answer and the decision", () => {
     expect(inboxPermissionChoices(e).slice(-1)).toEqual(["Allow and switch to Auto mode"]);
     expect(inboxPermissionChoices(e, { fullPermissions: true }).slice(-2)).toEqual(["Allow and switch to Auto mode", "Allow and switch to Full permissions"]);
     expect(inboxPermissionAnswer(answer(["Allow and switch to Auto mode"]), e).choice).toBe("auto");
-    // Full permissions picked where the session cannot switch to them: a Deny, never an allow.
-    expect(inboxPermissionAnswer(answer(["Allow and switch to Full permissions"]), e).choice).toBe("deny");
+    // Full permissions picked where the session cannot switch to them (a card from before): Allow once, the
+    // person allowed; never a switch, never a Deny.
+    expect(inboxPermissionAnswer(answer(["Allow and switch to Full permissions"]), e).choice).toBe("once");
     expect(inboxPermissionAnswer(answer(["Allow and switch to Full permissions"]), e, { fullPermissions: true }).choice).toBe("full");
   });
 

@@ -26,6 +26,8 @@ export interface FakeClaudeConfig {
   fault?: "untrusted" | "slow" | null;
   /** `--bg --permission-mode auto` fails as a CLI without auto mode does (commander's refusal of the value). */
   refuseAuto?: boolean;
+  /** Plannotator's plugin brings its own PermissionRequest hook (ExitPlanMode), as on a real install (default true; it turns the skip export off). */
+  pluginPermissionHook?: boolean;
   /** How long a turn takes before the answer (ms, default 800). */
   workMs?: number;
   /** Keep the turn running until cleared. */
@@ -53,7 +55,7 @@ export interface FakePermissionPrompt {
   tool_name: string;
   tool_input?: Record<string, unknown>;
   permission_suggestions?: Record<string, unknown>[];
-  /** A check bypass mode still asks (a dangerous rm): to the hook, or waived by the export when there is no hook. */
+  /** A check bypass mode still asks (a dangerous rm): to the hook, or waived by the export when no PermissionRequest hook exists at all. */
   safetyCheck?: boolean;
 }
 

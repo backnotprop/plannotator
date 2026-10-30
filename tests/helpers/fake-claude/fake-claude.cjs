@@ -40,9 +40,13 @@
  * without it the allow flag is ignored, a bypass start runs in default mode, and
  * a hook's `setMode bypassPermissions` is ignored. In bypass mode a prompt is not
  * asked, except a `safetyCheck` one (dangerous rm): that goes to the
- * PermissionRequest hook when there is one, is waived when there is none and
+ * settings file's PermissionRequest hook when there is one, is waived only when
+ * NO PermissionRequest hook exists at all and
  * CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1, and else waits on the
- * built-in dialog. A hook's setMode changes the session's mode for later prompts.
+ * built-in dialog. As in Claude, any PermissionRequest hook counts, the matcher
+ * ignored and plugins' included: Plannotator's plugin, enabled in HOME's
+ * settings, has one (ExitPlanMode), unless `pluginPermissionHook` is false.
+ * A hook's setMode changes the session's mode for later prompts.
  *
  * Permission prompts (`prompts`: a list of { tool_name, tool_input,
  * permission_suggestions, safetyCheck }, played in each turn, in order): as Claude Code
@@ -296,9 +300,13 @@ async function session(sessionId) {
   /** One permission prompt, as Claude Code plays it: the hook, then allow, deny, or blocked until answered locally. */
   const prompt = async (spec) => {
     const entry = (((settings.hooks || {}).PermissionRequest || [])[0] || { hooks: [] }).hooks[0];
-    // Bypass mode asks nothing, but a safety check: to the hook when there is one, waived by the export only without one.
+    // Bypass mode asks nothing, but a safety check: to the hook when there is one, waived by the export only
+    // when no PermissionRequest hook exists anywhere (the plugin's ExitPlanMode one counts, matcher ignored).
     const skipEnv = (env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS || process.env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS) === "1";
-    if (mode === "bypassPermissions" && (!spec.safetyCheck || (!(entry && entry.command) && skipEnv))) {
+    const user = readJson(path.join(process.env.HOME || "", ".claude", "settings.json"), {}) || {};
+    const pluginHook = config().pluginPermissionHook !== false && Object.entries(user.enabledPlugins || {}).some(([id, on]) => /^plannotator@/.test(id) && on === true);
+    const anyHook = Boolean(entry && entry.command) || pluginHook;
+    if (mode === "bypassPermissions" && (!spec.safetyCheck || (!anyHook && skipEnv))) {
       fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output: null, exitCode: null, outcome: "ran", asked: false, mode, ms: 0 })}\n`);
       return { tool: spec.tool_name, outcome: "ran" };
     }

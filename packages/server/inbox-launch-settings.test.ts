@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
+import { claudeBypassSetup, createAgentEnvironmentFor } from "./inbox-agents";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -27,7 +28,7 @@ function setEnv(name: string, value: string) {
   });
 }
 
-function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>; claudeJson?: Record<string, unknown>; fullPermissions?: boolean } = {}) {
+function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>; claudeLocal?: Record<string, unknown>; claudeJson?: Record<string, unknown>; fullPermissions?: boolean; enabled?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-settings-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -36,8 +37,9 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: options.enabled ?? true, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
   if (options.claude) writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(options.claude));
+  if (options.claudeLocal) writeFileSync(join(home, ".claude", "settings.local.json"), JSON.stringify(options.claudeLocal));
   if (options.claudeJson) writeFileSync(join(home, ".claude.json"), JSON.stringify(options.claudeJson));
   const store = InboxStore.open(dataDir);
   const reads = { count: 0 };
@@ -62,11 +64,11 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
     selfCommand: ["plannotator"],
   });
   restore.push(() => launch.stop());
-  const get = async (headers: Record<string, string> = {}, via = "local") => {
-    const response = await launch.route(new Request("http://127.0.0.1:4000/api/inbox/launch/settings", { headers: { host: "127.0.0.1:4000", ...headers } }), "/api/inbox/launch/settings", via);
+  const get = async (headers: Record<string, string> = {}, via = "local", query = "") => {
+    const response = await launch.route(new Request(`http://127.0.0.1:4000/api/inbox/launch/settings${query}`, { headers: { host: "127.0.0.1:4000", ...headers } }), "/api/inbox/launch/settings", via);
     return { status: response!.status, body: (await response!.json()) as { launch?: Record<string, unknown>; code?: string } };
   };
-  return { get, reads };
+  return { get, reads, launch, home };
 }
 
 describe("GET /api/inbox/launch/settings", () => {
@@ -88,6 +90,9 @@ describe("GET /api/inbox/launch/settings", () => {
     expect(reads.count).toBe(1);
     await get();
     expect(reads.count).toBe(1);
+    // The composer's read ahead ("Start Claude Code" picked) reads again, fresh or not; concurrent ones still share it.
+    await Promise.all([get({}, "local", "?ahead=1"), get({}, "local", "?ahead=1")]);
+    expect(reads.count).toBe(2);
   });
 
   test("the switch set: no shell read at all", async () => {
@@ -106,7 +111,51 @@ describe("GET /api/inbox/launch/settings", () => {
     }
   });
 
-  test("a person whose Claude settings set a default mode is not put in auto mode; theirs comes before the shell's export", async () => {
+  test("consent and a bypass disable count from Claude's own sources only: never consent from settings.local.json; a user-level disable turns bypass off", async () => {
+    const localOnly = setup({ fullPermissions: true, claudeLocal: { skipDangerousModePermissionPrompt: true } });
+    expect((await localOnly.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true });
+    const disabled = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true, permissions: { disableBypassPermissionsMode: "disable" } } });
+    expect((await disabled.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true });
+    const disabledLocal = setup({ fullPermissions: true, claude: { skipDangerousModePermissionPrompt: true }, claudeLocal: { permissions: { disableBypassPermissionsMode: "disable" } } });
+    expect((await disabledLocal.get()).body.launch).toMatchObject({ full_permissions: true, needs_consent: true });
+  });
+
+  test("a launch folder's own settings: its disable turns bypass off; its default mode counts, but never its bypass", () => {
+    const root = mkdtempSync(join(tmpdir(), "plannotator-launch-folder-"));
+    restore.push(() => rmSync(root, { recursive: true, force: true }));
+    setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
+    const home = join(root, "home");
+    const folder = join(root, "project");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    mkdirSync(join(folder, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ skipDangerousModePermissionPrompt: true, permissions: { defaultMode: "acceptEdits" } }));
+    const e = createAgentEnvironmentFor({ platform: "darwin", homeDir: home, env: {} });
+    expect(claudeBypassSetup(e, folder)).toEqual({ consent: true, disabled: false, defaultMode: "acceptEdits" });
+    // A repo cannot grant bypass, nor consent to it.
+    writeFileSync(join(folder, ".claude", "settings.json"), JSON.stringify({ skipDangerousModePermissionPrompt: true, permissions: { defaultMode: "bypassPermissions" } }));
+    expect(claudeBypassSetup(e, folder)).toEqual({ consent: true, disabled: false, defaultMode: "acceptEdits" });
+    writeFileSync(join(folder, ".claude", "settings.local.json"), JSON.stringify({ permissions: { defaultMode: "plan", disableBypassPermissionsMode: "disable" } }));
+    expect(claudeBypassSetup(e, folder)).toEqual({ consent: true, disabled: true, defaultMode: "plan" });
+    // Settings → Agents (no folder): the person's own files only.
+    expect(claudeBypassSetup(e)).toEqual({ consent: true, disabled: false, defaultMode: "acceptEdits" });
+  });
+
+  test("the login shell read ahead once at Inbox start (launch on only), and a fresh read is reused", async () => {
+    const off = setup({ enabled: false });
+    off.launch.warm();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(off.reads.count).toBe(0);
+    const on = setup();
+    on.launch.warm();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(on.reads.count).toBe(1);
+    expect((await on.get()).status).toBe(200);
+    expect(on.reads.count).toBe(1);
+  });
+
+  test("a person whose Claude settings set a default mode is not put in auto mode, the switch off included; theirs comes before the shell's export", async () => {
+    const off = setup({ fullPermissions: false, claude: { permissions: { defaultMode: "default" } } });
+    expect((await off.get()).body.launch).toMatchObject({ full_permissions: false, own_mode: true });
     const own = setup({ shellSkips: true, claude: { permissions: { defaultMode: "acceptEdits" } } });
     expect((await own.get()).body.launch).toMatchObject({ full_permissions: false, own_mode: true, follows: null });
     const bypass = setup({ claude: { skipDangerousModePermissionPrompt: true, permissions: { defaultMode: "bypassPermissions" } } });

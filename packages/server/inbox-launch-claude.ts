@@ -151,9 +151,9 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
      * `--allow-dangerously-skip-permissions`, so the session may switch to
      * bypass later (the card's Full permissions); `mode` adds `--permission-mode`
      * (null: the person's own default mode). Nothing else goes on argv. Auto
-     * mode refused (a CLI without it): `beforeRetry` (the caller pins the
-     * settings file to default mode), then started again with no mode, and
-     * `modeRefused` says why. A failure names the folder as `shownFolder` (`~/…`).
+     * mode refused (a CLI without it): started again with no mode (an auto
+     * launch's settings file pins default mode), and `modeRefused` says why.
+     * A failure names the folder as `shownFolder` (`~/…`).
      */
     async start(input: {
       folder: string;
@@ -163,7 +163,6 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
       mode: ClaudeLaunchMode;
       allowBypass: boolean;
       environment: AgentEnvironment;
-      beforeRetry?: () => void;
     }): Promise<({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }> {
       // A name that starts with "-" would read as a flag.
       const name = input.name.replace(/^-+/, "").trim() || "Inbox";
@@ -173,7 +172,6 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
       let modeRefused: string | undefined;
       if (input.mode === "auto" && !missing && refusedForMode(result)) {
         modeRefused = startFailureOf(result, input.shownFolder).text;
-        input.beforeRetry?.();
         ({ result, missing } = await run(base, input.folder, START_TIMEOUT_MS, input.environment));
         output = `${output}\n[auto mode refused; started again with no --permission-mode]\n${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
       }

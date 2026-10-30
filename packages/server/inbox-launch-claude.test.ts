@@ -203,12 +203,10 @@ describe("the start's permission mode", () => {
     }
   });
 
-  test("auto mode refused (a CLI without it): the settings file is pinned first, started again with no mode, and why is kept", async () => {
+  test("auto mode refused (a CLI without it): started again with no mode, the allow flag kept, and why is kept", async () => {
     const { env, starts, host } = cli(REFUSED);
-    let pinned = 0;
-    const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", allowBypass: true, environment: env, beforeRetry: () => void pinned++ });
+    const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", allowBypass: true, environment: env });
     expect(result).toMatchObject({ ok: true, modeRefused: REFUSED });
-    expect(pinned).toBe(1);
     expect(starts).toEqual([[...base, allow, "--permission-mode", "auto"], [...base, allow]]);
     expect(result.output).toContain("auto mode refused");
   });

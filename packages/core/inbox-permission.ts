@@ -553,7 +553,8 @@ export const INBOX_PERMISSION_REASON_MAX = 2_000;
  * The person's answer as one of the choices. The pick is matched by its
  * exact label against the labels this prompt's event makes, never by
  * position: "Allow once", the session label rebuilt from the event, the mode
- * switches (Full permissions only when the session can switch to it), and
+ * switches (Full permissions only when the session can switch to it; else,
+ * a card from before that still shows it, Allow once: the person allowed), and
  * anything else (a Skip, free text with no pick, an unknown label) is a Deny.
  * The free text (or a note) is the reason.
  */
@@ -562,7 +563,7 @@ export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: Inbo
   const picked = answer && !answer.skipped && answer.selected.length === 1 ? answer.selected[0] : undefined;
   if (picked === INBOX_PERMISSION_ALLOW_ONCE) return { choice: "once", reason: null };
   if (picked === INBOX_PERMISSION_AUTO) return { choice: "auto", reason: null };
-  if (picked === INBOX_PERMISSION_FULL && options.fullPermissions) return { choice: "full", reason: null };
+  if (picked === INBOX_PERMISSION_FULL) return { choice: options.fullPermissions ? "full" : "once", reason: null };
   const session = inboxPermissionSessionChoice(event, options.shownPath);
   if (session && picked === session.label) return { choice: "session", reason: null };
   return { choice: "deny", reason };

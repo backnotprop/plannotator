@@ -34,7 +34,7 @@ const EVENT = {
   permission_suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "bun run:*" }], behavior: "allow", destination: "localSettings" }],
 };
 
-function setup(options: { holdMs?: number; startMs?: number; bypassAvailable?: boolean } = {}) {
+function setup(options: { holdMs?: number; startMs?: number; bypassAvailable?: boolean; full?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-launch-permission-"));
   roots.push(dir);
   const clock = { now: options.startMs ?? Date.parse("2026-10-30T15:00:00.000Z") };
@@ -45,7 +45,7 @@ function setup(options: { holdMs?: number; startMs?: number; bypassAvailable?: b
     body: "Make the Settings search fuzzy.",
     to: { host: "claude-code", session: SESSION },
     idempotency_key: "send-1",
-    launch: { id: LAUNCH, agent: "claude-code", session_ref: SESSION.slice(0, 8), folder: "/work/plannotator", scratch: false, started_at: new Date(clock.now).toISOString(), ...(options.bypassAvailable ? { bypass_available: true as const } : {}) },
+    launch: { id: LAUNCH, agent: "claude-code", session_ref: SESSION.slice(0, 8), folder: "/work/plannotator", scratch: false, started_at: new Date(clock.now).toISOString(), ...(options.bypassAvailable ? { bypass_available: true as const } : {}), ...(options.full ? { full_permissions: true as const } : {}) },
   }).message;
   const launchDir = join(dir, "launch", LAUNCH);
   mkdirSync(launchDir, { recursive: true });
@@ -187,6 +187,11 @@ describe("the permission route", () => {
     const again = await full.call({ key: KEY, request_id: "req-00000020", event: EVENT });
     full.answer(again.body.message_id!, { selected: ["Allow and switch to Full permissions"] });
     expect((await full.call({ key: KEY, request_id: "req-00000020", event: EVENT, message_id: again.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
+
+    // A launch already in Full permissions (its safety checks still ask): nothing to switch to.
+    const already = setup({ bypassAvailable: true, full: true });
+    const safety = await already.call({ key: KEY, request_id: "req-00000022", event: EVENT });
+    expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode"]);
   });
 
   test("an answered prompt is never reopened: a stale pick (Deny at the current revision) is refused, and the record stays", async () => {

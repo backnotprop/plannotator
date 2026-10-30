@@ -956,7 +956,8 @@ export const inboxApi = {
   launchDelete: (launchId: string) => post<{ ok: true }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
   launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
-  launchSettingsRead: () => get<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings')),
+  /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
+  launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(inboxUrl(`/messages/${encodeURIComponent(messageId)}/to`), { to }),

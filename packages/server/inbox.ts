@@ -2380,6 +2380,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The permission hook runs this Plannotator.
     selfCommand,
   });
+  // The login shell read ahead, off any request's path (launch on only).
+  launch.warm();
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
   const compose = createInboxCompose({

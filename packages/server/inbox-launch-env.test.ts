@@ -27,11 +27,9 @@ describe("launchSpawnEnv", () => {
     expect(env).toMatchObject({ PATH: "/usr/bin:/bin", HOME: "/Users/me", CLAUDE_CODE_USE_BEDROCK: "1" });
   });
 
-  test("the shell's own skip-permissions export never rides the --bg env; the switch alone sets it", () => {
+  test("the skip-permissions export never rides the --bg env (it would reach the shared supervisor)", () => {
     const shell = { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" };
     expect(launchSpawnEnv(shell)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
-    expect(launchSpawnEnv(shell, false)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
-    expect(launchSpawnEnv(login, true)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBe("1");
   });
 });
 
@@ -54,14 +52,15 @@ describe("launchSettingsEnv", () => {
     expect(env).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CONFIG_DIR: "/Users/me/.claude-work", PLANNOTATOR_LAUNCH: "lch_1", PLANNOTATOR_LAUNCH_KEY: "k" });
   });
 
-  test("the hook's leave to switch to Full permissions only with the person's consent and not already full; Claude's export only in a full launch", () => {
+  test("the hook's leave to switch to Full permissions only with the person's consent and not already full; never Claude's export", () => {
     const allowed = launchSettingsEnv(login, { launchId: "lch_1", key: "k", dataDir: "/data/inbox", fullPermissions: false, bypassAvailable: true });
     expect(allowed.PLANNOTATOR_DATA_DIR).toBe("/data/inbox");
     expect(allowed.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBe("1");
     expect(allowed[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
     const full = launchSettingsEnv(login, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: true, bypassAvailable: true });
-    expect(full[CLAUDE_SKIP_PERMISSIONS_ENV]).toBe("1");
-    // A full launch has no permission hook: nothing to leave.
+    // Bypass is the start's --permission-mode; the export is inert beside a PermissionRequest hook anyway.
+    expect(full[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
+    // Already full: nothing to switch to.
     expect(full.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBeUndefined();
   });
 
@@ -79,7 +78,10 @@ describe("launchSettingsEnv", () => {
       // The person's own defaultMode comes before the export, and is never forced to auto.
       ["unset, acceptEdits", { setting: null, defaultMode: "acceptEdits", shellSkips: true, ...on }, { full: false, ownMode: true, bypass: true }],
       ["unset, defaultMode bypass", { setting: null, defaultMode: "bypassPermissions", shellSkips: false, ...on }, { full: true, ownMode: false, bypass: true }],
-      ["off, acceptEdits", { setting: false, defaultMode: "acceptEdits", shellSkips: false, ...on }, { full: false, ownMode: false, bypass: true }],
+      // The switch off never widens a person's own mode to auto (Full tried, then turned off again).
+      ["off, acceptEdits", { setting: false, defaultMode: "acceptEdits", shellSkips: false, ...on }, { full: false, ownMode: true, bypass: true }],
+      ["off, default", { setting: false, defaultMode: "default", shellSkips: false, ...on }, { full: false, ownMode: true, bypass: true }],
+      ["on, acceptEdits, no consent", { setting: true, defaultMode: "acceptEdits", shellSkips: false, ...off }, { full: false, ownMode: true, bypass: false }],
       // No consent (or bypass disabled by policy): never full, and nothing to switch to.
       ["on, no consent", { setting: true, defaultMode: null, shellSkips: false, ...off }, { full: false, ownMode: false, bypass: false }],
       ["unset, export, no consent", { setting: null, defaultMode: null, shellSkips: true, ...off }, { full: false, ownMode: false, bypass: false }],
