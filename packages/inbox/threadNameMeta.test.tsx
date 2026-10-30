@@ -155,3 +155,31 @@ test.skipIf(!hasDom)('a name cut with "…" shows whole in its tooltip', async (
   sized(text, 900, 320);
   expect(await tooltipOf(text)).toBe(long);
 });
+
+test.skipIf(!hasDom)('the top bar always shows the thread name; with no name it shows the subject only once the heading has scrolled away', async () => {
+  const bar = () => host!.querySelector<HTMLElement>('[data-header-subject]');
+  const scrollTo = async (subjectBottom: number) => {
+    const body = host!.querySelector<HTMLElement>('.ib-pbody')!;
+    body.getBoundingClientRect = () => ({ top: 100, bottom: 600, left: 0, right: 400, width: 400, height: 500, x: 0, y: 100, toJSON() {} });
+    host!.querySelector<HTMLElement>('.ib-subject')!.getBoundingClientRect = () => ({ top: 0, bottom: subjectBottom, left: 0, right: 400, width: 400, height: 20, x: 0, y: 0, toJSON() {} });
+    await act(async () => {
+      body.dispatchEvent(new Event('scroll'));
+    });
+  };
+  // Named, at the top: the name is there already (one message too), whole in its tooltip, the heading still the subject.
+  await render(thread('session-refresh', 1));
+  expect(bar()!.textContent).toBe('session-refresh');
+  expect(bar()!.hasAttribute('data-on')).toBe(true);
+  expect(bar()!.hasAttribute('title')).toBe(false);
+  sized(bar()!, 900, 120);
+  expect(await tooltipOf(bar()!)).toBe('session-refresh');
+  expect(host!.querySelector('h2.ib-subject')!.textContent).toBe(SUBJECT);
+  // Unnamed, at the top: hidden, so the subject does not show twice; scrolled away: the subject.
+  draw(thread(null, 3));
+  await settle();
+  expect(bar()!.textContent).toBe(SUBJECT);
+  await scrollTo(200);
+  expect(bar()!.hasAttribute('data-on')).toBe(false);
+  await scrollTo(20);
+  expect(bar()!.hasAttribute('data-on')).toBe(true);
+});

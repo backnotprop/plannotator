@@ -3995,13 +3995,15 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
         {phone && artifactsOn ? null : (
           <>
             {markReadButton}
-            {one && !artifactsOn ? (
+            {one && !artifactsOn && !nameChip ? (
               <span className="ib-sp" />
             ) : (
-              // The subject, once it has scrolled away, and always over the Artifacts grid (the heading stays the one a screen reader reads).
-              <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
-                {thread.subject ?? '(no subject)'}
-              </span>
+              // The thread's name (the list's rule), always; with no name, the subject once it has scrolled away, so its words never show twice. Always over the Artifacts grid (the heading stays the one a screen reader reads).
+              <Tip content={nameChip ?? thread.subject ?? '(no subject)'} cut>
+                <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                  {nameChip ?? thread.subject ?? '(no subject)'}
+                </span>
+              </Tip>
             )}
             {artifactsButton && (
               <Tip content={artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
