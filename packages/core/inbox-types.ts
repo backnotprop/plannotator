@@ -848,7 +848,7 @@ export interface InboxRun {
   folder: string;
   /** Since when: the start (starting), the turn (working), the prompt (waiting_answer, waiting_terminal), the stop. */
   since: string | null;
-  /** `starting` after a reply or Try again ("Starting … again"). */
+  /** `starting` after a reply's respawn ("Starting … again"). */
   again: boolean;
   /** `stopped`: the person pressed Stop (the line names the time). */
   stopped_by_person: boolean;
@@ -858,6 +858,8 @@ export interface InboxRun {
   untrusted: boolean;
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
   attach_command: string | null;
+  /** A permission question the person allowed whose effect is not seen yet (the card says "sent", not "Allowed"). */
+  approval_check?: string | null;
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */

@@ -48,6 +48,8 @@ export interface FakeClaudeConfig {
   prompts?: FakePermissionPrompt[];
   /** The person answers the open dialog in `claude attach`: the hook is ended (SIGTERM) and the session goes on. */
   localAnswer?: boolean;
+  /** How long a safety check's own dialog waits before it blocks the call (ms; Claude's is about 2 minutes). */
+  safetyBlockMs?: number;
 }
 
 /** One tool call that needs permission (Claude Code's PermissionRequest stdin, less what the session fills in). */
@@ -55,7 +57,10 @@ export interface FakePermissionPrompt {
   tool_name: string;
   tool_input?: Record<string, unknown>;
   permission_suggestions?: Record<string, unknown>[];
-  /** A check bypass mode still asks (a dangerous rm): to the hook, or waived by the export when no PermissionRequest hook exists at all. */
+  /**
+   * Claude's own safety check (a dangerous rm), for a person only: bypass mode still asks it (to the hook, or waived by
+   * the export when no PermissionRequest hook exists at all), and in any mode a hook's allow is ignored (its deny counts).
+   */
   safetyCheck?: boolean;
 }
 
@@ -67,13 +72,16 @@ export interface FakePermissionResult {
   /** The hook's stdout, parsed; null when it printed nothing. */
   output: { hookSpecificOutput?: { hookEventName?: string; decision?: { behavior: string; updatedInput?: unknown; updatedPermissions?: unknown[]; message?: string } } } | null;
   exitCode: number | null;
-  outcome: "ran" | "denied" | "local" | "blocked";
+  /** `autoblocked`: a safety check's own dialog blocked the call after `safetyBlockMs` with no answer in Terminal. */
+  outcome: "ran" | "denied" | "local" | "blocked" | "autoblocked";
   /** False when the session's mode asked nothing (bypass mode). */
   asked?: boolean;
   /** The session's mode after the prompt (a hook's setMode changes it). */
   mode?: string;
   /** A hook's setMode to bypass that the session ignored (bypass not available: no consent). */
   modeIgnored?: boolean;
+  /** A safety check whose hook allowed: Claude ignored the allow and kept its own dialog. */
+  ignoredAllow?: boolean;
   ms: number;
 }
 

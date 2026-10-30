@@ -48,6 +48,12 @@
  * settings, has one (ExitPlanMode), unless `pluginPermissionHook` is false.
  * A hook's setMode changes the session's mode for later prompts.
  *
+ * A `safetyCheck` prompt is for a person only, in any mode (Claude 2.1.314: the
+ * ask does not let hooks allow it): the hook still runs, but its allow is
+ * ignored (`ignoredAllow`, no setMode), the built-in dialog stays, and it blocks
+ * the call on its own after `safetyBlockMs` (default 2 minutes; outcome
+ * `autoblocked`) unless `localAnswer` answers it first. A hook's deny counts.
+ *
  * Permission prompts (`prompts`: a list of { tool_name, tool_input,
  * permission_suggestions, safetyCheck }, played in each turn, in order): as Claude Code
  * does, the session lists itself `waiting` on a "permission prompt" and runs
@@ -57,7 +63,7 @@
  * on the built-in dialog until `localAnswer` is set: that is the person
  * answering in `claude attach`, which ends the hook (SIGTERM) and goes on.
  * Each prompt is one line of permissions.jsonl: the tool, the hook's stdout
- * (parsed), its exit code and time, and the outcome (ran, denied, local).
+ * (parsed), its exit code and time, and the outcome (ran, denied, local, autoblocked).
  */
 const fs = require("fs");
 const path = require("path");
@@ -213,7 +219,8 @@ function main() {
       .map((a) => {
         const out = { pid: a.pid || null, id: a.id, cwd: a.cwd, kind: a.kind, startedAt: a.startedAt, sessionId: a.sessionId, name: a.name, status: a.status, state: a.state };
         if (waiting && a.state === "running" && a.status === "busy") return { ...out, status: "waiting", waitingFor: "permission prompt" };
-        return out;
+        // A prompt the session plays lists what it waits for, as Claude Code does ("permission prompt").
+        return a.status === "waiting" && a.waitingFor ? { ...out, waitingFor: a.waitingFor } : out;
       });
     process.stdout.write(`${JSON.stringify(list)}\n`);
     return;
@@ -357,18 +364,22 @@ async function session(sessionId) {
       output = stdout.trim() ? JSON.parse(stdout) : null;
     } catch {}
     const decision = output && output.hookSpecificOutput && output.hookSpecificOutput.decision;
-    let outcome = local ? "local" : decision ? (decision.behavior === "allow" ? "ran" : "denied") : "blocked";
+    // A safety check takes no allow from a hook: the dialog stays for the person (a deny still counts).
+    const ignoredAllow = Boolean(spec.safetyCheck && decision && decision.behavior === "allow");
+    let outcome = local ? "local" : decision && !ignoredAllow ? (decision.behavior === "allow" ? "ran" : "denied") : "blocked";
     // A switch of mode: bypass only when it is available (the person's consent and the allow flag), else ignored.
     let modeIgnored = false;
-    for (const update of (decision && decision.behavior === "allow" && decision.updatedPermissions) || []) {
+    for (const update of (decision && decision.behavior === "allow" && !ignoredAllow && decision.updatedPermissions) || []) {
       if (!update || update.type !== "setMode") continue;
       if (update.mode === "bypassPermissions" && !agent.bypassAvailable) modeIgnored = true;
       else mode = update.mode;
     }
-    // No decision: the built-in dialog stays until someone answers it locally.
-    while (outcome === "blocked" && !stopped && !config().localAnswer) await sleep(150);
-    if (outcome === "blocked" && config().localAnswer) outcome = "local";
-    fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, mode, modeIgnored, ms: Date.now() - started })}\n`);
+    // No decision (or an allow it ignored): the built-in dialog stays until someone answers it locally;
+    // a safety check's dialog blocks the call on its own after a while.
+    const blockAt = spec.safetyCheck ? started + (config().safetyBlockMs ?? 120_000) : Infinity;
+    while (outcome === "blocked" && !stopped && !config().localAnswer && Date.now() < blockAt) await sleep(150);
+    if (outcome === "blocked") outcome = config().localAnswer ? "local" : "autoblocked";
+    fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, mode, modeIgnored, ignoredAllow, ms: Date.now() - started })}\n`);
     updateAgent(sessionId, { status: "busy", waitingFor: null });
     return { tool: spec.tool_name, outcome };
   };

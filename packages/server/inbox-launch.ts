@@ -243,7 +243,12 @@ export function createInboxLaunch(options: {
       });
     return hostFetch;
   };
-  const hostStale = () => !hostView || now() - hostView.at > HOST_TTL_MS;
+  /** Stale after 10 s, or sooner when an allow waits on a read made after it settled. */
+  const hostStale = () => {
+    if (!hostView || now() - hostView.at > HOST_TTL_MS) return true;
+    const due = permissions.hostDueAt();
+    return due !== null && now() >= due;
+  };
   const hostStateOf = (ref: string | null): InboxRunHostState | null => {
     if (!ref || !hostView?.agents) return null;
     const agent = hostView.agents.find((a) => a.id === ref || a.sessionId.startsWith(ref));
@@ -315,7 +320,9 @@ export function createInboxLaunch(options: {
     if (launch.deleted_at) return null;
     const memo = memoOf(launch);
     const live = liveOf(root, memo);
-    const hostState = hostStateOf(launch.session_ref);
+    // A host read from before the last answer settled still shows our own prompt: never "waiting on Terminal".
+    const settled = permissions.settledAfter(launch.id);
+    const hostState = settled !== null && (hostView?.at ?? 0) < settled ? null : hostStateOf(launch.session_ref);
     if (hostState && hostState !== "absent" && hostState.status === "waiting" && hostState.waitingFor) memo.waitingSince ??= now();
     else memo.waitingSince = null;
     const project = store.project(root.project_id)?.name ?? launch.folder;
@@ -335,6 +342,7 @@ export function createInboxLaunch(options: {
       stoppedByPersonAt: memo.stoppedAt,
       attachCommand: launch.session_ref ? claudeAttachCommand(launch.folder, launch.session_ref) : null,
       permissionSince: permissions.openSince(root),
+      approvalCheck: permissions.checking(launch.id),
     });
   };
 
@@ -391,6 +399,9 @@ export function createInboxLaunch(options: {
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
     permissions.sweep();
+    // An allow being checked reads the host once it settled, watched or not (one read per answer).
+    const due = permissions.hostDueAt();
+    if (due !== null && now() >= due) void refreshHost();
     if (!watched) return;
     if (lastAvailable === null || (availability && now() - availability.at > AVAILABLE_TTL_MS)) refreshAvailable();
     if (hostStale() && all.some(needsHost)) void refreshHost();
@@ -650,11 +661,13 @@ export function createInboxLaunch(options: {
           // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
           if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
           if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, memo.respawn?.for ?? root.id);
-          else void run(root, true);
+          // No session was made: a first start, not "again".
+          else void run(root, false);
           return json({ run: runOfRoot(store.message(root.id)!) });
         }
         const cleared = store.settleLaunch(root.id, { error: null });
-        void run(cleared, true);
+        // The start never ran (untrusted, failed): Try again is its first real start, never "Starting … again".
+        void run(cleared, false);
         return json({ run: runOfRoot(cleared) });
       }
     }
@@ -763,6 +776,12 @@ export function createInboxLaunch(options: {
       return runOfRoot(store.message(threadId)!);
     },
 
+    /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
+    attachOf(threadId: string): string | null {
+      const launch = store.message(threadId)?.launch;
+      return launch?.session_ref && !launch.deleted_at && !launch.error ? claudeAttachCommand(launch.folder, launch.session_ref) : null;
+    },
+
     /** The list's row decorator, resolved once per list (one config read): the identity while launch is off. */
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
       return enabled() ? (row) => this.decorateLaunched(row) : (row) => row;
@@ -796,7 +815,7 @@ export function createInboxLaunch(options: {
       return roots()
         .map((root) => {
           const line = runOfRoot(root);
-          return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}` : "-"}`;
+          return `${root.launch!.id}:${line ? `${line.state}${line.again ? "+" : ""}${line.since ?? ""}${line.approval_check ? `?${line.approval_check}` : ""}` : "-"}`;
         })
         .join(",");
     },

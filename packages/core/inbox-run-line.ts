@@ -38,7 +38,7 @@ export interface InboxRunEvidence {
   now: number;
   /** The latest start or respawn (ms); the launch's `started_at` after an Inbox restart. */
   startedAt: number;
-  /** That start was a reply's respawn or Try again. */
+  /** That start was a reply's respawn (a Try again of a start that never ran is a first start). */
   again: boolean;
   /** The CLI is gone from the login PATH (false), there (true), or not checked (null). */
   cliAvailable: boolean | null;
@@ -60,6 +60,8 @@ export interface InboxRunEvidence {
   attachCommand: string | null;
   /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
   permissionSince?: number | null;
+  /** An answered question whose allow is being checked (the session has not visibly gone on yet), or null. */
+  approvalCheck?: string | null;
 }
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
@@ -77,6 +79,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
     cause: null,
     untrusted: false,
     attach_command: e.attachCommand,
+    approval_check: e.approvalCheck ?? null,
     ...extra,
   });
   const error = e.launch.error;

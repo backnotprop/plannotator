@@ -1001,6 +1001,8 @@ export interface ThreadPaneProps {
    * Absent: not a launched thread, or launch is off (the delivery line as always).
    */
   run?: InboxRun | null;
+  /** The host's attach command for a launched thread (the thread route's `attach_command`), also while the agent rests. */
+  attachCommand?: string | null;
   /** Stop, Try again or Delete changed the launch: read the thread again. */
   onRunChanged?: () => void;
 }
@@ -1189,7 +1191,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, run: runLine, onRunChanged }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, run: runLine, attachCommand = null, onRunChanged }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1212,13 +1214,15 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
       setLaunchError(cause instanceof InboxApiError ? cause.message : 'That did not work; try again.');
     }
   };
+  // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
+  const attach = runLine?.attach_command ?? attachCommand;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
           name: hostName(launched.agent),
           open: phone || remote === true || (!launched.session_ref && !runLine?.untrusted) ? null : () => void launchAct(() => inboxApi.launchOpen(launched.id)),
-          copyAttach: runLine?.attach_command
-            ? () => void copyTextToClipboard(runLine.attach_command!).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
+          copyAttach: attach
+            ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
           // A resting agent (no line) still runs in the background: Stop is offered then too.
           stop:
@@ -3349,6 +3353,11 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
     const by = m.questions?.[0]?.superseded_by?.message_id;
     return by ? (thread.messages.find((x) => x.id === by)?.body.trim() ?? null) : null;
   };
+  // The host's word that an answer sent from here did not take (a follow-up to an answered prompt; it withdraws nothing).
+  const permNotTaken = (m: InboxMessageWire): string | null => {
+    if (m.questions?.[0]?.state !== 'sent') return null;
+    return thread.messages.find((x) => x.reply_to === m.id && isPermMessage(x) && !(x.questions?.length))?.body.trim() ?? null;
+  };
   // The session already switched to Full permissions from an earlier prompt: no confirm again (the store's rule too).
   const permFullUsed = (m: InboxMessageWire): boolean => {
     const session = m.author.kind === 'agent' ? m.author.session : null;
@@ -4255,7 +4264,7 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} fullUsed={permFullUsed(message)} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} notTaken={permNotTaken(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
                   </div>
                 </article>,
               );

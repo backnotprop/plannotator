@@ -22,6 +22,7 @@
  * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
+import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
@@ -117,6 +118,24 @@ export function shellQuote(value: string): string {
 /** The command that opens the session in a terminal (the ⋯ menu's Copy attach command). */
 export function claudeAttachCommand(folder: string, short: string): string {
   return `cd ${shellQuote(folder)} && claude attach ${short}`;
+}
+
+/**
+ * Claude Code 2.1.314 takes a PermissionRequest hook's allow only when the ask
+ * lets hooks allow it; its own safety checks (removing the working folder, for
+ * one) are for a person in Terminal: it ignores the hook's allow, keeps its
+ * dialog up and blocks the call on its own after about 2 minutes. A deny always
+ * counts. The hook's input marks nothing about this (tool_name, tool_input,
+ * permission_suggestions and the base fields only), so the launch's mode
+ * decides: in bypass mode (Full permissions) only such checks reach the hook.
+ */
+export const CLAUDE_TERMINAL_ONLY = "Claude Code only accepts this approval in Terminal.";
+/** The follow-up when an allow from here did not take: the session still waits on its own dialog. */
+export const CLAUDE_APPROVAL_NOT_TAKEN = "Claude Code didn't take the approval from here: approve it in Terminal.";
+
+/** What a launch's permission card may offer: a full launch takes only a deny from here, and its card says why. */
+export function claudePermissionTerms(launch: Pick<InboxLaunchRecord, "full_permissions">): { allowHere: boolean; note: string | null } {
+  return launch.full_permissions === true ? { allowHere: false, note: CLAUDE_TERMINAL_ONLY } : { allowHere: true, note: null };
 }
 
 /** What Open in Terminal runs when no session exists yet (an untrusted folder): plain `claude`, so its trust prompt shows. */

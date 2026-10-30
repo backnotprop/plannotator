@@ -8,11 +8,11 @@ import { hostLabel } from '../compose/model';
 import { Tip } from './Tip';
 import { useMinuteClock } from './Undelivered';
 
-/** "4 min" since `since` (at least 1). */
+/** "4 min" since `since`; nothing under a minute (never "1 min" a few seconds in). */
 function minutesSince(since: string | null, now: number): string | null {
   if (!since) return null;
-  const min = Math.max(1, Math.floor((now - Date.parse(since)) / 60_000));
-  return `${min} min`;
+  const min = Math.floor((now - Date.parse(since)) / 60_000);
+  return min >= 1 ? `${min} min` : null;
 }
 
 /** `claude attach 4f1c9a2e` on screen; the command copied also changes into the folder first. */

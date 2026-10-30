@@ -14,7 +14,8 @@ import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { launchPermissionHooks } from "./inbox-launch";
-import { createLaunchPermissions, fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
+import { APPROVAL_SETTLE_MS, createLaunchPermissions, fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
+import { readInboxPermissionBody } from "@plannotator/core/inbox-permission";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -188,10 +189,14 @@ describe("the permission route", () => {
     full.answer(again.body.message_id!, { selected: ["Allow and switch to Full permissions"] });
     expect((await full.call({ key: KEY, request_id: "req-00000020", event: EVENT, message_id: again.body.message_id })).body).toMatchObject({ status: "decided", choice: "full" });
 
-    // A launch already in Full permissions (its safety checks still ask): no mode switch, neither Full nor Auto.
+    // A launch already in Full permissions: only Claude's own safety checks ask, and Claude takes only a deny for them
+    // from a hook. Deny alone, with the plain reason on the card; a deny counts.
     const already = setup({ bypassAvailable: true, full: true });
     const safety = await already.call({ key: KEY, request_id: "req-00000022", event: EVENT });
-    expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny"]);
+    expect(already.store.questionsOf(safety.body.message_id!)[0]!.choices.map((c) => c.label)).toEqual(["Deny"]);
+    expect(readInboxPermissionBody(already.store.message(safety.body.message_id!)!.body).note).toBe("Claude Code only accepts this approval in Terminal.");
+    already.answer(safety.body.message_id!, { selected: ["Deny"] });
+    expect((await already.call({ key: KEY, request_id: "req-00000022", event: EVENT, message_id: safety.body.message_id })).body).toMatchObject({ status: "decided", choice: "deny" });
   });
 
   test("an answered prompt is never reopened: a stale pick (Deny at the current revision) is refused, and the record stays", async () => {
@@ -398,6 +403,79 @@ describe("the lease", () => {
     permissions.sweep();
     expect(store.questionsOf(asked.body.message_id!)[0]!.state).toBe("open");
     expect((await held).body.status).toBe("waiting");
+  });
+});
+
+describe("an allow is checked, never assumed", () => {
+  const NOT_TAKEN = "Claude Code didn't take the approval from here: approve it in Terminal.";
+  const WAITING: InboxRunHostState = { status: "waiting", state: "blocked", waitingFor: "permission prompt" };
+  const decide = async (t: ReturnType<typeof setup>, request: string, selected: string[]) => {
+    const { body } = await t.call({ key: KEY, request_id: request, event: EVENT });
+    t.answer(body.message_id!, { selected });
+    expect((await t.call({ key: KEY, request_id: request, event: EVENT, message_id: body.message_id })).body.status).toBe("decided");
+    return body.message_id!;
+  };
+  const lastOf = (t: ReturnType<typeof setup>) => t.store.message(t.store.threadMessageIds(t.root.id).at(-1)!)!;
+
+  test("Claude kept its own dialog (a safety check ignores a hook's allow): once a settled read says so, a follow-up says it did not take; never before", async () => {
+    const t = setup();
+    const id = await decide(t, "req-00000030", ["Allow once"]);
+    const decidedAt = t.clock.now;
+    expect(t.permissions.checking(LAUNCH)).toBe(id);
+    expect(t.permissions.hostDueAt()).toBe(decidedAt + APPROVAL_SETTLE_MS);
+    // A read from before the answer settled still shows our own prompt: it proves nothing.
+    t.clock.now += 1_000;
+    t.host.state = WAITING;
+    t.host.readAt = t.clock.now;
+    t.permissions.sweep();
+    expect(lastOf(t).body).not.toBe(NOT_TAKEN);
+    expect(t.permissions.checking(LAUNCH)).toBe(id);
+    // Settled, and still waiting on a permission prompt: Claude did not take it.
+    t.clock.now = decidedAt + APPROVAL_SETTLE_MS + 500;
+    t.host.readAt = t.clock.now;
+    t.permissions.sweep();
+    const follow = lastOf(t);
+    expect(follow.body).toBe(NOT_TAKEN);
+    expect(follow.reply_to).toBe(id);
+    expect(follow.author).toEqual(t.store.message(id)!.author);
+    // It withdraws nothing: the question stays answered (the card reads the follow-up instead of "Allowed").
+    expect(follow.supersedes).toBeUndefined();
+    expect(t.store.questionsOf(id)[0]!.state).toBe("sent");
+    expect(t.permissions.checking(LAUNCH)).toBeNull();
+    expect(t.permissions.hostDueAt()).toBeNull();
+    // Said once.
+    t.permissions.sweep();
+    expect(t.store.threadMessageIds(t.root.id).filter((m) => t.store.message(m)!.body === NOT_TAKEN)).toHaveLength(1);
+  });
+
+  test("the session went on (a settled read not waiting on a permission prompt): nothing is written, and the check ends", async () => {
+    const t = setup();
+    const id = await decide(t, "req-00000031", ["Allow `bun run` for this session"]);
+    t.clock.now += APPROVAL_SETTLE_MS;
+    t.host.state = { status: "busy", state: "running", waitingFor: null };
+    t.host.readAt = t.clock.now;
+    t.permissions.sweep();
+    expect(lastOf(t).id).not.toBe(id);
+    expect(lastOf(t).body).not.toBe(NOT_TAKEN);
+    expect(t.permissions.checking(LAUNCH)).toBeNull();
+  });
+
+  test("a newer question of ours: the session went on to its next prompt, before any host read", async () => {
+    const t = setup();
+    await decide(t, "req-00000032", ["Allow once"]);
+    t.clock.now += 500;
+    await t.call({ key: KEY, request_id: "req-00000033", event: EVENT });
+    t.host.state = WAITING;
+    t.permissions.sweep();
+    expect(t.permissions.checking(LAUNCH)).toBeNull();
+    expect(t.store.threadMessageIds(t.root.id).some((m) => t.store.message(m)!.body === NOT_TAKEN)).toBe(false);
+  });
+
+  test("a deny always counts (never checked), but a host read from before it settled is still not a waiting session", async () => {
+    const t = setup();
+    await decide(t, "req-00000034", ["Deny"]);
+    expect(t.permissions.checking(LAUNCH)).toBeNull();
+    expect(t.permissions.settledAfter(LAUNCH)).toBe(t.clock.now + APPROVAL_SETTLE_MS);
   });
 });
 
