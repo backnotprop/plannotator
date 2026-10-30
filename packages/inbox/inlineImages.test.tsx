@@ -8,7 +8,7 @@
  * too and opens in the plain lightbox, so a click always opens something. The
  * browser proof is tests/e2e/inbox-image-viewer.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';

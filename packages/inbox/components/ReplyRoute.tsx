@@ -4,6 +4,8 @@ import type { LiveSession, LiveSessionsModel } from '../api';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { hostName, sessionWords } from './NewMessage';
+import { ShortcutHint, useShortcutHintShown } from '../shortcuts/hint';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 
 /**
  * Replying when the session that asked has ended (design record "replying
@@ -280,9 +282,7 @@ export function RouteChoice({
           {reask ? 'Cancel' : 'Back to the reply'}
         </button>
         <span className="ib-sp" />
-        <span className="ib-esc">
-          <kbd>Esc</kbd> goes back
-        </span>
+        <EscNote />
       </div>
     </form>
   );
@@ -322,3 +322,13 @@ export function redirectedName(to: { host: string; session: string }, asked: Inb
 /** Whether the person's reply went to another session than the one that asked. */
 export const isRedirected = (message: InboxMessageWire): boolean => message.author.kind === 'person' && !!message.to && !!message.reply_to;
 
+
+/** "Esc goes back": the keycap from the registry, the note gone with it when hints are off. */
+function EscNote() {
+  if (!useShortcutHintShown({ scope: inboxAppShortcuts, action: 'leavePage' })) return null;
+  return (
+    <span className="ib-esc">
+      <ShortcutHint scope={inboxAppShortcuts} action="leavePage" className="" /> goes back
+    </span>
+  );
+}

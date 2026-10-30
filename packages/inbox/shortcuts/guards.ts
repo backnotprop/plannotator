@@ -5,6 +5,19 @@
  * focused component's first). The registry already refuses a binding whose
  * modifiers differ from the key's (`E` never matches ⌘E or ⌥E).
  */
+import { isTouchPhone } from '../phone';
+import { selectionToolbarShowing } from '../selectionToolbar';
+import { shortcutPrefs } from './prefs';
+
+/**
+ * Whether single keys (letters, J / K and Shift+J / Shift+K, `[` `]`, `/`, G) act at all: Single-key shortcuts on,
+ * and not a real touch phone (`isTouchPhone`: the phone layout with a coarse pointer and no hover). A desktop window
+ * narrower than 768 px draws the phone layout (no keycaps, no map button) but keeps every key, as on main; `?`
+ * works on a touch phone too, for a hardware keyboard (design §5.4; `bareKeyAllowed`'s `onTouchPhone`).
+ */
+export function singleKeysLive(prefs: { singleKeys: boolean } = shortcutPrefs(), { onTouchPhone = false } = {}): boolean {
+  return prefs.singleKeys && (onTouchPhone || !isTouchPhone());
+}
 
 /**
  * The element the key came from. `composedPath()[0]` reaches into shadow
@@ -56,4 +69,39 @@ export function modalOpen(doc: Document | null = typeof document === 'undefined'
 /** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. */
 export function inOverlay(target: Element | null): boolean {
   return !!target?.closest('[role="dialog"], [role="alertdialog"], [data-popover-layer], [data-pn-image-annotator-stage]');
+}
+
+/**
+ * A binding that is one plain key (or a sequence of them): a letter, a digit
+ * or a punctuation key, no ⌘ / Ctrl / Alt. These are the keys Single-key
+ * shortcuts turns off (WCAG 2.1.4): Escape, Enter, Tab, the arrows, Home / End
+ * and every chord keep working.
+ */
+export function isBareBinding(binding: string): boolean {
+  const tokens = binding.trim().split(/[+\s]+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.includes('Mod') || tokens.includes('Alt')) return false;
+  return tokens.filter((token) => token !== 'Shift').every((token) => token.length === 1);
+}
+
+/**
+ * Whether a single key may act now, for every Inbox scope: never while typing
+ * (a field, a contenteditable), while an input method composes, on a held
+ * key's repeat, with ⌘ / Ctrl / Alt, from inside a dialog, menu, listbox or a
+ * file's frame, under a modal, while words selected in a message show their
+ * toolbar (a printable key starts a comment there), after something else used
+ * the key, when Single-key shortcuts is off, or on a touch phone (unless
+ * `onTouchPhone`: `?`). A scope adds its own rules
+ * (the tour's replay, a guided review) on top.
+ */
+export function bareKeyAllowed(event: KeyboardEvent, prefs: { singleKeys: boolean } = shortcutPrefs(), { onTouchPhone = false } = {}): boolean {
+  if (!singleKeysLive(prefs, { onTouchPhone })) return false;
+  if (event.defaultPrevented || isRepeatKey(event) || isComposingKey(event) || hasCommandModifier(event)) return false;
+  const target = keyTarget(event);
+  if (target) {
+    if (isEditableTarget(target) || inOverlay(target)) return false;
+    if (target.closest('[role="menu"], [role="listbox"], iframe')) return false;
+  }
+  if (modalOpen()) return false;
+  if (typeof document !== 'undefined' && selectionToolbarShowing(document)) return false;
+  return true;
 }

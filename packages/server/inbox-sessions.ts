@@ -120,6 +120,12 @@ interface SeenSession {
   idleSince: number | null;
   /** The last time it was seen idle (busy false); null when never. Decides whether an automatic mark went into a turn. */
   idleAt?: number | null;
+  /**
+   * When it last went idle (the `idleSince` of its latest idle spell), kept
+   * through a later busy turn and after the session ends (Tidy's "Nothing to
+   * change" must not flip back). Unlike `idleAt`, not refreshed by each poll.
+   */
+  lastIdleSince?: number | null;
   /** Its poll said it can deliver into a running turn (`send_now`). */
   sendNow: boolean;
   /** Its poll said it understands a reply it was tagged in (`tags`): only then can it be tagged. */
@@ -136,14 +142,6 @@ interface SeenSession {
   plugin: LoadedPlugin | null;
   /** Claude Code's version (`engine`); null when it sent none. */
   engine: string | null;
-  /**
-   * A session the Inbox runs itself over ACP (packages/server/inbox-acp-runner.ts):
-   * always live while this Inbox runs (the runner starts its agent on
-   * demand), but never offered as a target of its own: compose's list, a
-   * thread's project sessions and the reply route's `to` leave it out
-   * (compose starts a new one instead).
-   */
-  runner?: boolean;
   /**
    * A session the Inbox wakes itself, with no connection that polls (Codex:
    * `codex queue`; packages/server/inbox-codex-wake.ts): seen from its MCP
@@ -300,6 +298,7 @@ export function createInboxLiveSessions(options: {
       entry.idleSince = null;
     } else {
       entry.idleSince = entry.busy === false && entry.idleSince !== null ? entry.idleSince : (finiteMs(body.idle_since) ?? at);
+      entry.lastIdleSince = entry.idleSince;
       entry.idleAt = at;
       setDeliveryFlags(entry, false, entry.sendNow);
     }
@@ -520,7 +519,7 @@ export function createInboxLiveSessions(options: {
     let wroteInProject: Set<string> | null = null;
     const out: (InboxLiveSession & { order: number; started: number })[] = [];
     for (const [session, entry] of sessions) {
-      if (!isLive(entry) || entry.runner) continue;
+      if (!isLive(entry)) continue;
       if (entry.root !== null) {
         if (entry.root !== project.root) continue;
       } else {
@@ -567,7 +566,7 @@ export function createInboxLiveSessions(options: {
   }[] => {
     const out = [];
     for (const [session, entry] of sessions) {
-      if (!isLive(entry) || entry.runner) continue;
+      if (!isLive(entry)) continue;
       out.push({
         session,
         host: entry.host,
@@ -691,6 +690,12 @@ export function createInboxLiveSessions(options: {
       throw new InboxError("session_not_live", "A session you tagged is not live any more: nothing was sent. Remove the tag, or tag another session.", { sessions: missing });
     }
     return out;
+  };
+
+  /** Whether a session is live now with a connection that understands tags (so a notice reaches it truthfully). */
+  const wakesTagged = (session: string): boolean => {
+    const entry = sessions.get(session);
+    return !!entry && isLive(entry) && entry.tags;
   };
 
   /** How a session is connected now (live, no grace), or null when its connection does not poll. */
@@ -862,7 +867,7 @@ export function createInboxLiveSessions(options: {
     if (typeof session !== "string" || !session) throw new InboxError("validation_error", "to.session: the live session to send to.", { field: "to.session" });
     if (host !== undefined && typeof host !== "string") throw new InboxError("validation_error", "to.host: a string.", { field: "to.host" });
     const entry = sessions.get(session);
-    if (!entry || !isLive(entry) || entry.runner || (host !== undefined && entry.host !== host)) return null;
+    if (!entry || !isLive(entry) || (host !== undefined && entry.host !== host)) return null;
     return { host: entry.host, session, root: entry.root };
   };
 
@@ -958,46 +963,10 @@ export function createInboxLiveSessions(options: {
     return store.requestDeliverNow(messageId, tag ? tag.session : null);
   };
 
-  /**
-   * A session the Inbox runs over ACP (inbox-acp-runner.ts): live from now
-   * until this Inbox stops (it holds one poll forever), idle until a turn
-   * runs, never able to take a reply mid-turn (no Send now: the runner
-   * gives each turn what waited when it starts).
-   */
-  const registerRunnerSession = (session: string, host: string, root: string, startedAt: number) => {
-    const known = sessions.get(session);
-    if (known?.runner) return;
-    sessions.set(session, {
-      host,
-      root,
-      startedAt,
-      lastSeen: now(),
-      holding: 1,
-      busy: false,
-      idleSince: now(),
-      idleAt: now(),
-      sendNow: false,
-      tags: false,
-      cwd: root,
-      folder: root,
-      plugin: null,
-      engine: null,
-      runner: true,
-    });
-  };
-  /** A runner session's turn started or ended. */
-  const setRunnerBusy = (session: string, busy: boolean) => {
-    const entry = sessions.get(session);
-    if (!entry?.runner) return;
-    const at = now();
-    entry.lastSeen = at;
-    applyState(entry, { busy }, at);
-    trackWaitsOf(session, entry, at);
-  };
+  /** When `session` last went idle, live or not; null when never seen idle (Tidy's "Nothing to change"). */
+  const lastIdleOf = (session: string): number | null => sessions.get(session)?.lastIdleSince ?? null;
 
   return {
-    registerRunnerSession,
-    setRunnerBusy,
     pollStarted,
     stateChanged,
     seenWakeOnly,
@@ -1014,6 +983,7 @@ export function createInboxLiveSessions(options: {
     composeTarget,
     connectionOf,
     deliveryConnectionOf,
+    lastIdleOf,
     steerableSessions,
     autoSendAfterMs,
     trackWaits,
@@ -1026,5 +996,6 @@ export function createInboxLiveSessions(options: {
     restartAgents,
     mcpAgents,
     tagTargets,
+    wakesTagged,
   };
 }

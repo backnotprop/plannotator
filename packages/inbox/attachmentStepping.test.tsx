@@ -7,7 +7,7 @@
  * real browser proof (the HTML bridge, Back, the list) is
  * tests/e2e/inbox-attachment-stepping.spec.ts.
  *
- * DOM-gated: the rendering tests run under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: the rendering tests run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';

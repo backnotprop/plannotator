@@ -1,7 +1,8 @@
 /**
- * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, and Copilot CLI
+ * Plannotator CLI for Claude Code, Droid, Codex, Gemini CLI, Copilot CLI, and
+ * DeepSeek Harness
  *
- * Supports thirteen modes:
+ * Supports fifteen modes:
  *
  * 1. Plan Review (default, no args):
  *    - Spawned by Claude/Gemini/Codex hook entrypoints
@@ -52,16 +53,22 @@
  * 11. OpenCode Last (`plannotator opencode-annotate-last`):
  *    - Internal structured last-message annotation bridge for OpenCode
  *
- * 12. Improve Context (`plannotator improve-context`):
+ * 12. DeepSeek Harness Plan (`plannotator dsh-plan`):
+ *    - Internal bridge mode used by the @plannotator/dsh plugin (apps/dsh-plugin)
+ *    - Reads `{ plan, timeoutSeconds?, cwd? }` from stdin
+ *    - Outputs `{ approved, feedback?, message?, savedPath?, answersOnly? }`,
+ *      with `message` composed from the `dsh` prompt templates (dsh-plan.ts)
+ *
+ * 13. Improve Context (`plannotator improve-context`):
  *    - Spawned by PreToolUse hook on EnterPlanMode
  *    - Reads improvement hook file from ~/.plannotator/hooks/
  *    - Returns additionalContext or silently passes through
  *
- * 13. Uninstall (`plannotator uninstall`):
+ * 14. Uninstall (`plannotator uninstall`):
  *    - Removes recognized installer-owned components across supported hosts
  *    - Preserves local data by default; `--purge` removes known local data
  *
- * 14. Guide tools (`plannotator guide list|export|share|unshare`):
+ * 15. Guide tools (`plannotator guide list|export|share|unshare`):
  *    - List saved Guided Reviews; export one (or a snapshot JSON) as a portable
  *      HTML file whose viewer loads from guides.show; share one as a link on
  *      guides.show (encrypted by default) and remove it again
@@ -101,7 +108,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveDefaultDiffType, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -162,7 +169,7 @@ import {
   buildPlanFileRule,
 } from "@plannotator/shared/prompts";
 import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output";
-import { registerSession, unregisterSession, listSessions, type SessionInfo } from "@plannotator/server/sessions";
+import { registerSession, unregisterSession, listSessions, listInProcessSessions, type SessionInfo } from "@plannotator/server/sessions";
 import { enableAutoUpdateNotice, isManagedBinary, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
 import { openBrowser } from "@plannotator/server/browser";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
@@ -182,7 +189,8 @@ import {
   waitForPlanReviewCloseDelay,
   waitForPlanReviewDecision,
 } from "@plannotator/shared/plan-review-lifecycle";
-import { AGENT_CONFIG, type Origin } from "@plannotator/shared/agents";
+import type { Origin } from "@plannotator/shared/agents";
+import { detectOrigin } from "./detect-origin";
 import {
   findDroidSessionLogsByAncestorWalk,
   findDroidSessionLogsForCwd,
@@ -204,7 +212,11 @@ import {
   resolveCodexStopPlan,
 } from "./codex-session";
 import { findCopilotPlanContent, findCopilotSessionByAncestorPids, findCopilotSessionForCwd, getRecentCopilotMessages } from "./copilot-session";
+import { findDshSessionLog, getRecentDshMessages, resolveDshHome } from "./dsh-session";
+import { composeDshPlanOutput, dshPlanTimeoutFeedback, parseDshPlanInput } from "./dsh-plan";
 import { resolveLatestVibePlan } from "./vibe-plan";
+import { findQwenSessionLog, getRecentQwenMessages } from "./qwen-session";
+import { isQwenPlanPermissionRequest, qwenPlanFromEvent, qwenPlanHookOutput } from "./qwen-plan";
 import { resolveClaudePlan } from "./claude-plan";
 import { takeModPlanApproval } from "./mod-plan-approval";
 import {
@@ -413,11 +425,12 @@ if (tailscaleFlag) {
     );
   }
   process.env.PLANNOTATOR_REMOTE = "0";
-  // urlHost is irrelevant here — the advertised URL comes from tailscale
-  // serve, and the session is local-bound. An empty-but-set env var also
-  // suppresses a config-file urlHost, avoiding the misleading
+  // urlHost and publicUrl are irrelevant here — the advertised URL comes from
+  // tailscale serve, and the session is local-bound. An empty-but-set env var
+  // also suppresses the config-file key, avoiding the misleading
   // "set PLANNOTATOR_REMOTE=1" local-session warning mid --tailscale run.
   process.env.PLANNOTATOR_URL_HOST = "";
+  process.env.PLANNOTATOR_PUBLIC_URL = "";
   // "Ask this session" stays ON (#2166): the host's bridge config is kept
   // (taken at the top of this file), and the servers answer it only for a tab
   // on this machine and for the Tailscale login that owns it
@@ -465,6 +478,7 @@ async function handleTailscaleReady(port: number): Promise<void> {
     ({ url } = enableTailscaleServe(port));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write("To keep working on this computer, run the same command without --tailscale.\n");
     process.exit(
       annotateStartupFailureExitCode({
         requireApproval: requireApprovalFlag,
@@ -856,35 +870,8 @@ const shareBaseUrl = process.env.PLANNOTATOR_SHARE_URL || undefined;
 const pasteApiUrl = process.env.PLANNOTATOR_PASTE_URL || undefined;
 
 // Detect calling agent from environment variables set by agent runtimes.
-// Priority:
-//   PLANNOTATOR_ORIGIN (explicit override, validated against AGENT_CONFIG)
-//   > Amp plugin wrappers (PLANNOTATOR_ORIGIN=amp)
-//   > Droid command wrappers (PLANNOTATOR_ORIGIN=droid)
-//   > Codex (CODEX_THREAD_ID)
-//   > Copilot CLI (COPILOT_CLI)
-//   > OpenCode (OPENCODE)
-//   > Gemini CLI (GEMINI_CLI)
-//   > oh-my-pi harness (OMPCODE) — checked last because OMP exports OMPCODE
-//     into every shell it spawns; runtimes launched from an OMP session must
-//     still be detected as themselves. OMPCODE still wins over the terminal
-//     fallback below.
-//
-//   > Mistral Vibe — detected from the pre_tool hook payload (hook_event_name
-//     "pre_tool" + tool_name "exit_plan_mode" is unambiguous vs Claude/Gemini),
-//     so the installer's hook command needs no env prefix. PLANNOTATOR_ORIGIN=
-//     mistral-vibe remains the manual override above.
-//
-// To add a new agent, also add an entry to AGENT_CONFIG in
-// packages/core/agents.ts (see header comment there).
-const originOverride = process.env.PLANNOTATOR_ORIGIN as Origin | undefined;
-const detectedOrigin: Origin =
-  (originOverride && originOverride in AGENT_CONFIG) ? originOverride :
-  process.env.CODEX_THREAD_ID ? "codex" :
-  process.env.COPILOT_CLI ? "copilot-cli" :
-  process.env.OPENCODE ? "opencode" :
-  process.env.GEMINI_CLI ? "gemini-cli" :
-  process.env.OMPCODE ? "oh-my-pi" :
-  "claude-code";
+// The priority chain (and how to add an agent) is documented on detectOrigin.
+const detectedOrigin: Origin = detectOrigin(process.env);
 
 type OpenCodeBridgeAgent = {
   name: string;
@@ -998,14 +985,17 @@ if (args[0] === "sessions") {
   // SESSION DISCOVERY MODE
   // ============================================
 
+  // Both lists remove stale entries as they read. OpenCode's in-process
+  // servers are listed too, newest first with the rest.
+  const sessions = [...listSessions(), ...(await listInProcessSessions("opencode"))].sort(
+    (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+  );
+
   if (args.includes("--clean")) {
-    // Force cleanup: list sessions (which auto-removes stale entries)
-    const sessions = listSessions();
     console.error(`Cleaned up stale sessions. ${sessions.length} active session(s) remain.`);
     process.exit(0);
   }
 
-  const sessions = listSessions();
   const sessionsJson = jsonFlag;
 
   if (sessions.length === 0) {
@@ -1131,6 +1121,7 @@ if (args[0] === "sessions") {
   // client's mount effects don't auto-switch the diff away from the flags.
   const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
   let initialBaseFromFlags: string | undefined;
+  let initialBaseExplicit = false;
 
   let rawPatch: string;
   let gitRef: string;
@@ -1427,7 +1418,7 @@ if (args[0] === "sessions") {
         vcsType: reviewArgs.vcsType,
         requestedDiffType: openState.requestedDiffType,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveDefaultDiffTypeFor(config, managedVcs?.id),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
@@ -1439,7 +1430,9 @@ if (args[0] === "sessions") {
       // Forward the base the patch was actually computed against — without it
       // the server would serve this patch under the detected default: a
       // mixed-base review (wrong file-content fetches, wrong agent prompts).
-      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
+      // Evolution diff opens on the change's previous state, not the line base.
+      if (openState.requestedBase !== undefined || diffResult.diffType === "jj-evolog") initialBaseFromFlags = diffResult.base;
+      initialBaseExplicit = openState.requestedBase !== undefined;
       initialFileIdentities = diffResult.fileIdentities;
     } else {
       // Multi-repo workspace review has no base parameter — the open-state
@@ -1487,7 +1480,7 @@ if (args[0] === "sessions") {
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
-    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    initialBaseExplicit,
     openStatePinned,
     // `--no-git-remote-check` (#1553): session-only, and only ever a disable —
     // undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck deciding.
@@ -1873,6 +1866,11 @@ if (args[0] === "sessions") {
   const isDroid = detectedOrigin === "droid";
   const isCopilot = detectedOrigin === "copilot-cli";
   const isVibe = detectedOrigin === "mistral-vibe";
+  const isDsh = detectedOrigin === "dsh";
+  // DSH_SHELL is inherited by anything started from a DSH terminal, so only an
+  // explicit PLANNOTATOR_ORIGIN=dsh skips the Copilot ancestor check below.
+  const isExplicitDsh = isDsh && process.env.PLANNOTATOR_ORIGIN === "dsh";
+  const isQwen = detectedOrigin === "qwen-code";
 
   // Collect up to N recent assistant messages so the user can pick the right
   // one — defaults to the same selection as the legacy "last message"
@@ -1889,7 +1887,7 @@ if (args[0] === "sessions") {
   // earlier branch claims the invocation.
   let copilotLockSessionDir: string | null = null;
   let copilotSessionDir: string | null = null;
-  if (!stdinFlag && !isCodex && !isDroid && !isVibe) {
+  if (!stdinFlag && !isCodex && !isDroid && !isVibe && !isExplicitDsh && !isQwen) {
     copilotLockSessionDir = findCopilotSessionByAncestorPids();
     copilotSessionDir = copilotLockSessionDir ??
       (isCopilot ? findCopilotSessionForCwd(projectRoot) : null);
@@ -1912,6 +1910,26 @@ if (args[0] === "sessions") {
     const text = (await Bun.stdin.text()).trim();
     if (text) {
       lastMessage = { messageId: "stdin", text, lineNumbers: [] };
+    }
+  } else if (isDsh && !copilotLockSessionDir) {
+    // DeepSeek Harness path: DSH_SESSION_ID names the calling agent's session;
+    // its log lives under $DSH_HOME/sessions/<project>/<session>/. Checked
+    // before Codex so PLANNOTATOR_ORIGIN=dsh wins over an inherited
+    // CODEX_THREAD_ID. A Copilot CLI among our ancestors was started from a
+    // DSH terminal and is the real caller, so its lock wins.
+    const dshSessionId = process.env.DSH_SESSION_ID;
+    const dshLog = dshSessionId ? findDshSessionLog(dshSessionId) : null;
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] DSH detected, session ID: ${dshSessionId ?? "(none)"}`);
+      console.error(`[DEBUG] DSH selected log: ${dshLog ?? "(none)"}`);
+    }
+    if (dshLog) {
+      recentMessages = getRecentDshMessages(dshLog, RECENT_MESSAGES_LIMIT);
+      lastMessage = recentMessages[0] ?? null;
+    } else {
+      console.error(dshSessionId
+        ? `No DeepSeek Harness session log for DSH_SESSION_ID=${dshSessionId} under ${path.join(resolveDshHome(), "sessions")}.`
+        : "DSH_SESSION_ID is not set: run plannotator last from a DeepSeek Harness agent shell, or pass the message with --stdin.");
     }
   } else if (codexThreadId) {
     // Codex path: find rollout by thread ID
@@ -1991,6 +2009,21 @@ if (args[0] === "sessions") {
     if (vibeLog) {
       recentMessages = getRecentVibeMessages(vibeLog, RECENT_MESSAGES_LIMIT)
         .map((m) => ({ messageId: m.messageId, text: m.text, lineNumbers: [], timestamp: m.timestamp }));
+      lastMessage = recentMessages[0] ?? null;
+    }
+  } else if (isQwen) {
+    // Qwen Code path: QWEN_CODE_PROJECT_DIR + QWEN_CODE_SESSION_ID (set for
+    // the shell tool that runs this) name the session's log directly; the
+    // fallback is the newest chat of the cwd's project (qwen-session.ts).
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Qwen Code detected, project root: ${projectRoot}`);
+    }
+    const qwenLog = findQwenSessionLog({ cwd: projectRoot });
+    if (process.env.PLANNOTATOR_DEBUG) {
+      console.error(`[DEBUG] Qwen selected log: ${qwenLog ?? "(none)"}`);
+    }
+    if (qwenLog) {
+      recentMessages = getRecentQwenMessages(qwenLog, RECENT_MESSAGES_LIMIT);
       lastMessage = recentMessages[0] ?? null;
     }
   } else {
@@ -2248,6 +2281,78 @@ if (args[0] === "sessions") {
   }));
   process.exit(0);
 
+} else if (args[0] === "dsh-plan") {
+  // ============================================
+  // DEEPSEEK HARNESS PLAN REVIEW MODE
+  // ============================================
+  //
+  // Internal CLI bridge used by the @plannotator/dsh plugin to answer DSH's
+  // exit_plan_mode review. The stdin/stdout contract and the message
+  // composition live in dsh-plan.ts.
+
+  const parsed = parseDshPlanInput(await Bun.stdin.text());
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    process.exit(1);
+  }
+  const { plan: planContent, timeoutSeconds, cwd: planCwd } = parsed.input;
+  if (planCwd) {
+    try {
+      process.chdir(planCwd);
+    } catch (error) {
+      console.error(`dsh-plan cannot use cwd ${planCwd}: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  }
+
+  const planProject = (await detectProjectName()) ?? "_unknown";
+  const server = await startPlannotatorServer({
+    plan: planContent,
+    origin: "dsh",
+    // The plugin steers the approved-with-notes message dsh-plan composes
+    // into the agent after approving.
+    approvalNotesSupported: true,
+    sharingEnabled,
+    shareBaseUrl,
+    pasteApiUrl,
+    htmlContent: planHtmlContent(),
+    onReady: async (url, isRemote, port) => {
+      await handleServerReady(url, isRemote, port);
+
+      if (isRemote && sharingEnabled) {
+        await writeRemoteShareLink(planContent, shareBaseUrl, "review the plan", "plan only").catch(() => {});
+      }
+    },
+  });
+
+  registerCliSession({
+    pid: process.pid,
+    port: server.port,
+    url: server.url,
+    mode: "plan",
+    project: planProject,
+    startedAt: new Date().toISOString(),
+    label: `plan-${planProject}`,
+  });
+
+  let result: Awaited<ReturnType<typeof server.waitForDecision>>;
+  try {
+    result = await waitForPlanReviewDecision({
+      waitForDecision: server.waitForDecision,
+      timeoutMs: timeoutSeconds === null ? null : timeoutSeconds * 1000,
+      timeoutResult: {
+        approved: false,
+        feedback: dshPlanTimeoutFeedback(timeoutSeconds ?? 0),
+      },
+    });
+    await waitForPlanReviewCloseDelay(1500);
+  } finally {
+    await server.stop();
+  }
+
+  console.log(JSON.stringify(composeDshPlanOutput(result)));
+  process.exit(0);
+
 } else if (args[0] === "opencode-review" || args[0] === "opencode-review-directory") {
   // ============================================
   // OPENCODE PLUGIN CODE REVIEW MODE
@@ -2278,6 +2383,7 @@ if (args[0] === "sessions") {
   // `review` branch.
   const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
   let initialBaseFromFlags: string | undefined;
+  let initialBaseExplicit = false;
 
   let rawPatch: string;
   let gitRef: string;
@@ -2362,7 +2468,7 @@ if (args[0] === "sessions") {
         vcsType: reviewArgs.vcsType,
         requestedDiffType: openState.requestedDiffType,
         requestedBase: openState.requestedBase,
-        configuredDiffType: resolveDefaultDiffType(config),
+        configuredDiffType: resolveDefaultDiffTypeFor(config, managedVcs?.id),
         hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
       });
       gitContext = diffResult.gitContext;
@@ -2371,7 +2477,9 @@ if (args[0] === "sessions") {
       gitRef = diffResult.gitRef;
       diffError = diffResult.error;
       initialFingerprint = diffResult.fingerprint;
-      if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
+      // Evolution diff opens on the change's previous state, not the line base.
+      if (openState.requestedBase !== undefined || diffResult.diffType === "jj-evolog") initialBaseFromFlags = diffResult.base;
+      initialBaseExplicit = openState.requestedBase !== undefined;
       initialFileIdentities = diffResult.fileIdentities;
     } else {
       await resolveCliReviewOpenState(reviewArgs, {
@@ -2419,7 +2527,7 @@ if (args[0] === "sessions") {
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
-    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    initialBaseExplicit,
     openStatePinned,
     // `--no-git-remote-check` (#1553): session-only, and only ever a disable —
     // undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck deciding.
@@ -3061,11 +3169,16 @@ if (args[0] === "sessions") {
   let isGemini = false;
   let planFilename = "";
 
+  // Qwen Code: PermissionRequest on exit_plan_mode, the plan inline (qwen-plan.ts).
+  const isQwen = isQwenPlanPermissionRequest(event);
+
   // Detect harness: Gemini sends plan_filename (file on disk), Claude Code sends plan (inline)
-  planFilename = event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
+  planFilename = isQwen ? "" : event.tool_input?.plan_filename || event.tool_input?.plan_path || "";
   isGemini = !!planFilename;
 
-  if (isGemini) {
+  if (isQwen) {
+    planContent = qwenPlanFromEvent(event);
+  } else if (isGemini) {
     // Reconstruct full plan path from transcript_path and session_id:
     // transcript_path = <projectTempDir>/chats/session-...json
     // plan lives at   = <projectTempDir>/<session_id>/plans/<plan_filename>
@@ -3088,16 +3201,21 @@ if (args[0] === "sessions") {
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
-    origin: isGemini ? "gemini-cli" : detectedOrigin,
+    origin: isQwen ? "qwen-code" : isGemini ? "gemini-cli" : detectedOrigin,
     // No approvalNotesSupported: Claude Code's PermissionRequest allow carries
-    // no message, and Gemini CLI shows a systemMessage to the person, not the
-    // model, so notes sent with an approval would be lost.
+    // no message, Gemini CLI shows a systemMessage to the person, not the
+    // model, and Qwen Code ignores a hook's allow on exit_plan_mode, so notes
+    // sent with an approval would be lost.
     // Claude Code writes the plan to disk before the hook fires.
-    planFilePath: isGemini ? undefined : event.tool_input?.planFilePath,
+    planFilePath: isGemini || isQwen ? undefined : event.tool_input?.planFilePath,
     // Claude Code sets CLAUDE_PROJECT_DIR (the session's project root) for
     // hooks; a shell cd does not move it, so a chain under its project is
-    // continued (#2197). Gemini CLI sets the same variable as an alias: left out.
-    historyRoot: !isGemini && detectedOrigin === "claude-code" ? process.env.CLAUDE_PROJECT_DIR : undefined,
+    // continued (#2197). Gemini CLI and Qwen Code set the same variable as an
+    // alias: left out of the Claude Code check. Qwen's own QWEN_PROJECT_DIR
+    // (the session's working directory) plays the same part for Qwen.
+    historyRoot: isQwen
+      ? process.env.QWEN_PROJECT_DIR || undefined
+      : !isGemini && detectedOrigin === "claude-code" ? process.env.CLAUDE_PROJECT_DIR : undefined,
     permissionMode,
     sharingEnabled,
     shareBaseUrl,
@@ -3132,7 +3250,9 @@ if (args[0] === "sessions") {
   server.stop();
 
   // Output decision in the appropriate format for the harness
-  if (isGemini) {
+  if (isQwen) {
+    console.log(qwenPlanHookOutput(result));
+  } else if (isGemini) {
     if (result.approved) {
       console.log(result.feedback ? JSON.stringify({ systemMessage: result.feedback }) : "{}");
     } else {

@@ -6,6 +6,7 @@ import { Popover } from '@base-ui/react/popover';
 import { Check, Info, Settings2 } from 'lucide-react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { useReviewState } from '../ReviewStateContext';
+import { useCallFlowNodeSource } from '../../hooks/useCallFlowNodeSource';
 import {
   CallFlowTreeView,
   selectionForCallFlowNode,
@@ -233,6 +234,7 @@ export function CallFlowInstallFunnel({
 
 export function ReviewCallFlowPanel() {
   const state = useReviewState();
+  const loadNodeSource = useCallFlowNodeSource(state);
   const analysis = state.callFlowAnalysis;
   const [view, setView] = useState<'paths' | 'raw'>('paths');
 
@@ -393,6 +395,7 @@ export function ReviewCallFlowPanel() {
           <CallFlowTreeView
             trees={data.trees}
             onOpenNode={openNode}
+            loadNodeSource={loadNodeSource}
             onAnnotateTargets={state.onAddCallFlowAnnotation}
             canInteractWithNode={state.isCallFlowNodeInPatch}
             findShortcutActive={state.isCallFlowActive}

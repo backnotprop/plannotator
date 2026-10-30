@@ -5,7 +5,7 @@
  * composer's own word over both. The failure this catches: an Inbox comment
  * promising the instructions go with "your feedback".
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';

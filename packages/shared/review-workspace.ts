@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
 
-import type { DiffOption, DiffResult, DiffSide, DiffType, FileBytesRead, GitContext, GitDiffOptions } from "./review-core";
+import type { DiffOption, DiffResult, DiffSide, DiffType, FileBytesRead, GitContext, GitDiffOptions, RepoFileListing } from "./review-core";
+import { compareRepoPaths } from "./review-core";
 import {
   aggregateWorkspacePatch,
   buildWorkspaceRepoLabels,
@@ -77,6 +78,8 @@ export interface WorkspaceReviewRuntime {
     maxBytes: number,
     cwd?: string,
   ): Promise<FileBytesRead>;
+  /** The repository at a child's new side (All files); absent means no All files. */
+  listVcsFiles?(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<RepoFileListing | null>;
   canStageFiles(diffType: string, cwd?: string): Promise<boolean>;
   stageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
@@ -511,6 +514,42 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
       maxBytes,
       target.cwd,
     );
+  }
+
+  /**
+   * Every child repository's files at its new side, folder-prefixed like the
+   * workspace diff (All files). The workspace is live when any child lists its
+   * working tree; a child that cannot be listed is left out.
+   */
+  async listFiles(): Promise<RepoFileListing | null> {
+    const list = this.runtime.listVcsFiles;
+    if (!list) return null;
+    const paths: string[] = [];
+    const diskRoots: Array<{ prefix: string; root: string }> = [];
+    let live = false;
+    let listed = 0;
+    for (const repo of this.repos) {
+      if (!repo.vcsType || !repo.gitContext) continue;
+      const diffType = repo.diffType ?? mapWorkspaceModeToRepoDiffType(this.diffType, repo.vcsType);
+      if (!diffType) continue;
+      const result = await list(diffType, repo.gitContext.defaultBranch, repo.cwd).catch(() => null);
+      if (!result) continue;
+      listed += 1;
+      live ||= result.live;
+      const prefix = `${normalizeWorkspacePath(repo.label)}/`;
+      if (result.live && result.root) diskRoots.push({ prefix, root: result.root });
+      for (const path of result.paths) paths.push(prefix + path);
+    }
+    if (listed === 0) return null;
+    paths.sort(compareRepoPaths);
+    const allWorktree = live;
+    return {
+      paths,
+      revision: allWorktree ? { kind: "worktree", label: "working tree" } : { kind: "commit", label: "the workspace" },
+      live,
+      root: this.root,
+      diskRoots,
+    };
   }
 
   async stageFile(filePath: string, undo?: boolean): Promise<void> {

@@ -1072,10 +1072,15 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
 
     expect(primaryButton()!.textContent).toContain("Post Comments");
 
+    // A tap is Alt going down and coming up alone (the registry's double-tap).
+    const tapAlt = () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Alt", altKey: true, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt", bubbles: true }));
+    };
     const doubleTapAlt = async () => {
       await act(async () => {
-        window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt", bubbles: true }));
-        window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt", bubbles: true }));
+        tapAlt();
+        tapAlt();
       });
       await settle();
     };
@@ -1087,6 +1092,21 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await doubleTapAlt();
     expect(primaryButton()!.textContent).toContain("Post Comments");
     expect(submissions).toHaveLength(0);
+
+    // ⌥F5 twice (Next change) and Alt+← twice (Back on Windows) hold Alt
+    // around another key: never a destination switch.
+    for (const key of ["F5", "ArrowLeft"]) {
+      await act(async () => {
+        for (let i = 0; i < 2; i += 1) {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "Alt", altKey: true, bubbles: true }));
+          window.dispatchEvent(new KeyboardEvent("keydown", { key, code: key, altKey: true, bubbles: true }));
+          window.dispatchEvent(new KeyboardEvent("keyup", { key, code: key, altKey: true, bubbles: true }));
+          window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt", bubbles: true }));
+        }
+      });
+      await settle();
+      expect(primaryButton()!.textContent).toContain("Post Comments");
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
+import { INBOX_REF_LINK_RULE } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
@@ -223,6 +224,7 @@ export const CARD_COMMAND_USAGE = [
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
   "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
   "When a card waits on the person, link the Inbox thread where they make the call (--thread), so \"You: …\" opens it.",
+  `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
   "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
 ].join("\n");
@@ -314,9 +316,9 @@ export const INBOX_COMMAND_USAGE = [
   "                                  browser tab) and print its URL. A run published by",
   "                                  --tailscale is published again.",
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
-  "                                  files (claude-code, codex, gemini, pi, opencode,",
-  "                                  comma-separated). Only with the person's yes;",
-  "                                  starts nothing.",
+  "                                  files (claude-code, codex, gemini, qwen, pi,",
+  "                                  opencode, comma-separated). Only with the",
+  "                                  person's yes; starts nothing.",
   "",
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",

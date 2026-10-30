@@ -10,7 +10,7 @@
  * has Undo; with a live session To is prefilled and Send starts the thread
  * addressed to it (the list row draws that agent, "To <agent>").
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -41,8 +41,6 @@ let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 /** When set, the server's answer to a compose Send (POST /api/inbox/messages) is this instead. */
 let sendAnswer: { status: number; body: Record<string, unknown> } | null = null;
-/** When set, the runner's agents (GET /api/inbox/acp) are these, and its start (POST /api/inbox/acp/start) answers here: never a real agent. */
-let runAgents: { agents: unknown[]; places: unknown[] } | null = null;
 
 function loopback(path: string, method = 'GET', body?: string, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -112,11 +110,6 @@ beforeEach(() => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? String(init.body) : undefined;
     if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
-    const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    if (runAgents && method === 'GET' && path === '/api/inbox/acp') return json(runAgents);
-    if (runAgents && method === 'POST' && path === '/api/inbox/acp/start') {
-      return json({ thread_id: seeded!.waiting, message: {}, replayed: false, run: { key: 'run_01JZ0000000000000000000000', agent: 'grok' } });
-    }
     if (sendAnswer && method === 'POST' && path === '/api/inbox/messages') {
       return new Response(JSON.stringify(sendAnswer.body), { status: sendAnswer.status, headers: { 'Content-Type': 'application/json' } });
     }
@@ -138,7 +131,6 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
-  runAgents = null;
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
 });
@@ -277,7 +269,8 @@ test.skipIf(!hasDom)('a live session: a draft saved with nobody in To reopens wi
   await until(() => dialog()?.querySelector('[data-compose-to="choose"]:not([data-loading])') != null, 'To loaded, empty');
   expect(dialog()!.querySelector('[data-compose-send]')?.getAttribute('aria-disabled')).toBe('true');
   await pickTo('ses_live_dom');
-  expect(dialog()!.querySelector('[data-compose-status]')?.textContent).toBe('Claude Code takes it as its next turn.');
+  // With an agent chosen the footer has no status line (no "takes it as its next turn").
+  expect(dialog()!.querySelector('[data-compose-status]')).toBeNull();
   act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
   await until(() => dialog() === null, 'compose closed');
   const send = posted.find((p) => p.path === '/api/inbox/messages')!;
@@ -864,36 +857,6 @@ test.skipIf(!hasDom)('Board chip: off by default; on, the Send asks for the Boar
   await until(() => el.querySelector(`[data-message-article] [data-board-request]`) !== null, 'the Board mark');
   expect(el.textContent).not.toContain('plannotator-board-request');
 });
-
-test.skipIf(!hasDom)('Board chip: a new session the Inbox starts (New Grok Build session) asks for the Board too', async () => {
-  expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);
-  await loopback('/api/inbox/board/intro', 'POST', '{}');
-  localStorage.setItem(BOARD_CHOICE_KEY, '1');
-  runAgents = {
-    agents: [{ id: 'grok', label: 'Grok Build', installed: true, reason: null, enabled: true, install_command: '', self_updates: true }],
-    places: [{ project_id: 'prj_billing', name: 'billing', root: projects[0]!, root_display: projects[0]! }],
-  };
-  try {
-    const el = await renderApp();
-    await openCompose(el);
-    await until(() => dialog()!.querySelector('button[data-compose-to="choose"]') !== null, 'To offers the start');
-    const toButton = () => dialog()!.querySelector('button[data-compose-to]') as HTMLButtonElement;
-    for (let i = 0; i < 5 && toButton().getAttribute('aria-expanded') !== 'true'; i++) {
-      act(() => toButton().click());
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    await until(() => dialog()!.querySelector('[role="option"][data-compose-start]') !== null, 'the start row');
-    act(() => (dialog()!.querySelector('[role="option"][data-compose-start]') as HTMLElement).click());
-    await until(() => boardChip() !== null, 'the Board chip');
-    expect(boardChip()!.getAttribute('aria-pressed')).toBe('true');
-    type('Grok tracked work\n\nLook at the refund retries.');
-    act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
-    await until(() => posted.some((p) => p.path === '/api/inbox/acp/start'), 'the start');
-    expect(posted.find((p) => p.path === '/api/inbox/acp/start')!.body).toMatchObject({ agent: 'grok', project_id: 'prj_billing', board_request: true });
-  } finally {
-    localStorage.removeItem(BOARD_CHOICE_KEY);
-  }
-}, 20_000);
 
 test.skipIf(!hasDom)('Board chip: a draft keeps it, whatever the browser chose since', async () => {
   expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ board: { on: true } }))).status).toBe(200);

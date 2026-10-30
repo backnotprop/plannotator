@@ -11,7 +11,7 @@ import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd,
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import type { Host, HttpResult } from './host'
 import { InboxLink } from './inbox'
-import type { InboxToolInfo } from './inbox-contract'
+import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
   CLAIM_EXIT,
@@ -24,6 +24,7 @@ import {
   fileIn,
   INBOX_OPEN_TIMEOUT_MS,
   inboxOpenAnswer,
+  inboxOpened,
   inboxOpenArgv,
   isSeveralFilePaths,
   launchArgv,
@@ -828,11 +829,18 @@ export class PlannotatorMod {
   // --- Commands ------------------------------------------------------------
 
   /** `/plannotator-inbox`: open the person's Inbox (starting it detached when stopped) and say its address. */
-  async openInbox(): Promise<string> {
+  /**
+   * `/plannotator-inbox`'s answer: the address for the person and, once the
+   * Inbox opened, the Inbox briefing for the model as the command's hidden
+   * `context` (no turn starts). `toolName` is `plannotator_inbox` as this
+   * session registered it, when it did.
+   */
+  async openInbox(toolName?: string | null): Promise<{ text: string; context?: string[] }> {
     const result = await this.host
       .run(inboxOpenArgv(), { env: { PLANNOTATOR_DATA_DIR: this.session.dataDir }, timeoutMs: INBOX_OPEN_TIMEOUT_MS })
       .catch((error: unknown) => ({ exitCode: -1, stdout: '', stderr: error instanceof Error ? error.message : String(error) }))
-    return inboxOpenAnswer(result)
+    const text = inboxOpenAnswer(result)
+    return inboxOpened(result) ? { text, context: [inboxCommandBriefing(toolName ?? undefined)] } : { text }
   }
 
   /** `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`: open and return at once. */

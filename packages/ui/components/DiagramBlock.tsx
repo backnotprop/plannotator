@@ -16,6 +16,7 @@ import { svgContentSize } from './diagram/svgContentSize';
 import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramComments';
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import { useTheme } from './ThemeProvider';
+import { LazyBlockBoundary } from './LazyBlockBoundary';
 
 /**
  * A diagram fence in the document: the fence's language picks the engine
@@ -404,17 +405,21 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
         )}
       </div>
       {isExpanded && svgReady && typeof document !== 'undefined' && (
-        <Suspense fallback={null}>
-          <DiagramPopout
-            {...viewerProps}
-            open
-            onClose={() => setIsExpanded(false)}
-            title={`${label} diagram`}
-            renderId={`${kind}-${block.id}-popout`}
-            onAskAI={handlePopoutAskAI}
-            dataAttributes={{ 'data-block-id': block.id }}
-          />
-        </Suspense>
+        // A popout chunk that cannot load leaves the inline diagram as it is
+        // and says so under it.
+        <LazyBlockBoundary fallback={(notice) => <div className="mb-5">{notice}</div>}>
+          <Suspense fallback={null}>
+            <DiagramPopout
+              {...viewerProps}
+              open
+              onClose={() => setIsExpanded(false)}
+              title={`${label} diagram`}
+              renderId={`${kind}-${block.id}-popout`}
+              onAskAI={handlePopoutAskAI}
+              dataAttributes={{ 'data-block-id': block.id }}
+            />
+          </Suspense>
+        </LazyBlockBoundary>
       )}
     </>
   );

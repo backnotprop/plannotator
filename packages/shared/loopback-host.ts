@@ -12,6 +12,21 @@
  * Pi's AI runtime can load it under Node's strip-only TypeScript too.
  */
 
+/**
+ * A name under `.localhost` with at least one non-empty label in front
+ * (`plannotator.localhost`, `a.b.localhost`), the shape browsers resolve to
+ * loopback themselves (RFC 6761). Not `localhost` itself, not `.localhost`,
+ * not `a..localhost`. Used for a dedicated cookie hostname (#2184).
+ */
+export function isLocalhostSubdomain(hostname: string): boolean {
+	return /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+localhost$/i.test(hostname);
+}
+
+/** `localhost` or a localhost subdomain (isLocalhostSubdomain). */
+export function isLocalhostHostname(hostname: string): boolean {
+	return hostname.toLowerCase() === "localhost" || isLocalhostSubdomain(hostname);
+}
+
 /** True for hostnames that name the local loopback: localhost, the IPv6
  * loopback, or a LITERAL IPv4 address in 127.0.0.0/8. A string-prefix test
  * would also match DNS names like 127.0.0.1.evil.example that resolve
@@ -53,8 +68,17 @@ export function isLoopbackForwardedFor(headerValue: string | null | undefined): 
  * True when `hostHeader` is `<loopback name>:<port>`: `localhost`, any
  * `127.x.y.z` literal, or `[::1]`, followed by exactly this server's port.
  * A missing port, another port, or any other name is refused.
+ *
+ * `localName` is the localhost subdomain the session was advertised at
+ * (`urlHost: "plannotator.localhost"`, #2184): that one name is accepted
+ * too. No other subdomain is, and without it the check is the plain
+ * loopback one.
  */
-export function isLoopbackHostHeader(hostHeader: string | null | undefined, port: number | null | undefined): boolean {
+export function isLoopbackHostHeader(
+	hostHeader: string | null | undefined,
+	port: number | null | undefined,
+	localName?: string | null,
+): boolean {
 	if (!hostHeader || typeof port !== "number" || !Number.isInteger(port) || port <= 0) return false;
 	const value = hostHeader.trim();
 	let hostname: string;
@@ -73,5 +97,10 @@ export function isLoopbackHostHeader(hostHeader: string | null | undefined, port
 		portText = value.slice(colon + 1);
 	}
 	if (!/^\d{1,5}$/.test(portText) || Number(portText) !== port) return false;
-	return isLoopbackHostname(hostname);
+	if (isLoopbackHostname(hostname)) return true;
+	return (
+		typeof localName === "string" &&
+		isLocalhostSubdomain(localName) &&
+		hostname.toLowerCase() === localName.toLowerCase()
+	);
 }

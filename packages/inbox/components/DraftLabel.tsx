@@ -30,8 +30,18 @@ export function rowUnsent(unsent: InboxRowUnsent): { reply: boolean; picks: numb
   return { reply: unsent.reply_at !== null, picks: unsent.picks, comments: unsent.comments, done: unsent.done ?? 0, cant: unsent.cant ?? 0 };
 }
 
-/** The list row's count slot: "Draft · Your reply". */
-export function DraftLabel({ unsent }: { unsent: InboxRowUnsent }) {
+/**
+ * "Draft · Your reply" (the Drafts page). `short`: "Draft" alone, the list row's short form (approval
+ * "inbox-row-byline", option A); the row says the rest in its tooltip and name.
+ */
+export function DraftLabel({ unsent, short = false }: { unsent: InboxRowUnsent; short?: boolean }) {
+  if (short) {
+    return (
+      <span className="ib-draft-l" data-draft-label="">
+        <b>Draft</b>
+      </span>
+    );
+  }
   return (
     <span className="ib-draft-l" data-draft-label="">
       <b>Draft</b> <span aria-hidden="true">·</span> <span>{unsentWords(rowUnsent(unsent))}</span>

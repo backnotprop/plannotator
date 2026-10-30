@@ -7,7 +7,7 @@
 
 import { inboxAttachmentKindLabel, type InboxAttachmentState, type InboxMessageWire } from '@plannotator/core/inbox-types';
 import { threadArtifacts, type Artifact } from './artifacts';
-import { hasCommandModifier, inOverlay, isComposingKey, isEditableTarget, isRepeatKey } from './shortcuts/guards';
+import { hasCommandModifier, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, singleKeysLive } from './shortcuts/guards';
 
 /** One file in the thread's sequence, with the message it came in. */
 export interface AttachmentStep {
@@ -117,6 +117,8 @@ export function stepKeyIntent(event: KeyboardEvent, context: StepKeyContext): 1 
   const bracket = key === ']' || key === '[';
   const arrow = key === 'ArrowRight' || key === 'ArrowLeft';
   if (!bracket && !arrow) return null;
+  // `[` `]` are single keys: off with Single-key shortcuts and on a touch phone (WCAG 2.1.4). The arrows stay.
+  if (bracket && !singleKeysLive()) return null;
   if (isComposingKey(event) || isRepeatKey(event)) return null;
   if (hasCommandModifier(event)) return null;
   if (context.blocked) return null;

@@ -23,9 +23,11 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
 let previousDataDir: string | undefined;
+let previousHome: string | undefined;
 
 beforeEach(() => {
   previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  previousHome = process.env.HOME;
 });
 
 afterEach(async () => {
@@ -34,6 +36,8 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   if (previousDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
   else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
 });
 
 /** A PNG's signature and IHDR (w x h): enough for the sniffer and the dimension read; `salt` makes distinct bytes. */
@@ -56,6 +60,8 @@ function world() {
   writeFileSync(join(project, "design", "b.png"), png(4, 3, 2));
   writeFileSync(join(project, "design", "fake.png"), "not an image");
   writeFileSync(join(root, "outside.png"), png(4, 3, 9));
+  // The temp root is a scratch home folder: `.private` is one of its own hidden folders (as ~/.ssh), never shown.
+  process.env.HOME = root;
   mkdirSync(join(root, ".private"), { recursive: true });
   writeFileSync(join(root, ".private", "hidden.png"), png(4, 3, 8));
   const dataDir = join(root, "data");

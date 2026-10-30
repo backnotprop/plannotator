@@ -9,7 +9,7 @@
  * The window over a REAL Inbox (tests/helpers/inbox-dom-server.ts), its fetches
  * carried over loopback; the failed Send is a reply POST answered with a 500.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

@@ -246,11 +246,13 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       expect((await (await fetch(`${folder.url}/api/plan`)).json()).documentDrafts).toBe(true);
     });
 
-    test("a URL session has neither a path copy nor document copies", async () => {
+    test("a URL session has no path copy, but its linked documents get copies", async () => {
       const server = await start({ markdown: "# Page\n", filePath: "https://example.invalid/page" });
       servers.push(server);
-      expect((await (await fetch(`${server.url}/api/plan`)).json()).documentDrafts).toBeUndefined();
-      expect((await fetch(`${server.url}/api/draft/document?path=${encodeURIComponent(join(docDir, "x.md"))}`)).status).toBe(404);
+      // Linked documents get copies (linked-documents.scenarios.ts covers them).
+      expect((await (await fetch(`${server.url}/api/plan`)).json()).documentDrafts).toBe(true);
+      // The session draft is content-keyed only: a save is never refused as stale.
+      expect((await post(server, "/api/draft", draftBody(1, ["u"]))).status).toBe(200);
     });
 
     test("a file's comments follow it from a folder session into a session on the file alone", async () => {

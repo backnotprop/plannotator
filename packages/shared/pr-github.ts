@@ -5,7 +5,7 @@
  */
 
 import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
-import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
+import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 import { listGhAccounts } from "./pr-github-account";
 
@@ -523,6 +523,33 @@ export async function fetchGhPRFileContent(
   const cleaned = base64Content.replace(/\n/g, "");
   try {
     return Buffer.from(cleaned, "base64").toString("utf-8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every file of one commit through the git trees API, in one call. GitHub
+ * stops past ~100k entries and says `truncated`; the list is then partial.
+ */
+export async function fetchGhPRTree(
+  runtime: PRRuntime,
+  ref: GhPRRef,
+  sha: string,
+): Promise<PRTreeResult | null> {
+  const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api",
+    `repos/${ref.owner}/${ref.repo}/git/trees/${encodeURIComponent(sha)}?recursive=1`,
+    "--jq", '{truncated: .truncated, paths: [.tree[] | select(.type == "blob") | .path]}',
+  ]));
+  if (result.exitCode !== 0) return null;
+  try {
+    const parsed = JSON.parse(result.stdout) as { truncated?: unknown; paths?: unknown };
+    if (!Array.isArray(parsed.paths)) return null;
+    return {
+      paths: parsed.paths.filter((path): path is string => typeof path === "string"),
+      truncated: parsed.truncated === true,
+    };
   } catch {
     return null;
   }

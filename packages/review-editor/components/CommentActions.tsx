@@ -1,9 +1,13 @@
 import React from 'react';
+import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
 import { CopyButton } from './CopyButton';
 
 interface CommentActionsProps {
   /** When provided, shows the edit button (left-most). */
   onEdit?: () => void;
+  /** When provided, asks AI for a learning-oriented explanation. */
+  onExplain?: () => void;
+  explainDisabled?: boolean;
   /** When provided, shows the copy button (middle). */
   copyText?: string;
   /** When provided, shows the delete/close button (right-most). Omitted for
@@ -19,7 +23,7 @@ const ACTION_BTN = 'p-1 rounded text-muted-foreground transition-colors';
 /**
  * The single hover-revealed action row shared by every comment card (inline
  * diff, sidebar, file banner). Bottom-aligned, right-justified, order
- * left→right: edit · copy · delete (so the close/delete sits furthest right).
+ * left→right: edit · explain · copy · delete (so close/delete sits furthest right).
  * The parent card must carry the Tailwind `group` class for the hover reveal.
  *
  * Hover is never the only way to see it (#2062): Tailwind's `group-hover:`
@@ -28,8 +32,8 @@ const ACTION_BTN = 'p-1 rounded text-muted-foreground transition-colors';
  * that reports `(hover: none)` (phones, tablets, and some desktop Chrome
  * builds with a mouse).
  */
-export const CommentActions: React.FC<CommentActionsProps> = ({ onEdit, copyText, onDelete, selected = false }) => {
-  if (!onEdit && !copyText && !onDelete) return null;
+export const CommentActions: React.FC<CommentActionsProps> = ({ onEdit, onExplain, explainDisabled = false, copyText, onDelete, selected = false }) => {
+  if (!onEdit && !onExplain && !copyText && !onDelete) return null;
   return (
   <div
     className={`flex items-center justify-end gap-1 mt-1.5 transition-opacity ${
@@ -51,6 +55,7 @@ export const CommentActions: React.FC<CommentActionsProps> = ({ onEdit, copyText
         </svg>
       </button>
     )}
+    {onExplain && <ExplainButton onExplain={onExplain} disabled={explainDisabled} />}
     {copyText && <CopyButton text={copyText} variant="inline" />}
     {onDelete && (
       <button
@@ -67,3 +72,17 @@ export const CommentActions: React.FC<CommentActionsProps> = ({ onEdit, copyText
   </div>
   );
 };
+
+/** "Explain finding": asks Ask AI about a review agent's finding. */
+export const ExplainButton: React.FC<{ onExplain: () => void; disabled?: boolean }> = ({ onExplain, disabled = false }) => (
+  <button
+    type="button"
+    onClick={(e) => { e.stopPropagation(); onExplain(); }}
+    disabled={disabled}
+    className={`${ACTION_BTN} hover:bg-primary/10 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40`}
+    title="Explain finding"
+    aria-label="Explain finding"
+  >
+    <SparklesIcon className="w-3 h-3" />
+  </button>
+);

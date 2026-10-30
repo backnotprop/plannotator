@@ -161,6 +161,7 @@ const ReferenceList: React.FC<{
                           : 'hover:bg-muted/40 text-muted-foreground'
                       }`}
                       onClick={() => onSelect(loc)}
+                      data-code-nav-location={`${loc.filePath}:${loc.line}`}
                     >
                       <span className="font-mono text-[10px] flex-shrink-0 w-8 text-right">
                         :{loc.line}
@@ -206,12 +207,15 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
     }
   }, [allLocations]);
 
+  // A click previews the result here and opens its file in a tab at the line
+  // (approved design record "review-explorer": "A result opens in a tab").
   const handleSelect = useCallback(
     (loc: CodeNavLocation) => {
       setSelectedLocation(loc);
       preview.selectLocation(loc.filePath, loc.line);
+      state.onOpenCodeNavLocation?.(loc);
     },
-    [preview.selectLocation],
+    [preview.selectLocation, state.onOpenCodeNavLocation],
   );
 
   useEffect(() => {

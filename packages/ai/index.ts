@@ -77,6 +77,7 @@ export type {
   CodexSDKConfig,
   PiSDKConfig,
   OpenCodeConfig,
+  QwenSDKConfig,
 } from "./types.ts";
 
 // Provider registry

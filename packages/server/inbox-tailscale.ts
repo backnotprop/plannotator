@@ -478,8 +478,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     listenerPort: () => (listener ? (listener.port as number) : null),
     /**
      * A request the listener let in came from the machine's owner, not a login
-     * config.json `inboxTailscaleAllow` added: only the owner may start or
-     * steer an agent the Inbox runs (inbox-acp-runner.ts).
+     * config.json `inboxTailscaleAllow` added: only the owner may send
+     * Feedback (inbox-feedback.ts).
      */
     isOwnerRequest: (headers: Headers): boolean => {
       const identity = checkTailnetIdentity(headers, state.allowed);

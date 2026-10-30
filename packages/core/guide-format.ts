@@ -683,8 +683,8 @@ export const GUIDE_SHARE_KEY_PARAM = "key";
 
 /**
  * The viewer build a producer pins into exports. Producers embed the
- * generated `guide-viewer-manifest` module (checked in, kept in sync with the
- * viewer build) and may override the base URL for local development or
+ * generated `guide-viewer-manifest` module (gitignored; every shipping build
+ * writes it from its own viewer build) and may override the base URL for local development or
  * self-hosting via `PLANNOTATOR_GUIDE_VIEWER_URL` (https, or http localhost).
  */
 export function resolveGuideViewerAssets(

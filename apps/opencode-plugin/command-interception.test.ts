@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 import PlannotatorPlugin from "./index";
+import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
 
 /**
  * OpenCode 1 slash-command interception.
@@ -108,7 +109,11 @@ describe("OpenCode 1 command interception", () => {
     expect(readFileSync(calls, "utf8").trim()).toBe("inbox --open");
     // No second prompt: the address rides the command's own message.
     expect(sent).toHaveLength(0);
-    expect(parts.map((part) => part.text).join("\n")).toContain("http://localhost:61234/");
+    const turn = parts.map((part) => part.text).join("\n");
+    expect(turn).toContain("http://localhost:61234/");
+    // The one turn also briefs the model on the Inbox, and resumes no paused work.
+    expect(turn).toContain(INBOX_COMMAND_BRIEFING);
+    expect(turn).toContain("This command starts no new work and resumes none");
     expect(JSON.stringify(toasts)).toContain("http://localhost:61234/");
   });
 

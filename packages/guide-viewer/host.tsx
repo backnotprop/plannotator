@@ -89,6 +89,26 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * sits on `--background`, as it does in every host.
    */
   renderSectionTab?: (index: number) => React.ReactNode | null;
+  /**
+   * Controls a host draws on a file card's summary row, at its right (the VS
+   * Code extension: Open in editor, Diff). Answering null (or absent) leaves
+   * the card exactly as it is.
+   */
+  renderFileActions?: (file: DiffFile) => React.ReactNode | null;
+  /**
+   * Content a host adds at the foot of a section card's prose column, under
+   * its file chips (the VS Code extension: ask the agent about this chapter,
+   * and the chapter's answers). Called with the card's index; answering null
+   * (or absent) leaves the card exactly as it is.
+   */
+  renderSectionFooter?: (index: number) => React.ReactNode | null;
+  /**
+   * Draws a guide link the chain cannot follow itself (a `symbol:` link, a
+   * `code:` link to a file outside the guide): the VS Code extension asks
+   * the language server. Answering null (or absent) shows the link's label
+   * as plain text, as before.
+   */
+  renderLink?: (href: string, label: React.ReactNode, key: string | number) => React.ReactNode | null;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

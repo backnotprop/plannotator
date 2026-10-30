@@ -79,6 +79,13 @@ interface TooltipProps {
    * default, where the Escape that closes a tooltip goes no further.
    */
   escapePassesThrough?: boolean;
+  /**
+   * When true, the tooltip is shown whatever the pointer does: a host shows
+   * it while the element that holds the trigger has keyboard focus (the
+   * Inbox's row badges). False or unset: hover and focus on the trigger decide,
+   * as before.
+   */
+  forceOpen?: boolean;
 }
 
 export const Tooltip: React.FC<TooltipProps> = ({
@@ -92,28 +99,30 @@ export const Tooltip: React.FC<TooltipProps> = ({
   shouldOpen,
   container,
   escapePassesThrough = false,
+  forceOpen,
 }) => {
   const provider = React.useContext(TooltipProviderContext);
   const disableHoverablePopup = provider?.disableHoverablePopup ?? false;
   // Under a provider, an unset delay takes the provider's; alone, the shared default.
   const triggerDelay = delayDuration ?? (provider ? undefined : TOOLTIP_DELAY_MS);
-  // Controlled only for escapePassesThrough: the Escape close is canceled (so Base UI neither prevents nor stops
-  // the key) and the tooltip is closed here instead.
+  // Controlled for escapePassesThrough (the Escape close is canceled, so Base UI neither prevents nor stops the
+  // key, and the tooltip is closed here instead) and for forceOpen (shown on top of what hover decides).
   const [controlledOpen, setControlledOpen] = React.useState(false);
-  const controlled = escapePassesThrough ? { open: controlledOpen } : {};
+  const controlledMode = escapePassesThrough || forceOpen !== undefined;
+  const controlled = controlledMode ? { open: controlledOpen || forceOpen === true } : {};
   return (
     <BaseTooltip.Root
       disableHoverablePopup={disableHoverablePopup}
       {...controlled}
       onOpenChange={
-        shouldOpen || escapePassesThrough
+        shouldOpen || controlledMode
           ? (open, details) => {
               if (open && shouldOpen && !(details.trigger && shouldOpen(details.trigger))) {
                 details.cancel();
                 return;
               }
-              if (!escapePassesThrough) return;
-              if (!open && details.reason === 'escape-key') {
+              if (!controlledMode) return;
+              if (escapePassesThrough && !open && details.reason === 'escape-key') {
                 details.cancel();
                 details.allowPropagation();
               }

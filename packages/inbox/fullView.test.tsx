@@ -16,7 +16,7 @@
  * thread's wiring is fullScreenThread.test.tsx; the browser proof is
  * tests/e2e/inbox-full-view.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';

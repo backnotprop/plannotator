@@ -39,6 +39,13 @@
       "prBodyNotes": [
         "Bun patch release. Before merging: release.yml's smoke-binaries (macOS leg: the signed binary must launch) and the Bun runtime trust gate must pass, and bump BUN_VERSION and TARGET_IMAGE (digest from the registry) in dast.yml by hand."
       ]
+    },
+    {
+      "description": "Do not propose a new Ubuntu runner (ubuntu-XX.04 in runs-on): a new image changes the toolchain under every job (on ubuntu-26.04, tsc was not found, run 40717887617). Move to one by hand, after a test branch runs the workflows on it.",
+      "matchManagers": ["github-actions"],
+      "matchDatasources": ["github-runners"],
+      "matchDepNames": ["ubuntu"],
+      "enabled": false
     }
   ]
 }

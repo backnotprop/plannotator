@@ -1,6 +1,9 @@
 /**
- * Per-document draft copies for local-file and folder annotate sessions
- * (server: packages/shared/annotate-draft.ts, `/api/draft/document`).
+ * Per-document draft copies for local-file, folder, URL and last-message
+ * annotate sessions and for plan review (server:
+ * packages/shared/annotate-draft.ts, `/api/draft/document`). In plan review
+ * and the URL / last-message sessions the server also lists the copies, and a
+ * recovered session draft carries them (`adoptRestoredCopies` below, #1545).
  *
  * The session draft (useAnnotationDraft) carries the session's ROOT document.
  * Every other document the reviewer comments on — a folder session's files, a
@@ -56,6 +59,20 @@ export interface UseDocumentDraftsResult {
   /** Send a pending (debounced) write now, if there is one (see
       useAnnotationDraft's flushPendingSave). */
   flushPendingWrite: () => void;
+  /**
+   * The session draft brought these documents' copies back (Draft Recovered
+   * in a session whose server lists them: plan review, a URL, the last
+   * message). Each copy counts as read, exactly as the server holds it, so
+   * opening the document does not merge it a second time and an unchanged
+   * copy is not written back.
+   */
+  adoptRestoredCopies: (documents: ReadonlyArray<DocumentDraftState & { path: string }>) => void;
+  /**
+   * The reviewer dismissed a recovered draft: clear these documents' copies
+   * too, so they do not come back when a document is opened. A document this
+   * page already read is left alone: its comments are on screen.
+   */
+  discardCopies: (paths: readonly string[]) => void;
 }
 
 export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumentDraftsResult {
@@ -236,5 +253,23 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     writeNow(false);
   }, [writeNow]);
 
-  return { unbackedPaths, flushPendingWrite };
+  const adoptRestoredCopies = useCallback((documents: ReadonlyArray<DocumentDraftState & { path: string }>) => {
+    for (const doc of documents) {
+      loadedRef.current.add(doc.path);
+      lastSentRef.current.set(doc.path, JSON.stringify([doc.annotations, doc.globalAttachments]));
+    }
+  }, []);
+
+  const discardCopies = useCallback((paths: readonly string[]) => {
+    if (!canWriteRef.current || closedRef.current) return;
+    const unread = paths.filter((path) => !loadedRef.current.has(path) && !inFlightRef.current.has(path));
+    if (unread.length === 0) return;
+    fetch('/api/draft/document', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documents: unread.map((path) => ({ path, annotations: [], globalAttachments: [] })) }),
+    }).catch(() => {});
+  }, []);
+
+  return { unbackedPaths, flushPendingWrite, adoptRestoredCopies, discardCopies };
 }

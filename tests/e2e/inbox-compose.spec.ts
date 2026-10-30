@@ -294,7 +294,7 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await shot(page, '01-compose-to-picker');
   await dialog.locator('[data-compose-session="ses-claude"]').click();
   await expect(to).toHaveAttribute('data-compose-to', 'ses-claude');
-  await expect(dialog.locator('[data-compose-status]')).toHaveText('Claude Code takes it as its next turn.');
+  await expect(dialog.locator('[data-compose-status]')).toHaveCount(0);
   await shot(page, '02-compose-ready-with-file');
   await dialog.locator('[data-compose-send]').click();
   await expect(dialog).toHaveCount(0);

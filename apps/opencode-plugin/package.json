@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/opencode",
-  "version": "0.28.35",
+  "version": "0.28.38",
   "type": "module",
   "description": "Plannotator plugin for OpenCode - interactive plan review with visual annotation",
   "author": "backnotprop",
@@ -44,7 +44,7 @@
     "build:skill": "rm -rf skills && mkdir -p skills && cp -R ../skills/core/plannotator skills/plannotator",
     "smoke:v2": "bun fixtures/v2-installed-smoke.ts",
     "postinstall": "node scripts/postinstall.cjs",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run --cwd ../.. build:viewer-pin && bun run build"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.19.3",

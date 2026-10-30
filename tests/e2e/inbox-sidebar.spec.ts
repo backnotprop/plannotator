@@ -6,7 +6,10 @@
  * survives a reload, the hover peek shows the navigation while it is closed,
  * the edge collapses on a click and resizes on a drag (and closes past half
  * the minimum, reopening when the held pointer comes back), reduced motion
- * lands without travel, and a phone width gets the sheet.
+ * lands without travel, and a phone width gets the sheet. Pinned and Projects
+ * close like folders: a click on the header, the closed Pinned's count, the
+ * project on screen kept under a closed Projects, the choice kept across a
+ * reload, and 44 px headers with their chevron on a phone.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * The PNGs, the video and the sampled curves land in .local/proof/sidebar/.
@@ -347,5 +350,55 @@ test('a phone width: the sidebar is a sheet the toggle opens, a pick and Escape 
   await expect(side(page)).toHaveCount(0);
   await page.locator('[data-settings-back]').click();
   await expect(side(page)).toBeVisible();
+  expect(world.errors).toEqual([]);
+});
+
+test('Pinned and Projects close like folders: the count, the project on screen kept, a reload, and the phone sheet', async () => {
+  const { page, url } = world;
+  await page.goto(url);
+  const header = (section: 'pinned' | 'projects') => side(page).locator(`[data-sidebar-section="${section}"]`);
+  await page.locator('.ib-lbody [data-thread-id]', { hasText: 'Stripe 409' }).first().click({ button: 'right' });
+  await page.locator('[data-row-action="pin"]').click();
+  await expect(side(page).locator('[data-pinned-row]')).toHaveCount(1);
+  await expect(header('pinned')).toHaveAttribute('aria-expanded', 'true');
+
+  // Closed, Pinned counts what waits on the person: the Stopped thread does not hide.
+  await header('pinned').click();
+  await expect(header('pinned')).toHaveAttribute('aria-expanded', 'false');
+  await expect(side(page).locator('[data-pinned-row]')).toHaveCount(0);
+  await expect(header('pinned')).toHaveAccessibleName('Pinned 1 waiting on you');
+
+  // In a project, Projects closed keeps that project under its header, and nothing else.
+  await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
+  await expect(page.locator('.ib-lhead h1')).toHaveText('docs-site');
+  await header('projects').click();
+  await expect(header('projects')).toHaveAttribute('aria-expanded', 'false');
+  await expect(side(page).locator('.ib-proj')).toHaveText([/^docs-site/]);
+  expect(await cookie(page, 'plannotator-inbox-sidebar-closed')).toBe(encodeURIComponent('pinned,projects'));
+  await page.reload();
+  await expect(header('projects')).toHaveAttribute('aria-expanded', 'false');
+  await expect(header('pinned')).toHaveAttribute('aria-expanded', 'false');
+  await expect(side(page).locator('.ib-proj')).toHaveText([/^docs-site/]);
+  await page.mouse.move(900, 450);
+  await shot('sections-closed');
+
+  // A phone: the sheet's headers are 44 px, the chevron always shows, and a tap opens a section without closing the sheet.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.ib-lhead').getByRole('button', { name: 'Toggle Sidebar' }).click();
+  const sheet = page.getByRole('dialog');
+  const phoneHeader = sheet.locator('[data-sidebar-section="pinned"]');
+  await expect(phoneHeader).toBeVisible();
+  expect(await phoneHeader.evaluate((el) => el.getBoundingClientRect().height)).toBe(44);
+  expect(await phoneHeader.locator('.ib-side-sec-chev').evaluate((el) => getComputedStyle(el).visibility)).toBe('visible');
+  await phoneHeader.click();
+  await expect(phoneHeader).toHaveAttribute('aria-expanded', 'true');
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator('[data-pinned-row]')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await header('projects').click();
+  await expect(side(page).locator('.ib-proj')).toHaveCount(2);
+  expect(await cookie(page, 'plannotator-inbox-sidebar-closed')).toBeUndefined();
   expect(world.errors).toEqual([]);
 });

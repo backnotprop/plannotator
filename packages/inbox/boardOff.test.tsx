@@ -5,7 +5,7 @@
  * computer instead. What regresses: a Board row (or the Board) shown while it
  * is off, or an off page with no way on.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  * The server half (tools/list, `board_off`, cards kept) is
  * packages/server/inbox-board-switch.test.ts; the whole window on the
  * compiled binary is tests/e2e/inbox-board.spec.ts.

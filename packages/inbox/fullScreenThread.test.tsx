@@ -8,7 +8,7 @@
  * showing; Side by side puts the file beside the thread; the comments drawer left
  * open comes back with the next file; a step keeps full screen.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

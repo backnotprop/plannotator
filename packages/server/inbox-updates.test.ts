@@ -11,7 +11,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxUpdate } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
-import { readUpdateState, writeReleaseNotes, writeUpdateState, type FetchReleaseResult } from "@plannotator/shared/update-check";
+import {
+  readUpdateState,
+  RELEASE_NOTES_PENDING_RETRY_MS,
+  writeReleaseNotes,
+  writeUpdateState,
+  type FetchReleaseResult,
+} from "@plannotator/shared/update-check";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUsedBefore, startInboxServer, type InboxServer } from "./inbox";
 import { deriveInboxUpdate, failureDetails } from "./inbox-updates";
@@ -237,6 +243,18 @@ describe("when the Inbox asks (the release page, minutes after a release)", () =
       (d) => d.summary !== "",
     );
     expect(details.summary).toBe("Notes for 0.28.12.");
+  });
+
+  test("the dialog's open reviews leave out OpenCode's in-process ones (they keep no binary open)", async () => {
+    const open = (mode: "plan" | "review", host?: "opencode") => ({
+      pid: 4242, port: 1, url: "http://localhost:1", mode, project: "p", startedAt: "2026-10-01T00:00:00Z", label: mode, ...(host ? { host } : {}),
+    });
+    const server = await start({
+      updates: { fetchRelease: latest(), fetchReleaseTag: tagged(), isManaged: () => true, listSessions: () => [open("plan"), open("review", "opencode")] },
+    });
+    await waitFor(() => health(server), (u) => u !== null);
+    const details = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/update`)).json()) as { sessions: { mode: string }[] };
+    expect(details.sessions.map((s) => s.mode)).toEqual(["plan"]);
   });
 
   test("an API locked out by its rate limit never hides a release the page names", async () => {
@@ -532,6 +550,35 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
     expect(tagRequests).toEqual(["0.28.10"]);
   });
 
+  // The 0.28.37 bug: the Inbox started on the new version while the release
+  // still carried GitHub's generated body; the written notes replaced it 39 s
+  // later, and the link stayed hidden for the whole run (a 24 h back-off).
+  test("asked before the release notes were written: the link shows once the 15-minute retry saves them, without a restart", async () => {
+    let clock = Date.now();
+    const publishedAt = new Date(clock - 60_000).toISOString();
+    let written = false;
+    answer = (version) =>
+      Response.json({
+        tag_name: `v${version}`,
+        published_at: publishedAt,
+        body: written ? `## What's New in v${version}\n\nWhat ${version} brings.\n\n## Install / Update\n` : "## What's Changed\n\n* a PR\n",
+      });
+    const server = await start({
+      updates: { fetchRelease: latest(), now: () => clock, isManaged: () => true, listSessions: () => [], launchInstaller: () => {} },
+    });
+    // The generated body saved no notes: the link goes, and the ticks ask no more for now.
+    expect(await waitFor(() => listUpdated(server), (v) => v === null)).toBeNull();
+    await Bun.sleep(150); // a few health ticks
+    expect(tagRequests).toEqual(["0.28.10"]);
+
+    written = true;
+    clock += RELEASE_NOTES_PENDING_RETRY_MS;
+    // The next health tick asks again, saves the notes, and the list (and the event stream) carry the link.
+    expect(await waitFor(() => listUpdated(server), (v) => v === "0.28.10")).toBe("0.28.10");
+    expect(tagRequests).toEqual(["0.28.10", "0.28.10"]);
+    expect((await (await whatsNew(server, "0.28.10")).json()).notes).toBe("What 0.28.10 brings.");
+  });
+
   test("a version this Inbox has no reason to show is never fetched", async () => {
     const server = await startReal();
     expect((await whatsNew(server, "0.27.1")).status).toBe(404);
@@ -542,8 +589,9 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
 
 describe("the question sound (config.json inboxSound)", () => {
   const settingsOf = async (server: InboxServer) => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).sound;
+  // These tests restart servers; never reuse a socket from a stopped instance.
   const postJson = (server: InboxServer, path: string, body: unknown) =>
-    fetch(`http://127.0.0.1:${server.port}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    fetch(`http://127.0.0.1:${server.port}${path}`, { keepalive: false, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const claim = async (server: InboxServer) => (await (await postJson(server, "/api/inbox/sound/dialog", { serverSession: server.serverSession })).json()).show;
 
   test("on at 60 unless set; saved field by field; anything else refused with nothing written", async () => {

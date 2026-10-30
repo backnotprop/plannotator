@@ -11,7 +11,7 @@
  * nothing. happy-dom has no layout; the real browser shots are in
  * tests/e2e/inbox-undelivered.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -19,6 +19,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection, InboxMessageWire, InboxProject, InboxRowDelivery, InboxThread } from '@plannotator/core/inbox-types';
 import { INBOX_AUTO_SEND_ACK_NOTES } from '@plannotator/core/inbox-types';
 import type { RecipientConnection } from './deliveryLine';
+import { undeliveredLabel, undeliveredShort } from './deliveryLine';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -142,18 +143,40 @@ const rowEl = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[d
 const badge = (el: HTMLElement, id: string) => rowEl(el, id).querySelector<HTMLElement>('[data-undelivered]');
 
 for (const shape of ['wide', 'narrow', 'phone'] as const) {
-  test.skipIf(!hasDom)(`${shape} row: "Undelivered N min" in place of the count, blue where it can go in now, grey where it cannot`, () => {
+  const wide = shape === 'wide';
+  test.skipIf(!hasDom)(`${shape} row: ${wide ? '"Undelivered N min"' : '"Undelivered Nm"'} in place of the count, blue where it can go in now, grey where it cannot`, () => {
     const el = renderList(SECTIONS, { phone: shape === 'phone', narrow: shape === 'narrow' });
-    expect(badge(el, CAN.thread_id)!.textContent).toBe('Undelivered 3 min');
+    // A two-line or phone row draws the short form (approval "inbox-row-byline", option A); a wide row the full
+    // words (the owner, 2026-10-29).
+    expect(badge(el, CAN.thread_id)!.textContent).toBe(wide ? 'Undelivered 3 min' : 'Undelivered 3m');
     expect(badge(el, CAN.thread_id)!.hasAttribute('data-stuck')).toBe(false);
-    expect(badge(el, STUCK.thread_id)!.textContent).toBe('Undelivered 12 min');
+    expect(badge(el, STUCK.thread_id)!.textContent).toBe(wide ? 'Undelivered 12 min' : 'Undelivered 12m');
     expect(badge(el, STUCK.thread_id)!.hasAttribute('data-stuck')).toBe(true);
-    // In the count's cell: the row's name reads it.
-    expect(badge(el, CAN.thread_id)!.closest('.ib-c')).not.toBeNull();
+    // In the count's cell: the row's name reads the full words (hidden text beside a short form).
+    const cell = badge(el, CAN.thread_id)!.closest('.ib-c')!;
+    if (wide) expect(cell.querySelector('.ib-sr')).toBeNull();
+    else {
+      expect(badge(el, CAN.thread_id)!.closest('[aria-hidden="true"]')).not.toBeNull();
+      expect(cell.querySelector('.ib-sr')!.textContent).toBe('Undelivered 3 min');
+    }
     // An older Inbox sends no wait: no badge.
     expect(badge(el, QUEUED_OLD.thread_id)).toBeNull();
   });
 }
+
+test('the wait in minutes, then hours, then days (review D1): "14 min" / "14m", "2 hours" / "2h", "1 day" / "1d"', () => {
+  const now = Date.parse('2026-10-29T12:00:00.000Z');
+  const ago = (min: number) => new Date(now - min * 60_000).toISOString();
+  const both = (min: number) => [undeliveredLabel(ago(min), now), undeliveredShort(ago(min), now)];
+  expect(both(0)).toEqual(['Undelivered', 'Undelivered']);
+  expect(both(14)).toEqual(['Undelivered 14 min', 'Undelivered 14m']);
+  expect(both(59)).toEqual(['Undelivered 59 min', 'Undelivered 59m']);
+  expect(both(60)).toEqual(['Undelivered 1 hour', 'Undelivered 1h']);
+  expect(both(125)).toEqual(['Undelivered 2 hours', 'Undelivered 2h']);
+  expect(both(1439)).toEqual(['Undelivered 23 hours', 'Undelivered 23h']);
+  expect(both(1500)).toEqual(['Undelivered 1 day', 'Undelivered 1d']);
+  expect(both(60 * 24 * 9)).toEqual(['Undelivered 9 days', 'Undelivered 9d']);
+});
 
 test.skipIf(!hasDom)('Send now on the row: only where it can go in now, a sibling of the row, posted for the reply; never on a phone row', () => {
   const pressed: string[] = [];

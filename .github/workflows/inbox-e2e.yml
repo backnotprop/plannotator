@@ -16,13 +16,23 @@ name: Inbox window e2e
 # engine WKWebView is, and the VS Code Guides webview's sanitizer and Mermaid
 # path (vscode-guides-sanitize.spec.ts) and its answer frame
 # (vscode-guides-answer.spec.ts), no binary needed. Runs only when the
-# Inbox, the ui and the guide viewer it composes, the binary entry or the build
-# could have changed.
+# Inbox, the ui and the guide viewer it composes, the plan editor (the Grid
+# paper spec, grid-paper-fill.spec.ts), the plan and annotate servers and the
+# draft storage they share (annotate-*.spec.ts, plan-linked-doc-drafts.spec.ts),
+# the binary entry or the build could have changed. The Pi servers are not
+# listed: these specs drive only the compiled Bun binary, and test.yml runs the
+# Pi mirrors of the same scenarios.
+#
+# The specs run as 8 parallel shards of whole spec files, balanced by
+# measured time (scripts/ci-e2e-shard.ts, tests/e2e/shard-times.json).
 
 on:
+  # Manual runs on a branch, e.g. a stacked PR whose base is not main.
+  workflow_dispatch:
   pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'packages/inbox/**'
       - 'apps/inbox/**'
@@ -39,18 +49,31 @@ on:
       - 'packages/server/html-assets.ts'
       - 'packages/server/tailscale-serve.ts'
       - 'packages/server/request-host-guard.ts'
+      - 'packages/server/index.ts'
+      - 'packages/server/annotate.ts'
+      - 'packages/shared/annotate*'
+      - 'packages/shared/draft.ts'
+      - 'packages/shared/review-draft.ts'
+      - 'packages/shared/doc-resolve.ts'
       - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/editor/**'
       - 'packages/guide-viewer/**'
       - 'packages/review-editor/**'
+      - 'packages/shared/repo-files.ts'
+      - 'packages/server/review*.ts'
       - 'packages/server/guide/**'
       - 'packages/core/guide*'
       - 'apps/hook/server/index.ts'
       - 'apps/hook/package.json'
       - 'apps/hook/server/inbox*'
       - 'build/**'
+      - 'packages/shared/packed-app.ts'
+      - 'build/pack-app.ts'
+      - 'apps/hook/vite.config.ts'
+      - 'apps/review/**'
       - 'package.json'
       - 'bun.lock'
       - 'tests/e2e/**'
@@ -62,6 +85,7 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
+      - 'scripts/ci-e2e-shard.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
       - 'apps/vscode-extension/src/guides/webview-csp.ts'
@@ -87,12 +111,21 @@ on:
       - 'packages/server/html-assets.ts'
       - 'packages/server/tailscale-serve.ts'
       - 'packages/server/request-host-guard.ts'
+      - 'packages/server/index.ts'
+      - 'packages/server/annotate.ts'
+      - 'packages/shared/annotate*'
+      - 'packages/shared/draft.ts'
+      - 'packages/shared/review-draft.ts'
+      - 'packages/shared/doc-resolve.ts'
       - 'packages/shared/tailscale.ts'
       - 'packages/shared/html-assets.ts'
       - 'packages/shared/html-assets-node.ts'
       - 'packages/ui/**'
+      - 'packages/editor/**'
       - 'packages/guide-viewer/**'
       - 'packages/review-editor/**'
+      - 'packages/shared/repo-files.ts'
+      - 'packages/server/review*.ts'
       - 'packages/server/guide/**'
       - 'packages/core/guide*'
       - 'apps/hook/server/index.ts'
@@ -110,6 +143,7 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
+      - 'scripts/ci-e2e-shard.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
       - 'apps/vscode-extension/src/guides/webview-csp.ts'
@@ -120,10 +154,60 @@ on:
 permissions:
   contents: read
 
+# One run per PR, and one per main: a newer push cancels the older run (main
+# included: only its newest commit needs the heavy suites). Adding any other
+# label starts a run that skips every job; it gets a group of its own so it
+# cannot cancel the real one.
+concurrency:
+  group: inbox-e2e-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
+  cancel-in-progress: true
+
 jobs:
-  inbox-window-e2e:
-    name: Inbox window (Playwright against the compiled binary)
+  # The apps are built once and shared with the shards; each shard compiles
+  # the binary from them (a few seconds) with the flags release.yml uses.
+  build:
+    name: Inbox window (build the apps)
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the apps
+        run: bun run build:review && bun run build:hook
+
+      - name: Keep the built apps for the shards
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inbox-e2e-apps
+          path: |
+            apps/hook/dist/
+            apps/review/dist/
+            apps/inbox/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The specs, split into whole spec files by measured time
+  # (scripts/ci-e2e-shard.ts). Each shard is its own runner with one worker,
+  # as the single job was.
+  inbox-window-e2e:
+    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/8)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -156,18 +240,30 @@ jobs:
         if: steps.browser-cache.outputs.cache-hit == 'true'
         run: bunx playwright install-deps chromium webkit
 
-      - name: Build the apps and compile the binary
+      # Code review's Go to Definition (review-explorer.spec.ts) searches with ripgrep.
+      - name: Install ripgrep
+        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
+
+      - name: Get the built apps
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: inbox-e2e-apps
+          path: apps
+
+      - name: Compile the binary
         run: >-
-          bun run build:review && bun run build:hook &&
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
           --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
 
-      - name: Run the Inbox window proof
-        run: bun run test:e2e:inbox
+      - name: Run the Inbox window proof (this shard's specs)
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: bun run scripts/ci-e2e-shard.ts "$SHARD"
 
       # The update notices need a release-numbered binary (a 0.0.0-dev one has
       # no update control): the same build with 0.28.10, against a fake GitHub.
       - name: Run the update specs on a release-numbered binary
+        if: matrix.shard == 1
         run: |
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
             --define '__CLI_VERSION__="0.28.10"' --outfile .local/plannotator-0.28.10
@@ -175,6 +271,7 @@ jobs:
             bunx playwright test -c tests/e2e/playwright.config.ts inbox-update-notice inbox-updates.spec
 
       - name: Replay the phone door's contract exchanges and the Wi-Fi listener on the binary
+        if: matrix.shard == 1
         run: |
           export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
           PLANNOTATOR_INBOX_TEST_BINARY="$PWD/.local/plannotator" bun test packages/server/inbox-devices.test.ts packages/server/inbox-lan.test.ts
@@ -183,6 +280,23 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: inbox-window-proof
+          name: inbox-window-proof-${{ matrix.shard }}
           path: .local/proof/
           if-no-files-found: ignore
+
+  # The merge script merges a PR only when every `Full CI (all green)` check on
+  # its head succeeded. A skipped job counts as passed elsewhere, so this job
+  # passes only when every job above ran and succeeded.
+  full-ci:
+    name: Full CI (all green)
+    needs: [build, inbox-window-e2e]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job above succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          jq -e 'all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null

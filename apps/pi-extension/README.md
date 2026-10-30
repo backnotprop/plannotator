@@ -410,7 +410,7 @@ During execution, the agent marks completed steps with `[DONE:n]` markers. Progr
 | `/plannotator-review [DIRECTORY \| PR_URL]` | Open code review UI for current changes, another repository/worktree, or a PR |
 | `/plannotator-annotate <file>` | Open markdown file in annotation UI |
 | `/plannotator-last` | Annotate the last assistant message |
-| `/plannotator-inbox` | Open the Plannotator Inbox in the browser and show its address (needs the `plannotator` CLI) |
+| `/plannotator-inbox` | Open the Plannotator Inbox in the browser, show its address, and brief the agent on using it (needs the `plannotator` CLI) |
 
 When the `plannotator` tool is turned on, the agent opens, lists and closes reviews with it (see above).
 

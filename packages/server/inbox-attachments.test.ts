@@ -152,3 +152,47 @@ test("a script attaches as kind code: served as text/plain under the sandbox CSP
   });
   expect(annotated.status).toBe(200);
 });
+
+/** A PNG's signature and IHDR (2 x 3 px): enough for the sniffer and the dimension read. */
+function png(): Uint8Array {
+  const bytes = new Uint8Array(33);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 3, 8, 6, 0, 0, 0]);
+  return bytes;
+}
+
+test("an image in an attached Markdown file loads from the file's own folder, only when that version of the file shows it (#2228)", async () => {
+  const { project, dataDir } = world();
+  mkdirSync(join(project, "docs", "shots"), { recursive: true });
+  writeFileSync(join(project, "docs", "shots", "before.png"), png());
+  writeFileSync(join(project, "docs", "shots", "after.png"), png());
+  writeFileSync(join(project, "docs", "shots", "unshown.png"), png());
+  writeFileSync(join(project, "docs", "plan.md"), "# Plan\n\n![before](shots/before.png)\n");
+  writeFileSync(join(project, "docs", "notes.txt"), "![before](shots/before.png)\n");
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const sent = await send(client, { project_path: project, body: "The plan.", attachments: ["docs/plan.md", "docs/notes.txt"] });
+  const [markdown, text] = sent.attachments as { id: string; kind: string }[];
+  expect(markdown!.kind).toBe("markdown");
+  const image = (id: string, path: string, version: string, headers: Record<string, string> = {}) =>
+    fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${id}/markdown-image?path=${encodeURIComponent(path)}&version=${version}`, { headers });
+
+  // Relative to docs/, the Markdown file's folder, not the project root.
+  const shown = await image(markdown!.id, "shots/before.png", "current");
+  expect(shown.status).toBe(200);
+  expect(shown.headers.get("content-type")).toBe("image/png");
+  // A file next to it that the Markdown does not show is refused.
+  expect((await image(markdown!.id, "shots/unshown.png", "current")).status).toBe(403);
+
+  // The file changes after the send: the current version shows only the new image, the sent version only the old one.
+  writeFileSync(join(project, "docs", "plan.md"), "# Plan\n\n![after](shots/after.png)\n");
+  expect((await image(markdown!.id, "shots/after.png", "current")).status).toBe(200);
+  expect((await image(markdown!.id, "shots/before.png", "current")).status).toBe(403);
+  expect((await image(markdown!.id, "shots/before.png", "sent")).status).toBe(200);
+  expect((await image(markdown!.id, "shots/after.png", "sent")).status).toBe(403);
+
+  // Only a Markdown attachment shows images this way.
+  expect(text!.kind).not.toBe("markdown");
+  expect((await image(text!.id, "shots/before.png", "current")).status).toBe(422);
+  // Another site is refused before anything is read.
+  expect((await image(markdown!.id, "shots/after.png", "current", { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+});

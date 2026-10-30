@@ -8,7 +8,7 @@
  * when nothing changed), a band that stays open or traps Escape, and a file
  * opened from the header going somewhere other than where its tile goes.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';

@@ -9,13 +9,16 @@ import { CommentPopover, type CommentAskAIHandler } from './CommentPopover';
 import { ImagePeek, type ImagePeekHandle, type ImagePeekRow } from './ImagePeek';
 import { RegionBoxLayer, RegionToolStrip, regionOf, type RegionBoxItem } from './ImageRegions';
 import { ImageZoomStage, type ImageZoomStageHandle, type WheelHintGate, type ZoomDraw, type ZoomMode } from './ImageZoomStage';
-import type { NaturalBox, ZoomSize, ZoomViewport } from './imageZoom';
+import { canPanToward, type NaturalBox, type ZoomSize, type ZoomViewport } from './imageZoom';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useSwipeStep } from '../hooks/useSwipeStep';
 
 /** One image of a document, for the lightbox's stepping (`images`). */
 export interface LightboxImage {
   src: string;
   alt: string;
+  /** What the viewer calls the image (a picture choice: "B · Quiet hover menu"). Absent: the file name its src names. */
+  name?: string;
   /** The heading the image sits under ("Options"), for "2 of 4 · in “Options”" and the peek's rows. */
   section?: string | null;
   /**
@@ -70,10 +73,12 @@ function isTextField(el: EventTarget | null): boolean {
 }
 
 /**
- * The file name an image's src names: the `path` a host route carries
- * (`/api/image?path=…`), else the URL's last segment, else the alt text.
+ * What the viewer calls an image: its `name` when the host gave one, else the
+ * file name its src names (the `path` a host route carries,
+ * `/api/image?path=…`, else the URL's last segment), else the alt text.
  */
-export function lightboxImageName(image: Pick<LightboxImage, 'src' | 'alt'>): string {
+export function lightboxImageName(image: Pick<LightboxImage, 'src' | 'alt' | 'name'>): string {
+  if (image.name) return image.name;
   try {
     const base = typeof window !== 'undefined' && /^https?:/.test(window.location.href) ? window.location.href : 'http://localhost/';
     const url = new URL(image.src, base);
@@ -162,7 +167,15 @@ export const ImageLightbox: React.FC<{
   images?: readonly LightboxImage[];
   /** Comments on part of an image (#2100). Additive: absent, no region tools. */
   regions?: LightboxRegionComments;
-}> = ({ src, alt, onClose, images, regions }) => {
+  /**
+   * A touch screen's swipe through `images` (`useSwipeStep`, the Inbox
+   * phone viewer's, approval "inbox-image-swipe"): the image follows the
+   * finger and steps past a third of the width or on a flick, a zoomed image
+   * pans to its edge first, and a drag down at Fit closes. Additive: absent,
+   * no swipe.
+   */
+  swipe?: boolean;
+}> = ({ src, alt, onClose, images, regions, swipe }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -389,6 +402,47 @@ export const ImageLightbox: React.FC<{
   }, [index]);
   const stepRef = useRef(step);
   stepRef.current = step;
+  // A touch screen's swipe (`swipe`): heard on the image area, which stays put (so a finger that comes back while the
+  // last step is still sliding is heard), and only the picture follows the finger (`swipeTrackRef`), not the region
+  // strip over it. A box being drawn, Region, or the peek keep the touch. One image alone: a drag down still closes.
+  const swipeAreaRef = useRef<HTMLDivElement>(null);
+  const swipeTrackRef = useRef<HTMLDivElement>(null);
+  /** The zoom stage, inside the track that follows the finger with `swipe`; without it, as before (no wrapper). */
+  const tracked = (stage: React.ReactNode) =>
+    swipe ? (
+      <div ref={swipeTrackRef} className="absolute inset-0" data-lightbox-track="">
+        {stage}
+      </div>
+    ) : (
+      stage
+    );
+  const dimsRef = useRef(dims);
+  dimsRef.current = dims;
+  const zoomModeRef = useRef(zoomMode);
+  zoomModeRef.current = zoomMode;
+  useSwipeStep(framed ? swipeAreaRef : overlayRef, {
+    enabled: !!swipe && !(canDraw && tool === 'region') && !peekOpen && !drawerOpen,
+    canStep: (dir) => stepping && index + dir >= 0 && index + dir < (list?.length ?? 0),
+    move: () => [swipeTrackRef.current],
+    onStep: (dir) => stepRef.current(dir),
+    wouldAsk: () => pending !== null,
+    keeps: (dir) => !stepping || canPanToward(stageRef.current?.visibleBox() ?? null, dimsRef.current?.width ?? 0, dir),
+    dismiss: {
+      can: () => {
+        if (zoomModeRef.current !== 'fit') return false;
+        const box = stageRef.current?.visibleBox() ?? null;
+        return box === null || box.y <= 1;
+      },
+      onDismiss: () => onCloseRef.current(),
+      onProgress: (share) => {
+        const overlay = overlayRef.current;
+        if (!overlay) return;
+        // The framed viewer's page colour, or the one-image overlay's dark veil, fades with the drag.
+        const veil = framed ? `color-mix(in oklch, var(--background) ${Math.round((1 - share) * 100)}%, transparent)` : `rgb(0 0 0 / ${(0.8 * (1 - share)).toFixed(3)})`;
+        overlay.style.backgroundColor = share > 0 ? veil : '';
+      },
+    },
+  });
   const steppingRef = useRef(stepping);
   steppingRef.current = stepping;
   const peekOpenRef = useRef(peekOpen);
@@ -531,22 +585,24 @@ export const ImageLightbox: React.FC<{
         data-image-lightbox=""
         className="fixed inset-0 z-[200] bg-black/80 text-white backdrop-blur-sm outline-none"
       >
-        <ImageZoomStage
-          ref={stageRef}
-          key={src}
-          src={src}
-          alt={alt}
-          label={alt ? `Image: ${alt}` : 'Image'}
-          mode={zoomMode}
-          onModeChange={setZoomMode}
-          inset={{ x: 0.9, y: 0.85 }}
-          onBackgroundTap={onClose}
-          className="absolute inset-0"
-          imageClassName="shadow-2xl"
-          radius={8}
-          stageAttributes={{ 'data-lightbox-stage': zoomMode }}
-          wheelHint={wheelHint}
-        />
+        {tracked(
+          <ImageZoomStage
+            ref={stageRef}
+            key={src}
+            src={src}
+            alt={alt}
+            label={alt ? `Image: ${alt}` : 'Image'}
+            mode={zoomMode}
+            onModeChange={setZoomMode}
+            inset={{ x: 0.9, y: 0.85 }}
+            onBackgroundTap={onClose}
+            className="absolute inset-0"
+            imageClassName="shadow-2xl"
+            radius={8}
+            stageAttributes={{ 'data-lightbox-stage': zoomMode }}
+            wheelHint={wheelHint}
+          />
+        )}
         {alt && (
           <div className="pointer-events-none absolute inset-x-0 bottom-[2.5vh] mx-auto max-w-[90vw] truncate text-center text-sm text-white/70">{alt}</div>
         )}
@@ -711,48 +767,50 @@ export const ImageLightbox: React.FC<{
                 </svg>
               </button>
             )}
-            <div className="relative min-h-0 min-w-0 flex-1 self-stretch">
-              <ImageZoomStage
-                ref={stageRef}
-                key={`${index}:${current.src}`}
-                src={current.src}
-                alt={current.alt}
-                label={`Image: ${name}`}
-                description={drawing ? 'Region: drag to draw a box and comment on it. Or frame the spot with Actual size and the scroll keys, then press Enter to comment on what is on screen.' : undefined}
-                mode={zoomMode}
-                onModeChange={setZoomMode}
-                onScaleChange={setScale}
-                onImageLoad={setDims}
-                // A single image keeps #2067's tap beside the image to close
-                // (its click swallowed so the page beneath never gets it), in
-                // Move only: in Region a press there may start a box.
-                onBackgroundTap={!stepping && !drawing ? onClose : undefined}
-                onViewChange={regionsOn ? (v, stage, eased) => setView({ view: v, stage, eased }) : undefined}
-                drawing={drawing}
-                onDraw={drawing ? onDraw : undefined}
-                className="absolute inset-0"
-                imageClassName="shadow-xl"
-                stageAttributes={{ 'data-lightbox-stage': zoomMode, ...(regionsOn ? { 'data-region-tool-active': tool } : {}) }}
-                wheelHint={wheelHint}
-              >
-                {regionsOn && (
-                  <RegionBoxLayer
-                    view={view?.view ?? null}
-                    stage={view?.stage ?? null}
-                    eased={view?.eased ?? false}
-                    regions={boxes}
-                    selectedId={selectedId}
-                    draft={draft}
-                    pending={pending ? { box: pending, n: pendingNumber } : null}
-                    interactive={!drawing}
-                    onPick={(id) => {
-                      setDrawerOpen(true);
-                      setSelectedId(id);
-                    }}
-                    pendingRef={setPendingEl}
-                  />
-                )}
-              </ImageZoomStage>
+            <div ref={swipeAreaRef} className="relative min-h-0 min-w-0 flex-1 self-stretch" data-lightbox-swipe={swipe ? '' : undefined}>
+              {tracked(
+                <ImageZoomStage
+                  ref={stageRef}
+                  key={`${index}:${current.src}`}
+                  src={current.src}
+                  alt={current.alt}
+                  label={`Image: ${name}`}
+                  description={drawing ? 'Region: drag to draw a box and comment on it. Or frame the spot with Actual size and the scroll keys, then press Enter to comment on what is on screen.' : undefined}
+                  mode={zoomMode}
+                  onModeChange={setZoomMode}
+                  onScaleChange={setScale}
+                  onImageLoad={setDims}
+                  // A single image keeps #2067's tap beside the image to close
+                  // (its click swallowed so the page beneath never gets it), in
+                  // Move only: in Region a press there may start a box.
+                  onBackgroundTap={!stepping && !drawing ? onClose : undefined}
+                  onViewChange={regionsOn ? (v, stage, eased) => setView({ view: v, stage, eased }) : undefined}
+                  drawing={drawing}
+                  onDraw={drawing ? onDraw : undefined}
+                  className="absolute inset-0"
+                  imageClassName="shadow-xl"
+                  stageAttributes={{ 'data-lightbox-stage': zoomMode, ...(regionsOn ? { 'data-region-tool-active': tool } : {}) }}
+                  wheelHint={wheelHint}
+                >
+                  {regionsOn && (
+                    <RegionBoxLayer
+                      view={view?.view ?? null}
+                      stage={view?.stage ?? null}
+                      eased={view?.eased ?? false}
+                      regions={boxes}
+                      selectedId={selectedId}
+                      draft={draft}
+                      pending={pending ? { box: pending, n: pendingNumber } : null}
+                      interactive={!drawing}
+                      onPick={(id) => {
+                        setDrawerOpen(true);
+                        setSelectedId(id);
+                      }}
+                      pendingRef={setPendingEl}
+                    />
+                  )}
+                </ImageZoomStage>
+              )}
               {strip && (
                 <div className={`pointer-events-none absolute inset-x-0 z-[3] flex justify-center ${phone ? 'bottom-2.5' : 'top-2.5'}`}>{strip}</div>
               )}

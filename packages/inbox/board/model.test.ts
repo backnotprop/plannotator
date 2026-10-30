@@ -5,11 +5,13 @@
  * column menu, the age and the live state of a link. What regresses: a lane
  * out of COLUMNS.md order, "You: …" leaking into an agent's column, a card
  * staying bold after the person opened it, a Start offered on a card already
- * sent, or a merged PR shown as open.
+ * sent, or a merged PR shown as open. The project filter: another project's
+ * card leaking into the lanes or counts, the menu offering a project with no
+ * card (or dropping the picked one), New card ignoring the filter.
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
-import { boardCounts, boardLanes, cardAge, cardFoot, cardLine, cardMessageBody, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread } from './model';
+import { boardCounts, boardLanes, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMessageBody, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -150,4 +152,40 @@ test('"You: …" goes to the thread where the person makes the call: the sent th
   expect(youThread(card('e'), rowOf)).toBeNull();
   // The link's name holds its visible words as shown, case and all (WCAG 2.5.3: a voice user says what they see).
   for (const you of ['Merge #14', 'PR #14: look', 'Pick one of three dialogs']) expect(youLinkLabel(you).startsWith(`You: ${you}`)).toBe(true);
+});
+
+test("the project filter keeps only that project's cards, in every column; none keeps every card", () => {
+  const cards = [
+    card('a1', { project_id: 'prj_a', column: 'designing' }),
+    card('b1', { project_id: 'prj_b', column: 'your_look' }),
+    card('a2', { project_id: 'prj_a', column: 'shipped' }),
+    card('a3', { project_id: 'prj_a', column: 'icebox' }),
+    card('b2', { project_id: 'prj_b', column: 'dropped', dropped: { at: '2026-10-21T10:00:00.000Z', by: CLAUDE, reason: 'x', seen_at: null } }),
+  ];
+  expect(cardsInProject(cards, null)).toBe(cards);
+  expect(cardsInProject(cards, 'prj_a').map((c) => c.id)).toEqual(['a1', 'a2', 'a3']);
+  // The counts and the drops read the filtered cards.
+  expect(boardCounts(cardsInProject(cards, 'prj_a'))).toEqual({ inFlight: 1, onYou: 0, shipped: 1, icebox: 1, dropped: 0 });
+  expect(unseenDrops(cardsInProject(cards, 'prj_a'))).toEqual([]);
+  expect(unseenDrops(cardsInProject(cards, 'prj_b')).map((c) => c.id)).toEqual(['b2']);
+  expect(cardsInProject(cards, 'prj_gone')).toEqual([]);
+});
+
+test("the Project menu offers the projects with a card, in the sidebar's order, and keeps the picked one", () => {
+  const projects = [{ id: 'prj_c' }, { id: 'prj_a' }, { id: 'prj_none' }, { id: 'prj_b' }];
+  const cards = [card('b', { project_id: 'prj_b' }), card('a', { project_id: 'prj_a', column: 'shipped' }), card('c', { project_id: 'prj_c', column: 'icebox' })];
+  expect(boardProjects(cards, projects, null).map((p) => p.id)).toEqual(['prj_c', 'prj_a', 'prj_b']);
+  // Picked with no card left: still listed, so the menu shows what is checked.
+  expect(boardProjects(cards, projects, 'prj_none').map((p) => p.id)).toEqual(['prj_c', 'prj_a', 'prj_none', 'prj_b']);
+});
+
+test('New card goes in the filtered project, else the card heard from last, else the first project', () => {
+  const projects = [{ id: 'prj_a' }, { id: 'prj_b' }];
+  const cards = [card('a', { project_id: 'prj_a', heard_at: '2026-10-20T10:00:00.000Z' }), card('b', { project_id: 'prj_b', heard_at: '2026-10-21T10:00:00.000Z' })];
+  expect(newCardProject('prj_a', projects, cards)).toBe('prj_a');
+  expect(newCardProject(null, projects, cards)).toBe('prj_b');
+  // A filter naming no known project is not a place to put a card.
+  expect(newCardProject('prj_gone', projects, cards)).toBe('prj_b');
+  expect(newCardProject(null, projects, [])).toBe('prj_a');
+  expect(newCardProject(null, [], [])).toBeNull();
 });

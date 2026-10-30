@@ -13,9 +13,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   acquireUpdateLock,
+  AUTO_UPDATE_LOCK_LIVE_MAX_MS,
   autoUpdatePaths,
   installerCommand,
   isUpdateLockHeld,
+  launchInstaller,
+  parseUpdateLockHolder,
+  readAutoUpdateResult,
   reapDeadUpdateLock,
   removeJudgedLock,
   runAutoUpdateCheck,
@@ -24,12 +28,15 @@ import {
   type AutoUpdateDeps,
   type InstallerLaunch,
 } from "./auto-update";
+import { deriveInboxUpdate } from "./inbox-updates";
 import { readUpdateState, writeUpdateState, type FetchReleaseResult } from "@plannotator/shared/update-check";
 
 const NOW = 1_800_000_000_000;
 const posix = process.platform !== "win32";
 let dataDir: string;
 const started: ChildProcess[] = [];
+// Process groups of wrappers launchInstaller started in this file (it names them in the lock).
+const launchedGroups: number[] = [];
 
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), "plannotator-update-stuck-"));
@@ -41,8 +48,37 @@ afterEach(() => {
       process.kill(-child.pid!, "SIGKILL");
     } catch {}
   }
+  for (const group of launchedGroups.splice(0)) {
+    try {
+      process.kill(-group, "SIGKILL");
+    } catch {}
+  }
   rmSync(dataDir, { recursive: true, force: true });
 });
+
+/** What the Inbox's button shows for the facts on disk (version 0.28.31 running). */
+function inboxButton() {
+  return deriveInboxUpdate({
+    current: "0.28.31",
+    onDisk: null,
+    checksOn: true,
+    managed: true,
+    lockHeld: isUpdateLockHeld(dataDir),
+    state: readUpdateState(dataDir),
+    result: readAutoUpdateResult(dataDir),
+    now: Date.now(),
+  })?.state;
+}
+
+function personPressedUpdateNow() {
+  writeUpdateState(
+    {
+      latestRelease: { tag: "0.28.32", fetchedAt: Date.now() },
+      pending: { version: "0.28.32", fromVersion: "0.28.31", startedAt: Date.now(), by: "person" },
+    },
+    dataDir,
+  );
+}
 
 /** A pid that is certainly not running (nor its group): a child of ours that has exited. */
 async function deadPid(): Promise<number> {
@@ -213,6 +249,19 @@ describe.skipIf(!posix)("the detached wrapper names its process group and machin
     }
   }, 30_000);
 
+  test("a wrapper never removes a lock another install took (F5)", async () => {
+    const { server, child, paths } = await startWrapper('echo "fake installer started"\nsleep 1\n');
+    try {
+      const other = holderLine(process.pid, liveGroup());
+      writeFileSync(paths.lock, other);
+      if (child.exitCode === null && child.signalCode === null) await new Promise((r) => child.on("exit", r));
+      expect(JSON.parse(readFileSync(paths.result, "utf-8")).exitCode).toBe(0);
+      expect(readFileSync(paths.lock, "utf-8")).toBe(other);
+    } finally {
+      server.stop(true);
+    }
+  }, 30_000);
+
   test("a wrapper that finishes records its result and releases the lock itself", async () => {
     const { server, child, paths } = await startWrapper('echo "fake installer started"\nexit 0\n');
     try {
@@ -223,6 +272,88 @@ describe.skipIf(!posix)("the detached wrapper names its process group and machin
       server.stop(true);
     }
   }, 30_000);
+});
+
+// F6 (#2338): an install that died before anything named it in the lock showed
+// "Updating…" for the hour, then "available", never Failed.
+describe("a killed or failed-to-start install shows Failed with Try again", () => {
+  test("a holder line whose process is gone is reaped, on every platform (Windows judges the pid)", async () => {
+    personPressedUpdateNow();
+    const paths = autoUpdatePaths(dataDir);
+    const dead = await deadPid();
+    writeFileSync(paths.lock, holderLine(dead, dead));
+    backdate(paths.lock, UPDATE_LOCK_HANDOFF_MS + 1_000);
+    expect(reapDeadUpdateLock(dataDir)).toBe(true);
+    expect(inboxButton()).toBe("failed");
+  });
+
+  test("a lock past its hour that nothing can judge is released as failed, not dropped silently", () => {
+    personPressedUpdateNow();
+    const paths = autoUpdatePaths(dataDir);
+    writeFileSync(paths.lock, "123");
+    backdate(paths.lock, 61 * 60_000);
+    expect(reapDeadUpdateLock(dataDir)).toBe(true);
+    expect(existsSync(paths.lock)).toBe(false);
+    expect(inboxButton()).toBe("failed");
+  });
+
+  test.skipIf(!posix)("the lock names the wrapper from the spawn on: killed before its first line, it reads as Failed", async () => {
+    personPressedUpdateNow();
+    const paths = autoUpdatePaths(dataDir);
+    // The wrapper's update-prepare step is this script: it sleeps, nothing is downloaded.
+    const sleeper = join(dataDir, "sleeper.sh");
+    writeFileSync(sleeper, "exec sleep 30\n");
+    expect(acquireUpdateLock(paths.lock)).toBe(true);
+    launchInstaller({
+      version: "v0.28.32",
+      logPath: paths.log,
+      resultPath: paths.result,
+      lockPath: paths.lock,
+      platform: process.platform,
+      flags: [],
+      prepare: { binary: "/bin/sh", entry: sleeper },
+    });
+    const holder = parseUpdateLockHolder(readFileSync(paths.lock, "utf-8"));
+    expect(holder).not.toBeNull();
+    launchedGroups.push(holder!.group);
+    process.kill(-holder!.group, "SIGKILL");
+    backdate(paths.lock, UPDATE_LOCK_HANDOFF_MS + 1_000);
+    // Until this process reaps the killed wrapper, its group still exists.
+    const deadline = Date.now() + 5_000;
+    while (!reapDeadUpdateLock(dataDir) && Date.now() < deadline) await Bun.sleep(20);
+    expect(existsSync(paths.lock)).toBe(false);
+    expect(inboxButton()).toBe("failed");
+  });
+
+  test.skipIf(!posix || !!Bun.which("powershell.exe"))("an installer that cannot be spawned reads as Failed at once", async () => {
+    personPressedUpdateNow();
+    const paths = autoUpdatePaths(dataDir);
+    expect(acquireUpdateLock(paths.lock)).toBe(true);
+    // The Windows wrapper's powershell.exe is not on this machine: the spawn fails after it returns.
+    launchInstaller({ version: "v0.28.32", logPath: paths.log, resultPath: paths.result, lockPath: paths.lock, platform: "win32", flags: [] });
+    const deadline = Date.now() + 5_000;
+    while (existsSync(paths.lock) && Date.now() < deadline) await Bun.sleep(10);
+    expect(existsSync(paths.lock)).toBe(false);
+    expect(readAutoUpdateResult(dataDir)).toEqual({ version: "0.28.32", exitCode: -1 });
+    expect(inboxButton()).toBe("failed");
+  });
+});
+
+// F5 (#2338): a lock past its hour was taken while its install still ran, and
+// the first wrapper's final `rm -f` then deleted the second install's lock.
+describe.skipIf(!posix)("never two installers at once", () => {
+  test("a lock past its hour whose installer still runs is still held, up to a day", () => {
+    const paths = autoUpdatePaths(dataDir);
+    const group = liveGroup();
+    writeFileSync(paths.lock, holderLine(group, group));
+    backdate(paths.lock, 61 * 60_000);
+    expect(isUpdateLockHeld(dataDir)).toBe(true);
+    expect(reapDeadUpdateLock(dataDir)).toBe(false);
+    expect(acquireUpdateLock(paths.lock)).toBe(false);
+    // A hung install never holds for good.
+    backdate(paths.lock, AUTO_UPDATE_LOCK_LIVE_MAX_MS + 60_000);
+    expect(isUpdateLockHeld(dataDir)).toBe(false);
+  });
 });
 
 describe("auto-update while the check keeps failing", () => {

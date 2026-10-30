@@ -1,0 +1,7 @@
+/* The review app's stylesheet, scanned for what the portable viewer can draw.
+   The viewer renders the guide chain, never the review's left panel, so the
+   panel's header is left out of Tailwind's scan: its classes would change the
+   viewer's CSS (and so the pinned /v1 file) without being used here. */
+@import "@plannotator/review-editor/styles";
+
+@source not "../../../packages/review-editor/components/ReviewPanelHeader.tsx";

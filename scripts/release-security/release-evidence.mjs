@@ -20,10 +20,12 @@ export const NATIVE_SUBJECTS = [
 export const NPM_SUBJECTS = [
   "npm-packages/plannotator-opencode.tgz",
   "npm-packages/plannotator-pi-extension.tgz",
+  "npm-packages/plannotator-dsh.tgz",
 ];
 
 export const RELEASE_WORKSPACES = [
   "",
+  "apps/dsh-plugin",
   "apps/hook",
   "apps/opencode-plugin",
   "apps/paste-service",

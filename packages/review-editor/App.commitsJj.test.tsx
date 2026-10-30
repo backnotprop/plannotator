@@ -12,6 +12,8 @@
  *    session was on.
  *  - A reload that lands on a jj-commit diff snaps back to the session
  *    default once, exactly like a git commit diff.
+ *  - Snapping back to a saved jj Evolution diff default diffs against the
+ *    previous evolog entry, not the line base.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
@@ -65,7 +67,7 @@ const JJ_CONTEXT = {
     { id: "jj-current", label: "Current change" },
     { id: "jj-last", label: "Last change" },
     { id: "jj-line", label: "Line of work" },
-    { id: "jj-all", label: "All files" },
+    { id: "jj-all", label: "Every file" },
   ],
   worktrees: [],
 };
@@ -97,7 +99,7 @@ class StubEventSource {
 
 let switchRequests: Array<{ diffType: string; base?: string }> = [];
 
-function makeFetch(initialDiffType: string): typeof fetch {
+function makeFetch(initialDiffType: string, gitContext: object = JJ_CONTEXT): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init); the double implements
   // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -113,7 +115,7 @@ function makeFetch(initialDiffType: string): typeof fetch {
         diffType: initialDiffType,
         base: "trunk()",
         hideWhitespace: false,
-        gitContext: JJ_CONTEXT,
+        gitContext,
       });
     }
     if (url.pathname === "/api/diff/switch") {
@@ -180,12 +182,12 @@ function seedUnrelatedAnnouncementsSeen(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-async function mount(initialDiffType = "jj-current"): Promise<void> {
+async function mount(initialDiffType = "jj-current", gitContext: object = JJ_CONTEXT): Promise<void> {
   setStorageBackend(memoryBackend);
   seedUnrelatedAnnouncementsSeen();
   configStore.loadFromBackend();
   switchRequests = [];
-  globalThis.fetch = makeFetch(initialDiffType);
+  globalThis.fetch = makeFetch(initialDiffType, gitContext);
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
@@ -241,5 +243,21 @@ describe.if(hasDom)("Commits view in a jj session", () => {
     // The persisted default (a git type) is not offered here, so the jj
     // session's first option is where the review resumes.
     expect(switchRequests[0].diffType).toBe("jj-current");
+  });
+
+  test("the snap-back to a saved Evolution diff default uses the previous evolog entry as its base", async () => {
+    // Failure caught: the fallback sending the line base (trunk()) with
+    // jj-evolog, which diffs the whole line of work as "Evolution diff".
+    memory.set("plannotator-review-defaults", JSON.stringify({ jj: { defaultDiffType: "jj-evolog" } }));
+    await mount(`jj-commit:${HEAD_ID}`, {
+      ...JJ_CONTEXT,
+      diffOptions: [...JJ_CONTEXT.diffOptions, { id: "jj-evolog", label: "Evolution diff" }],
+      jjEvologs: [
+        { commitId: "aaaaaaaaaaaa", description: "now" },
+        { commitId: "bbbbbbbbbbbb", description: "before" },
+      ],
+    });
+    await waitFor(() => switchRequests.length > 0, "the snap-back switch");
+    expect(switchRequests[0]).toMatchObject({ diffType: "jj-evolog", base: "bbbbbbbbbbbb" });
   });
 });

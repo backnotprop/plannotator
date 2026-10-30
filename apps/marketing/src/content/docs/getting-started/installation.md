@@ -95,15 +95,15 @@ For `curl … | bash` pipelines you can set `PLANNOTATOR_MINIMAL=1` in the envir
 <details>
 <summary><strong>Skipping individual agent integrations</strong></summary>
 
-Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
+Want the full install but not every agent integration? Each one has its own opt-out. `--skip-codex` keeps the installer from writing `hooks.json` / `config.toml` under your Codex home even when Codex is detected; `--skip-gemini` and `--skip-kiro` do the same for `~/.gemini` and `~/.kiro`; `--skip-opencode` skips the OpenCode command stubs and cache clear; `--skip-qwen` skips the Qwen Code extension and skills. Skipping never removes an integration a previous install already wired, and the installer reports the state honestly (for example `Codex: detected, skipped (--skip-codex)`, never a false "not detected").
 
 ```bash
 curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-codex
 ```
 
-PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode`. Windows CMD: same `--skip-*` flags as bash.
+PowerShell: `-SkipCodex` / `-SkipGemini` / `-SkipKiro` / `-SkipOpencode` / `-SkipQwen`. Windows CMD: same `--skip-*` flags as bash.
 
-For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`) or persist the choice in `~/.plannotator/config.json`:
+For unattended updates, set the environment variables `PLANNOTATOR_SKIP_CODEX_INSTALL=1` (likewise `_GEMINI_`, `_KIRO_`, `_OPENCODE_`, `_QWEN_`) or persist the choice in `~/.plannotator/config.json`:
 
 ```json
 { "skipInstall": { "codex": true } }
@@ -165,7 +165,7 @@ Plannotator can do this for you. Turn on **Settings → General → Keep Plannot
 
 in `~/.plannotator/config.json`, or `PLANNOTATOR_AUTO_UPDATE=1` in your environment (the environment variable wins). It is off by default.
 
-When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-skills`, `--skip-claude-plugin`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
+When it is on, the `plannotator` binary checks GitHub for a newer stable release at most once a day, after a review session has started. It never downgrades. If a newer release exists and no other Plannotator session is open, it runs the same install script shown above for that exact version, in the background, with your saved install choices: the `skipInstall` keys in `config.json`, the answers from your first install, and the install flags you last ran the script with. Each install records its flags (`--minimal`, `--no-minimal`, `--skip-codex`, `--skip-gemini`, `--skip-kiro`, `--skip-vibe`, `--skip-opencode`, `--skip-qwen`, `--skip-skills`, `--skip-claude-plugin`, `--with-call-flow`, `--verify-attestation`, `--skip-attestation`, or the PowerShell equivalents such as `-SkipSkills`) in `~/.plannotator/install-flags.json`, and auto-update passes the same ones again. Running the install script by hand with none of those flags records an empty set, so later updates go back to the defaults. Nothing waits for it: the check adds no time to a review, and a failed check or install only writes a line to `~/.plannotator/update.log`. The next time Plannotator opens you see "Updated to vX", or "Auto-update failed" with the path to that log.
 
 Auto-update only applies to the binary the install script manages (`~/.local/bin/plannotator`, or `%LOCALAPPDATA%\plannotator\plannotator.exe` on Windows). A development build, a binary installed some other way, and the OpenCode and Pi plugins are never updated by it.
 
@@ -348,6 +348,19 @@ curl -fsSL https://plannotator.ai/install.cmd -o install.cmd && install.cmd && d
 On Windows the installer checks for `%USERPROFILE%\.kiro` (or `kiro-cli` on your PATH). This installs the Kiro skills to `~/.kiro/skills` and the Plannotator agent to `~/.kiro/agents/plannotator.json` (an existing agent file is never overwritten). If you install Kiro *after* Plannotator, just re-run the installer.
 
 See the [Kiro guide](/docs/guides/kiro-cli/) for the skill list and the Plannotator agent.
+
+## Qwen Code
+
+Qwen Code is auto-detected: `~/.qwen` (or the folder named by `QWEN_HOME`) must exist, with the `qwen` command on your PATH or Qwen's own files in it. Plan review needs Qwen Code 0.13.0 or newer; with an older one the installer installs nothing for it and asks you to update. Otherwise the installer:
+
+- copies the `/plannotator-review`, `/plannotator-annotate` and `/plannotator-last` skills to `~/.qwen/skills`;
+- installs the `plannotator` Qwen extension with `qwen extensions install`. The extension opens the plan in Plannotator when the agent calls `exit_plan_mode`.
+
+Re-running the installer leaves an unchanged extension alone. A new extension version is applied with `qwen extensions update`, which keeps your settings: if you turned the extension off, it stays off. An extension you linked or installed yourself is left as it is. If the `qwen` command is not on your PATH, the skills still install; re-run the installer once `qwen` is on your PATH to add the extension. A failed Qwen step never fails the install. Restart Qwen Code afterwards.
+
+After you approve a plan in Plannotator, Qwen Code asks you to confirm it once more in the terminal. Qwen Code does not let a hook approve a tool that needs the user, and `exit_plan_mode` is one. Feedback you send instead goes to the agent at once.
+
+To install the extension by hand from a Plannotator checkout: `qwen extensions install ./apps/qwen-code/extension --consent`. `plannotator uninstall` removes it.
 
 ## Kilo Code
 

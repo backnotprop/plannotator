@@ -5,8 +5,8 @@
  * (scripts/inbox-sim.ts):
  *
  *  - an agent's `:::action` block with `Stopped:` puts its thread under
- *    Stopped on you, and the row reads "1 action item" ("1 question, 1 action item" beside
- *    a question): no new section, page or strip;
+ *    Stopped on you, and the row counts it in the box pill ("1 action to do", and the
+ *    question count beside it): no new section, page or strip;
  *  - the thread draws the checklist card in place of the block (approval
  *    "action-items-checklist", option A): adjacent blocks are one card, blocks
  *    separated by prose are two; one row open at a time; the open row shows
@@ -197,14 +197,19 @@ test.afterAll(async () => {
   }
 });
 
-test('the list: no new section; the action item sits in Stopped on you and its row says "1 action item"', async () => {
+test('the list: no new section; the action item sits in Stopped on you and its row counts it in the box pill', async () => {
   const { page, threads } = world;
   await page.goto(world.url);
   const stopped = page.locator('section[aria-label="Stopped on you"], .ib-group').filter({ hasText: 'Stopped on you' }).first();
   await expect(stopped).toContainText('Approve the production deploy on Vercel');
-  await expect(row(page, threads.vercel)).toContainText('1 action item');
-  await expect(row(page, threads.npm)).toContainText('1 question, 1 action item');
-  await expect(row(page, threads.staging)).toContainText('3 action items');
+  // The open action items' pill and the open questions' count (approval "inbox-row-action-icon"), named in words.
+  for (const [id, actions, questions] of [[threads.vercel, 1, 0], [threads.npm, 1, 1], [threads.staging, 3, 0]] as const) {
+    await expect(row(page, id).locator('[data-action-count]')).toHaveAttribute('data-action-count', String(actions));
+    await expect(row(page, id).locator('.ib-qn')).toHaveCount(questions);
+  }
+  await expect(row(page, threads.vercel)).toHaveAccessibleName(/1 action to do/);
+  await expect(row(page, threads.npm)).toHaveAccessibleName(/1 action to do 1 question/);
+  await expect(row(page, threads.staging)).toHaveAccessibleName(/3 actions to do/);
   // No "Action item" section band, page or strip.
   await expect(page.getByText('Action item', { exact: true })).toHaveCount(0);
   await shot(page, '01-list');

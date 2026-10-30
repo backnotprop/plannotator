@@ -42,6 +42,7 @@ export function Tip({
   side = 'top',
   align,
   wide = true,
+  open,
 }: {
   content: ReactNode;
   children: ReactElement;
@@ -50,6 +51,11 @@ export function Tip({
   side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
   wide?: boolean;
+  /**
+   * Shown whatever the pointer does while true (the list rows' badges, while
+   * their row has keyboard focus). Unset: hover decides, as for every tip.
+   */
+  open?: boolean;
 }) {
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const shouldOpen = useCallback(
@@ -77,10 +83,25 @@ export function Tip({
     children
   );
   return (
-    <Tooltip content={content} side={side} align={align} wide={wide} delayDuration={TIP_DELAY_MS} shouldOpen={shouldOpen} container={container} escapePassesThrough>
+    <Tooltip
+      content={content}
+      side={side}
+      align={align}
+      wide={wide}
+      delayDuration={TIP_DELAY_MS}
+      shouldOpen={shouldOpen}
+      // Opened without a hover, shouldOpen never named the trigger's root: the window's.
+      container={container ?? (open ? windowTooltipRoot() : null)}
+      escapePassesThrough
+      forceOpen={open}
+    >
       {trigger}
     </Tooltip>
   );
+}
+
+function windowTooltipRoot(): HTMLElement | null {
+  return typeof document === 'undefined' ? null : document.querySelector<HTMLElement>('[data-pn-tooltip-root]');
 }
 
 /** A project's tooltip: its whole name (a row may cut it) over its folder, which no row shows. */

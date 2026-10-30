@@ -87,6 +87,15 @@ const TOOLS: { id: Tool; icon: React.FC; label: string }[] = [
 
 const STROKE_SIZES = [3, 6, 10, 16, 24];
 
+/** The colours' names, for a screen reader (the swatch shows only the colour). */
+const COLOR_NAMES: Record<string, string> = {
+  '#ef4444': 'Red',
+  '#eab308': 'Yellow',
+  '#22c55e': 'Green',
+  '#3b82f6': 'Blue',
+  '#ffffff': 'White',
+};
+
 export const Toolbar: React.FC<ToolbarProps> = ({
   tool,
   color,
@@ -124,6 +133,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             type="button"
             onClick={() => onToolChange(id)}
             title={label}
+            aria-label={label}
+            aria-pressed={tool === id}
             className={`p-1.5 rounded transition-colors ${
               tool === id
                 ? 'bg-primary text-primary-foreground'
@@ -144,6 +155,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onClick={() => canDecrease && onStrokeSizeChange(STROKE_SIZES[currentSizeIndex - 1])}
           disabled={!canDecrease}
           title="Smaller stroke"
+          aria-label="Smaller stroke"
           className={`p-1 rounded transition-colors ${
             canDecrease
               ? 'hover:bg-muted text-muted-foreground hover:text-foreground'
@@ -155,6 +167,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <div
           className="w-5 h-5 flex items-center justify-center"
           title={`Stroke size: ${strokeSize}`}
+          role="img"
+          aria-label={`Stroke size: ${strokeSize}`}
         >
           <div
             className="rounded-full"
@@ -170,6 +184,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onClick={() => canIncrease && onStrokeSizeChange(STROKE_SIZES[currentSizeIndex + 1])}
           disabled={!canIncrease}
           title="Larger stroke"
+          aria-label="Larger stroke"
           className={`p-1 rounded transition-colors ${
             canIncrease
               ? 'hover:bg-muted text-muted-foreground hover:text-foreground'
@@ -189,6 +204,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             key={c}
             type="button"
             onClick={() => onColorChange(c)}
+            aria-label={`Colour: ${COLOR_NAMES[c] ?? c}`}
+            aria-pressed={color === c}
             className={`w-5 h-5 rounded-full border-2 transition-transform ${
               color === c ? 'scale-110 border-foreground' : 'border-transparent hover:scale-105'
             }`}
@@ -205,6 +222,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         onClick={onUndo}
         disabled={!canUndo}
         title="Undo (Cmd+Z)"
+        aria-label="Undo"
         className={`p-1.5 rounded transition-colors ${
           canUndo
             ? 'hover:bg-muted text-muted-foreground hover:text-foreground'
@@ -220,6 +238,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onClick={onRedo}
           disabled={!canRedo}
           title="Redo (Cmd+Shift+Z)"
+          aria-label="Redo"
           className={`p-1.5 rounded transition-colors ${
             canRedo
               ? 'hover:bg-muted text-muted-foreground hover:text-foreground'
@@ -235,6 +254,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         type="button"
         onClick={onClear}
         title="Clear all"
+        aria-label="Clear all"
         className="p-1.5 rounded transition-colors hover:bg-muted text-muted-foreground hover:text-destructive"
       >
         <ClearIcon />
@@ -249,6 +269,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         type="button"
         onClick={onSave}
         title={saveKey === 'Enter' ? 'Save (Enter)' : 'Save (Esc)'}
+        aria-label="Save"
         className="shrink-0 p-1.5 rounded transition-colors bg-success text-success-foreground hover:opacity-90"
       >
         <CheckIcon />

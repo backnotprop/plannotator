@@ -16,11 +16,11 @@
  * browser-safe.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList } from "./pr-github";
-import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview } from "./pr-gitlab";
-import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList } from "./pr-bitbucket";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRTree } from "./pr-github";
+import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview, fetchGlTree } from "./pr-gitlab";
+import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList, fetchBbTree } from "./pr-bitbucket";
 import { ensureGhPRAccess, ghScopedRuntime } from "./pr-github-account";
-import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem } from "./pr-types";
+import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem, PRTreeResult } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
 // pr-provider as a single facade. Browser code imports from pr-types
@@ -57,6 +57,8 @@ export interface PRProvider<R extends PRRef = PRRef> {
   fetchStack?(runtime: PRRuntime, ref: R, metadata: PRMetadata): Promise<PRStackTree | null>;
   /** Recent PRs for the switcher. Absent: an empty list. */
   fetchList?(runtime: PRRuntime, ref: R): Promise<PRListItem[]>;
+  /** Every file of one commit (All files without a checkout). Absent: no listing. */
+  fetchTree?(runtime: PRRuntime, ref: R, sha: string): Promise<PRTreeResult | null>;
 }
 
 const githubProvider: PRProvider<GithubPRRef> = {
@@ -76,6 +78,7 @@ const githubProvider: PRProvider<GithubPRRef> = {
   markFilesViewed: markGhFilesViewed,
   fetchStack: fetchGhPRStack,
   fetchList: fetchGhPRList,
+  fetchTree: fetchGhPRTree,
 };
 
 const gitlabProvider: PRProvider<GitlabMRRef> = {
@@ -85,6 +88,7 @@ const gitlabProvider: PRProvider<GitlabMRRef> = {
   fetchContext: fetchGlMRContext,
   fetchFileContent: fetchGlFileContent,
   fetchFileBytes: fetchGlFileBytes,
+  fetchTree: fetchGlTree,
   // GitLab has no file-level discussion: file comments ride the body (#1599).
   submitReview: (runtime, ref, headSha, action, body, fileComments, fileLevelComments) =>
     submitGlMRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments),
@@ -101,6 +105,7 @@ const bitbucketProvider: PRProvider<BitbucketPRRef> = {
   submitReview: (runtime, ref, headSha, action, body, fileComments, fileLevelComments) =>
     submitBbPRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments),
   fetchList: fetchBbPRList,
+  fetchTree: fetchBbTree,
 };
 
 type ProviderRegistry = { [P in Platform]: PRProvider<Extract<PRRef, { platform: P }>> };
@@ -167,6 +172,16 @@ export async function fetchPRFileBytes(
   maxBytes: number,
 ): Promise<PRFileBytesResult> {
   return getPRProvider(ref).fetchFileBytes(runtimeFor(runtime, ref), ref, sha, filePath, maxBytes);
+}
+
+/** Every file of one commit from the platform's tree API; null when unavailable. */
+export async function fetchPRTree(
+  runtime: PRRuntime,
+  ref: PRRef,
+  sha: string,
+): Promise<PRTreeResult | null> {
+  const provider = getPRProvider(ref);
+  return provider.fetchTree ? provider.fetchTree(runtimeFor(runtime, ref), ref, sha) : null;
 }
 
 /** Submit a platform review and preserve any provider-specific partial result. */

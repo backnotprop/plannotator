@@ -333,7 +333,7 @@ test('Mark read moves the thread to Quiet ("Read"); a new agent message brings i
   await page.keyboard.press('Escape');
   await openQuiet(page);
   await expect.poll(() => sectionOf(page, threads.search)).toBe('quiet');
-  await expect(page.locator(`.ib-lbody [data-row="${threads.search}"] .ib-c`)).toHaveText('Read');
+  await expect(page.locator(`.ib-lbody [data-row="${threads.search}"] .ib-c .ib-cs`)).toHaveText('Read');
   await shot('06-list-read-in-quiet', ['light', 'dark']);
 
   // The agent writes again: the thread waits behind "1 new", then is back on top.

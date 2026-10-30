@@ -7,7 +7,7 @@
  * and the ended-session choice ("Who should ask again?").
  *
  * The pure rules (reask.ts) run everywhere; the window's parts are
- * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: they run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';

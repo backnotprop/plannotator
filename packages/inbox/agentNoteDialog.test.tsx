@@ -7,7 +7,7 @@
  * "Don't add a note" answer for these agents only and write nothing. The
  * page's requests go to a recording fetch.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -155,6 +155,23 @@ test.skipIf(!hasDom)('unticking renames the primary; with nothing ticked it is "
   expect(calls).toEqual([{ path: '/api/inbox/agents/notes', body: { add: [], asked: ['codex', 'gemini', 'claude-code'], seen: true } }]);
   expect(seen.closed).toBe(1);
   expect(seen.models).toHaveLength(1);
+});
+
+test.skipIf(!hasDom)('a run that made Plannotator a trusted sender in Qwen Code says so in the band, under what it connected', () => {
+  const qwen = row('qwen', 'Qwen Code', { path: '~/.qwen/QWEN.md', create: true });
+  const { el } = mount([qwen, CLAUDE], { ...REPORT, added: ['qwen'], manual_why: [], trusted: ['qwen'] });
+  const lines = [...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent ?? '');
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toBe('Connected Qwen Code to the Inbox.');
+  expect(el.querySelector('[data-anote-trusted]')?.textContent).toContain('Qwen Code');
+});
+
+test.skipIf(!hasDom)('a trusted sender removed in Qwen is a warning in the band, with the way to Settings', () => {
+  const qwen = row('qwen', 'Qwen Code', { path: '~/.qwen/QWEN.md', create: true });
+  const { el } = mount([qwen, CLAUDE], { ...REPORT, added: [], manual_why: [], trust_failed: [{ agent: 'qwen', reason: 'removed in Qwen' }] });
+  const warn = el.querySelector('.ib-anote-band .ib-anote-warn');
+  expect(warn?.textContent).toContain('removed in Qwen');
+  expect(warn?.querySelector('button')?.textContent).toBe('Settings → Agents');
 });
 
 test.skipIf(!hasDom)('four or more ticked: "Add to N agents"', () => {

@@ -20,8 +20,10 @@ import {
   type GitCommandResult,
   type GitContext,
   type GitDiffOptions,
+  type RepoFileListing,
   type ReviewGitRuntime,
   getEmptyTreeSha,
+  listGitSideFiles,
   getWorkingTreeDiffFromBase,
   hashFingerprintPart,
   MAX_REVIEW_FILE_CONTENT_BYTES,
@@ -867,6 +869,25 @@ export async function getGitButlerFileBytesForDiff(
   const source = side === "old" ? sources.old : sources.new;
   if (!source) return { kind: "missing" };
   return readDiffSideBytes(runtime, source, maxBytes, sources.cwd);
+}
+
+/**
+ * The repository at a GitButler view's new side (All files): the working tree
+ * for the Workspace view, the stack or branch tip for committed views.
+ */
+export async function listGitButlerFilesForDiff(
+  runtime: ReviewGitButlerRuntime,
+  diffType: DiffType,
+  cwd?: string,
+): Promise<RepoFileListing | null> {
+  // Which revision a side reads does not depend on the path; any valid one will do.
+  const sources = await resolveGitButlerSideSources(runtime, diffType, "README", undefined, cwd);
+  const side = sources?.new;
+  if (!side || !sources.cwd) return null;
+  return listGitSideFiles(
+    runtime,
+    side.kind === "worktree" ? { kind: "worktree", cwd: sources.cwd } : { kind: "commit", rev: side.rev, cwd: sources.cwd },
+  );
 }
 
 /** Fingerprint the exact visible GitButler patch for the freshness endpoint. */

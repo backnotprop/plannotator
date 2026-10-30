@@ -83,6 +83,15 @@ const RELEASE_CHECK_TIMEOUT_MS = 8_000;
  */
 export const RELEASE_ASSETS_FETCH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const RELEASE_ASSETS_FETCH_RETRY_MS = 6 * 60 * 60 * 1000;
+/**
+ * A release's notes answered with no "What's New" part while the release is
+ * young (published under RELEASE_NOTES_YOUNG_MS ago): GitHub's generated
+ * body, read in the minutes before the written notes replaced it. Asked again
+ * after this instead of RELEASE_ASSETS_FETCH_INTERVAL_MS, so the "What's new"
+ * link shows within the hour, not a day later.
+ */
+export const RELEASE_NOTES_PENDING_RETRY_MS = 15 * 60 * 1000;
+export const RELEASE_NOTES_YOUNG_MS = 2 * 24 * 60 * 60 * 1000;
 /** "Remind me tomorrow" in the Inbox. */
 export const UPDATE_SNOOZE_MS = 24 * 60 * 60 * 1000;
 /** The terminal hint shows at most this often. */
@@ -143,6 +152,34 @@ export function releaseUrlFor(version: string): string {
 // ---------------------------------------------------------------------------
 // State (update-state.json, shared with auto-update)
 // ---------------------------------------------------------------------------
+
+/** One version's notes fetch (`notesFetch[<version>]`). */
+export interface NotesFetchRecord {
+  attemptedAt: number;
+  failedAt?: number;
+  error?: string;
+  /**
+   * The release's `published_at` (epoch ms), kept when its answer carried no
+   * "What's New" part: while it is under RELEASE_NOTES_YOUNG_MS old, the next
+   * try waits RELEASE_NOTES_PENDING_RETRY_MS instead of a day.
+   */
+  publishedAt?: number;
+  /**
+   * Set on the claim, gone once GitHub answers: a claim still marked was
+   * abandoned (its process quit mid-request), and is asked again after
+   * RELEASE_NOTES_PENDING_RETRY_MS, not read as an empty answer (24 h).
+   */
+  inFlight?: boolean;
+  /**
+   * Set on a failure that may have been the network (not a rate limit, and
+   * no release check answered between the failure before it and this one):
+   * asked again RELEASE_NOTES_PENDING_RETRY_MS after it once a release check
+   * has answered since (the network is back), not after 6 h. One quick retry,
+   * then 6 h: a source that keeps failing while the network is up (or a
+   * network that drops again before the quick retry) waits 6 h.
+   */
+  retryOnline?: boolean;
+}
 
 export interface UpdateState {
   /** Auto-update's install window (epoch ms of the last check that got past its gates). */
@@ -217,16 +254,23 @@ export interface UpdateState {
    */
   inboxPreviousVersion?: string;
   /**
+   * The version an Inbox start found newer than `inboxVersion`, kept until its
+   * "What's new" link was offered with readable notes: a start on that same
+   * version shows the link too, so a restart before the notes were readable
+   * does not lose it.
+   */
+  whatsNewPending?: string;
+  /**
    * One release's notes fetched by its tag (fetchReleaseNotesFor), per
    * version: claimed before the request, so concurrent processes ask once.
    */
-  notesFetch?: Record<string, { attemptedAt: number; failedAt?: number; error?: string }>;
+  notesFetch?: Record<string, NotesFetchRecord>;
   /**
    * The Inbox's fetch of one release's images (packages/server/inbox-whats-new-images.ts),
-   * per version, with the same claim and back-off as `notesFetch`. Only the
-   * Inbox writes it; nothing here fetches an image.
+   * per version, with the same claim and back-off as `notesFetch` (its
+   * `inFlight` mark too). Only the Inbox writes it; nothing here fetches an image.
    */
-  releaseImagesFetch?: Record<string, { attemptedAt: number; failedAt?: number; error?: string }>;
+  releaseImagesFetch?: Record<string, Pick<NotesFetchRecord, "attemptedAt" | "failedAt" | "error" | "inFlight">>;
   /**
    * Safe updates: installs of `version` whose download did not match the
    * checksum Plannotator fetched (install.sh exit 113), counted once each.
@@ -1044,17 +1088,41 @@ export function scheduleReleaseCheck(deps: ReleaseCheckDeps, then?: (outcome: Re
 /** How many versions `notesFetch` remembers. */
 const NOTES_FETCH_REMEMBERED = 10;
 
+/** The record names a release young enough for the quick retry (a clock far off either way does not). */
+function isYoungRelease(record: NotesFetchRecord, now: number): boolean {
+  const published = record.publishedAt;
+  return typeof published === "number" && Number.isFinite(published) && Math.abs(now - published) < RELEASE_NOTES_YOUNG_MS;
+}
+
+/**
+ * A release check answered after `at` (the network is up again since then).
+ * An answer dated after `now` (the clock moved back) does not count.
+ */
+function releaseCheckAnsweredAfter(state: UpdateState, at: number, now: number): boolean {
+  const answered = state.latestRelease?.fetchedAt;
+  return typeof answered === "number" && answered > at && answered <= now;
+}
+
 /**
  * Whether one version's notes may be asked for now: once, then after a
- * failure no sooner than 6 h, and after an answer that carried no "What's
- * New" part no sooner than 24 h (the release body is edited after publishing).
- * Never in a loop.
+ * failure no sooner than 6 h (15 minutes once the network is back, see
+ * `retryOnline`), after an answer that carried no "What's New" part no
+ * sooner than 15 minutes while the release is under 2 days old (the release
+ * body is edited after publishing), else 24 h. A claim nobody answered (its
+ * process quit) waits 15 minutes. Never sooner than 15 minutes, never in a loop.
  */
 export function isNotesFetchDue(state: UpdateState, version: string, now: number): boolean {
   const record = state.notesFetch?.[version];
   const at = record?.attemptedAt;
   if (!record || typeof at !== "number" || !Number.isFinite(at) || at > now) return true;
-  return now - at >= (record.failedAt ? RELEASE_ASSETS_FETCH_RETRY_MS : RELEASE_ASSETS_FETCH_INTERVAL_MS);
+  const wait = record.failedAt
+    ? record.retryOnline && releaseCheckAnsweredAfter(state, record.failedAt, now)
+      ? RELEASE_NOTES_PENDING_RETRY_MS
+      : RELEASE_ASSETS_FETCH_RETRY_MS
+    : record.inFlight || isYoungRelease(record, now)
+      ? RELEASE_NOTES_PENDING_RETRY_MS
+      : RELEASE_ASSETS_FETCH_INTERVAL_MS;
+  return now - at >= wait;
 }
 
 export interface ReleaseNotesFetchDeps {
@@ -1087,7 +1155,7 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
   if (hasReleaseNotesContent(stored)) return { outcome: "present", notes: stored };
   if (!deps.enabled()) return { outcome: "disabled" };
   const now = (deps.now ?? Date.now)();
-  const record = (patch: { attemptedAt: number; failedAt?: number; error?: string }) =>
+  const record = (patch: NotesFetchRecord) =>
     patchUpdateState((s) => {
       const entries = Object.entries({ ...(s.notesFetch ?? {}), [version]: patch })
         .filter(([, r]) => r && typeof r.attemptedAt === "number")
@@ -1095,10 +1163,18 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
         .slice(0, NOTES_FETCH_REMEMBERED);
       return { ...s, notesFetch: Object.fromEntries(entries) };
     }, dataDir);
+  let pendingBefore = false;
+  let previous: NotesFetchRecord | undefined;
+  let state: UpdateState;
   try {
-    if (!isNotesFetchDue(readUpdateState(dataDir), version, now)) return { outcome: "not-due" };
-    // Claim the attempt before the network call so concurrent processes ask once.
-    record({ attemptedAt: now });
+    state = readUpdateState(dataDir);
+    if (!isNotesFetchDue(state, version, now)) return { outcome: "not-due" };
+    // Claim the attempt before the network call so concurrent processes ask
+    // once. Marked in flight, so an attempt that never finished (the process
+    // quit) is tried again on the quick cadence, not in a day.
+    previous = state.notesFetch?.[version];
+    pendingBefore = !!previous && !previous.failedAt && isYoungRelease(previous, now);
+    record({ attemptedAt: now, inFlight: true, ...(pendingBefore && { publishedAt: previous!.publishedAt }) });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     updateLog(`could not write update-state.json: ${error}`, dataDir);
@@ -1108,9 +1184,14 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
   const tag = result.ok ? normalizeStableVersion(result.release.tag) : null;
   if (!result.ok || tag !== version) {
     const error = result.ok ? `the release answered for ${JSON.stringify(result.release.tag).slice(0, 80)}` : result.error;
-    updateLog(`could not read the release notes for ${version} (${error}); next try in 6h`, dataDir);
+    // Maybe the network (a laptop waking, a VPN): asked again 15 minutes after,
+    // once a release check answers. Not after a rate limit, and not when this
+    // source failed before with a release check answering since (it keeps
+    // failing while the network is up: 6 h).
+    const retryOnline = !(!result.ok && result.rateLimited) && !(previous?.failedAt && releaseCheckAnsweredAfter(state, previous.failedAt, now));
+    updateLog(`could not read the release notes for ${version} (${error}); next try in ${retryOnline ? "15m once online, else 6h" : "6h"}`, dataDir);
     try {
-      record({ attemptedAt: now, failedAt: now, error: error.slice(0, 200) });
+      record({ attemptedAt: now, failedAt: now, error: error.slice(0, 200), ...(retryOnline && { retryOnline }) });
     } catch {}
     return { outcome: "failed", error };
   }
@@ -1121,6 +1202,24 @@ export async function fetchReleaseNotesFor(deps: ReleaseNotesFetchDeps): Promise
     writeReleaseNotes(saved, dataDir);
   } catch (err) {
     updateLog(`could not save the release notes: ${err instanceof Error ? err.message : String(err)}`, dataDir);
+  }
+  if (!notes) {
+    // GitHub's generated body, read before the written notes replaced it (or
+    // a release with none): a young release is asked again in 15 minutes.
+    const published = release.publishedAt ? Date.parse(release.publishedAt) : NaN;
+    const pending: NotesFetchRecord = { attemptedAt: now, ...(Number.isFinite(published) && { publishedAt: published }) };
+    try {
+      record(pending);
+    } catch {}
+    // One line per version, not one per retry.
+    if (isYoungRelease(pending, now) && !pendingBefore) {
+      updateLog(`the release notes for ${version} have no "What's New" part yet; next try in ${formatWait(RELEASE_NOTES_PENDING_RETRY_MS)}`, dataDir);
+    }
+  } else {
+    // Answered: no longer in flight (it matters only when the notes could not be saved).
+    try {
+      record({ attemptedAt: now });
+    } catch {}
   }
   // The release page names no publish date: take this answer's for the latest release.
   if (release.publishedAt) {
@@ -1158,6 +1257,7 @@ export const INSTALL_FLAG_SPELLINGS = {
   "skip-kiro": { posix: "--skip-kiro", powershell: "-SkipKiro" },
   "skip-vibe": { posix: "--skip-vibe", powershell: "-SkipVibe" },
   "skip-opencode": { posix: "--skip-opencode", powershell: "-SkipOpencode" },
+  "skip-qwen": { posix: "--skip-qwen", powershell: "-SkipQwen" },
   "skip-skills": { posix: "--skip-skills", powershell: "-SkipSkills" },
   "skip-claude-plugin": { posix: "--skip-claude-plugin", powershell: "-SkipClaudePlugin" },
 } as const;

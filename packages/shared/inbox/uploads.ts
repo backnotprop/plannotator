@@ -45,6 +45,7 @@ import {
   inboxAttachmentNameRefusal,
   inboxBoardRequestBlock,
   inboxId,
+  INBOX_UPLOAD_MAX_BYTES,
   isInboxId,
   THREAD_NAME_BIDI,
   THREAD_NAME_CONTROL,
@@ -82,8 +83,8 @@ export function inboxBodyForAgent(
   return words;
 }
 const PENDING_DIR = "pending";
-/** The most one uploaded file may hold (decision 1a: under the Inbox's 128 MiB request bound). */
-export const INBOX_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+/** Defined in core so the window can name it; re-exported for the servers. */
+export { INBOX_UPLOAD_MAX_BYTES };
 /** An upload no draft names is kept this long, then swept. */
 export const INBOX_UPLOAD_KEEP_MS = 24 * 60 * 60 * 1000;
 export const INBOX_UPLOAD_NAME_MAX_BYTES = 255;

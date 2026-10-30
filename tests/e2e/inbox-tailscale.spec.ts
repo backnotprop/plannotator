@@ -84,8 +84,9 @@ async function shot(name: string): Promise<void> {
 }
 
 function startInbox(args: string[]): string {
-  // PATH: the fake first, then this Node; no system directory, so no real tailscale is ever reachable.
-  const env = { PATH: `${world.bin}:${dirname(process.execPath)}`, HOME: world.root, PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
+  // PATH: the fake first, then this Node; no system directory, so no real tailscale is ever reachable. Node's folder
+  // may hold agent CLIs (npm puts gemini, pi, copilot there): the test sandbox makes the Inbox look up none.
+  const env = { PATH: `${world.bin}:${dirname(process.execPath)}`, PLANNOTATOR_TEST_SANDBOX: world.root, HOME: world.root, PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
   const started = spawnSync(binary, ['inbox', '--background', ...args], { env, encoding: 'utf8', timeout: 60_000 });
   // Every start's pid, before anything can fail: the teardown signals each one.
   rememberInboxOf(world.dataDir);
@@ -172,7 +173,7 @@ test('Tailscale stopped: the switch stays on and the error says why, and one cli
   const toggle = block.getByRole('switch', { name: 'Reach the Inbox over Tailscale' });
   await toggle.click();
   await expect(block.locator('[data-tailscale-error]')).toContainText('Tailscale could not publish the Inbox');
-  await expect(block.locator('[data-tailscale-error]')).toContainText('Tailscale is stopped.');
+  await expect(block.locator('[data-tailscale-error]')).toContainText('Tailscale is turned off on this computer.');
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await shot('settings-tailscale-unavailable');
   writeFileSync(join(world.root, 'mode'), 'up');

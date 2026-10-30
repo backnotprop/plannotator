@@ -5,7 +5,7 @@
  *   1. Add an entry to AGENT_CONFIG below (origin key, display name, badge CSS classes,
  *      optional AI provider types)
  *   2. If detection is via environment variable, add it to the detection chain
- *      in apps/hook/server/index.ts (detectedOrigin constant)
+ *      in apps/hook/server/detect-origin.ts (detectOrigin)
  *   3. That's it — all UI components read from this config automatically
  */
 
@@ -28,6 +28,8 @@ export const AGENT_CONFIG = {
   'gemini-cli':  { name: 'Gemini CLI', badge: 'bg-sky-500/15 text-sky-400' },
   'oh-my-pi':    { name: 'Oh My Pi',    badge: 'bg-fuchsia-500/15 text-fuchsia-400' },
   'mistral-vibe': { name: 'Mistral Vibe', badge: 'bg-rose-500/15 text-rose-400' },
+  'qwen-code':   { name: 'Qwen Code',   badge: 'bg-indigo-500/15 text-indigo-400', aiProviderTypes: ['qwen-sdk'] },
+  'dsh':         { name: 'DeepSeek Harness', badge: 'bg-teal-500/15 text-teal-400' },
 } as const satisfies Record<string, AgentConfigEntry>;
 
 /** All recognized origin values. */

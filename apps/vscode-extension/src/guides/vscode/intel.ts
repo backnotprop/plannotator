@@ -13,6 +13,7 @@ import { searchDefinitions } from "../symbol-search";
 import type { LinkInfo } from "../webview-protocol";
 import type { ReaderModel, ReaderSides } from "../reader-model";
 import { headUri } from "./uris";
+import { headLeavesRepo, realFileInside } from "../safe-path";
 
 const CHAPTER_COLORS = ["charts.yellow", "charts.blue", "charts.purple", "charts.green", "charts.orange", "charts.red"];
 const CHAPTER_HEX = ["#e2b93d", "#3794ff", "#b180d7", "#89d185", "#d18616", "#f14c4c"];
@@ -60,8 +61,10 @@ async function workspaceSymbols(name: string, root: string): Promise<SymbolCandi
 
 /** Workspace symbols include import and re-export aliases: they are not where a symbol is defined. */
 function isImportLine(root: string, c: SymbolCandidate): boolean {
+  const real = realFileInside(root, c.path);
+  if (!real) return false;
   try {
-    const line = readFileSync(join(root, c.path), "utf8").split("\n")[c.line - 1] ?? "";
+    const line = readFileSync(real, "utf8").split("\n")[c.line - 1] ?? "";
     return /^\s*(import\b|export\s*(\*|\{|type\s*\{))/.test(line) || /^\s*[\w$,\s{}]*\}\s*from\s*["']/.test(line);
   } catch {
     return false;
@@ -102,6 +105,8 @@ function dedupe(list: SymbolCandidate[]): SymbolCandidate[] {
 /** Where a symbol is, in order: language server, then text search in the changed files. */
 export async function findSymbol(name: string, path: string | undefined, headRoot: string, changedPaths: readonly string[]): Promise<SymbolCandidate[]> {
   if (path) {
+    // A path that leaves the repository (a symlink out of it) is never handed to a language server or read.
+    if (!realFileInside(headRoot, path)) return [];
     const fromDoc = await documentSymbols(vscode.Uri.file(join(headRoot, path)), name, path);
     if (fromDoc.length) return fromDoc;
     const hits = await searchDefinitions(headRoot, [path], name);
@@ -141,7 +146,11 @@ export async function locateLink(link: GuideLink, reader: ReaderModel, sides: Re
   const headRoot = sides.head.kind === "fs" ? sides.head.root : sides.gitRoot;
   const changed = [...reader.files.keys()];
   const fileFor = (path: string) => reader.files.get(path) ?? { path, status: "modified" };
+  // A file on disk only when it is a regular file inside the repository once symlinks are followed
+  // (the link is the agent's; the change could add a symlink out of the repository).
+  const outside = (path: string) => headLeavesRepo(sides, fileFor(path));
   if (link.kind === "code") {
+    if (outside(link.path)) return { error: `${link.path} is not a file inside the repository; not opened.` };
     const uri = headUri(sides, fileFor(link.path));
     const start = Math.max(0, (link.startLine ?? 1) - 1);
     const end = Math.max(start, (link.endLine ?? link.startLine ?? 1) - 1);
@@ -155,9 +164,12 @@ export async function locateLink(link: GuideLink, reader: ReaderModel, sides: Re
     };
   }
   if (link.kind === "symbol") {
+    // Refused before anything is asked or read: the link's own path may be a symlink out of the repository.
+    if (link.path && outside(link.path)) return { error: `${link.path} is not a file inside the repository; not opened.` };
     const found = await findSymbol(link.name, link.path, headRoot, changed);
     if (found.length === 0) return { error: `No symbol named ${link.name} was found.` };
     const hit = { ...found[0] };
+    if (outside(hit.path)) return { error: `${hit.path} is not a file inside the repository; not opened.` };
     if (hit.character === 0) hit.character = nameColumn(headRoot, hit.path, hit.line, link.name);
     return {
       uri: headUri(sides, fileFor(hit.path)),
@@ -171,7 +183,7 @@ export async function locateLink(link: GuideLink, reader: ReaderModel, sides: Re
   return { error: "A chapter link has no code location." };
 }
 
-function hoverText(hovers: vscode.Hover[] | undefined): string | undefined {
+export function hoverText(hovers: vscode.Hover[] | undefined): string | undefined {
   const parts: string[] = [];
   for (const h of hovers ?? []) {
     for (const c of h.contents) {
@@ -187,8 +199,10 @@ function hoverText(hovers: vscode.Hover[] | undefined): string | undefined {
 
 /** The column of `name` on a line (so hover and references answer for the symbol, not a keyword). */
 function nameColumn(root: string, path: string, line: number, name: string): number {
+  const real = realFileInside(root, path);
+  if (!real) return 0;
   try {
-    const text = readFileSync(join(root, path), "utf8").split("\n")[line - 1] ?? "";
+    const text = readFileSync(real, "utf8").split("\n")[line - 1] ?? "";
     const short = name.split(".").pop()!;
     const m = new RegExp(`\\b${short.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).exec(text);
     return m ? m.index : 0;
@@ -199,6 +213,16 @@ function nameColumn(root: string, path: string, line: number, name: string): num
 
 /** Set while the popover asks the language server, so the guide's own hover line stays out of it. */
 export let askingLanguageServer = 0;
+
+/** Run `ask` with the guide's own hover line kept out of the language server's answer. */
+export async function withoutGuideHoverLine<T>(ask: () => Promise<T>): Promise<T> {
+  askingLanguageServer++;
+  try {
+    return await ask();
+  } finally {
+    askingLanguageServer--;
+  }
+}
 
 /** What the overview's hover popover shows for a link (SPEC 3.5). */
 export async function linkInfo(href: string, reader: ReaderModel, sides: ReaderSides): Promise<LinkInfo> {

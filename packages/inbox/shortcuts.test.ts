@@ -3,12 +3,31 @@
  * review's and code review's. What would regress: a binding the registry
  * cannot read (it would never fire), two scopes with one id (one would shadow
  * the other in a help list), the full-screen chord drifting from plan
- * review's, or a new bare letter slipping in (the owner's rule: none until the
- * shared shortcut system lists them; E and Z predate it).
+ * review's, or a single key slipping in that the owner did not approve
+ * (approval "inbox-keyboard-shortcuts": the set below, each extra behind its
+ * switch in shortcuts/extras.ts). Every combination of the extras is checked,
+ * so turning one on or off never breaks the others.
  */
 import { describe, expect, test } from 'bun:test';
 import { htmlAnnotateShortcuts, listRegistryShortcuts, matchesShortcutBinding, validateShortcutRegistry } from '@plannotator/ui/shortcuts';
-import { inboxFileViewerShortcuts, inboxShortcutRegistry, inboxSurface, inboxThreadShortcuts } from './shortcuts';
+import { buildInboxShortcutRegistry, INBOX_SHORTCUT_EXTRAS, inboxFileViewerShortcuts, inboxShortcutRegistry, inboxSurface, inboxThreadShortcuts, isBareBinding, type InboxShortcutExtras } from './shortcuts';
+
+const COMBOS: InboxShortcutExtras[] = [false, true].flatMap((slashSearch) =>
+  [false, true].flatMap((goTo) => [false, true].map((readFromList) => ({ slashSearch, goTo, readFromList }))),
+);
+
+/** The single keys the owner approved; each extra adds its own. */
+function approvedBare(extras: InboxShortcutExtras): string[] {
+  const core = ['E', 'Z', 'R', 'J', 'K', 'Shift+J', 'Shift+K', 'N', 'O', 'F', '?', '[', ']'];
+  return [...core, ...(extras.slashSearch ? ['/'] : []), ...(extras.goTo ? ['G I', 'G B', 'G S'] : [])].sort();
+}
+
+function bareBindings(registry: ReturnType<typeof buildInboxShortcutRegistry>): string[] {
+  return listRegistryShortcuts(registry)
+    .flatMap((entry) => entry.bindings)
+    .filter(isBareBinding)
+    .sort();
+}
 
 describe('the Inbox surface', () => {
   test('validates: every binding normalized, every scope id unique and the Inbox’s own', () => {
@@ -19,11 +38,26 @@ describe('the Inbox surface', () => {
     expect(inboxSurface.registry).toBe(inboxShortcutRegistry);
   });
 
-  test('the only bare letters are E and Z (Mark read, Undo)', () => {
-    const letters = listRegistryShortcuts(inboxShortcutRegistry)
-      .flatMap((entry) => entry.bindings)
-      .filter((binding) => /^[A-Z]$/.test(binding));
-    expect(letters.sort()).toEqual(['E', 'Z']);
+  test('the single keys are exactly the approved ones, for every combination of the extras', () => {
+    for (const extras of COMBOS) expect(bareBindings(buildInboxShortcutRegistry(extras))).toEqual(approvedBare(extras));
+    expect(bareBindings(inboxShortcutRegistry)).toEqual(approvedBare(INBOX_SHORTCUT_EXTRAS));
+  });
+
+  test('every combination validates, and no single key means two things', () => {
+    for (const extras of COMBOS) {
+      const registry = buildInboxShortcutRegistry(extras);
+      expect(validateShortcutRegistry(registry)).toEqual([]);
+      const bare = bareBindings(registry);
+      expect(new Set(bare).size).toBe(bare.length);
+      // A sequence's first key is never a key of its own (G would fire before G I could).
+      const firsts = new Set(bare.filter((b) => b.includes(' ')).map((b) => b.split(' ')[0]));
+      for (const first of firsts) expect(bare).not.toContain(first);
+    }
+  });
+
+  test('a single key is one plain key or a sequence of them; chords, Escape, Enter and the arrows are not', () => {
+    for (const binding of ['E', '?', '/', '[', 'G I']) expect(isBareBinding(binding)).toBe(true);
+    for (const binding of ['Mod+K', 'Mod+Enter', 'Escape', 'Enter', 'ArrowDown', 'Home', 'Shift+F10', 'Alt+E']) expect(isBareBinding(binding)).toBe(false);
   });
 
   test('the full-screen toolbar takes plan review’s Hide tools chord', () => {

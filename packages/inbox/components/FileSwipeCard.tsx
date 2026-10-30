@@ -1,6 +1,6 @@
 import { readInboxAttachmentKind } from '@plannotator/core/inbox-types';
 import { attachmentImageUrl, readableVersion } from '../attachments';
-import { useSwipeProgress, type FileSwipe } from '../fileSwipe';
+import { useSwipePhase, useSwipeProgress, type FileSwipe } from '../fileSwipe';
 import { Icon } from '../icons';
 import type { AttachmentStep } from '../stepping';
 import { peekTile } from './AttachmentStepper';
@@ -11,12 +11,20 @@ import { FileName } from './FileName';
  * "Previous · name") with its thumbnail or type tile, at the edge it comes
  * from, fading in with the finger's travel. Only while a swipe is under way;
  * hidden from screen readers (the step is said in the pane's live region).
+ * Only a card on screen redraws as the finger moves.
  */
-export function FileSwipeCard({ swipe, steps, index }: { swipe: FileSwipe; steps: readonly AttachmentStep[]; index: number }) {
+export function FileSwipeCard({ swipe, steps, index, skip }: { swipe: FileSwipe; steps: readonly AttachmentStep[]; index: number; skip?: (dir: 1 | -1) => boolean }) {
+  const phase = useSwipePhase(swipe);
+  // An image coming in beside an image is drawn whole (ImageSwipePeek): no card.
+  if (!phase || phase.phase !== 'drag' || skip?.(phase.dir)) return null;
+  const step = steps[index + phase.dir];
+  if (!step) return null;
+  return <SwipeCard swipe={swipe} step={step} />;
+}
+
+function SwipeCard({ swipe, step }: { swipe: FileSwipe; step: AttachmentStep }) {
   const progress = useSwipeProgress(swipe);
   if (!progress) return null;
-  const step = steps[index + progress.dir];
-  if (!step) return null;
   const { attachment } = step;
   const next = progress.dir > 0;
   return (

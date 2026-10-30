@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request as httpRequest } from "node:http";
-import { createPiSessionBridgeHub, PI_INBOX_REMINDER_CUSTOM_TYPE, PLANNOTATOR_ASK_CUSTOM_TYPE } from "./pi-session-bridge.ts";
+import { createPiSessionBridgeHub, PI_INBOX_BRIEFING_CUSTOM_TYPE, PI_INBOX_REMINDER_CUSTOM_TYPE, PLANNOTATOR_ASK_CUSTOM_TYPE } from "./pi-session-bridge.ts";
 import {
 	SESSION_ASK_HEADER,
 	SESSION_ASK_TAKEN_OVER_INTERRUPT_TEXT,
@@ -386,20 +386,26 @@ describe("Pi session bridge", () => {
 	// The failure this guards: the Inbox's session-start reminder rides the
 	// session's first run, which can be the run answering our question; read
 	// as a take-over it would cut the answer off before it started.
-	test("the Inbox's session-start reminder in the run answering our question is not a take-over", () => {
-		const host = fakePi();
-		const bridge = createPiSessionBridgeHub(host.pi).createBridge(host.ctx as never, {});
-		const out = sink();
-		bridge.ask({ askId: "ask-1", text: "Question text", mode: "turn" }, out.sink, new AbortController().signal);
-		host.startTurn("ask-1");
-		host.emit("message_start", { type: "message_start", message: { role: "custom", customType: PI_INBOX_REMINDER_CUSTOM_TYPE, details: {} } });
-		host.assistantText("Because of X.");
-		host.endTurn();
-		expect(out.calls).toEqual([
-			["delta", "Because of X."],
-			["done", "Because of X."],
-		]);
-	});
+	// /plannotator-inbox's hidden briefing rides the next prompt the same way.
+	for (const [name, customType] of [
+		["the Inbox's session-start reminder", PI_INBOX_REMINDER_CUSTOM_TYPE],
+		["/plannotator-inbox's Inbox briefing", PI_INBOX_BRIEFING_CUSTOM_TYPE],
+	] as const) {
+		test(`${name} in the run answering our question is not a take-over`, () => {
+			const host = fakePi();
+			const bridge = createPiSessionBridgeHub(host.pi).createBridge(host.ctx as never, {});
+			const out = sink();
+			bridge.ask({ askId: "ask-1", text: "Question text", mode: "turn" }, out.sink, new AbortController().signal);
+			host.startTurn("ask-1");
+			host.emit("message_start", { type: "message_start", message: { role: "custom", customType, details: {} } });
+			host.assistantText("Because of X.");
+			host.endTurn();
+			expect(out.calls).toEqual([
+				["delta", "Because of X."],
+				["done", "Because of X."],
+			]);
+		});
+	}
 
 	test("through the provider: a take-over keeps the partial answer and ends with the note", async () => {
 		const host = fakePi();

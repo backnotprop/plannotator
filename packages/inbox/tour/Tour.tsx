@@ -873,6 +873,8 @@ export function TourNavigation({
       onUpdate={() => {}}
       onWhatsNew={() => {}}
       connectPrompt={false}
+      // The tour draws Pinned and Projects open whatever this browser closed.
+      rememberSections={false}
     />
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.53.1",
+  "version": "0.55.0",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -88,7 +88,7 @@
     "clsx": "^2.1.1",
     "diff": "^8.0.4",
     "dompurify": "^3.4.17",
-    "katex": "^0.18.11",
+    "katex": "^0.19.0",
     "lucide-react": "^1.59.0",
     "marked": "^17.0.6",
     "mermaid": "12.2.0",

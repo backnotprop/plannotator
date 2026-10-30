@@ -45,7 +45,7 @@ const BEAT_MS = 160;
 
 const NEWS = ['Search index built', 'Install page links fixed', 'Changelog drafted', 'Docs deploy finished'];
 
-type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight' | 'mouse' | 'held' | 'phoneAsks' | 'stackedAsks' | 'stackedSeen' | 'resized';
+type ProjectKey = 'desk' | 'reduce' | 'phone' | 'stacked' | 'framesDark' | 'framesLight' | 'mouse' | 'held' | 'seen' | 'phoneAsks' | 'stackedAsks' | 'stackedSeen' | 'resized';
 
 interface World {
   root: string;
@@ -84,7 +84,7 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const projects = {} as World['projects'];
-  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight', 'mouse', 'held', 'phoneAsks', 'stackedAsks', 'stackedSeen', 'resized'] as const) {
+  for (const key of ['desk', 'reduce', 'phone', 'stacked', 'framesDark', 'framesLight', 'mouse', 'held', 'seen', 'phoneAsks', 'stackedAsks', 'stackedSeen', 'resized'] as const) {
     const path = scratchProject(join(root, 'src'), key === 'desk' ? 'docs-site' : `docs-${key}`);
     const threads = await seed(agent, path, key);
     if (key === 'held') {
@@ -554,6 +554,80 @@ test('desktop, the mouse: a close hands no row focus, no Mark read action shows,
   await page.keyboard.press('e');
   await page.waitForTimeout(300);
   expect(marked).toEqual([]);
+  await context.close();
+});
+
+// A plain update the person opened: Quiet on the server (the look), still drawn in New while the thread is
+// open. Mark read stays on it (the header, the row's hover action, E) and moves the row to Quiet now.
+test('desktop: a seen update held in New keeps Mark read; it moves the row to Quiet now, and Undo puts it back', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const written: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/(read|unread)$/.test(request.url())) written.push(request.url());
+  });
+  const { id } = world.projects.seen;
+  await page.goto(`${world.url}/#project=${id}`);
+  await expect(page.locator('[data-section-id="new"] [data-thread-id]')).toHaveCount(4);
+  const before = await rowsOf(page);
+  const first = before[0]!;
+  const row = page.locator(`.ib-lbody [data-thread-id="${first}"]`);
+  const header = page.locator('section.ib-pane [data-mark-read]');
+  const quietCount = page.locator('[data-section-id="quiet"] .ib-n');
+  await openWithKeyboard(page, first);
+  expect(await sectionOf(page, first)).toBe('new');
+  await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
+  await shot(page, 'seen-held-01-opened');
+  await expect(header).toBeEnabled();
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toBeVisible();
+
+  // The header: the row moves to Quiet now, the toast says so with Undo.
+  await header.click();
+  await expect(row).toHaveCount(0);
+  await expect(quietCount).toHaveText('1');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Moved to Quiet');
+  await expect(page.locator('[data-toast-undo]')).toBeVisible();
+  await expect(header).toBeDisabled();
+  await shot(page, 'seen-held-02-moved');
+  // Undo: back between the same neighbours.
+  await page.locator('[data-toast-undo]').click();
+  await expect.poll(() => sectionOf(page, first)).toBe('new');
+  expect(await rowsOf(page)).toEqual(before);
+  await expect(header).toBeEnabled();
+  await shot(page, 'seen-held-03-undone');
+
+  // E, then Z.
+  await page.locator('section.ib-pane h2.ib-subject').click();
+  await page.keyboard.press('e');
+  await expect(row).toHaveCount(0);
+  await page.keyboard.press('z');
+  await expect.poll(() => sectionOf(page, first)).toBe('new');
+  expect(await rowsOf(page)).toEqual(before);
+
+  // The row's hover action. It is drawn only while the mouse is on the row (display: none
+  // otherwise), and an action waits with no time limit: on CI this test twice hung here to its
+  // 4-minute timeout (the shots stop at 03-undone), the action never shown to the click, as when
+  // the row is still settling back from the Undo as the mouse arrives. Hover until the action
+  // shows (each try bounded, all tries within 15 s: toPass has no limit of its own), then click it.
+  const rowMarkRead = page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`);
+  await expect(async () => {
+    await page.locator(`.ib-lbody [data-row="${first}"]`).hover({ timeout: 2_000 });
+    await expect(rowMarkRead).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await rowMarkRead.click({ timeout: 5_000 });
+  await expect(row).toHaveCount(0);
+  await expect(quietCount).toHaveText('1');
+
+  // Nothing was written (the thread was already Quiet), and the close settles it where it is.
+  expect(written).toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  await page.waitForTimeout(BEAT_MS + 400);
+  await expect(row).toHaveCount(0);
+  await expect(quietCount).toHaveText('1');
+  expect(errors).toEqual([]);
   await context.close();
 });
 

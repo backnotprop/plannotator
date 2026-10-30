@@ -52,6 +52,8 @@ interface ToolbarHostProps {
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
   aiHistoryMessages?: AIChatEntry[];
+  /** Selected lines can only be asked about (no comments): the toolbar is the Ask box. */
+  askOnly?: boolean;
 }
 
 /**
@@ -71,6 +73,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     isAILoading,
     onViewAIResponse,
     aiHistoryMessages,
+    askOnly = false,
   },
   ref,
 ) {
@@ -81,6 +84,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     onLineSelection,
     onAddAnnotation,
     onEditAnnotation,
+    askOnly,
   });
 
   const conventionalCommentsEnabled = useConfigValue('conventionalComments');
@@ -152,7 +156,7 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
 
   return (
     <>
-      {toolbar.toolbarState && !toolbar.showCodeModal && !toolbar.showCommentModal && (
+      {toolbar.toolbarState && !toolbar.showCodeModal && (askOnly || !toolbar.showCommentModal) && (
         <AnnotationToolbar
           toolbarState={toolbar.toolbarState}
           toolbarRef={toolbar.toolbarRef}
@@ -182,10 +186,11 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
           isAILoading={isAILoading}
           onViewAIResponse={onViewAIResponse}
           aiHistoryMessages={aiHistoryMessages}
+          askOnly={askOnly}
         />
       )}
 
-      {toolbar.toolbarState && toolbar.showCommentModal && (
+      {toolbar.toolbarState && toolbar.showCommentModal && !askOnly && (
         <ExpandedCommentDialog
           title={expandedCommentTitle}
           commentText={toolbar.commentText}

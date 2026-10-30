@@ -1,7 +1,7 @@
 /**
- * Which agents Plannotator can start over ACP, and how: Guides' agents (the
- * VS Code extension, `KNOWN_AGENTS`) and the Inbox runner's (packages/server/
- * inbox-acp-runner.ts, which picks its own entries, `GROK` first).
+ * Which agents Plannotator can start over ACP, and how: Guided Reviews in the
+ * VS Code extension (`KNOWN_AGENTS`), its only user now. `GROK` is kept from
+ * the Inbox's removed Grok Build runner (0.28.34 to 0.28.36).
  *
  * A small, bundled list: every entry's launch command and install command come
  * from the agent's own documentation (the source is linked on each entry). An
@@ -102,10 +102,10 @@ export interface AgentDescriptor {
    */
   signIn?: { command?: string; args: readonly string[] };
   /**
-   * The first line `<program> --version` prints, as this agent prints it. The
-   * Inbox's runner starts its program only when it answers this way
-   * (packages/server/inbox-acp-runner.ts), so another program installed under
-   * the same name is never started as this agent.
+   * The first line `<program> --version` prints, as this agent prints it, so
+   * a caller can tell another program installed under the same name from this
+   * agent. Set on `GROK`; no caller reads it now (the Inbox's Grok Build
+   * runner, which did, was removed).
    */
   versionShape?: RegExp;
 }
@@ -256,7 +256,8 @@ export const PI: AgentDescriptor = {
 /**
  * Grok Build, xAI's terminal agent, in its ACP mode (`grok agent stdio`).
  * Source: ~/.grok/README.md ("Agent mode", "Installation"). Not one of Guides'
- * agents: the Inbox runner starts it. It updates itself when it starts.
+ * agents; kept from the Inbox's removed Grok Build runner. It updates itself
+ * when it starts.
  */
 export const GROK: AgentDescriptor = {
   id: "grok",
@@ -303,7 +304,17 @@ export function engineLabel(engine: string | undefined): string {
 }
 
 export type AdapterResolution =
-  | { ok: true; command: string; args: string[]; env?: Record<string, string>; source: "setting" | "path" | "managed" }
+  | {
+      ok: true;
+      command: string;
+      args: string[];
+      env?: Record<string, string>;
+      source: "setting" | "path" | "managed";
+      /** Set by a caller that adds to the launch (Guides' user-CLI choice): a line for its log on each launch. */
+      cliLog?: string;
+      /** Set by such a caller: `AgentLaunch.startHint` (added to a failure before the first session is ready). */
+      startHint?: string;
+    }
   | {
       ok: false;
       message: string;

@@ -40,7 +40,7 @@ import {
   resolveMarkdownFile,
   resolveUserPath,
 } from "./resolve-file";
-import { diagramRenderKindForPath } from "@plannotator/core/annotatable";
+import { documentRenderKindForPath } from "@plannotator/core/annotatable";
 import type { AnnotateBundleFile } from "./annotate-bundle";
 import { looksLikeFilePath } from "./plannotator-tool";
 
@@ -413,7 +413,7 @@ export function resolveAnnotateBundleFiles(
     const isHtml = /\.html?$/i.test(path);
     files.push({
       path,
-      renderAs: isHtml ? (options.convertHtml ? "markdown" : "html") : diagramRenderKindForPath(path) ?? "markdown",
+      renderAs: isHtml ? (options.convertHtml ? "markdown" : "html") : documentRenderKindForPath(path) ?? "markdown",
     });
   }
   return { ok: true, files };

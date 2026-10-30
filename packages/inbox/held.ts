@@ -6,7 +6,7 @@
  * closes (`settleOwn`; when that happens and how it moves: settle.ts). Pure.
  */
 
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
 
 export interface HeldNotice {
   count: number;
@@ -92,6 +92,8 @@ export function heldNotice(
   latest: readonly InboxListSection[],
   openedHere?: ReadonlySet<string>,
   open?: OpenThread | null,
+  /** The window's project names by id (`windowProjectNames`); a project not in it reads its server name. */
+  names?: ReadonlyMap<string, string>,
 ): HeldNotice {
   const before = rowsById(shown);
   // By id: two projects can share a name ("api" at work and at home), and two
@@ -104,7 +106,7 @@ export function heldNotice(
     if (isOpenRow(row, open)) continue;
     if (!hasNewAgentActivity(before.get(row.thread_id), row, openedHere)) continue;
     count += 1;
-    projects.set(row.project.id, row.project.name);
+    projects.set(row.project.id, names?.get(row.project.id) ?? row.project.name);
   }
   if (count === 0) return { count, text: null };
   return { count, text: projects.size === 1 ? `${count} new in ${[...projects.values()][0]}` : `${count} new` };
@@ -295,6 +297,26 @@ export function adoptKeepingOpen(shown: readonly InboxListSection[], latest: rea
     threads.splice(index, 0, row);
     return { ...section, threads };
   });
+}
+
+/**
+ * The group a thread's row sits in on screen, or null when the list on screen
+ * has none for it. While the list holds still this can differ from the row's
+ * own `section`, which says where it will settle.
+ */
+export function drawnSection(shown: readonly InboxListSection[] | null, threadId: string): InboxSectionId | null {
+  return shown?.find((section) => section.threads.some((row) => row.thread_id === threadId))?.id ?? null;
+}
+
+/**
+ * Undo of a row moved on screen only (Mark read on a seen update held in New,
+ * markRead.ts `seenHeldInNew`): the row goes back into the group it was drawn
+ * in `before`, between the same neighbours, in its state as it is now; every
+ * other row stays as it is on screen. A row no longer on screen stays out.
+ */
+export function putRowBack(shown: readonly InboxListSection[], before: readonly InboxListSection[], threadId: string): InboxListSection[] {
+  if (drawnSection(shown, threadId) === null) return shown.map((section) => ({ ...section }));
+  return adoptKeepingOpen(before, shown, threadId);
 }
 
 /**

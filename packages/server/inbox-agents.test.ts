@@ -5,7 +5,7 @@
  * touched, what a later run does, and what uninstall removes.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
@@ -260,6 +260,22 @@ describe("agents connected by one key in a plain-JSON file", () => {
     Bun.sleepSync(20);
     expect(writeJsonEntry(file, ["mcpServers"], { command: "/p/plannotator", args: ["inbox", "mcp"] })).toEqual({ ok: true, changed: false });
     expect(statSync(file).mtimeMs).toBe(mtime);
+  });
+
+  test("a write is atomic: a new file renamed over the old one (never rewritten in place), the file's mode kept, no temp file left", () => {
+    // An agent reading its file mid-write sees the old text or the new, never half; shared by every JSON file Plannotator edits.
+    const dir = join(fake.home, "atomic");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "mcp.json");
+    writeFileSync(file, '{\n  "mcpServers": {}\n}\n', { mode: 0o640 });
+    chmodSync(file, 0o640);
+    for (const value of [{ command: "/p/plannotator", args: ["inbox", "mcp"] }, undefined]) {
+      const inode = statSync(file).ino;
+      expect(writeJsonEntry(file, ["mcpServers"], value, [["/p/plannotator", "inbox", "mcp"]])).toMatchObject({ ok: true, changed: true });
+      expect(statSync(file).ino).not.toBe(inode);
+      expect(statSync(file).mode & 0o777).toBe(0o640);
+      expect(readdirSync(dir)).toEqual(["mcp.json"]);
+    }
   });
 
   test("a file that is not plain JSON is refused and left as it was", async () => {

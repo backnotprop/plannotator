@@ -1,7 +1,8 @@
 /**
  * Per-document draft copies (annotate-draft.ts on the server): the pure half.
  *
- * A local-file or folder annotate session saves each document it holds
+ * A plan review, or an annotate session (local file, folder, URL, last
+ * message), saves each document it holds
  * comments on (other than its own root, which rides the session draft) under
  * that document's path, and merges a document's saved comments in the first
  * time the document is opened. These helpers decide what to send and what to

@@ -11,8 +11,8 @@
  * extension. When an agent asks about one it is allowed once without a
  * prompt. They are matched by
  * their exact programmatic name or whole title, never a title that merely
- * mentions one (a shell command can). The matching is shared with the
- * Inbox's runner (packages/acp-client/permission-policy.ts).
+ * mentions one (a shell command can). The matching lives in the shared
+ * package (packages/acp-client/permission-policy.ts).
  */
 
 import type { RequestPermissionRequest } from "@agentclientprotocol/sdk";

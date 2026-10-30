@@ -1,0 +1,31 @@
+{
+  "description": "Plannotator for Qwen Code. PermissionRequest on exit_plan_mode opens the plan review and waits for the decision (timeout in milliseconds: Qwen reads a command-hook timeout of 1000 or more as milliseconds, and before 2026-09-12 read every timeout so; here 96 hours). PreToolUse on enter_plan_mode adds Plannotator's planning context when it is turned on, and prints nothing otherwise (timeout 5000 ms). PLANNOTATOR_ORIGIN names the agent for the review UI.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "enter_plan_mode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator improve-context",
+            "timeout": 5000,
+            "env": { "PLANNOTATOR_ORIGIN": "qwen-code" }
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "exit_plan_mode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "plannotator",
+            "timeout": 345600000,
+            "env": { "PLANNOTATOR_ORIGIN": "qwen-code" }
+          }
+        ]
+      }
+    ]
+  }
+}

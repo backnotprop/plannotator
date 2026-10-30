@@ -1,15 +1,16 @@
 name: Deploy
 
+# Deploys after the Test workflow passes on a push to main: workflow_run starts
+# this workflow when that Test run completes, so nothing waits on a runner.
+# Only a Test run for a push to main in this repository can deploy. A PR run of
+# Test (a fork's included, even from a branch named main) also completes and
+# starts this workflow, but every job below skips it, so no code from a PR ever
+# runs next to the deploy secrets.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'apps/marketing/**'
-      - 'apps/portal/**'
-      - 'apps/paste-service/**'
-      - 'apps/waitlist-service/**'
-      - 'packages/**'
+  workflow_run:  # zizmor: ignore[dangerous-triggers] Gated to push runs on main of this repository; PR runs skip every job.
+    workflows: [Test]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       target:
@@ -28,154 +29,115 @@ permissions:
   contents: read
 
 jobs:
-  # Deploy remains automatic, but only after the exact commit has passed the
-  # repository's full Test workflow. The workflows start together on a main
-  # push; this job waits for Test instead of allowing deployment to race it.
-  verify:
-    name: Require successful Test run
+  detect-changes:
+    # A manual run deploys the commit it runs on; it still needs a passed Test
+    # run there (checked below, no waiting).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: read
-    steps:
-      - name: Wait for Test on this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          COMMIT_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          deadline=$((SECONDS + 2400))
-          previous_state=""
-
-          while (( SECONDS < deadline )); do
-            run_json="$(gh api --method GET \
-              "repos/${REPOSITORY}/actions/workflows/test.yml/runs" \
-              -f head_sha="$COMMIT_SHA" \
-              -f per_page=100)"
-
-            # Manual Test runs are an explicit recovery path when the original
-            # push run was skipped or cannot be recovered. Ignore PR runs and
-            # retain the exact-SHA requirement enforced by the API query.
-            run="$(jq -c '
-              [.workflow_runs[]
-                | select(
-                    .head_sha == env.COMMIT_SHA and
-                    (.event == "push" or .event == "workflow_dispatch")
-                  )]
-              | sort_by(.created_at)
-              | last // {}
-            ' <<<"$run_json")"
-
-            trigger="$(jq -r '.event // ""' <<<"$run")"
-            status="$(jq -r '.status // "missing"' <<<"$run")"
-            conclusion="$(jq -r '.conclusion // ""' <<<"$run")"
-            run_url="$(jq -r '.html_url // ""' <<<"$run")"
-            state="${trigger}:${status}:${conclusion}"
-
-            if [[ "$state" != "$previous_state" ]]; then
-              if [[ -n "$run_url" ]]; then
-                echo "Test workflow for ${COMMIT_SHA}: ${state} (${run_url})"
-              else
-                echo "Test workflow for ${COMMIT_SHA}: ${state}"
-              fi
-              previous_state="$state"
-            fi
-
-            if [[ "$status" == "completed" ]]; then
-              if [[ "$conclusion" == "success" ]]; then
-                exit 0
-              fi
-              echo "Test workflow did not succeed for ${COMMIT_SHA}: ${conclusion} (${run_url})" >&2
-              exit 1
-            fi
-
-            sleep 15
-          done
-
-          echo "Timed out waiting for the Test workflow on ${COMMIT_SHA}." >&2
-          exit 1
-
-  detect-changes:
-    needs: verify
-    runs-on: ubuntu-24.04
     outputs:
+      sha: ${{ steps.changes.outputs.sha }}
       marketing: ${{ steps.changes.outputs.marketing }}
       portal: ${{ steps.changes.outputs.portal }}
       paste: ${{ steps.changes.outputs.paste }}
       waitlist: ${{ steps.changes.outputs.waitlist }}
     steps:
+      - name: Manual run needs a passed Test run on this commit
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          conclusion="$(gh api "repos/${REPOSITORY}/actions/workflows/test.yml/runs?head_sha=${COMMIT_SHA}&per_page=100" \
+            --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last | .conclusion // "missing"')"
+          if [[ "$conclusion" != "success" ]]; then
+            echo "The latest Test run on ${COMMIT_SHA} is ${conclusion}, not success. Run Test on this commit first." >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # A workflow_run checks out the default branch's tip by default, which
+          # may be newer than the commit Test passed on.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Check for changes
         id: changes
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           TARGET: ${{ inputs.target }}
-          BEFORE_SHA: ${{ github.event.before }}
-          CURRENT_SHA: ${{ github.sha }}
+          CURRENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TEST_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ "$TARGET" == "all" || "$TARGET" == "marketing" ]]; then
-              echo "marketing=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "marketing=false" >> "$GITHUB_OUTPUT"
-            fi
-            if [[ "$TARGET" == "all" || "$TARGET" == "portal" ]]; then
-              echo "portal=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "portal=false" >> "$GITHUB_OUTPUT"
-            fi
-            if [[ "$TARGET" == "all" || "$TARGET" == "paste" ]]; then
-              echo "paste=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "paste=false" >> "$GITHUB_OUTPUT"
-            fi
-            if [[ "$TARGET" == "all" || "$TARGET" == "waitlist" ]]; then
-              echo "waitlist=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "waitlist=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            # For push events, check what changed
-            git fetch origin "$BEFORE_SHA" --depth=1 2>/dev/null || true
-
-            MARKETING_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^(apps/marketing/|packages/)' || true)
-            PORTAL_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^(apps/portal/|packages/)' || true)
-            PASTE_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^apps/paste-service/' || true)
-            WAITLIST_CHANGED=$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" 2>/dev/null | grep -E '^apps/waitlist-service/' || true)
-
-            if [[ -n "$MARKETING_CHANGED" ]]; then
-              echo "marketing=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "marketing=false" >> "$GITHUB_OUTPUT"
-            fi
-
-            if [[ -n "$PORTAL_CHANGED" ]]; then
-              echo "portal=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "portal=false" >> "$GITHUB_OUTPUT"
-            fi
-
-            if [[ -n "$PASTE_CHANGED" ]]; then
-              echo "paste=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "paste=false" >> "$GITHUB_OUTPUT"
-            fi
-
-            if [[ -n "$WAITLIST_CHANGED" ]]; then
-              echo "waitlist=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "waitlist=false" >> "$GITHUB_OUTPUT"
-            fi
+            echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
+            for site in marketing portal paste waitlist; do
+              if [[ "$TARGET" == "all" || "$TARGET" == "$site" ]]; then
+                echo "$site=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "$site=false" >> "$GITHUB_OUTPUT"
+              fi
+            done
+            exit 0
           fi
+
+          # The passed Test runs of pushes to main, newest first (one call).
+          RUNS="$(gh api "repos/${REPOSITORY}/actions/workflows/test.yml/runs?branch=main&event=push&status=success&per_page=50")"
+
+          # What changed since the last push to main that passed Test. Every
+          # push to main runs Test, so that is where the last deploy came
+          # from; a push whose Test failed is deployed with the next one.
+          BEFORE_SHA="$(jq -r "[.workflow_runs[] | select(.id < ${TEST_RUN_ID})] | first | .head_sha // empty" <<< "$RUNS")"
+          if [[ -z "$BEFORE_SHA" ]] || ! git fetch --no-tags --depth=1 origin "$BEFORE_SHA"; then
+            BEFORE_SHA="${CURRENT_SHA}^1"
+          fi
+
+          # A newer main commit already passed Test (runs finish out of order,
+          # or this one was rerun): deploy that newer tree instead of this
+          # older one, which would overwrite it. It contains this commit, and
+          # the diff from this run's base covers this commit's changes too.
+          NEWEST_ID="$(jq -r '.workflow_runs[0].id // 0' <<< "$RUNS")"
+          if (( NEWEST_ID > TEST_RUN_ID )); then
+            CURRENT_SHA="$(jq -r '.workflow_runs[0].head_sha' <<< "$RUNS")"
+            echo "Test run ${NEWEST_ID} passed on a newer main commit; deploying its tree ${CURRENT_SHA}."
+            git fetch --no-tags --depth=1 origin "$CURRENT_SHA"
+          fi
+          echo "sha=$CURRENT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Changes ${BEFORE_SHA}..${CURRENT_SHA}"
+          CHANGED="$(git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA")"
+
+          changed() { grep -Eq "$1" <<< "$CHANGED" && echo true || echo false; }
+          {
+            echo "marketing=$(changed '^(apps/marketing/|packages/)')"
+            echo "portal=$(changed '^(apps/portal/|packages/)')"
+            echo "paste=$(changed '^apps/paste-service/')"
+            echo "waitlist=$(changed '^apps/waitlist-service/')"
+          } >> "$GITHUB_OUTPUT"
 
   deploy-marketing:
     needs: detect-changes
     if: needs.detect-changes.outputs.marketing == 'true'
+    # One deploy of a site at a time, queued and never cancelled, so two never
+    # sync over each other. The group is on the deploy jobs, not the workflow:
+    # a skipped Deploy run (a failed Test, a PR) must not replace a pending one.
+    # A queued deploy of the same site from a newer commit can replace a pending
+    # one; it ships the whole newer tree, which includes the older change.
+    concurrency:
+      group: deploy-marketing
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -184,6 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ needs.detect-changes.outputs.sha }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -233,6 +196,9 @@ jobs:
   deploy-portal:
     needs: detect-changes
     if: needs.detect-changes.outputs.portal == 'true'
+    concurrency:
+      group: deploy-portal
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -241,6 +207,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ needs.detect-changes.outputs.sha }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -271,6 +238,9 @@ jobs:
   deploy-paste:
     needs: detect-changes
     if: needs.detect-changes.outputs.paste == 'true'
+    concurrency:
+      group: deploy-paste
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -278,6 +248,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ needs.detect-changes.outputs.sha }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -297,6 +268,9 @@ jobs:
   deploy-waitlist:
     needs: detect-changes
     if: needs.detect-changes.outputs.waitlist == 'true'
+    concurrency:
+      group: deploy-waitlist
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -304,6 +278,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ needs.detect-changes.outputs.sha }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

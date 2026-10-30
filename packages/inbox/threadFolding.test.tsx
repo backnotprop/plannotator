@@ -6,7 +6,7 @@
  * has no layout, so where a test needs positions it gives the elements some.
  * The real browser proof is tests/e2e/inbox-thread-folding.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -232,6 +232,7 @@ const shown = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>('.ib-pbo
 const holdings = (el: HTMLElement, id: string) => [...(article(el, id)?.querySelectorAll('[data-holding]') ?? [])].map((h) => `${h.getAttribute('data-holding')}=${h.textContent}`);
 const focusedArticle = () => (document.activeElement as HTMLElement | null)?.closest('[data-message-article], [data-middle-fold]');
 const key = (k: string, target: EventTarget = document.body) => act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
+const shift = (k: string, target: EventTarget = document.body) => act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey: true, bubbles: true, cancelable: true })));
 
 test.skipIf(!hasDom)('read messages fold to lines; the new, the last and one holding an unsent pick stay open; the middle of the read run hides', async () => {
   const el = await render(seven());
@@ -416,28 +417,28 @@ test.skipIf(!hasDom)('the "↓ 1 new" pill shows while the first new message is 
   expect(pill.hasAttribute('data-off')).toBe(true);
 });
 
-test.skipIf(!hasDom)('keys: n goes to the first new message, j and k move between messages and the fold; never while typing', async () => {
+test.skipIf(!hasDom)('keys: n goes to the first new message, Shift+J and Shift+K move between messages and the fold; never while typing', async () => {
   const el = await render(seven());
   key('n');
   expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A4');
-  key('k');
+  shift('K');
   expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_P3');
-  key('k');
-  key('k');
+  shift('K');
+  shift('K');
   expect(focusedArticle()?.hasAttribute('data-middle-fold')).toBe(true);
-  key('k');
+  shift('K');
   expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A1');
-  key('k');
+  shift('K');
   expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A1');
-  key('j');
-  key('j');
+  shift('J');
+  shift('J');
   expect(focusedArticle()?.getAttribute('data-message-article')).toBe('msg_A3');
   // In the reply box the letters are text.
   act(() => ([...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement).click());
   const box = el.querySelector('textarea')!;
   box.focus();
   key('n', box);
-  key('j', box);
+  shift('J', box);
   expect(document.activeElement).toBe(box);
 });
 
@@ -547,7 +548,7 @@ test.skipIf(!hasDom)('the meta line says one time when the thread began and ende
   const thread = seven();
   const at = thread.messages[0]!.created_at;
   const el = await render({ ...thread, messages: thread.messages.map((m) => ({ ...m, created_at: at })) });
-  const span = el.querySelectorAll('[data-thread-meta] > span')[2]!.textContent!;
+  const span = el.querySelectorAll('[data-thread-meta-rest] > span')[2]!.textContent!;
   expect(span).not.toContain(' to ');
   expect(span).toMatch(/\d{1,2}:\d{2} [AP]M$/);
   expect(el.querySelectorAll('button div').length).toBe(0);

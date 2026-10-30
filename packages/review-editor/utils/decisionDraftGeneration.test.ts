@@ -15,7 +15,9 @@ import { join } from 'node:path';
 const APP = readFileSync(join(import.meta.dir, '..', 'App.tsx'), 'utf8');
 
 test('every /api/feedback post carries draftGeneration', () => {
-  const calls = [...APP.matchAll(/fetch\('\/api\/feedback',\s*\{([\s\S]*?)\n\s*\}\)/g)].map((m) => m[1]);
+  // Local agent decisions use feedbackUrl to carry their page-scoped draft
+  // identity; the platform status post keeps the literal endpoint.
+  const calls = [...APP.matchAll(/fetch\((?:'\/api\/feedback'|feedbackUrl),\s*\{([\s\S]*?)\n\s*\}\)/g)].map((m) => m[1]);
   // Sanity: the regex finds the agent-path and platform-path posts.
   expect(calls.length).toBeGreaterThanOrEqual(3);
   for (const body of calls) expect(body).toContain('draftGeneration: getDraftGeneration()');

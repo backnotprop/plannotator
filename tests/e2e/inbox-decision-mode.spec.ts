@@ -27,7 +27,7 @@
  * /Users/ramos/plannotator/.ops/shots/decision-mode-build/ when that folder's parent exists, else .local/proof/decision-mode/.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -35,6 +35,8 @@ import { deflateSync } from 'node:zlib';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { agentCliCalls, writeAgentCliStubs } from './agent-cli-stubs';
+import { finger } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -89,6 +91,8 @@ function mockPng(width = 240, height = 360, accent: [number, number, number] = [
 interface World {
   root: string;
   dataDir: string;
+  /** Agent CLI stubs first on the Inbox's PATH: each call is recorded. */
+  stubs: string;
   env: Record<string, string>;
   url: string;
   claude: SimAgent;
@@ -127,7 +131,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-decide-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  // Codex sends with a wake, so the person's reply to it is queued through `codex queue`: under the test sandbox
+  // the Inbox looks for no codex (an empty agent PATH, never the apps' own CLIs), and the stubs first on PATH
+  // record any lookup that gets past it (the last test). Never the codex on the runner's PATH.
+  const stubs = writeAgentCliStubs(join(root, 'agent-clis'));
+  const env = { PATH: `${stubs}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_SANDBOX: root };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -144,7 +152,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
-  world = { root, dataDir, env, url, claude, codex, pi, billing, web, context, page, errors };
+  world = { root, dataDir, stubs, env, url, claude, codex, pi, billing, web, context, page, errors };
   await fetch(`http://127.0.0.1:${port()}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notifications: { dismissed: true } }) });
 });
 
@@ -468,6 +476,52 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   }
   expect((await stateOf(INVOICES))?.state).toBe('open');
 
+  // The pictures' viewer on a phone (Chromium, real touches; approval "inbox-image-swipe"): only the picture follows
+  // the finger (the viewer's header and its image area stay put), two quick flicks step twice (the second, while the
+  // first still slides, is not lost), and a drag down closes it. Nothing is answered.
+  const real = await chromium.launch();
+  try {
+    const { defaultBrowserType: _ignored, ...pixel } = devices['Pixel 7'];
+    const context = await real.newContext({ ...pixel, colorScheme: 'light' });
+    const phone = await context.newPage();
+    await phone.goto(world.url);
+    await decideIn(phone, drawers.thread_id);
+    await goToCard(phone, DRAWERS);
+    await card(phone).locator('[data-decision-tiles] [data-question-tile]').nth(0).locator('[data-question-zoom]').tap();
+    const viewer = phone.locator('[data-image-lightbox]');
+    await expect(viewer.locator('[data-lightbox-count]')).toHaveText('1 of 3');
+    await expect(viewer).toHaveAttribute('aria-label', 'A · Total on top, image 1 of 3');
+    const swipeArea = viewer.locator('[data-lightbox-swipe]');
+    const box = (await swipeArea.boundingBox())!;
+    const at = { x: box.x + box.width * 0.75, y: box.y + box.height * 0.45 };
+    const touch = await finger(phone, 'chromium');
+    const header = viewer.locator('[data-lightbox-count]');
+    const headerBefore = await header.boundingBox();
+    // Slow and short of a third: it follows, then springs back.
+    await touch.down(at.x, at.y, -box.width * 0.15, 0);
+    expect(await viewer.locator('[data-lightbox-track]').evaluate((el) => (el as HTMLElement).style.transform)).toMatch(/^translateX\(-\d/);
+    expect(await swipeArea.evaluate((el) => (el as HTMLElement).style.transform)).toBe('');
+    expect(await header.boundingBox()).toEqual(headerBefore);
+    await touch.up();
+    await phone.waitForTimeout(400);
+    await expect(viewer.locator('[data-lightbox-count]')).toHaveText('1 of 3');
+    await touch.down(at.x, at.y, -box.width * 0.3, 0, 3);
+    await touch.up();
+    await touch.down(at.x, at.y, -box.width * 0.3, 0, 3);
+    await touch.up();
+    await expect(viewer.locator('[data-lightbox-count]')).toHaveText('3 of 3');
+    await expect(viewer).toHaveAttribute('aria-label', 'C · Three steps, image 3 of 3');
+    await phone.waitForTimeout(400);
+    await touch.down(box.x + box.width / 2, box.y + box.height * 0.3, 0, box.height * 0.4);
+    await touch.up();
+    await expect(viewer).toHaveCount(0);
+    await expect(phone.locator('[data-decision-mode]')).toBeVisible();
+    await context.close();
+  } finally {
+    await real.close();
+  }
+  expect((await stateOf(DRAWERS))?.state).toBe('open');
+
   await page.goto(world.url);
   await decideIn(page, drawers.thread_id);
   const dialog = page.locator('[data-decision-mode]');
@@ -525,4 +579,14 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   if (await keep.isVisible().catch(() => false)) await keep.click();
   await expect(dialog).toBeHidden();
   expect(world.errors).toEqual([]);
+});
+
+test('the Codex session it answered is never woken through a codex CLI: none is looked up or run', async () => {
+  // Test 2 answers Codex's question (its session sent with a wake): without that answer this proves nothing.
+  const thread = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/threads/${stripeThread}`)).json()) as { thread?: { messages: { author: { kind: string }; body: string }[] } };
+  const answered = thread.thread?.messages.some((m) => m.author.kind === 'person' && m.body.includes('Yes, Thursday')) ?? false;
+  expect(answered, "Codex's question was answered (run this with the queue test)").toBe(true);
+  // Without the sandbox the Inbox ran `codex --version` and `codex queue` from PATH: here, the stubs in front of
+  // the runner's own codex.
+  expect(agentCliCalls(world.stubs)).toEqual([]);
 });

@@ -8,7 +8,7 @@
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
-import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult } from "./pr-types";
+import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
 
 // GitLab-specific MRRef shape (used internally)
@@ -563,6 +563,48 @@ export async function fetchGlFileContent(
 
   // GitLab returns raw file content (no base64 encoding)
   return result.stdout;
+}
+
+/**
+ * Every file of one commit through the repository tree API (recursive,
+ * paged by `glab --paginate`). Listing more than the page budget is reported
+ * as truncated rather than waited on.
+ */
+/** Pages of 100 entries the tree listing follows before calling it truncated (as Bitbucket's). */
+export const GL_TREE_MAX_PAGES = 500;
+const GL_TREE_PAGE_SIZE = 100;
+
+export async function fetchGlTree(
+  runtime: PRRuntime,
+  ref: GlMRRef,
+  sha: string,
+  maxPages: number = GL_TREE_MAX_PAGES,
+): Promise<PRTreeResult | null> {
+  const encoded = encodeProject(ref.projectPath);
+  const paths: string[] = [];
+  // Page by page, so a huge repository stops at the budget instead of
+  // following `--paginate` to the end.
+  for (let page = 1; page <= maxPages; page += 1) {
+    const result = await runtime.runCommand(
+      "glab",
+      apiArgs(
+        ref.host,
+        `projects/${encoded}/repository/tree?ref=${encodeURIComponent(sha)}&recursive=true&per_page=${GL_TREE_PAGE_SIZE}&page=${page}`,
+      ),
+    );
+    if (result.exitCode !== 0) return page === 1 ? null : { paths, truncated: true };
+    let entries: Array<{ type?: unknown; path?: unknown }>;
+    try {
+      entries = parsePaginatedArray<{ type?: unknown; path?: unknown }>(result.stdout);
+    } catch {
+      return page === 1 ? null : { paths, truncated: true };
+    }
+    for (const entry of entries) {
+      if (entry.type === "blob" && typeof entry.path === "string") paths.push(entry.path);
+    }
+    if (entries.length < GL_TREE_PAGE_SIZE) return { paths, truncated: false };
+  }
+  return { paths, truncated: true };
 }
 
 /**

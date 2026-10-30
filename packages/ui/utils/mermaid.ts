@@ -11,9 +11,8 @@
  * the lazy path IS Plannotator's own path: `packages/editor/App.tsx` no longer
  * imports `./mermaid-eager`, so a plan with no diagram never downloads the
  * runtime in a chunked build (the share portal, any host that bundles by
- * route). The single-file builds inline the `import('mermaid')` target through
- * `inlineDynamicImports`, so there the lazy import resolves from the bundle
- * itself and nothing is fetched. A host that wants the runtime registered at
+ * route), nor in the single-file builds, which carry it as a packed chunk
+ * their server serves on request (build/pack-app.ts). A host that wants the runtime registered at
  * startup imports `./mermaid-eager`, which fills the slot at module
  * evaluation; the slot then short-circuits this loader.
  *

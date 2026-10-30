@@ -20,7 +20,8 @@
  * queued messages, no "Ask this session" question running, and the last run
  * settled: `agent_settled` where Pi has it, idle alone on older Pi), goes in
  * with `pi.sendUserMessage(text, { deliverAs: "followUp" })` (a follow-up
- * never steers into a run that started in the same instant), and counts as
+ * never steers into a run that started in the same instant; Oh My Pi, idle,
+ * gets no `deliverAs`: see `resolveIdleDeliveryOptions`), and counts as
  * delivered when Pi starts that user message. Send now (the person pressed
  * it in the Inbox; the command's `now`) goes in at once instead: as a
  * `deliverAs: "steer"` while a run is going, which Pi reads after the run's
@@ -46,7 +47,7 @@ import {
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
 import { inboxAgentTool, type InboxReplyCommand } from "./generated/inbox/connection.ts";
-import { isCtxAlive } from "./current-pi-session.ts";
+import { isCtxAlive, resolveIdleDeliveryOptions } from "./current-pi-session.ts";
 import { loadedPackageVersion, packageUpdatedMessage, readPackageVersion } from "./package-version.ts";
 import { detectPiHost } from "./pi-host.ts";
 
@@ -256,7 +257,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			};
 			waiting = { id: command.id, resolve, reject, timer: setTimeout(watchdog, DELIVERY_WATCHDOG_MS) };
 			try {
-				pi.sendUserMessage(text, { deliverAs });
+				pi.sendUserMessage(text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs }));
 			} catch (error) {
 				endWaiting(error instanceof Error ? error : new Error(String(error)));
 			}

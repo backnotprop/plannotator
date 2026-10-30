@@ -8,7 +8,7 @@
  * draft or the "only after I say yes" rule. Plus the sidebar row: above
  * Settings, only when the window gives it a handler.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';

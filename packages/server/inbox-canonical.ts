@@ -3,12 +3,11 @@
  *
  * A browser keeps its notification permission (and cookies and storage) per
  * origin, and `http://127.0.0.1:<port>` and `http://localhost:<port>` are two
- * origins for the same server. The Inbox advertises and opens
- * `http://localhost:<port>/` (the spelling the thread links agents get, and
- * the one plan review, code review and annotate share their cookies on), so a
- * person who once allowed notifications at `127.0.0.1` got none at
- * `localhost`. A page loaded at the other loopback spelling of THIS port
- * (`127.x.y.z`, `[::1]`) is sent to the canonical one.
+ * origins for the same server. The Inbox advertises and opens localhost by
+ * default, or the configured *.localhost hostname, so its links and window
+ * use the same notification permission and preference cookies. A page loaded
+ * at another loopback spelling of THIS port (`127.x.y.z`, `[::1]`, localhost)
+ * is sent to that canonical address.
  *
  * Only a browser's top-level navigation to `/` is redirected (`Sec-Fetch-Mode:
  * navigate` and `Sec-Fetch-Dest: document`), so APIs, the event stream, the
@@ -22,32 +21,45 @@
  * `no-store`: never cached, since another server may hold this port later.
  */
 
+import { loadConfig, resolveLocalUrlHostname } from "@plannotator/shared/config";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 
-/** The one spelling the Inbox opens, advertises and redirects to. */
+/** The hostname the Inbox opens when no localhost subdomain is configured. */
 export const INBOX_CANONICAL_HOSTNAME = "localhost";
 
-/** `http://localhost:<port>/`: the Inbox's one address on this computer. */
+/**
+ * `http://localhost:<port>/`, or `http://<name>:<port>/` when `urlHost` /
+ * PLANNOTATOR_URL_HOST names a localhost subdomain (`plannotator.localhost`,
+ * #2184): the Inbox's one address on this computer. Any other url host (a
+ * tailnet name, an IP) is for remote sessions and never changes it. The
+ * Inbox reads it once at start, for its registry, links and redirect.
+ */
 export function inboxCanonicalBaseUrl(port: number): string {
-  return `http://${INBOX_CANONICAL_HOSTNAME}:${port}/`;
+  return `http://${resolveLocalUrlHostname(loadConfig()) ?? INBOX_CANONICAL_HOSTNAME}:${port}/`;
 }
 
 /**
- * The redirect for a top-level navigation of `/` that reached this port by a
- * loopback literal (`127.x.y.z`, `[::1]`), or null to answer the request as it is.
+ * The redirect for a top-level navigation of `/` that reached this port by
+ * another loopback spelling (`127.x.y.z`, `[::1]`, and `localhost` when a
+ * subdomain is configured), or null to answer the request as it is.
+ * `canonicalBaseUrl` is the start-time address (inboxCanonicalBaseUrl), so a
+ * config change while the Inbox runs never moves its window.
  */
-export function inboxCanonicalRedirect(req: Request, url: URL, port: number, via: "local" | "tailnet"): Response | null {
+export function inboxCanonicalRedirect(req: Request, url: URL, canonicalBaseUrl: string, via: "local" | "tailnet"): Response | null {
   if (via !== "local") return null;
   if (req.method !== "GET" || url.pathname !== "/") return null;
   if (req.headers.get("sec-fetch-mode") !== "navigate" || req.headers.get("sec-fetch-dest") !== "document") return null;
+  const target = new URL(canonicalBaseUrl);
+  const port = Number(target.port);
   const host = req.headers.get("host");
-  if (!host || !isLoopbackHostHeader(host, port)) return null;
-  const target = inboxCanonicalBaseUrl(port);
-  if (new URL(target).host === host.trim().toLowerCase()) return null;
+  // Only the plain loopback names and the configured subdomain: any other
+  // name (another *.localhost, a proxy's own) is answered where it asked.
+  if (!host || !isLoopbackHostHeader(host, port, target.hostname)) return null;
+  if (target.host === host.trim().toLowerCase()) return null;
   return new Response(null, {
     status: 307,
     headers: {
-      Location: `${target}${url.search}`,
+      Location: `${target.href}${url.search}`,
       "Cache-Control": "no-store",
       "Referrer-Policy": "no-referrer",
     },

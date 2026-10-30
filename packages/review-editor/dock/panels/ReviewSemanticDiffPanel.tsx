@@ -5,6 +5,7 @@ import type {
   SemanticDiffResponse,
 } from '@plannotator/shared/semantic-diff-types';
 import { useReviewState } from '../ReviewStateContext';
+import { useReviewFileSource } from '../../hooks/useReviewFileSource';
 import {
   SemanticDiffRows,
   groupSemanticChangesByFile,
@@ -47,6 +48,7 @@ function splitFilePath(filePath: string): { dir: string; name: string } {
 
 export function ReviewSemanticDiffPanel() {
   const state = useReviewState();
+  const loadSource = useReviewFileSource(state);
   const {
     rawPatch,
     semanticDiffAvailable,
@@ -173,6 +175,7 @@ export function ReviewSemanticDiffPanel() {
                 binaryChanges={group.binaryChanges}
                 onOpenChange={openChange}
                 onOpenBinary={openBinaryChange}
+                loadSource={loadSource}
               />
             </div>
           </section>

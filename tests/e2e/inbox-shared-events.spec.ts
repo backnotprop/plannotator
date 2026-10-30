@@ -35,7 +35,7 @@
  * .local/proof/shared-events/results.json.
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type CDPSession, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { removeInboxScratch, stopScratchInbox } from './inbox-scratch';
@@ -153,6 +153,21 @@ test('the code before this change stalls the seventh tab; the shared stream load
   results.stall = { oldLoadsMs: oldLoads, oldSeventhStalledForMs: stalledMs, oldSeventhLoadedAfterOneClosedMs: afterFreeMs, newLoadsMs: newLoads, newNinthMs: ninth.ms };
 });
 
+/** Hold even an idle page: Debugger.pause only schedules a pause at the next script. */
+async function holdMainThread(cdp: CDPSession): Promise<() => Promise<void>> {
+  await cdp.send('Debugger.enable');
+  const paused = new Promise<void>((resolve) => cdp.once('Debugger.paused', () => resolve()));
+  const evaluation = cdp.send('Runtime.evaluate', { expression: 'debugger;' });
+  await Promise.race([
+    paused,
+    evaluation.then(() => { throw new Error('Debugger evaluation completed without pausing'); }),
+  ]);
+  return async () => {
+    await cdp.send('Debugger.resume');
+    await evaluation;
+  };
+}
+
 /**
  * Close, reload, crash, freeze or stall the leader while an agent writes;
  * measure how fast another tab leads and the longest a tab in front went
@@ -174,6 +189,7 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   await new Promise((done) => setTimeout(done, 600));
   const at = Date.now();
   let cdp: Awaited<ReturnType<typeof w.context.newCDPSession>> | null = null;
+  let resumeMainThread: (() => Promise<void>) | null = null;
   if (how === 'close') {
     await leader!.close();
     forget(w, leader!);
@@ -184,19 +200,17 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
     void cdp.send('Page.crash').catch(() => {});
     forget(w, leader!);
   } else if (how === 'stall') {
-    // No freeze event: the debugger holds the page's main thread from its next script on (its stream's next frame).
+    // No freeze event: the debugger holds the page's main thread while its stream keeps receiving frames.
     cdp = await w.context.newCDPSession(leader!);
-    await cdp.send('Debugger.enable');
-    await cdp.send('Debugger.pause');
+    resumeMainThread = await holdMainThread(cdp);
   } else {
     // Chrome freezes a page by dispatching `freeze`, running its microtasks, then running nothing more until
     // `resume`. Headless pages are always visible, so CDP's Page.setWebLifecycleState does not freeze them
     // (checked: no freeze event fires); the same sequence is played instead: the event, then the debugger
     // holds the page's main thread (its stream's frames and the channel's messages queue up), then resume.
     cdp = await w.context.newCDPSession(leader!);
-    await cdp.send('Debugger.enable');
     await leader!.evaluate(() => document.dispatchEvent(new Event('freeze')));
-    await cdp.send('Debugger.pause');
+    resumeMainThread = await holdMainThread(cdp);
   }
   // Streams on the server, sampled until the leader runs again (never more than two: the stalled one and the new).
   const streamSamples: number[] = [];
@@ -230,11 +244,11 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
   if (how === 'freeze') {
     await expect.poll(() => streams(w)).toBe(1);
     // It wakes: it fetches what it missed and follows.
-    await cdp!.send('Debugger.resume');
+    await resumeMainThread!();
     await leader!.evaluate(() => document.dispatchEvent(new Event('resume')));
   }
   if (how === 'stall') {
-    await cdp!.send('Debugger.resume');
+    await resumeMainThread!();
     // It runs again: it learns the lock was taken, closes its stream and follows.
     const rejoin = await waitFor(
       async () => (await logOf(leader!)).filter((e) => e.at >= at).map((e) => e.type),
@@ -502,14 +516,13 @@ test('soak: tabs open, close, reload, crash, come to the front and stall at rand
       if (leader) {
         if (!front || front === leader) await bringToFront(w.pages.find((p) => p !== leader)!);
         const cdp = await w.context.newCDPSession(leader);
-        await cdp.send('Debugger.enable');
-        await cdp.send('Debugger.pause');
+        const resumeMainThread = await holdMainThread(cdp);
         const stallUntil = Date.now() + 3000 + Math.floor(random() * 6000);
         while (Date.now() < stallUntil) {
           await new Promise((done) => setTimeout(done, 300));
           stallSamples.push(await streams(w));
         }
-        await cdp.send('Debugger.resume');
+        await resumeMainThread();
         await cdp.detach().catch(() => {});
         actions.stall++;
         if ((await logOf(leader)).some((e) => e.type === 'stolen')) actions.stallTakenOver++;

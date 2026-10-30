@@ -118,10 +118,17 @@ export function createInboxCompose(options: {
 
   /** A new thread the person writes, addressed to one live session (compose's Send). */
   const startThread = async (body: Record<string, unknown>): Promise<Response> => {
+    const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
+    if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     // A replayed Send answers the thread it wrote, whatever the session's state now.
-    const replay = replayThread(body);
-    if (replay) return json(replay);
-    const uploads = checkSend(body);
+    const replay = store.personThreadByKey(key);
+    if (replay) {
+      const result = store.startPersonThread({ project_id: replay.project_id, body: body.body, to: replay.to ?? null, idempotency_key: key, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
+      return json({ thread_id: result.message.thread_id, message: result.message, replayed: true });
+    }
+    if (typeof body.body !== "string" || body.body.trim() === "") throw new InboxError("validation_error", "body: write a message.", { field: "body" });
+    const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
+    if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
     const target = live.composeTarget(body.to);
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
@@ -130,16 +137,6 @@ export function createInboxCompose(options: {
     if (root === null) throw new InboxError("session_not_live", "That session has not said where it works yet; try again in a moment.");
     const project = target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
-    return json(writeThread(body, uploads, { host: target.host, session: target.session }, project));
-  };
-
-  /**
-   * The Send itself, once its target and project are known: the thread, its
-   * files, the draft it came from. Shared with the ACP runner's "Start a new
-   * Grok Build session" (inbox-acp-runner.ts), whose session is made first.
-   */
-  const writeThread = (body: Record<string, unknown>, uploads: unknown[], to: { host: string; session: string }, project: InboxProject) => {
-    const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     const at = now().toISOString();
     const attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
     let result: ReturnType<InboxStore["startPersonThread"]>;
@@ -147,7 +144,7 @@ export function createInboxCompose(options: {
       result = store.startPersonThread({
         project_id: project.id,
         body: body.body,
-        to,
+        to: { host: target.host, session: target.session },
         idempotency_key: key,
         attachments,
         thread_name: body.thread_name,
@@ -166,30 +163,12 @@ export function createInboxCompose(options: {
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
     if (body.draft_id !== undefined) deleteInboxDraft(store.dir, body.draft_id);
-    return {
+    return json({
       thread_id: result.message.thread_id,
       message: result.message,
       project: { id: project.id, name: project.name, root: project.root },
       replayed: result.replayed,
-    };
-  };
-
-  /** A replayed Send (the same idempotency key): the thread it wrote, whatever its session's state now; null when the key is new. */
-  const replayThread = (body: Record<string, unknown>) => {
-    const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
-    if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
-    const replay = store.personThreadByKey(key);
-    if (!replay) return null;
-    const result = store.startPersonThread({ project_id: replay.project_id, body: body.body, to: replay.to ?? null, idempotency_key: key, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
-    return { thread_id: result.message.thread_id, message: result.message, replayed: true };
-  };
-
-  /** The uploads a Send names, checked; the body checked to have words. */
-  const checkSend = (body: Record<string, unknown>): unknown[] => {
-    if (typeof body.body !== "string" || body.body.trim() === "") throw new InboxError("validation_error", "body: write a message.", { field: "body" });
-    const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
-    if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
-    return uploads;
+    });
   };
 
   /** "Send to another session": a message no session took yet, to a live session of its thread's project. */
@@ -276,5 +255,5 @@ export function createInboxCompose(options: {
     }
   };
 
-  return { route, sweep, sessionsModel, replayThread, checkSend, writeThread };
+  return { route, sweep, sessionsModel };
 }

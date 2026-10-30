@@ -123,10 +123,8 @@ export interface NotifyItem {
   asks: boolean;
   /** The thread itself is new. */
   fresh: boolean;
-  /** What brought it (`thread:<id>`, `<message id>/<question key>`, `acp:<permission id>`): what tabs claim, so one tab raises each. */
+  /** What brought it (`thread:<id>`, `<message id>/<question key>`): what tabs claim, so one tab raises each. */
   keys: string[];
-  /** Its own words (an agent the Inbox runs waiting on a permission): "<project>: Grok Build needs your OK", the tool. */
-  notice?: { title: string; body: string };
 }
 
 /** Several Inbox tabs: each item is raised by the first tab to claim it (`claimNotices`). */
@@ -222,9 +220,11 @@ export function askKind(
  * "Moved" is the Inbox's port changing under the same name. Another name
  * (the tailnet address on another device, or localhost after the tailnet)
  * is another place the Inbox is open, with its own permission: the plain ask.
+ * A `.localhost` name (`plannotator.localhost`, the cookie switch, #2184) is
+ * this computer, so moving there from localhost is "moved" too.
  */
 function sameHost(a: string, b: string): boolean {
-  const loopback = (host: string) => host === 'localhost' || host === '[::1]' || /^127\./.test(host);
+  const loopback = (host: string) => host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' || /^127\./.test(host);
   try {
     const left = new URL(a).hostname;
     const right = new URL(b).hostname;
@@ -351,8 +351,6 @@ export function useInboxNotifications(options: {
   tabsRef.current = { onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront };
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
   const counted = useRef(new Set<string>());
-  /** The first list read only records the permissions already waiting (a reload raises nothing for them). */
-  const permissionsPrimed = useRef(false);
   /** Every thread a list read showed this page: a later line of one of those roots is never a new thread. */
   const known = useRef(new Set<string>());
   /** New questions (message id and claim key), waiting for the list read. */
@@ -495,7 +493,7 @@ export function useInboxNotifications(options: {
     if (burst.current.size <= 1) {
       const item = items.at(-1)!;
       const row = rows.get(item.threadId);
-      text = item.notice ?? threadNotificationText({
+      text = threadNotificationText({
         project: row?.project.name ?? 'Plannotator Inbox',
         agent: agentName(item.author),
         subject: row?.subject ?? '(no subject)',
@@ -538,28 +536,9 @@ export function useInboxNotifications(options: {
       const rowList = list.sections.flatMap((section) => section.threads);
       for (const row of rowList) known.current.add(row.thread_id);
       if (rowList.length > 0 || (list.projects ?? []).some((project) => project.threads > 0)) setHasThreads(true);
-      // An agent the Inbox runs waits on a permission (the row's `run`): one notice per request, like a
-      // question that stops the agent. One already waiting when the page loads raises nothing.
-      const runItems: NotifyItem[] = [];
-      for (const row of rowList) {
-        const id = row.run?.state === 'permission' ? row.run.permission_id : null;
-        if (!id || counted.current.has(`acp:${id}`)) continue;
-        counted.current.add(`acp:${id}`);
-        if (!permissionsPrimed.current) continue;
-        runItems.push({
-          threadId: row.thread_id,
-          author: { kind: 'agent', host: row.run!.agent, session: row.run!.key, name: row.run!.label },
-          asks: true,
-          fresh: false,
-          keys: [`acp:${id}`],
-          notice: { title: `${row.project.name}: ${row.run!.label} needs your OK`, body: row.run!.permission_title ?? 'A tool' },
-        });
-      }
-      permissionsPrimed.current = true;
-      if (questions.length === 0 && fresh.length === 0 && runItems.length === 0) return;
+      if (questions.length === 0 && fresh.length === 0) return;
       // The threads these items landed in, newest last, with the agent that wrote.
       const threads = new Map<string, NotifyItem>();
-      for (const item of runItems) threads.set(item.threadId, item);
       for (const threadId of fresh) {
         const root = messages.current.get(threadId);
         if (root) threads.set(threadId, { threadId, author: root.author, asks: false, fresh: true, keys: [`thread:${threadId}`] });

@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readInboxAgents } from "@plannotator/server/inbox-agents";
+import { INBOX_NOTE_START } from "@plannotator/server/inbox-agent-notes";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -177,7 +178,7 @@ test("plannotator inbox --notes adds only the notes named, starts nothing, and a
   expect(result.stderr).toContain("Plannotator can't see, update or remove that copy.");
   expect(result.stderr).toContain("Codex: Added a marked section to ~/.codex/AGENTS.md.");
   expect(result.stderr).toContain("Gemini CLI: Created ~/.gemini/GEMINI.md.");
-  expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain("<!-- plannotator-inbox:start v3 ");
+  expect(readFileSync(join(w.home, ".codex", "AGENTS.md"), "utf8")).toContain(INBOX_NOTE_START);
   expect(existsSync(join(w.home, ".pi"))).toBe(false);
   expect(existsSync(join(w.home, ".cursor"))).toBe(false);
   expect(existsSync(join(w.home, ".plannotator", "inbox", "inbox.json"))).toBe(false);

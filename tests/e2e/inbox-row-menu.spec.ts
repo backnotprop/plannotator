@@ -98,7 +98,7 @@ test('a right-click opens the menu without opening the thread; Copy link copies 
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
   await expect(menu(page)).toBeVisible();
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Pin thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Archive']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Archive']);
   await expect(page.locator(`[data-row="${threads.search}"]`)).toHaveAttribute('data-menu', '');
   expect(page.url()).not.toContain('thread=');
   await shot(page, '01-menu-light.png');
@@ -130,8 +130,10 @@ test('the keyboard: Shift+F10 on a focused row opens the menu, Escape and Tab gi
   // Focus moves into the menu; the arrows walk its items.
   await expect(menu(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  // Pin thread leads (approval "inbox-pinned-threads"), then Copy link.
+  // Pin thread leads (approval "inbox-pinned-threads"), then Copy thread and Copy link.
   await expect(page.locator('[data-row-action="pin"]')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-row-action="copy-thread"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-row-action="copy-link"]')).toBeFocused();
   await shot(page, '03-menu-keyboard-light.png');

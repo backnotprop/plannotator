@@ -286,8 +286,10 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
   let stopped = false;
 
   // "Just updated": this Inbox runs a newer version than the one that ran
-  // before it. Shown as a quiet link for the life of this process, while its
-  // notes are saved or can be fetched (computeUpdatedLink).
+  // before it, or a later start on that version whose link was not yet
+  // offered with readable notes (whatsNewPending). Shown as a quiet link for
+  // the life of this process, while its notes are saved or can be fetched
+  // (computeUpdatedLink).
   let updated: string | null = null;
   // The version the Inbox ran before this one (inboxPreviousVersion), kept
   // across restarts until the next update: What's new counts the releases a
@@ -298,12 +300,14 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       const state = readUpdateState(options.dataDir);
       const before = state.inboxVersion;
       const newer = !!before && compareStableVersions(options.version, before) === 1;
-      if (newer) updated = normalizeStableVersion(options.version);
+      if (newer || (before === options.version && state.whatsNewPending === options.version)) updated = normalizeStableVersion(options.version);
       if (before !== options.version) {
         patchUpdateState((s) => {
           const next: typeof s = { ...s, inboxVersion: options.version };
-          if (newer) next.inboxPreviousVersion = before;
-          else if (before) delete next.inboxPreviousVersion;
+          if (newer) {
+            next.inboxPreviousVersion = before;
+            next.whatsNewPending = options.version;
+          } else if (before) delete next.inboxPreviousVersion;
           return next;
         }, options.dataDir);
       }
@@ -381,11 +385,28 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     return job;
   };
 
+  // Set once this run offered the link with readable notes (whatsNewPending is then removed).
+  let whatsNewOffered = false;
   /** The link shows while the notes are saved, being fetched, or can be fetched now. */
   const computeUpdatedLink = (): string | null => {
     if (!updated) return null;
     try {
-      if (hasReleaseNotesContent(readReleaseNotes(updated, options.dataDir))) return updated;
+      if (hasReleaseNotesContent(readReleaseNotes(updated, options.dataDir))) {
+        // Offered with readable notes: a later start on this version no longer shows it.
+        if (!whatsNewOffered) {
+          whatsNewOffered = true;
+          try {
+            if (readUpdateState(options.dataDir).whatsNewPending === options.version) {
+              patchUpdateState((s) => {
+                const next = { ...s };
+                delete next.whatsNewPending;
+                return next;
+              }, options.dataDir);
+            }
+          } catch {}
+        }
+        return updated;
+      }
       if (!checksOn()) return null;
       if (notesInFlight.has(updated)) return updated;
       return isNotesFetchDue(readUpdateState(options.dataDir), updated, now()) ? updated : null;
@@ -535,7 +556,8 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     const current = model ?? compute();
     let sessions: SessionInfo[] = [];
     try {
-      sessions = listSessions();
+      // An in-process server (OpenCode) keeps no binary open: not "running on" this version.
+      sessions = listSessions().filter((s) => !s.host);
     } catch {}
     const snooze = state.snooze;
     const failingNow = failing();

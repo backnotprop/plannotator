@@ -146,12 +146,12 @@ export const GuideView: React.FC<GuideViewProps> = ({
   const renderLink = useCallback<GuideLinkRenderer>(
     (href, label, key) => {
       const parsed = parseGuideLink(href);
-      if (!parsed?.ok) return null;
+      if (!parsed?.ok) return host.renderLink?.(href, label, key) ?? null;
       const link = parsed.link;
       let onClick: (() => void) | null = null;
       if (link.kind === 'chapter' && link.chapter <= guide.sections.length) onClick = () => jumpToChapter(link.chapter - 1);
       if (link.kind === 'code' && guideFilePaths.has(link.path)) onClick = () => handleRequestReveal(link.path);
-      if (!onClick) return null;
+      if (!onClick) return host.renderLink?.(href, label, key) ?? null;
       return (
         <button
           key={key}
@@ -165,7 +165,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
         </button>
       );
     },
-    [guide.sections.length, guideFilePaths, jumpToChapter, handleRequestReveal],
+    [guide.sections.length, guideFilePaths, jumpToChapter, handleRequestReveal, host.renderLink],
   );
 
   const unplacedSection = useMemo<GuideSection | null>(

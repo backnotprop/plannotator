@@ -14,7 +14,7 @@
  * fallback runs; Chromium's execCommand path is proved in
  * tests/e2e/inbox-dictation-paste.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 

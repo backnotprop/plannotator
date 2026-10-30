@@ -1,6 +1,6 @@
 ---
 import { shortcutReferenceSurfaces } from '../lib/shortcutReference';
-import { formatShortcutBindingsText } from '../../../../packages/ui/shortcuts';
+import { formatShortcutDefinitionText } from '../../../../packages/ui/shortcuts';
 ---
 
 <p>Keyboard shortcuts available across the Plannotator review and annotation UIs.</p>
@@ -24,7 +24,7 @@ import { formatShortcutBindingsText } from '../../../../packages/ui/shortcuts';
           <tbody>
             {section.shortcuts.map((shortcut) => (
               <tr>
-                <td><code>{formatShortcutBindingsText(shortcut.bindings)}</code></td>
+                <td><code>{formatShortcutDefinitionText(shortcut)}</code></td>
                 <td>{shortcut.description}</td>
                 <td>{shortcut.hint ?? '—'}</td>
               </tr>

@@ -1,118 +1,28 @@
 /**
- * The Inbox window's browser proofs: a real Chromium against the compiled
- * binary (`plannotator inbox`), under a temp PLANNOTATOR_DATA_DIR: the window
- * (inbox.spec.ts), the onboarding tour (inbox-tour.spec.ts), notifications and
- * guided reviews (inbox-guides.spec.ts), New message
- * (inbox-new-message.spec.ts), hover cards for issue, PR and MR links (inbox-ref-cards.spec.ts), compose: a new message to a connected agent (inbox-compose.spec.ts), the skill picker in compose opening at the caret (inbox-compose-skill-picker.spec.ts), pasting images into compose and the reply box (inbox-paste.spec.ts), the question sound and its one-time dialog (inbox-sound.spec.ts), stepping through a thread's attachments (inbox-attachment-stepping.spec.ts), one viewer for a thread's images and files (inbox-image-viewer.spec.ts), stepping through files on a phone with the toolbar pill and a swipe (inbox-phone-stepping.spec.ts), a thread's Artifacts view (inbox-artifacts.spec.ts), one full-screen mode for files (inbox-full-view.spec.ts), the side-by-side view named and remembered (inbox-side-by-side.spec.ts), full screen going back to where it was opened from (inbox-fullscreen-close.spec.ts), coming back from a file keeping the thread's place (inbox-thread-scroll-return.spec.ts), video attachments (inbox-video.spec.ts), replying when the asking session has ended (inbox-ended-session.spec.ts), Queued, Sending and Send now under a sent reply (inbox-send-now.spec.ts), replies to a busy agent: Undelivered N min and going in by themselves after 5 minutes (inbox-undelivered.spec.ts), a session that needs a restart after an update (inbox-restart.spec.ts), Pi, Oh My Pi and OpenCode 2 sessions that need a reload (inbox-reload-hosts.spec.ts), the order inside a section (inbox-order.spec.ts), replaced questions (inbox-replaced.spec.ts), Re-ask (inbox-reask.spec.ts), picture choices and the question contract lines (inbox-picture-choices.spec.ts), the Recommended pill staying on the tag (inbox-choice-pill.spec.ts), the open questions button in a thread's foot (inbox-open-questions.spec.ts), folding a thread (inbox-thread-folding.spec.ts), choice labels written in markdown (inbox-choice-labels.spec.ts), phones (inbox-phones.spec.ts), the sidebar (inbox-sidebar.spec.ts), the list column's resize edge (inbox-list-resize.spec.ts), images in messages (inbox-message-images.spec.ts), links to attached files (inbox-message-links.spec.ts), links inside an attached HTML page (inbox-html-links.spec.ts), links in annotate's HTML file and live app surfaces (annotate-html-links.spec.ts), Back in a review of several files keeping the reader's place (annotate-bundle-back-scroll.spec.ts), Send Feedback after the annotate server was killed (annotate-send-failure.spec.ts), Over your tailnet (inbox-tailscale.spec.ts), the update control (inbox-updates.spec.ts), Mark read and the Send that skips (inbox-mark-read.spec.ts), the thread foot shortening before it wraps (inbox-thread-foot.spec.ts), the thread header's order (inbox-thread-header.spec.ts), 👍 Looks good (inbox-ack.spec.ts), action items an agent needs you to go do (inbox-actions.spec.ts), the project menu (inbox-project-menu.spec.ts), the thread row's right-click menu (inbox-row-menu.spec.ts), pinned threads in the sidebar, on a desktop and an iPhone in WebKit (inbox-pins.spec.ts), the Board page (inbox-board.spec.ts), archived threads in Settings (inbox-archived.spec.ts), the row you open staying put and the settle (inbox-open-stays-put.spec.ts), a new message in the thread you have open (inbox-seen-on-sight.spec.ts), the agents on this computer (inbox-agents.spec.ts), the annotation toolstrip painting above the document in the Inbox and annotate (toolstrip-stacking.spec.ts), the toolstrip's label in both reading directions, in Chromium and in the webkit project (toolstrip-rtl.spec.ts), the window on a phone in WebKit and Chromium (inbox-mobile.spec.ts), the question card footer, radios and attaching images on a phone (inbox-mobile-fixes.spec.ts), Settings in sections (inbox-settings.spec.ts), the worst-case data at every width (inbox-worst-case.spec.ts), dictated (pasted) text landing in the field being written in (inbox-dictation-paste.spec.ts), the Soft look's polish pass (inbox-soft-polish.spec.ts), pulling a phone's list down to refresh it (inbox-pull-refresh.spec.ts), reply drafts and the Draft label (inbox-reply-drafts.spec.ts), picks made while writing a reply (inbox-picks-composing.spec.ts), tabs sharing one event stream (inbox-shared-events.spec.ts, and in WebKit inbox-shared-events-webkit.spec.ts), code review drawing diagrams with the engine it loads on demand (review-diagrams.spec.ts), comments on part of an image in annotate and plan review (image-region-comments.spec.ts), and the
- * (inbox-new-message.spec.ts), hover cards for issue, PR and MR links (inbox-ref-cards.spec.ts), compose: a new message to a connected agent (inbox-compose.spec.ts), the skill picker in compose opening at the caret (inbox-compose-skill-picker.spec.ts), pasting images into compose and the reply box (inbox-paste.spec.ts), the question sound and its one-time dialog (inbox-sound.spec.ts), stepping through a thread's attachments (inbox-attachment-stepping.spec.ts), one viewer for a thread's images and files (inbox-image-viewer.spec.ts), stepping through files on a phone with the toolbar pill and a swipe (inbox-phone-stepping.spec.ts), a thread's Artifacts view (inbox-artifacts.spec.ts), one full-screen mode for files (inbox-full-view.spec.ts), the side-by-side view named and remembered (inbox-side-by-side.spec.ts), video attachments (inbox-video.spec.ts), replying when the asking session has ended (inbox-ended-session.spec.ts), Queued, Sending and Send now under a sent reply (inbox-send-now.spec.ts), replies to a busy agent: Undelivered N min and going in by themselves after 5 minutes (inbox-undelivered.spec.ts), a session that needs a restart after an update (inbox-restart.spec.ts), Pi, Oh My Pi and OpenCode 2 sessions that need a reload (inbox-reload-hosts.spec.ts), the order inside a section (inbox-order.spec.ts), replaced questions (inbox-replaced.spec.ts), Re-ask (inbox-reask.spec.ts), folding a thread (inbox-thread-folding.spec.ts), phones (inbox-phones.spec.ts), the sidebar (inbox-sidebar.spec.ts), the list column's resize edge (inbox-list-resize.spec.ts), images in messages (inbox-message-images.spec.ts), links to attached files (inbox-message-links.spec.ts), links inside an attached HTML page (inbox-html-links.spec.ts), links in annotate's HTML file and live app surfaces (annotate-html-links.spec.ts), Back in a review of several files keeping the reader's place (annotate-bundle-back-scroll.spec.ts), Over your tailnet (inbox-tailscale.spec.ts), the update control (inbox-updates.spec.ts), Mark read and the Send that skips (inbox-mark-read.spec.ts), the thread foot shortening before it wraps (inbox-thread-foot.spec.ts), the thread header's order (inbox-thread-header.spec.ts), 👍 Looks good (inbox-ack.spec.ts), action items an agent needs you to go do (inbox-actions.spec.ts), the project menu (inbox-project-menu.spec.ts), archived threads in Settings (inbox-archived.spec.ts), the row you open staying put and the settle (inbox-open-stays-put.spec.ts), a new message in the thread you have open (inbox-seen-on-sight.spec.ts), the agents on this computer (inbox-agents.spec.ts), the annotation toolstrip painting above the document in the Inbox and annotate (toolstrip-stacking.spec.ts), the toolstrip's label in both reading directions, in Chromium and in the webkit project (toolstrip-rtl.spec.ts), the window on a phone in WebKit and Chromium (inbox-mobile.spec.ts), Settings in sections (inbox-settings.spec.ts), the worst-case data at every width (inbox-worst-case.spec.ts), dictated (pasted) text landing in the field being written in (inbox-dictation-paste.spec.ts), component tooltips in place of native titles (inbox-tooltips.spec.ts), tagging agents in a reply or a comment (inbox-tags.spec.ts), reply drafts and the Draft label (inbox-reply-drafts.spec.ts), picks made while writing a reply (inbox-picks-composing.spec.ts), and the
- * surface a phone hosts, in WebKit (surface.spec.ts), on Linux, Inter's stylistic sets reaching Inter only and never monospace text, while macOS and Windows keep them as before (mono-font-features.spec.ts, on the built apps/hook/dist pages), hover cards for #refs in plan review, annotate and code review (ref-cards-review.spec.ts),
- * the @plannotator/ui file tree's scroll anchoring and font-following row height
- * (file-tree.spec.ts, no binary), and the VS Code Guides
- * webview's sanitizer and Mermaid path (vscode-guides-sanitize.spec.ts) and its answer
- * frame under the answer tab's policy (vscode-guides-answer.spec.ts). Build the binary
- * first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Copy file in a code attachment has its own spec (inbox-copy-file.spec.ts).
+ * The browser proofs: headless Playwright against the Inbox window, annotate,
+ * plan review, code review and the VS Code Guides webview, mostly on the
+ * compiled binary under a temp PLANNOTATOR_DATA_DIR. Build the binary first
+ * (see inbox.spec.ts), then `bun run test:e2e:inbox`. One spec:
+ * `bunx playwright test -c tests/e2e/playwright.config.ts <name>.spec.ts`.
+ *
+ * Each spec says what it proves in its own header comment. A new
+ * `tests/e2e/*.spec.ts` runs in the `chromium` project with no edit to this
+ * file; name it `*-webkit.spec.ts` to run it in the `webkit` project only.
  */
 import { defineConfig } from '@playwright/test';
 
+/** Specs that their own config runs, never this one: the thread parity harness (inbox-thread-parity.config.ts). */
+const OWN_CONFIG = ['inbox-thread-parity.spec.ts'];
+/** Specs that run in the `webkit` project only. */
+const WEBKIT_ONLY = '*-webkit.spec.ts';
+
 export default defineConfig({
   testDir: '.',
-  testMatch: [
-    'annotate-ai-history.spec.ts',
-    'annotate-bundle-back-scroll.spec.ts',
-    'annotate-html-links.spec.ts',
-    'annotate-send-failure.spec.ts',
-    'file-tree.spec.ts',
-    'image-region-comments.spec.ts',
-    'inbox-ack.spec.ts',
-    'inbox-action-markdown.spec.ts',
-    'inbox-actions.spec.ts',
-    'inbox-agents.spec.ts',
-    'inbox-archived.spec.ts',
-    'inbox-artifacts.spec.ts',
-    'inbox-attachment-stepping.spec.ts',
-    'inbox-attachments-kinds.spec.ts',
-    'inbox-attachments.spec.ts',
-    'inbox-board.spec.ts',
-    'inbox-choice-labels.spec.ts',
-    'inbox-choice-pill.spec.ts',
-    'inbox-compose-skill-picker.spec.ts',
-    'inbox-compose.spec.ts',
-    'inbox-copy-file.spec.ts',
-    'inbox-decision-mode.spec.ts',
-    'inbox-dictation-paste.spec.ts',
-    'inbox-ended-session.spec.ts',
-    'inbox-explicit-skip.spec.ts',
-    'inbox-first-run.spec.ts',
-    'inbox-full-view.spec.ts',
-    'inbox-fullscreen-close.spec.ts',
-    'inbox-guides.spec.ts',
-    'inbox-html-links.spec.ts',
-    'inbox-image-viewer.spec.ts',
-    'inbox-list-resize.spec.ts',
-    'inbox-mark-read.spec.ts',
-    'inbox-message-comments.spec.ts',
-    'inbox-message-images.spec.ts',
-    'inbox-message-links.spec.ts',
-    'inbox-mobile-fixes.spec.ts',
-    'inbox-mobile.spec.ts',
-    'inbox-new-message.spec.ts',
-    'inbox-open-questions.spec.ts',
-    'inbox-open-stays-put.spec.ts',
-    'inbox-order.spec.ts',
-    'inbox-paste.spec.ts',
-    'inbox-phone-stepping.spec.ts',
-    'inbox-phones.spec.ts',
-    'inbox-picks-composing.spec.ts',
-    'inbox-picture-choices.spec.ts',
-    'inbox-pins.spec.ts',
-    'inbox-project-menu.spec.ts',
-    'inbox-pull-refresh.spec.ts',
-    'inbox-reask.spec.ts',
-    'inbox-ref-cards.spec.ts',
-    'inbox-refresh.spec.ts',
-    'inbox-reload-hosts.spec.ts',
-    'inbox-replaced.spec.ts',
-    'inbox-reply-drafts.spec.ts',
-    'inbox-restart.spec.ts',
-    'inbox-row-menu.spec.ts',
-    'inbox-search.spec.ts',
-    'inbox-seen-on-sight.spec.ts',
-    'inbox-send-now.spec.ts',
-    'inbox-settings.spec.ts',
-    'inbox-shared-events.spec.ts',
-    'inbox-side-by-side.spec.ts',
-    'inbox-sidebar.spec.ts',
-    'inbox-soft-polish.spec.ts',
-    'inbox-sound.spec.ts',
-    'inbox-tags.spec.ts',
-    'inbox-tailscale.spec.ts',
-    'inbox-thread-folding.spec.ts',
-    'inbox-thread-foot.spec.ts',
-    'inbox-thread-header.spec.ts',
-    'inbox-thread-scroll-return.spec.ts',
-    'inbox-tooltips.spec.ts',
-    'inbox-tour.spec.ts',
-    'inbox-undelivered.spec.ts',
-    'inbox-update-notice.spec.ts',
-    'inbox-updates.spec.ts',
-    'inbox-video.spec.ts',
-    'inbox-worst-case.spec.ts',
-    'inbox.spec.ts',
-    'mono-font-features.spec.ts',
-    'notifications.spec.ts',
-    'ref-cards-review.spec.ts',
-    'review-diagrams.spec.ts',
-    'surface.spec.ts',
-    'toolstrip-rtl.spec.ts',
-    'toolstrip-stacking.spec.ts',
-    'vscode-guides-answer.spec.ts',
-    'vscode-guides-sanitize.spec.ts',
-  ],
+  testMatch: '*.spec.ts',
+  testIgnore: OWN_CONFIG,
   outputDir: '../../.local/test-results',
-  // A stand-in first on PATH for every agent CLI the Inbox runs itself, and a tripwire that fails the run on a call past --version (tests/helpers/agent-cli-guard.ts).
+  // Feedback never reaches the live Worker, and agent CLI stubs go first on PATH: a stub that is called fails the run (global-setup.ts, agent-cli-stubs.ts).
   globalSetup: './global-setup.ts',
-  globalTeardown: './global-teardown.ts',
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -126,9 +36,9 @@ export default defineConfig({
     launchOptions: { args: ['--use-mock-keychain', '--password-store=basic'] },
   },
   projects: [
-    // Every spec, in Chromium.
-    { name: 'chromium' },
-    // The toolstrip's right-to-left check in WebKit too. No Chromium flags here: WebKit refuses them.
-    { name: 'webkit', testMatch: ['toolstrip-rtl.spec.ts', 'inbox-shared-events-webkit.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
+    // Every spec but the WebKit-only ones, in Chromium. A project's testIgnore replaces the top-level one, so it repeats OWN_CONFIG.
+    { name: 'chromium', testIgnore: [...OWN_CONFIG, WEBKIT_ONLY] },
+    // The WebKit-only specs, and the toolstrip's right-to-left check in WebKit too. No Chromium flags here: WebKit refuses them.
+    { name: 'webkit', testMatch: [WEBKIT_ONLY, 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
   ],
 });

@@ -59,8 +59,9 @@ import {
   questionChoiceWithoutRecommendedMarker,
   parseQuestionChoiceText,
 } from "./question-block";
-import { readInboxQuestionKind } from "./inbox-types";
+import { INBOX_ROW_WAITS_MAX, INBOX_ROW_WAIT_ENTRY_MAX, INBOX_ROW_WAIT_HOLDS_MAX, INBOX_ROW_WAIT_TEXT_MAX, readInboxQuestionKind } from "./inbox-types";
 import type {
+  InboxRowWait,
   InboxQuestionContract,
   InboxQuestion,
   InboxQuestionFacts,
@@ -464,6 +465,31 @@ export function summarizeInboxQuestions(questions: readonly InboxQuestion[]): In
     if (prompt === null) prompt = q.prompt;
   }
   return { open, picked, stopped, holds_up: holdsUp, prompt, actions, ...(staged > 0 ? { staged } : {}) };
+}
+
+/**
+ * What a row's Stopped / Holds up badge holds (approval "inbox-row-badges"):
+ * the open questions and action items that stop the agent or hold something
+ * up, in the order given (thread order), capped. The same open rule as the
+ * badges' summary (`summarizeInboxQuestions`), so the card never lists a
+ * question the badge does not count.
+ */
+export function inboxRowWaits(questions: readonly InboxQuestion[]): InboxRowWait[] {
+  const out: InboxRowWait[] = [];
+  for (const q of questions) {
+    if (out.length >= INBOX_ROW_WAITS_MAX) break;
+    if (!inboxQuestionWaitsForList(q) || q.state !== "open") continue;
+    if (q.stopped === null && q.holds_up.length === 0) continue;
+    out.push({
+      message_id: q.message_id,
+      key: q.key,
+      position: q.position,
+      prompt: cutText(q.prompt, INBOX_ROW_WAIT_TEXT_MAX),
+      stopped: q.stopped === null ? null : cutText(q.stopped, INBOX_ROW_WAIT_TEXT_MAX),
+      holds_up: q.holds_up.slice(0, INBOX_ROW_WAIT_HOLDS_MAX).map((h) => cutText(h, INBOX_ROW_WAIT_ENTRY_MAX)),
+    });
+  }
+  return out;
 }
 
 // ─────────────────────────────── Picks ───────────────────────────────

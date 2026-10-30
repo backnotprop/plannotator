@@ -82,6 +82,12 @@ packages/ui/components/html-viewer/bridge-script.asset.js
 packages/ui/components/html-viewer/bridge-script.lite.ts
 .wrangler/
 
+# The guides.show viewer pin, generated (never committed: its hashes move with
+# every viewer change, so a committed copy conflicted across open PRs).
+# `bun install` writes the fallback pin; `bun run build:viewer-pin` pins this
+# checkout's viewer build. See apps/guides-show/build/sync-manifest.ts.
+packages/core/guide-viewer-manifest.ts
+
 # Local working notes at the repo root (untracked by design — never commit).
 # Guard added after 548dad1f swept these into main with a blanket add.
 /DESIGN_*
@@ -107,3 +113,6 @@ packages/ui/components/html-viewer/bridge-script.lite.ts
 /adr/research/SPIKE-bundle-optimization-theories-20260619-154926.md
 /adr/research/SPIKE-local-app-annotation-20260810.md
 /scripts/convert-themes.ts
+
+# Playwright run results (local runs write them at the repo root)
+test-results/

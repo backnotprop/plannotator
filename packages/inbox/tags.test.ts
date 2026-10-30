@@ -4,7 +4,20 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { TaggableModel, TaggableSession } from './api';
-import { TAG_READERS_GROUP, sendTagsByTarget, sentRecipientsWords, tagDeliveryLine, tagHeadsUp, tagName, tagOptions, tagPeople, tagsToSend } from './tags';
+import {
+  TAG_READERS_GROUP,
+  effectiveTagMode,
+  sendTagsByTarget,
+  sentRecipientsWords,
+  tagDeliveryLine,
+  tagHeadsUp,
+  tagModeLine,
+  tagName,
+  tagOptions,
+  tagPeople,
+  tagsToSend,
+  type TagOption,
+} from './tags';
 import { tagTokenSpans } from './tagHighlight';
 
 const time = (iso: string) => iso.slice(11, 16);
@@ -155,5 +168,66 @@ describe('a sent reply', () => {
     const text = 'Ok. @Claude Code (another session) re-run it. @Pi raise it; @Pilot no; a@Pi no; (@Pi) yes.';
     const spans = tagTokenSpans(text, ['Pi', 'Claude Code', 'Claude Code (another session)']).map((s) => text.slice(s.start, s.end));
     expect(spans).toEqual(['@Claude Code (another session)', '@Pi', '@Pi']);
+  });
+});
+
+describe('the reply box line (approval "inbox-tag-handoff", A2)', () => {
+  const opt = (id: string, label: string, extra: Partial<TagOption> = {}): TagOption => ({
+    id,
+    host: 'claude-code',
+    label,
+    agent: 'Claude Code',
+    detail: '',
+    group: 'Claude Code',
+    owner: false,
+    wakes: true,
+    taggable: true,
+    project: null,
+    ...extra,
+  });
+  const herdr = opt('ses_herdr', 'Claude Code (herdr)');
+  const pi = opt('ses_pi', 'Pi', { host: 'pi', agent: 'Pi' });
+  const codex = opt('ses_codex', 'Codex', { host: 'codex', agent: 'Codex', wakes: false });
+  const owner = opt('ses_owner', 'Claude Code', { owner: true });
+
+  test('one live agent: an Ask by default, with both switches; each switch reads back with Ask instead', () => {
+    expect(tagModeLine([herdr], 'ask')).toEqual({
+      mode: 'ask',
+      lead: 'Asks',
+      names: 'Claude Code (herdr)',
+      after: '',
+      links: [
+        { mode: 'add', label: 'Add instead' },
+        { mode: 'handoff', label: 'Hand off instead' },
+      ],
+    });
+    expect(tagModeLine([herdr], 'handoff')).toMatchObject({ mode: 'handoff', lead: 'Hands this thread to', names: 'Claude Code (herdr)', links: [{ mode: 'ask', label: 'Ask instead' }] });
+    expect(tagModeLine([herdr], 'add')).toMatchObject({ mode: 'add', lead: 'Adds', after: ' to this thread', links: [{ mode: 'ask', label: 'Ask instead' }] });
+  });
+
+  test('no line for the owner alone; Hand off only for one agent; neither switch while an agent is not woken', () => {
+    expect(tagModeLine([owner], 'ask')).toBeNull();
+    expect(tagModeLine([herdr, pi], 'ask')!.links.map((l) => l.mode)).toEqual(['add']);
+    expect(tagModeLine([pi, codex], 'ask')).toMatchObject({ names: 'Pi and Codex', links: [] });
+    expect(tagModeLine([pi, codex], 'ask')!.after).toBe(" · Codex isn't woken: it sees your reply the next time it reads this thread");
+  });
+
+  test('a mode no longer offered (a second tag, an agent not woken) sends as an Ask', () => {
+    expect(effectiveTagMode([herdr], 'handoff')).toBe('handoff');
+    expect(effectiveTagMode([herdr, pi], 'handoff')).toBe('ask');
+    expect(effectiveTagMode([herdr, pi], 'add')).toBe('add');
+    expect(effectiveTagMode([pi, codex], 'add')).toBe('ask');
+    expect(effectiveTagMode([], 'handoff')).toBe('ask');
+  });
+
+  test("the mode rides only the words' tags; an Ask is sent with no mode, as before; a comment's tag stays an Ask", () => {
+    const options = [herdr, pi];
+    const ask = sendTagsByTarget([{ id: 'm1', owner: 'ses_owner' }], ['ses_herdr'], new Map(), options);
+    expect(ask.get('m1')).toEqual([{ host: 'claude-code', session: 'ses_herdr', label: 'Claude Code (herdr)' }]);
+    const handed = sendTagsByTarget([{ id: 'm1', owner: 'ses_owner' }], ['ses_herdr'], new Map([['m1', ['ses_pi']]]), options, 'handoff');
+    expect(handed.get('m1')).toEqual([
+      { host: 'claude-code', session: 'ses_herdr', label: 'Claude Code (herdr)', mode: 'handoff' },
+      { host: 'pi', session: 'ses_pi', label: 'Pi' },
+    ]);
   });
 });

@@ -18,7 +18,7 @@ import { type DiffType, prepareLocalReviewDiff, detectManagedVcs, gitRuntime } f
 import { resolveReviewOpenState } from "@plannotator/shared/review-open-state";
 import { detectProjectName } from "@plannotator/server/project";
 import { parsePRUrl, checkPRAuth, fetchPR, getCliName, getMRLabel, getMRNumberLabel, getDisplayRepo } from "@plannotator/server/pr";
-import { loadConfig, resolveDefaultDiffType, resolveUseJina } from "@plannotator/shared/config";
+import { loadConfig, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveUseJina } from "@plannotator/shared/config";
 import {
   composeReviewApprovedMessage,
   getAnnotateApprovedWithNotesPrompt,
@@ -53,6 +53,7 @@ import path from "path";
 import { resolveValidatedTargetAgent } from "./agent-switch";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
 import { announceSessionUrl } from "./session-url";
+import { decideListed } from "./session-registry";
 import {
   readLastUserAgent,
   readMessageAgent,
@@ -124,6 +125,7 @@ export async function handleReviewCommand(
   // plugin's existing log path and refuse to start a session.
   const openStatePinned = reviewArgs.base !== undefined || reviewArgs.diffType !== undefined;
   let initialBaseFromFlags: string | undefined;
+  let initialBaseExplicit = false;
 
   let rawPatch: string;
   let gitRef: string;
@@ -223,7 +225,7 @@ export async function handleReviewCommand(
           vcsType: reviewArgs.vcsType,
           requestedDiffType: openState.requestedDiffType,
           requestedBase: openState.requestedBase,
-          configuredDiffType: resolveDefaultDiffType(config),
+          configuredDiffType: resolveDefaultDiffTypeFor(config, managedVcs?.id),
           hideWhitespace: config.diffOptions?.hideWhitespace ?? false,
         });
         gitContext = diffResult.gitContext;
@@ -234,8 +236,9 @@ export async function handleReviewCommand(
         initialFingerprint = diffResult.fingerprint;
         // Forward the base the patch was computed against — without it the
         // server serves this patch under the detected default: a mixed-base
-        // review.
-        if (openState.requestedBase !== undefined) initialBaseFromFlags = diffResult.base;
+        // review. Evolution diff opens on the change's previous state.
+        if (openState.requestedBase !== undefined || diffResult.diffType === "jj-evolog") initialBaseFromFlags = diffResult.base;
+        initialBaseExplicit = openState.requestedBase !== undefined;
         initialFileIdentities = diffResult.fileIdentities;
       } catch (err) {
         client.app.log({ level: "error", message: err instanceof Error ? err.message : "Failed to prepare local review diff" });
@@ -274,17 +277,18 @@ export async function handleReviewCommand(
   const sessionId = event.properties?.sessionID;
 
   const startServer = deps.startReviewServer ?? startReviewServer;
+  const reviewProject = (await detectProjectName(reviewDirectory ? reviewCwd : undefined)) ?? undefined;
   const server = await startServer({
     rawPatch,
     gitRef,
     error: diffError,
     origin: "opencode",
-    project: (await detectProjectName(reviewDirectory ? reviewCwd : undefined)) ?? undefined,
+    project: reviewProject,
     includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,
     gitContext,
     initialBase: initialBaseFromFlags,
-    initialBaseExplicit: initialBaseFromFlags !== undefined,
+    initialBaseExplicit,
     openStatePinned,
     // `--no-git-remote-check` (#1553): session-only, and only ever a disable —
     // undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck deciding.
@@ -310,10 +314,8 @@ export async function handleReviewCommand(
     },
   });
 
-  const result = await server.waitForDecision();
+  const result = await decideListed(server, "review", reviewProject);
   result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
-  await Bun.sleep(1500);
-  server.stop();
 
   if (result.exit) {
     return;
@@ -567,9 +569,7 @@ export async function handleAnnotateCommand(
     },
   });
 
-  const result = await server.waitForDecision();
-  await Bun.sleep(1500);
-  server.stop();
+  const result = await decideListed(server, "annotate", annotateProject);
 
   // A Done with nothing to send (#1701) carries the zero-state sentence as
   // feedback; it is not something the agent should act on.
@@ -709,9 +709,7 @@ export async function handleAnnotateLastCommand(
     },
   });
 
-  const result = await server.waitForDecision();
-  await Bun.sleep(1500);
-  server.stop();
+  const result = await decideListed(server, "annotate", lastProject);
 
   if (result.exit || (result.approved && !result.feedback) || result.nothingToSend === true) {
     return null;

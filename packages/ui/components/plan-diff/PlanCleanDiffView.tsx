@@ -573,7 +573,7 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
   switch (block.type) {
     case "unchanged":
       return (
-        <div className={`plan-diff-unchanged ${unchangedClassName ?? DEFAULT_UNCHANGED_CLASS}`}>
+        <div className={`plan-diff-unchanged ${unchangedClassName ?? DEFAULT_UNCHANGED_CLASS}`} data-doc-text="">
           <MarkdownChunk content={block.content} />
         </div>
       );

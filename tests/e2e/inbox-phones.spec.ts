@@ -375,7 +375,7 @@ test('This Wi-Fi where nothing can announce it (no Bonjour) and where openssl fa
   writeFileSync(join(root, 'mode'), 'ok');
   writeFileSync(join(bin, 'openssl'), `#!/bin/sh\nread mode < '${join(root, 'mode')}'\nif [ "$mode" = broken ]; then echo 'openssl: broken' >&2; exit 1; fi\nexec '${real!}' "$@"\n`);
   chmodSync(join(bin, 'openssl'), 0o755);
-  const env = { PATH: bin, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_INBOX_PHONES: '1' };
+  const env = { PATH: bin, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_INBOX_PHONES: '1', PLANNOTATOR_TEST_SANDBOX: root };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const other = await world.context.newPage();

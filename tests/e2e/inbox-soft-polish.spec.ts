@@ -187,7 +187,7 @@ test("Mark read's E is a keycap inside its button, centred on it; today's look k
   expect(today.line).not.toBe('rgba(0, 0, 0, 0)');
   // Today: the button's 11 px end padding and its 1 px border.
   expect(today.end).toBeCloseTo(12, 0);
-  await expect(kbd).toHaveText('E');
+  await expect(kbd).toHaveAttribute('data-keycap', 'E');
 });
 
 test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard focus) the name is cut before it and keeps its end, left to right and right to left", async () => {

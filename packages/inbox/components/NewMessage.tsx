@@ -249,8 +249,6 @@ export function NewMessageComposer({
         <button type="button" className="ib-btn ib-ghost" onClick={onCancel}>
           Cancel
         </button>
-        <span className="ib-sp" />
-        <span className="ib-st">{target.busy ? `${name} takes it when its turn ends.` : `${name} takes it as its next turn.`}</span>
       </div>
       {error && (
         <div className="ib-error" role="alert">

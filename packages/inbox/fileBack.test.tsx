@@ -11,7 +11,7 @@
  * open the header is as before. The compiled-binary proof is
  * tests/e2e/inbox-attachments.spec.ts.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
@@ -171,18 +171,20 @@ const listRow = (el: ParentNode, threadId: string) => el.querySelector<HTMLEleme
 test.skipIf(!hasDom)('with a file open beside the thread, ‹ Inbox leads the header and brings the list back', async () => {
   const el = await renderApp(`#thread=${ids.filed}&file=${ids.attachment}`);
   await until(() => el.querySelector('.ib-view') !== null && back(el) !== null, 'the file beside the thread');
-  // The list and the sidebar are hidden by the file; the way back leads, then Mark read; Archive ends the header, and the thread's × is gone.
+  // The list and the sidebar are hidden by the file; the way back leads, then Mark read; Archive and ⋯ More end the header, and the thread's × is gone.
   expect(el.querySelector('.ib-listcol')).toBeNull();
   expect(sidebarState(el)).toBe('collapsed');
   const head = el.querySelector('section.ib-pane .ib-phead')!;
   expect(head.firstElementChild).toBe(back(el));
-  // Mark read follows the way back (after its divider), and Archive ends the header, where the × was.
+  // Mark read follows the way back (after its divider), and Archive then ⋯ More end the header, where the × was.
   const buttons = [...head.querySelectorAll('button')];
   expect(buttons[0]).toBe(back(el)!);
   const markRead = head.querySelector<HTMLButtonElement>('[data-mark-read]');
   expect(markRead).not.toBeNull();
   expect(buttons[1]).toBe(markRead!);
-  expect(head.lastElementChild).toBe(head.querySelector('[data-archive]'));
+  // ⋯ More (the copy menu, design record "inbox-copy-message") ends it, right after Archive.
+  expect(head.lastElementChild).toBe(head.querySelector('[data-thread-more]'));
+  expect(head.lastElementChild!.previousElementSibling).toBe(head.querySelector('[data-archive]'));
   expect(back(el)!.getAttribute('aria-label')).toBe('Back to Inbox');
   expect(back(el)!.textContent?.trim()).toBe('Inbox');
   expect(await tooltipOf(back(el)!)).toBe('Close notes.md and show the list');

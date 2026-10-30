@@ -6,10 +6,10 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GuideGeneration, type GenerationDeps, type GenerationInput } from "./generation";
+import { GuideGeneration, resolveHeadFile, type GenerationDeps, type GenerationInput } from "./generation";
 import { CLAUDE_CODE, CODEX, KNOWN_AGENTS, customAgent, type AgentDescriptor } from "@plannotator/acp-client/agents";
 import { startRelayHost, type RelayHost } from "./mcp/relay-host";
 import { changedFilesFromPatch } from "./sources/git";
@@ -674,3 +674,26 @@ async function gone(pid: number, timeoutMs: number): Promise<boolean> {
     return true;
   }
 }
+
+describe("the builder's resolveFile hook", () => {
+  it("counts a real file's lines; a symlink out of the repository, a folder or a path up out of it is not there", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pn-resolve-file-"));
+    try {
+      const root = join(dir, "repo");
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "a.ts"), "one\ntwo\nthree\n");
+      writeFileSync(join(dir, "credentials"), "secret\n".repeat(40));
+      symlinkSync(join(dir, "credentials"), join(root, "notes.md"));
+      symlinkSync(join(root, "src", "a.ts"), join(root, "alias.ts"));
+      expect(await resolveHeadFile(root, "src/a.ts")).toEqual({ exists: true, lineCount: 3 });
+      expect(await resolveHeadFile(root, "alias.ts")).toEqual({ exists: true, lineCount: 3 });
+      expect(await resolveHeadFile(root, "notes.md")).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, "src")).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, "../credentials")).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, join(dir, "credentials"))).toEqual({ exists: false });
+      expect(await resolveHeadFile(root, "missing.ts")).toEqual({ exists: false });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

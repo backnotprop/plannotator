@@ -3,7 +3,7 @@
  * changes, in the file's own style, and anything that cannot be placed
  * safely is refused.
  */
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { addJsonMember, removeJsonMember } from "./json-edit";
 
 const V = { command: "/p", args: ["inbox", "mcp"] };
@@ -49,4 +49,41 @@ test("removal of the first, a middle and the only member keeps everything else",
   expect(removeJsonMember('{"m":{"k":1,"a":2}}', ["m"], "k")).toEqual({ ok: true, changed: true, text: '{"m":{"a":2}}' });
   expect(removeJsonMember('{"m":{"a":1,"k":2,"b":3}}', ["m"], "k")).toEqual({ ok: true, changed: true, text: '{"m":{"a":1,"b":3}}' });
   expect(removeJsonMember('{"m":{\n  "k": 1\n}}', ["m"], "k")).toEqual({ ok: true, changed: true, text: '{"m":{}}' });
+});
+
+describe("JSON with comments (Qwen Code's settings.json)", () => {
+  const C = { comments: true };
+
+  test("every comment stays: the comma goes before a comment ending the last member's line, the member after it; removal gives the file back", () => {
+    const before = '{\n  // mine\n  "mcpServers": {\n    "a": { "env": { "T": "${T}" } } // keep\n  },\n  /* x */ "z": "http://a//b"\n}\n';
+    const added = addJsonMember(before, ["mcpServers"], "k", 1, C);
+    expect(added).toEqual({ ok: true, changed: true, text: '{\n  // mine\n  "mcpServers": {\n    "a": { "env": { "T": "${T}" } }, // keep\n    "k": 1\n  },\n  /* x */ "z": "http://a//b"\n}\n' });
+    expect(removeJsonMember(added.ok ? added.text : "", ["mcpServers"], "k", C)).toEqual({ ok: true, changed: true, text: before });
+    // A comment inside an empty object stays, after the new member.
+    expect(addJsonMember('{\n  "m": {\n    // none yet\n  }\n}', ["m"], "k", 1, C)).toEqual({ ok: true, changed: true, text: '{\n  "m": {\n    "k": 1\n    // none yet\n  }\n}' });
+  });
+
+  test("a CRLF file keeps CRLF everywhere: a line comment ending the last member's line keeps its line ending", () => {
+    const before = '{\r\n  "mcpServers": {\r\n    "a": 1 // keep\r\n  }\r\n}\r\n';
+    const added = addJsonMember(before, ["mcpServers"], "k", { c: "x" }, C);
+    expect(added).toEqual({ ok: true, changed: true, text: '{\r\n  "mcpServers": {\r\n    "a": 1, // keep\r\n    "k": {\r\n      "c": "x"\r\n    }\r\n  }\r\n}\r\n' });
+    expect(removeJsonMember(added.ok ? added.text : "", ["mcpServers"], "k", C)).toEqual({ ok: true, changed: true, text: before });
+  });
+
+  test("a one-line file keeps a comment inside an empty object", () => {
+    expect(addJsonMember('{"mcpServers":{/* keep me */}}', ["mcpServers"], "k", 1, C)).toEqual({ ok: true, changed: true, text: '{"mcpServers":{"k":1/* keep me */}}' });
+    expect(addJsonMember("{/* only */}", ["mcpServers"], "k", 1, C)).toEqual({ ok: true, changed: true, text: '{"mcpServers":{"k":1}/* only */}' });
+  });
+
+  test("a removal next to a comment cuts only the member and one comma", () => {
+    expect(removeJsonMember('{"m": {\n  // ours\n  "k": 1,\n  "b": 2 // b\n}}', ["m"], "k", C)).toEqual({ ok: true, changed: true, text: '{"m": {\n  // ours\n  "b": 2 // b\n}}' });
+    expect(removeJsonMember('{"m": {\n  "a": 1, // a\n  "k": 2 /* k */\n}}', ["m"], "k", C)).toEqual({ ok: true, changed: true, text: '{"m": {\n  "a": 1 // a /* k */\n}}' });
+    expect(removeJsonMember('{"m": {\n  /* only */\n  "k": 1\n}}', ["m"], "k", C)).toEqual({ ok: true, changed: true, text: '{"m": {\n  /* only */\n}}' });
+  });
+
+  test("refused as Qwen refuses them: a trailing comma, an unterminated comment; and comments stay refused without the option", () => {
+    expect(addJsonMember('{"a": 1,}', ["m"], "k", 1, C)).toEqual({ ok: false, reason: "it is not valid JSON" });
+    expect(addJsonMember('{"a": 1 /* x', ["m"], "k", 1, C)).toEqual({ ok: false, reason: "it is not valid JSON" });
+    expect(addJsonMember("{ // x\n}", ["m"], "k", 1)).toEqual({ ok: false, reason: "it is not plain JSON" });
+  });
 });

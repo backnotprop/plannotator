@@ -7,7 +7,7 @@
  * the words it had. happy-dom has no layout; the real browser shots are in
  * the e2e (tests/e2e/inbox-send-now.spec.ts).
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';

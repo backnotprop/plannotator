@@ -131,6 +131,24 @@ describe("enableTailscaleServe", () => {
     expect(calls.at(-1)).toEqual(["serve", "--https=4321", "off"]);
   });
 
+  // What `tailscale serve` prints when Serve is off for the tailnet (its CLI
+  // prints the control server's text and link on stdout, then exits 0 or waits).
+  const SERVE_OFF = "\nServe is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=nABC\n\n";
+
+  test("Serve off for the tailnet, CLI exits 0: says so with Tailscale's link and takes nothing down", () => {
+    const { runner, calls } = makeRunner({ serve: { status: 0, stdout: SERVE_OFF, stderr: "" } });
+    expect(() => enableTailscaleServe(4321, runner)).toThrow(
+      /Serve is off for your tailnet[\s\S]*not a Plannotator bug[\s\S]*https:\/\/login\.tailscale\.com\/f\/serve\?node=nABC/,
+    );
+    expect(calls.some((args) => args.includes("off"))).toBe(false);
+  });
+
+  test("Serve off for the tailnet, CLI waits until we time out: the link it printed still reaches the user", () => {
+    const timedOut = Object.assign(new Error("spawnSync tailscale ETIMEDOUT"), { code: "ETIMEDOUT" });
+    const { runner } = makeRunner({ serve: { error: timedOut, status: null, stdout: SERVE_OFF, stderr: "" } });
+    expect(() => enableTailscaleServe(4321, runner)).toThrow(/Serve is off[\s\S]*f\/serve\?node=nABC/);
+  });
+
   test("a failed serve command reports the daemon detail", () => {
     const { runner } = makeRunner({
       serve: { status: 1, stdout: "", stderr: "invalid port" },

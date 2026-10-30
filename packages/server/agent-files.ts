@@ -19,7 +19,7 @@
 
 import { randomBytes } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 /** Files larger than this are never edited. */
 export const AGENT_FILE_MAX_BYTES = 1024 * 1024;
@@ -122,6 +122,36 @@ export function writeAgentFileAtomic(target: string, text: string, mode: number,
     rmSync(temp, { force: true });
     throw error;
   }
+}
+
+/**
+ * A path as the file system names it, so one place spelled two ways is one
+ * place: the real path of its deepest existing folder (a symlinked folder,
+ * `/tmp` and `/private/tmp`, another case on a volume that ignores case: the
+ * real path has the case on disk), the rest as written, normalized. Never
+ * case-folded: on a case-sensitive volume (Linux, or one formatted so on
+ * macOS) `qwen` and `Qwen` are two folders.
+ */
+export function placeKey(path: string): string {
+  let head = resolve(path);
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      head = realpathSync.native(head);
+      break;
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) break;
+      rest.unshift(basename(head));
+      head = parent;
+    }
+  }
+  return join(head, ...rest);
+}
+
+/** Whether two paths name one place (`placeKey`). */
+export function samePlace(a: string, b: string): boolean {
+  return a === b || placeKey(a) === placeKey(b);
 }
 
 /** A short, plain reason for a file-system error. */

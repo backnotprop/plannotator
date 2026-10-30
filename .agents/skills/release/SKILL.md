@@ -117,12 +117,13 @@ Write the draft to `RELEASE_NOTES_v<VERSION>.md` in the repo root and tell the u
 
 ## Phase 2: Version Bump
 
-Bump the version string in these **8 files** (and only these — other package.json files use stub versions). `scripts/check-release-version.mjs` (run in CI and on the tag) fails if any of them disagrees:
+Bump the version string in these **9 files** (and only these — other package.json files use stub versions). `scripts/check-release-version.mjs` (run in CI and on the tag) fails if any of them disagrees:
 
 | File | Field |
 |------|-------|
 | `package.json` (root) | `"version"` |
 | `apps/opencode-plugin/package.json` | `"version"` |
+| `apps/dsh-plugin/package.json` | `"version"` |
 | `apps/pi-extension/package.json` | `"version"` |
 | `apps/hook/.claude-plugin/plugin.json` | `"version"` |
 | `apps/copilot/plugin.json` | `"version"` |
@@ -130,7 +131,11 @@ Bump the version string in these **8 files** (and only these — other package.j
 | `openpackage.yml` (root) | `version:` |
 | `packages/server/package.json` | `"version"` |
 
-Read each file, confirm the current version matches expectations, then update all 8 atomically.
+Read each file, confirm the current version matches expectations, then update all 9 atomically.
+
+`node scripts/check-release-version.mjs` (also `bun run check:release-version`) checks exactly these 9 files and fails the release when one differs; `apps/dsh-plugin/package.json` (`@plannotator/dsh`) is one of them.
+
+The DeepSeek Harness plugin is checked like the other packages: the release workflow's `test` job runs `bun run typecheck` (which includes `apps/dsh-plugin/tsconfig.json`) and `bun test` (which includes `apps/dsh-plugin` and `apps/hook/server/dsh-*.test.ts`).
 
 Do not bump the VS Code extension (`apps/vscode-extension/package.json`) — it has independent versioning. The Droid manifest (`apps/droid-plugin/.factory-plugin/plugin.json`) is exempt too: Droid tracks the plugin by the marketplace's git commit and treats `version` as metadata.
 
@@ -144,7 +149,8 @@ Run builds in dependency order:
 bun run build:review    # 1. Code review editor (standalone Vite build)
 bun run build:hook      # 2. Plan review + hook server (copies review's built HTML into hook dist)
 bun run build:opencode  # 3. OpenCode plugin (copies built HTML from hook + review)
-bun run build:pi        # 4. Pi extension (chains review → hook → pi internally, safe to run after 1-2)
+bun run build:dsh       # 4. DeepSeek Harness plugin (Node bundle; no HTML)
+bun run build:pi        # 5. Pi extension (chains review → hook → pi internally, safe to run after 1-2)
 ```
 
 `build:pi` chains review and hook internally, so after steps 1-2 it only runs the pi-specific build.
@@ -176,7 +182,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    ```
    chore: bump version to X.Y.Z
    ```
-   Stage only the 8 version-bumped files. Do not stage the release notes file (it's untracked by design).
+   Stage only the 9 version-bumped files. Do not stage the release notes file (it's untracked by design).
 
 2. **Create and push the tag:**
    ```bash
@@ -190,14 +196,15 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    - Runs tests
    - Cross-compiles binaries for 6 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64/ARM64)
    - Compiles paste service binaries (same 6 platforms)
-   - Packs the two npm packages in a credential-free job
+   - Packs the npm packages (`@plannotator/opencode`, `@plannotator/pi-extension`, `@plannotator/dsh`) in a credential-free job, into the one artifact the security gate scans (`NPM_SUBJECTS` in `scripts/release-security/release-evidence.mjs`; `tests/release-gate-subjects.test.ts` fails when release.yml packs or publishes a tarball outside it)
    - Downloads pinned, checksum-verified Syft and Grype binaries; generates and schema-validates the release-wide CycloneDX SBOM after all shipped subjects exist
    - Forces the repository-owned, suppression-free Grype configuration, retries the official database update up to three times, requires a valid/active schema-v6 database no more than 120 hours old with no pending update, and preserves the machine-readable scan/database/policy evidence as a workflow artifact
    - Rejects every scanner-side ignored match, then blocks before any attestation or publication on CISA KEV or fixable Critical findings classified as shipped/runtime or unknown-applicability. High, development-only, and no-fix Critical findings are report-only but remain in the evidence
+   - `viewer-pin-live`: requires guides.show (deployed for the same tag by `guides-show-deploy.yml`) to serve the guide viewer JS and CSS that the `build` and `npm-package` jobs pinned, retrying for about 5 minutes; `attest`, `release` and `npm-publish` wait for it, so a failure attests, releases and publishes nothing. Recovery: deploy guides.show on the tag (`gh workflow run guides-show-deploy.yml --ref vX.Y.Z`), then "Re-run failed jobs" on the release run
    - Generates SLSA build provenance attestations for all 12 binaries via `actions/attest-build-provenance` (signed through Sigstore, recorded in Rekor)
-   - Uses the separate official `actions/attest` SBOM path to bind the CycloneDX predicate to all 12 binaries and both npm tarballs through the same GitHub OIDC/Sigstore service. This is an inventory attestation, not a replacement for SLSA or npm provenance
+   - Uses the separate official `actions/attest` SBOM path to bind the CycloneDX predicate to all 12 binaries and the `@plannotator/opencode`, `@plannotator/pi-extension` and `@plannotator/dsh` tarballs through the same GitHub OIDC/Sigstore service. This is an inventory attestation, not a replacement for SLSA or npm provenance
    - Creates the GitHub Release with all binaries, SHA256 sidecars, the versioned CycloneDX SBOM, and its SHA256 sidecar attached
-   - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance
+   - Publishes `@plannotator/opencode` and `@plannotator/pi-extension` to npm with provenance, then the gated `@plannotator/dsh` tarball last, in a step allowed to fail until its trusted publishing is set up (a failure there shows as a warning; check it with `npm view`)
 
    **SBOM scope:** the public document is a release-wide Syft inventory of the monorepo's locked build inputs and dependencies. It is deliberately not described as exact binary runtime contents. Coverage testing found that Bun standalone executables hide bundled JavaScript dependency metadata from Syft. The OpenCode tarball is similarly opaque; the Pi tarball exposes only a partial view through nested package-lock files. The scope and limitations are also embedded in the CycloneDX metadata.
 
@@ -212,10 +219,10 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    gh run view <run-id> --log
    ```
    Verify:
-   - All jobs pass, including `release-security`, `attest`, `release`, and `npm-publish`
+   - All jobs pass, including `release-security`, `viewer-pin-live`, `attest`, `release`, and `npm-publish`
    - `release-security-evidence` records the Syft/Grype versions, active database schema/build/checksum/update status, all Grype matches, and an `ACCEPT` policy decision
    - The GitHub Release was created with all binary artifacts, SHA256 sidecars, the versioned `plannotator-X.Y.Z-release-sbom.cdx.json`, and its `.sha256` sidecar
-   - npm packages published successfully (check with `npm view @plannotator/opencode version` and `npm view @plannotator/pi-extension version`)
+   - npm packages published successfully (check with `npm view @plannotator/opencode version`, `npm view @plannotator/dsh version` and `npm view @plannotator/pi-extension version`)
 
    A pull request proves generation, schema/sentinel validation, database policy, Grype evaluation, least-privilege job wiring, and all report artifacts. GitHub OIDC issuance, publication to the artifact-attestation service, and final release-asset publication only run for a real eligible `v*` tag. For the first release after this control lands, complete this bounded tag-only verification before calling the rollout complete:
 
@@ -256,7 +263,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 ## Checklist
 
 Before tagging, verify:
-- [ ] All 8 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
+- [ ] All 9 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
 - [ ] The published-package floor guard is green (`bun test tests/published-package-floors.test.ts`), and no `engines.node`/`npm`/`opencode`/`vscode`/`bun`, `os`, `cpu`, `libc` or host peer was added or changed on a published package without an `ALLOWED` entry the owner signed off (`engines.vscode` is pinned at `^1.85.0`: a raise stops updates for Cursor, Windsurf and older VS Code). npm silently installs an older version for anyone whose runtime misses such a field: 0.28.32's Pi Node floor kept older-Node users on 0.28.31
 - [ ] Sibling dependencies resolve: `bun run check:sibling-deps @plannotator/opencode @plannotator/pi-extension` passes (it reads npm). When `@plannotator/core` and `@plannotator/ui` ship, publish core before ui, and run it with every package going out (`bun run check:sibling-deps @plannotator/core @plannotator/ui`): ui pins an exact core, and a ui published first fails to install with ETARGET
 - [ ] Never `npm deprecate` the current `latest`: npm then picks the newest non-deprecated version for bare and range installs, so everyone silently stays behind. Ship a new version instead
@@ -265,6 +272,7 @@ Before tagging, verify:
 - [ ] `bun run build:review` succeeded
 - [ ] `bun run build:hook` succeeded
 - [ ] `bun run build:opencode` succeeded
+- [ ] `bun run build:dsh` succeeded
 - [ ] `bun run build:pi` succeeded (or pi-specific build step)
 - [ ] Version bump committed
 - [ ] Pi parity gate passed (imports, vendor.sh, dry-run pack)
@@ -276,7 +284,7 @@ Before tagging, verify:
 - [ ] The release publishes `plannotator-darwin-arm64.sha256`, `plannotator-darwin-x64.sha256`, `plannotator-linux-arm64.sha256` and `plannotator-linux-x64.sha256` under exactly these names, with the binaries. Never rename, merge (for example into one `checksums.txt`), drop or delay them: every binary from 0.28.33 on downloads these names before it updates, and fails to update without its own (`packages/server/update-prepare.ts` `candidateAssets`; guarded by `update-prepare.test.ts`).
 
 After tagging, verify:
-- [ ] Release workflow completed with `release-security`, `attest`, `release`, and `npm-publish` green
+- [ ] Release workflow completed with `release-security`, `viewer-pin-live`, `attest`, `release`, and `npm-publish` green (if `viewer-pin-live` failed: deploy guides.show on the tag, then "Re-run failed jobs")
 - [ ] GitHub Release created with all binaries, sidecars, SBOM, and SBOM sidecar
 - [ ] One native binary passes both the explicit SLSA and CycloneDX predicate checks pinned to the tag and signer workflow
 - [ ] Downloaded SBOM checksum passes and canonical JSON matches the attested predicate

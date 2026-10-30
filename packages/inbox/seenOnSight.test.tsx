@@ -11,7 +11,7 @@
  * tests/e2e/inbox-seen-on-sight.spec.ts; the rules alone are checked at the
  * bottom without a DOM.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act } from 'react';

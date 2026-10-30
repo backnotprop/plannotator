@@ -24,6 +24,26 @@ function prepareDataDir(): void {
 }
 
 describe("executeSubmitPlan", () => {
+  test.each([{ edits: undefined }, { edits: [] }])("rejects absent or empty edits without creating a plan or opening review (%j)", async ({ edits }) => {
+    prepareDataDir();
+    const reviewPlan = mock(async () => ({ approved: true }));
+    const result = await executeSubmitPlan({
+      edits,
+      invokingAgent: "plan",
+      sessionId: "session-invalid",
+      directory: "/workspace/example",
+      workflowOptions: normalizeWorkflowOptions(undefined),
+    }, {
+      reviewPlan,
+      resolveTargetAgent: async () => undefined,
+      sendApprovalHandoff: async () => {},
+    });
+
+    expect(result).toContain("Error: No edits provided");
+    expect(reviewPlan).not.toHaveBeenCalled();
+    expect(existsSync(getPlanBackingPath("example"))).toBe(false);
+  });
+
   test("supports hosts without cancellation signals", async () => {
     prepareDataDir();
     const reviewPlan = mock(async () => ({ approved: false, feedback: "Add tests" }));

@@ -21,7 +21,8 @@
  *  - The release check's rules: no request while PLANNOTATOR_UPDATE_CHECK is
  *    off, the same user agent, and the notes' claim and back-off per version
  *    (`releaseImagesFetch` in update-state.json: claimed before the request,
- *    then 6 h after a failure and 24 h after an answer). A failed image is
+ *    then 6 h after a failure and 24 h after an answer; a claim its process
+ *    abandoned mid-fetch, 15 minutes after it). A failed image is
  *    left out (logged to update.log); it never fails the notes.
  *  - Stored as `update-notes/<version>/<sha256>.<ext>`, with the src → file
  *    map in `update-notes/<version>/images.json` (its own file, so the release
@@ -43,6 +44,7 @@ import { isLfsPointer, readImageDimensions, sniffImageContentType } from "@plann
 import {
   RELEASE_ASSETS_FETCH_INTERVAL_MS,
   RELEASE_ASSETS_FETCH_RETRY_MS,
+  RELEASE_NOTES_PENDING_RETRY_MS,
   hasReleaseNotesContent,
   normalizeStableVersion,
   patchUpdateState,
@@ -302,14 +304,23 @@ export async function fetchReleaseImage(src: string, options: FetchReleaseImageO
 // One release's images
 // ---------------------------------------------------------------------------
 
-type FetchRecord = { attemptedAt: number; failedAt?: number; error?: string };
+type FetchRecord = NonNullable<UpdateState["releaseImagesFetch"]>[string];
 
-/** Once, then after a failure no sooner than 6 h, after an answer no sooner than 24 h (the notes' rule). */
+/**
+ * Once, then after a failure no sooner than 6 h, after an answer no sooner
+ * than 24 h (the notes' rule). A claim nobody answered (its process quit
+ * mid-fetch) waits 15 minutes, as the notes' does.
+ */
 export function isReleaseImagesFetchDue(state: UpdateState, version: string, now: number): boolean {
   const record = state.releaseImagesFetch?.[version];
   const at = record?.attemptedAt;
   if (!record || typeof at !== "number" || !Number.isFinite(at) || at > now) return true;
-  return now - at >= (record.failedAt ? RELEASE_ASSETS_FETCH_RETRY_MS : RELEASE_ASSETS_FETCH_INTERVAL_MS);
+  const wait = record.failedAt
+    ? RELEASE_ASSETS_FETCH_RETRY_MS
+    : record.inFlight
+      ? RELEASE_NOTES_PENDING_RETRY_MS
+      : RELEASE_ASSETS_FETCH_INTERVAL_MS;
+  return now - at >= wait;
 }
 
 export interface ReleaseImagesFetchDeps {
@@ -355,8 +366,9 @@ export async function fetchReleaseImagesFor(deps: ReleaseImagesFetchDeps): Promi
     }, deps.dataDir);
   try {
     if (!isReleaseImagesFetchDue(readUpdateState(deps.dataDir), version, now)) return { outcome: "not-due" };
-    // Claim the attempt before the network call so concurrent processes ask once.
-    record({ attemptedAt: now });
+    // Claim the attempt before the network call so concurrent processes ask once;
+    // marked in flight until the answer below replaces it.
+    record({ attemptedAt: now, inFlight: true });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     updateLog(`could not write update-state.json: ${error}`, deps.dataDir);

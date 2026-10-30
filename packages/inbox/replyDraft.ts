@@ -20,7 +20,14 @@
  * thread runs (its generation is raised, so a save queued earlier does
  * nothing) until the Send ends (`sent`) or fails (`release`). The box is
  * read-only meanwhile. The Send names the `updated_at` its words were saved as
- * in `clear_draft`, so the server clears that draft only.
+ * in `clear_draft`, so the server clears that draft only (or one holding
+ * exactly the sent words: a save whose answer never came leaves the window's
+ * `updated_at` behind).
+ *
+ * A read (`reload`) never writes back words a Send claimed, and never applies
+ * an answer older than what the window learned since it went out. A save whose
+ * answer never came (a lost answer, the keepalive as the page goes) is read
+ * back, so the window's base follows what landed.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
@@ -91,6 +98,14 @@ export function useReplyDraft(threadId: string) {
   const ownClears = useRef(new Map<string, string>());
   /** The words the last save queued here carries (or the draft read): the page's last save names them (`base_body`). */
   const lastWords = useRef<string | null>(null);
+  /** Per thread: the words of the last save this window sent, answered or not; the next save names them (`base_body`). */
+  const sentWords = useRef(new Map<string, string>());
+  /** Raised by each `reload`: only the newest read applies its answer. */
+  const readSeq = useRef(0);
+  /** Raised each time this window learns the draft itself (its save, Send, Discard, a read-back): a read sent before is read again. */
+  const learned = useRef(0);
+  /** The keepalive save sent as the page went (its answer is never read): read back when the page comes back. */
+  const keptAlive = useRef<{ threadId: string; text: string; generation: number } | null>(null);
 
   const generationOf = (target: string) => generations.current.get(target) ?? 0;
   const bump = (target: string) => generations.current.set(target, generationOf(target) + 1);
@@ -106,8 +121,23 @@ export function useReplyDraft(threadId: string) {
     synced.current.set(target, draft?.body ?? null);
     if (target === current.current) lastWords.current = draft?.body ?? null;
   };
+  /** adopt, from this window's own save, Send, Discard or read-back (not from a `reload`). */
+  const learn = (target: string, draft: InboxReplyDraft | null) => {
+    adopt(target, draft);
+    learned.current += 1;
+  };
   const show = (target: string, draft: InboxReplyDraft | null) => {
     if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null });
+  };
+  /**
+   * A save of `text` went without its answer reaching here: it may have landed. The draft holding
+   * those words is this window's own, so its base is that draft's (and the Send's clear_draft names it).
+   */
+  const readBack = async (target: string, text: string, generation: number) => {
+    const latest = await readDraft(target);
+    if (latest?.body !== text || generation !== generationOf(target) || claimed.current.has(target)) return;
+    learn(target, latest);
+    show(target, latest);
   };
 
   const write = useCallback((target: string, text: string) => {
@@ -121,10 +151,16 @@ export function useReplyDraft(threadId: string) {
         // waiting on the person's choice after a conflict: the words must not land.
         if (generation !== generationOf(target) || claimed.current.has(target) || conflicts.current.has(target)) return;
         let answer: { draft: InboxReplyDraft | null };
+        // `base_body`: a save of this window's that landed without its answer still counts as its own.
+        const baseBody = sentWords.current.get(target);
+        sentWords.current.set(target, text);
         try {
-          answer = await inboxApi.saveReplyDraft(target, text, baseOf(target));
+          answer = await inboxApi.saveReplyDraft(target, text, baseOf(target), baseBody ?? null);
         } catch (cause) {
           if (!(cause instanceof InboxApiError) || cause.code !== 'draft_conflict') throw cause;
+          // Refused: these words never landed, so they are not this window's on the server.
+          if (baseBody === undefined) sentWords.current.delete(target);
+          else sentWords.current.set(target, baseBody);
           // Another window saved, sent or discarded since: adopt the draft as it is
           // there, and keep these words here, not saved, for the person to choose.
           const latest = await readDraft(target);
@@ -133,12 +169,12 @@ export function useReplyDraft(threadId: string) {
           if (own !== undefined && (latest === null || latest.body === own)) {
             // This window's own Send cleared (or still holds) the draft: these words, edited since, are the draft now.
             ownClears.current.delete(target);
-            adopt(target, latest);
+            learn(target, latest);
             show(target, latest);
             if (generation === generationOf(target)) write(target, text);
             return;
           }
-          adopt(target, latest);
+          learn(target, latest);
           // A conflict only when both windows hold words: an empty box (or the same words) is not one,
           // and never deletes the other window's draft.
           if (generation === generationOf(target) && text.trim() !== '' && text !== (latest?.body ?? '')) setConflict(target, text);
@@ -146,10 +182,11 @@ export function useReplyDraft(threadId: string) {
           return;
         }
         if (generation !== generationOf(target)) return;
-        adopt(target, answer.draft ?? null);
+        learn(target, answer.draft ?? null);
         show(target, answer.draft ?? null);
       } catch {
-        // Kept in the box; the next pause in typing tries again.
+        // No answer: read back what may have landed. Otherwise kept in the box; the next pause in typing tries again.
+        await readBack(target, text, generation);
       } finally {
         unsaved -= 1;
         unsavedChanged();
@@ -208,9 +245,23 @@ export function useReplyDraft(threadId: string) {
           ...(session ? { serverSession: session } : {}),
         }),
       }).catch(() => {});
+      sentWords.current.set(next.threadId, next.text);
+      keptAlive.current = { threadId: next.threadId, text: next.text, generation: generationOf(next.threadId) };
+    };
+    // Back from the back/forward cache: the keepalive's answer was never read, and the `drafts` frames
+    // sent meanwhile are not replayed. Read back what it saved.
+    const onShow = (event: PageTransitionEvent) => {
+      const kept = keptAlive.current;
+      keptAlive.current = null;
+      if (!event.persisted || !kept) return;
+      chain.current = chain.current.then(() => readBack(kept.threadId, kept.text, kept.generation));
     };
     window.addEventListener('pagehide', onHide);
-    return () => window.removeEventListener('pagehide', onHide);
+    window.addEventListener('pageshow', onShow);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('pageshow', onShow);
+    };
   }, []);
 
   /** The words changed: saved after a pause in typing (not while a Send holds the thread, nor after a conflict). */
@@ -242,7 +293,9 @@ export function useReplyDraft(threadId: string) {
     const target = current.current;
     bump(target);
     setConflict(target, null);
-    adopt(target, null);
+    // Dropped: a draft holding these words later is another window's, never this one's (`base_body`).
+    sentWords.current.delete(target);
+    learn(target, null);
     setState({ loadedFor: target, draft: null, conflict: null });
     chain.current = chain.current.then(() => inboxApi.discardReplyDraft(target).then(() => undefined, () => undefined));
   }, []);
@@ -280,6 +333,8 @@ export function useReplyDraft(threadId: string) {
     pending.current = null;
     bump(target);
     claimed.current.delete(target);
+    // Sent: a draft holding these words later is another window's, never this one's (`base_body`).
+    sentWords.current.delete(target);
     // After a conflict the Send carried this window's words and cleared nothing: the other
     // window's draft is still there, and the thread shows it.
     if (conflicts.current.has(target)) {
@@ -287,14 +342,20 @@ export function useReplyDraft(threadId: string) {
       setState((s) => ({ ...s, loadedFor: target, conflict: null }));
       return;
     }
-    adopt(target, null);
+    learn(target, null);
     setState({ loadedFor: target, draft: null, conflict: null });
   }, []);
 
   /**
    * Read the thread's draft again (`event: drafts`: another window, or a phone's
    * Send, saved, sent or discarded it; or the foot's Send wants the words as they
-   * are now). `local` is the open box's words (null: the box is closed).
+   * are now). `boxWords` gives the open box's words as the answer comes (null:
+   * the box is closed).
+   *
+   * Only the newest read applies its answer, and one sent before this window
+   * learned the draft itself (its save, Send or Discard answered meanwhile) is
+   * read again (it gives up, answering undefined, after three reads). Once a Send claimed (or sent) the words, or a Discard dropped
+   * them, the box's words are not edits: never written back as a draft.
    *
    * Unchanged since this window's base: nothing moves. Changed, and the box has
    * no edits since its last save or read (or is closed): the window takes the
@@ -305,12 +366,22 @@ export function useReplyDraft(threadId: string) {
    *
    * Answers undefined when it was not read (the thread changed, the read failed).
    */
-  const reload = useCallback(async (local: string | null = null): Promise<{ draft: InboxReplyDraft | null; replaceBox: boolean } | undefined> => {
+  const reload = useCallback(async (boxWords: () => string | null = () => null): Promise<{ draft: InboxReplyDraft | null; replaceBox: boolean } | undefined> => {
     const target = current.current;
-    await chain.current;
-    if (target !== current.current) return undefined;
-    const draft = await readDraft(target);
-    if (draft === undefined || target !== current.current) return undefined;
+    const read = ++readSeq.current;
+    const generation = generationOf(target);
+    let draft: InboxReplyDraft | null | undefined;
+    for (let attempt = 0; ; attempt += 1) {
+      // After this window's queued saves and Discard, so a read again is never served before them.
+      await chain.current;
+      if (target !== current.current) return undefined;
+      const knew = learned.current;
+      draft = await readDraft(target);
+      if (draft === undefined || target !== current.current || read !== readSeq.current) return undefined;
+      if (knew === learned.current) break;
+      if (attempt === 2) return undefined;
+    }
+    const local = generation !== generationOf(target) || claimed.current.has(target) ? null : boxWords();
     if ((draft?.updated_at ?? null) === baseOf(target)) {
       show(target, draft);
       return { draft, replaceBox: false };

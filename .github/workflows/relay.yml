@@ -14,6 +14,7 @@ on:
   pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'apps/relay/**'
       - 'packages/server/inbox*'
@@ -57,13 +58,18 @@ on:
 permissions:
   contents: read
 
+# One run per PR, and one per main: a newer push cancels the older run (main
+# included: only its newest commit needs the heavy suites). Adding any other
+# label starts a run that skips every job; it gets a group of its own so it
+# cannot cancel the real one.
 concurrency:
-  group: relay-${{ github.ref }}
+  group: relay-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
 
 jobs:
   relay:
     name: Inbox relay (wrangler dev with the compiled binary)
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -99,3 +105,20 @@ jobs:
             apps/relay/.wrangler/proof-*/wrangler.log
             .local/relay-proof/
           if-no-files-found: ignore
+
+  # The merge script merges a PR only when every `Full CI (all green)` check on
+  # its head succeeded. A skipped job counts as passed elsewhere, so this job
+  # passes only when the job above ran and succeeded.
+  full-ci:
+    name: Full CI (all green)
+    needs: [relay]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job above succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          jq -e 'all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null

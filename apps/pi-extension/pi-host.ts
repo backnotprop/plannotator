@@ -2,12 +2,14 @@
  * Which host runs this extension: Pi, or Oh My Pi (OMP, a Pi fork that loads
  * this package as an OMP plugin through its legacy-Pi compat layer).
  *
- * The one thing that differs today is the `plannotator` tool's default
+ * Two things differ today. One is the `plannotator` tool's default
  * (AGENT_TOOL_DEFAULTS in packages/shared/config.ts): off on Pi, which sends
  * the full tool definition with every request, on in OMP, which lists an
  * extension tool as one line of its system prompt and loads the schema only
- * when the model reads it. Everything else (the session bridge, the commands,
- * the Inbox tool) is the same extension and still names itself `pi`.
+ * when the model reads it. The other is how a message reaches an idle agent
+ * (`resolveIdleDeliveryOptions` in current-pi-session.ts). Everything else
+ * (the session bridge, the commands, the Inbox tool) is the same extension
+ * and still names itself `pi`.
  *
  * Neither host's ExtensionContext names the host, but OMP's ExtensionAPI
  * carries objects Pi's never has: `arktype` (OMP's injected omptype schema

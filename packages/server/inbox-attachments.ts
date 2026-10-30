@@ -5,7 +5,8 @@
  * guards.
  *
  * A file is reached ONLY by its attachment id: there is no route that takes a
- * path. The current file is read through its record with the rules in
+ * bare path (`markdown-image` takes only an image the Markdown file itself
+ * shows, relative to its folder). The current file is read through its record with the rules in
  * packages/shared/inbox/attachments.ts; `?version=sent` reads the blob of
  * the bytes the agent sent. Raw bytes of a text kind always go out as
  * `text/plain` with a `sandbox` CSP and nosniff, so an attached HTML page
@@ -41,7 +42,8 @@ import {
   openInboxAttachmentVersion,
   readInboxAttachmentText,
 } from "@plannotator/shared/inbox/attachments";
-import { INBOX_MESSAGE_IMAGE_CSP } from "@plannotator/shared/inbox/message-images";
+import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync } from "@plannotator/shared/inbox/message-images";
+import { inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
@@ -272,6 +274,25 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         inline_images: await Promise.all(store.threadInlineImages(threadId).map(({ attachment, message }) => inboxAttachmentState(attachment, message.id, { hash: "small" }))),
         annotations: store.pendingAnnotations(threadId),
       });
+    }
+
+    // Only images referenced by the selected Markdown version, relative to the file itself.
+    const markdownImage = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/markdown-image$/.exec(path);
+    if (markdownImage) {
+      if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET or HEAD." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
+      const { attachment, message } = attachmentOf(markdownImage[1]!);
+      if (attachment.kind !== "markdown") throw new InboxError("validation_error", "Only Markdown attachments show inline images.");
+      const project = store.project(message.project_id);
+      if (!project) throw new InboxError("project_not_found", "The attachment's project is gone.");
+      const body = (await readVersion(store, attachment, versionOf(url))).toString("utf8");
+      return inboxImageResponse(req, await readInboxMessageImageAsync({
+        body,
+        root: project.root,
+        base: dirname(attachment.path),
+        path: url.searchParams.get("path"),
+        anywhere: message.author.kind === "agent",
+      }));
     }
 
     const view = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/view$/.exec(path);

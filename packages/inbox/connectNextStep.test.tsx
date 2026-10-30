@@ -7,7 +7,7 @@
  * next step; Not now puts a step off; installing is a command to copy; MCP is
  * folded behind "Use MCP instead"; Message opens compose to the live session.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';

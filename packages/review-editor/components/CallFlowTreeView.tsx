@@ -10,6 +10,12 @@ import {
 } from '@plannotator/ui/utils/composerYield';
 import { splitCallFlowFilePath } from '../utils/callFlowPresentation';
 import { CallFlowSearchControls } from './CallFlowSearchControls';
+import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
+import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
+import type { CallFlowNodeSource, CallFlowNodeSourceLoader } from '../hooks/useCallFlowNodeSource';
+
+/** Lines shown above and below a Call Flow step in its source hover preview. */
+export const CALL_FLOW_PREVIEW_CONTEXT_LINES = 3;
 import {
   useCallFlowFindShortcut,
   type CallFlowFindShortcutSurface,
@@ -89,6 +95,8 @@ interface CallFlowNodeRowProps {
   readonly depth: number;
   readonly treePath: string;
   readonly onOpen: (node: CallFlowNode) => void;
+  /** Loads the source a location's hover preview shows; absent, locations have no preview. */
+  readonly loadNodeSource?: CallFlowNodeSourceLoader;
   readonly onAnnotate?: (
     target: CallFlowAnnotationTarget,
     anchor: HTMLElement,
@@ -115,6 +123,7 @@ function CallFlowNodeRow({
   depth,
   treePath,
   onOpen,
+  loadNodeSource,
   onAnnotate,
   selectedTargetKeys,
   focusFiles,
@@ -145,6 +154,10 @@ function CallFlowNodeRow({
   const path = node.file ? splitCallFlowFilePath(node.file) : null;
   const startsFileSection = Boolean(path && fileBoundaryPaths.has(treePath));
   const location = node.file ? `${node.file}${node.line ? `:${node.line}` : ''}` : '';
+  const sourcePreview = useHoverPreview<CallFlowNodeSource>(
+    () => loadNodeSource?.(node) ?? Promise.resolve(null),
+    Boolean(loadNodeSource && node.file && node.line),
+  );
   const targetTitle = annotatable
     ? `${inPatch ? `Comment on ${node.label}.` : `Comment on ${node.label} as Call Flow feedback.`} Shift-click to add or remove this step from the open comment.`
     : navigable
@@ -212,8 +225,16 @@ function CallFlowNodeRow({
           <button
             type="button"
             className="call-flow-node-location"
+            ref={(element) => { sourcePreview.anchorRef.current = element; }}
             disabled={!navigable}
-            onClick={() => onOpen(node)}
+            onMouseEnter={sourcePreview.onEnter}
+            onMouseLeave={sourcePreview.onLeave}
+            onFocus={sourcePreview.onEnter}
+            onBlur={sourcePreview.onLeave}
+            onClick={() => {
+              sourcePreview.dismiss();
+              onOpen(node);
+            }}
             title={navigable ? `Open ${location}` : 'Outside the reviewed patch'}
             aria-label={navigable ? `Open ${location}` : `Source ${location} is outside the reviewed patch`}
           >
@@ -228,6 +249,19 @@ function CallFlowNodeRow({
         ) : (
           <span className="call-flow-node-location-placeholder" aria-hidden="true" />
         )}
+        {sourcePreview.preview && node.line && (
+          <CodeSnippetPreview
+            anchorEl={sourcePreview.anchorRef.current}
+            contents={sourcePreview.preview.contents}
+            filepath={sourcePreview.preview.filepath}
+            title={sourcePreview.preview.filepath}
+            line={node.line}
+            lineEnd={node.endLine && node.endLine > node.line ? node.endLine : undefined}
+            contextLines={CALL_FLOW_PREVIEW_CONTEXT_LINES}
+            onDismiss={sourcePreview.dismiss}
+            {...sourcePreview.previewHandlers}
+          />
+        )}
       </div>
       {hasChildren && expanded && (
         <ol className="call-flow-children">
@@ -240,6 +274,7 @@ function CallFlowNodeRow({
                 depth={depth + 1}
                 treePath={`${treePath}/${child.key}:${index}`}
                 onOpen={onOpen}
+                loadNodeSource={loadNodeSource}
                 onAnnotate={onAnnotate}
                 selectedTargetKeys={selectedTargetKeys}
                 focusFiles={focusFiles}
@@ -264,6 +299,8 @@ function CallFlowNodeRow({
 interface CallFlowTreeViewProps {
   readonly trees: readonly CallFlowTree[];
   readonly onOpenNode: (node: CallFlowNode) => void;
+  /** Loads the source shown when a step's file:line is hovered or focused; absent, no preview. */
+  readonly loadNodeSource?: CallFlowNodeSourceLoader;
   /** Commit one source-backed annotation through the native review model. */
   readonly onAnnotateTargets?: (
     targets: readonly CallFlowAnnotationTarget[],
@@ -302,6 +339,7 @@ function CallFlowEntrySection({
   currentSearchPath,
   showAllContext,
   onOpenNode,
+  loadNodeSource,
   onAnnotate,
   selectedTargetKeys,
   focused,
@@ -321,6 +359,7 @@ function CallFlowEntrySection({
   readonly currentSearchPath?: string;
   readonly showAllContext: boolean;
   readonly onOpenNode: (node: CallFlowNode) => void;
+  readonly loadNodeSource?: CallFlowNodeSourceLoader;
   readonly onAnnotate?: CallFlowNodeRowProps['onAnnotate'];
   readonly selectedTargetKeys: ReadonlySet<string>;
   readonly focused?: ReadonlySet<string>;
@@ -354,6 +393,7 @@ function CallFlowEntrySection({
             depth={0}
             treePath={treePath}
             onOpen={onOpenNode}
+            loadNodeSource={loadNodeSource}
             onAnnotate={onAnnotate}
             selectedTargetKeys={selectedTargetKeys}
             focusFiles={focused}
@@ -377,6 +417,7 @@ function CallFlowEntrySection({
 export function CallFlowTreeView({
   trees,
   onOpenNode,
+  loadNodeSource,
   onAnnotateTargets,
   focusFiles,
   canInteractWithNode,
@@ -780,6 +821,7 @@ export function CallFlowTreeView({
             currentSearchPath={currentSearchMatch?.treePath}
             showAllContext={showAllContext}
             onOpenNode={onOpenNode}
+            loadNodeSource={loadNodeSource}
             onAnnotate={onAnnotateTargets ? selectTarget : undefined}
             selectedTargetKeys={selectedTargetKeys}
             focused={focused}

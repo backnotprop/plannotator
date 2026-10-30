@@ -99,10 +99,12 @@ test.afterAll(async () => {
   }
 });
 
-test('the Search entry sits under the Tater mark; no key but the one chord opens the palette', async () => {
+test('the Search entry sits under the Tater mark; no key but the chord and / opens the palette', async () => {
   await page.goto(url);
   const entry = page.locator('.ib-side .ib-sp-entry');
-  await expect(entry).toHaveText(/^Search(⌘K|Ctrl K)$/);
+  // The keycap is drawn from its attribute (shortcuts/hint.tsx), so the entry's words are "Search".
+  await expect(entry).toHaveText('Search');
+  await expect(entry.locator('[data-shortcut-hint="inbox-search.openSearch"]')).toHaveAttribute('data-keycap', /^(⌘K|Ctrl K)$/);
   await expect(entry).toHaveAttribute('aria-haspopup', 'dialog');
   // Under the brand, above Inbox.
   const brand = await page.locator('.ib-side .ib-brand').boundingBox();
@@ -112,11 +114,16 @@ test('the Search entry sits under the Tater mark; no key but the one chord opens
   expect(box!.y).toBeLessThan(inbox!.y);
   // The phone header's icon is not drawn on a desktop.
   await expect(page.locator('.ib-lhead .ib-lhead-search')).toBeHidden();
-  // ⌘K / Ctrl+K is the one shortcut (its own tests below); nothing else opens it.
-  for (const key of ['/', 'k', 'Alt+k', 'Shift+K', 'Control+Shift+K']) {
+  // ⌘K / Ctrl+K (its own tests below) and / (approval "inbox-keyboard-shortcuts") open it; nothing else does.
+  for (const key of ['k', 'Alt+k', 'Shift+K', 'Control+Shift+K', 'Alt+/']) {
     await page.keyboard.press(key);
     await expect(palette(page)).toHaveCount(0);
   }
+  await page.keyboard.press('/');
+  await expect(input(page)).toBeFocused();
+  await expect(input(page)).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(palette(page)).toBeHidden();
   await shot(page, '01-closed');
 });
 
@@ -240,9 +247,9 @@ for (const platform of [
       await ctx.addInitScript((value) => Object.defineProperty(Navigator.prototype, 'platform', { get: () => value, configurable: true }), platform.value);
       const p = await ctx.newPage();
       await p.goto(`${url}#thread=${world.threads.retry}`);
-      const hint = p.locator('.ib-side .ib-sp-entry [data-search-hint]');
-      await expect(hint).toHaveText(platform.hint);
-      await expect(p.locator('.ib-side .ib-sp-entry')).toHaveAttribute('aria-keyshortcuts', platform.value === 'MacIntel' ? 'Meta+K' : 'Control+K');
+      const hint = p.locator('.ib-side .ib-sp-entry [data-shortcut-hint="inbox-search.openSearch"]');
+      await expect(hint).toHaveAttribute('data-keycap', platform.hint);
+      await expect(p.locator('.ib-side .ib-sp-entry')).toHaveAttribute('aria-keyshortcuts', platform.value === 'MacIntel' ? 'Meta+K /' : 'Control+K /');
       await p.locator('.ib-side').screenshot({ path: join(proofDir, `30-sidebar-hint-${platform.shot}-light.png`) });
       await p.emulateMedia({ colorScheme: 'dark' });
       await p.waitForTimeout(250);

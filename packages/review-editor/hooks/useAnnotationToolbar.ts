@@ -35,6 +35,12 @@ interface UseAnnotationToolbarArgs {
   onLineSelection: (range: SelectedLineRange | null) => void;
   onAddAnnotation: (type: CodeAnnotationType, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel, decorations?: ConventionalDecoration[], tokenMeta?: TokenAnnotationMeta) => void;
   onEditAnnotation: (id: string, text?: string, suggestedCode?: string, originalCode?: string, conventionalLabel?: ConventionalLabel | null, decorations?: ConventionalDecoration[]) => void;
+  /**
+   * The toolbar is only an Ask box (a host with no comments): the expanded
+   * comment composer a touch screen gets is never opened, so the Ask box keeps
+   * its outside-click and Escape dismissal.
+   */
+  askOnly?: boolean;
 }
 
 // Per-range draft storage (survives component remounts, e.g. file switches)
@@ -58,9 +64,9 @@ function draftKey(filePath: string, range: SelectedLineRange): string {
   return `${filePath}:${range.side}:${start}-${end}`;
 }
 
-export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation }: UseAnnotationToolbarArgs) {
+export function useAnnotationToolbar({ patch, filePath, isFocused, onLineSelection, onAddAnnotation, onEditAnnotation, askOnly = false }: UseAnnotationToolbarArgs) {
   const visibleBounds = useVisibleViewportBounds(16);
-  const expandedComposerRequired = shouldUseExpandedComposer({
+  const expandedComposerRequired = !askOnly && shouldUseExpandedComposer({
     bounds: visibleBounds,
     coarsePointer: hasPrimaryCoarsePointer(),
   });

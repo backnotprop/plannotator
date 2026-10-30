@@ -23,6 +23,10 @@
         "bun-types": "^1.4.3",
       },
     },
+    "apps/dsh-plugin": {
+      "name": "@plannotator/dsh",
+      "version": "0.28.35",
+    },
     "apps/feedback-service": {
       "name": "@plannotator/feedback-service",
       "version": "0.1.0",
@@ -76,7 +80,6 @@
         "@vitejs/plugin-react": "^5.0.0",
         "typescript": "~5.8.2",
         "vite": "^6.2.0",
-        "vite-plugin-singlefile": "^2.3.4",
       },
     },
     "apps/inbox": {
@@ -211,7 +214,6 @@
         "@vitejs/plugin-react": "^5.0.0",
         "typescript": "~5.8.2",
         "vite": "^6.2.0",
-        "vite-plugin-singlefile": "^2.3.4",
       },
     },
     "apps/vscode-extension": {
@@ -226,11 +228,25 @@
         "zod": "4.6.7",
       },
       "devDependencies": {
+        "@pierre/diffs": "1.5.2",
+        "@plannotator/core": "workspace:*",
+        "@plannotator/guide-viewer": "workspace:*",
+        "@plannotator/review-editor": "workspace:*",
+        "@plannotator/shared": "workspace:*",
+        "@plannotator/ui": "workspace:*",
+        "@tailwindcss/vite": "^4.3.3",
         "@types/bun": "latest",
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
         "@types/vscode": "1.85.0",
+        "@vitejs/plugin-react": "^5.0.0",
         "@vscode/vsce": "^3.7.1",
         "esbuild": "^0.28.2",
+        "react": "^19.3.1",
+        "react-dom": "^19.3.1",
+        "tailwindcss": "^4.1.18",
         "typescript": "^5.0.0",
+        "vite": "^6.2.0",
       },
     },
     "apps/waitlist-service": {
@@ -351,7 +367,6 @@
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.5.2",
-        "@plannotator/acp-client": "workspace:*",
         "@plannotator/ai": "workspace:*",
         "@plannotator/core": "workspace:*",
         "@plannotator/shared": "workspace:*",
@@ -363,6 +378,7 @@
       },
       "devDependencies": {
         "@modelcontextprotocol/client": "2.3.1",
+        "fast-check": "4.10.2",
         "glimpseui": "^0.8.0",
       },
     },
@@ -397,7 +413,7 @@
     },
     "packages/ui": {
       "name": "@plannotator/ui",
-      "version": "0.53.1",
+      "version": "0.55.0",
       "dependencies": {
         "@base-ui/react": "^1.9.0",
         "@codemirror/autocomplete": "^6.20.3",
@@ -428,7 +444,7 @@
         "clsx": "^2.1.1",
         "diff": "^8.0.4",
         "dompurify": "^3.4.17",
-        "katex": "^0.18.11",
+        "katex": "^0.19.0",
         "lucide-react": "^1.59.0",
         "marked": "^17.0.6",
         "mermaid": "12.2.0",
@@ -462,6 +478,7 @@
   },
   "overrides": {
     "dompurify": "^3.4.17",
+    "katex": "^0.19.0",
     "lodash-es": "4.18.1",
     "proxy-addr": "2.0.8",
     "sharp": "0.35.5",
@@ -2138,7 +2155,7 @@
 
     "jws": ["jws@4.0.1", "", { "dependencies": { "jwa": "^2.0.1", "safe-buffer": "^5.0.1" } }, "sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA=="],
 
-    "katex": ["katex@0.18.11", "", { "dependencies": { "commander": "^15.0.0" }, "bin": { "katex": "cli.js" } }, "sha512-yvyz/2VMKqoho/35Hat5w37wIEdWJ5ElVMidTAlWrxr5uW4aBGsEpveTmKh18/zw08v/7lGswCPon4OhqmqrTA=="],
+    "katex": ["katex@0.19.0", "", { "dependencies": { "commander": "^15.0.0" }, "bin": { "katex": "cli.js" } }, "sha512-v6Tznz3zJ7u3niRCoDTsumM2+HA2XXcCu+WAacCeHD2z3p9A9Ks987o5FzfTGBN0e8A0vjEgIDvLbICrXpdw/Q=="],
 
     "keytar": ["keytar@7.9.0", "", { "dependencies": { "node-addon-api": "^4.3.0", "prebuild-install": "^7.0.1" } }, "sha512-VPD8mtVtm5JNtA2AErl6Chp06JBfy7diFQ7TQQhdpWOl6MrCRB+eRbvAZUsbGQS9kiMq0coJsy0W0vHpDCkWsQ=="],
 

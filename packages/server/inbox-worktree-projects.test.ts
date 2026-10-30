@@ -162,23 +162,32 @@ test("a worktree inside a hidden folder (as Codex and Claude Code keep theirs) s
   writeFileSync(join(hidden, "shots", "after.png"), png());
   // A hidden folder inside the folder sent from is the agent's own, as in its project.
   writeFileSync(join(hidden, "shots", ".cache", "frame.png"), png());
-  // The same hidden parent, outside the worktree: not the folder sent from, so refused.
+  // The same hidden parent, outside the worktree: not the folder sent from, and (as `~/.codex`) a
+  // hidden folder of the home folder, so refused.
   mkdirSync(join(root, ".codex", "other"), { recursive: true });
   writeFileSync(join(root, ".codex", "other", "x.png"), png());
-  const server = await start(dataDir);
-  const sent = await send(await agent(server), {
-    project_path: hidden,
-    body: "![after](shots/after.png) ![frame](shots/.cache/frame.png) ![other](../../other/x.png)",
-    agent_session: "ses_codex",
-  });
-  expect(sent.project.root).toBe(main);
-  expect(server.store.message(sent.message_id)?.base_path).toBe(hidden);
-  expect((await image(server, sent.message_id, "shots/after.png")).status).toBe(200);
-  expect((await image(server, sent.message_id, "shots/.cache/frame.png")).status).toBe(200);
-  const other = await image(server, sent.message_id, "../../other/x.png");
-  expect(other.status).toBe(403);
-  expect(((await other.json()) as { code: string }).code).toBe("image_hidden");
-  expect(sent.images_not_shown).toEqual([{ ref: "../../other/x.png", reason: "in a hidden folder, or a hidden or .env file" }]);
+  // The temp root is a scratch home folder, as Codex keeps its worktrees in ~/.codex.
+  const previousHome = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    const server = await start(dataDir);
+    const sent = await send(await agent(server), {
+      project_path: hidden,
+      body: "![after](shots/after.png) ![frame](shots/.cache/frame.png) ![other](../../other/x.png)",
+      agent_session: "ses_codex",
+    });
+    expect(sent.project.root).toBe(main);
+    expect(server.store.message(sent.message_id)?.base_path).toBe(hidden);
+    expect((await image(server, sent.message_id, "shots/after.png")).status).toBe(200);
+    expect((await image(server, sent.message_id, "shots/.cache/frame.png")).status).toBe(200);
+    const other = await image(server, sent.message_id, "../../other/x.png");
+    expect(other.status).toBe(403);
+    expect(((await other.json()) as { code: string }).code).toBe("image_hidden");
+    expect(sent.images_not_shown).toEqual([{ ref: "../../other/x.png", reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" }]);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });
 
 test("relative attachments resolve in the worktree and are recorded by their realpath", async () => {

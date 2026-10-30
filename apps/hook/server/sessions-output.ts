@@ -26,6 +26,7 @@ export function formatSessionsTable(sessions: readonly SessionInfo[], now: numbe
       session.url.padEnd(28),
       `${ageText(session.startedAt, now)} ago`.padEnd(10),
       session.target ?? "-",
+      session.host === "opencode" ? "(in OpenCode)" : "",
     ];
     lines.push(`  ${cells.join(" ")}`.trimEnd());
   });
@@ -48,6 +49,7 @@ export function formatSessionsJson(sessions: readonly SessionInfo[]): string {
       label: session.label,
       startedAt: session.startedAt,
       ...(session.hostSession ? { hostSession: session.hostSession } : {}),
+      ...(session.host ? { host: session.host } : {}),
     })),
   );
 }
