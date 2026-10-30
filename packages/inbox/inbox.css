@@ -3146,6 +3146,9 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 .ib-agrow .ib-agv code { font-size: var(--ib-fs-12, 12px); color: var(--foreground); }
 .pn-inbox .ib-agrow .ib-agv .ib-lnk { font-size: var(--ib-fs-12-5, 12.5px); margin: 0 0 0 6px; display: inline; }
 .ib-agrow .ib-agr { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+/* Settings → Agents' "Scratch folders" path, while it is changed. */
+.ib-agrow .ib-agpath { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-agrow .ib-agpath:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
 .ib-agrow .ib-agsub { grid-column: 2 / 4; margin-top: -2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
 .ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
 .pn-inbox .ib-agrow .ib-agsub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
@@ -3477,6 +3480,9 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-folders .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }
 .ib-cp-fopt > svg.ib-ic { color: var(--muted-foreground); }
 .ib-cp-fopt s { color: var(--muted-foreground); }
+/* Last, under a line: "New scratch folder" (· trust it once, while Claude Code does not trust its root). */
+.ib-cp-folders .ib-cp-list > .ib-cp-cap-line { grid-column: 1 / -1; margin: 4px 2px; }
+.ib-cp-scratch .ib-cp-trust { color: var(--muted-foreground); }
 
 /* Notes under To: no agent running, or the session a draft was for has ended. */
 .ib-cp-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--ib-line); background: var(--ib-band); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
@@ -3715,7 +3721,7 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
 .pn-inbox .ib-run-btn { border: 0; background: none; padding: 2px 4px; color: var(--muted-foreground); font-size: inherit; border-radius: 5px; }
 .pn-inbox .ib-run-btn:hover:not(:disabled) { color: var(--foreground); background: color-mix(in oklch, var(--muted) 70%, transparent); }
 .ib-run-cmd { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: 6px; background: var(--muted); color: var(--foreground); }
-.ib-run-cmd code { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-run-cmd code { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
 .ib-run-spin { flex: none; width: 11px; height: 11px; margin-top: 3px; border-radius: 50%; border: 1.5px dashed currentColor; }
 @media (prefers-reduced-motion: no-preference) {
   .ib-run-spin { animation: ib-run-spin 2.4s linear infinite; }
@@ -4521,7 +4527,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-undl .ib-m-whybox { margin: 0; padding: 0; border: 0; background: none; width: 100%; }
 .pn-inbox .ib-undl .ib-m-why { color: var(--muted-foreground); padding-left: 20px; line-height: 1.7; margin: 0; }
 .pn-inbox .ib-undl .ib-m-why > span { margin-right: 6px; }
-.pn-inbox .ib-undl .ib-m-why code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.92em; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--foreground); white-space: nowrap; }
+.pn-inbox .ib-undl .ib-m-why code { font-family: var(--font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--foreground); white-space: nowrap; }
 .pn-inbox .ib-undl .ib-m-whybox .ib-rl-lead, .pn-inbox .ib-undl .ib-m-whybox .ib-rl-fold { padding-left: 20px; }
 /* OpenCode's one quiet line (approval "reload-hosts"): under the lead, in its column and tone. */
 .pn-inbox .ib-undl .ib-m-whybox > .ib-rw-after { padding-left: 20px; margin: 0; color: var(--muted-foreground); line-height: 1.7; }

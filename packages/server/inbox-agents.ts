@@ -34,7 +34,7 @@
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { cutText } from "@plannotator/core/inbox-questions";
 import {
   INBOX_AGENT_IDS,
@@ -655,6 +655,29 @@ export function claudeBypassSetup(e: AgentEnvironment, folder: string | null = n
   };
   const defaultMode = modeOf(managed, false) ?? modeOf(projectLocal, true) ?? modeOf(project, true) ?? modeOf(user, false);
   return { consent, disabled, defaultMode };
+}
+
+/**
+ * Whether Claude Code trusts `folder`: its global config (`~/.claude.json`, `$CLAUDE_CONFIG_DIR/.claude.json`)
+ * records `hasTrustDialogAccepted: true` for the folder or a folder above it (a child inherits a trusted
+ * parent's trust: bg-test). Read only; the Inbox never writes it. Unreadable: not trusted.
+ */
+export function claudeTrustsFolder(e: AgentEnvironment, folder: string): boolean {
+  const configDir = envDir(e, "CLAUDE_CONFIG_DIR");
+  const global = readAgentFile(configDir ? join(configDir, ".claude.json") : join(e.homeDir, ".claude.json"), CLAUDE_JSON_MAX_BYTES);
+  if (global.kind !== "file") return false;
+  let projects: unknown;
+  try {
+    projects = (JSON.parse(global.text) as { projects?: unknown }).projects;
+  } catch {
+    return false;
+  }
+  if (!projects || typeof projects !== "object") return false;
+  const table = projects as Record<string, { hasTrustDialogAccepted?: unknown } | undefined>;
+  for (let dir = folder; ; dir = dirname(dir)) {
+    if (table[dir]?.hasTrustDialogAccepted === true) return true;
+    if (dirname(dir) === dir) return false;
+  }
 }
 
 /** Claude Code's managed (enterprise) settings file, per platform. */

@@ -328,6 +328,10 @@ export interface InboxLaunchSettings {
   needs_consent?: boolean;
   /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
   bypass_off?: boolean;
+  /** Where new scratch folders go (absolute), as shown (`~/…`), and whether it is the default (`<dataDir>/scratch`). Absent from an older Inbox. */
+  scratch_dir?: string;
+  scratch_dir_shown?: string;
+  scratch_default?: boolean;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
@@ -637,7 +641,7 @@ export type DraftView = InboxDraft & { status: InboxDraftStatus };
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
   /** A live session, or (launch on) a new session of `agent` started in the project. */
-  to: { host: string; session: string } | { launch: { agent: InboxLaunchAgent; project_id: string } };
+  to: { host: string; session: string } | { launch: { agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -955,12 +959,14 @@ export const inboxApi = {
   // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
   launchStop: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`), {}),
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
-  launchDelete: (launchId: string) => post<{ ok: true }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
+  launchDelete: (launchId: string) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
   launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
+  /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
+  launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(inboxUrl(`/messages/${encodeURIComponent(messageId)}/to`), { to }),
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */

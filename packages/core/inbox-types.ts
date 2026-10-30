@@ -816,8 +816,9 @@ export interface InboxLaunchRecord {
   agent: InboxLaunchAgent;
   /** The host's own short id (`claude attach <ref>`); null until it started. */
   session_ref: string | null;
-  /** The folder it runs in (the project root). */
+  /** The folder it runs in: the project root, or the scratch folder the Inbox made (its real path). */
   folder: string;
+  /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
   scratch: boolean;
   started_at: string;
   /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
@@ -2247,6 +2248,11 @@ export interface InboxComposeProject {
 export interface InboxComposeLaunch {
   agents: { agent: InboxLaunchAgent; name: string }[];
   projects: { id: string; name: string; root: string; exists: boolean }[];
+  /**
+   * The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents), and
+   * whether Claude Code trusts it already (else the row reads "trust it once"). Absent from an older Inbox.
+   */
+  scratch?: { root: string; trusted: boolean };
 }
 
 /**

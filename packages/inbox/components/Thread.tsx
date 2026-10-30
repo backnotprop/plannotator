@@ -4082,7 +4082,14 @@ export function ThreadPane({ notice, thread, sent, onQuestions, onChanged, draft
             <Icon name="warn" size={16} />
             <div>
               <b>Delete the {hostName(launched.agent)} session?</b>
-              <p>It stops, and its session files are removed. This thread stays.</p>
+              {launched.scratch ? (
+                <p>
+                  It stops, and its session files and its scratch folder <bdi>{launched.folder.split('/').pop()}</bdi>, with everything in it, are removed. This thread
+                  stays.
+                </p>
+              ) : (
+                <p>It stops, and its session files are removed. This thread stays.</p>
+              )}
               <span className="ib-acts">
                 <button type="button" className="ib-btn ib-ghost" onClick={() => setConfirmDelete(false)}>
                   Cancel

@@ -16,13 +16,15 @@
  * Calls:
  *  --version                 "<version> (Claude Code)"
  *  --bg --name N --settings F [--allow-dangerously-skip-permissions] [--permission-mode M]
- *                            no prompt; faults: untrusted (Claude's error, exit 1),
+ *                            no prompt; faults: untrusted (Claude's error, exit 1;
+ *                            with `trustCheck`, only in a folder HOME's .claude.json
+ *                            does not trust, itself or above),
  *                            refuseAuto (commander's refusal of `auto`, exit 1),
  *                            slow (sleeps 40 s); else (after `bgDelayMs`) prints
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
  *                            and starts the session process.
  *  agents --json [--all] [--cwd D]  without --all, done and stopped sessions are left out
- *  stop <id> / respawn <id> / rm <id> / purge / attach <id>
+ *  stop <id> / respawn <id> / rm <id> / purge <folder> / attach <id>
  *
  * The session process (`__session <sessionId>`) reads the settings file's env
  * (PLANNOTATOR_DATA_DIR), finds the Inbox in <dataDir>/inbox/inbox.json and
@@ -98,6 +100,14 @@ const updateAgent = (sessionId, patch) => {
   if (current) saveAgent({ ...current, ...patch });
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Claude's folder trust (`trustCheck`): HOME's ~/.claude.json records the folder, or a folder above it, as accepted. */
+const trusted = (folder) => {
+  const projects = (readJson(path.join(process.env.HOME || "", ".claude.json"), {}) || {}).projects || {};
+  for (let dir = folder; ; dir = path.dirname(dir)) {
+    if (projects[dir] && projects[dir].hasTrustDialogAccepted === true) return true;
+    if (path.dirname(dir) === dir) return false;
+  }
+};
 
 const args = process.argv.slice(2);
 
@@ -166,7 +176,7 @@ function main() {
     } catch {}
     const env = (settings && settings.env) || {};
     record({ settingsPath, settings, settingsMode: mode, threadExisted: threadWritten(env.PLANNOTATOR_DATA_DIR, env.PLANNOTATOR_LAUNCH) });
-    if (cfg.fault === "untrusted") {
+    if (cfg.fault === "untrusted" || (cfg.trustCheck && !trusted(process.cwd()))) {
       process.stdout.write("Starting background service…\n");
       process.stderr.write(`Error: Workspace not trusted. Run \`claude\` in ${process.cwd()} once and accept the trust dialog.\n`);
       process.exit(1);
@@ -251,7 +261,13 @@ function main() {
     process.stdout.write(`removed ${agent.id}\n`);
     return;
   }
-  if (command === "purge" || command === "attach") return;
+  // purge <folder>: every session of that folder goes (and, in Claude, its transcripts).
+  if (command === "purge") {
+    for (const a of allAgents()) if (a.cwd === ref) fs.rmSync(agentFile(a.sessionId), { force: true });
+    process.stdout.write(`purged ${ref}\n`);
+    return;
+  }
+  if (command === "attach") return;
   process.stderr.write(`fake claude: unknown call ${args.join(" ")}\n`);
   process.exit(2);
 }

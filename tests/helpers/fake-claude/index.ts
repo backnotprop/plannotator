@@ -24,6 +24,8 @@ export interface FakeClaudeConfig {
   version?: string;
   /** `untrusted`: `--bg` fails with Claude's untrusted-folder error. `slow`: it never answers in time. */
   fault?: "untrusted" | "slow" | null;
+  /** Claude's folder trust: `--bg` fails as untrusted unless HOME's .claude.json trusts the folder or a folder above it (bg-test). */
+  trustCheck?: boolean;
   /** `--bg --permission-mode auto` fails as a CLI without auto mode does (commander's refusal of the value). */
   refuseAuto?: boolean;
   /** Plannotator's plugin brings its own PermissionRequest hook (ExitPlanMode), as on a real install (default true; it turns the skip export off). */
