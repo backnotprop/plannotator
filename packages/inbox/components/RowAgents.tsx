@@ -4,12 +4,14 @@ import { agentName } from '../tags';
 import { Tip } from './Tip';
 
 /**
- * The agents in a list row. A wide row draws them after its project (`RowAgents`, approval "list-rows-mail-icons",
- * 2026-10-30): one bare 16 px mark per agent host, in the order they joined the thread. A host with two or more
- * sessions is one mark and "×N". Past three hosts, two marks and "+N", N counting the sessions not drawn. A
- * three-line or phone row draws them before its project (`RowAgentTiles`, approval "inbox-list-row-v2",
- * 2026-10-30): the thread header's overlapping tiles, one per agent, at most two and a "+N" tile counting the other
- * agents. Either run is one image whose name lists every agent, the hidden ones too.
+ * The agents in a list row. A wide row draws them before its project (`RowAgents`, approval "list-rows-mail-icons",
+ * 2026-10-30; before the project since the owner's call of 2026-10-31): one bare 16 px mark per agent host, in the
+ * order they joined the thread. A host with two or more sessions is one mark and "×N". Past three hosts, two marks
+ * and "+N", N counting the sessions not drawn. The project hugs its own row's marks, 6 px after them (the owner,
+ * 2026-10-31: no column that reserves width). A three-line or phone row draws them before its project too
+ * (`RowAgentTiles`, approval "inbox-list-row-v2", 2026-10-30): the thread header's overlapping tiles, one per agent,
+ * at most two and a "+N" tile counting the other agents. Either run is one image whose name lists every agent, the
+ * hidden ones too.
  */
 
 /** A row draws up to three hosts' marks; past that two and "+N". */
