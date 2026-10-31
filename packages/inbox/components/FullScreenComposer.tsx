@@ -29,6 +29,8 @@
  */
 import { createContext, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
+import { VoiceFoot } from './VoiceMic';
+import { useVoiceSession } from '../voice';
 import { AttachFilesButton, ComposeFileTiles, useFileDrop, type ComposeFile } from '../compose/ComposeFiles';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
@@ -161,6 +163,7 @@ export function FullScreenComposer({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
+  const voice = useVoiceSession();
   const tabsRef = useRef<HTMLDivElement | null>(null);
   /** Where focus goes once the next state is drawn: the card's field (restored, a tab picked) or the pill (minimized). */
   const focusNext = useRef<'field' | 'pill' | null>(null);
@@ -285,6 +288,7 @@ export function FullScreenComposer({
         ) : (
           <Rides reply={reply} />
         )}
+        <VoiceFoot voice={voice} phone={phone} />
         <button type="button" className="ib-fcomp-link" onClick={reply.onOpenThread} data-fcomp-open-thread="">
           Open in thread
         </button>
@@ -339,6 +343,7 @@ export function FullScreenComposer({
             <div className="ib-fcomp-field" data-fcomp-field="" onPaste={reply.onPaste}>
               <InboxComposerField
                 textareaRef={replyRef}
+                voice={voice}
                 ariaLabel={replyLabel}
                 ariaDescribedBy={reply.error ? errorId : undefined}
                 placeholder={`${replyLabel}…`}
@@ -355,7 +360,7 @@ export function FullScreenComposer({
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
                     event.stopPropagation();
-                    reply.onSend();
+                    if (!voice.busy) reply.onSend();
                   }
                 }}
               />
@@ -364,7 +369,7 @@ export function FullScreenComposer({
               type="button"
               className="ib-btn ib-pri ib-fcomp-send"
               onClick={reply.onSend}
-              disabled={reply.sending || !reply.canSend}
+              disabled={reply.sending || !reply.canSend || voice.busy}
               aria-busy={reply.sending || undefined}
               aria-label={phone ? `Send to ${reply.to}` : undefined}
               data-fcomp-send=""

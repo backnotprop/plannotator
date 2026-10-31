@@ -75,6 +75,8 @@ import { TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField } from './ComposerField';
+import { VoiceFoot } from './VoiceMic';
+import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesSettled } from '../actionSaves';
@@ -1317,6 +1319,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const [skipArmed, setSkipArmed] = useState<ReadonlySet<string> | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const voice = useVoiceSession();
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
   /**
@@ -3058,7 +3061,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * takes them there, on the device's route.
    */
   const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean } = {}) => {
-    if (sending) return;
+    // Dictation still running, in this box: the words are not in it yet (Mod+Enter reaches here with Send off).
+    if (sending || voice.busy) return;
     // A pick was replaced while the person was answering: nothing goes until they have read that.
     if (staleQuestions.length > 0 && !options.despiteReplaced) {
       setGuard(true);
@@ -4818,6 +4822,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             >
               <InboxComposerField
                 textareaRef={textRef}
+                voice={voice}
                 ariaLabel={`Reply to ${replyName ?? asker}`}
                 ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                 placeholder="Write a reply"
@@ -4892,6 +4897,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     unanchored={unanchoredComments}
                   />
                 )}
+                <VoiceFoot voice={voice} phone={phone} />
               </div>
               {boxDrop.over && (
                 <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
@@ -4909,7 +4915,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               <>
               {error && errorLine}
               <div className="ib-acts">
-                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending}>
+                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.busy}>
                   <Icon name="send" size={15} />
                   Send
                 </button>
