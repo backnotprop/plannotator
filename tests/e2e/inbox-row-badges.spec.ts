@@ -193,7 +193,7 @@ test('desktop: the triangles with their words, the marks before the project, the
         lefts: ['.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).left),
         cell: box('.ib-from').left,
         project: box('.ib-p').left,
-        markCount: r.querySelectorAll('.ib-ags > .ib-ag').length,
+        markCount: r.querySelectorAll('.ib-ags .ib-atile').length,
         marks: box('.ib-ags').toJSON() as DOMRect,
         subjRight: box('.ib-subj').right,
         subj: box('.ib-subj').left,
@@ -401,6 +401,14 @@ test('beside an open thread: the agents\' tiles, the project and the time on lin
   expect(pair.length).toBe(2);
   for (const m of pair) expect(Math.round(m.width)).toBe(20);
   expect(Math.round(pair[0]!.right - pair[1]!.left)).toBe(5);
+  // No cut (the owner, 2026-10-31), and each logo whole: at its right edge, where the next tile reaches, it is on top.
+  const logos = await page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-l1 .ib-atiles > .ib-atile`).evaluateAll((tiles) =>
+    tiles.map((t) => {
+      const logo = t.querySelector('.ib-mk')!.getBoundingClientRect();
+      return { cut: getComputedStyle(t).maskImage !== 'none', whole: document.elementFromPoint(logo.right - 0.5, (logo.top + logo.bottom) / 2)?.closest('.ib-atile') === t };
+    }),
+  );
+  expect(logos).toEqual([{ cut: false, whole: true }, { cut: false, whole: true }]);
   await expect(page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-atiles`)).toHaveAttribute('aria-label', 'Claude Code and Pi');
   // The long row at the column's narrowest (380 px): the long project stays on one line after both tiles (cut with
   // "…" when it must); the long name wraps on line 2, whole; the preview is cut first on line 3, and ?2 is whole.
