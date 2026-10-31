@@ -33,6 +33,7 @@
   "inbox-image-viewer.spec.ts": 86,
   "inbox-inline-html.spec.ts": 25,
   "inbox-list-resize.spec.ts": 14,
+  "inbox-live-reconnect.spec.ts": 85,
   "inbox-mark-read.spec.ts": 25,
   "inbox-message-comments.spec.ts": 18,
   "inbox-message-images.spec.ts": 4,
