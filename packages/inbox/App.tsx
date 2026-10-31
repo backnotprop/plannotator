@@ -193,6 +193,8 @@ const DRAFTS_REFRESH_MS = 10_000;
 const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
+/** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
+const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
 const AGENTS_SESSIONS_REFRESH_MS = 5_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
@@ -822,6 +824,13 @@ function Inbox() {
   const toastDeadline = useRef(0);
   const toastLeft = useRef<number | null>(null);
   const [said, setSaid] = useState('');
+  /**
+   * The live stream is dead (liveStream.ts: silent past its window, and a reconnect brought nothing): the list's
+   * quiet "Reconnecting…" line, until the stream is heard again.
+   */
+  const [streamDead, setStreamDead] = useState(false);
+  /** When the live region last said "Reconnecting…": said once, and not again for a while (a flaky network). */
+  const reconnectSaidAt = useRef<number | null>(null);
   /** The thread whose reply box opens once it is on screen (the warning toast's Reply). */
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
@@ -1446,6 +1455,14 @@ function Inbox() {
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
         onConnect: reportWindow,
+        // The stream went silent past its window (or the tab came back after it): read what a record would make the
+        // page read, once, so a message that arrived meanwhile is on screen. Never while the stream is heard.
+        onCatchUp: () => {
+          void refreshList(false).then((next) => next && flushNotifications(next));
+          const open = routeRef.current.thread;
+          if (open) void refreshThread(open);
+        },
+        onLive: (live) => setStreamDead(!live),
         // Linked machines. A record from another machine: a live one rings like this Inbox's own (a resync after a
         // reconnect never does), and the open thread follows when it is that machine's. Its row moves once this Inbox
         // has read that machine's list again, which the `machines` frame says.
@@ -2119,6 +2136,16 @@ function Inbox() {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
   };
+  // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
+  // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
+  useEffect(() => {
+    if (!streamDead) return;
+    const at = reconnectSaidAt.current;
+    if (at !== null && Date.now() - at < RECONNECT_SAY_GAP_MS) return;
+    reconnectSaidAt.current = Date.now();
+    say('Reconnecting…');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is a fresh closure each render; only the change matters.
+  }, [streamDead]);
   /**
    * Click Inbox to refresh (the owner, 2026-10-20: "Just click inbox, it
    * refreshes"): clicking Inbox, or the project folder the list shows, or the
@@ -4103,6 +4130,7 @@ function Inbox() {
           onSearch={(opener) => openSearch(opener)}
           onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
+          reconnecting={streamDead}
           empty={
             projectAllArchived(filterProject) ? (
               <div className="ib-empty-list" data-project-archived="">

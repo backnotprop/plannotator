@@ -2107,6 +2107,9 @@ pre code.pn-code[data-keep-layout] {
 .ib-row[data-away] > *, .ib-nrow[data-away] > *, .ib-mrow[data-away] > * { opacity: 0.55; }
 .ib-away { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 12px 6px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
 .ib-away > .ib-ic { flex: none; }
+/* The live stream is dead (liveStream.ts): one quiet line under the list, the away line's muted text, no colour of its
+   own, gone with the stream's next frame. */
+.ib-relink { flex: none; margin: 0; padding: 8px 20px 10px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
 /* An answer held for another machine: the words as they will land, then its "Sending to …" line. */
 .ib-held-words { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ib-route hr { border: 0; border-top: 1px solid var(--ib-hair); margin: 6px 4px; }
@@ -2976,6 +2979,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-mpair > .ib-mdigits { flex: none; }
   .ib-mfield .ib-fbk-contact { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-away { padding-inline: 14px; }
+  .ib-relink { padding: 8px 16px calc(10px + env(safe-area-inset-bottom)); }
   .ib-ways { grid-template-columns: minmax(0, 1fr); }
   .ib-scan { flex-direction: column; align-items: center; }
   .ib-scan-t { width: 100%; }
