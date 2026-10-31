@@ -474,7 +474,6 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
       // Like O: from the file's pane the key is the file's own, so Q opens nothing.
       expect(fileOpens, `Q from the file pane (focus ${fileFocus}) opens no popup`).toBe(0);
       // From the thread (focus moved into the foot's reply button), Q works with the file open.
-      console.log(`STEP9 file open: focus ${fileFocus}; Q opened the popup: ${fileOpens > 0}; thread foot visible: ${await button().isVisible()}`);
       if (await button().isVisible()) {
         await page.locator('[data-reply-button]').focus();
         await press('q');
