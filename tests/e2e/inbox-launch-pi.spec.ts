@@ -308,17 +308,29 @@ test('Open in Terminal while the Inbox\'s Pi runs: it ends, the Terminal\'s Pi t
     await page.locator('[data-launch-item="open"]').click();
     const ran = await waitFor('osascript', () => fake.osascript().at(-1));
     const command = ran.at(-1)!;
-    expect(command).toBe(`cd '${world.project}' && while kill -0 ${start.pid} 2>/dev/null; do sleep 0.2; done; PLANNOTATOR_INBOX_TOOL=1 PLANNOTATOR_DATA_DIR='${world.dataDir}' pi --session-id ${session}`);
+    expect(command.startsWith('/bin/sh -c ')).toBe(true);
+    // Terminal has not run it yet: the Inbox's Pi still has the session.
+    await page.waitForTimeout(1_000);
+    expect(fake.alive(start.pid)).toBe(true);
+    // What Terminal would run, run here in the person's shell: the fake on PATH and none of the Inbox's env.
+    shell = spawn('/bin/zsh', ['-f', '-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });
     const ended = await waitFor('the Inbox\'s process ended', () => fake.exits().find((exit) => exit.pid === start.pid));
     // Its turn was aborted before its stdin closed.
     expect(ended).toMatchObject({ why: 'stdin', aborted: true });
     fake.configure({ hold: false });
-    // What Terminal would run, run here: a plain shell with the fake on PATH and none of the Inbox's env.
-    shell = spawn('/bin/sh', ['-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });
     const terminal = await waitFor('the Terminal\'s Pi', () => fake.terminals().at(-1));
-    // A reply goes to the Terminal's Pi: it answers, nothing starts here, and ⋯ offers no second Pi on the session.
+    expect(terminal).toMatchObject({ argv: ['--session-id', session], cwd: world.project, dataDir: world.dataDir, inboxTool: '1' });
+    expect(terminal.at).toBeGreaterThanOrEqual(ended.at);
+    // A reply goes to the Terminal's Pi: it answers, nothing starts here (no restart line meanwhile), and ⋯
+    // offers no second Pi on the session.
     await reply(page, 'Now the cold start.');
-    await expect(p.locator('article.ib-message[data-author="agent"]').filter({ hasText: 'Done: Now the cold start.' })).toBeVisible({ timeout: 30_000 });
+    const answered = p.locator('article.ib-message[data-author="agent"]').filter({ hasText: 'Done: Now the cold start.' });
+    for (const deadline = Date.now() + 30_000; (await answered.count()) === 0 && Date.now() < deadline; ) {
+      await expect(p.locator('[data-run="failed"]')).toHaveCount(0);
+      await expect(p.locator('[data-run="starting"]').filter({ hasText: 'again' })).toHaveCount(0);
+      await page.waitForTimeout(250);
+    }
+    await expect(answered).toBeVisible();
     expect(ours()).toHaveLength(1);
     expect(await menuItems(page)).not.toContain('Copy attach command');
     // It quit in Terminal. Once the bridge lost it, a reply starts Pi here again on the same session.
