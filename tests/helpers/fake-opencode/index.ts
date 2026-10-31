@@ -28,6 +28,8 @@ export interface FakeOpenCodeConfig {
   version?: string;
   /** How long a turn takes before the answer (ms, default 400). */
   workMs?: number;
+  /** Each turn ends in this `session.error` instead of answering (`{ name, data: { message } }`, as OpenCode's). */
+  turnError?: { name: string; data: Record<string, unknown> } | null;
   /** Keep the turn running until cleared. */
   hold?: boolean;
   /** The answer's first words. */

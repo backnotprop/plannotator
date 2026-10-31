@@ -44,6 +44,9 @@
  *    `PLANNOTATOR_LAUNCH=<id>`, which tells the plugin its replies come back
  *    as turns. So To offers OpenCode only when the plugin is in the person's
  *    OpenCode config.
+ *  - a turn that ends in an error (`session.error`: the provider refused the
+ *    model or the login) answers nothing, so the host says it: one note from
+ *    the session, "OpenCode's turn ended with an error: <OpenCode's own text>".
  *  - permission prompts: `permission.asked` on the server's event stream
  *    becomes the thread's permission card (inbox-launch-opencode-permission.ts),
  *    the session's own and its subagents' (child sessions, `parentID`).
@@ -97,6 +100,23 @@ export const OPENCODE_DENIED_EARLIER = "Denied with your earlier answer.";
 export const OPENCODE_ALLOWED_EARLIER = "Allowed by your Allow for this session.";
 /** The words after "OpenCode stopped." for a server the host stopped for being idle (`stoppedNote`). */
 export const openCodeIdleNote = (minutes: number) => `It was idle for ${minutes} minute${minutes === 1 ? "" : "s"}. Your reply continues it.`;
+
+/**
+ * The thread note for a turn that ended in an error (`session.error`): OpenCode's own `error.data.message` (else
+ * the error's name) as one line, every control or invisible character dropped, Markdown's marks escaped, 300
+ * characters at most.
+ */
+export function openCodeTurnErrorNote(message: string): string {
+  const flat = message
+    // The zero-width joiner stays (it holds an emoji together).
+    .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const short = [...flat].length > 300 ? `${[...flat].slice(0, 299).join("").trimEnd()}…` : flat;
+  // Only marks the Inbox's inline Markdown both formats and unescapes.
+  const shown = short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+  return shown ? `${OPENCODE_NAME}'s turn ended with an error: ${shown}` : `${OPENCODE_NAME}'s turn ended with an error.`;
+}
 
 /** `1.18.23` (OpenCode prints the bare version) → `1.18.23`. */
 export function parseOpenCodeVersion(stdout: string): string | null {
@@ -262,6 +282,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
   /** Launches whose server (ours by its process) did not answer an adoption, since when. */
   const unproved = new Map<string, number>();
   let perm: LaunchPermissionContext | null = null;
+  let errorNotes = 0;
   let questions: ReturnType<typeof createLaunchQuestions> | null = null;
   /** Permission questions by message id. */
   const asked = new Map<string, Asked>();
@@ -536,6 +557,37 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       case "question.rejected":
         if (typeof p.requestID === "string") conn.questions.delete(p.requestID);
         return;
+      case "session.error":
+        if (p.sessionID === conn.session) turnFailed(conn, p.error);
+        return;
+    }
+  };
+
+  /**
+   * The session's turn ended in an error (the provider refused the model or the login): OpenCode answers nothing in
+   * the Inbox, so one note from the session says it, with OpenCode's own words (and the logs). Stop's abort says
+   * nothing, and neither does a context overflow, which OpenCode compacts away and goes on.
+   */
+  const turnFailed = (conn: Connection, error: unknown) => {
+    const e = (error ?? {}) as { name?: unknown; data?: { message?: unknown } };
+    if (e.name === "MessageAbortedError" || e.name === "ContextOverflowError") return;
+    const text = typeof e.data?.message === "string" && e.data.message.trim() ? e.data.message : typeof e.name === "string" ? e.name : "";
+    if (existsSync(ctx.launchDir(conn.launchId))) ctx.startLog(conn.launchId, `session.error: ${String(e.name)}: ${text.slice(0, 2000)}`);
+    ctx.log(`Inbox launch ${conn.launchId}: an OpenCode turn ended with an error: ${text.slice(0, 200)}`);
+    const root = rootOfLaunch(conn.launchId);
+    if (!root || !perm) return;
+    try {
+      const latest = perm.store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
+      perm.store.sendMessage({
+        project_id: root.project_id,
+        author: { kind: "agent", host: OPENCODE, session: conn.session, name: OPENCODE_NAME },
+        body: openCodeTurnErrorNote(text),
+        reply_to: latest,
+        idempotency_key: `opencode-error-${conn.launchId}-${Date.now()}-${++errorNotes}`,
+      });
+      perm.onChange();
+    } catch (failure) {
+      ctx.log(`Inbox launch ${conn.launchId}: the turn's error note was not written: ${failure instanceof Error ? failure.message : String(failure)}`);
     }
   };
 

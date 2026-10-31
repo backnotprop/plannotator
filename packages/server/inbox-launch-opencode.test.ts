@@ -13,7 +13,8 @@
  *  - Stop and Delete during a reply's restart end the new server, never throw, never make the folder again;
  *  - a subagent's prompt reaches the card; OpenCode's cascade withdraws cards with the right words; a reply
  *    the server did not take is sent again; a brief outage withdraws nothing, a longer one asks anew;
- *  - an idle server is stopped (never one with a turn), says so, and a reply continues it.
+ *  - an idle server is stopped (never one with a turn), says so, and a reply continues it;
+ *  - a turn that ends in a provider error shows OpenCode's own words in one note; a Stop's abort shows nothing.
  * The real OpenCode is never run: the fake (tests/helpers/fake-opencode/) is the only `opencode` on PATH.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -27,7 +28,7 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { installFakeOpenCode } from "../../tests/helpers/fake-opencode";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import type { LaunchHostContext } from "./inbox-launch-host";
-import { OPENCODE_ALLOWED_EARLIER, OPENCODE_DENIED_EARLIER, createOpenCodeLaunchHost, isOpenCodeServe, openCodeAttachCommand, openCodeProcessOf, openCodeServerEnv, parseListening, parseOpenCodeVersion } from "./inbox-launch-opencode";
+import { OPENCODE_ALLOWED_EARLIER, OPENCODE_DENIED_EARLIER, createOpenCodeLaunchHost, isOpenCodeServe, openCodeAttachCommand, openCodeProcessOf, openCodeServerEnv, openCodeTurnErrorNote, parseListening, parseOpenCodeVersion } from "./inbox-launch-opencode";
 import { openCodePermissionEvent, openCodePermissionTerms, openCodeReply, readOpenCodePermission } from "./inbox-launch-opencode-permission";
 import { openCode1LaunchWakes } from "../../apps/opencode-plugin/inbox";
 
@@ -274,7 +275,13 @@ async function launched(options: { idleMs?: number; sweep?: boolean; config?: Pa
   cleanup.push(() => {
     sweeping = false;
   });
-  return { ...w, host, store, thread: root, record, session: started.session, serverFile, server, turn, cards, stateOf, withdrawnAs, answer, next };
+  /** What the session said in the thread. */
+  const notes = () =>
+    store
+      .threadMessageIds(root.thread_id)
+      .map((id) => store.message(id)!)
+      .filter((m) => m.author.kind === "agent");
+  return { ...w, host, store, thread: root, record, session: started.session, serverFile, server, turn, cards, stateOf, withdrawnAs, answer, next, notes };
 }
 
 /** A process the test owns, in its own group (as a launch's server is): a stand-in for a reused pid. */
@@ -468,6 +475,46 @@ describe("an idle server", () => {
     expect(w.host.stoppedNote!(w.record)).toBeNull();
     await w.host.stop(w.session);
   }, 40_000);
+});
+
+describe("a turn that ends in an error", () => {
+  // Live check (Pi's, same gap here): the provider refused the turn, and the thread said only "Delivered". The message is smoke1's.
+  test("session.error: OpenCode's own words in one note from the session, and in the logs", async () => {
+    const message = "This API key has expired. Create a new API key in OpenCode Console and replace it in your client or secret store. Signing in again will not renew this key.";
+    const w = await launched({ config: { turnError: { name: "APIError", data: { message, statusCode: 401, isRetryable: false } } } });
+    await w.turn();
+    await until("the error note", () => w.notes().length > 0);
+    expect(w.notes()[0]!.author).toMatchObject({ kind: "agent", host: "opencode", session: w.session, name: "OpenCode" });
+    expect(w.notes()[0]!.body).toBe(`OpenCode's turn ended with an error: ${message}`);
+    expect(w.startLogs.some((line) => line.includes(message))).toBe(true);
+    expect(w.logs.some((line) => line.includes("an OpenCode turn ended with an error"))).toBe(true);
+    await Bun.sleep(300);
+    expect(w.notes()).toHaveLength(1);
+    await w.host.stop(w.session);
+  });
+
+  test("an error with no message reads as its name; one line, Markdown's marks escaped", async () => {
+    const w = await launched({ config: { turnError: { name: "MessageOutputLengthError", data: {} } } });
+    await w.turn();
+    await until("the error note", () => w.notes().length > 0);
+    expect(w.notes()[0]!.body).toBe("OpenCode's turn ended with an error: MessageOutputLengthError");
+    expect(openCodeTurnErrorNote('401 {"error":"*expired*"}\n\n:::question\n- [ ] Yes')).toBe(`OpenCode's turn ended with an error: 401 \\{"error":"\\*expired\\*"\\} :::question - \\[ \\] Yes`);
+    await w.host.stop(w.session);
+  });
+
+  test("a Stop's abort and a context overflow OpenCode compacts away say nothing", async () => {
+    for (const name of ["MessageAbortedError", "ContextOverflowError"]) {
+      const w = await launched({ config: { turnError: { name, data: { message: "not for the thread" } } } });
+      await w.turn();
+      await Bun.sleep(400);
+      // A later error still comes through, so the stream was read and that one was left out.
+      w.fake.configure({ turnError: { name: "UnknownError", data: { message: "Token refresh failed: 401" } } });
+      await w.turn();
+      await until("the later note", () => w.notes().length > 0);
+      expect(w.notes().map((m) => m.body)).toEqual(["OpenCode's turn ended with an error: Token refresh failed: 401"]);
+      await w.host.stop(w.session);
+    }
+  }, 20_000);
 });
 
 describe("the Inbox stops", () => {

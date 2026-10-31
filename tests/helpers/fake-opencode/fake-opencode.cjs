@@ -44,7 +44,9 @@
  * "once" by the fake itself, as a person in `opencode attach` would), then
  * after `workMs` (and while `hold` is set) the agent answers through the
  * Inbox's MCP `send_message` (`reply_to` the item in the wake text), as
- * Plannotator's plugin does from `PLANNOTATOR_DATA_DIR`, and goes idle.
+ * Plannotator's plugin does from `PLANNOTATOR_DATA_DIR`, and goes idle. With
+ * `turnError` it answers nothing: `session.error` with that error, then idle,
+ * as the real server did on an expired key (.ops/work/launch-opencode/smoke1).
  */
 "use strict";
 const http = require("node:http");
@@ -195,7 +197,9 @@ const turn = async (session, text) => {
     }
   await sleep(cfg.workMs ?? 400);
   while (config().hold && !aborted.has(session.id)) await sleep(100);
-  if (!aborted.has(session.id)) {
+  const failure = aborted.has(session.id) ? null : config().turnError;
+  if (failure) emit("session.error", { sessionID: session.id, error: failure });
+  else if (!aborted.has(session.id)) {
     const item = /\(([a-z]+_[0-9A-HJKMNP-TV-Z]{26})\)/.exec(text)?.[1];
     const n = fs.existsSync(path.join(STATE, "prompts.jsonl")) ? fs.readFileSync(path.join(STATE, "prompts.jsonl"), "utf8").split("\n").filter(Boolean).length : 0;
     const body = `${config().answer ?? "OpenCode here"} (turn ${n})`;
