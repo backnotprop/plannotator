@@ -44,7 +44,7 @@ const FAKE = "fake-agent" as InboxLaunchAgent;
 function fakeLaunchHost() {
   const calls: string[] = [];
   /** What the test makes go wrong. */
-  const faults = { resumeThrows: false };
+  const faults: { resumeThrows: boolean; gate: Promise<void> | null } = { resumeThrows: false, gate: null };
   let questions: ReturnType<typeof createLaunchQuestions> | null = null;
   const sessions = new Map<string, { ref: string; live: LaunchLive | null; state: "running" | "stopped" }>();
   const byRef = (ref: string) => [...sessions.values()].find((s) => s.ref === ref);
@@ -75,11 +75,17 @@ function fakeLaunchHost() {
     async stop(ref) {
       calls.push(`stop ${ref}`);
       const session = byRef(ref)!;
+      // As OpenCode's: not live from the moment the stop begins; the stop itself takes a while (`gate`).
       session.state = "stopped";
       session.live = null;
+      await faults.gate;
       return { exitCode: 0, text: "" };
     },
-    remove: async (ref) => (calls.push(`remove ${ref}`), { exitCode: 0, text: "" }),
+    async remove(ref) {
+      calls.push(`remove ${ref}`);
+      await faults.gate;
+      return { exitCode: 0, text: "" };
+    },
     purge: async (folder) => (calls.push(`purge ${folder}`), { exitCode: 0, text: "" }),
     attach: (launch) => (launch.session_ref ? `fake attach ${launch.session_ref}` : null),
     terminal: (launch) => `fake attach ${launch.session_ref}`,
@@ -237,6 +243,59 @@ describe("a second agent behind LaunchHost", () => {
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+
+  test("a reply waiting while Stop or Delete runs never starts the session again meanwhile; after Stop, only the next reply does", async () => {
+    const { store, clock, project, fake, launch, post } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-q", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    // Mid-turn, past the start grace: the follow-up waits for the turn to end.
+    fake.poll("session-f1", true, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    const answer = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: FAKE, session: "session-f1", name: "Fake Agent" }, body: "On it.", reply_to: root.id, idempotency_key: "answer-q" }).message;
+    clock.now += 120_000;
+    store.sendReply(answer.id, { words: "And the changelog.", idempotency_key: "reply-q1" });
+    const resumes = () => fake.calls.filter((call) => call === "resume f1").length;
+    const sweeps = async () => {
+      for (let i = 0; i < 5; i++) {
+        launch.sweep(true);
+        await Bun.sleep(5);
+      }
+    };
+
+    // Stop, slow: no restart while it runs, nor after it for the reply written before it.
+    let open: () => void = () => {};
+    fake.faults.gate = new Promise((resolve) => (open = resolve));
+    const stopped = post(prepared.launch.id, "stop");
+    await sweeps();
+    expect(resumes()).toBe(0);
+    open();
+    await stopped;
+    fake.faults.gate = null;
+    clock.now += 1_000;
+    await sweeps();
+    expect(resumes()).toBe(0);
+    // The person's next reply starts it again (the held one goes along).
+    store.sendReply(answer.id, { words: "Go on.", idempotency_key: "reply-q2" });
+    await until(() => resumes() === 1);
+    await sweeps();
+    expect(resumes()).toBe(1);
+
+    // Mid-turn again with a reply waiting; Delete, slow: never started again while it stops and removes.
+    fake.poll("session-f1", true, clock.now);
+    clock.now += 120_000;
+    store.sendReply(answer.id, { words: "One more.", idempotency_key: "reply-q3" });
+    fake.faults.gate = new Promise((resolve) => (open = resolve));
+    const deleted = post(prepared.launch.id, "delete");
+    await sweeps();
+    open();
+    await deleted;
+    await sweeps();
+    expect(resumes()).toBe(1);
+    expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
   });
 
   test("a host reads the login shell through its context: a fresh read when it asks, shared with one under way", async () => {
