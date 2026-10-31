@@ -80,7 +80,7 @@ export function createInboxTagsRoute(options: {
     const liveRows: (InboxTaggableSession & { rank: number; activity: number })[] = live.allLive().map((entry) => {
       const project = projectOfRoot(entry.root, entry.session);
       const isOwner = owner?.session === entry.session;
-      const sameProject = project?.id === thread.project.id;
+      const sameProject = !!project?.id && store.sameProject(project.id, thread.project.id);
       return {
         session: entry.session,
         host: entry.host,

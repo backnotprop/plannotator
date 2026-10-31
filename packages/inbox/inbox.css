@@ -1426,6 +1426,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-stbl td.ib-a { text-align: right; width: 130px; }
 .ib-stbl tr.ib-sub td:first-child { padding-left: 26px; color: var(--muted-foreground); }
 .ib-stbl .ib-fold { display: inline-flex; align-items: center; gap: 6px; }
+.ib-store-note { padding-left: 19px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .pn-inbox .ib-del-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); font-weight: 500; }
 .pn-inbox .ib-del-l:disabled { opacity: 0.45; }
 /* Archived in Settings (owner ruling 2026-10-12): Settings' own rows, one per archived thread. */
@@ -6062,6 +6063,14 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-tidy-ag em { font-style: normal; color: var(--muted-foreground); font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .ib-tidy-run[data-state="tidied"] em { color: var(--foreground); }
 .ib-tidy-top[data-below] { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--ib-hair, var(--border)); }
+/* Tidy's combine suggestions (approval "project-combine"). */
+.ib-tidy-sub { padding: 8px 8px 4px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-tidy-sub[data-below] { margin-top: 4px; border-top: 1px solid var(--ib-hair, var(--border)); padding-top: 10px; }
+.ib-tidy-ag.ib-tidy-cmb { height: auto; min-height: 44px; padding-top: 5px; padding-bottom: 5px; grid-template-columns: 16px 18px minmax(0, 1fr); }
+.ib-tidy-cmb > svg { color: var(--muted-foreground); }
+.ib-tidy-cmb .ib-tidy-nm { display: flex; flex-direction: column; white-space: normal; min-width: 0; }
+.ib-tidy-cmb .ib-tidy-nm b { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-tidy-cmb .ib-tidy-nm small { color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
 .ib-tidy-err { margin: 6px 8px 0; font-size: var(--ib-fs-12, 12px); color: var(--destructive); }
 .ib-tidy-bot { display: flex; align-items: center; gap: 8px; padding: 6px 2px 2px 8px; margin-top: 4px; border-top: 1px solid var(--ib-hair, var(--border)); }
 .pn-inbox .ib-tidy-bot .ib-btn { margin-left: auto; }

@@ -58,7 +58,7 @@ import {
   stopSettle,
   type SettleSnapshot,
 } from './settle';
-import { plural, shortAgentName, tildePath } from './format';
+import { formatCount, plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
 import { inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
@@ -2711,6 +2711,56 @@ function Inbox() {
   };
 
   /**
+   * Combine projects (approval "project-combine"), or Separate one again. A
+   * pair is `from` going into `into`, or back out (`into` null). One toast with
+   * one Undo for the whole step (the button and `Z`), whichever of the rename
+   * warning, Tidy or the project menu took it. Pairs that went through stay, and
+   * Undo takes them back, even when a later one was refused.
+   */
+  const combineProjects = async (pairs: readonly { from: string; fromName: string; into: string | null; intoName: string; undoInto: string | null }[]): Promise<string | null> => {
+    const write = async (steps: readonly { project: string; into: string | null }[]) => {
+      const done: { project: string; into: string | null }[] = [];
+      for (const step of steps) {
+        try {
+          await inboxApi.combineProject(step.project, step.into);
+          done.push(step);
+        } catch (cause) {
+          return { done, failed: cause };
+        }
+      }
+      return { done, failed: null };
+    };
+    const { done, failed } = await write(pairs.map((pair) => ({ project: pair.from, into: pair.into })));
+    await refreshList(false);
+    const failure = failed === null ? null : failed instanceof Error ? failed.message : 'The projects did not change.';
+    if (done.length === 0) {
+      showToast(errorToast(failed, 'The projects did not change.'));
+      return failure;
+    }
+    const [first] = pairs;
+    const lead = !first!.into ? `Separated ${first!.fromName}` : done.length === 1 ? `Combined into ${first!.intoName}` : `Combined ${formatCount(done.length)} projects`;
+    const undo = pairs.slice(0, done.length).map((pair) => ({ project: pair.from, into: pair.undoInto }));
+    showToast({
+      icon: 'check',
+      lead,
+      onUndo: () => {
+        void (async () => {
+          const back = await write(undo);
+          await refreshList(false);
+          if (back.failed !== null) {
+            showToast(errorToast(back.failed, 'The projects did not change.'));
+            return;
+          }
+          dismissToast();
+          say(first!.into ? (done.length === 1 ? `Separated ${first!.fromName}.` : 'Separated the projects.') : `Combined into ${first!.intoName}.`);
+        })();
+      },
+    });
+    say(`${lead}.`);
+    return failure;
+  };
+
+  /**
    * Settings' Unarchive: the thread goes back to the list, in whatever
    * section its state puts it, and opens there (owner ruling 2026-10-12).
    */
@@ -3117,6 +3167,11 @@ function Inbox() {
   };
 
   const projects = latest?.projects ?? [];
+  // A project that was combined (here, in another window, by an agent) has no page of its own: its link opens the project it went into.
+  const combinedHead = route.project ? projects.find((project) => project.combined?.some((member) => member.id === route.project))?.id : undefined;
+  useEffect(() => {
+    if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
+  }, [combinedHead]);
   const latestSections = latest?.sections ?? [];
   const latestRows = useMemo(() => new Map((latest?.sections ?? []).flatMap((section) => section.threads).map((row) => [row.thread_id, row] as const)), [latest]);
   // Decision mode is on only while settings say so; with it off, nothing of it renders and nothing is read.
@@ -4238,7 +4293,14 @@ function Inbox() {
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
           pinned={pinsOn ? pinnedIds : undefined}
-          tidy={listTidy}
+          tidy={{
+            ...listTidy,
+            combine: async (pairs) => {
+              const failed = await combineProjects(pairs.map((pair) => ({ from: pair.from.id, fromName: pair.from.name, into: pair.into.id, intoName: pair.into.name, undoInto: null })));
+              listTidy.refresh();
+              return failed;
+            },
+          }}
           onSearch={(opener) => openSearch(opener)}
           onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
@@ -4481,6 +4543,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             announce={say}
             // Not on a page opened over the tailnet: the update routes answer 403 local_only there.
             update={pageUpdate}

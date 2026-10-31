@@ -518,11 +518,13 @@ export function createInboxLiveSessions(options: {
       if (message.author.kind === "agent" && message.author.session) lastWrote.set(message.author.session, index);
     });
     let wroteInProject: Set<string> | null = null;
+    // Every folder of a combined project: a session in either can take the thread.
+    const roots = new Set([project.root, ...store.projectGroup(project.id).flatMap((id) => store.project(id)?.root ?? [])]);
     const out: (InboxLiveSession & { order: number; started: number })[] = [];
     for (const [session, entry] of sessions) {
       if (!isLive(entry)) continue;
       if (entry.root !== null) {
-        if (entry.root !== project.root) continue;
+        if (!roots.has(entry.root)) continue;
       } else {
         wroteInProject ??= new Set(
           store
