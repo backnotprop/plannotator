@@ -123,6 +123,7 @@ async function reply(page: Page, words: string): Promise<void> {
 
 async function menuItems(page: Page): Promise<string[]> {
   await pane(page).locator('[data-thread-more]').click();
+  await page.locator('[data-thread-menu] [data-launch-item]').first().waitFor({ state: 'visible', timeout: 10_000 });
   const items = await page.locator('[data-thread-menu] [data-launch-item]').allTextContents();
   await page.keyboard.press('Escape');
   return items;
@@ -271,9 +272,11 @@ test('an extension dialog over RPC: answered Cancel at once, and the thread says
   try {
     const { threadId } = await launch(page, 'Clean the build folder.');
     const p = pane(page);
-    const note = p.locator('article.ib-message[data-author="agent"]').filter({ hasText: "Pi asked something the Inbox can't show yet" });
+    // As the person reads it (the renderer curls the apostrophe; no backslash may show).
+    const note = p.locator('article.ib-message[data-author="agent"]').filter({ hasText: 'Pi asked something the Inbox can' });
     await expect(note).toBeVisible({ timeout: 30_000 });
     await expect(note).toContainText('(“Dangerous command: rm -rf ./build Allow?”); answered Cancel.');
+    await expect(note).not.toContainText('\\');
     const asked = await waitFor('the dialog answered', () => fake.dialogs().find((d) => d.title === title));
     expect(asked.response).toMatchObject({ cancelled: true });
     // The turn went on with the cancel (the gate's "no"), and Pi answered.

@@ -143,7 +143,7 @@ describe("Pi's launch host, against the fake pi", () => {
         .find((m) => m.author.kind === "agent"),
     );
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
-    expect(note.body).toStartWith("Pi asked something the Inbox can't show yet (“⚠️ Dangerous command\\: \\:\\:\\:question - \\[ \\] Yes \\`rm -rf \\~\\` Allow? xxx");
+    expect(note.body).toStartWith("Pi asked something the Inbox can't show yet (“⚠️ Dangerous command: :::question - \\[ \\] Yes \\`rm -rf \\~\\` Allow? xxx");
     expect(note.body).toEndWith("…”); answered Cancel.");
     // One line, no control or invisible character, no block of its own: it can never become a question.
     expect(note.body).not.toContain("\n");

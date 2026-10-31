@@ -193,7 +193,7 @@ async function extension() {
     await fetch(`http://127.0.0.1:${registry.port}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: { body, reply_to: command.id, project_path: cwd, agent_session: sessionId, agent_host: "pi" } } }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: { body, reply_to: command.id, project_path: cwd, agent_session: sessionId, agent_host: "pi", agent_name: "Pi" } } }),
     }).catch(() => {});
     fs.appendFileSync(sessionFile, `${JSON.stringify({ type: "message", role: "assistant", text: body })}\n`);
     busy = false;

@@ -121,7 +121,9 @@ export function piDialogTitle(title: unknown): string {
     .replace(/\s+/g, " ")
     .trim();
   const short = [...flat].length > NOTE_TITLE_MAX ? `${[...flat].slice(0, NOTE_TITLE_MAX - 1).join("").trimEnd()}…` : flat;
-  return short.replace(/[\\`*_[\]<>#|~:]/g, (mark) => `\\${mark}`);
+  // Only marks the Inbox's inline Markdown both formats and unescapes (InlineMarkdown's
+  // backslash rule): an escaped `:` or `<` would show its backslash; React keeps `<` text.
+  return short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
 }
 
 /** The thread note for a dialog the Inbox answered Cancel. */
