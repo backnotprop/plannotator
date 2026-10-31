@@ -93,11 +93,11 @@ import { useInboxNotifications } from './notify';
 import { useInboxSound } from './sound';
 import { notificationLine, SoundIntroDialog } from './components/SoundIntro';
 import { ListLookIntro, type ListIntroGroup } from './components/ListLookIntro';
-import { LIST_INTRO_LIST_MS, listIntroListAlone, listIntroMayAsk, listIntroWanted, type ListIntroLoad } from './listIntro';
+import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
 import { readListLook, writeListLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
-import { leaveOnPurpose, unsentReply } from './unsent';
+import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, seenHeldInNew } from './markRead';
@@ -531,6 +531,16 @@ function replyInProgress(): boolean {
   return !!active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable);
 }
 
+/**
+ * The list options dialog waits (its claim unspent, or a claimed one unopened) while anything else is over the page or
+ * a reply is under way: another dialog, a modal panel ui draws (`aria-modal`), an image opened full size, a pinned
+ * reference card, a reply being typed, or a reply box left open with words or files in it, wherever focus is.
+ */
+function listIntroHeldBack(): boolean {
+  if (modalOpen() || replyInProgress() || replyBeingWritten()) return true;
+  return document.querySelector('[role="dialog"][aria-modal="true"], [data-image-lightbox], [data-ref-card-pinned]') !== null;
+}
+
 function hasRows(sections: readonly InboxListSection[] | null): boolean {
   return !!sections && sections.some((s) => s.threads.length > 0);
 }
@@ -763,14 +773,14 @@ function Inbox() {
    * Inbox gave it to this page; it opens once the page is free), open, or closed. `listIntroDecided`: this load
    * asked the Inbox and has its answer. `listIntroLatch`: what decides whether this load wants it, read once when
    * the first list and settings are in (a list that grows later never brings it up mid-session).
-   * `tourThisLoad`: the tour was on screen in this load, so the dialog never shows on it. `listIntroListLong`: the
-   * list alone (no thread open) has been on screen for `LIST_INTRO_LIST_MS` since it last came back.
+   * `tourThisLoad`: the tour was on screen in this load, so the dialog never shows on it. `listIntroSettled`: the
+   * Inbox page (the list, a thread open or not) has been clear for `LIST_INTRO_SETTLED_MS` since it last came back.
    */
   const [listIntro, setListIntro] = useState<'none' | 'claimed' | 'open' | 'shown'>('none');
   const [listIntroDecided, setListIntroDecided] = useState(false);
   const listIntroAsked = useRef(false);
   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
-  const [listIntroListLong, setListIntroListLong] = useState(false);
+  const [listIntroSettled, setListIntroSettled] = useState(false);
   const tourThisLoad = useRef(false);
   /** Sidebar → Feedback (components/FeedbackDialog.tsx): open only on the person's click. */
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -3090,10 +3100,12 @@ function Inbox() {
   const firstRun = latest !== null && projects.length === 0;
 
   // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
-  // on a load that showed either or the tour, only with three rows or more and only once the list alone (no thread,
-  // so no file or document either) has been on screen for a moment: a load that opens on a thread waits, unclaimed,
-  // until the person is back on the list. It waits while a reply is typed or another dialog is open, then claims it
-  // from the Inbox (only the first claim ever shows it).
+  // on a load that showed either or the tour, only with three rows or more and only once the Inbox page (the list, a
+  // thread open or not) has been settled for a moment with no file, document, guided review, Artifacts view, search or
+  // new message over it (each keeps the claim waiting, unspent); opening another thread, project or machine starts the
+  // wait again. It waits while a reply is typed or left open with words or files, or another dialog, an image opened
+  // full size or a pinned reference card is over the page (listIntroHeldBack), then claims it from the Inbox (only
+  // the first claim ever shows it).
   if (route.page === 'tour') tourThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
     listIntroLatch.current = {
@@ -3104,34 +3116,35 @@ function Inbox() {
     };
   }
   const listIntroAtLoad = listIntroLatch.current;
-  const listIntroAlone = listIntroListAlone(route, { search: searchOpen, compose: compose !== null });
+  const listIntroClear = listIntroPageClear(route, { search: searchOpen, compose: compose !== null });
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad?.due ?? false,
     local: listIntroAtLoad?.local ?? false,
     listLoaded: listIntroAtLoad !== null,
     firstRun: listIntroAtLoad?.firstRun ?? false,
     rows: listIntroAtLoad?.rows ?? 0,
-    // Read with the list on screen now: the wait's flag clears an effect later, never a render late.
-    listAlone: listIntroListLong && listIntroAlone,
+    // Read with the page as it is now: the wait's flag clears an effect later, never a render late.
+    settled: listIntroSettled && listIntroClear,
     tourThisLoad: tourThisLoad.current,
     otherDialogThisLoad: soundDialog !== 'none' || agentNote !== 'none',
     othersSettled: soundSettled && agentNoteSettled,
     updating: updateDialog !== null || restarting,
   };
   const listIntroWant = listIntroWanted(listIntroLoad);
-  // Watched only while the dialog may still show on this load: each time the list alone comes back, the same wait.
+  // Watched only while the dialog may still show on this load: each time the Inbox page is clear again, the same wait.
   const listIntroWatch = listIntroWant && (!listIntroDecided || listIntro === 'claimed');
   useEffect(() => {
-    setListIntroListLong(false);
-    if (!listIntroWatch || !listIntroAlone) return;
-    const timer = setTimeout(() => setListIntroListLong(true), LIST_INTRO_LIST_MS);
+    setListIntroSettled(false);
+    if (!listIntroWatch || !listIntroClear) return;
+    const timer = setTimeout(() => setListIntroSettled(true), LIST_INTRO_SETTLED_MS);
     return () => clearTimeout(timer);
-  }, [listIntroWatch, listIntroAlone]);
+    // Another thread, project or machine opened: the same wait again from there, so it never lands as a page changes.
+  }, [listIntroWatch, listIntroClear, route.thread, route.project, route.machine]);
   const listIntroReady = listIntroMayAsk(listIntroLoad, { modal: false, replying: false });
   useEffect(() => {
     if (!listIntroReady || listIntroAsked.current) return;
     const ask = () => {
-      if (listIntroAsked.current || modalOpen() || replyInProgress()) return false;
+      if (listIntroAsked.current || listIntroHeldBack()) return false;
       listIntroAsked.current = true;
       // Claimed: the Inbox has retired it, so this page shows it, but only once the page is free again (below).
       inboxApi
@@ -3147,15 +3160,16 @@ function Inbox() {
     }, 700);
     return () => clearInterval(timer);
   }, [listIntroReady]);
-  // A claim answered after the person opened a thread, Settings, the Board or an update, began a reply or opened
-  // another dialog: it opens when they are back on the list alone for a moment with nothing open or typed (never
-  // dropped: it is spent).
+  // A claim answered after the person opened Settings, the Board, a file, a guided review, the Artifacts view, a
+  // search, a new message or an update, began a reply
+  // or opened another dialog: it opens when they are back on the Inbox page for a moment with nothing open or typed
+  // (never dropped: it is spent).
   const listIntroClaimed = listIntro === 'claimed';
-  const listIntroPlaceFree = listIntroLoad.listAlone && !listIntroLoad.updating;
+  const listIntroPlaceFree = listIntroLoad.settled && !listIntroLoad.updating;
   useEffect(() => {
     if (!listIntroClaimed || !listIntroPlaceFree) return;
     const open = () => {
-      if (modalOpen() || replyInProgress()) return false;
+      if (listIntroHeldBack()) return false;
       setListIntro('open');
       return true;
     };
