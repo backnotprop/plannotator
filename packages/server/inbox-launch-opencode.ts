@@ -14,8 +14,9 @@
  * can read; never in a log, the start log, argv, the run line or the attach
  * command (that reads the file).
  *
- * The server outlives an Inbox restart (a turn keeps running through an
- * update) and the next Inbox adopts it only once it is proved to be ours: the
+ * A server running a turn or holding a prompt outlives an Inbox restart (a
+ * turn keeps running through an update; one with nothing to do is ended when
+ * the Inbox stops) and the next Inbox adopts it only once it is proved ours: the
  * pid still runs `opencode serve` on our port, started when we recorded, as
  * its own process group's leader; it refuses a call with no password and
  * answers ours; and it has the session. No signal ever goes to a pid that is
@@ -88,6 +89,8 @@ const CASCADE_MS = 15_000;
 const REPLY_RETRY_MS = 2_000;
 /** How long a server of ours (by its process) may fail to answer an adoption before it is ended. */
 const UNPROVED_MS = 60_000;
+/** A reply waits this long for a server of ours that does not answer yet (after an Inbox restart), then it is ended and a new one starts. */
+const REPLY_WAIT_MS = 20_000;
 
 /** A card OpenCode answered itself with the person's earlier Deny (OpenCode's reject rejects the session's other prompts). */
 export const OPENCODE_DENIED_EARLIER = "Denied with your earlier answer.";
@@ -148,7 +151,7 @@ export function openCodeServerEnv(login: Readonly<LaunchEnv>, input: { launchId:
 /** One process as `ps` shows it: its process group, its start time, its command line; null when it is not running. */
 export function openCodeProcessOf(pid: number): { pgid: number; started: string; command: string } | null {
   if (!Number.isInteger(pid) || pid <= 1) return null;
-  const ran = spawnSync("/bin/ps", ["-o", "pgid=,lstart=,command=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 });
+  const ran = spawnSync("/bin/ps", ["-o", "pgid=,lstart=,command=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000, env: { PATH: "/usr/bin:/bin", LC_ALL: "C", TZ: "UTC0" } });
   const line = (ran.stdout ?? "").trim().split("\n")[0] ?? "";
   const match = /^(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d+)\s+(.*)$/.exec(line);
   return match ? { pgid: Number(match[1]), started: match[2]!.replace(/\s+/g, " "), command: match[3]! } : null;
@@ -199,6 +202,10 @@ interface Connection {
   busy: boolean;
   /** A turn is being handed to the server now. */
   delivering: boolean;
+  /** Turns handed over so far (an idle stop sees one that went while it read the server). */
+  delivered: number;
+  /** An idle stop reads the server once more: no turn is handed over meanwhile. */
+  stopping: boolean;
   /** Permission requests the server holds now (the session's and its subagents'), by id. */
   permissions: Map<string, OpenCodePermissionRequest>;
   /** OpenCode's own question tool waits on someone (it is answered in OpenCode, never here). */
@@ -237,10 +244,16 @@ interface Asked {
 interface Opening {
   promise: Promise<Connection | null>;
   token: { cancelled: boolean };
+  /** `adopt`: only looks for a running server (a sweep, the sessions view); a reply's resume opens after it. */
+  kind: "adopt" | "open";
 }
 
-export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idleMs?: number; now?: () => number } = {}) {
+export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idleMs?: number; replyWaitMs?: number; now?: () => number } = {}) {
   const idleMs = options.idleMs ?? OPENCODE_IDLE_STOP_MS;
+  /** How long a reply waits for a server of ours that does not answer yet, before it is ended and a new one starts. */
+  const replyWaitMs = options.replyWaitMs ?? REPLY_WAIT_MS;
+  /** The Inbox stopped (`close`): nothing connects any more. */
+  let hostClosed = false;
   const now = options.now ?? Date.now;
   const connections = new Map<string, Connection>();
   /** Starts and resumes under way, by launch id: one at a time. */
@@ -635,6 +648,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
   const connect = (launch: InboxLaunchRecord, session: string, server: OpenCodeServer): Connection => {
     const known = connections.get(session);
     if (known && !known.closed) return known;
+    if (hostClosed) throw new Error("the Inbox is stopping; the server is left for the next one");
     idleStopped.delete(session);
     const conn: Connection = {
       launchId: launch.id,
@@ -644,6 +658,8 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       abort: new AbortController(),
       busy: false,
       delivering: false,
+      delivered: 0,
+      stopping: false,
       permissions: new Map(),
       questions: new Set(),
       children: new Map(),
@@ -657,11 +673,12 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
     connections.set(session, conn);
     void readEvents(conn);
     const target: InboxWakeTarget = {
-      isBusy: () => conn.closed || conn.busy || conn.delivering || conn.permissions.size > 0 || conn.questions.size > 0,
+      isBusy: () => conn.closed || conn.stopping || conn.busy || conn.delivering || conn.permissions.size > 0 || conn.questions.size > 0,
       async deliver(text) {
         // Busy before the call: the turn starts with it, and an idle stop never ends a server taking one.
         conn.busy = true;
         conn.delivering = true;
+        conn.delivered++;
         conn.idleSince = null;
         try {
           const sent = await call(conn.server, "POST", `/session/${encodeURIComponent(session)}/prompt_async`, conn.folder, { parts: [{ type: "text", text }] });
@@ -737,7 +754,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
   };
 
   /** One open (start or resume) per launch at a time; Stop and Delete cancel it (`cancelOpening`). */
-  const once = (launchId: string, open: (token: { cancelled: boolean }) => Promise<Connection | null>): Promise<Connection | null> => {
+  const once = (launchId: string, open: (token: { cancelled: boolean }) => Promise<Connection | null>, kind: Opening["kind"] = "open"): Promise<Connection | null> => {
     const under = opening.get(launchId);
     if (under) return under.promise;
     const token = { cancelled: false };
@@ -747,7 +764,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
         return null;
       })
       .finally(() => opening.delete(launchId));
-    opening.set(launchId, { promise, token });
+    opening.set(launchId, { promise, token, kind });
     return promise;
   };
   /** Cancel a start or resume under way and wait for it; what it opened anyway is closed and ended. */
@@ -772,7 +789,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
   const idleSweep = () => {
     for (const conn of [...connections.values()]) {
       if (conn.closed) continue;
-      const quiet = !conn.busy && !conn.delivering && conn.permissions.size === 0 && conn.questions.size === 0 && !opening.has(conn.launchId);
+      const quiet = !conn.busy && !conn.delivering && !conn.stopping && conn.permissions.size === 0 && conn.questions.size === 0 && !opening.has(conn.launchId);
       if (!quiet) {
         conn.idleSince = null;
         continue;
@@ -780,18 +797,32 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       conn.idleSince ??= now();
       if (now() - conn.idleSince < idleMs) continue;
       conn.idleSince = null;
+      // No turn is handed over while the server is read once more (the wake sees it busy).
+      conn.stopping = true;
+      const delivered = conn.delivered;
+      const kept = () => conn.closed || conn.busy || conn.delivering || conn.delivered !== delivered || conn.permissions.size > 0 || conn.questions.size > 0;
       void (async () => {
-        // Read once more from the server: a turn or a prompt the events have not shown keeps it.
-        if (!(await readStatus(conn)) || conn.busy || conn.closed || conn.delivering) return;
-        const pending = await call(conn.server, "GET", "/permission", conn.folder);
-        if (pending?.status === 200 && Array.isArray(pending.body) && pending.body.length > 0) return;
-        ctx.log(`Inbox launch ${conn.launchId}: OpenCode idle for ${Math.round(idleMs / 60_000)} min; its server stopped (a reply continues the session)`);
-        idleStopped.set(conn.session, Math.max(1, Math.round(idleMs / 60_000)));
-        await shut(conn, "idle");
-        perm?.onChange();
+        try {
+          // Read once more from the server: a turn or a prompt the events have not shown keeps it.
+          if (!(await readStatus(conn)) || kept()) return;
+          const pending = await call(conn.server, "GET", "/permission", conn.folder);
+          if (pending?.status === 200 && Array.isArray(pending.body) && pending.body.length > 0) return;
+          // Anything that came while it read keeps it too.
+          if (kept()) return;
+          ctx.log(`Inbox launch ${conn.launchId}: OpenCode idle for ${Math.round(idleMs / 60_000)} min; its server stopped (a reply continues the session)`);
+          idleStopped.set(conn.session, Math.max(1, Math.round(idleMs / 60_000)));
+          await shut(conn, "idle");
+          perm?.onChange();
+        } finally {
+          conn.stopping = false;
+        }
       })();
     }
   };
+
+  /** The idle check, on its own timer: it runs with Launch off and with no window open (the engine's sweep may not). */
+  const idleTimer = setInterval(idleSweep, Math.max(50, Math.min(30_000, Math.floor(idleMs / 4))));
+  idleTimer.unref?.();
 
   // ── Permission questions: the person's answer goes back to the server ──
 
@@ -923,7 +954,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       const roots = perm?.roots() ?? [];
       for (const root of roots) {
         const launch = root.launch!;
-        if (launch.session_ref && !connections.get(launch.session_ref) && !opening.has(launch.id)) await once(launch.id, () => adopt(launch));
+        if (launch.session_ref && !connections.get(launch.session_ref) && !opening.has(launch.id)) await once(launch.id, () => adopt(launch), "adopt");
       }
       return (ref: string) => {
         const conn = connections.get(ref);
@@ -947,13 +978,33 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       if (!session) return { exitCode: 1, text: "no session", failure: { code: "failed" as const, text: "That session never started." } };
       let failure: string | null = null;
       let cancelled = false;
+      // An adoption under way (a sweep's, the sessions view's): what it finds is the answer; nothing found, this opens.
+      for (let under = opening.get(launch.id); under; under = opening.get(launch.id)) {
+        const found = await under.promise;
+        if (found && !found.closed) return { exitCode: 0, text: `opencode serve ${found.server.url}`, failure: null };
+        if (under.token.cancelled || under.kind === "open") break;
+      }
       const conn = await once(launch.id, async (token) => {
-        const adopted = await adopt(launch);
+        let adopted = await adopt(launch);
+        // A server of ours (by its process) that does not answer yet, as after an Inbox restart in a long call:
+        // waited for a while, then ended, so a new one never runs beside it on the same session.
+        const until = now() + replyWaitMs;
+        while (!adopted && unproved.has(launch.id) && now() < until && !token.cancelled) {
+          await sleep(500);
+          adopted = await adopt(launch);
+        }
         if (adopted) return adopted;
         if (token.cancelled) {
           cancelled = true;
           return null;
         }
+        const left = readServer(launch.id);
+        if (left && alive(left.pid) && ours(left)) {
+          ctx.log(`Inbox launch ${launch.id}: our opencode serve (pid ${left.pid}) still does not answer; ended before a new one starts`);
+          await endServer(left, "replaced: it did not answer");
+          dropServerFile(launch.id, left);
+        }
+        unproved.delete(launch.id);
         const opened = await startServer(launch, await ctx.loginEnv(), token);
         if ("failure" in opened) {
           cancelled = opened.cancelled === true;
@@ -1027,9 +1078,27 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       return minutes ? openCodeIdleNote(minutes) : null;
     },
 
-    /** The Inbox stops: its event streams and wakes go; the servers run on, adopted by the next Inbox. */
+    /**
+     * The Inbox stops: its event streams, wakes and timer go, and what still opens is cancelled. A server with
+     * nothing to do is ended now (no Inbox may ever sweep it again; a reply continues the session on a new one);
+     * one running a turn or holding a prompt runs on, for the next Inbox to adopt.
+     */
     close() {
-      for (const conn of [...connections.values()]) close(conn);
+      hostClosed = true;
+      clearInterval(idleTimer);
+      for (const under of opening.values()) under.token.cancelled = true;
+      for (const conn of [...connections.values()]) {
+        const quiet = !conn.busy && !conn.delivering && conn.permissions.size === 0 && conn.questions.size === 0;
+        close(conn);
+        if (!quiet || !alive(conn.server.pid) || !ours(conn.server)) continue;
+        try {
+          process.kill(-conn.server.pid, "SIGTERM");
+        } catch {
+          // Gone.
+        }
+        dropServerFile(conn.launchId, conn.server);
+        ctx.log(`Inbox launch ${conn.launchId}: the Inbox stops; its idle opencode serve (pid ${conn.server.pid}) ended`);
+      }
     },
 
     permissions(context: LaunchPermissionContext): LaunchHostPermissions {
@@ -1047,7 +1116,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       });
       let adopting = false;
       return {
-        /** Every second: adopt a server an earlier Inbox started; answer what the person answered; stop an idle server. */
+        /** Every second: adopt a server an earlier Inbox started; answer what the person answered. */
         sweep() {
           if (!adopting) {
             const waiting = context.roots().filter((root) => {
@@ -1056,7 +1125,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
             });
             if (waiting.length > 0) {
               adopting = true;
-              void Promise.all(waiting.map((root) => once(root.launch!.id, () => adopt(root.launch!))))
+              void Promise.all(waiting.map((root) => once(root.launch!.id, () => adopt(root.launch!), "adopt")))
                 .then((found) => {
                   if (found.some(Boolean)) context.onChange();
                 })
@@ -1066,7 +1135,6 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
             }
           }
           if (asked.size > 0) settleSoon();
-          idleSweep();
         },
         withdrawAll(root: InboxMessage) {
           withdrawLaunch(root.launch!.id, INBOX_PERMISSION_NO_LONGER_WAITING);

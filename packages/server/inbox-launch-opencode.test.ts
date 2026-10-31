@@ -86,6 +86,15 @@ const alive = (pid: number) => {
     return false;
   }
 };
+/** As `until`, for a check that must ask (a promise is never taken for a yes). */
+async function untilAsync(what: string, check: () => Promise<boolean>, ms = 10_000) {
+  const deadline = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`timed out: ${what}`);
+    await Bun.sleep(50);
+  }
+}
+
 async function until(what: string, check: () => boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
   while (!check()) {
@@ -195,7 +204,7 @@ describe("a launch's server", () => {
 });
 
 /** A started launch with its thread: the store, the permission transport, the person's answers, a turn put to the server. */
-async function launched(options: { idleMs?: number; config?: Parameters<ReturnType<typeof installFakeOpenCode>["configure"]>[0] } = {}) {
+async function launched(options: { idleMs?: number; sweep?: boolean; config?: Parameters<ReturnType<typeof installFakeOpenCode>["configure"]>[0] } = {}) {
   const w = world();
   if (options.config) w.fake.configure(options.config);
   const host = options.idleMs ? createOpenCodeLaunchHost(w.ctx, { idleMs: options.idleMs }) : w.host;
@@ -205,15 +214,22 @@ async function launched(options: { idleMs?: number; config?: Parameters<ReturnTy
   if (!started.ok) throw new Error(`did not start: ${started.text}`);
   const record: InboxLaunchRecord = { ...w.launch, session_ref: started.session };
   const root = store.startPersonThread({ project_id: project.id, body: "Tidy the readme.", to: { host: "opencode", session: started.session }, idempotency_key: "send-1", launch: record }).message;
-  const permissions = host.permissions({
+  const permissionContext = {
     store,
-    launchDir: (id) => join(w.dataDir, "inbox", "launch", id),
-    rootOf: (id) => (id === LAUNCH_ID ? store.message(root.id) : null),
+    launchDir: (id: string) => join(w.dataDir, "inbox", "launch", id),
+    rootOf: (id: string) => (id === LAUNCH_ID ? store.message(root.id) : null),
     roots: () => [store.message(root.id)!],
-    displayFolder: (path) => path,
+    displayFolder: (path: string) => path,
     host: { stateOf: () => null, readAt: () => 0 },
     onChange: () => {},
-  });
+  };
+  const permissions = host.permissions(permissionContext);
+  /** The next Inbox (after `close`): a new host over the same data dir and thread. */
+  const next = (opts: Parameters<typeof createOpenCodeLaunchHost>[1] = {}) => {
+    const again = createOpenCodeLaunchHost(w.ctx, opts);
+    again.permissions(permissionContext);
+    return again;
+  };
   const serverFile = join(w.dataDir, "inbox", "launch", LAUNCH_ID, "server.json");
   const server = () => JSON.parse(readFileSync(serverFile, "utf8")) as { pid: number; started: string; url: string; password: string };
   /** A turn, as the wake puts it (no Inbox runs in a unit test, so the test is the wake). */
@@ -248,7 +264,7 @@ async function launched(options: { idleMs?: number; config?: Parameters<ReturnTy
     store.sendReply(messageId, { idempotency_key: `answer-${messageId}`, questions: [{ key: question.key, revision: saved[0]!.revision }] });
   };
   /** The engine's sweep, every 50 ms, until the test ends. */
-  let sweeping = true;
+  let sweeping = options.sweep !== false;
   void (async () => {
     while (sweeping) {
       permissions.sweep();
@@ -258,7 +274,7 @@ async function launched(options: { idleMs?: number; config?: Parameters<ReturnTy
   cleanup.push(() => {
     sweeping = false;
   });
-  return { ...w, host, store, thread: root, record, session: started.session, serverFile, server, turn, cards, stateOf, withdrawnAs, answer };
+  return { ...w, host, store, thread: root, record, session: started.session, serverFile, server, turn, cards, stateOf, withdrawnAs, answer, next };
 }
 
 /** A process the test owns, in its own group (as a launch's server is): a stand-in for a reused pid. */
@@ -455,18 +471,77 @@ describe("an idle server", () => {
 });
 
 describe("the Inbox stops", () => {
-  test("close lets go of the event stream and the wake; the server runs on for the next Inbox", async () => {
-    const w = await launched({});
+  test("close ends a server with nothing to do (a reply continues it), and keeps one running a turn for the next Inbox, which adopts it", async () => {
+    const quiet = await launched({});
+    const idle = quiet.server().pid;
+    quiet.host.close!();
+    expect(quiet.host.live(quiet.session)).toBeNull();
+    await until("the idle server ended", () => !alive(idle), 10_000);
+    expect(existsSync(quiet.serverFile)).toBe(false);
+
+    const w = await launched({ config: { hold: true } });
     const pid = w.server().pid;
+    await w.turn();
+    await untilAsync("busy", async () => (await w.host.sessions())(w.session)?.status === "busy");
     w.host.close!();
-    expect(w.host.live(w.session)).toBeNull();
     await Bun.sleep(300);
     expect(alive(pid)).toBe(true);
-    // The next look adopts the same server again: no second one.
-    await until("adopted again", async () => (await w.host.sessions())(w.session)?.state === "running", 10_000);
+    // The next Inbox adopts the same server: running, and no second one.
+    const again = w.next();
+    await untilAsync("adopted again", async () => (await again.sessions())(w.session)?.state === "running");
+    expect(w.server().pid).toBe(pid);
     expect(w.fake.serves()).toHaveLength(1);
-    await w.host.stop(w.session);
+    await again.stop(w.session);
     await until("ended", () => !alive(pid), 10_000);
+  }, 40_000);
+});
+
+describe("a reply while our server does not answer yet (after an Inbox restart)", () => {
+  /** A launch running a turn, the Inbox closed; its server then stops answering for a while. */
+  const restarted = async (outageMs: number) => {
+    const w = await launched({ config: { hold: true } });
+    const pid = w.server().pid;
+    await w.turn();
+    await untilAsync("busy", async () => (await w.host.sessions())(w.session)?.status === "busy");
+    w.host.close!();
+    w.fake.configure({ outageUntil: Date.now() + outageMs, outagePids: [pid] });
+    return { w, pid };
+  };
+
+  test("it answers within the wait: the reply goes to the same server, even while a sweep's adoption found nothing", async () => {
+    const { w, pid } = await restarted(4_000);
+    const again = w.next({ replyWaitMs: 15_000 });
+    // A sweep's adoption under way (it finds nothing while the server does not answer), then the reply.
+    void again.sessions();
+    await Bun.sleep(100);
+    const resumed = await again.resume(w.record);
+    expect(resumed.failure).toBeNull();
+    expect(w.server().pid).toBe(pid);
+    expect(w.fake.serves()).toHaveLength(1);
+    await again.stop(w.session);
+  }, 40_000);
+
+  test("it does not answer within the wait: it is ended before a new one starts, never two servers on the session", async () => {
+    const { w, pid } = await restarted(120_000);
+    const again = w.next({ replyWaitMs: 1_500 });
+    const resumed = await again.resume(w.record);
+    expect(resumed.failure).toBeNull();
+    expect(alive(pid)).toBe(false);
+    const now = w.server();
+    expect(now.pid).not.toBe(pid);
+    expect(alive(now.pid)).toBe(true);
+    expect(w.fake.serves()).toHaveLength(2);
+    expect(w.fake.processes().filter((x) => x.kind === "server" && x.alive)).toHaveLength(1);
+    await again.stop(w.session);
+  }, 40_000);
+});
+
+describe("idle with no sweep", () => {
+  test("Launch off (the engine sweeps no host): an idle server is still stopped on the host's own timer", async () => {
+    const w = await launched({ idleMs: 600, sweep: false });
+    const pid = w.server().pid;
+    await until("stopped for idle", () => !alive(pid), 15_000);
+    expect(w.host.stoppedNote!(w.record)).toBe("It was idle for 1 minute. Your reply continues it.");
   }, 30_000);
 });
 
