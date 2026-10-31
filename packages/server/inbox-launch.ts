@@ -7,12 +7,14 @@
  * This file is the engine, the same for every agent. What one agent does
  * (its CLI, its settings, trust, how it connects, its permission transport)
  * is its `LaunchHost` (inbox-launch-host.ts), held in `hosts` by the agent's
- * id: `claude-code` is inbox-launch-claude.ts. A record whose agent has no
+ * id: `claude-code` is inbox-launch-claude.ts, `codex` inbox-launch-codex.ts. A record whose agent has no
  * host here (a downgrade) gets no line, no sweep and `404 launch_not_found`.
  *
  * We start nothing that lives on its own: the agent's own background host
- * keeps the session (`claude --bg`). Messages move over the links the Inbox
- * already has (Claude Code: the mod's bridge poll). Behind
+ * keeps the session (`claude --bg`, Codex's app-server daemon). Messages move
+ * over the links the Inbox already has (Claude Code: the mod's bridge poll;
+ * Codex: the Codex wake, which hands a launched session's items to its host,
+ * `deliver`). Behind
  * `inboxLaunch.enabled` (config only, default off): off, every route here
  * answers 404 and nothing else changes.
  *
@@ -59,7 +61,7 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -72,8 +74,9 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
@@ -110,10 +113,11 @@ interface Memo {
    */
   busySeen: boolean;
   /**
-   * The newest reply still waiting when the person pressed Stop: it does not start the session again (that
-   * would undo the Stop); the person's next reply does, and takes it along.
+   * The replies still waiting when the person pressed Stop (read once its deliveries settled): none starts the
+   * session again (that would undo the Stop); the person's next reply does, and takes them along. Kept in the
+   * launch's folder (`held.json`), so an Inbox restart holds them too.
    */
-  heldReply: string | null;
+  held: string[] | null;
 }
 
 /** What the engine keeps per host: its availability (30 s), its sessions view (10 s), its permission transport. */
@@ -147,7 +151,7 @@ export function createInboxLaunch(options: {
   onChange: () => void;
   /** The argv that runs this Plannotator (the permission hook's command): the Inbox's own `selfCommand`. */
   selfCommand: readonly string[];
-  /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
+  /** More agents beside Claude Code and Codex, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
   hosts?: (context: LaunchHostContext) => LaunchHost[];
   now?: () => number;
   log?: (line: string) => void;
@@ -319,6 +323,17 @@ export function createInboxLaunch(options: {
     });
 
   const launchDir = (id: string) => join(store.dir, "launch", id);
+  const heldFile = (id: string) => join(launchDir(id), "held.json");
+  /** The replies a Stop held, as the launch's folder keeps them (null: none, or unreadable). */
+  const readHeld = (id: string): string[] | null => {
+    try {
+      const replies = (JSON.parse(readFileSync(heldFile(id), "utf8")) as { replies?: unknown }).replies;
+      const ids = Array.isArray(replies) ? replies.filter((reply): reply is string => typeof reply === "string") : [];
+      return ids.length > 0 ? ids : null;
+    } catch {
+      return null;
+    }
+  };
   const startLog = (id: string, text: string) => {
     try {
       mkdirSync(launchDir(id), { recursive: true, mode: 0o700 });
@@ -349,6 +364,7 @@ export function createInboxLaunch(options: {
   /** The agents the Inbox can start, one per line. */
   const ownHosts: LaunchHost[] = [
     claude,
+    createCodexLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -422,11 +438,27 @@ export function createInboxLaunch(options: {
   const memoOf = (launch: InboxLaunchRecord): Memo => {
     let memo = memos.get(launch.id);
     if (!memo) {
-      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false, heldReply: null };
+      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false, held: readHeld(launch.id) };
       memos.set(launch.id, memo);
     }
     return memo;
   };
+  /** A Stop's held replies (`Memo.held`): set, or released (null) by a start, a restart or the person's next reply. */
+  const setHeld = (launchId: string, memo: Memo, held: string[] | null) => {
+    const next = held && held.length > 0 ? held : null;
+    if (!next && !memo.held) return;
+    memo.held = next;
+    try {
+      if (next) {
+        mkdirSync(launchDir(launchId), { recursive: true, mode: 0o700 });
+        writeFileSync(heldFile(launchId), `${JSON.stringify({ replies: next })}\n`, { mode: 0o600 });
+      } else rmSync(heldFile(launchId), { force: true });
+    } catch {
+      // Kept in memory: a restart then holds nothing.
+    }
+  };
+  /** Whether a Stop holds `pending` (the replies waiting now): yes while every one was waiting at the Stop. */
+  const holds = (memo: Memo, pending: readonly InboxMessage[]) => !!memo.held && pending.length > 0 && pending.every((reply) => memo.held!.includes(reply.id));
 
   /** The host's live state of a launched root's session, with Stop counted at once. */
   const liveOf = (host: LaunchHost, root: InboxMessage, memo: Memo) => {
@@ -574,6 +606,14 @@ export function createInboxLaunch(options: {
   const deleting = new Map<string, Promise<Record<string, unknown>>>();
   /** A Stop under way, by launch id: no reply starts the session again until it is done. */
   const stopping = new Set<string>();
+  /** A reply's `deliver` under way, by launch id: a Stop or Delete stops it at its next step and waits for it. */
+  const delivering = new Map<string, Set<{ controller: AbortController; done: Promise<unknown> }>>();
+  /** Before a Stop or Delete stops the session: no delivery under way starts a turn after it. */
+  const settleDeliveries = async (launchId: string) => {
+    const under = [...(delivering.get(launchId) ?? [])];
+    for (const one of under) one.controller.abort();
+    await Promise.all(under.map((one) => one.done.catch(() => undefined)));
+  };
 
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
@@ -584,7 +624,7 @@ export function createInboxLaunch(options: {
     memo.stoppedAt = null;
     memo.respawn = null;
     memo.busySeen = false;
-    memo.heldReply = null;
+    setHeld(launch.id, memo, null);
     starting.add(launch.id);
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
@@ -629,7 +669,7 @@ export function createInboxLaunch(options: {
     memo.quietPolls = host.live(root.to!.session)?.polls ?? memo.quietPolls;
     memo.respawn = { for: forReply, connected: false, failed: null };
     memo.busySeen = false;
-    memo.heldReply = null;
+    setHeld(launch.id, memo, null);
     const attempt = memo.respawn;
     options.onChange();
     void host
@@ -661,9 +701,10 @@ export function createInboxLaunch(options: {
     const memo = memoOf(launch);
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
-    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
+    const pending = store.pendingReplies(root.to.session, { tags: true });
+    const newest = pending.at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
-    if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
+    if (!newest || memo.respawn?.for === newest.id || holds(memo, pending)) return;
     respawn(root, host, newest.id);
   };
   const unsubscribe = store.subscribe((line) => {
@@ -735,11 +776,12 @@ export function createInboxLaunch(options: {
       case "stop": {
         if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
         const memo = memoOf(launch);
-        // What waits now was written before the Stop: it stays for the person's next reply.
-        memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
         stopping.add(launch.id);
         let result: LaunchHostResult;
         try {
+          await settleDeliveries(launch.id);
+          // What waits once its deliveries settled was written before the Stop: it stays for the person's next reply.
+          setHeld(launch.id, memo, root.to ? store.pendingReplies(root.to.session, { tags: true }).map((reply) => reply.id) : null);
           result = await host.stop(launch.session_ref);
         } finally {
           stopping.delete(launch.id);
@@ -777,6 +819,7 @@ export function createInboxLaunch(options: {
         // Deleted already (a second Delete, from a stale window): nothing more. Its folder path may be another launch's now.
         if (launch.deleted_at) return json({ ok: true });
         const done = (async (): Promise<Record<string, unknown>> => {
+          await settleDeliveries(launch.id);
           // Still starting: `run` removes the session it makes once it sees `deleted_at`.
           if (launch.session_ref) {
             const stop = await host.stop(launch.session_ref);
@@ -984,6 +1027,46 @@ export function createInboxLaunch(options: {
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       return runOfRoot(store.message(threadId)!);
+    },
+
+    /**
+     * The wake's text for a person's item to `session` of `agent` (the Codex wake asks before `codex queue`): a
+     * launched session's host takes it as a turn (`deliver`); anything else, or launch off, goes the wake's own way.
+     */
+    async deliver(agent: string, session: string, text: string): Promise<LaunchDelivery> {
+      if (!enabled() || !Object.hasOwn(hosts, agent)) return "queue";
+      const host = hosts[agent]!;
+      const ofSession = roots().filter((m) => m.launch!.agent === agent && m.to?.host === agent && m.to.session === session && m.launch!.session_ref);
+      const root = ofSession.find((m) => !m.launch!.deleted_at) ?? ofSession[0];
+      if (!root || !host.deliver) return "queue";
+      const launch = root.launch!;
+      // Deleted: the reply waits in the Inbox and never reaches the agent (it would bring the session back).
+      if (launch.deleted_at) return "hold";
+      // A Stop or Delete under way: asked again later (then held, or deleted).
+      if (stopping.has(launch.id) || deleting.has(launch.id)) return { failed: "a Stop or Delete is under way" };
+      // The replies that waited when the person pressed Stop: they never undo the Stop (after a restart too);
+      // their next reply takes them along.
+      const memo = memoOf(launch);
+      if (memo.held) {
+        const pending = store.pendingReplies(session, { tags: true });
+        if (pending.length === 0 || holds(memo, pending)) return "hold";
+        setHeld(launch.id, memo, null);
+      }
+      const controller = new AbortController();
+      const call = host.deliver(launch, text, controller.signal).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }));
+      const one = { controller, done: call };
+      const under = delivering.get(launch.id) ?? delivering.set(launch.id, new Set()).get(launch.id)!;
+      under.add(one);
+      let result: LaunchDelivery;
+      try {
+        result = await call;
+      } finally {
+        under.delete(one);
+        if (under.size === 0) delivering.delete(launch.id);
+      }
+      if (typeof result === "object") startLog(launch.id, "failed" in result ? `deliver: ${result.failed}` : `deliver: may have gone, not sent again: ${result.uncertain}`);
+      options.onChange();
+      return result;
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
