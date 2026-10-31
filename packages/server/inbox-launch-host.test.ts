@@ -44,7 +44,15 @@ const FAKE = "fake-agent" as InboxLaunchAgent;
 function fakeLaunchHost() {
   const calls: string[] = [];
   /** What the test makes go wrong. */
-  const faults: { resumeThrows: boolean; gate: Promise<void> | null; deliverGate: Promise<void> | null } = { resumeThrows: false, gate: null, deliverGate: null };
+  const faults: {
+    resumeThrows: boolean;
+    gate: Promise<void> | null;
+    deliverGate: Promise<void> | null;
+    /** The turn had gone before the Stop's signal came (Codex's `turn/start` sent). */
+    lateTurn: boolean;
+    /** The wake records the delivery as soon as the turn took it. */
+    delivered: ((text: string) => void) | null;
+  } = { resumeThrows: false, gate: null, deliverGate: null, lateTurn: false, delivered: null };
   let questions: ReturnType<typeof createLaunchQuestions> | null = null;
   const sessions = new Map<string, { ref: string; live: LaunchLive | null; state: "running" | "stopped" }>();
   const byRef = (ref: string) => [...sessions.values()].find((s) => s.ref === ref);
@@ -91,8 +99,9 @@ function fakeLaunchHost() {
     async deliver(launch, text, signal) {
       calls.push(`deliver ${text}`);
       await faults.deliverGate;
-      if (signal.aborted) return { failed: "stopped" };
+      if (signal.aborted && !faults.lateTurn) return { failed: "stopped" };
       calls.push(`turn ${text}`);
+      faults.delivered?.(text);
       return "delivered";
     },
     attach: (launch) => (launch.session_ref ? `fake attach ${launch.session_ref}` : null),
@@ -352,6 +361,36 @@ describe("a second agent behind LaunchHost", () => {
     expect(await deliver("One more.")).toBe("hold");
     expect(turns()).toHaveLength(2);
     expect(fake.calls.filter((call) => call.startsWith("deliver ")).length).toBe(3);
+  });
+
+  test("a reply whose turn had gone when the person pressed Stop: the replies still waiting once it settled are held, an older one too", async () => {
+    const { store, project, fake, launch, post } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-l", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    // "Earlier." (another thread to the same session, so the later delivery does not settle it) failed once and
+    // waits for the wake's retry; "Later." is going in as the person presses Stop.
+    store.startPersonThread({ project_id: project.id, body: "Earlier.", to: { host: FAKE, session: "session-f1" }, idempotency_key: "send-l2" });
+    const later = store.sendReply(root.id, { words: "Later.", idempotency_key: "reply-l2" }).reply;
+    fake.faults.lateTurn = true;
+    fake.faults.delivered = () => void store.recordDelivery(later.id, { host: FAKE, session: "session-f1" });
+    let open: () => void = () => {};
+    fake.faults.deliverGate = new Promise((resolve) => (open = resolve));
+    const under = launch.deliver(FAKE, "session-f1", "Later.");
+    await until(() => fake.calls.includes("deliver Later."));
+    const stopped = post(prepared.launch.id, "stop");
+    // The Stop is waiting on the delivery when its turn goes.
+    await Bun.sleep(20);
+    open();
+    expect(await under).toBe("delivered");
+    expect((await stopped)!.status).toBe(200);
+    fake.faults.deliverGate = null;
+    // The retry after the Stop: held, never a turn after it.
+    expect(await launch.deliver(FAKE, "session-f1", "Earlier.")).toBe("hold");
+    expect(fake.calls.filter((call) => call.startsWith("turn "))).toEqual(["turn Later."]);
   });
 
   test("a host reads the login shell through its context: a fresh read when it asks, shared with one under way", async () => {

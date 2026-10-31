@@ -77,13 +77,12 @@ export function parseDaemonStart(stdout: string): { socketPath: string | null; a
 
 /**
  * Whether Codex itself would write a folder's trust for this thread (thread_processor.rs: only when the effective
- * permissions can write the folder): a full launch (`danger-full-access`), or the person's `sandbox_mode` (their
- * selected `profile`'s first) being `workspace-write` or `danger-full-access`. Unset is `read-only` (Codex's
- * default for a folder with no trust decision), which writes nothing. A named `default_permissions` profile is
- * not read here: no trust is passed, and Codex decides as it would in its own TUI.
+ * permissions can write the folder): the person's `sandbox_mode` (their selected `profile`'s first) being
+ * `workspace-write` or `danger-full-access`. Unset is `read-only` (Codex's default for a folder with no trust
+ * decision), which writes nothing. A named `default_permissions` profile is not read here: no trust is passed,
+ * and Codex decides as it would in its own TUI.
  */
-export function codexWritesTrust(configText: string | null, full: boolean): boolean {
-  if (full) return true;
+export function codexWritesTrust(configText: string | null): boolean {
   let parsed: Record<string, any> = {};
   try {
     parsed = configText ? (Bun.TOML.parse(configText) as Record<string, any>) : {};
@@ -522,7 +521,10 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
   /** A reply's restart (`resume`, `deliver`) may start the daemon: with a fresh login-shell read, as `start` has, made only then. */
   const loginEnv = () => ctx.loginEnv();
 
-  /** `thread/start` and `thread/resume`'s settings for a launch: full permissions when the record says so, the folder's trust in memory, the Inbox's data dir for its MCP entry. */
+  /**
+   * `thread/start` and `thread/resume`'s settings for a launch: the folder's trust in memory and the Inbox's data dir
+   * for its MCP entry. Never an approval policy or a sandbox: Codex runs with the person's own Codex settings.
+   */
   const threadSettings = (launch: InboxLaunchRecord) => {
     let configText: string | null = null;
     try {
@@ -538,13 +540,12 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
     }
     const isDefaultDataDir = ctx.dataDir === getDefaultPlannotatorDataDir(ctx.homeDir);
     const config: Record<string, unknown> = {
-      ...codexTrustOverride(configText, launch.folder, real, codexTrustRoot(real), codexWritesTrust(configText, launch.full_permissions === true)),
+      ...codexTrustOverride(configText, launch.folder, real, codexTrustRoot(real), codexWritesTrust(configText)),
       // A test or second Inbox: the launched thread's Inbox MCP talks to this one.
       ...(isDefaultDataDir ? {} : { [`mcp_servers.${INBOX_MCP_SERVER_NAME}.env.PLANNOTATOR_DATA_DIR`]: ctx.dataDir }),
     };
     return {
       cwd: launch.folder,
-      ...(launch.full_permissions ? { approvalPolicy: "never", sandbox: "danger-full-access" } : {}),
       ...(Object.keys(config).length > 0 ? { config } : {}),
     };
   };
@@ -651,11 +652,8 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       return { ok: true, version: text! };
     },
 
-    /** Full permissions when Settings → Agents' switch is on; otherwise the person's own config.toml decides (`own_mode`). */
-    startOf: () => {
-      const full = ctx.config().fullPermissions === true;
-      return { full, ownMode: !full, bypass: false };
-    },
+    /** Always the person's own Codex settings (`own_mode`): Settings → Agents' full-permissions switch is Claude Code's. */
+    startOf: () => ({ full: false, ownMode: true, bypass: false }),
 
     /** Codex's trust only picks a default approval policy, and the Inbox passes a new folder's trust in memory: every folder starts. */
     trusts: () => true,

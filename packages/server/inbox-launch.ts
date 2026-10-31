@@ -61,7 +61,7 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -113,10 +113,11 @@ interface Memo {
    */
   busySeen: boolean;
   /**
-   * The newest reply still waiting when the person pressed Stop: it does not start the session again (that
-   * would undo the Stop); the person's next reply does, and takes it along.
+   * The replies still waiting when the person pressed Stop (read once its deliveries settled): none starts the
+   * session again (that would undo the Stop); the person's next reply does, and takes them along. Kept in the
+   * launch's folder (`held.json`), so an Inbox restart holds them too.
    */
-  heldReply: string | null;
+  held: string[] | null;
 }
 
 /** What the engine keeps per host: its availability (30 s), its sessions view (10 s), its permission transport. */
@@ -322,6 +323,17 @@ export function createInboxLaunch(options: {
     });
 
   const launchDir = (id: string) => join(store.dir, "launch", id);
+  const heldFile = (id: string) => join(launchDir(id), "held.json");
+  /** The replies a Stop held, as the launch's folder keeps them (null: none, or unreadable). */
+  const readHeld = (id: string): string[] | null => {
+    try {
+      const replies = (JSON.parse(readFileSync(heldFile(id), "utf8")) as { replies?: unknown }).replies;
+      const ids = Array.isArray(replies) ? replies.filter((reply): reply is string => typeof reply === "string") : [];
+      return ids.length > 0 ? ids : null;
+    } catch {
+      return null;
+    }
+  };
   const startLog = (id: string, text: string) => {
     try {
       mkdirSync(launchDir(id), { recursive: true, mode: 0o700 });
@@ -426,11 +438,27 @@ export function createInboxLaunch(options: {
   const memoOf = (launch: InboxLaunchRecord): Memo => {
     let memo = memos.get(launch.id);
     if (!memo) {
-      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false, heldReply: null };
+      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false, held: readHeld(launch.id) };
       memos.set(launch.id, memo);
     }
     return memo;
   };
+  /** A Stop's held replies (`Memo.held`): set, or released (null) by a start, a restart or the person's next reply. */
+  const setHeld = (launchId: string, memo: Memo, held: string[] | null) => {
+    const next = held && held.length > 0 ? held : null;
+    if (!next && !memo.held) return;
+    memo.held = next;
+    try {
+      if (next) {
+        mkdirSync(launchDir(launchId), { recursive: true, mode: 0o700 });
+        writeFileSync(heldFile(launchId), `${JSON.stringify({ replies: next })}\n`, { mode: 0o600 });
+      } else rmSync(heldFile(launchId), { force: true });
+    } catch {
+      // Kept in memory: a restart then holds nothing.
+    }
+  };
+  /** Whether a Stop holds `pending` (the replies waiting now): yes while every one was waiting at the Stop. */
+  const holds = (memo: Memo, pending: readonly InboxMessage[]) => !!memo.held && pending.length > 0 && pending.every((reply) => memo.held!.includes(reply.id));
 
   /** The host's live state of a launched root's session, with Stop counted at once. */
   const liveOf = (host: LaunchHost, root: InboxMessage, memo: Memo) => {
@@ -596,7 +624,7 @@ export function createInboxLaunch(options: {
     memo.stoppedAt = null;
     memo.respawn = null;
     memo.busySeen = false;
-    memo.heldReply = null;
+    setHeld(launch.id, memo, null);
     starting.add(launch.id);
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
@@ -641,7 +669,7 @@ export function createInboxLaunch(options: {
     memo.quietPolls = host.live(root.to!.session)?.polls ?? memo.quietPolls;
     memo.respawn = { for: forReply, connected: false, failed: null };
     memo.busySeen = false;
-    memo.heldReply = null;
+    setHeld(launch.id, memo, null);
     const attempt = memo.respawn;
     options.onChange();
     void host
@@ -673,9 +701,10 @@ export function createInboxLaunch(options: {
     const memo = memoOf(launch);
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
-    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
+    const pending = store.pendingReplies(root.to.session, { tags: true });
+    const newest = pending.at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
-    if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
+    if (!newest || memo.respawn?.for === newest.id || holds(memo, pending)) return;
     respawn(root, host, newest.id);
   };
   const unsubscribe = store.subscribe((line) => {
@@ -747,12 +776,12 @@ export function createInboxLaunch(options: {
       case "stop": {
         if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
         const memo = memoOf(launch);
-        // What waits now was written before the Stop: it stays for the person's next reply.
-        memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
         stopping.add(launch.id);
         let result: LaunchHostResult;
         try {
           await settleDeliveries(launch.id);
+          // What waits once its deliveries settled was written before the Stop: it stays for the person's next reply.
+          setHeld(launch.id, memo, root.to ? store.pendingReplies(root.to.session, { tags: true }).map((reply) => reply.id) : null);
           result = await host.stop(launch.session_ref);
         } finally {
           stopping.delete(launch.id);
@@ -1015,12 +1044,13 @@ export function createInboxLaunch(options: {
       if (launch.deleted_at) return "hold";
       // A Stop or Delete under way: asked again later (then held, or deleted).
       if (stopping.has(launch.id) || deleting.has(launch.id)) return { failed: "a Stop or Delete is under way" };
-      // The reply that waited when the person pressed Stop: it never undoes the Stop; their next reply takes it along.
+      // The replies that waited when the person pressed Stop: they never undo the Stop (after a restart too);
+      // their next reply takes them along.
       const memo = memoOf(launch);
-      if (memo.heldReply) {
-        const newest = store.pendingReplies(session, { tags: true }).at(-1);
-        if (!newest || newest.id === memo.heldReply) return "hold";
-        memo.heldReply = null;
+      if (memo.held) {
+        const pending = store.pendingReplies(session, { tags: true });
+        if (pending.length === 0 || holds(memo, pending)) return "hold";
+        setHeld(launch.id, memo, null);
       }
       const controller = new AbortController();
       const call = host.deliver(launch, text, controller.signal).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }));

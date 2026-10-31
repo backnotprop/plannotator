@@ -64,14 +64,13 @@ describe("the pure parts", () => {
   });
 
   test("Codex writes trust only when the thread can write the folder", () => {
-    expect(codexWritesTrust(null, false)).toBe(false);
-    expect(codexWritesTrust('sandbox_mode = "read-only"\n', false)).toBe(false);
-    expect(codexWritesTrust('sandbox_mode = "workspace-write"\n', false)).toBe(true);
-    expect(codexWritesTrust('sandbox_mode = "danger-full-access"\n', false)).toBe(true);
-    expect(codexWritesTrust('sandbox_mode = "read-only"\n', true)).toBe(true);
+    expect(codexWritesTrust(null)).toBe(false);
+    expect(codexWritesTrust('sandbox_mode = "read-only"\n')).toBe(false);
+    expect(codexWritesTrust('sandbox_mode = "workspace-write"\n')).toBe(true);
+    expect(codexWritesTrust('sandbox_mode = "danger-full-access"\n')).toBe(true);
     // The selected profile's sandbox wins; a named permissions profile is not guessed at.
-    expect(codexWritesTrust('sandbox_mode = "read-only"\nprofile = "w"\n[profiles.w]\nsandbox_mode = "workspace-write"\n', false)).toBe(true);
-    expect(codexWritesTrust('sandbox_mode = "workspace-write"\ndefault_permissions = "mine"\n', false)).toBe(false);
+    expect(codexWritesTrust('sandbox_mode = "read-only"\nprofile = "w"\n[profiles.w]\nsandbox_mode = "workspace-write"\n')).toBe(true);
+    expect(codexWritesTrust('sandbox_mode = "workspace-write"\ndefault_permissions = "mine"\n')).toBe(false);
   });
 
   test.skipIf(process.platform === "win32")("a linked worktree's trust root is its main checkout, as Codex resolves it; a plain checkout's is itself", () => {
@@ -91,7 +90,7 @@ describe("the pure parts", () => {
     // The person marked the main checkout untrusted: the worktree gets no trust from the Inbox.
     const config = `sandbox_mode = "workspace-write"\n[projects."${main}"]\ntrust_level = "untrusted"\n`;
     const wt = join(dir, "wt", "pkg");
-    expect(codexTrustOverride(config, wt, wt, codexTrustRoot(wt), codexWritesTrust(config, false))).toEqual({});
+    expect(codexTrustOverride(config, wt, wt, codexTrustRoot(wt), codexWritesTrust(config))).toEqual({});
     // A `.git` file that is not a linked worktree's (a forged pointer): no root, as Codex finds none.
     const forged = join(dir, "forged");
     mkdirSync(forged);
@@ -260,7 +259,7 @@ interface World {
 /** The person's config.toml in these tests: their threads can write their folder, so Codex would write its trust. */
 const WRITES = 'model = "gpt-5"\nsandbox_mode = "workspace-write"\n';
 
-function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMcp?: boolean } = {}): World {
+function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMcp?: boolean; fullPermissions?: boolean } = {}): World {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-codex-")));
   const dataDir = join(root, "data");
   const home = join(root, "home");
@@ -269,7 +268,7 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
   for (const dir of [dataDir, home, folder]) mkdirSync(dir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
   const codex = installFakeCodex({
     bin,
     state: join(root, "codex-state"),
@@ -376,6 +375,23 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     expect(w.codex.threads()[threadId]!.name).toBe("Ledger fix");
     // No turn yet: the Codex wake delivers the root.
     expect(w.codex.turns()).toEqual([]);
+  });
+
+  test("Codex runs with the person's own Codex settings: no approval policy or sandbox from the Inbox, whatever Settings → Agents' switch says", async () => {
+    for (const fullPermissions of [true, false, undefined]) {
+      const w = world(fullPermissions === undefined ? {} : { fullPermissions });
+      const root = await w.send("Fix it.", "send-1");
+      expect(root.launch!.full_permissions ?? false).toBe(false);
+      // A restart for a reply sends the thread's settings again: none there either.
+      w.store.recordDelivery(root.id, { host: "codex", session: root.launch!.session_ref! });
+      await w.post(root.launch!.id, "stop");
+      w.store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-1" });
+      await until(() => w.codex.rpc("thread/resume").length > 0);
+      for (const sent of [...w.codex.rpc("thread/start"), ...w.codex.rpc("thread/resume")]) {
+        expect(sent.params.approvalPolicy).toBeUndefined();
+        expect(sent.params.sandbox).toBeUndefined();
+      }
+    }
   });
 
   test("a folder the person already trusts gets no trust from the Inbox (theirs counts)", async () => {
@@ -587,6 +603,28 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     expect(await w.launch.deliver("codex", threadId, wake(root.id, "Still there?"))).toBe("hold");
     expect(starts()).toBe(before);
     expect(w.codex.turns()).toEqual([]);
+  });
+
+  test("a reply waiting when the person pressed Stop is held across an Inbox restart: no turn until their next reply", async () => {
+    const w = world();
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    // Written, and Stop pressed before the wake delivered it.
+    w.store.sendReply(root.id, { words: "Wrong one.", idempotency_key: "reply-1" });
+    await w.post(root.launch!.id, "stop");
+    const again = w.restart();
+    // The new Inbox's first sweeps: no restart, and the wake's ask is held.
+    for (let i = 0; i < 3; i++) {
+      again.launch.sweep(true);
+      await Bun.sleep(20);
+    }
+    expect(await again.launch.deliver("codex", threadId, wake(root.id, "Wrong one."))).toBe("hold");
+    expect(w.codex.rpc("turn/start")).toEqual([]);
+    // Their next reply starts it again, and the held one goes along.
+    again.store.sendReply(root.id, { words: "This one.", idempotency_key: "reply-2" });
+    expect(await again.launch.deliver("codex", threadId, wake(root.id, "Wrong one."))).toBe("delivered");
+    expect(w.codex.rpc("turn/start")).toHaveLength(1);
   });
 
   test("the daemon stopped (its socket gone): a sweep finds none and keeps nothing of it; a look once it runs again finds it, and a reply then starts it", async () => {
