@@ -575,6 +575,15 @@ test('a name several projects match: a button each, and Enter does not choose', 
   await page.keyboard.press('Escape');
   await expect(row(page, 'web-app')).toBeVisible();
   expect((await get('/api/inbox/projects')).projects.filter((project: { combined?: unknown[] }) => (project.combined?.length ?? 0) > 0)).toEqual([]);
+
+  // The whole label names one, and the toast says the name it will have: alone in its group, it loses the parent.
+  await openRename(page, 'web-app');
+  await page.keyboard.type('billing-svc · code');
+  await expect(clash(page)).toContainText('already exists. Combine them?');
+  await page.keyboard.press('Enter');
+  await expect(toast(page).locator('text=Combined into billing-svc')).toHaveText(/^Combined into billing-svc$/);
+  await toast(page).getByRole('button', { name: 'Undo' }).click();
+  await expect(row(page, 'web-app')).toBeVisible();
 });
 
 test('Settings: each folder keeps its size and says what Delete does', async () => {
