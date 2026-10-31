@@ -1166,7 +1166,7 @@ const BEAT_MS = 10_000;
 
 /** A world on fake timers with the real windows, and a clock whose server beats while `beating`. */
 /**
- * Bun's fake timers drive the runtime's timers, not happy-dom's (DOM_TESTS=1 swaps those in), so these run without
+ * Bun's fake timers drive the runtime's timers, not happy-dom's (the DOM lanes swap those in), so these run without
  * the DOM, as CI runs this file (it is not in tests/dom-test-list.txt).
  */
 const fakeTimerTest = test.skipIf(typeof document !== 'undefined');
