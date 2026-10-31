@@ -762,3 +762,15 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
     expect(tail).toEqual(['badge', 'action', 'question']);
   }
 });
+
+test.skipIf(!hasDom)('a message stored before the reader dropped a task box from the first line still draws its card (matched by its place)', () => {
+  const body = ":::action\n- [ ] Let this MacBook's key into the Mac mini\n\n  ```\n  ssh-copy-id user@host\n  ```\n:::";
+  const [parsed] = parseInboxActionBlocks(body);
+  expect(parsed!.prompt).toBe("Let this MacBook's key into the Mac mini");
+  // The record kept the key its first line had then ("[ ] Let this…").
+  const stored = { ...record(0), key: 'a-0badc0de', position: 0, prompt: "[ ] Let this MacBook's key into the Mac mini" };
+  expect(actionForBlock(body, [stored], { startLine: parsed!.startLine, content: '' })?.key).toBe('a-0badc0de');
+  // A record with its own key wins over one at the same place.
+  const fresh = { ...record(0), key: parsed!.key, position: 0 };
+  expect(actionForBlock(body, [stored, fresh], { startLine: parsed!.startLine, content: '' })?.key).toBe(parsed!.key);
+});

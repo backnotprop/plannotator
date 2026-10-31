@@ -235,7 +235,7 @@ test('no agent is running: compose says so, Send sends nothing, a file attaches,
   await page.keyboard.press('Escape');
   await dialog.locator('[data-compose-keep]').click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('[data-inbox-toast]')).toContainText('It waits under Drafts and never sends itself.');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('It never sends itself');
   const nav = page.locator('[data-drafts-nav]');
   await expect(nav).toContainText('Drafts1');
   await nav.click();

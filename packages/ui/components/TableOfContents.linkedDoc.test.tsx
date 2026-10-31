@@ -67,6 +67,16 @@ describe.if(hasDom)('TableOfContents linked-document header', () => {
     expect(backs).toBe(1);
   });
 
+  test('a Windows linked-document path shows only the file name', async () => {
+    const host = await mount({
+      linkedDocFilepath: 'C:\\site\\pages\\01-entry-point.html',
+      onLinkedDocBack: () => {},
+      backLabel: 'file',
+    });
+    expect(host.textContent).toContain('01-entry-point.html');
+    expect(host.textContent).not.toContain('C:\\site');
+  });
+
   test('a heading-less ROOT document still renders nothing', async () => {
     const host = await mount({});
     expect(host.querySelector('nav')).toBeNull();

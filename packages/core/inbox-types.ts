@@ -62,7 +62,7 @@ export function ulid(now: number = Date.now()): string {
 }
 
 /** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card. */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -83,6 +83,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   tdy: /^tdy_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** An agent the Inbox started (launch; packages/server/inbox-launch.ts). */
   lch: /^lch_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** An Inbox: the stable id other machines' links key on (packages/server/inbox-links.ts). */
+  ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -1304,6 +1306,12 @@ export const INBOX_SECTIONS: readonly { readonly id: InboxSectionId; readonly la
  */
 export interface InboxListRow extends InboxThreadSummary {
   project: { id: string; name: string };
+  /**
+   * The machine whose Inbox owns the thread (its stable `ibx_` id), on rows of
+   * the merged view only (`GET /api/inbox/threads?machines=1`; linked
+   * machines, packages/server/inbox-machines.ts). Absent on this Inbox's own list.
+   */
+  machine?: string;
   /** The thread's name (send_message's `thread`), or null for a session's default thread. */
   thread_name: string | null;
   section: InboxSectionId;
@@ -1561,6 +1569,10 @@ export interface InboxHealth {
    * project for every folder that compacts or resumes.
    */
   peek?: true;
+  /** This Inbox's stable id, which linked machines key on (additive; packages/server/inbox-links.ts). */
+  inbox_id?: string;
+  /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
+  machine_links?: number;
 }
 
 /** What an Inbox window reports about its browser's notification permission for its own origin. */
@@ -2082,10 +2094,14 @@ export type InboxToolCostHost = "pi" | "opencode";
  * Then `project_path`'s description says it defaults to the folder the
  * session started in (INBOX_AGENT_PROJECT_PATH_DESCRIPTION): about +86
  * bytes (0.9%, estimated, inside the 5% drift test); the stated cost stands.
+ * Then the action item's command sentence (each command in its own fenced
+ * block, so it gets a copy button; `Run:` left out of the short list):
+ * measured on Pi, 10,303 bytes (both changes; tokens estimated at about
+ * 4 bytes each). With the Board on 11,722 (11,490 + 232, estimated).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10071, tokens: 2700 };
+const INBOX_TOOL_COST_NOW = { bytes: 10303, tokens: 2750 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11490, tokens: 3100 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11722, tokens: 3150 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

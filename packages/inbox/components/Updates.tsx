@@ -189,7 +189,8 @@ export function Modal({ label, labelledBy, describedBy, onClose, children, testI
                 return;
               }
               if (event.key !== 'Tab') return;
-              const items = [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])];
+              // Never an element under `inert` (the list options dialog's picture of real rows): it takes no focus.
+              const items = [...(ref.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter((el) => !el.closest('[inert]'));
               if (items.length === 0) return;
               const first = items[0]!;
               const last = items[items.length - 1]!;

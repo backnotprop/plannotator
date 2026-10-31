@@ -249,7 +249,7 @@ test("the owner's no-loop rule: Tailscale's check says signed out, its switch is
   expect(world.errors).toEqual([]);
 });
 
-test("a code closed by five wrong tries, and the Tailscale switch's two error states (a mapping that is not the Inbox's on 8443; Tailscale stopped)", async () => {
+test("a code closed by five wrong tries, and the Tailscale switch's two error states (mappings that are not the Inbox's on every port from 8443 to 8450; Tailscale stopped)", async () => {
   const { page } = world;
   await page.goto('about:blank');
   await page.goto(`${world.url}#settings/devices/pair`);
@@ -271,12 +271,18 @@ test("a code closed by five wrong tries, and the Tailscale switch's two error st
   await expect(mine).toHaveAttribute('aria-checked', 'false');
 
   // A second Inbox whose `tailscale` is a script on PATH, so CI and this Mac show the same states without a tailnet.
+  // Every port the door may take is held by a mapping that is not the Inbox's.
   const root = inboxScratch('plannotator-inbox-phones-tailscale-');
   const bin = join(root, 'bin');
   mkdirSync(bin);
+  const held = [8443, 8444, 8445, 8446, 8447, 8448, 8449, 8450];
+  const taken = JSON.stringify({
+    TCP: Object.fromEntries(held.map((p) => [String(p), { HTTPS: true }])),
+    Web: Object.fromEntries(held.map((p) => [`x.ts.net:${p}`, { Handlers: { '/': { Proxy: 'http://127.0.0.1:3000' } } }])),
+  });
   writeFileSync(
     join(bin, 'tailscale'),
-    `#!/bin/sh\nif [ "$(cat '${join(root, 'mode')}')" = down ]; then echo 'Tailscale is stopped.' >&2; exit 1; fi\nif [ "$1" = serve ] && [ "$2" = status ]; then echo '{"TCP":{"8443":{"HTTPS":true}},"Web":{"x.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}'; exit 0; fi\nexit 1\n`,
+    `#!/bin/sh\nif [ "$(cat '${join(root, 'mode')}')" = down ]; then echo 'Tailscale is stopped.' >&2; exit 1; fi\nif [ "$1" = serve ] && [ "$2" = status ]; then echo '${taken}'; exit 0; fi\nexit 1\n`,
   );
   chmodSync(join(bin, 'tailscale'), 0o755);
   const env = { PATH: `${bin}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_INBOX_PHONES: '1' };
@@ -289,7 +295,7 @@ test("a code closed by five wrong tries, and the Tailscale switch's two error st
     const phones = other.locator('[data-settings-phones]');
     const toggle = other.getByRole('switch', { name: 'Tailscale', exact: true });
     for (const [mode, words, name] of [
-      ['taken', 'Another tailscale serve mapping already uses port 8443', 'settings-phones-tailnet-port-taken'],
+      ['taken', 'Other tailscale serve mappings already use every port the Inbox can take (8443 to 8450)', 'settings-phones-tailnet-port-taken'],
       ['down', 'Tailscale could not publish the Inbox', 'settings-phones-tailnet-unavailable'],
     ] as const) {
       writeFileSync(join(root, 'mode'), mode);

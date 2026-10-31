@@ -16,7 +16,10 @@ import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { AnnotationType, type Annotation, type EditorMode, type HostDraft, type InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { getIdentity } from '@plannotator/ui/utils/identity';
+import { DocumentContents } from '@plannotator/ui/components/DocumentContents';
 import { annotationOf, attachmentBlocks, codeRangeOf } from '../attachments';
+import { showsContents } from '../contents';
+import { Icon } from '../icons';
 import { postToShell } from './bridge';
 import type { DiagramHostDraft } from '@plannotator/ui/components/diagram/DiagramViewer';
 
@@ -76,6 +79,10 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
   );
   const annotations = useMemo(() => fileRecords.map(annotationOf), [fileRecords]);
   const blocks = useMemo(() => attachmentBlocks(attachment.kind, open.text, attachment.name), [attachment.kind, attachment.name, open.text]);
+  // A Markdown file with Contents (contents.ts: 4 or more headings): a Contents button opens the list, as in the window on a phone.
+  const hasContents = kind === 'markdown' && showsContents(blocks);
+  const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
+  const [contentsOpen, setContentsOpen] = useState(false);
 
   // Paint the stored highlights once the document is drawn; later ones arrive through commit.
   // The shell's "3 annotations" sheet opens a file at one mark (`focus`):
@@ -247,7 +254,7 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
       )}
       {isText && (
         <>
-          <div className="sf-docscroll">
+          <div className="sf-docscroll" ref={setScrollViewport}>
             <Viewer
               ref={viewerRef}
               blocks={blocks}
@@ -286,6 +293,27 @@ export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function
               compact
             />
           </div>}
+          {hasContents && (
+            <button type="button" className="sf-contents-open" onClick={() => setContentsOpen(true)} aria-label="Contents" aria-expanded={contentsOpen} data-contents-open="">
+              <Icon name="contents" size={18} />
+            </button>
+          )}
+          {hasContents && contentsOpen && (
+            <>
+              <button type="button" className="sf-contents-scrim" aria-label="Close contents" tabIndex={-1} onClick={() => setContentsOpen(false)} />
+              <div className="sf-contents" role="dialog" aria-label="Contents" data-contents="sheet">
+                <div className="sf-contents-h">
+                  <span>Contents</span>
+                  <button type="button" className="sf-contents-close" onClick={() => setContentsOpen(false)} aria-label="Close contents">
+                    <Icon name="x" size={18} />
+                  </button>
+                </div>
+                <div className="sf-contents-list">
+                  <DocumentContents blocks={blocks} annotations={annotations} scrollViewport={scrollViewport} onNavigate={() => setContentsOpen(false)} />
+                </div>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

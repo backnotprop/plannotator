@@ -88,7 +88,7 @@ Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from it
 - Editors (VS Code, Zed, JetBrains, Goose) are never changed. Settings has a one-click link or a snippet for each.
 - Qwen Code's `settings.json` may hold comments: Plannotator keeps every one, and adds only its own entry. It never uses `qwen mcp add`, which writes your other servers back with their `${VAR}` values filled in (a token kept in your environment would end up in the file). A file that is not valid JSON or is read-only is left as it was, and the terminal says why. A relative `QWEN_HOME` names a different folder in each project, so you connect Qwen Code by hand then. If the Inbox starts with another `QWEN_HOME` than the one Qwen Code was connected in, Plannotator leaves both folders as they are and tells you once. **Settings → Agents** shows Qwen Code off there, with the folder it is connected in; turn it on to move it. If the new folder's settings.json can't take it, nothing changes and the reason is shown.
 - `PLANNOTATOR_INBOX_CONNECT=0` skips this step.
-- `plannotator uninstall` removes every entry it recorded adding (never one you added yourself). `--dry-run` lists them first. If its record (`~/.plannotator/inbox/agents.json`) is gone, it removes none: an entry that runs this Plannotator is named with how to remove it, since you may have added it by hand.
+- `plannotator uninstall` removes every entry it recorded adding (never one you added yourself). `--dry-run` lists them first. If its record (`~/.plannotator/inbox/agents.json`) is gone, it removes none. Any `plannotator-inbox` entry that still runs Plannotator and that it did not add is named with how to remove it (for Claude Code's `~/.claude.json`, `claude mcp remove plannotator-inbox -s user`), and the `plannotator` command is still removed. If an agent's config file can't be read (not valid JSON or TOML, not UTF-8, or permission denied), uninstall leaves the file as it is and keeps the `plannotator` command. It names the file, the agent and the reason, and says what to do before you run it again.
 
 ### A note in each agent's instructions
 
@@ -161,7 +161,7 @@ Holds up: staging deploy; release notes
 
 Agents are told to write `Stopped:` only when they truly cannot continue. A negative value (`no`, `none`, `n/a`, a dash) means no stop, so `Stopped: no` is read as if the line were not there, and a `Holds up:` entry `none` holds nothing up. `plannotator inbox --help` and the `send_message` tool's `body` field teach agents both lines.
 
-An action item is an Inbox-only `:::action` block. Its first line is what to do; the other lines say why, except these: `Where:` (a link becomes an **Open** button, or a place in words), `Run:` (a command to copy), `Stopped:` and `Holds up:` (as for questions), and `Watching:` (what the agent watches to notice it done by itself).
+An action item is an Inbox-only `:::action` block. Its first line is what to do; the other lines say why, except these: `Where:` (a link becomes an **Open** button, or a place in words), `Stopped:` and `Holds up:` (as for questions), and `Watching:` (what the agent watches to notice it done by itself). Agents are told to put each command you must run in its own fenced code block, one per command in the order to run them; each block gets a copy button. An older `Run: <command>` line still works: one becomes the item's command with **Copy**, several become one code block each, in order. A line that is only inline code, or "Run in Terminal …: <command>", also becomes a code block with a copy button. Selecting text in an action item or a question card keeps the selection, so you can copy any part of it.
 
 ```markdown
 :::action
@@ -255,7 +255,7 @@ Once you have run the Inbox on this computer, a session that has the tool also g
 
 Where it goes:
 
-- **Claude Code:** once, in the context of the conversation's first message. It names the tool by its full name (`mcp__…__plannotator_inbox`), so Claude can find it. After a compaction, the plugin adds the same line again. On Team and Enterprise accounts, Claude Code's built-in security plugin keeps plugins out of that first-message context, so there the line goes with your first prompt instead. Claude Code still shows a note that the plugin's `prompt.context` hook was skipped; the reminder reaches Claude anyway.
+- **Claude Code:** once, with the conversation's first prompt. It names the tool by its full name (`mcp__…__plannotator_inbox`), so Claude can find it. After a compaction, the plugin adds the same line again. When you resume a conversation, its first prompt gets the session's open Inbox threads instead, plus the line if that conversation never had it. Subagents do not get the line. On Team and Enterprise accounts, Claude Code's built-in security plugin (`cc-plugin-sec-default`) still skips two of the plugin's hooks, and Claude Code shows a note for each: `classic.PermissionRequest` at the first permission prompt of a session, and `session.compact` at the first compaction (there, the line comes back after a compaction without the thread list). The reminder reaches Claude anyway.
 - **Pi:** once, as a hidden message with the session's first prompt.
 - **OpenCode:** a line in the system prompt of every request. On OpenCode 1, and on an OpenCode 2 that cannot bring a reply back by itself, the sentence about the reply says to call `wait_for_reply` instead.
 
@@ -395,7 +395,7 @@ The Inbox stores the files agents attached as they were when sent, the messages 
 plannotator uninstall --purge
 ```
 
-Both forms remove the `plannotator-inbox` entries `plannotator inbox` added to your agents (an entry you changed to run something else is left, and named). `--purge` also stops a running Inbox first, then deletes `~/.plannotator/inbox/` with the rest of the Plannotator data. If the Inbox does not stop, uninstall still removes the plugins, skills, hooks and config entries, but keeps your Plannotator data (`~/.plannotator`) and the `plannotator` binary. Quit the Inbox and run the command again to finish. Add `--dry-run` to see what would be removed.
+Both forms remove the `plannotator-inbox` entries `plannotator inbox` added to your agents (an entry you changed to run something else is left, and named; so is one you added yourself). An agent config uninstall can't read keeps the `plannotator` binary until you fix it (see [Your agents are connected for you](#your-agents-are-connected-for-you)). `--purge` also stops a running Inbox first, then deletes `~/.plannotator/inbox/` with the rest of the Plannotator data. If the Inbox does not stop, uninstall still removes the plugins, skills, hooks and config entries, but keeps your Plannotator data (`~/.plannotator`) and the `plannotator` binary. Quit the Inbox and run the command again to finish. Add `--dry-run` to see what would be removed.
 
 ## Troubleshooting
 

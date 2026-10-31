@@ -10,3 +10,4 @@ The Inbox details are split by topic. Read the foundation guide for command, ser
 - [`inbox-files-and-guides.md`](inbox-files-and-guides.md) — attachments, annotations, images, and guided reviews.
 - [`inbox-notifications-and-agents.md`](inbox-notifications-and-agents.md) — search, event streams, notifications, Board, and agent connections.
 - [`inbox-phones-and-security.md`](inbox-phones-and-security.md) — phone pairing and surface, security boundaries, and proofs.
+- [`inbox-machines.md`](inbox-machines.md) — linked machines: one Inbox across machines, the link, the merged view, the forward and the outbox.

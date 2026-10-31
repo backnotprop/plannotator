@@ -98,13 +98,14 @@ export const inboxRefusesAssetPath = refusesHiddenHtmlAssetPath;
 export const INBOX_HTML_DOCUMENT_CSP = `${HTML_ASSET_DOCUMENT_CSP}; connect-src 'none'`;
 
 /**
- * The page `relativePath` names in the folder of the attached HTML page at
+ * The document `relativePath` names in the folder of the attached document at
  * `attachedPath` (its realpath): its realpath and text. Refused (InboxError)
  * when the path is not a plain relative path, names a hidden segment or a
- * dotenv file (as requested or by where it leads), is not `.html`/`.htm`,
+ * dotenv file (as requested or by where it leads), has the wrong extension for `kind`
+ * (as requested or by where it leads),
  * leads outside that folder, is not a regular file, or is over 2 MB.
  */
-export async function readInboxLinkedPage(attachedPath: string, relativePath: string | null): Promise<{ path: string; text: string }> {
+export async function readInboxLinkedPage(attachedPath: string, relativePath: string | null, kind: "html" | "markdown" = "html"): Promise<{ path: string; text: string }> {
   const rel = (relativePath ?? "").replace(/\\/g, "/");
   if (!rel || rel.length > 2048 || /[\u0000-\u001f\u007f]/.test(rel) || rel.startsWith("/") || /^[a-z]:/i.test(rel)) {
     throw new InboxError("validation_error", "path: a path relative to the attached page's folder.", { field: "path" });
@@ -115,7 +116,9 @@ export async function readInboxLinkedPage(attachedPath: string, relativePath: st
   }
   const clean = segments.join("/");
   const name = segments[segments.length - 1]!;
-  if (!/\.html?$/i.test(name)) throw new InboxError("linked_page_not_html", `${name} is not an HTML page.`);
+  const extension = kind === "markdown" ? /\.mdx?$/i : /\.html?$/i;
+  const wrongKind = () => new InboxError("linked_page_not_html", `${name} is not ${kind === "markdown" ? "a Markdown document" : "an HTML page"}.`);
+  if (!extension.test(name)) throw wrongKind();
   const root = dirname(attachedPath);
   const target = resolvePath(root, clean);
   if (!isWithinDirectory(target, root)) throw new InboxError("linked_page_outside", "Only pages in the attached page's own folder open here.");
@@ -134,6 +137,8 @@ export async function readInboxLinkedPage(attachedPath: string, relativePath: st
   if (inboxRefusesAssetPath(relativeTo(root, real).split(sep).join("/"))) {
     throw new InboxError("linked_page_refused", "Plannotator does not open hidden files or .env files.");
   }
+  // And by what it is: `notes.md` linked to `data.json` is not a Markdown document.
+  if (!extension.test(basename(real))) throw wrongKind();
   // The handle is opened on the realpath without following a link. O_NOFOLLOW covers
   // only the last segment, so once open the realpath must still lead to the very
   // file the descriptor holds (dev and ino): a parent folder swapped for a symlink
@@ -276,7 +281,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       });
     }
 
-    // Only images referenced by the selected Markdown version, relative to the file itself.
+    // Only images referenced by the selected Markdown version or a guarded sibling document.
     const markdownImage = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/markdown-image$/.exec(path);
     if (markdownImage) {
       if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET or HEAD." }, 405);
@@ -285,11 +290,13 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       if (attachment.kind !== "markdown") throw new InboxError("validation_error", "Only Markdown attachments show inline images.");
       const project = store.project(message.project_id);
       if (!project) throw new InboxError("project_not_found", "The attachment's project is gone.");
-      const body = (await readVersion(store, attachment, versionOf(url))).toString("utf8");
+      const document = url.searchParams.get("document");
+      const page = document === null ? null : await readInboxLinkedPage(attachment.path, document, "markdown");
+      const body = page?.text ?? (await readVersion(store, attachment, versionOf(url))).toString("utf8");
       return inboxImageResponse(req, await readInboxMessageImageAsync({
         body,
         root: project.root,
-        base: dirname(attachment.path),
+        base: dirname(page?.path ?? attachment.path),
         path: url.searchParams.get("path"),
         anywhere: message.author.kind === "agent",
       }));
@@ -343,20 +350,22 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       });
     }
 
-    // Another page an attached HTML page links to (`<a href="B-cards.html">`), not
+    // Another document an attached HTML or Markdown document links to, not
     // attached itself: shown read-only in the same pane. Reached by the attachment's
     // id plus a path relative to the attached page's own folder (never an absolute
     // path), with the asset route's rules: inside that folder by realpath, no hidden
-    // segment or dotenv name, `.html`/`.htm`, at most 2 MB.
+    // segment or dotenv name, matching document kind, at most 2 MB.
     const linked = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/linked-page$/.exec(path);
     if (linked) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       const { attachment } = attachmentOf(linked[1]!);
-      if (readInboxAttachmentKind(attachment.kind) !== "html") {
-        throw new InboxError("attachment_not_html", `${attachment.name} is not an HTML page.`);
+      const kind = readInboxAttachmentKind(attachment.kind);
+      if (kind !== "html" && kind !== "markdown") {
+        throw new InboxError("attachment_not_html", `${attachment.name} is not an HTML or Markdown document.`);
       }
-      const page = await readInboxLinkedPage(attachment.path, url.searchParams.get("path"));
+      const page = await readInboxLinkedPage(attachment.path, url.searchParams.get("path"), kind);
+      if (kind === "markdown") return json({ serverSession, path: page.path, name: basename(page.path), html: null, text: page.text, url: null });
       return json({
         serverSession,
         path: page.path,

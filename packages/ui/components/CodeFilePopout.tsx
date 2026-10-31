@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { File, type LineAnnotation } from '@pierre/diffs/react';
 import type { SelectedLineRange as PierreSelectedLineRange, LineEventBaseProps } from '@pierre/diffs';
+import { normalizeBrowserPath } from '@plannotator/core/browser-paths';
+import { basenameFromPath } from '@plannotator/core/source-save';
 import { PopoutDialog } from './PopoutDialog';
 import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
@@ -399,8 +401,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     setPendingComment(null);
   }, [filepath]);
 
-  const displayName = filepath.split('/').pop() || filepath;
-  const relativePath = filepath.replace(/.*\/(?=.*\/)/, '');
+  const displayName = basenameFromPath(filepath);
+  const relativePath = normalizeBrowserPath(filepath).replace(/.*\/(?=.*\/)/, '');
   const selectedCodeAnnotation = useMemo(
     () => annotations.find((ann) => ann.id === selectedAnnotationId),
     [annotations, selectedAnnotationId],
@@ -696,8 +698,8 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
 
-  const displayName = filepath.split('/').pop() || filepath;
-  const relativePath = filepath.replace(/.*\/(?=.*\/)/, '');
+  const displayName = basenameFromPath(filepath);
+  const relativePath = normalizeBrowserPath(filepath).replace(/.*\/(?=.*\/)/, '');
   const lineCount = useMemo(() => contents.split('\n').length, [contents]);
 
   const handleCopy = async () => {

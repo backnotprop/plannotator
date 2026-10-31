@@ -10,12 +10,13 @@
  * (packages/shared/inbox/message-images.ts). An attached Markdown file's
  * images work the same way with `inboxMarkdownImageBase(attachment, version)`:
  * `/api/inbox/attachments/<id>/markdown-image?path=<src>&version=…`, relative
- * to the file's folder (#2228). There is no route that takes a bare path.
+ * to the file's folder (#2228); a Markdown file a link in it opened adds
+ * `&document=<its path in that folder>` (#2230). There is no route that takes a bare path.
  *
  * Remote images (`http(s)`, protocol-relative `//host/…`) are left as
  * written: the window's CSP (`img-src 'self' data: blob:`) does not load them.
  */
-import { inboxUrl } from './inboxUrl';
+import { inboxUrl, machineOf } from './inboxUrl';
 import type { ImageSrcResolver } from '@plannotator/ui/configure';
 import { tourAssetUrl, tourMarkupUrl } from './tour/assets';
 
@@ -51,7 +52,7 @@ export function inboxMessageImageBase(messageId: string): string {
 
 /** The URL an image in a message loads from. */
 export function inboxMessageImageUrl(messageId: string, src: string): string {
-  return inboxUrl(`/messages/${encodeURIComponent(messageId)}/image?path=${encodeURIComponent(src)}`);
+  return inboxUrl(`/messages/${encodeURIComponent(messageId)}/image?path=${encodeURIComponent(src)}`, undefined, machineOf(messageId));
 }
 
 /**
@@ -63,16 +64,19 @@ export function inlineImageRefFromSrc(src: string, messageId: string): string | 
   try {
     const base = typeof window !== 'undefined' && /^https?:/.test(window.location.href) ? window.location.href : 'http://localhost/';
     const url = new URL(src, base);
-    if (url.pathname !== inboxUrl(`/messages/${encodeURIComponent(messageId)}/image`)) return null;
+    if (url.pathname !== inboxUrl(`/messages/${encodeURIComponent(messageId)}/image`, undefined, machineOf(messageId))) return null;
     return url.searchParams.get('path');
   } catch {
     return null;
   }
 }
 
-/** The image base for one Markdown attachment version (the images themselves remain live files). */
-export function inboxMarkdownImageBase(attachmentId: string, version: 'current' | 'sent'): string {
-  return `${ATTACHMENT_BASE_PREFIX}${attachmentId}:${version}`;
+/**
+ * The image base for one Markdown attachment version (the images themselves remain live files). `document`: a
+ * Markdown file a link in it opened (its path relative to the attachment's folder), whose own images these are.
+ */
+export function inboxMarkdownImageBase(attachmentId: string, version: 'current' | 'sent', document?: string): string {
+  return `${ATTACHMENT_BASE_PREFIX}${attachmentId}:${version}${document ? `:${encodeURIComponent(document)}` : ''}`;
 }
 
 /** The window's image resolver: message and Markdown images use scoped Inbox routes. */
@@ -92,8 +96,11 @@ export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
     return TOUR_ASSET_RE.test(path) ? tourAssetUrl(path) : inboxUrl(`/tour/assets/none`);
   }
   if (base?.startsWith(ATTACHMENT_BASE_PREFIX)) {
-    const match = /^(att_[0-9A-Za-z]+):(current|sent)$/.exec(base.slice(ATTACHMENT_BASE_PREFIX.length));
-    if (match) return inboxUrl(`/attachments/${match[1]}/markdown-image?path=${encodeURIComponent(path)}&version=${match[2]}`);
+    const match = /^(att_[0-9A-Za-z]+):(current|sent)(?::([^:]+))?$/.exec(base.slice(ATTACHMENT_BASE_PREFIX.length));
+    if (match) {
+      const document = match[3] ? `&document=${match[3]}` : '';
+      return inboxUrl(`/attachments/${match[1]}/markdown-image?path=${encodeURIComponent(path)}&version=${match[2]}${document}`, undefined, machineOf(match[1]));
+    }
   }
   if (base?.startsWith(MESSAGE_BASE_PREFIX)) {
     const id = base.slice(MESSAGE_BASE_PREFIX.length);

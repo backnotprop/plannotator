@@ -545,6 +545,17 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     },
   },
   {
+    id: 'tokyo-night-moon',
+    name: 'Tokyo Night Moon',
+    builtIn: true,
+    modeSupport: 'dark-only',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#82aaff', secondary: '#444a73', accent: '#86e1fc', background: '#222436', foreground: '#c8d3f5' },
+      light: { primary: '#82aaff', secondary: '#444a73', accent: '#86e1fc', background: '#222436', foreground: '#c8d3f5' },
+    },
+  },
+  {
     id: 'vesper',
     name: 'Vesper',
     builtIn: true,

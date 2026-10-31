@@ -22,14 +22,27 @@
  * The tailnet. "Reach from my tailnet" opens a second loopback listener that
  * serves the door and nothing else, and publishes THAT port at
  * `https://<MagicDNS name>:8443` through `tailscale serve` (never funnel).
+ * When another mapping holds 8443 at the first publish, the next free port up
+ * to 8450; that port then sticks (the address carries it), and a later start
+ * that finds it held refuses rather than move (inbox-tailnet-door.ts).
  * `tailscale serve` passes the client's Host header through, so the socket,
- * not a header, keeps tailnet requests on the door. Kept in inbox.json as
- * `tailnet: { https_port, door_port }`; published at each start, taken down
- * (listener and mapping) when the switch goes off and at each clean stop.
+ * not a header, keeps tailnet requests on the door. The switch is kept in
+ * inbox.json as `tailnet: { https_port, door_port }`; the port and the
+ * mapping the Inbox made, and only that, in `inbox/tailnet-door.json`.
+ * Published at each start, taken down (listener and mapping) when the switch
+ * goes off and at each clean stop.
  *
  * The Wi-Fi. "Reach from this Wi-Fi" opens a TLS listener on every interface
  * that serves the same door-only handler, with a pinned self-signed
  * certificate and a Bonjour record (inbox-lan.ts, contract section 3).
+ *
+ * Machines (inbox-machines.ts). Another Plannotator Inbox links through the
+ * same door as a device with platform `machine`, redeemed from a machine
+ * offer. That works with Phones off: then the door answers only a machine's
+ * token (anything else is the unknown-route 404, as before), pairing takes
+ * only a machine offer, and the tailnet door publishes at start only while a
+ * machine is linked. A machine may never ask for the merged view
+ * (`machines=1`), so two Inboxes linked both ways cannot echo each other.
  */
 
 import { childEnv } from "@plannotator/shared/child-env";
@@ -50,7 +63,7 @@ import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } fr
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups";
 import { INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
-import { runTailscale, serveStatusProxy, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
+import { describeTailscaleFailure, runTailscale, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
   PAIRING_CHECKS_DEADLINE_MS,
@@ -61,14 +74,37 @@ import {
   type PairingTailscaleRunner,
 } from "./inbox-pairing-checks";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
-import { enableTailscaleServe, removeTailscaleServe, TailscaleServeError } from "./tailscale-serve";
+import { enableTailscaleServe, TailscaleServeError, takeDownOwnServeMapping } from "./tailscale-serve";
+import {
+  adoptLegacyTailnetDoor,
+  chooseTailnetDoorPort,
+  clearTailnetDoorRecord,
+  hasTailnetDoorRecord,
+  INBOX_TAILNET_HTTPS_PORTS,
+  INBOX_TAILNET_PORT_RANGE,
+  legacyTailnetDoorRecord,
+  readTailnetDoorRecord,
+  writeTailnetDoorRecord,
+  type TailnetDoorRecord,
+} from "./inbox-tailnet-door";
 
 /** The pairing offer's lifetime (limit, contract section 1): long enough to fetch a phone. */
 export const PAIRING_OFFER_MS = 10 * 60_000;
 /** Wrong six-digit codes before the offer closes (limit, contract section 1). */
 export const PAIRING_CODE_TRIES = 5;
-/** The tailnet HTTPS port (contract section 1, ruling 8). */
-export const INBOX_TAILNET_HTTPS_PORT = 8443;
+/** The tailnet HTTPS port the door takes first (contract section 1, ruling 8); the next free one up to 8450 when it is taken. */
+export const INBOX_TAILNET_HTTPS_PORT = INBOX_TAILNET_HTTPS_PORTS[0]!;
+/**
+ * Phones off: how long the tailnet door stays published for a machine that
+ * was unlinked here while it could not be told (asleep, away), so that its
+ * next contact is refused (`401 device_revoked`) and it removes its side. A
+ * week: a laptop closed for a trip or a holiday still hears it when it opens,
+ * and a machine silent for longer is likely gone (wiped, sold), so the door
+ * does not stay published for nobody. The outbox keeps settled writes as long.
+ */
+export const UNLINKED_REFUSAL_KEPT_MS = 7 * 24 * 60 * 60_000;
+/** After that refusal has been answered, the door comes down once the answer has left (as `UNLINKED_DOOR_CLOSE_MS`). */
+const REFUSED_DOOR_CLOSE_MS = 1_000;
 
 export const DOOR_PREFIX = "/api/inbox/device/";
 
@@ -182,6 +218,20 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^markups$/, window: () => "/api/inbox/markups", raw: { max: INBOX_DEVICE_MARKUP_MAX_BYTES, code: "markup_too_large", what: "a drawing" } },
 ];
 
+/** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */
+const MACHINE_DOOR_WRITES = ["link-back", "unlink"] as const;
+
+/** For rule 8's test (inbox-outbox.test.ts): every door route in words (`GET threads`, `POST messages/:id/(picks|reply|…)`). */
+export function doorRouteNames(): string[] {
+  const words = (route: RegExp) => route.source.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/");
+  return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), ...MACHINE_DOOR_WRITES.map((route) => `POST ${route}`)];
+}
+
+/** For rule 8's test: the door's POST routes, and which take a raw body (a file). */
+export function doorWriteRoutes(): { route: string; raw: boolean }[] {
+  return ALLOWLIST.filter((entry) => entry.method === "POST").map((entry) => ({ route: entry.route.source, raw: entry.raw !== undefined }));
+}
+
 /** Where a pairing attempt reached the door: the Wi-Fi's listener, the tailnet's, or this computer's own port (the simulator). */
 export type PairingVia = "wifi" | "tailnet" | "local";
 
@@ -252,6 +302,8 @@ export interface InboxDevicesContext {
   /** The server's own `fetch`: the door hands each allowed request to it on loopback. */
   dispatch: (req: Request) => Promise<Response>;
   now?: () => Date;
+  /** Tests: how long the door stays up for a machine unlinked while it could not be told. Default `UNLINKED_REFUSAL_KEPT_MS`. */
+  refusalKeptMs?: number;
   tailscale?: TailscaleRunner;
   /** Tests: how step 1's checks run `tailscale` (may be asynchronous). Default: `tailscale` when given, else the CLI as a child process. */
   checksTailscale?: PairingTailscaleRunner;
@@ -264,10 +316,36 @@ export interface InboxDevicesContext {
     paired: (device: InboxDevice) => Promise<{ url: string; mailbox_id: string } | null>;
     revoked: (device: InboxDevice) => void;
   };
+  /** Phones on (PLANNOTATOR_INBOX_PHONES): the whole phone surface. Off: the door serves linked machines only. Default true. */
+  phones?: boolean;
+  /** Linked machines (inbox-machines.ts): the two door routes only a machine calls. Bound after both exist. */
+  machines?: () => InboxDoorMachines | null;
 }
 
-/** The computer's name as the phone shows it: macOS's ComputerName, else the host name's first label. */
+/** What the door hands to inbox-machines.ts. */
+export interface InboxDoorMachines {
+  /** The other machine handed this Inbox a code for its own door: link back (both ways). */
+  linkBack: (deviceId: string, body: Record<string, unknown>) => Promise<Response>;
+  /** The other machine unlinked this one: forget it here too. */
+  unlinkedBy: (deviceId: string) => Response;
+  /** A machine is linked: publish the tailnet door at start even with Phones off. */
+  hasLinks: () => boolean;
+}
+
+/** The platform a linked Inbox pairs as. */
+export const MACHINE_PLATFORM = "machine";
+/** Machine offers kept, open or redeemed (a CLI offer and a link-back can be open at once). */
+const MACHINE_OFFERS_KEPT = 8;
+
+/**
+ * The computer's name as a phone and a linked machine show it: PLANNOTATOR_MACHINE_NAME when set (a headless box
+ * whose host name says nothing, two Inboxes on one computer in a test), else macOS's ComputerName, else the host
+ * name's first label.
+ */
 function computerName(): string {
+  // Control characters stripped: the name is echoed by another machine's CLI and must never carry a terminal escape.
+  const named = process.env.PLANNOTATOR_MACHINE_NAME?.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
+  if (named) return named.slice(0, 64);
   if (process.platform === "darwin") {
     try {
       const out = spawnSync("scutil", ["--get", "ComputerName"], { encoding: "utf8", timeout: 2000, env: childEnv() });
@@ -378,27 +456,42 @@ function bearer(req: Request): string | null {
 }
 
 /**
- * Take down the mapping on 8443 when it points at one of `targets` (this
- * Inbox's door listeners). "none" when there is no such mapping, "failed"
- * when Tailscale could not say or could not remove it.
+ * Take down the door mapping this Inbox recorded (inbox-tailnet-door.ts),
+ * only while it still points exactly where the record says: anything else on
+ * that port is someone else's and is never touched. With no record yet, an
+ * older build's inbox.json `tailnet` is read as one, once
+ * (`adoptLegacyTailnetDoor`). The record keeps the port and says the mapping
+ * is gone once it is down or found gone; it is unchanged when Tailscale could
+ * not say or could not remove it. Nothing is spawned when there is nothing
+ * recorded. Also `uninstall --purge`, with the Inbox stopped (`legacy`: that
+ * data dir's inbox.json `tailnet`).
  */
-function takeDownOwnMapping(run: TailscaleRunner, targets: readonly string[]): "removed" | "none" | "failed" {
-  const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
-  if (status.error || status.status !== 0) return "failed";
-  const existing = serveStatusProxy(status.stdout, INBOX_TAILNET_HTTPS_PORT);
-  if (existing.state === "malformed") return "failed";
-  if (existing.state !== "mapped" || !targets.includes(existing.proxy)) return "none";
-  return removeTailscaleServe(INBOX_TAILNET_HTTPS_PORT, run) ? "removed" : "failed";
+export function takeDownInboxTailnet(
+  dataDir: string,
+  run: TailscaleRunner = runTailscale,
+  legacy: InboxRegistryEntry["tailnet"] = readInboxRegistry(dataDir)?.tailnet,
+): "removed" | "none" | "failed" {
+  let record = readTailnetDoorRecord(dataDir);
+  if (!record && !hasTailnetDoorRecord(dataDir)) {
+    if (!legacy?.door_port) return "none";
+    const status = run(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+    if (status.error || status.status !== 0) return "failed";
+    record = adoptLegacyTailnetDoor(dataDir, legacy, status.stdout);
+  }
+  if (!record?.published) return "none";
+  const result = takeDownOwnServeMapping(run, record.https_port, [record.target]);
+  if (result !== "failed") writeTailnetDoorRecord(dataDir, { ...record, published: false });
+  return result;
 }
 
-/**
- * `uninstall --purge` with the Inbox stopped: take down the tailnet mapping
- * the last run left, by the door_port inbox.json kept. Nothing is spawned when
- * the switch was never on.
- */
-export function takeDownInboxTailnet(dataDir: string, run: TailscaleRunner = runTailscale): "removed" | "none" | "failed" {
-  const door = readInboxRegistry(dataDir)?.tailnet?.door_port;
-  return door ? takeDownOwnMapping(run, [`http://127.0.0.1:${door}`]) : "none";
+/** Why the door's port could not be taken (inbox-tailnet-door.ts), in the window's words. */
+class DoorPortError extends Error {
+  constructor(
+    readonly code: "tailnet_port_taken" | "tailnet_port_held" | "tailnet_port_raced",
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 export function createInboxDevices(context: InboxDevicesContext) {
@@ -416,6 +509,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
   let offer: Offer | null = null;
   /** The last offer made, kept after it closes so the window can say what reached the door while it showed. */
   let lastOffer: Offer | null = null;
+  const phonesOn = context.phones !== false;
+  /** Machine offers (inbox-machines.ts), newest last, with the device each was redeemed for. */
+  const machineOffers: (Offer & { deviceId: string | null })[] = [];
   let name: string | null = null;
   const tailnet: TailnetState = { on: false, address: null, error: null };
 
@@ -434,7 +530,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const revoked = devices.revoke(device.id, now().toISOString()) ?? device;
     for (const stream of streams.get(device.id) ?? []) stream.abort();
     streams.delete(device.id);
-    context.relay?.revoked(revoked);
+    if (device.platform !== MACHINE_PLATFORM) context.relay?.revoked(revoked);
     return revoked;
   };
 
@@ -459,6 +555,45 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // A phone can use the code only through an address it carries; the window never shows a code without one.
       reachable: reach.tailnet !== null || (reach.lan !== null && reach.fingerprint !== null),
     };
+  };
+
+  /** A one-time offer another Inbox redeems as a machine (Phones on or off). */
+  const openMachineOffer = () => {
+    const made = {
+      secret: randomBytes(32).toString("base64url"),
+      code: String(randomInt(0, 1_000_000)).padStart(6, "0"),
+      expiresAt: now().getTime() + PAIRING_OFFER_MS,
+      wrong: 0,
+      redeemed: false,
+      attempts: [],
+      deviceId: null,
+    };
+    machineOffers.push(made);
+    if (machineOffers.length > MACHINE_OFFERS_KEPT) machineOffers.splice(0, machineOffers.length - MACHINE_OFFERS_KEPT);
+    return { secret: made.secret, code: made.code, expires_at: new Date(made.expiresAt).toISOString() };
+  };
+  const openMachineOffers = () => machineOffers.filter((o) => !o.redeemed && o.wrong < PAIRING_CODE_TRIES && o.expiresAt > now().getTime());
+  const offerDevice = (secret: string) => machineOffers.find((o) => sameSecret(o.secret, secret))?.deviceId ?? null;
+
+  /** A machine redeems a machine offer: the same limits as a phone's (10 minutes, 5 wrong codes), its own slots. */
+  const redeemMachine = (name: string, secret: string | null, code: string | null): Response => {
+    const open = openMachineOffers();
+    const match = open.find((o) => (secret ? sameSecret(secret, o.secret) : code === o.code));
+    if (!match) {
+      if (!secret) for (const o of open) o.wrong += 1;
+      if (secret || open.length === 0) return refuse(410, "offer_expired", "This link code is no longer open. Make a new one on the other machine.");
+      return refuse(401, "pairing_code_wrong", "That code is not the one on the other machine.", {
+        tries_left: Math.max(PAIRING_CODE_TRIES - Math.max(...open.map((o) => o.wrong)), 0),
+      });
+    }
+    match.redeemed = true;
+    const token = `tok_${randomBytes(32).toString("base64url")}`;
+    const at = now().toISOString();
+    const device = devices.add({ id: inboxId("dev"), name, platform: MACHINE_PLATFORM, token, secret: match.secret, at });
+    // A machine is never a phone: no relay carriage, no pushes.
+    devices.setCarriage(device.id, false, at);
+    match.deviceId = device.id;
+    return json({ device: publicDevice(devices.get(device.id) ?? device), token, computer: computer() }, 201);
   };
 
   const attempt = (target: Offer | null, entry: Omit<PairingAttempt, "at">) => {
@@ -503,6 +638,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (!platform.ok) throw new InboxError("validation_error", `platform: ${platform.message}`, { field: "platform" });
     const secret = typeof body.secret === "string" && body.secret ? body.secret : null;
     const code = typeof body.code === "string" && body.code ? body.code : null;
+    if (platform.name === MACHINE_PLATFORM) {
+      // Machines link over the tailnet only: never by a code, or at all, over the Wi-Fi.
+      if (via === "wifi") return refuse(403, "machine_not_accepted_here", "Machines link over the tailnet, not the Wi-Fi.");
+      if (!secret && !code) throw new InboxError("validation_error", "secret or code: one is required.", { field: "secret" });
+      return redeemMachine(byName.name, secret, code);
+    }
     if (secretOnly && !secret && code) {
       attempt(openOffer() ?? lastOffer, { via, result: "code_over_wifi" });
       return refuse(400, "code_not_accepted_here", "Over the Wi-Fi, pair by scanning the QR code on your computer's screen.");
@@ -684,6 +825,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
   const serve = async (req: Request, url: URL, route: string, device: InboxDevice): Promise<Response> => {
     devices.touch(device.id, now().toISOString());
     if (route === "revoke" && req.method === "POST") return json({ device: publicDevice(revoke(device)) });
+    if (device.platform === MACHINE_PLATFORM) {
+      // A machine reads this Inbox's own threads only (PLAN rule 3): never the merged view, so links both ways cannot echo.
+      if (url.searchParams.has("machines")) return refuse(403, "machines_view_refused", "A linked machine reads this Inbox's own threads only.");
+      const machines = context.machines?.() ?? null;
+      const [linkBack, unlink] = MACHINE_DOOR_WRITES;
+      if (machines && req.method === "POST" && route === linkBack) return machines.linkBack(device.id, await context.readBody(req));
+      if (machines && req.method === "POST" && route === unlink) return machines.unlinkedBy(device.id);
+    }
     for (const entry of ALLOWLIST) {
       if (entry.method !== req.method) continue;
       const match = entry.route.exec(route);
@@ -703,17 +852,41 @@ export function createInboxDevices(context: InboxDevicesContext) {
     return refuse(404, "device_route_not_found", "Not a phone route.");
   };
 
+  /**
+   * Phones off: whether the door answers this request at all (it is there
+   * for linked machines only). A machine's pairing while a machine offer is
+   * open, and a machine's token, are answered. So is a token this door does
+   * not know, once machines link here (through the tailnet's listener, or
+   * when any machine device exists): `401 device_token_invalid` tells a
+   * machine whose link was wiped here (a reinstall) to re-pair, and ends the
+   * writes it holds with their notice. Anything else gets the unknown-route
+   * 404 it always got, Origin header or not.
+   */
+  const answersWithPhonesOff = (req: Request, route: string, via: PairingVia, token: string | null, device: InboxDevice | null): boolean => {
+    if (route === "pair" && req.method === "POST") return openMachineOffers().length > 0;
+    if (device) return device.platform === MACHINE_PLATFORM;
+    return token !== null && (via === "tailnet" || devices.list().some((d) => d.platform === MACHINE_PLATFORM));
+  };
+
   /** `via`: the listener the request reached (the window's own port when the caller says nothing). */
-  const door = async (req: Request, url: URL, via: PairingVia = "local"): Promise<Response> => {
+  /** Null: Phones are off and this is no machine's request (the caller answers its unknown-route 404). */
+  const door = async (req: Request, url: URL, via: PairingVia = "local"): Promise<Response | null> => {
     try {
-      if (req.headers.get("origin") !== null) return refuse(403, "origin_not_allowed", "Browser requests are not accepted here.");
       const route = url.pathname.startsWith(DOOR_PREFIX) ? url.pathname.slice(DOOR_PREFIX.length) : "";
-      if (route === "pair" && req.method === "POST") return await redeem(req, via);
       const token = bearer(req);
+      const device = token ? devices.byToken(token) : null;
+      if (!phonesOn && !answersWithPhonesOff(req, route, via, token, device)) return null;
+      if (req.headers.get("origin") !== null) return refuse(403, "origin_not_allowed", "Browser requests are not accepted here.");
+      if (route === "pair" && req.method === "POST") return await redeem(req, via);
       if (!token) return refuse(401, "device_token_missing", "This request needs the phone's token.");
-      const device = devices.byToken(token);
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
-      if (device.revoked_at !== null) return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
+      if (device.revoked_at !== null) {
+        // A machine unlinked while it could not be told has now heard it: the door it kept up may come down.
+        if (device.refusal_owed_until !== undefined) refusalAnswered(device.id);
+        return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
+      }
+      // A machine reaches this door over the tailnet only, never the Wi-Fi's listener.
+      if (device.platform === MACHINE_PLATFORM && via === "wifi") return refuse(403, "machine_not_accepted_here", "Machines reach this Inbox over the tailnet, not the Wi-Fi.");
       return await serve(req, url, route, device);
     } catch (error) {
       return caught(error);
@@ -787,7 +960,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
         return refuse(404, "device_route_not_found", "Not a phone route.");
       }
       if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
-      return door(req, url, via);
+      return door(req, url, via).then((answer) => answer ?? refuse(404, "device_route_not_found", "Not a phone route."));
     };
 
   // ── The Wi-Fi (contract section 3): the same door-only handler, over TLS on every interface. ──
@@ -830,12 +1003,19 @@ export function createInboxDevices(context: InboxDevicesContext) {
     doorServer = null;
   };
 
-  /** Targets a mapping of this Inbox's own points at: this run's door listener, or the last run's. */
-  const ownTargets = () =>
-    [doorServer?.port, context.registry().tailnet?.door_port].filter((p): p is number => !!p).map((p) => `http://127.0.0.1:${p}`);
+  /** The tailnet HTTPS port the door is published on this run, while it is. */
+  let doorHttpsPort: number | null = null;
 
+  /** The record, or (no record yet) what an older build's inbox.json `tailnet` says, never written here: the pairing checks only read. */
+  const recordFor = (serveStatus: string): TailnetDoorRecord | null =>
+    hasTailnetDoorRecord(context.dataDir) ? readTailnetDoorRecord(context.dataDir) : legacyTailnetDoorRecord(context.registry().tailnet, serveStatus);
+
+  /** The tailnet port the door would take now, from `tailscale serve status --json`: the kept port, else (first publish) the first free one. */
+  const doorPortIn = (serveStatus: string) => chooseTailnetDoorPort(serveStatus, recordFor(serveStatus));
+
+  /** The switch: inbox.json's `tailnet`. Off also forgets the door's port, so the next first publish chooses again. */
   const saveSwitch = (on: boolean) => {
-    const value = on && doorServer ? { https_port: INBOX_TAILNET_HTTPS_PORT, door_port: doorServer.port as number } : undefined;
+    const value = on && doorServer ? { https_port: doorHttpsPort ?? INBOX_TAILNET_HTTPS_PORT, door_port: doorServer.port as number } : undefined;
     const apply = (target: InboxRegistryEntry) => {
       if (value) target.tailnet = { ...value };
       else delete target.tailnet;
@@ -843,24 +1023,80 @@ export function createInboxDevices(context: InboxDevicesContext) {
     // Never another Inbox's entry, never into a removed data folder.
     updateOwnInboxRegistry(context.dataDir, context.registry().serverSession, apply);
     apply(context.registry());
+    if (!on) clearTailnetDoorRecord(context.dataDir);
   };
+
+  /** Who reaches the door on its port, for the words of a refusal. */
+  const reachers = () => (phonesOn ? "linked machines and paired phones" : "linked machines");
 
   const tailnetWords = (error: unknown): { code: string; message: string } => {
-    if (error instanceof TailscaleServeError && error.code === "conflict") {
-      return {
-        code: "tailnet_port_taken",
-        message: `Another tailscale serve mapping already uses port ${INBOX_TAILNET_HTTPS_PORT}. The Inbox never replaces it: remove it with "tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off" if nothing needs it.`,
-      };
-    }
+    if (error instanceof DoorPortError) return { code: error.code, message: error.message };
     const detail = error instanceof Error ? error.message.replace(/^--tailscale:\s*/, "") : String(error);
-    return { code: "tailnet_unavailable", message: `Tailscale could not publish the Inbox. ${detail}` };
+    // Linux: `tailscale serve` needs root unless the person made their user the operator once.
+    const linux =
+      process.platform === "linux" && /access denied|permission|operator|not permitted/i.test(detail)
+        ? ' On Linux, run "sudo tailscale set --operator=$USER" once, then try again.'
+        : "";
+    return { code: "tailnet_unavailable", message: `Tailscale could not publish the Inbox. ${detail}${linux}` };
   };
 
-  /** Open the door listener and point the tailnet mapping at it; on failure both are closed and the error kept for the window. */
+  /**
+   * Open the door listener and point a tailnet mapping at it, on its port
+   * (inbox-tailnet-door.ts: the kept one, else the first free one). The
+   * record is written before `tailscale serve` runs, so a crash between the
+   * two never leaves a mapping the Inbox does not own; when serve fails, the
+   * record goes back to what it was. On failure the listener closes and the
+   * error is kept for the window.
+   */
   const publish = (): { ok: true } | { ok: false; code: string; message: string } => {
     try {
+      const status = tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+      if (status.error || status.status !== 0) throw new TailscaleServeError("unavailable", `--tailscale: ${describeTailscaleFailure(status)}`);
+      // An older build's inbox.json record, read once (inbox-tailnet-door.ts).
+      const record = adoptLegacyTailnetDoor(context.dataDir, context.registry().tailnet, status.stdout);
+      const port = chooseTailnetDoorPort(status.stdout, record);
+      if (port.state === "malformed") {
+        throw new TailscaleServeError(
+          "malformed",
+          "--tailscale: could not parse `tailscale serve status --json` output; refusing to modify the serve config. Inspect it with `tailscale serve status`.",
+        );
+      }
+      if (port.state === "taken") {
+        throw new DoorPortError(
+          "tailnet_port_taken",
+          `Other tailscale serve mappings already use every port the Inbox can take (${INBOX_TAILNET_PORT_RANGE}). The Inbox never replaces them: free one of them if nothing needs it ("tailscale serve status" lists them).`,
+        );
+      }
+      if (port.state === "held") {
+        // How the port can change on purpose. With Phones off and nothing linked, there is nothing to unlink:
+        // the port is let go of once nothing needs the door (closeTailnetIfUnused), and the next code chooses again.
+        const move = phonesOn
+          ? "To move this Inbox to a new port instead, turn Tailscale off and on again here, then pair your phones and link your machines again."
+          : context.machines?.()?.hasLinks()
+            ? "To move this Inbox to a new port instead, unlink each machine, then link it again."
+            : `Nothing is linked here, so the Inbox lets go of port ${port.port} on its own once no link code is open (a code lasts ${PAIRING_OFFER_MS / 60_000} minutes)${
+                owesRefusal() ? `, and the machine unlinked here has heard it was unlinked (at most ${UNLINKED_REFUSAL_KEPT_MS / 86_400_000} days)` : ""
+              }; the next code then takes a free port.`;
+        throw new DoorPortError(
+          "tailnet_port_held",
+          `Another tailscale serve mapping now uses port ${port.port}, where ${reachers()} reach this Inbox. The Inbox never replaces it, and does not move to another port on its own: free port ${port.port} if nothing needs it ("tailscale serve status" lists it). ${move}`,
+        );
+      }
       const doorPort = openDoorListener();
-      const { url } = enableTailscaleServe(doorPort, tailscale, { httpsPort: INBOX_TAILNET_HTTPS_PORT, ownTargets: ownTargets(), persist: true });
+      writeTailnetDoorRecord(context.dataDir, { https_port: port.port, target: `http://127.0.0.1:${doorPort}`, published: true });
+      let url: string;
+      try {
+        ({ url } = enableTailscaleServe(doorPort, tailscale, { httpsPort: port.port, ownTargets: port.own ? [port.own] : [], persist: true }));
+      } catch (error) {
+        if (record) writeTailnetDoorRecord(context.dataDir, record);
+        else clearTailnetDoorRecord(context.dataDir);
+        // Free a moment ago, someone else's now: the race between reading the status and serving.
+        if (error instanceof TailscaleServeError && error.code === "conflict") {
+          throw new DoorPortError("tailnet_port_raced", `Port ${port.port} was just taken by another tailscale serve mapping. Try again.`);
+        }
+        throw error;
+      }
+      doorHttpsPort = port.port;
       const served = new URL(url);
       tailnet.address = `${served.hostname}:${served.port || "443"}`;
       tailnet.error = null;
@@ -891,38 +1127,149 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (on) process.once("SIGHUP", onHangup);
   };
 
-  /** Take this Inbox's own mapping down (never someone else's); the listener closes unless the take-down failed. */
+  /** Take this Inbox's own mapping down (the recorded one, never someone else's); the listener closes unless the take-down failed. */
   const unpublish = (): "removed" | "none" | "failed" => {
-    const result = takeDownOwnMapping(tailscale, ownTargets());
+    const result = takeDownInboxTailnet(context.dataDir, tailscale, context.registry().tailnet);
     if (result === "failed") return result;
     closeDoorListener();
     hangup(false);
     tailnet.address = null;
+    doorHttpsPort = null;
     return result;
+  };
+
+  // ── A refusal owed (inbox-machines.md, "Unlink removes both sides") ──
+  //
+  // A machine unlinked here while it could not be told learns at its next
+  // contact, from its revoked token's `401 device_revoked`. With Phones off
+  // that contact needs the tailnet door, so the door stays published until
+  // that token has been refused once, the limit passes
+  // (`UNLINKED_REFUSAL_KEPT_MS`), or the person turns the tailnet off. The
+  // device record keeps `refusal_owed_until`, so a restart publishes it again.
+  // The door serves nothing new meanwhile: that token is revoked, and the
+  // door answers exactly as it does while a machine is linked.
+
+  const refusalKeptMs = context.refusalKeptMs ?? UNLINKED_REFUSAL_KEPT_MS;
+  const owesRefusal = () => devices.owedRefusals(now().getTime()).length > 0;
+  /** Fires when the soonest owed refusal reaches its limit. */
+  let owedTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The door's close once a refusal's answer has left (`REFUSED_DOOR_CLOSE_MS`). */
+  let refusedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Wake when the soonest owed refusal reaches its limit: the door then comes down unless something else needs it. */
+  const watchOwed = () => {
+    if (owedTimer) clearTimeout(owedTimer);
+    owedTimer = null;
+    const soonest = devices.owedRefusals(now().getTime())[0];
+    if (!soonest) return;
+    const wait = Math.max(Date.parse(soonest.refusal_owed_until!) - now().getTime(), 0) + 50;
+    owedTimer = setTimeout(
+      () => {
+        owedTimer = null;
+        closeTailnetIfUnused();
+        watchOwed();
+      },
+      Math.min(wait, 2 ** 31 - 1),
+    );
+    owedTimer.unref?.();
+  };
+
+  /** A machine unlinked here could not be told: its revoked token is owed one refusal, and the door stays for it. */
+  const oweRefusal = (deviceId: string) => {
+    devices.oweRefusal(deviceId, new Date(now().getTime() + refusalKeptMs).toISOString(), now().toISOString());
+    watchOwed();
+  };
+
+  /** That machine was refused (`401 device_revoked`): it removes its side now, and the door comes down after the answer. */
+  const refusalAnswered = (deviceId: string) => {
+    devices.oweRefusal(deviceId, null, now().toISOString());
+    watchOwed();
+    if (refusedTimer) clearTimeout(refusedTimer);
+    refusedTimer = setTimeout(() => {
+      refusedTimer = null;
+      closeTailnetIfUnused();
+    }, REFUSED_DOOR_CLOSE_MS);
+    refusedTimer.unref?.();
+  };
+
+  /**
+   * Phones off: once no machine is linked, no machine offer is open and no
+   * refusal is owed, the tailnet door has nothing to serve, so this Inbox's
+   * mapping comes down and the switch is cleared (after the last unlink that
+   * reached the other machine, an offer nobody used, or the refusal an
+   * unlinked machine was owed). Phones on: the person's own switch decides,
+   * so nothing changes.
+   */
+  const closeTailnetIfUnused = () => {
+    if (phonesOn || openMachineOffers().length > 0 || context.machines?.()?.hasLinks() || owesRefusal()) return;
+    if (tailnet.address === null && !doorServer && !context.registry().tailnet) return;
+    if (unpublish() === "failed") return;
+    tailnet.on = false;
+    tailnet.error = null;
+    saveSwitch(false);
+  };
+
+  /**
+   * At start, Phones off, nothing linked or owed, the switch kept, and a
+   * refusal whose limit passed while the Inbox was down. After a clean stop
+   * the record says the mapping is down, and nothing runs (the next link
+   * publishes the same port). After a crash during that week (kill -9, a
+   * panic, a dead battery) the record still says published, and no later
+   * start would take that mapping to a dead loopback port down: it comes
+   * down now, the switch is cleared and the lapsed refusals are forgotten. A
+   * take-down that failed changes nothing, so the next start tries again.
+   */
+  const settleLapsedRefusals = (kept: InboxRegistryEntry["tailnet"]) => {
+    // Nothing is owed now, so every refusal still recorded has lapsed.
+    const lapsed = devices.owedRefusals(Number.NEGATIVE_INFINITY);
+    if (lapsed.length === 0 || !readTailnetDoorRecord(context.dataDir)?.published) return;
+    if (takeDownInboxTailnet(context.dataDir, tailscale, kept) === "failed") return;
+    saveSwitch(false);
+    for (const device of lapsed) devices.oweRefusal(device.id, null, now().toISOString());
   };
 
   /**
    * At start: the switch was on, so point the mapping at a fresh door
    * listener before anything else uses it. If that fails, a mapping the last
    * run left (a crash, kill -9) is taken down, so it never points at a dead
-   * port for longer than this start.
+   * port for longer than this start. With Phones off, no machine linked and
+   * no refusal owed, the tailnet is not this Inbox's business: `tailscale`
+   * never runs (a leftover waits for a link, Phones, or `uninstall --purge`),
+   * except for a door kept for a refusal whose limit passed while the Inbox
+   * was down (`settleLapsedRefusals`).
    */
   const startTailnet = () => {
-    if (!context.registry().tailnet) return;
+    watchOwed();
+    const kept = context.registry().tailnet;
+    if (!kept) return;
+    // Phones off: the door is published only for linked machines, and for one unlinked while it could not be told.
+    if (!phonesOn && !context.machines?.()?.hasLinks() && !owesRefusal()) {
+      settleLapsedRefusals(kept);
+      return;
+    }
     tailnet.on = true;
     if (publish().ok) saveSwitch(true);
-    else takeDownOwnMapping(tailscale, ownTargets());
+    else takeDownInboxTailnet(context.dataDir, tailscale, kept);
   };
 
   /**
    * A clean stop (quit, the stop route, a restart to update, which runs this
    * before it starts the new binary) takes the mapping and the door listener
    * down, so nothing is published while the Inbox is stopped. The switch stays
-   * on in inbox.json (with door_port, so a take-down that failed here is done
-   * by the next start or `uninstall --purge`), and the next start publishes
-   * again.
+   * on in inbox.json, and the record keeps the port, so the next start
+   * publishes the same address; a take-down that failed here leaves the
+   * record saying the mapping may exist, so the next start or
+   * `uninstall --purge` does it.
    */
   const stopTailnet = () => {
+    if (owedTimer) clearTimeout(owedTimer);
+    owedTimer = null;
+    // A close still waiting for a refusal's answer runs now, so a stop never leaves the switch on for nothing.
+    if (refusedTimer) {
+      clearTimeout(refusedTimer);
+      refusedTimer = null;
+      closeTailnetIfUnused();
+    }
     if (tailnet.address === null && !doorServer) return;
     unpublish();
     closeDoorListener();
@@ -937,13 +1284,17 @@ export function createInboxDevices(context: InboxDevicesContext) {
       saveSwitch(true);
       return json({ tailnet });
     }
-    // A take-down that failed changes nothing: the switch stays on, door_port is kept, and the window says why.
+    // A take-down that failed changes nothing: the switch stays on, the record is kept, and the window says why.
+    const port = readTailnetDoorRecord(context.dataDir)?.https_port ?? INBOX_TAILNET_HTTPS_PORT;
     if (unpublish() === "failed") {
-      return refuse(409, "tailnet_unavailable", `Tailscale could not take the Inbox's address down. Try again, or run "tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off".`);
+      return refuse(409, "tailnet_unavailable", `Tailscale could not take the Inbox's address down. Try again, or run "tailscale serve --https=${port} off".`);
     }
     tailnet.on = false;
     tailnet.error = null;
     saveSwitch(false);
+    // The person turned the tailnet off: no door is kept for an unlinked machine after this.
+    for (const device of devices.owedRefusals(Number.NEGATIVE_INFINITY)) devices.oweRefusal(device.id, null, now().toISOString());
+    watchOwed();
     return json({ tailnet });
   };
 
@@ -980,8 +1331,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       dataDir: context.dataDir,
       // Tests hand in a scripted runner; this computer's own `tailscale` runs as a child process, never blocking the Inbox.
       tailscale: context.checksTailscale ?? context.tailscale ?? runTailscaleQuietly,
-      httpsPort: INBOX_TAILNET_HTTPS_PORT,
-      ownTargets,
+      doorPort: doorPortIn,
       probes: context.probes,
       deadlineMs: deadline,
     });
@@ -1000,6 +1350,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
   };
 
   const windowRoute = async (req: Request, url: URL): Promise<Response | null> => {
+    if (!phonesOn) return null;
     const path = url.pathname;
     if (path === "/api/inbox/pairing") {
       // The last offer's state and what reached the door while it showed; never its secret or code.
@@ -1056,5 +1407,38 @@ export function createInboxDevices(context: InboxDevicesContext) {
     return null;
   };
 
-  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices };
+  /** Linked machines (inbox-machines.ts): the door's side of linking. */
+  const machineDoor = {
+    openMachineOffer,
+    offerDevice,
+    /** `oweRefusal`: a machine unlinked while it could not be told; the door stays up until its token is refused once. */
+    revokeDevice: (id: string, options: { oweRefusal?: boolean } = {}) => {
+      const device = devices.get(id);
+      if (!device) return;
+      if (device.revoked_at === null) revoke(device);
+      if (options.oweRefusal && device.platform === MACHINE_PLATFORM) oweRefusal(id);
+    },
+    /** Close a machine offer that will not be used (a link that failed halfway); the device it made, if one was. */
+    closeMachineOffer: (secret: string): string | null => {
+      const found = machineOffers.find((o) => sameSecret(o.secret, secret));
+      if (!found) return null;
+      found.redeemed = true;
+      return found.deviceId ?? null;
+    },
+    tailnetAddress: () => tailnet.address,
+    /** Why the door is not published, while it should be (a port held, Tailscale stopped), in the window's words. */
+    tailnetError: () => tailnet.error,
+    publishTailnet: (): { ok: true; address: string } | { ok: false; message: string } => {
+      if (tailnet.address) return { ok: true, address: tailnet.address };
+      const result = publish();
+      if (!result.ok) return { ok: false, message: result.message };
+      tailnet.on = true;
+      saveSwitch(true);
+      return { ok: true, address: tailnet.address! };
+    },
+    closeTailnetIfUnused,
+    computerName: () => computer().name,
+  };
+
+  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices, machineDoor };
 }

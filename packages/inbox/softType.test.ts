@@ -132,8 +132,10 @@ test("a phone's bottom sheet has the dialog corner on top (owner's ruling q8), f
 });
 
 test('rows part with no line between them in both modes (the prototype\'s rows); other lines keep today\'s colour', () => {
-  expect(CODE).toMatch(/\.pn-inbox \{[^}]*--ib-soft-rows:\s*;/);
-  const light = /:root\.light \.pn-inbox \{([^}]*)\}/.exec(CODE)?.[1] ?? '';
+  // The window's token blocks also name the list options dialog's light picture (`.ib-lightscope`).
+  expect(CODE).toMatch(/\.pn-inbox, \.ib-lightscope \{[^}]*--ib-soft-rows:\s*;/);
+  const light = /:root\.light \.pn-inbox,\s*\.ib-lightscope\.light \{([^}]*)\}/.exec(CODE)?.[1] ?? '';
+  expect(light).toContain('--ib-soft-nav');
   expect(light).not.toContain('--ib-soft-rows');
   expect(CODE).toMatch(/--ib-row-line-s:\s*var\(--ib-soft-rows\)\s*transparent;/);
   expect(CODE).toMatch(/\.ib-row, \.ib-nrow \{ border-bottom-color: var\(--ib-row-line\); \}/);
