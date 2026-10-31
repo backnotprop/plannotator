@@ -1658,6 +1658,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-pane.ib-withfile .ib-annpop { width: 400px; }
 .ib-pane.ib-withfile .ib-pbody { padding: 16px 20px 0; }
 .ib-pane.ib-withfile .ib-pfoot { padding: 12px 20px 14px; }
+/* The thread in full screen (the header's "Hide the sidebar and the list"): a reading measure, centred. */
+.pn-inbox .ib-pane[data-full] .ib-pbody,
+.pn-inbox .ib-pane[data-full] .ib-pfoot { padding-inline: max(30px, calc((100% - 760px) / 2)); }
 .ib-pane.ib-withfile .ib-msg { padding-left: 0; }
 .ib-pane.ib-withfile .ib-att-t { min-width: 0; flex: 1 1 250px; }
 .ib-view { position: relative; z-index: 1; flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px auto minmax(0, 1fr) auto auto; background: var(--background); }
@@ -2725,6 +2728,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox[data-stack~="thread"] .ib-main { position: relative; }
 .pn-inbox[data-stack~="thread"][data-view="thread"] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
 .pn-inbox[data-stack~="file"][data-view="file"] .ib-pane.ib-withfile { display: none; }
+/* The thread in full screen (App.tsx `data-thread-full`): the list stays drawn under it, hidden as a stacked
+   window hides it, so J/K and G I still read its order and its scroll stays. */
+.pn-inbox[data-thread-full] .ib-main { position: relative; }
+.pn-inbox[data-thread-full] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
 .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 30px; padding: 0 9px 0 4px; border-radius: 7px; color: var(--primary); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; white-space: nowrap; }
 .pn-inbox .ib-pback:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-pback-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

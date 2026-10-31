@@ -180,11 +180,16 @@ test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at t
   const expand = el.querySelector<HTMLButtonElement>('[data-expand-all]')!;
   expect(expand.textContent).toBe('');
   expect(expand.getAttribute('aria-label')).toMatch(/^(Expand all messages|Fold the earlier messages)$/);
+  // Expand all / Fold all are chevrons, never the four-arrow maximize glyph the Inbox draws elsewhere (an image's fit
+  // toggle), so no header icon reads as "maximize" (owner, 2026-10-30). The glyph matches the label.
+  const glyph = expand.querySelector('svg')?.getAttribute('data-icon');
+  expect(glyph).toBe(expand.getAttribute('aria-label') === 'Expand all messages' ? 'unfold' : 'fold');
   const head = el.querySelector('section.ib-pane .ib-phead')!;
-  const order = [...head.querySelectorAll('[data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map((n) =>
-    n.hasAttribute('data-artifacts-button') ? 'artifacts' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-archive') ? 'archive' : n.classList.contains('ib-vsep') ? '|' : 'close',
+  // The thread's full-screen button and its hairline lead (approval "inbox-files-tabs", amendment 2026-10-30, B).
+  const order = [...head.querySelectorAll('[data-full-in], [data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map((n) =>
+    n.hasAttribute('data-full-in') ? 'full' : n.hasAttribute('data-artifacts-button') ? 'artifacts' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-archive') ? 'archive' : n.classList.contains('ib-vsep') ? '|' : 'close',
   );
-  expect(order).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
+  expect(order).toEqual(['full', '|', 'artifacts', 'expand', 'archive', '|', 'close']);
   // A thread with no artifact has no button.
   act(() => root?.unmount());
   host?.remove();

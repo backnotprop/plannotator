@@ -102,7 +102,7 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 6,
     },
     close: {
-      // App.tsx: a guided review, then the Artifacts view, then the thread.
+      // App.tsx: a guided review, then the Artifacts view, then full screen, then the thread.
       description: 'Close, one layer at a time',
       bindings: ['Escape'],
       section: 'Everywhere',
