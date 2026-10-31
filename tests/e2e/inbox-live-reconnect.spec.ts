@@ -179,6 +179,11 @@ test.beforeAll(async () => {
   for (const subject of ['Retry budget for the webhook worker', 'Ledger export columns', 'Flaky invoice e2e']) await agentStarts(subject);
 });
 
+// A test that failed while the proxy held the streams back leaves none held for the next.
+test.afterEach(() => {
+  world?.proxy.heal();
+});
+
 test.afterAll(async () => {
   try {
     await world?.proxy.close().catch(() => {});
@@ -228,6 +233,7 @@ test('the stream stalls with a thread open: the agent\'s new message shows withi
 
   world.proxy.stall();
   const stalledAt = Date.now();
+  const sinceStall = requests.length;
   const body = `Canary at 5% is green; moving to 25% (${Date.now()}).`;
   await world.agent.send({ project_path: world.path, reply_to: threadId, body } as Parameters<SimAgent['send']>[0]);
   await page.waitForTimeout(3_000);
@@ -238,16 +244,19 @@ test('the stream stalls with a thread open: the agent\'s new message shows withi
   await expect(pane.getByText(body)).toBeVisible({ timeout: STALE_MS + 10_000 });
   // The reconnect is held too: after the grace, the quiet line under the list.
   await expect(note(page)).toBeVisible({ timeout: NOTE_DELAY_MS + 10_000 });
+  // The words are pinned on purpose: the owner approved "Reconnecting…" as the note's and the live region's copy.
   await expect(note(page)).toHaveText('Reconnecting…');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Reconnecting…');
   expect(Date.now() - stalledAt).toBeLessThan(STALE_MS + NOTE_DELAY_MS + 10_000);
-  // The catch-up read the list and the open thread through the usual paths.
-  expect(requests.some((r) => r.startsWith('/api/inbox/threads?'))).toBe(true);
+  // The catch-up read the list and the open thread through the usual paths, after the stall (not the page's first reads).
+  const afterStall = requests.slice(sinceStall);
+  expect(afterStall.some((r) => r.startsWith('/api/inbox/threads?'))).toBe(true);
+  expect(afterStall).toContain(`/api/inbox/threads/${threadId}`);
 
   world.proxy.heal();
   await expect(note(page)).toHaveCount(0, { timeout: 10_000 });
-  // The live region said it once, and says nothing of the return.
-  await expect(page.locator('[data-inbox-live]')).toHaveText('Reconnecting…');
+  // Live again: the live region drops the words and announces nothing of the return.
+  await expect(page.locator('[data-inbox-live]')).toHaveText('');
 
   // Live again: the next message arrives through the stream, at once.
   const next = `Moved to 25%; error rate flat (${Date.now()}).`;

@@ -44,7 +44,7 @@
  */
 
 import { inboxUrl } from './inboxUrl';
-import { STREAM_STALE_MS, watchLiveStream } from './liveStream';
+import { STREAM_STALE_MS, watchLiveStream, type LiveStreamTimers } from './liveStream';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
 
 /** The Web Lock the leader holds while it holds the stream. */
@@ -62,8 +62,9 @@ export type SharedEventsMessage =
   /**
    * A tab became leader (`to` absent), or answers one tab's join (`to` its id).
    * `from`: the seq its stream started after; a tab that has seen less fetches the lines between.
+   * `reopen`: the leader opened its silent stream again (followers leave the stream to it; an older tab ignores it).
    */
-  | { v: 1; type: 'leader'; window: string; from: number; to?: string }
+  | { v: 1; type: 'leader'; window: string; from: number; to?: string; reopen?: boolean }
   /** A follower is here (or wants to know the leader): the leader watches its lock and answers. */
   | { v: 1; type: 'join'; window: string }
   /** A visible follower asks whether a leader is alive (its main thread runs); the leader answers at once. */
@@ -84,6 +85,11 @@ export const CATCH_UP_RETRY_MS = 1000;
 export const CATCH_UP_RETRY_MAX_MS = 30_000;
 /** A follower's silence window is the leader's and this much more: the leader mends its own stream first. */
 export const FOLLOWER_STALE_EXTRA_MS = 5_000;
+/**
+ * And up to this much more, fixed per tab: followers hear the same frames, so without it every follower of a dead
+ * stream would act at the same instant and each take the stream from the one before.
+ */
+export const FOLLOWER_STALE_JITTER_MS = 5_000;
 
 interface LockManagerLike {
   request(name: string, options: { signal?: AbortSignal; steal?: boolean }, callback: () => Promise<unknown> | unknown): Promise<unknown>;
@@ -120,8 +126,12 @@ export interface SharedEventsEnv {
     retryMaxMs?: number;
     staleMs?: number;
     followerStaleExtraMs?: number;
+    /** This tab's own share of `FOLLOWER_STALE_JITTER_MS` (default: drawn at random once). */
+    followerJitterMs?: number;
     deadNoteDelayMs?: number;
   };
+  /** The silence watch's timers (liveStream.ts); a test passes a tab whose timers the browser holds back. */
+  liveTimers?: LiveStreamTimers;
 }
 
 export function sharedInboxEventsSupported(): boolean {
@@ -152,6 +162,9 @@ export function prepareInboxEvents(channel: (name: string) => ChannelLike = defa
   const frames: unknown[] = [];
   const opened = channel(EVENTS_CHANNEL);
   opened.onmessage = (event) => {
+    // A heartbeat carries nothing to keep (and would take a record's place under the cap).
+    const data = event.data as { type?: unknown; frame?: { name?: unknown } } | null;
+    if (data?.type === 'frame' && data.frame?.name === 'heartbeat') return;
     if (frames.length < EARLY_FRAMES_MAX) frames.push(event.data);
   };
   early = { channel: opened, frames };
@@ -307,7 +320,12 @@ export function subscribeSharedInboxEvents(
   const retryMaxMs = env.timing?.retryMaxMs ?? CATCH_UP_RETRY_MAX_MS;
   const isVisible = env.isVisible ?? (() => false);
   const staleMs = env.timing?.staleMs ?? STREAM_STALE_MS;
-  const followerStaleExtraMs = env.timing?.followerStaleExtraMs ?? FOLLOWER_STALE_EXTRA_MS;
+  const followerStaleExtraMs = (env.timing?.followerStaleExtraMs ?? FOLLOWER_STALE_EXTRA_MS) + (env.timing?.followerJitterMs ?? Math.random() * FOLLOWER_STALE_JITTER_MS);
+  /**
+   * When a leader last said it holds (or reopened) the stream: a follower that heard that within its window leaves
+   * the stream to it (that tab is at work on it), still catching up and saying "Reconnecting…" for itself.
+   */
+  let leaderSaidAt = 0;
 
   let lastSeq = cursor;
   let leader: string | null = null;
@@ -382,6 +400,8 @@ export function subscribeSharedInboxEvents(
   /** One frame to this tab's handlers, a record once (by seq); held while a catch-up runs or is owed. */
   const deliver = (frame: InboxEventFrame, via: Via) => {
     if (stopped) return;
+    // A heartbeat was heard already (liveStream.ts); it carries nothing to handle or to hold for a catch-up.
+    if (frame.name === 'heartbeat') return;
     if (frame.name === 'hello' && behind && !catching && !leading) void catchUp();
     if ((catching || behind) && via !== 'catch-up') {
       hold(frame, via);
@@ -518,6 +538,13 @@ export function subscribeSharedInboxEvents(
       trace({ type: 'reopen', from: lastSeq });
       closeStream?.();
       closeStream = env.open(lastSeq, onStreamFrame, win);
+      // The followers hear it is at work on the stream, and leave it this window.
+      post({ v: 1, type: 'leader', window: win.id, from: ledFrom, reopen: true });
+      return;
+    }
+    // A leader said within this window that it holds or reopened the stream: leave it that tab (only the catch-up runs).
+    if (Date.now() - leaderSaidAt < staleMs + followerStaleExtraMs) {
+      trace({ type: 'steal-skipped', from: leader });
       return;
     }
     trace({ type: 'steal', from: leader, silent: true });
@@ -629,9 +656,11 @@ export function subscribeSharedInboxEvents(
     if (data.type === 'leader') {
       if (data.window === win.id || leading) return;
       cancelCheck();
+      leaderSaidAt = Date.now();
       setLeader(data.window);
       // A new leader's announcement: tell it this tab is here (it watches this tab's lock and answers this tab only).
-      if (data.to === undefined) post({ v: 1, type: 'join', window: win.id });
+      // Not for a leader reopening its stream (`reopen`): it knows this tab already.
+      if (data.to === undefined && data.reopen !== true) post({ v: 1, type: 'join', window: win.id });
       return;
     }
     if (data.type === 'join') {
@@ -662,6 +691,9 @@ export function subscribeSharedInboxEvents(
       // Read at each check: a follower gives its leader a moment more to mend its own stream.
       staleMs: () => (leading ? staleMs : staleMs + followerStaleExtraMs),
       deadNoteDelayMs: env.timing?.deadNoteDelayMs,
+      timers: env.liveTimers,
+      // After a wake a follower waits for the first relayed frame; the leader reopens at once and says so.
+      graceLate: () => !leading,
     },
   );
   trace({ type: 'subscribe', cursor, window: win.id });

@@ -17,7 +17,45 @@ afterEach(() => {
 
 const HEARTBEAT_MS = 10_000;
 
-function setup(options: { visible?: boolean } = {}) {
+/**
+ * Timers the page's own, except while `asleep`: a callback that comes due then waits for `wake` (the computer
+ * slept, or the browser held a hidden tab's timers back), while the clock runs on.
+ */
+function sleepyTimers() {
+  let asleep = false;
+  let waiting: (() => void)[] = [];
+  return {
+    timers: {
+      setTimeout: (fn: () => void, ms: number) => {
+        const timer = { cancelled: false, id: null as ReturnType<typeof setTimeout> | null };
+        const run = () => {
+          if (!timer.cancelled) fn();
+        };
+        timer.id = setTimeout(() => {
+          if (asleep) waiting.push(run);
+          else run();
+        }, ms);
+        return timer;
+      },
+      clearTimeout: (handle: unknown) => {
+        const timer = handle as { cancelled: boolean; id: ReturnType<typeof setTimeout> | null };
+        timer.cancelled = true;
+        if (timer.id !== null) clearTimeout(timer.id);
+      },
+    },
+    sleep: () => {
+      asleep = true;
+    },
+    wake: () => {
+      asleep = false;
+      const due = waiting;
+      waiting = [];
+      for (const fn of due) fn();
+    },
+  };
+}
+
+function setup(options: { visible?: boolean; timers?: ReturnType<typeof sleepyTimers>['timers'] } = {}) {
   const log: string[] = [];
   const doc = new EventTarget();
   const win = new EventTarget();
@@ -28,7 +66,7 @@ function setup(options: { visible?: boolean } = {}) {
       catchUp: () => log.push('catch-up'),
       onLive: (live) => log.push(live ? 'live' : 'dead'),
     },
-    { isVisible: () => state.visible, lifecycle: { document: doc, window: win } },
+    { isVisible: () => state.visible, lifecycle: { document: doc, window: win }, timers: options.timers },
   );
   const show = (visible: boolean) => {
     state.visible = visible;
@@ -102,30 +140,78 @@ test('a reconnect that brings nothing: dead once after the grace, a reconnect an
   watch.stop();
 });
 
-test('shown again after a hide longer than the window: one catch-up; a short hide: none', () => {
+test('a healthy tab shown again, after a hide far longer than the window, reads nothing', () => {
   const { log, watch, show } = setup();
   show(false);
-  run(STREAM_STALE_MS + 10_000, watch, true);
+  run(60_000, watch, true);
   show(true);
-  expect(log).toEqual(['catch-up']);
   show(false);
-  run(10_000, watch, true);
+  run(10 * 60_000, watch, true);
   show(true);
-  expect(log).toEqual(['catch-up']);
+  expect(log).toEqual([]);
   watch.stop();
 });
 
-test('shown again with the stream silent past the window: reconnect and catch up at once', () => {
-  const { log, watch, show } = setup({ visible: false });
+test('shown again with the stream silent past the window (its timers were held back): a short grace, then reconnect and catch up', () => {
+  const clock = sleepyTimers();
+  const { log, watch, show } = setup({ visible: false, timers: clock.timers });
   watch.heard();
-  // A hidden tab's timers held back: the check has not fired yet when it is shown.
-  jest.setSystemTime(Date.now() + STREAM_STALE_MS + 5_000);
+  // A hidden tab's timers held back: the check has not run yet when it is shown.
+  clock.sleep();
+  jest.advanceTimersByTime(STREAM_STALE_MS + 5_000);
   show(true);
+  // Shown, the tab's timers run again: the held check was replaced by the grace.
+  clock.wake();
+  expect(log).toEqual([]);
+  jest.advanceTimersByTime(DEAD_NOTE_DELAY_MS);
   expect(log).toEqual(['reconnect', 'catch-up']);
   watch.stop();
 });
 
-test('back online while dead: reconnect and catch up at once; online while healthy and in front: nothing', () => {
+test('shown while the stream is dead: a catch-up at once', () => {
+  const { log, watch, show } = setup();
+  jest.advanceTimersByTime(STREAM_STALE_MS + DEAD_NOTE_DELAY_MS);
+  expect(log).toEqual(['reconnect', 'catch-up', 'dead']);
+  show(false);
+  jest.advanceTimersByTime(5_000);
+  show(true);
+  expect(log).toEqual(['reconnect', 'catch-up', 'dead', 'catch-up']);
+  watch.stop();
+});
+
+test('a check that runs long past its time (the computer slept) waits a grace: the first frame after the wake cancels it', () => {
+  const clock = sleepyTimers();
+  const { log, watch } = setup({ timers: clock.timers });
+  run(30_000, watch, true);
+  // Asleep for ten minutes: the overdue check runs the moment the computer wakes, before any frame.
+  clock.sleep();
+  jest.advanceTimersByTime(10 * 60_000);
+  clock.wake();
+  expect(log).toEqual([]);
+  // The leader's next frame comes in the grace.
+  jest.advanceTimersByTime(800);
+  watch.heard();
+  jest.advanceTimersByTime(DEAD_NOTE_DELAY_MS * 3);
+  expect(log).toEqual([]);
+  run(2 * 60_000, watch, true);
+  expect(log).toEqual([]);
+  watch.stop();
+});
+
+test('a late check with nothing heard in its grace acts when the grace ends', () => {
+  const clock = sleepyTimers();
+  const { log, watch } = setup({ timers: clock.timers });
+  run(30_000, watch, true);
+  clock.sleep();
+  jest.advanceTimersByTime(10 * 60_000);
+  clock.wake();
+  expect(log).toEqual([]);
+  jest.advanceTimersByTime(DEAD_NOTE_DELAY_MS);
+  expect(log).toEqual(['reconnect', 'catch-up']);
+  watch.stop();
+});
+
+test('back online while dead: reconnect and catch up at once; online while healthy: nothing', () => {
   const { log, watch, online } = setup();
   run(30_000, watch, true);
   online();
