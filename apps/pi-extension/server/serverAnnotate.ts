@@ -20,7 +20,7 @@ import type { LiveAppProxy } from "../generated/live-proxy-core.ts";
 
 import { contentHash } from "../generated/draft.ts";
 import { annotateDraftFilePath, annotateSessionHasRootlessDocuments, createAnnotateDraftSession } from "../generated/annotate-draft.ts";
-import { isPathAllowed } from "../generated/doc-resolve.ts";
+import { getAllowedRootPaths, isPathAllowed } from "../generated/doc-resolve.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
@@ -859,12 +859,18 @@ export async function startAnnotateServer(options: {
 		}
 	};
 
-	const getReferenceRootPaths = () => getAnnotateReferenceRootPaths({
-		mode: options.mode || "annotate",
-		filePath: options.filePath,
-		folderPath: options.folderPath,
-		initialSingleFileSourcePath,
-		bundlePaths,
+	const fileBrowserRoots = new Set<string>();
+	const getReferenceRootPaths = () => getAllowedRootPaths({
+		rootPaths: [
+			...getAnnotateReferenceRootPaths({
+				mode: options.mode || "annotate",
+				filePath: options.filePath,
+				folderPath: options.folderPath,
+				initialSingleFileSourcePath,
+				bundlePaths,
+			}),
+			...fileBrowserRoots,
+		],
 	});
 
 	// Live app session state, populated after the annotate port is known (the
@@ -1346,8 +1352,8 @@ export async function startAnnotateServer(options: {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
 			handleObsidianDocRequest(res, url);
-		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
-			await handleFileBrowserRequest(res, url);
+		} else if (url.pathname === "/api/reference/files" && (req.method === "GET" || req.method === "POST")) {
+			await handleFileBrowserRequest(res, url, req.method === "POST" ? (path) => fileBrowserRoots.add(path) : undefined);
 		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
 			handleFileBrowserStreamRequest(req, res, url);
 			return;

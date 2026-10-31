@@ -241,6 +241,9 @@ export async function startPlannotatorServer(
 ): Promise<ServerResult> {
   const { origin, htmlContent, permissionMode, sharingEnabled = true, shareBaseUrl, pasteApiUrl, onReady, mode, customPlanPath, planFilePath } = options;
   const approvalNotesSupported = options.approvalNotesSupported === true;
+  // Only successful, same-origin POST listings add document roots for this session.
+  const fileBrowserRoots = new Set<string>();
+  const getReferenceRootPaths = () => [process.cwd(), ...fileBrowserRoots];
   // `plan`, its slug, file trust and version diff are `let`: a host with
   // `planRevisions` pushes revised plans into the open review (updatePlan).
   let plan = options.plan;
@@ -306,10 +309,11 @@ export async function startPlannotatorServer(
   // reload offers every document's comments on its own document (#1545,
   // annotate-draft.ts). The plan's own draft is unchanged (/api/draft below).
   // A document may be saved exactly when /api/doc serves it: inside the
-  // project, or a file the plan links beside its own plan file.
+  // project, an explicitly added Files directory, or a file the plan links
+  // beside its own plan file.
   const planDocumentDrafts = mode !== "archive"
     ? createDocumentDraftStore({
-        isAllowed: (path) => isPathAllowed(path, getAllowedRootPaths()) || isPlanLinkedDocPath(path, planFile),
+        isAllowed: (path) => isPathAllowed(path, getAllowedRootPaths({ rootPaths: getReferenceRootPaths() })) || isPlanLinkedDocPath(path, planFile),
         indexKey: documentDraftIndexKey(draftKey),
       })
     : null;
@@ -547,12 +551,12 @@ export async function startPlannotatorServer(
 
           // API: Serve a linked markdown document
           if (url.pathname === "/api/doc" && req.method === "GET") {
-            return handleDoc(req, { planFile });
+            return handleDoc(req, { planFile, rootPaths: getReferenceRootPaths() });
           }
 
           // API: Batch existence check for code-file paths the renderer detected
           if (url.pathname === "/api/doc/exists" && req.method === "POST") {
-            return handleDocExists(req);
+            return handleDocExists(req, { rootPaths: getReferenceRootPaths() });
           }
 
           // API: Hook status for the Settings Hooks tab
@@ -689,8 +693,8 @@ export async function startPlannotatorServer(
           }
 
           // API: List markdown files in a directory as a tree
-          if (url.pathname === "/api/reference/files" && req.method === "GET") {
-            return handleFileBrowserFiles(req);
+          if (url.pathname === "/api/reference/files" && (req.method === "GET" || req.method === "POST")) {
+            return handleFileBrowserFiles(req, (path) => fileBrowserRoots.add(path));
           }
 
           // API: Watch file browser roots and refresh the tree/status snapshot on changes

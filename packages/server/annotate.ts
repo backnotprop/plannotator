@@ -27,7 +27,7 @@ import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./ref
 import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE_BYTES, resolveUserPath, warmFileListCache } from "@plannotator/shared/resolve-file";
 import { contentHash } from "./draft";
 import { annotateDraftFilePath, annotateSessionHasRootlessDocuments, createAnnotateDraftSession } from "@plannotator/shared/annotate-draft";
-import { isPathAllowed } from "@plannotator/shared/doc-resolve";
+import { getAllowedRootPaths, isPathAllowed } from "@plannotator/shared/doc-resolve";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { ANNOTATE_LIVE_VERSION_PATH, annotateLiveVersionFilePath, saveAnnotateLiveVersion } from "@plannotator/shared/annotate-live-version";
@@ -776,12 +776,18 @@ export async function startAnnotateServer(
     }
   };
 
-  const getReferenceRootPaths = () => getAnnotateReferenceRootPaths({
-    mode,
-    filePath,
-    folderPath,
-    initialSingleFileSourcePath,
-    bundlePaths,
+  const fileBrowserRoots = new Set<string>();
+  const getReferenceRootPaths = () => getAllowedRootPaths({
+    rootPaths: [
+      ...getAnnotateReferenceRootPaths({
+        mode,
+        filePath,
+        folderPath,
+        initialSingleFileSourcePath,
+        bundlePaths,
+      }),
+      ...fileBrowserRoots,
+    ],
   });
 
   // Detect repo info (cached for this session)
@@ -1375,8 +1381,8 @@ export async function startAnnotateServer(
           }
 
           // API: List markdown files in a directory as a tree
-          if (url.pathname === "/api/reference/files" && req.method === "GET") {
-            return handleFileBrowserFiles(req);
+          if (url.pathname === "/api/reference/files" && (req.method === "GET" || req.method === "POST")) {
+            return handleFileBrowserFiles(req, (path) => fileBrowserRoots.add(path));
           }
 
           // API: Watch file browser roots and refresh the tree/status snapshot on changes

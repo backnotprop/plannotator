@@ -498,7 +498,7 @@ export function handleObsidianDocRequest(res: Res, url: URL): void {
 	}
 }
 
-export async function handleFileBrowserRequest(res: Res, url: URL): Promise<void> {
+export async function handleFileBrowserRequest(res: Res, url: URL, onDirectoryListed?: (path: string) => void): Promise<void> {
 	const dirPath = url.searchParams.get("dirPath");
 	if (!dirPath) {
 		json(res, { error: "Missing dirPath parameter" }, 400);
@@ -509,6 +509,12 @@ export async function handleFileBrowserRequest(res: Res, url: URL): Promise<void
 		json(res, { error: "Invalid directory path" }, 400);
 		return;
 	}
+	// The callback is supplied only for POST, after the server's origin guard.
+	if (onDirectoryListed && url.searchParams.get("registerOnly") === "1") {
+		onDirectoryListed(resolvedDir);
+		json(res, { ok: true });
+		return;
+	}
 	try {
 		const workspaceStatus = filterWorkspaceStatusForDirectory(await getWorkspaceStatusForDirectory(resolvedDir), resolvedDir, includeWorkspaceFile);
 		// Pi's file browser had no cap: it applies one only when
@@ -517,6 +523,7 @@ export async function handleFileBrowserRequest(res: Res, url: URL): Promise<void
 			seed: getWorkspaceStatusRelativePaths(workspaceStatus, resolvedDir, includeWorkspaceFile),
 			limit: explicitFileBrowserMaxFiles(),
 		});
+		onDirectoryListed?.(resolvedDir);
 		json(res, {
 			tree: buildFileTree(listing.files),
 			workspaceStatus,
