@@ -34,6 +34,10 @@ const shots = process.env.INBOX_Q_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 
 const BODY = 'section.ib-pane .ib-pbody:not(.ib-artbody)';
+
+// No click, focus or fill waits for an element longer than a person would: a step that cannot find its element (a thread
+// the page closed, a card that never drew) fails in seconds with its own message, never by sitting until the test timeout.
+test.use({ actionTimeout: 15_000 });
 const filler = (n: number) => `Step ${n}: ${'we watch the error rate and the latency for an hour, then roll on. '.repeat(14)}`;
 
 const OLD_Q = ['I need a tag before I touch the release branch.', '', ':::question', 'Which tag should the release carry?', '', '- [ ] latest', '- [ ] next', ':::'].join('\n');
@@ -162,7 +166,15 @@ let replies: { url: string; body: string }[] = [];
 let shotN = 0;
 
 async function start(browser: import('@playwright/test').Browser, title: string, viewport: { width: number; height: number }) {
+  trace.length = 0;
+  traceStart = Date.now();
   world = await createWorld();
+  trail('world created');
+  // No test here takes 80 s: past that, say whether the page still answers and where a busy one is, while it is
+  // still stuck (after the timeout the browser is already gone and nothing can be asked of it).
+  watchdog = setTimeout(() => {
+    void diagnose().then(() => console.log(`WATCHDOG ${title}\n${trace.join('\n')}`));
+  }, 80_000);
   context = await browser.newContext({ viewport, ...(shots ? { recordVideo: { dir: shots, size: viewport } } : {}) });
   page = await context.newPage();
   consoleErrors = [];
@@ -178,19 +190,65 @@ async function start(browser: import('@playwright/test').Browser, title: string,
   void title;
 }
 
+/** A timestamped line of what the test was doing: printed when the test ends, so a CI failure says where it stopped. */
+const trace: string[] = [];
+let traceStart = Date.now();
+function trail(line: string) {
+  trace.push(`${((Date.now() - traceStart) / 1000).toFixed(1)}s ${line}`);
+}
+let watchdog: ReturnType<typeof setTimeout> | undefined;
+const sleep = (ms: number) => new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ms));
+
+/**
+ * Is the page answering? A page stuck in a script loop answers nothing, makes every `expect` time out and keeps
+ * `context.close()` waiting: then the debugger is paused through the protocol (which a busy page still hears) and the
+ * stack it was in is recorded.
+ */
+async function diagnose(): Promise<void> {
+  try {
+    const answer = await Promise.race([page.evaluate(() => document.readyState), sleep(4000)]);
+    if (answer !== 'timeout') {
+      trail(`page answers (${answer}); url ${page.url()}`);
+      const where = await page.evaluate(() => `${document.querySelector('section.ib-pane') ? 'a thread is open' : 'no thread open'}; ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 160)}`).catch(() => '?');
+      trail(`page shows: ${where}`);
+      // Is the Inbox itself still there? (A server that went away leaves the window on its list, with a broken stream.)
+      const server = await Promise.race([fetch(new URL('/api/inbox/threads', world.url)).then((r) => `HTTP ${r.status}`), sleep(3000)]).catch((e) => `unreachable: ${(e as Error).message}`);
+      trail(`inbox server: ${server}`);
+      await test.info().attach('page', { body: await page.screenshot({ timeout: 5000 }).catch(() => Buffer.from('')), contentType: 'image/png' }).catch(() => {});
+      return;
+    }
+    trail('PAGE DOES NOT ANSWER (4 s): a script is busy or stuck');
+    const cdp = await context.newCDPSession(page);
+    cdp.on('Debugger.paused', (event) => {
+      const frames = event.callFrames.slice(0, 15).map((f) => `${f.functionName || '(anonymous)'} ${f.url.split('/').pop() ?? ''}:${f.location.lineNumber}:${f.location.columnNumber ?? 0}`);
+      trail(`PAUSED IN: ${frames.join('  <  ')}`);
+    });
+    await Promise.race([cdp.send('Debugger.enable').then(() => cdp.send('Debugger.pause')), sleep(3000)]);
+    await sleep(1500);
+  } catch (error) {
+    trail(`diagnose failed: ${(error as Error).message}`);
+  }
+}
+
 async function finish(title: string) {
+  clearTimeout(watchdog);
   try {
     expect(consoleErrors, 'no console errors').toEqual([]);
   } finally {
     // Every step runs even when the one before it throws (a test that timed out leaves a closed page and context): the
-    // scratch Inbox must be stopped whatever happened, or its server outlives the run.
+    // scratch Inbox must be stopped whatever happened, or its server outlives the run. The close is bounded: left to
+    // itself it can sit until the test's own timeout and bury the error that sent the test here.
     try {
+      await diagnose();
       const video = page.video();
-      await context.close();
-      if (video && shots) renameSync(await video.path(), join(shots, `${title.replace(/[^a-z0-9]+/gi, '-')}.webm`));
+      const closed = await Promise.race([context.close().then(() => 'closed' as const), sleep(20_000)]);
+      if (closed === 'timeout') trail('context.close() did not finish in 20 s');
+      else if (video && shots) renameSync(await video.path(), join(shots, `${title.replace(/[^a-z0-9]+/gi, '-')}.webm`));
     } catch {
       // The browser side is gone already; nothing of it is left to save.
     } finally {
+      console.log(`TRACE ${title}\n${trace.join('\n')}`);
+      await test.info().attach('trace', { body: trace.join('\n'), contentType: 'text/plain' }).catch(() => {});
       try {
         await Promise.all([world.agent, world.codex].map((a) => a.close().catch(() => {})));
       } finally {
@@ -239,6 +297,7 @@ async function load() {
 
 /** Arrow to a thread's row and open it with Enter: keys only. */
 async function openThread(thread: string) {
+  trail(`open thread ${thread}`);
   await press('g', 'i');
   for (let i = 0; i < 30; i++) {
     // A row the list has not drawn yet (it draws what is near the focus) is further down.
@@ -265,14 +324,20 @@ async function openThread(thread: string) {
 
 /** A thread by its address, fresh page (focus on the page itself, as after a link): where the walk to its row is no part of the proof. */
 async function gotoThread(thread: string) {
+  trail(`goto thread ${thread}`);
   landed = false;
   await page.goto(`${world.url}#thread=${thread}`);
+  // The address is the thread's, and the pane drawn is that thread's (not the one a same-page hash change left up).
+  await expect.poll(() => new URL(page.url()).hash, { message: `the address is the thread's (now ${page.url()})` }).toBe(`#thread=${thread}`);
   await expect(page.locator('section.ib-pane')).toBeVisible();
   await page.waitForTimeout(700);
+  trail(`thread open: ${page.url()}; pane "${(await page.locator('section.ib-pane h2').first().innerText().catch(() => '?')).slice(0, 40)}"`);
 }
 
 /** Tab until `target` has focus (bounded, each look short). */
 async function tabTo(target: Locator, max = 40) {
+  // A target that is not on the page fails at once, not after `max` looks of two seconds each.
+  await expect(target, `the Tab target is on the page (url ${page.url()})`).toBeVisible();
   for (let i = 0; i < max; i++) {
     const here = await target.evaluate((el) => el === document.activeElement, undefined, { timeout: 2000 }).catch(() => false);
     if (here) return;
@@ -302,7 +367,7 @@ async function mod(key: string) {
 for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 }]) {
   const title = `Q opens the open items popup, ${viewport.width} wide`;
   test(title, async ({ browser }) => {
-    test.setTimeout(420_000);
+    test.setTimeout(180_000);
     await start(browser, title, viewport);
     try {
       await load();
@@ -504,7 +569,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
 // ── Mod+Enter ──
 
 test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
-  test.setTimeout(420_000);
+  test.setTimeout(180_000);
   const title = 'Mod+Enter sends from every place focus can be';
   await start(browser, title, { width: 1440, height: 900 });
   const report: string[] = [];
@@ -516,6 +581,7 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
 
     /** Send with the shortcut, then check one reply went with `words`, and where focus is. */
     async function sendAndCheck(spot: string, thread: string, words: RegExp) {
+      trail(`send: ${spot}`);
       const was = sentCount();
       await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+Enter`); // no pause: as fast as a person can
       await expect.poll(sentCount, { message: `${spot}: a reply was posted` }).toBe(was + 1);
@@ -664,19 +730,24 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
     // A menu open: Mod+Enter keeps the menu's keys (the open-questions popup), with a pick waiting that it could send.
     await gotoThread(t.menu);
     const menuRadio = card('Spot menu').getByRole('radio').first();
-    await tabTo(menuRadio);
+    trail('menu step: pick, then q, then the chord');
+    await tabTo(menuRadio, 90);
+    await expect(menuRadio, `focus reached the menu spot choice (on ${await focusedText()})`).toBeFocused();
     await page.keyboard.press('Space');
     await expect(page.locator('.ib-footbtns .ib-pri')).toBeVisible();
     await page.locator('[data-reply-button]').focus();
     await page.keyboard.press('q');
     await expect(popup()).toBeVisible();
+    // Focus has reached the first row: the keys are the menu's now, the chord included. Enter on a row jumps to its card
+    // and closes the list, with or without ⌘ (a menu item takes Enter whatever is held), and sends nothing.
+    await focusOn(rowsOf().nth(0), 'menu step: first row');
     const beforeMenu = sentCount();
     await mod('Enter');
-    await page.waitForTimeout(500);
-    expect(sentCount(), 'menu open: nothing sent').toBe(beforeMenu);
-    await page.keyboard.press('Escape');
+    await page.waitForTimeout(600);
+    expect(sentCount(), 'menu open: the chord sends nothing').toBe(beforeMenu);
+    expect(new URL(page.url()).hash, 'the chord on a row did not close the thread').toBe(`#thread=${t.menu}`);
+    // With the list shut again (the row's jump closed it), the same chord from the foot sends the waiting pick.
     await expect(popup()).toHaveCount(0);
-    // (On the list's own button Enter opens the list, as on any menu button: the chord is sent from the Reply button.)
     await page.locator('[data-reply-button]').focus();
     await mod('Enter');
     await expect.poll(sentCount, { message: 'menu closed: the same key sends' }).toBe(beforeMenu + 1);
@@ -691,7 +762,7 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
 // ── where Mod+Enter and Q must stand down (review of #2439) ──
 
 test('Mod+Enter and Q stand down where Send is not on screen or the key is not theirs', async ({ browser }) => {
-  test.setTimeout(420_000);
+  test.setTimeout(180_000);
   const title = 'Mod+Enter and Q stand down';
   await start(browser, title, { width: 1440, height: 900 });
   try {
