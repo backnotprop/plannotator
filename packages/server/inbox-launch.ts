@@ -74,7 +74,7 @@ import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchLive, LaunchSessions } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
@@ -110,6 +110,11 @@ interface Memo {
    * instead of blinking out between taking the turn and its next poll.
    */
   busySeen: boolean;
+  /**
+   * The newest reply still waiting when the person pressed Stop: it does not start the session again (that
+   * would undo the Stop); the person's next reply does, and takes it along.
+   */
+  heldReply: string | null;
 }
 
 /** What the engine keeps per host: its availability (30 s), its sessions view (10 s), its permission transport. */
@@ -419,7 +424,7 @@ export function createInboxLaunch(options: {
   const memoOf = (launch: InboxLaunchRecord): Memo => {
     let memo = memos.get(launch.id);
     if (!memo) {
-      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false };
+      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false, heldReply: null };
       memos.set(launch.id, memo);
     }
     return memo;
@@ -569,6 +574,8 @@ export function createInboxLaunch(options: {
   const starting = new Set<string>();
   /** A Delete under way, by launch id: a second one (a double click) waits for it and answers the same. */
   const deleting = new Map<string, Promise<Record<string, unknown>>>();
+  /** A Stop under way, by launch id: no reply starts the session again until it is done. */
+  const stopping = new Set<string>();
 
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
@@ -579,6 +586,7 @@ export function createInboxLaunch(options: {
     memo.stoppedAt = null;
     memo.respawn = null;
     memo.busySeen = false;
+    memo.heldReply = null;
     starting.add(launch.id);
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
@@ -623,6 +631,7 @@ export function createInboxLaunch(options: {
     memo.quietPolls = host.live(root.to!.session)?.polls ?? memo.quietPolls;
     memo.respawn = { for: forReply, connected: false, failed: null };
     memo.busySeen = false;
+    memo.heldReply = null;
     const attempt = memo.respawn;
     options.onChange();
     void host
@@ -648,12 +657,15 @@ export function createInboxLaunch(options: {
     const host = hostOf(launch);
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
     if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || !root.delivery || respawning.has(launch.id) || starting.has(launch.id)) return;
+    // A Stop or a Delete under way: the session is going, never started again meanwhile (a host's `live` may
+    // read null as soon as its stop begins).
+    if (stopping.has(launch.id) || deleting.has(launch.id)) return;
     const memo = memoOf(launch);
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
     const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
-    if (!newest || memo.respawn?.for === newest.id) return;
+    if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
     respawn(root, host, newest.id);
   };
   const unsubscribe = store.subscribe((line) => {
@@ -725,7 +737,15 @@ export function createInboxLaunch(options: {
       case "stop": {
         if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
         const memo = memoOf(launch);
-        const result = await host.stop(launch.session_ref);
+        // What waits now was written before the Stop: it stays for the person's next reply.
+        memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
+        stopping.add(launch.id);
+        let result: LaunchHostResult;
+        try {
+          result = await host.stop(launch.session_ref);
+        } finally {
+          stopping.delete(launch.id);
+        }
         startLog(launch.id, `stop ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
         memo.stoppedAt = now();
         memo.startedAt = Math.min(memo.startedAt, now() - INBOX_RUN_START_GRACE_MS);
