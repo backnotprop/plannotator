@@ -8,11 +8,11 @@
  *  - Stopped is a red triangle alone, Holds up an amber triangle and its count;
  *    their accessible text stays "Stopped" and "Holds up 3".
  *  - The one-line row (approvals "inbox-row-byline" and "list-rows-mail-icons"):
- *    the agents' marks with the project after them (the owner, 2026-10-31),
- *    every project on one left edge however many marks its row draws, the
- *    title cell, then the badge, the count and the time, each in its own
- *    column: every column's right edge lines up down the list, and every
- *    title cell starts on one left edge.
+ *    the agents' marks, then the project hugging them 6px later (the owner,
+ *    2026-10-31: no width reserved, so each row's project starts after its
+ *    own marks), the title cell, then the badge, the count and the time,
+ *    each in its own column: every column's right edge lines up down the
+ *    list, and every title cell starts on one left edge.
  *  - Card A opens on the badge after the tooltip delay, and while the row has
  *    keyboard focus; a click's focus opens nothing.
  *  - Beside an open thread the three-line rows keep the card (approval

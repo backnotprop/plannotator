@@ -198,35 +198,20 @@ describe.if(hasDom)("a wide row's agents", () => {
       expect(r.querySelectorAll('.ib-ags').length).toBe(1);
     });
 
-    test(`${shape}: the marks are drawn first and the project hugs them, 6px after, cut with "…", never pushed out`, () => {
+    test(`${shape}: the project is read first and the marks are drawn first`, () => {
       const el = render(shape);
       const from = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from`)!;
-      const marks = from.querySelector<HTMLElement>('.ib-ags')!;
-      const project = from.querySelector<HTMLElement>('.ib-p')!;
-      const cascade = loadCascade(CSS);
-      expect(cascade.resolved(from, 'display')).toBe('flex');
-      expect(cascade.resolved(from, 'gap')).toBe('6px');
-      expect(cascade.resolved(marks, 'order')).toBe('-1');
-      expect(cascade.resolved(marks, 'flex')).toBe('none');
-      // No width reserved for the marks: the project follows this row's own run.
-      expect(cascade.resolved(marks, 'min-width')).toBeUndefined();
-      expect(cascade.resolved(marks, 'width')).toBeUndefined();
-      expect(cascade.resolved(project, 'min-width')).toBe('0');
-      expect(cascade.resolved(project, 'white-space')).toBe('nowrap');
-      expect(cascade.resolved(project, 'text-overflow')).toBe('ellipsis');
+      // Read: the project, then the agents (the DOM). Drawn: the marks, then the project (`order`; the pixels, 6px
+      // apart on every row, are proved in tests/e2e/inbox-row-badges.spec.ts and inbox.spec.ts).
+      expect([...from.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-p', 'ib-ags']);
+      expect(loadCascade(CSS).resolved(from.querySelector<HTMLElement>('.ib-ags')!, 'order')).toBe('-1');
     });
   }
 
-  test("one project's wide list: the marks alone in a column as wide as they are, the title 6px after them", () => {
+  test("one project's wide list: the marks alone, no project", () => {
     const el = render('wide', true);
-    const r = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"]`)!;
-    const from = r.querySelector<HTMLElement>('.ib-from')!;
-    expect(from.querySelector('.ib-p')).toBeNull();
-    const cascade = loadCascade(CSS);
-    // The column takes this row's marks, nothing more; the grid's 10px gap less 4px leaves the title 6px after them.
-    expect(cascade.resolved(r, 'grid-template-columns')!.startsWith('max-content ')).toBe(true);
-    expect(cascade.resolved(r, 'gap')).toBe('0 10px');
-    expect(cascade.resolved(from, 'margin-right')).toBe('-4px');
+    const from = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from`)!;
+    expect([...from.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-ags']);
   });
 });
 

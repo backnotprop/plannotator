@@ -634,7 +634,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
 });
 
 // Late, in a project of its own, so its threads change no count above (review of #2374, finding 1).
-test("one project's list: three agents with ×N or bare, on one line, and the title 6px after each row's own marks", async () => {
+test("one project's list: three agents with ×N or bare, on one line, and the title 6px after each row's own marks; at 780 and 768 every row keeps its title and its columns", async () => {
   const { page } = world;
   const ops = scratchProject(join(world.root, 'src'), 'ops-console');
   // Hosts this spec has already seen: a host new to it brings the agent-note dialog, over the Update test below.
@@ -654,12 +654,14 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
   // Three hosts, one session each: the common run.
   const plain = await claudeA!.send({ project_path: ops, thread: 'three-plain', subject: 'Three agents, one session each', body: ask('Three bare marks?') });
   for (const a of [codexA, opencodeA]) await a!.send({ project_path: ops, reply_to: plain.thread_id, body: 'Joined.' });
+  // One agent: the shortest run, beside the widest at a narrow width below.
+  const solo = await claudeA!.send({ project_path: ops, thread: 'one-mark', subject: 'One agent', body: ask('One mark?') });
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(world.url);
   await side(page).getByRole('button', { name: /^ops-console(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'ops-console' })).toBeVisible();
-  await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(2);
+  await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(3);
   await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-ags`)).toHaveAttribute('aria-label', '2 Claude Code sessions, 3 Codex sessions and 2 OpenCode sessions');
   await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-agx`)).toHaveText(['×2', '×3', '×2']);
   // At 1440 and 1000 alike: the marks' column is as wide as each row's run, on one line, and the title starts 6px
@@ -687,10 +689,10 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
         };
       }),
     );
-    for (const r of rows) {
+    for (const r of rows.filter((row) => row.id !== solo.thread_id)) {
       const where = `row ${r.id} at ${width}`;
       expect(r.drawn, where).toBe(3);
-      expect(r.lines, `${where}: the run wraps`).toBe(1);
+      expect(r.lines, `${where}: the run must not wrap with room for it`).toBe(1);
       // Icon, small gap, title: the title 6px after this row's own marks, none spilling out of the row.
       expect(Math.abs(r.titleLeft - r.marksRight - 6), `${where}: the title 6px after the marks`).toBeLessThanOrEqual(0.5);
       expect(r.marksRight, `${where}: the marks leave their cell`).toBeLessThanOrEqual(r.fromRight + 0.5);
@@ -698,6 +700,54 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
       expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
     }
   }
+  // The narrowest desktop windows (780, 768: a list of about 530px), with and without the pin's column: the "×N" run
+  // wraps inside its track before the title goes, so every row keeps a title, its counts and time stay in line down
+  // the list, and nothing runs past the row.
+  const narrowRows = async (label: string) => {
+    for (const width of [780, 768]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForTimeout(150);
+      const rows = await page.locator('.ib-lbody .ib-row').evaluateAll((els) =>
+        els.map((r) => {
+          const box = (sel: string) => r.querySelector(sel)!.getBoundingClientRect();
+          return {
+            id: (r as HTMLElement).dataset.threadId,
+            counts: box('.ib-cq').right,
+            time: box('.ib-t').right,
+            inner: r.getBoundingClientRect().right - parseFloat(getComputedStyle(r).paddingRight),
+            title: box('.ib-subj').width,
+            spill: r.scrollWidth - r.clientWidth,
+            marksTop: Math.min(...[...r.querySelector('.ib-ags')!.children].map((c) => c.getBoundingClientRect().top)),
+            marksBottom: Math.max(...[...r.querySelector('.ib-ags')!.children].map((c) => c.getBoundingClientRect().bottom)),
+            rowTop: r.getBoundingClientRect().top,
+            rowBottom: r.getBoundingClientRect().bottom,
+          };
+        }),
+      );
+      expect(rows.length, `${label} at ${width}`).toBe(3);
+      for (const r of rows) {
+        const where = `${label}, row ${r.id} at ${width}`;
+        expect(Math.abs(r.counts - rows[0]!.counts), `${where}: the counts move`).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(r.time - rows[0]!.time), `${where}: the time moves`).toBeLessThanOrEqual(0.5);
+        expect(r.time, `${where}: the time runs past the row`).toBeLessThanOrEqual(r.inner + 0.5);
+        expect(r.spill, `${where}: the row spills`).toBeLessThanOrEqual(0);
+        expect(r.title, `${where}: the title is gone`).toBeGreaterThan(0);
+        expect(r.marksTop, where).toBeGreaterThanOrEqual(r.rowTop);
+        expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
+      }
+    }
+  };
+  await narrowRows('no pin');
+  const health = (await (await fetch(new URL('/api/inbox/health', world.url))).json()) as { serverSession: string };
+  const pin = async (pinned: boolean) => {
+    const res = await fetch(new URL(`/api/inbox/threads/${solo.thread_id}/pin`, world.url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned, serverSession: health.serverSession }) });
+    expect(res.ok, `pin ${pinned}: ${res.status}`).toBe(true);
+  };
+  await pin(true);
+  await expect(page.locator('.ib-listcol.ib-pincol')).toHaveCount(1);
+  await narrowRows('the pin column');
+  await pin(false);
+  await expect(page.locator('.ib-listcol.ib-pincol')).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 900 });
   // These sessions bring the agent-note dialog on this load (docs/agent-guides/inbox-foundation.md, asked once per
   // agent): answer it "Not now", or it opens again over the Update test below.

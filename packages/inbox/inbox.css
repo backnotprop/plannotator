@@ -777,8 +777,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The one-line row (approval "inbox-row-byline", 2026-10-29; its cells by approval "list-rows-mail-icons",
    2026-10-30): the agents' marks with the project after them, the title cell (the thread's name, then the grey
    subject), then right-aligned the count in words, the badge, the open counts and the time, each in a column of its
-   own so they line up down the list in every row, and every title has the same room. Every row's tracks depend only
-   on the list's width (no row's content sizes them), so they line up though each row is its own grid. The owner's
+   own so they line up down the list in every row. In every project's list every title has the same room: every
+   row's tracks depend only on the list's width (no row's content sizes them), so they line up though each row is its
+   own grid. One project's list is the exception: its first track is that row's marks, so its titles start after
+   their own marks (below), and only the columns right of the title line up down the list. The owner's
    call of 2026-10-29: full-width rows (a list of 1150px or more, `.ib-fullw`) say the full words. The words column
    is 14% of the row, from 148px to 160px (1440 and wider), where "Draft · Your reply, 2 picks" and "Undelivered 23
    hours" fit; longer words end in "…" with the full words in the tooltip. The project column holds the marks the
@@ -789,9 +791,14 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row { display: grid; grid-template-columns: 220px minmax(0, 1fr) 124px 52px 84px 76px; align-items: center; gap: 0 10px; height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-14, 14px); width: 100%; text-align: left; }
 .ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
 /* One project's list: the first column holds the agents' marks alone (InboxList's WideRow), as wide as this row's
-   marks and no wider (the owner, 2026-10-31: no blank before the title), so the title follows its own marks. */
-.ib-noproj .ib-row { grid-template-columns: max-content minmax(0, 1fr) 124px 52px 84px 76px; }
-.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
+   marks and no wider (the owner, 2026-10-31: no blank before the title), so the title follows its own marks. The
+   list keeps the wide row at any width, so the marks' track is bounded (`minmax(min-content, max-content)`) and the
+   title keeps at least 24px: short of room the run wraps between marks (below) before the title goes, and the
+   columns right of the title never move. With room, the run is one line and the title hugs it. 24px, not more: in a
+   780px window the row has about 102px for the marks and the title, and three "×N" hosts (34px each) need 73px to
+   take two lines; narrower (768px, or the pin's column) they take three, which the 50px row still holds. */
+.ib-noproj .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) 124px 52px 84px 76px; }
+.ib-noproj.ib-fullw .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
 /* The pin's column (the owner, 2026-10-31: the pin beside the counts, as on the three-line row), only in a list with a
    pinned row (`.ib-pincol`), between the badge and the open counts, so the pins line up next to `?N` and the badge
    and the counts keep their columns. It takes the pin's 13px plus an 8px gap from the title cell: an 11px track and
@@ -802,8 +809,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    The one-project list with Hide agent icons has its own two templates (with the list's look options, below). */
 .ib-pincol .ib-row { grid-template-columns: 220px minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-pincol.ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
-.ib-pincol.ib-noproj .ib-row { grid-template-columns: max-content minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
-.ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; }
 /* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
    edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run out
@@ -829,8 +836,12 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row .ib-from > .ib-ags { order: -1; }
 .ib-row .ib-p { flex: 0 1 auto; min-width: 0; font-weight: 400; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* One project's list: the marks alone in a column as wide as they are, and the title 6px after them, the same gap:
-   the grid's 10px gap less 4px the marks reach into it (a negative margin takes 4px off their track). */
+   the grid's 10px gap less 4px the marks reach into it (a negative margin takes 4px off their track). Short of room
+   (a narrow list, three hosts with "×N") the run wraps between marks inside its track rather than take the title's
+   last 24px or push the columns after it: two lines, or three at the narrowest, with no gap between lines, so three
+   16px lines (48px) still sit inside the 50px row. */
 .ib-noproj .ib-row .ib-from { margin-right: -4px; }
+.ib-noproj .ib-row .ib-ags { flex: 0 1 auto; flex-wrap: wrap; height: auto; min-height: 16px; row-gap: 0; max-width: 100%; }
 .ib-row.ib-u .ib-title { font-weight: 600; }
 /* The thread chip: it can shrink to its border (flex), and its name keeps its
    own 166px cap and ellipsis (the inner span), so the chip is as wide as before
