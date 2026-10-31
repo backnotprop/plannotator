@@ -481,6 +481,30 @@ export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
  */
 export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
 
+/** The wide rows' open counts column, as inbox.css draws it (`.ib-row`'s grid). */
+const COUNTS_COLUMN_PX = 84;
+
+/**
+ * In a list with the pin's column (`.ib-pincol`), widen the open counts' column for the whole list to the widest
+ * counts drawn ("[□ 12] ?12", "[□ 99+] ?99+" pass its 84px), so every pin stays in one column 8px before its row's
+ * counts and none runs under a pin. The counts sit at their column's right edge, so their width is the column's right
+ * edge less their leftmost part, whatever the column's width: a second pass gives the same answer. Without pins, or
+ * with counts that fit, the column keeps its 84px (`--ib-cq-w` unset).
+ */
+function fitCountsColumn(list: HTMLElement, pinColumn: boolean): void {
+  let widest = 0;
+  if (pinColumn) {
+    for (const cell of list.querySelectorAll<HTMLElement>('.ib-row > .ib-cq')) {
+      const lefts = [...cell.children].map((part) => part.getBoundingClientRect()).filter((box) => box.width > 1).map((box) => box.left);
+      if (lefts.length) widest = Math.max(widest, cell.getBoundingClientRect().right - Math.min(...lefts));
+    }
+  }
+  const width = widest > COUNTS_COLUMN_PX ? `${Math.ceil(widest)}px` : '';
+  if (list.style.getPropertyValue('--ib-cq-w') === width) return;
+  if (width) list.style.setProperty('--ib-cq-w', width);
+  else list.style.removeProperty('--ib-cq-w');
+}
+
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
  * one-line row; its cells as approval "list-rows-mail-icons", 2026-10-30, lays
@@ -680,7 +704,8 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
  * (approval "inbox-list-row-v2", 2026-10-30): the agents' tiles and the
  * project and the time on line 1; the title on line 2, never cut; the grey
  * preview with the guided review book, then the pin, the badge and the count
- * at the right end of line 3.
+ * at the right end of line 3. A pin with nothing else for line 3 stays at the
+ * right end of line 1, before the time.
  */
 function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, onOpen }: { row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void }) {
   const wordsId = useId();
@@ -688,6 +713,9 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   const badge = rowHasBadge(row) ? <RowBadge row={row} /> : null;
   const guide = row.guide && row.section !== 'sent';
   const preview = previewOf(row);
+  // A pin with nothing else for line 3 (no preview, book, badge or count) stays on line 1, before the time, so the
+  // row never grows a line for the pin alone.
+  const pinOnLine1 = pinned && !preview && !guide && !badge && countWords(row, 0) === null && row.questions.open < 1;
   return (
     <>
     <button
@@ -706,6 +734,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
       <span className="ib-m1">
         <LeadLine row={row} project={project} filtered={filtered} tip={false} />
         {compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
+        {pinOnLine1 && <PinMark />}
         <span className="ib-t">
           <TimeWithTick delivery={row.delivery} time={shortTime(rowTimeIso(row))} />
         </span>
@@ -724,7 +753,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             <Icon name="book" size={13} />
           </span>
         )}
-        {pinned && <PinMark />}
+        {pinned && !pinOnLine1 && <PinMark />}
         {badge}
         <LineCount row={row} />
       </span>
@@ -820,7 +849,23 @@ export function InboxList(props: InboxListProps) {
   // The wide rows' pin column (the owner, 2026-10-31: the pin beside the counts): only in a list with a pinned row,
   // Quiet's folded rows included, so a list without pins keeps its columns and opening Quiet moves none.
   const pinColumn = !props.phone && !twoLine && !!props.pinned && visible.some((s) => s.threads.some((row) => props.pinned!.has(row.thread_id)));
-  const lit =(row: InboxListRow) => props.lit?.has(row.thread_id) === true;
+  // With the pin's column, the counts' column holds the widest counts (`fitCountsColumn`), after every render and
+  // once the fonts are in, so no count runs under a pin.
+  const pinColumnRef = useRef(pinColumn);
+  pinColumnRef.current = pinColumn;
+  useLayoutEffect(() => {
+    if (listRef.current) fitCountsColumn(listRef.current, pinColumn);
+  });
+  useEffect(() => {
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+    if (!fonts?.addEventListener) return;
+    const refit = () => {
+      if (listRef.current) fitCountsColumn(listRef.current, pinColumnRef.current);
+    };
+    fonts.addEventListener('loadingdone', refit);
+    return () => fonts.removeEventListener('loadingdone', refit);
+  }, [listRef]);
+  const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
   // The row whose right-click menu is open: a muted background, as the project row's.
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowOf = (threadId: string) => {

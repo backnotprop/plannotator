@@ -554,10 +554,14 @@ button.ib-mut { border-radius: 6px; }
 .ib-pinrow[data-menu] .ib-pmore { color: var(--foreground); }
 /* A pinned thread's row in the list: a small pin always on the right, beside the counts (the owner, 2026-10-31).
    On line 3 of three-line and phone rows its auto margin pushes it before the badge and the counts whether the
-   preview before it is short or cut. A wide row has it in its own column (`.ib-cpin`, below the wide row). */
+   preview before it is short or cut (a phone row with nothing else for line 3 keeps it on line 1, before the time).
+   A wide row has it in its own column (`.ib-cpin`, below the wide row). */
 .ib-pinmark { display: inline-flex; flex: none; color: var(--muted-foreground); }
 .pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; }
 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pinmark { margin-left: auto; }
+/* A phone row with nothing else for line 3 keeps its pin on line 1, before the time (PhoneRow's `pinOnLine1`). */
+.ib-m1 > .ib-pinmark { margin-left: auto; }
+.ib-m1 > .ib-pinmark + .ib-t { margin-left: 0; }
 /* The thread header's pin: an icon toggle, pressed while pinned. */
 .pn-inbox .ib-pinbtn[aria-pressed="true"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 13%, transparent); }
 .pn-inbox .ib-pinbtn[aria-pressed="true"] svg.ib-ic { fill: color-mix(in oklch, currentColor 22%, transparent); }
@@ -786,14 +790,16 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The pin's column (the owner, 2026-10-31: the pin beside the counts, as on the three-line row), only in a list with a
    pinned row (`.ib-pincol`), between the badge and the open counts, so the pins line up next to `?N` and the badge
    and the counts keep their columns. It takes the pin's 13px plus an 8px gap from the title cell: an 11px track and
-   the grid's 10px gap, the 13px pin starting at the track's left, so it ends 8px before the counts' column. */
-.ib-pincol .ib-row { grid-template-columns: 220px minmax(0, 1fr) 124px 52px 11px 84px 76px; }
-.ib-pincol.ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px 84px 76px; }
-.ib-pincol.ib-noproj .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) 124px 52px 11px 84px 76px; }
-.ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px 84px 76px; }
-.ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; position: relative; z-index: 1; }
-/* Open counts wider than their column run under the pin, which paints above them on the row's ground, as the badge. */
-.ib-row .ib-cpin > .ib-pinmark { background: linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
+   the grid's 10px gap, the 13px pin starting at the track's left, so it ends 8px before the counts' column. Open
+   counts wider than 84px (a 12 and 12 pair, "[□ 99+] ?99+") would run under the pin, so in such a list the counts'
+   column takes the widest counts' width (`--ib-cq-w`, set by `fitCountsColumn` in InboxList.tsx) and the pins stay one
+   column, 8px before every row's counts. A list without pins keeps the 84px column and its overflow under the badge.
+   The one-project list with Hide agent icons has its own two templates (with the list's look options, below). */
+.ib-pincol .ib-row { grid-template-columns: 220px minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; }
 /* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
    edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run out
    to the left, never into the time; past the gap they slide under the badge, which paints above them on an opaque
@@ -6144,6 +6150,9 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-noproj.ib-lk-noagents .ib-from { display: contents; }
 .ib-noproj.ib-lk-noagents .ib-row { grid-template-columns: minmax(0, 1fr) 124px 52px 84px 76px; }
 .ib-noproj.ib-lk-noagents.ib-fullw .ib-row { grid-template-columns: minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
+/* The same with the pin's column (`.ib-pincol`, by the wide row's grid): the first cell gone, the pin's track kept. */
+.ib-pincol.ib-noproj.ib-lk-noagents .ib-row { grid-template-columns: minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj.ib-lk-noagents.ib-fullw .ib-row { grid-template-columns: minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
 /* Compact rows: line 1 is the agents, the project, the title and the time; line 2 the preview. The project (with its
    agents) gives way first, down to a floor of min(its width, --ib-lk-floor), then the title, cut with "…"; the time
    never. flex-basis: content with the floor as its width is that floor (min-width: auto takes the smaller of the
