@@ -204,10 +204,15 @@ async function dialogContrast(page: Page): Promise<Record<string, number>> {
     const offStyle = getComputedStyle(off);
     const picture = dialog.querySelector('[data-list-intro-picture]')!;
     const pictureBg = getComputedStyle(picture).backgroundColor;
+    const band = getComputedStyle(picture.querySelector('.ib-band')!);
     return {
       background: lum(bg),
       picture: lum(pictureBg),
       pictureName: ratio(getComputedStyle(picture.querySelector('.ib-title, .ib-m2')!).color, pictureBg),
+      // Text that takes its colour from the picture itself, not a row: the first band's label on the band, and the
+      // desktop picture's list header (none on a phone, so it passes as 21).
+      pictureBand: ratio(band.color, band.backgroundColor === 'rgba(0, 0, 0, 0)' ? pictureBg : band.backgroundColor),
+      pictureHeader: picture.querySelector('.ib-lhead h1') ? ratio(getComputedStyle(picture.querySelector('.ib-lhead h1')!).color, pictureBg) : 21,
       title: ratio(color('#ib-lo-title'), bg),
       line: ratio(color('#ib-lo-desc'), bg),
       label: ratio(color('.ib-lo-opt > span'), bg),
@@ -220,7 +225,7 @@ async function dialogContrast(page: Page): Promise<Record<string, number>> {
 }
 
 function contrastPasses(c: Record<string, number>) {
-  for (const key of ['title', 'line', 'label', 'keep', 'done', 'pictureName']) expect(c[key], `${key}: text 4.5:1`).toBeGreaterThanOrEqual(4.5);
+  for (const key of ['title', 'line', 'label', 'keep', 'done', 'pictureName', 'pictureBand', 'pictureHeader']) expect(c[key], `${key}: text 4.5:1`).toBeGreaterThanOrEqual(4.5);
   for (const key of ['offOutline', 'offThumb']) expect(c[key], `${key}: 3:1`).toBeGreaterThanOrEqual(3);
 }
 
@@ -553,6 +558,23 @@ test('the dialog follows the window\'s mode and passes WCAG AA in both; only its
     else expect(c.background, `a light dialog: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
     expect(c.picture, `a light picture: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
     contrastPasses(c);
+    // The picture's bottom: in a dark dialog the rows fade into the card's own light ground (no mask, a clean rounded
+    // edge, its bottom row of pixels the card's colour); in a light one, the approved fade to transparent.
+    const edge = await page.locator('[data-list-intro-picture]').evaluate((el) => {
+      const style = getComputedStyle(el);
+      const after = getComputedStyle(el, '::after');
+      return { mask: style.maskImage, radius: style.borderBottomLeftRadius, fade: after.backgroundImage, fadeBottom: after.bottom, card: style.backgroundColor };
+    });
+    if (dark) {
+      expect(edge.mask).toBe('none');
+      expect(edge.radius).toBe('10px');
+      expect(edge.fade).toContain('linear-gradient');
+      expect(edge.fadeBottom).toBe('0px');
+    } else {
+      expect(edge.mask).toContain('linear-gradient');
+      expect(edge.radius).toBe('0px');
+      expect(edge.fade).toBe('none');
+    }
     await namesOneLine(page);
     await shot(page, name);
     if (dark && !phone) {

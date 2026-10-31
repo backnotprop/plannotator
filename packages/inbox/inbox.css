@@ -6183,8 +6183,9 @@ dialog.ib-dlg.ib-lo { width: min(560px, calc(100vw - 32px)); }
 .ib-lo { --lo-well: color-mix(in oklch, var(--background) 70%, var(--card)); }
 :root.light .ib-lo { --lo-well: color-mix(in oklch, var(--muted) 48%, var(--card)); }
 /* The scope's own box: the frame's height and fill below, not the window root's (its token block draws a height and
-   ground for .pn-inbox). */
-.ib-lightscope { color-scheme: light; }
+   ground for .pn-inbox). Its own text colour, the light palette's, never the dark dialog's inherited near-white (band
+   labels, the list header). */
+.ib-lightscope { color-scheme: light; color: var(--foreground); }
 /* The window's rules for a list hidden under a thread (a phone, or a stacked window, with a thread open) reach the
    picture's column too, which is a list column inside the window: it is always drawn. */
 dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: auto; visibility: visible; }
@@ -6199,6 +6200,12 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lo-art { background: var(--lo-well); padding: 20px 18px 0; }
 .ib-lo-frame { display: flex; width: 380px; max-width: 100%; height: 380px; margin: 0 auto; overflow: hidden; background: var(--card); border-radius: 10px 10px 0 0; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); }
 .ib-lo-frame .ib-lo-list { flex: 1; width: auto; height: 100%; border-right: 0; }
+/* A dark dialog: the light picture never fades into it (white rows through grey into the dark well read as a smudge).
+   The rows fade out inside the card, into its own light background; the card keeps its edge and rounded bottom, on
+   the well with the same margin below as at its sides. A light dialog keeps the approved fade to transparent. */
+:root:not(.light) .ib-lo-art { padding-bottom: 18px; }
+:root:not(.light) .ib-lo-frame { position: relative; border-radius: 10px; -webkit-mask-image: none; mask-image: none; }
+:root:not(.light) .ib-lo-frame::after { content: ""; position: absolute; inset: auto 0 0; height: 64px; background: linear-gradient(to bottom, color-mix(in oklch, var(--card) 0%, transparent), var(--card)); pointer-events: none; }
 .ib-lo-frame .ib-lbody { overflow: hidden; }
 .ib-lo-frame .ib-lbody > .ib-group > .ib-rw, .ib-lo-frame .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
 .ib-lo-frame .ib-band .ib-ic { margin-left: auto; }
@@ -6212,6 +6219,7 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
   /* A phone: a bottom sheet, the phone's rows (no list header), 44 px targets, Done full width above Keep as it is. */
   dialog.ib-dlg.ib-lo.ib-lo-phone { margin: auto 8px calc(8px + env(safe-area-inset-bottom)); width: calc(100vw - 16px); max-width: none; }
   .ib-lo-phone .ib-lo-art { padding: 14px 14px 0; }
+  :root:not(.light) .ib-lo-phone .ib-lo-art { padding-bottom: 14px; }
   .ib-lo-phone .ib-lo-frame { width: auto; height: 300px; }
   .ib-lo-phone .ib-lo-frame .ib-lbody { padding-top: 8px; }
   .ib-lo-phone .ib-lo-opt { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
