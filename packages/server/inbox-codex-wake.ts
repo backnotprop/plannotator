@@ -343,6 +343,14 @@ export function createInboxCodexWake(options: {
       delivered(item.id, session);
       return;
     }
+    if (own === "hold") {
+      // Not now, and never `codex queue` (a deleted launch's thread, or a reply the person's Stop held): it waits
+      // in the Inbox, looked at again when the next line lands.
+      inFlight.delete(key);
+      retryAt.delete(key);
+      dropClaim(item.id, session);
+      return;
+    }
     if (typeof own === "object" && "uncertain" in own) {
       // Sent, and no answer: the turn may have started. Kept claimed and uncertain, never sent again (as a timed-out `codex queue`).
       inFlight.delete(key);

@@ -35,9 +35,10 @@ export interface LaunchHostResult {
  * (`delivered`, recorded at once), the wake's own way should carry it (`queue`: Codex's `codex queue`, for a
  * session busy with a turn), it could not (`failed`: tried again later, as a failed `codex queue` is), or it
  * may have gone (`uncertain`: sent and never answered; kept claimed and never sent again, as a `codex queue`
- * that ran out of time is).
+ * that ran out of time is). `hold` (the engine's answer, never a host's): not now, and not the wake's own way
+ * either; the item waits in the Inbox (a deleted launch's session, or a reply the person's Stop held).
  */
-export type LaunchDelivery = "delivered" | "queue" | { failed: string } | { uncertain: string };
+export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string } | { uncertain: string };
 
 /** Why a start or a restart did not take, in words for the run line. */
 export type LaunchStartFailure = { code: InboxLaunchError["code"]; text: string };
@@ -163,8 +164,10 @@ export interface LaunchHost {
   /**
    * Only a host whose sessions the Inbox wakes itself (Codex: inbox-codex-wake.ts, no mod poll): the wake text
    * of a person's item for a launched session goes in as that session's turn. Without it, the wake's own way.
+   * `signal`: the person pressed Stop or Delete meanwhile (the engine waits for this call before it stops the
+   * session): start no turn after it.
    */
-  deliver?(launch: InboxLaunchRecord, text: string): Promise<LaunchDelivery>;
+  deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery>;
   /** The Inbox stops: let go of what this host holds (a connection, the processes it owns). No `close`: it holds nothing. */
   close?(): void;
 }

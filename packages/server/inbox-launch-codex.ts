@@ -454,48 +454,63 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       if (got || !options.start) return got;
       return connect(options);
     }
-    connecting = (async () => {
+    // No daemon and no start: nothing to wait for (never a slot for it).
+    if (!options.start && !existsSync(socket())) return null;
+    const attempt = (async (): Promise<CodexConnection | null> => {
+      const tryConnect = () =>
+        connectCodex(socket(), {
+          notification: onNotification,
+          request: (id, method, params) => permissions?.asked(id, method, params),
+          closed: () => {
+            // A late close of an earlier connection: the newer one stays.
+            if (connection?.open) return;
+            connection = null;
+            for (const view of threads.values()) view.subscribed = false;
+            permissions?.connectionLost();
+            if (!closing) ctx.log("Inbox launch: the Codex app-server connection closed");
+          },
+        });
+      let made: CodexConnection;
       try {
-        if (!options.start && !existsSync(socket())) return null;
-        const tryConnect = () =>
-          connectCodex(socket(), {
-            notification: onNotification,
-            request: (id, method, params) => permissions?.asked(id, method, params),
-            closed: () => {
-              connection = null;
-              for (const view of threads.values()) view.subscribed = false;
-              permissions?.connectionLost();
-              if (!closing) ctx.log("Inbox launch: the Codex app-server connection closed");
-            },
-          });
-        try {
-          connection = await tryConnect();
-        } catch (error) {
-          if (!options.start) return null;
-          // Not running (or a stale socket): start the shared daemon, then connect to the socket it names.
-          const e = await ctx.environment();
-          const codex = e.which("codex");
-          if (!codex) throw new Error("codex is not on the Inbox's PATH");
-          const daemonEnv = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: launchSpawnEnv(await options.env()) });
-          const result = await daemonEnv.run([codex, "app-server", "daemon", "start"], { timeoutMs: DAEMON_TIMEOUT_MS, killGroup: false });
-          if (options.launchId) ctx.startLog(options.launchId, `codex app-server daemon start: exit ${result.exitCode}\n${result.stdout}${result.stderr}`);
-          if (result.exitCode !== 0) throw new Error(`codex app-server daemon start exited ${result.exitCode}: ${(result.stderr || result.stdout).trim().slice(0, 300)}`);
-          const parsed = parseDaemonStart(result.stdout);
-          if (parsed?.socketPath) socketPath = parsed.socketPath;
-          connection = await tryConnect().catch((again: unknown) => {
-            throw new Error(`${again instanceof Error ? again.message : String(again)} (before the start: ${error instanceof Error ? error.message : String(error)})`);
-          });
-        }
-        connectedAt = now();
-        // A new connection is on no thread: rejoin the launched threads that run a turn (their approvals come again).
-        const fresh = connection;
-        queueMicrotask(() => void rejoinThreads(fresh).catch(() => undefined));
-        return connection;
-      } finally {
-        connecting = null;
+        made = await tryConnect();
+      } catch (error) {
+        if (!options.start) return null;
+        // Not running (or a stale socket): start the shared daemon, then connect to the socket it names.
+        const e = await ctx.environment();
+        const codex = e.which("codex");
+        if (!codex) throw new Error("codex is not on the Inbox's PATH");
+        const daemonEnv = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: launchSpawnEnv(await options.env()) });
+        const result = await daemonEnv.run([codex, "app-server", "daemon", "start"], { timeoutMs: DAEMON_TIMEOUT_MS, killGroup: false });
+        if (options.launchId) ctx.startLog(options.launchId, `codex app-server daemon start: exit ${result.exitCode}\n${result.stdout}${result.stderr}`);
+        if (result.exitCode !== 0) throw new Error(`codex app-server daemon start exited ${result.exitCode}: ${(result.stderr || result.stdout).trim().slice(0, 300)}`);
+        const parsed = parseDaemonStart(result.stdout);
+        if (parsed?.socketPath) socketPath = parsed.socketPath;
+        made = await tryConnect().catch((again: unknown) => {
+          throw new Error(`${again instanceof Error ? again.message : String(again)} (before the start: ${error instanceof Error ? error.message : String(error)})`);
+        });
       }
+      // The Inbox stopped meanwhile: this host holds nothing any more.
+      if (closing) {
+        made.close();
+        return null;
+      }
+      connection = made;
+      connectedAt = now();
+      // A new connection is on no thread: rejoin the launched threads that run a turn (their approvals come again).
+      queueMicrotask(() => void rejoinThreads(made).catch(() => undefined));
+      return made;
     })();
-    return connecting;
+    connecting = attempt;
+    // Settled: the slot is free, and only this attempt's (cleared after it was stored, never before).
+    void attempt.then(
+      () => {
+        if (connecting === attempt) connecting = null;
+      },
+      () => {
+        if (connecting === attempt) connecting = null;
+      },
+    );
+    return attempt;
   };
   /** `connect` with the daemon started when needed: a connection, or an error saying why not. */
   const connectStarted = async (env: () => Promise<LaunchEnv>, launchId?: string): Promise<CodexConnection> => {
@@ -785,11 +800,15 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
      * queued message would wait), rejoining the thread first when this connection is not on it; `queue` while a
      * turn runs (it is the next turn).
      */
-    async deliver(launch: InboxLaunchRecord, text: string): Promise<LaunchDelivery> {
+    async deliver(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery> {
       const threadId = launch.session_ref!;
+      // A Stop or Delete pressed meanwhile: no turn after it (the engine asks again once it is done).
+      const stopped = { failed: "a Stop or Delete came first" } as const;
       const conn = await connectStarted(loginEnv);
+      if (signal.aborted) return stopped;
       let view = threads.get(threadId);
       if (!view?.subscribed) view = await resumeThread(conn, launch);
+      if (signal.aborted) return stopped;
       if (view.status.type === "active") return "queue";
       try {
         await conn.request("turn/start", { threadId, input: [{ type: "text", text, text_elements: [] }] });

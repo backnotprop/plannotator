@@ -588,4 +588,31 @@ describe("a thread the Inbox launched", () => {
     expect(again.codexWake.uncertain(THREAD, sent.id)).toBe(true);
     expect(queues(w.fake)).toEqual([]);
   });
+
+  test("a delivery the launch holds (a deleted launch's thread, a reply its Stop held) is never queued; it waits, and is asked again when the next line lands", async () => {
+    const asked: string[] = [];
+    let answer: LaunchDelivery = "hold";
+    const w = await world({ deliver: async (_session, text) => (asked.push(text), answer) });
+    const project = w.server.store.ensureProject({ name: "ledger", root: w.project });
+    const sent = w.server.store.startPersonThread({ project_id: project.id, body: "Fix it.", to: { host: "codex", session: THREAD }, idempotency_key: "p1" }).message;
+    await w.server.codexWake.sweep();
+    await w.server.codexWake.sweep();
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((text) => text.includes("Fix it."))).toBe(true);
+    expect(queues(w.fake)).toEqual([]);
+    expect(w.server.codexWake.uncertain(THREAD, sent.id)).toBe(false);
+    expect(w.server.store.message(sent.id)!.delivery?.state).not.toBe("delivered");
+    // The person's next reply: both are asked again, oldest first, go in, and are asked no more.
+    answer = "delivered";
+    const before = asked.length;
+    w.server.store.sendReply(sent.id, { words: "Go on.", idempotency_key: "r1" });
+    await w.server.codexWake.sweep();
+    await w.server.codexWake.sweep();
+    const after = asked.slice(before);
+    expect(after).toHaveLength(2);
+    expect(after[0]).toContain("Fix it.");
+    expect(after[1]).toContain("Go on.");
+    expect(w.server.store.message(sent.id)!.delivery?.state).toBe("delivered");
+    expect(queues(w.fake)).toEqual([]);
+  });
 });

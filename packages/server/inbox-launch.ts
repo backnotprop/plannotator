@@ -578,6 +578,14 @@ export function createInboxLaunch(options: {
   const deleting = new Map<string, Promise<Record<string, unknown>>>();
   /** A Stop under way, by launch id: no reply starts the session again until it is done. */
   const stopping = new Set<string>();
+  /** A reply's `deliver` under way, by launch id: a Stop or Delete stops it at its next step and waits for it. */
+  const delivering = new Map<string, Set<{ controller: AbortController; done: Promise<unknown> }>>();
+  /** Before a Stop or Delete stops the session: no delivery under way starts a turn after it. */
+  const settleDeliveries = async (launchId: string) => {
+    const under = [...(delivering.get(launchId) ?? [])];
+    for (const one of under) one.controller.abort();
+    await Promise.all(under.map((one) => one.done.catch(() => undefined)));
+  };
 
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
@@ -744,6 +752,7 @@ export function createInboxLaunch(options: {
         stopping.add(launch.id);
         let result: LaunchHostResult;
         try {
+          await settleDeliveries(launch.id);
           result = await host.stop(launch.session_ref);
         } finally {
           stopping.delete(launch.id);
@@ -781,6 +790,7 @@ export function createInboxLaunch(options: {
         // Deleted already (a second Delete, from a stale window): nothing more. Its folder path may be another launch's now.
         if (launch.deleted_at) return json({ ok: true });
         const done = (async (): Promise<Record<string, unknown>> => {
+          await settleDeliveries(launch.id);
           // Still starting: `run` removes the session it makes once it sees `deleted_at`.
           if (launch.session_ref) {
             const stop = await host.stop(launch.session_ref);
@@ -997,10 +1007,34 @@ export function createInboxLaunch(options: {
     async deliver(agent: string, session: string, text: string): Promise<LaunchDelivery> {
       if (!enabled() || !Object.hasOwn(hosts, agent)) return "queue";
       const host = hosts[agent]!;
-      const root = roots().find((m) => !m.launch!.deleted_at && m.launch!.agent === agent && m.to?.host === agent && m.to.session === session && m.launch!.session_ref);
+      const ofSession = roots().filter((m) => m.launch!.agent === agent && m.to?.host === agent && m.to.session === session && m.launch!.session_ref);
+      const root = ofSession.find((m) => !m.launch!.deleted_at) ?? ofSession[0];
       if (!root || !host.deliver) return "queue";
-      const result = await host.deliver(root.launch!, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }));
-      if (typeof result === "object") startLog(root.launch!.id, "failed" in result ? `deliver: ${result.failed}` : `deliver: may have gone, not sent again: ${result.uncertain}`);
+      const launch = root.launch!;
+      // Deleted: the reply waits in the Inbox and never reaches the agent (it would bring the session back).
+      if (launch.deleted_at) return "hold";
+      // A Stop or Delete under way: asked again later (then held, or deleted).
+      if (stopping.has(launch.id) || deleting.has(launch.id)) return { failed: "a Stop or Delete is under way" };
+      // The reply that waited when the person pressed Stop: it never undoes the Stop; their next reply takes it along.
+      const memo = memoOf(launch);
+      if (memo.heldReply) {
+        const newest = store.pendingReplies(session, { tags: true }).at(-1);
+        if (!newest || newest.id === memo.heldReply) return "hold";
+        memo.heldReply = null;
+      }
+      const controller = new AbortController();
+      const call = host.deliver(launch, text, controller.signal).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }));
+      const one = { controller, done: call };
+      const under = delivering.get(launch.id) ?? delivering.set(launch.id, new Set()).get(launch.id)!;
+      under.add(one);
+      let result: LaunchDelivery;
+      try {
+        result = await call;
+      } finally {
+        under.delete(one);
+        if (under.size === 0) delivering.delete(launch.id);
+      }
+      if (typeof result === "object") startLog(launch.id, "failed" in result ? `deliver: ${result.failed}` : `deliver: may have gone, not sent again: ${result.uncertain}`);
       options.onChange();
       return result;
     },

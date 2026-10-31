@@ -44,7 +44,7 @@ const FAKE = "fake-agent" as InboxLaunchAgent;
 function fakeLaunchHost() {
   const calls: string[] = [];
   /** What the test makes go wrong. */
-  const faults: { resumeThrows: boolean; gate: Promise<void> | null } = { resumeThrows: false, gate: null };
+  const faults: { resumeThrows: boolean; gate: Promise<void> | null; deliverGate: Promise<void> | null } = { resumeThrows: false, gate: null, deliverGate: null };
   let questions: ReturnType<typeof createLaunchQuestions> | null = null;
   const sessions = new Map<string, { ref: string; live: LaunchLive | null; state: "running" | "stopped" }>();
   const byRef = (ref: string) => [...sessions.values()].find((s) => s.ref === ref);
@@ -87,6 +87,14 @@ function fakeLaunchHost() {
       return { exitCode: 0, text: "" };
     },
     purge: async (folder) => (calls.push(`purge ${folder}`), { exitCode: 0, text: "" }),
+    // As Codex's: the wake's text goes in as a turn; it takes a while (`deliverGate`), and starts none once stopped.
+    async deliver(launch, text, signal) {
+      calls.push(`deliver ${text}`);
+      await faults.deliverGate;
+      if (signal.aborted) return { failed: "stopped" };
+      calls.push(`turn ${text}`);
+      return "delivered";
+    },
     attach: (launch) => (launch.session_ref ? `fake attach ${launch.session_ref}` : null),
     terminal: (launch) => `fake attach ${launch.session_ref}`,
     // Pushed prompts: no hook route; its questions are written by the shared question code.
@@ -296,6 +304,54 @@ describe("a second agent behind LaunchHost", () => {
     await sweeps();
     expect(resumes()).toBe(1);
     expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
+  });
+
+  test("a host that delivers the reply itself: none goes in during a Stop or Delete, the reply waiting at Stop waits for the next, and after Delete none reaches the agent", async () => {
+    const { store, project, fake, launch, post } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-d", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    const turns = () => fake.calls.filter((call) => call.startsWith("turn "));
+    const deliver = (text: string) => launch.deliver(FAKE, "session-f1", text);
+
+    // A delivery under way when the person presses Stop: Stop waits for it, and it starts no turn after the Stop.
+    store.sendReply(root.id, { words: "And the changelog.", idempotency_key: "reply-d1" });
+    let open: () => void = () => {};
+    fake.faults.deliverGate = new Promise((resolve) => (open = resolve));
+    const under = deliver("And the changelog.");
+    await until(() => fake.calls.includes("deliver And the changelog."));
+    const stopped = post(prepared.launch.id, "stop");
+    await Bun.sleep(20);
+    expect(fake.calls.includes("stop f1")).toBe(false);
+    open();
+    expect(await under).toMatchObject({ failed: expect.any(String) });
+    expect((await stopped)!.status).toBe(200);
+    fake.faults.deliverGate = null;
+    expect(turns()).toEqual([]);
+    // Tried again later (the wake's back-off): it waited when the person pressed Stop, so it waits on.
+    expect(await deliver("And the changelog.")).toBe("hold");
+    // The person's next reply: both go in.
+    store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-d2" });
+    expect(await deliver("And the changelog.")).toBe("delivered");
+    expect(await deliver("Go on.")).toBe("delivered");
+    expect(turns()).toEqual(["turn And the changelog.", "turn Go on."]);
+
+    // While a Delete stops and removes the session: nothing goes in; after it, a reply waits in the Inbox.
+    fake.faults.gate = new Promise((resolve) => (open = resolve));
+    const deleted = post(prepared.launch.id, "delete");
+    await until(() => fake.calls.filter((call) => call === "stop f1").length === 2);
+    store.sendReply(root.id, { words: "One more.", idempotency_key: "reply-d3" });
+    expect(await deliver("One more.")).toMatchObject({ failed: expect.any(String) });
+    open();
+    await deleted;
+    fake.faults.gate = null;
+    expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
+    expect(await deliver("One more.")).toBe("hold");
+    expect(turns()).toHaveLength(2);
+    expect(fake.calls.filter((call) => call.startsWith("deliver ")).length).toBe(3);
   });
 
   test("a host reads the login shell through its context: a fresh read when it asks, shared with one under way", async () => {

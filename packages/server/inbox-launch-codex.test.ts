@@ -252,6 +252,9 @@ interface World {
   post: (id: string, action: string) => Promise<Response | null>;
   send: (body: string, key: string) => Promise<InboxMessage>;
   restart: () => { store: InboxStore; launch: ReturnType<typeof createInboxLaunch> };
+  /** The login-shell reads the engine made. */
+  logins: { count: number };
+  daemonDown: () => Promise<void>;
 }
 
 /** The person's config.toml in these tests: their threads can write their folder, so Codex would write its trust. */
@@ -281,6 +284,10 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
   const store = InboxStore.open(dataDir);
   const project = store.ensureProject({ name: "ledger", root: folder });
   const env = { HOME: home, PATH: `${bin}:/usr/bin:/bin` };
+  /** The person's login shell: its own object, with a name the Inbox's own env lacks (`CODEX_TEST_LOGIN`). */
+  const logins = { count: 0 };
+  const loginEnv = async () => (logins.count++, { ...env, CODEX_TEST_LOGIN: "1" });
+  const logs: string[] = [];
   const engine = (on: InboxStore, laterMs = 0) => {
   const launch = createInboxLaunch({
     store: on,
@@ -289,14 +296,14 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
     serverSession: "srv",
     homeDir: home,
     platform: process.platform,
-    loginEnv: async () => env,
-    ownEnv: () => env,
+    loginEnv,
+    ownEnv: () => ({ ...env }),
     installDirs: [],
     displayFolder: (path) => path,
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
-    log: () => {},
+    log: (line) => void logs.push(line),
     selfCommand: ["plannotator"],
     now: () => Date.now() + laterMs,
   });
@@ -323,7 +330,15 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
     const again = InboxStore.open(dataDir);
     return { store: again, launch: engine(again, INBOX_RUN_START_GRACE_MS * 2) };
   };
-  return { store, codex, launch, project, home, post, send, restart };
+  const socket = join(home, "app-server-control", "app-server-control.sock");
+  /** The daemon stops (`daemon stop`, a reboot, its updater): its socket goes, and the Inbox sees its connection close. */
+  const daemonDown = async () => {
+    const closes = () => logs.filter((line) => line.includes("Codex app-server connection closed")).length;
+    const was = closes();
+    expect(codex.cli(["app-server", "daemon", "stop"]).status).toBe(0);
+    await until(() => !existsSync(socket) && closes() > was);
+  };
+  return { store, codex, launch, project, home, post, send, restart, logins, daemonDown };
 }
 
 async function until(check: () => boolean, ms = 5_000) {
@@ -392,6 +407,12 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     const w = world({ config: { workMs: 50 } });
     const root = await w.send("Fix it.", "send-1");
     const threadId = root.launch!.session_ref!;
+    // The wake delivered the root; each reply below is the person's, written after a Stop.
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    const reply = (words: string, key: string) => {
+      const sent = w.store.sendReply(root.id, { words, idempotency_key: key }).reply;
+      return { text: wake(root.id, words), delivered: () => w.store.recordDelivery(sent.id, { host: "codex", session: threadId }) };
+    };
     const at = Date.now();
     const stopped = await w.post(root.launch!.id, "stop");
     expect(stopped!.status).toBe(200);
@@ -401,8 +422,11 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
 
     // A reply after Stop: the thread is rejoined and the reply starts a turn (a queued one would wait on the interrupted thread).
     w.codex.configure({ hold: true });
-    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Go on."))).toBe("delivered");
-    expect(w.codex.rpc("thread/resume")).toHaveLength(1);
+    const goOn = reply("Go on.", "reply-1");
+    expect(await w.launch.deliver("codex", threadId, goOn.text)).toBe("delivered");
+    goOn.delivered();
+    // Rejoined (the engine's restart for the reply may have rejoined it too).
+    expect(w.codex.rpc("thread/resume").length).toBeGreaterThan(0);
     await until(() => w.codex.turns().length === 1);
     await Bun.sleep(100);
 
@@ -414,7 +438,7 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
 
     // Again after the interrupt: a turn/start, never the paused queue.
     w.codex.configure({ hold: false });
-    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Once more."))).toBe("delivered");
+    expect(await w.launch.deliver("codex", threadId, reply("Once more.", "reply-2").text)).toBe("delivered");
     await until(() => w.codex.turns().filter((t) => t.how === "turn/start").length === 2);
   });
 
@@ -546,17 +570,77 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     expect(w.codex.rpc("turn/interrupt").map((r) => r.params.turnId)).toEqual([w.codex.turns()[0]!.turnId]);
   });
 
-  test("Delete never starts the daemon: with none running, the thread is left in Codex", async () => {
+  test("Delete never starts the daemon: with none running, the thread is left in Codex, and a reply after it never reaches Codex", async () => {
     const w = world();
     const root = await w.send("Fix it.", "send-1");
     const threadId = root.launch!.session_ref!;
-    expect(w.codex.cli(["app-server", "daemon", "stop"]).status).toBe(0);
-    await until(() => !existsSync(join(w.codex.home, "app-server-control", "app-server-control.sock")));
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    await w.daemonDown();
     const starts = () => w.codex.calls().filter((c) => c.argv.join(" ") === "app-server daemon start").length;
     const before = starts();
     expect(await (await w.post(root.launch!.id, "delete"))!.json()).toEqual({ ok: true });
     expect(starts()).toBe(before);
     expect(w.codex.rpc("thread/delete")).toEqual([]);
     expect(w.codex.threads()[threadId]).toBeDefined();
+    // A reply in the kept thread: it waits in the Inbox (never `codex queue`, which would run the deleted session again).
+    w.store.sendReply(root.id, { words: "Still there?", idempotency_key: "reply-1" });
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Still there?"))).toBe("hold");
+    expect(starts()).toBe(before);
+    expect(w.codex.turns()).toEqual([]);
+  });
+
+  test("the daemon stopped (its socket gone): a sweep finds none and keeps nothing of it; a look once it runs again finds it, and a reply then starts it", async () => {
+    const w = world({ config: { hold: true } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    const lookWithNone = async () => {
+      await w.daemonDown();
+      // The 1 s sweep looks for the daemon (never starting it) and finds none.
+      w.launch.sweep(true);
+      await Bun.sleep(50);
+    };
+    await lookWithNone();
+    // Started again from outside (Codex's updater): Stop finds it. A look stuck on the earlier "none" would say
+    // "not running" here, and a reply's start would then never return (the whole Inbox stuck).
+    expect(w.codex.cli(["app-server", "daemon", "start"]).status).toBe(0);
+    await w.post(root.launch!.id, "stop");
+    expect(w.codex.rpc("thread/unsubscribe")).toHaveLength(1);
+    // Stopped again, a look, then the person replies: the reply starts the daemon and goes in as a turn.
+    await lookWithNone();
+    w.store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-1" });
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Go on."))).toBe("delivered");
+    await until(() => w.codex.turns().length === 1);
+  }, 20_000);
+
+  test("a reply's daemon start reads the login shell, and only then: never the Inbox's own env, and no read while the daemon runs", async () => {
+    const w = world();
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    const starts = () => w.codex.calls().filter((c) => c.argv.join(" ") === "app-server daemon start");
+    const fromLogin = () => starts().at(-1)!.env.includes("CODEX_TEST_LOGIN");
+    const reads = w.logins.count;
+    // The daemon runs: a reply reads no login shell.
+    w.store.sendReply(root.id, { words: "One.", idempotency_key: "reply-1" });
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "One."))).toBe("delivered");
+    expect(w.logins.count).toBe(reads);
+    await until(() => w.codex.turns().some((t) => t.ended === "completed"));
+
+    // Stopped (a reboot): the wake's deliver starts it with the login shell's env.
+    await w.daemonDown();
+    const before = starts().length;
+    w.store.sendReply(root.id, { words: "Two.", idempotency_key: "reply-2" });
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Two."))).toBe("delivered");
+    expect(starts()).toHaveLength(before + 1);
+    expect(fromLogin()).toBe(true);
+    expect(w.logins.count).toBe(reads + 1);
+
+    // Stopped again, and the Inbox restarted: a reply's restart (`resume`) starts it with the login shell's env too.
+    await w.daemonDown();
+    const again = w.restart();
+    again.store.sendReply(root.id, { words: "Three.", idempotency_key: "reply-3" });
+    await until(() => starts().length === before + 2);
+    expect(fromLogin()).toBe(true);
   });
 });
