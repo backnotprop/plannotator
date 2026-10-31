@@ -11,7 +11,8 @@
  * PLANNOTATOR_UPDATE_CHECK=0, NO_BROWSER.
  *
  *  1. The journey: the To row, Send starts one `opencode serve` in the folder
- *     with this Inbox's data dir, the plugin's tool and the launch id; its
+ *     on a free port it picked (never 0 or 4096) with this Inbox's data dir,
+ *     the plugin's tool and the launch id; its
  *     password only in launch/<id>/server.json (0600), never in a log, the
  *     page, the run line or the attach command; Working; Open in Terminal runs
  *     `opencode attach`; the answer lands as a reply to the root.
@@ -19,7 +20,8 @@
  *     choices (no mode switch, no Terminal hand-off); the session choice is
  *     OpenCode's "always", Deny with a reason is a reject with the reason, and
  *     the agent goes on; a prompt answered in `opencode attach` withdraws the
- *     card ("Answered in Terminal").
+ *     card ("Answered in Terminal"); a subagent's prompt (a child session) is
+ *     the same card with "From a subagent (…)".
  *  3. An Inbox restart while a card waits: the server keeps running, the
  *     Inbox adopts it (no second server), the same card answers it.
  *  4. Stop: the turn is aborted, the server and the command it ran end, "You
@@ -286,7 +288,9 @@ test('the journey: the To row; Send starts one server with the password only in 
 
   const { threadId, launchId } = await launchFrom(page, 'Make the Settings search fuzzy, like the command palette.', world.projects.plannotator);
   const serve = await waitFor('opencode serve', () => fake.serves()[0]);
-  expect(serve.argv).toEqual(['serve', '--hostname', '127.0.0.1', '--port', '0']);
+  // A free port the Inbox picked itself: never `--port 0` (OpenCode would take its default 4096) and never 4096.
+  expect(serve.argv.slice(0, 4)).toEqual(['serve', '--hostname', '127.0.0.1', '--port']);
+  expect(Number(serve.argv[4]) > 0 && serve.argv[4] !== '4096').toBe(true);
   expect(serve.cwd).toBe(world.projects.plannotator);
   // This Inbox (a temp data dir), the plugin's tool on, this launch: the plugin replies here, and its replies come back as turns.
   expect(serve.values).toMatchObject({ PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_INBOX_TOOL: '1', PLANNOTATOR_LAUNCH: launchId });
@@ -389,6 +393,20 @@ test('permission prompts on the card: OpenCode in the header, its choices; the s
   expect(fake.serves()).toHaveLength(2);
   expect((await readThread(page, threadId)).thread.messages.filter((m) => m.author.session?.startsWith('perm:') && (m.questions?.length ?? 0) > 0)).toHaveLength(3);
   await expect(p.locator('[data-run]')).toHaveCount(0);
+
+  // 4. A subagent's prompt (the task tool's child session): the same card, saying where it comes from.
+  fake.configure({ prompts: [BUILD], localAnswer: false, subagent: true });
+  try {
+    await reply(page, 'Ask a subagent to check the build.');
+    await expect(card(page).locator('[data-perm-note]')).toHaveText('From a subagent (Look around (@explore subagent)).', { timeout: 30_000 });
+    await armed(page);
+    await card(page).locator('[data-perm="once"]').click();
+    const child = await waitFor('the child session', () => fake.sessions().find((s) => s.parentID === session));
+    await waitFor('the reply in the child session', () => fake.replies().find((r) => r.session === child.id && r.reply === 'once'));
+    await expect(agentMessages(page)).toHaveCount(3, { timeout: 30_000 });
+  } finally {
+    fake.configure({ subagent: false });
+  }
 });
 
 test('an Inbox restart while a card waits: the server runs on, the Inbox adopts it (no second server), and the same card answers it', async () => {

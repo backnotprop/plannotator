@@ -129,7 +129,12 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       break;
     case 'stopped':
       icon = 'stop';
-      text = run.stopped_by_person && run.since ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.` : `${name} stopped. Your reply starts it again.`;
+      text =
+        run.stopped_by_person && run.since
+          ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
+          : run.idle_minutes
+            ? `${name} stopped after ${run.idle_minutes} minutes idle. Your reply continues it.`
+            : `${name} stopped. Your reply starts it again.`;
       break;
     case 'failed':
       icon = 'warn';

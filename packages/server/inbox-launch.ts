@@ -10,9 +10,12 @@
  * id: `claude-code` is inbox-launch-claude.ts. A record whose agent has no
  * host here (a downgrade) gets no line, no sweep and `404 launch_not_found`.
  *
- * We start nothing that lives on its own: the agent's own background host
- * keeps the session (`claude --bg`). Messages move over the links the Inbox
- * already has (Claude Code: the mod's bridge poll). Behind
+ * Where the agent has a background host of its own, it keeps the session
+ * (`claude --bg`). Where it has none (OpenCode 1), its host runs one
+ * `opencode serve` per launch, proved its own before any signal, and stops it
+ * after 30 minutes with no turn and no prompt (a reply continues the session).
+ * Messages move over the links the Inbox already has (Claude Code: the mod's
+ * bridge poll; OpenCode: the host's own wake on that bridge). Behind
  * `inboxLaunch.enabled` (config only, default off): off, every route here
  * answers 404 and nothing else changes.
  *
@@ -622,7 +625,11 @@ export function createInboxLaunch(options: {
     options.onChange();
     void host
       .resume(launch)
+      // A host whose resume throws is a failed restart, never an unhandled rejection (it would end the Inbox).
+      .catch((error: unknown) => ({ exitCode: 1, text: `error: ${error instanceof Error ? error.message : String(error)}`, failure: { code: "failed" as const, text: "It did not start again." } }))
       .then(async (result) => {
+        // Deleted meanwhile: nothing is written for it (its folder is gone, and stays gone).
+        if (store.message(root.id)?.launch?.deleted_at) return;
         startLog(launch.id, `respawn ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
         if (!result.failure) return;
         attempt.failed = result.failure.text;

@@ -38,6 +38,20 @@ export interface FakeOpenCodeConfig {
   localAnswer?: boolean;
   /** `serve` exits at once with an error. */
   failServe?: boolean;
+  /** `serve` waits this long before it listens. */
+  serveDelayMs?: number;
+  /** The server takes any request, with or without the password (one started without a password). */
+  acceptAnyAuth?: boolean;
+  /** A turn's prompts come from a child session (the task tool's subagent), `parentID` the session. */
+  subagent?: boolean;
+  /** The child session is announced with `session.created` (else the host must look it up). */
+  announceChild?: boolean;
+  /** A turn's prompts are asked at once (parallel tool calls). */
+  parallel?: boolean;
+  /** That many permission reply calls answer 500. */
+  failReplies?: number;
+  /** Until then (epoch ms) the event streams end and every route answers 503. */
+  outageUntil?: number;
 }
 
 export interface FakeOpenCodeCall {
@@ -59,9 +73,11 @@ export interface FakeOpenCode {
   /** Each turn a session took: its text and the server that took it. */
   prompts(): { session: string; text: string; server: number }[];
   /** Each permission reply a server got. */
-  replies(): { session: string; request: string; permission: string; reply: string; message?: string | null; local?: boolean }[];
+  replies(): { session: string; request: string; permission: string; reply: string; message?: string | null; local?: boolean; cascade?: boolean }[];
+  /** The reply calls that answered 500 (`failReplies`), by request id. */
+  failedReplies(): string[];
   /** The sessions OpenCode keeps (its database). */
-  sessions(): { id: string; directory: string; title: string | null; permission: unknown }[];
+  sessions(): { id: string; directory: string; title: string | null; permission: unknown; parentID?: string }[];
   /** The sessions a turn was aborted in. */
   aborts(): string[];
   /** Every server and child pid recorded, with whether it is still running. */
@@ -124,6 +140,7 @@ export function installFakeOpenCode(input: { bin: string; state: string; config?
       return existsSync(dir) ? readdirSync(dir).filter((n) => n.endsWith(".json")).map((n) => JSON.parse(readFileSync(join(dir, n), "utf8"))) : [];
     },
     aborts: () => (existsSync(join(state, "aborts.log")) ? readFileSync(join(state, "aborts.log"), "utf8").split("\n").filter(Boolean) : []),
+    failedReplies: () => (existsSync(join(state, "replies-failed.log")) ? readFileSync(join(state, "replies-failed.log"), "utf8").split("\n").filter(Boolean) : []),
     processes,
     childOf(server) {
       const pid = rows("children.log").find((row) => row[1] === server)?.[0];

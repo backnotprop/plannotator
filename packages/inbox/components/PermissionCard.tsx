@@ -553,6 +553,12 @@ export function PermissionCard({
                 Deny with a reason
               </button>
             </div>
+            {/* The host's note (OpenCode: "From a subagent …"); Claude Code's cards that allow here have none. */}
+            {read.note && (
+              <p className="pc-modes" data-perm-note="">
+                {read.note}
+              </p>
+            )}
             {labels.includes(INBOX_PERMISSION_AUTO) && (
               <p className="pc-modes">
                 <span>{phone ? 'Or allow and switch to' : 'Or allow this and switch the session to'}</span>

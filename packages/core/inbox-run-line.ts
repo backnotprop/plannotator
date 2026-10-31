@@ -29,8 +29,11 @@ import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
 
-/** The host's view of one session (`claude agents --json --all`), or `absent` when `--all` does not list it. */
-export type InboxRunHostState = { status: string | null; state: string | null; waitingFor: string | null } | "absent";
+/**
+ * The host's view of one session (`claude agents --json --all`), or `absent` when `--all` does not list it.
+ * `idleMinutes`: stopped by the host after that long idle (a reply continues it).
+ */
+export type InboxRunHostState = { status: string | null; state: string | null; waitingFor: string | null; idleMinutes?: number } | "absent";
 
 export interface InboxRunEvidence {
   launch: InboxLaunchRecord;
@@ -99,5 +102,6 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
   if (!e.seenLive && !hostStopped) return line("failed", { cause: "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?" });
-  return line("stopped", { stopped_by_person: e.stoppedByPersonAt !== null, since: iso(e.stoppedByPersonAt) });
+  const idleMinutes = e.stoppedByPersonAt === null && host?.state === "stopped" ? host.idleMinutes : undefined;
+  return line("stopped", { stopped_by_person: e.stoppedByPersonAt !== null, since: iso(e.stoppedByPersonAt), ...(idleMinutes ? { idle_minutes: idleMinutes } : {}) });
 }

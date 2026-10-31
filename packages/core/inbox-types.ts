@@ -859,6 +859,8 @@ export interface InboxRun {
   again: boolean;
   /** `stopped`: the person pressed Stop (the line names the time). */
   stopped_by_person: boolean;
+  /** `stopped` by the host after this many minutes idle (OpenCode's server); a reply continues it. */
+  idle_minutes?: number;
   /** `failed`: the cause in words; `missing`: null. */
   cause: string | null;
   /** `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there. */

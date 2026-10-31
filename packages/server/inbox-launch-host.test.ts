@@ -41,6 +41,8 @@ const FAKE = "fake-agent" as InboxLaunchAgent;
 /** An in-memory agent: `start` makes a session that is not connected; the test works and idles it (`poll`), and asks its permission questions (`ask`). */
 function fakeLaunchHost() {
   const calls: string[] = [];
+  /** What the test makes go wrong. */
+  const faults = { resumeThrows: false };
   let questions: ReturnType<typeof createLaunchQuestions> | null = null;
   const sessions = new Map<string, { ref: string; live: LaunchLive | null; state: "running" | "stopped" }>();
   const byRef = (ref: string) => [...sessions.values()].find((s) => s.ref === ref);
@@ -64,6 +66,7 @@ function fakeLaunchHost() {
     live: (session) => sessions.get(session)?.live ?? null,
     async resume(launch) {
       calls.push(`resume ${launch.session_ref}`);
+      if (faults.resumeThrows) throw new Error("the host broke");
       byRef(launch.session_ref!)!.state = "running";
       return { exitCode: 0, text: "", failure: null };
     },
@@ -100,7 +103,7 @@ function fakeLaunchHost() {
     const event = { session_id: session, tool_name: "Bash", tool_input: { command: "ls" }, cwd: root.launch!.folder, permission_suggestions: [], permission_mode: null };
     return questions!.ask(root, event, "req-1", questions!.questionFor(root, event, {}))!;
   };
-  return { host, calls, poll, ask };
+  return { host, calls, poll, ask, faults };
 }
 
 function setup() {
@@ -200,6 +203,35 @@ describe("a second agent behind LaunchHost", () => {
     expect(await (await post(prepared.launch.id, "delete"))!.json()).toEqual({ ok: true });
     expect(fake.calls.slice(before)).toEqual(["stop f1", "remove f1", "withdrawAll f1"]);
     expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
+  });
+
+  test("a host whose resume throws: a failed restart on the line, never an unhandled rejection (it would end the Inbox)", async () => {
+    const { store, clock, project, fake, launch, post } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-throw", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    fake.poll("session-f1", false, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    const answer = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: FAKE, session: "session-f1", name: "Fake Agent" }, body: "Done.", reply_to: root.id, idempotency_key: "answer-throw" }).message;
+    await post(prepared.launch.id, "stop");
+    fake.faults.resumeThrows = true;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      clock.now += 1_000;
+      store.sendReply(answer.id, { words: "One more thing.", idempotency_key: "reply-throw" });
+      await until(() => fake.calls.includes("resume f1"));
+      clock.now += 120_000;
+      // The rejection lands a few ticks later (and would end the process uncaught).
+      await Bun.sleep(50);
+      expect(unhandled).toEqual([]);
+      expect(await launch.runOf(root.id)).toMatchObject({ state: "failed", again: true, cause: "It did not start again." });
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   test("a scratch launch's Delete purges its folder through its host", async () => {

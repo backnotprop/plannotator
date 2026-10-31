@@ -8,20 +8,26 @@
  *  - full permissions is an allow-all session ruleset; otherwise the person's own permissions decide;
  *  - Stop ends the server and the commands it left running; a reply starts a new server on the same session;
  *  - Delete's remove runs `opencode session delete`;
- *  - OpenCode's prompts read as the card's tools, with its own choices (no mode switch) and replies.
+ *  - OpenCode's prompts read as the card's tools, with its own choices (no mode switch) and replies;
+ *  - only a server proved ours is adopted or signalled (a reused pid, one that takes any request: never);
+ *  - Stop and Delete during a reply's restart end the new server, never throw, never make the folder again;
+ *  - a subagent's prompt reaches the card; OpenCode's cascade withdraws cards with the right words; a reply
+ *    the server did not take is sent again; a brief outage withdraws nothing, a longer one asks anew;
+ *  - an idle server is stopped (never one with a turn), says so, and a reply continues it.
  * The real OpenCode is never run: the fake (tests/helpers/fake-opencode/) is the only `opencode` on PATH.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxPermissionAnswer, inboxPermissionQuestion } from "@plannotator/core/inbox-permission";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { installFakeOpenCode } from "../../tests/helpers/fake-opencode";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import type { LaunchHostContext } from "./inbox-launch-host";
-import { createOpenCodeLaunchHost, openCodeAttachCommand, openCodeServerEnv, parseListening, parseOpenCodeVersion } from "./inbox-launch-opencode";
+import { OPENCODE_ALLOWED_EARLIER, OPENCODE_DENIED_EARLIER, createOpenCodeLaunchHost, isOpenCodeServe, openCodeAttachCommand, openCodeProcessOf, openCodeServerEnv, parseListening, parseOpenCodeVersion } from "./inbox-launch-opencode";
 import { openCodePermissionEvent, openCodePermissionTerms, openCodeReply, readOpenCodePermission } from "./inbox-launch-opencode-permission";
 import { openCode1LaunchWakes } from "../../apps/opencode-plugin/inbox";
 
@@ -109,7 +115,10 @@ describe("a launch's server", () => {
     expect(started.session).toMatch(/^ses_/);
     expect(started.ref).toBe(started.session);
     const serve = w.fake.serves()[0]!;
-    expect(serve.argv).toEqual(["serve", "--hostname", "127.0.0.1", "--port", "0"]);
+    // A free port the Inbox picked: never 0 (OpenCode would take its default 4096) and never 4096.
+    expect(serve.argv.slice(0, 4)).toEqual(["serve", "--hostname", "127.0.0.1", "--port"]);
+    const port = Number(serve.argv[4]);
+    expect(port > 0 && port !== 4096).toBe(true);
     expect(serve.cwd).toBe(w.folder);
     expect(serve.values).toMatchObject({ PLANNOTATOR_DATA_DIR: w.dataDir, PLANNOTATOR_INBOX_TOOL: "1", PLANNOTATOR_LAUNCH: LAUNCH_ID });
     // A password of its own (never the shell's other server's), and no Claude Code session tag.
@@ -117,8 +126,11 @@ describe("a launch's server", () => {
     expect(serve.env).not.toContain("PLANNOTATOR_SESSION_TAG");
     const file = join(w.dataDir, "inbox", "launch", LAUNCH_ID, "server.json");
     expect(statSync(file).mode & 0o777).toBe(0o600);
-    const server = JSON.parse(readFileSync(file, "utf8")) as { pid: number; url: string; password: string };
+    const server = JSON.parse(readFileSync(file, "utf8")) as { pid: number; started: string; url: string; password: string };
     expect(server.password).toMatch(/^[0-9a-f]{48}$/);
+    expect(server.url).toBe(`http://127.0.0.1:${port}`);
+    // The process as recorded: its start time, so a reused pid is never taken for it.
+    expect(server.started).toBe(openCodeProcessOf(server.pid)!.started);
     expect(server.password).not.toBe("the-person-s-other-server");
     // The session: its title, no ruleset (the person's own permissions decide).
     expect(w.fake.sessions()).toEqual([{ id: started.session, directory: w.folder, title: "Tidy the readme", permission: null }]);
@@ -179,6 +191,264 @@ describe("a launch's server", () => {
     const started = await w.host.start(w.launch, { name: "n", login: await w.ctx.loginEnv() });
     expect(started).toMatchObject({ ok: false, code: "failed" });
     expect(w.fake.processes().every((p) => !p.alive)).toBe(true);
+  }, 40_000);
+});
+
+/** A started launch with its thread: the store, the permission transport, the person's answers, a turn put to the server. */
+async function launched(options: { idleMs?: number; config?: Parameters<ReturnType<typeof installFakeOpenCode>["configure"]>[0] } = {}) {
+  const w = world();
+  if (options.config) w.fake.configure(options.config);
+  const host = options.idleMs ? createOpenCodeLaunchHost(w.ctx, { idleMs: options.idleMs }) : w.host;
+  const store = InboxStore.open(w.dataDir);
+  const project = store.ensureProject({ name: "project", root: w.folder });
+  const started = await host.start(w.launch, { name: "Tidy", login: await w.ctx.loginEnv() });
+  if (!started.ok) throw new Error(`did not start: ${started.text}`);
+  const record: InboxLaunchRecord = { ...w.launch, session_ref: started.session };
+  const root = store.startPersonThread({ project_id: project.id, body: "Tidy the readme.", to: { host: "opencode", session: started.session }, idempotency_key: "send-1", launch: record }).message;
+  const permissions = host.permissions({
+    store,
+    launchDir: (id) => join(w.dataDir, "inbox", "launch", id),
+    rootOf: (id) => (id === LAUNCH_ID ? store.message(root.id) : null),
+    roots: () => [store.message(root.id)!],
+    displayFolder: (path) => path,
+    host: { stateOf: () => null, readAt: () => 0 },
+    onChange: () => {},
+  });
+  const serverFile = join(w.dataDir, "inbox", "launch", LAUNCH_ID, "server.json");
+  const server = () => JSON.parse(readFileSync(serverFile, "utf8")) as { pid: number; started: string; url: string; password: string };
+  /** A turn, as the wake puts it (no Inbox runs in a unit test, so the test is the wake). */
+  const turn = async (text = "Go on (msg_01KAAAAAAAAAAAAAAAAAAAAAAA)") => {
+    const s = server();
+    const response = await fetch(`${s.url}/session/${started.session}/prompt_async?directory=${encodeURIComponent(w.folder)}`, {
+      method: "POST",
+      headers: { authorization: `Basic ${Buffer.from(`opencode:${s.password}`).toString("base64")}`, "content-type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text }] }),
+    });
+    expect(response.status).toBe(204);
+  };
+  /** The thread's permission questions, in order. */
+  const cards = () =>
+    store
+      .threadMessageIds(root.thread_id)
+      .map((id) => store.message(id)!)
+      .filter((m) => m.author.session?.startsWith("perm:") && store.questionsOf(m.id).length > 0);
+  const stateOf = (id: string) => store.questionsOf(id)[0]!.state;
+  /** The withdrawal follow-up's words for a question, or null. */
+  const withdrawnAs = (id: string) => {
+    for (const mid of store.threadMessageIds(root.thread_id)) {
+      const m = store.message(mid)!;
+      if (m.supersedes?.includes(id)) return m.body;
+    }
+    return null;
+  };
+  const answer = (messageId: string, pick: { selected?: string[]; other?: string }) => {
+    const question = store.questionsOf(messageId)[0]!;
+    const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: pick.selected ?? [], ...(pick.other ? { other: pick.other } : {}) };
+    const saved = store.savePicks(messageId, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true });
+    store.sendReply(messageId, { idempotency_key: `answer-${messageId}`, questions: [{ key: question.key, revision: saved[0]!.revision }] });
+  };
+  /** The engine's sweep, every 50 ms, until the test ends. */
+  let sweeping = true;
+  void (async () => {
+    while (sweeping) {
+      permissions.sweep();
+      await Bun.sleep(50);
+    }
+  })();
+  cleanup.push(() => {
+    sweeping = false;
+  });
+  return { ...w, host, store, thread: root, record, session: started.session, serverFile, server, turn, cards, stateOf, withdrawnAs, answer };
+}
+
+/** A process the test owns, in its own group (as a launch's server is): a stand-in for a reused pid. */
+function stranger(command: string[]): number {
+  const child = spawn(command[0]!, command.slice(1), { stdio: "ignore", detached: true, env: { PATH: "/usr/bin:/bin" } });
+  child.unref();
+  const pid = child.pid!;
+  cleanup.push(() => {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Gone.
+    }
+  });
+  return pid;
+}
+
+describe("only our own server is adopted or signalled", () => {
+  test("a stale server.json naming another program's pid: dropped, never adopted, never signalled", async () => {
+    const w = await launched();
+    await w.host.stop(w.session);
+    // The pid now runs something else (a reused pid), in its own group, with its start time on record.
+    const pid = stranger(["/bin/sleep", "60"]);
+    await until("the stand-in runs", () => openCodeProcessOf(pid) !== null);
+    const forged = JSON.stringify({ pid, started: openCodeProcessOf(pid)!.started, url: "http://127.0.0.1:9", password: "a".repeat(48) });
+    writeFileSync(w.serverFile, forged);
+    // Stop with no connection: never signalled.
+    expect((await w.host.stop(w.session)).text).toContain("not our server");
+    expect(alive(pid)).toBe(true);
+    // A reply: not adopted; a new server of our own instead. The stand-in still runs.
+    writeFileSync(w.serverFile, forged);
+    expect((await w.host.resume(w.record)).failure).toBeNull();
+    expect(w.server().pid).not.toBe(pid);
+    expect(w.fake.serves()).toHaveLength(2);
+    await w.host.stop(w.session);
+    expect(alive(pid)).toBe(true);
+    // What `ours` asks of the command line: `opencode serve` on the server's own port.
+    expect(isOpenCodeServe("/x/opencode serve --hostname 127.0.0.1 --port 5", 5)).toBe(true);
+    expect(isOpenCodeServe("/x/opencode serve --hostname 127.0.0.1 --port 5", 6)).toBe(false);
+    expect(isOpenCodeServe("/bin/sleep 60", 5)).toBe(false);
+  }, 60_000);
+
+  test("a server that takes any request (no password): never adopted, never signalled", async () => {
+    const w = await launched();
+    await w.host.stop(w.session);
+    // Another `opencode serve`, one that answers without a password (the person's own, say), on a port of its own.
+    const other = installFakeOpenCode({ bin: join(w.root, "bin-other"), state: join(w.root, "fake-other"), config: { acceptAnyAuth: true } });
+    cleanup.push(() => other.stopAll());
+    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    const pid = stranger([join(w.root, "bin-other", "opencode"), "serve", "--hostname", "127.0.0.1", "--port", String(port)]);
+    let up = false;
+    for (let i = 0; i < 100 && !up; i++) {
+      up = await fetch(`http://127.0.0.1:${port}/global/health`).then((r) => r.ok).catch(() => false);
+      if (!up) await Bun.sleep(100);
+    }
+    expect(up).toBe(true);
+    // Everything `ps` can tell matches; only its answer without a password gives it away.
+    expect(isOpenCodeServe(openCodeProcessOf(pid)!.command, port)).toBe(true);
+    const forged = JSON.stringify({ pid, started: openCodeProcessOf(pid)!.started, url: `http://127.0.0.1:${port}`, password: "b".repeat(48) });
+    writeFileSync(w.serverFile, forged);
+    expect((await w.host.stop(w.session)).text).toContain("not our server");
+    expect(alive(pid)).toBe(true);
+    writeFileSync(w.serverFile, forged);
+    expect((await w.host.sessions())(w.session)).toMatchObject({ state: "stopped" });
+    expect(w.logs.some((line) => line.includes("answers without the password"))).toBe(true);
+    expect(alive(pid)).toBe(true);
+  }, 60_000);
+});
+
+describe("Stop and Delete while it starts again", () => {
+  test("Stop during a reply's restart cancels it: the new server ends, nothing is left, no failure", async () => {
+    const w = await launched();
+    await w.host.stop(w.session);
+    w.fake.configure({ serveDelayMs: 4_000 });
+    const resuming = w.host.resume(w.record);
+    await until("the new server spawned", () => w.fake.serves().length === 2);
+    // server.json is written at once, before the wait: an Inbox that dies now leaves a server the next one can prove and end.
+    await until("server.json before the wait", () => existsSync(w.serverFile));
+    const pending = w.server();
+    expect(pending.pid).toBe(w.fake.serves()[1]!.pid);
+    expect((await w.host.stop(w.session)).exitCode).toBe(0);
+    expect(await resuming).toMatchObject({ exitCode: 0, failure: null });
+    await until("the new server ended", () => !alive(pending.pid));
+    expect(existsSync(w.serverFile)).toBe(false);
+  }, 60_000);
+
+  test("Delete during a reply's restart (its folder removed): no throw, the server ends, the folder is never made again", async () => {
+    const w = await launched();
+    await w.host.stop(w.session);
+    w.fake.configure({ serveDelayMs: 4_000 });
+    const resuming = w.host.resume(w.record);
+    await until("the new server spawned", () => w.fake.serves().length === 2);
+    const pid = w.fake.serves()[1]!.pid;
+    const dir = join(w.dataDir, "inbox", "launch", LAUNCH_ID);
+    rmSync(dir, { recursive: true, force: true });
+    await expect(resuming).resolves.toMatchObject({ exitCode: 0, failure: null });
+    await until("the server ended", () => !alive(pid));
+    expect(existsSync(dir)).toBe(false);
+  }, 60_000);
+});
+
+describe("permission prompts", () => {
+  test("a subagent's prompt (a child session, looked up): asked on the card with its note, answered on the server", async () => {
+    const w = await launched({ config: { subagent: true, prompts: [{ permission: "bash", patterns: ["ls"], always: ["ls *"], metadata: { command: "ls" } }] } });
+    await w.turn();
+    await until("the card", () => w.cards().length === 1);
+    const card = w.cards()[0]!;
+    expect(card.body).toContain("From a subagent (Look around (@explore subagent)).");
+    w.answer(card.id, { selected: ["Allow once"] });
+    await until("the reply", () => w.fake.replies().some((r) => r.reply === "once"));
+    const child = w.fake.sessions().find((s) => s.parentID === w.session)!;
+    expect(w.fake.replies().find((r) => r.reply === "once")!.session).toBe(child.id);
+  }, 30_000);
+
+  test("a subagent announced with session.created is known without a lookup", async () => {
+    const w = await launched({ config: { subagent: true, announceChild: true, prompts: [{ permission: "bash", patterns: ["ls"], metadata: { command: "ls" } }] } });
+    await w.turn();
+    await until("the card", () => w.cards().length === 1);
+    expect(w.cards()[0]!.body).toContain("From a subagent");
+  }, 30_000);
+
+  test("OpenCode's cascade: an always allows the prompts it covers, a reject denies the others; their cards say so", async () => {
+    const build = { permission: "bash", patterns: ["bun run build"], always: ["bun run *"], metadata: { command: "bun run build" } };
+    const check = { permission: "bash", patterns: ["bun run test"], always: ["bun run *"], metadata: { command: "bun run test" } };
+    const w = await launched({ config: { parallel: true, prompts: [build, check] } });
+    await w.turn();
+    await until("two cards", () => w.cards().length === 2);
+    const [first, second] = w.cards();
+    w.answer(first!.id, { selected: ["Allow `bun run` for this session"] });
+    await until("the second withdrawn", () => w.withdrawnAs(second!.id) !== null);
+    expect(w.withdrawnAs(second!.id)).toBe(OPENCODE_ALLOWED_EARLIER);
+    expect(w.fake.replies().filter((r) => r.cascade)).toHaveLength(1);
+
+    // The next turn: a Deny rejects the other prompt with it.
+    await Bun.sleep(800);
+    await w.turn();
+    await until("two more cards", () => w.cards().length === 4);
+    const [, , third, fourth] = w.cards();
+    w.answer(third!.id, { other: "Not now." });
+    await until("the fourth withdrawn", () => w.withdrawnAs(fourth!.id) !== null);
+    expect(w.withdrawnAs(fourth!.id)).toBe(OPENCODE_DENIED_EARLIER);
+  }, 30_000);
+
+  test("a reply the server did not take is sent again, never lost", async () => {
+    const w = await launched({ config: { failReplies: 2, prompts: [{ permission: "bash", patterns: ["ls"], metadata: { command: "ls" } }] } });
+    await w.turn();
+    await until("the card", () => w.cards().length === 1);
+    w.answer(w.cards()[0]!.id, { selected: ["Allow once"] });
+    await until("taken at the third try", () => w.fake.replies().some((r) => r.reply === "once"), 20_000);
+    expect(w.fake.failedReplies()).toHaveLength(2);
+  }, 30_000);
+
+  test("a brief outage strands nothing; after a longer one the server is adopted again and the prompt asked anew", async () => {
+    const w = await launched({ config: { prompts: [{ permission: "bash", patterns: ["ls"], metadata: { command: "ls" } }] } });
+    await w.turn();
+    await until("the card", () => w.cards().length === 1);
+    const card = w.cards()[0]!;
+    // About a second of no answer: the stream drops, the health checks retry, nothing is withdrawn.
+    w.fake.configure({ outageUntil: Date.now() + 1_200 });
+    await Bun.sleep(3_500);
+    expect(w.stateOf(card.id)).toBe("open");
+    // Longer: the connection is lost and the card withdrawn; once the server answers again it is adopted and asked anew.
+    w.fake.configure({ outageUntil: Date.now() + 6_000 });
+    await until("withdrawn", () => w.stateOf(card.id) === "superseded", 15_000);
+    await until("asked anew", () => w.cards().length === 2 && w.stateOf(w.cards()[1]!.id) === "open", 30_000);
+    w.answer(w.cards()[1]!.id, { selected: ["Allow once"] });
+    await until("the reply", () => w.fake.replies().some((r) => r.reply === "once"));
+    // The same server all along: adopted again, never ended.
+    expect(w.fake.serves()).toHaveLength(1);
+  }, 60_000);
+});
+
+describe("an idle server", () => {
+  test("stopped after the idle time with no turn and no prompt; the line says so; a reply continues it; a running turn keeps it", async () => {
+    const w = await launched({ idleMs: 600, config: { hold: true } });
+    const pid = w.server().pid;
+    // A turn runs: kept past the idle time.
+    await w.turn();
+    await Bun.sleep(1_800);
+    expect(alive(pid)).toBe(true);
+    // The turn ends: stopped once the idle time passes.
+    w.fake.configure({ hold: false });
+    await until("stopped for idle", () => !alive(pid), 15_000);
+    await until("server.json gone", () => !existsSync(w.serverFile));
+    expect((await w.host.sessions())(w.session)).toEqual({ status: null, state: "stopped", waitingFor: null, idleMinutes: 1 });
+    expect(w.host.live(w.session)).toBeNull();
+    // A reply continues the same session on a new server; the idle mark goes.
+    expect((await w.host.resume(w.record)).failure).toBeNull();
+    expect((await w.host.sessions())(w.session)).toMatchObject({ state: "running" });
+    await w.host.stop(w.session);
   }, 40_000);
 });
 
