@@ -2602,6 +2602,25 @@ function Inbox() {
   };
 
   /**
+   * The project menu's Rename… (a name) and Reset name (null): the project's
+   * `display_name` on the server, then the list read again, so the sidebar,
+   * the rows, search and the project's list all read the new name before the
+   * field closes. A refused name keeps the field open, with the toast.
+   */
+  const renameProject = async (projectId: string, name: string | null): Promise<boolean> => {
+    try {
+      await inboxApi.renameProject(projectId, name);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The name did not change.'));
+      return false;
+    }
+    await refreshList(false);
+    const now = latestRef.current?.projects.find((p) => p.id === projectId)?.name;
+    say(name === null ? `Name reset${now ? ` to ${now}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
+  /**
    * Settings' Unarchive: the thread goes back to the list, in whatever
    * section its state puts it, and opens there (owner ruling 2026-10-12).
    */
@@ -4333,6 +4352,7 @@ function Inbox() {
             projectCounts={projectCounts}
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
+            onProjectRename={renameProject}
             // Not on a page opened over the tailnet: the update routes answer 403 local_only there.
             update={pageUpdate}
             restarting={restarting}

@@ -66,7 +66,7 @@ export interface SearchPaletteProps {
   /** The project open in the list: a tie boost, and the Project chip's starting value (the person can clear it). */
   currentProject: string | null;
   /** The projects for the Project chip, with their names as the person reads them. */
-  projects: readonly { id: string; name: string; root: string }[];
+  projects: readonly { id: string; name: string; root: string; display_name?: string | null }[];
   /** `opened`: a result opened here (focus goes to it); `dismissed`: focus goes back to what opened the palette. */
   onClose: (reason: 'dismissed' | 'opened') => void;
   /** Open a result in this tab: the window writes the hash (a new history entry) and lands on the message. */

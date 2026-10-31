@@ -9,7 +9,11 @@
  *
  * When two projects have the same folder name, each also names its parent
  * folder ("api · work", "api · personal"), and as many parents as it takes to
- * tell them apart. Pure.
+ * tell them apart.
+ *
+ * A project the person renamed (`display_name`, Rename… in the project menu)
+ * reads that name as it is: no parent is added to it, and it takes no part in
+ * the others' clashes. Pure.
  */
 
 /** The parts of a path, either separator, without empty ones. */
@@ -26,9 +30,14 @@ function sameKey(name: string): string {
  * Each project's display name by id. `name` (the stored slug) is the fallback
  * when the root has no last segment (a filesystem root).
  */
-export function inboxProjectLabels(projects: readonly { id: string; root: string; name: string }[]): Map<string, string> {
+export function inboxProjectLabels(projects: readonly { id: string; root: string; name: string; display_name?: string | null }[]): Map<string, string> {
   const base = new Map<string, { parts: string[]; name: string }>();
+  const labels = new Map<string, string>();
   for (const project of projects) {
+    if (project.display_name) {
+      labels.set(project.id, project.display_name);
+      continue;
+    }
     const parts = segments(project.root);
     const last = parts[parts.length - 1];
     base.set(project.id, { parts, name: last ? last.normalize("NFC") : project.name });
@@ -38,7 +47,6 @@ export function inboxProjectLabels(projects: readonly { id: string; root: string
     const key = sameKey(name);
     groups.set(key, [...(groups.get(key) ?? []), id]);
   }
-  const labels = new Map<string, string>();
   for (const ids of groups.values()) {
     if (ids.length === 1) {
       labels.set(ids[0]!, base.get(ids[0]!)!.name);

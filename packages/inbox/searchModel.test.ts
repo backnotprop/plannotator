@@ -6,7 +6,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxSearchRow } from '@plannotator/core/inbox-search';
-import { countWords, markedRuns, moreLabel, resultTarget, searchGroups, searchRowMark, searchTime } from './search/model';
+import { countWords, markedRuns, moreLabel, projectNames, resultTarget, searchGroups, searchRowMark, searchTime } from './search/model';
 
 const project = { id: 'prj_a', name: 'api' };
 const base = { project, section: 'quiet' as const, archived: false, at: '2026-10-09T14:03:00Z' };
@@ -77,4 +77,14 @@ test('the mark a row starts with: the agent for a message, an outline for what t
   expect(searchRowMark(file)).toEqual({ kind: 'icon', icon: 'doc' });
   expect(searchRowMark(guide)).toEqual({ kind: 'icon', icon: 'book' });
   expect(searchRowMark(projectRow)).toEqual({ kind: 'icon', icon: 'folder' });
+});
+
+test("search's project names: a renamed project reads its display_name as it is, never with a parent", () => {
+  const names = projectNames([
+    { id: 'a', name: 'acme', root: '/code/acme/main', display_name: 'acme' },
+    { id: 'b', name: 'acme', root: '/code/old/acme' },
+  ]);
+  expect(names.get('a')).toBe('acme');
+  // The folder named acme does not count the renamed project as a clash.
+  expect(names.get('b')).toBe('acme');
 });

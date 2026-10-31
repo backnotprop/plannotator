@@ -115,7 +115,7 @@ export function machineCounts(sections: readonly InboxListSection[], model: Mach
   return counts;
 }
 
-type NamedProject = { id: string; root: string; name: string; machine?: string };
+type NamedProject = { id: string; root: string; name: string; display_name?: string | null; machine?: string };
 
 /**
  * The window's one name per project (`windowProjectNames`), told apart within each machine only: the same folder

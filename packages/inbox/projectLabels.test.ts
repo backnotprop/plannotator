@@ -121,3 +121,25 @@ test('a worktrees folder right in a home folder (or with only dot-folders up to 
   ]);
   expect(['mac', 'linux', 'win', 'dot', 'top'].map((id) => names.get(id))).toEqual(['foo', 'bar', 'baz', 'qux', 'quux']);
 });
+
+// Rename… in the project menu: the person's name for a project is drawn as it is.
+test('a renamed project reads its display_name as it is, and the others no longer clash with it', () => {
+  const acme = { id: 'prj_acme', root: '/Users/me/code/acme/main', name: 'acme', display_name: 'acme' };
+  const initech = { id: 'prj_initech', root: '/Users/me/code/initech/main', name: 'main · initech' };
+  const names = shortProjectNames([acme, initech]);
+  expect(names.get(acme.id)).toBe('acme');
+  // Before the rename the two `main` folders named their parents; now the other one is alone.
+  expect(names.get(initech.id)).toBe('main');
+  expect(shortProjectNames([{ ...acme, display_name: undefined }, initech]).get(acme.id)).toBe('main · acme');
+  // A name that is also another project's folder name gets no parent added.
+  const notes = { id: 'prj_notes', root: '/Users/me/code/notes', name: 'notes' };
+  const named = shortProjectNames([{ ...initech, display_name: 'notes' }, notes]);
+  expect(named.get(initech.id)).toBe('notes');
+  expect(named.get(notes.id)).toBe('notes');
+});
+
+test('the window-wide names (a pin outside the sidebar included) carry the display_name too', () => {
+  const acme = { id: 'prj_acme', root: '/Users/me/code/acme/main', name: 'acme', display_name: 'acme' };
+  const names = windowProjectNames({ projects: [acme], sidebar: [], sections: [], pins: [{ project: { id: acme.id } }] });
+  expect(names.get(acme.id)).toBe('acme');
+});

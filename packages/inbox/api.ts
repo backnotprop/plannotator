@@ -1004,8 +1004,11 @@ export const inboxApi = {
   /** The project menu's Archive all: every listed thread resolved (one that came back is marked read instead). */
   archiveProject: (projectId: string, batchId: string) =>
     post<ProjectBatchAnswer<{ resolved: string[]; read: string[] }>>(projectUrl(projectId, `/resolve`), { resolved: true, batch_id: batchId }),
+  /** The project menu's Rename… (a name) and Reset name (null): the project's `display_name`. */
+  renameProject: (projectId: string, name: string | null) =>
+    post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/name`), { name }),
   /** Its Undo: exactly the threads the batch took. */
-  unarchiveProject: (projectId: string, threads: { resolved: readonly string[]; read: readonly string[] }) =>
+  unarchiveProject:(projectId: string, threads: { resolved: readonly string[]; read: readonly string[] }) =>
     post<{ threads: InboxListRow[]; skipped: string[] }>(projectUrl(projectId, `/resolve`), { resolved: false, threads }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean } = {}) =>
