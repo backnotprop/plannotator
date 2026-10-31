@@ -2740,6 +2740,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
      keyboard is the card (the reply foot, the compose and search sheets), so the canvas is the card too, and no
      dark band shows there. theme.css's `body` paints --background; the desktop keeps it. */
   html:has(.pn-inbox), body:has(.pn-inbox) { background-color: var(--card); }
+  /* With the keyboard up (phone.ts trackKeyboard): the page itself is no taller than the part the keyboard leaves,
+     so iOS Safari has nothing to pan to (the window's top above the bars, blank canvas under its bottom), and the
+     root does not rubber-band. body and #root follow html's 100%. */
+  :root[data-ib-keyboard]:has(.pn-inbox) { height: var(--ib-vvh, 100%); overflow: hidden; overscroll-behavior: none; }
   .ib-main { padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); gap: 0; position: relative; overflow: hidden; }
   /* One screen at a time: the pane is the screen, edge to edge, with no card around it. */
   .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: 0; box-shadow: none; }
@@ -2860,6 +2864,11 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-pfoot [data-new-message] { width: 44px; padding: 0; justify-content: center; margin-left: auto; flex: none; }
   .pn-inbox .ib-pfoot [data-new-message] .ib-btn-l { display: none; }
   .ib-rtext, .ib-rmirror { font-size: var(--ib-fs-16-in, 16px); max-height: min(32vh, 30dvh); }
+  /* With the keyboard up the page no longer pans to what the keyboard covers (phone.ts), so the thread fits the
+     ~257 px an iPhone keyboard leaves: the thread's padding may close while you type, and the reply's words scroll
+     in their box past a fifth of that height (about two lines), so Send stays above the keyboard. */
+  :root[data-ib-keyboard] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
+  :root[data-ib-keyboard] :is(.ib-rtext, .ib-rmirror) { max-height: max(44px, calc(var(--ib-vvh, 100dvh) * 0.2)); }
   /* The skill picker: full width directly above the reply box, which sits on the keyboard; never a
      sheet (a sheet would close the keyboard and lose the caret). 44 px rows, at most 4½ showing,
      the description under the name; a tap inserts on pointerdown, so the keyboard stays up. */
