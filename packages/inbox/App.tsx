@@ -100,7 +100,7 @@ import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
-import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, seenHeldInNew } from './markRead';
+import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
 import type { PinnedAction } from './components/PinnedRow';
@@ -2337,6 +2337,49 @@ function Inbox() {
   };
 
   /**
+   * Mark unread (the owner's ask, 2026-10-31; markRead.ts `canMarkUnread`):
+   * the thread's latest agent message is new again, so its row is New and
+   * bold, as if the person had not opened it. Nothing is sent to the agent,
+   * and questions a Mark read set aside stay closed. From the open thread the
+   * thread closes, as a mail app's Mark unread does: left open, its next look
+   * would read it again, and the list shows the row back in New. Undo looks
+   * again (on a thread that was marked read, marks it read again).
+   */
+  const markUnread = async (threadId: string) => {
+    const before = rowOf(threadId);
+    const wasRead = (before?.read_at ?? null) !== null;
+    try {
+      await inboxApi.markUnread(threadId);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite();
+    if (routeRef.current.thread === threadId) {
+      if (fromCard) backToCard();
+      else close({ ...routeRef.current, thread: null, file: null });
+    }
+    showToast({
+      ...markUnreadToast(before ?? { subject: null }),
+      icon: 'unread',
+      onUndo: () => {
+        dismissToast();
+        void (async () => {
+          try {
+            if (wasRead) await inboxApi.markRead(threadId, true);
+            else await inboxApi.seen(threadId);
+          } catch (cause) {
+            showError(cause);
+            return;
+          }
+          await afterWrite();
+          say(wasRead ? 'Marked read again.' : 'Read again.');
+        })();
+      },
+    });
+  };
+
+  /**
    * 👍 Looks good (design record "inbox-acknowledge", approved 2026-10-15,
    * amended 2026-10-16), or take it back (the toast's Undo, `Z`, the pressed
    * button). The ack is recorded on the agent's latest message and the thread
@@ -2530,6 +2573,7 @@ function Inbox() {
   const rowAction = (row: InboxListRow, action: RowMenuAction) => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
     if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
+    if (action === 'mark-unread') return void markUnread(row.thread_id);
     if (action === 'archive') return void archive(row.thread_id, row.thread_id, true);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
@@ -4169,6 +4213,7 @@ function Inbox() {
             row={openThreadRow}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
+            onMarkUnread={() => void markUnread(thread.thread_id)}
             onAck={(messageId, on, agent) => void acknowledge(thread.thread_id, messageId, on, agent)}
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}

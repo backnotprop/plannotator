@@ -2,7 +2,7 @@
 
 Date: 2026-10-12. This is the model of where a thread sits in the Inbox list and why it moves. It is written from the code, and the code is checked against it: `packages/shared/inbox/store.test.ts` ("the thread-state model") runs generated and hand-written event sequences against the real store and an independent model of the rules below, and checks every invariant after every step. The phone apps replay the trace fixtures in `packages/shared/inbox/fixtures/thread-state/v1/` (see "Trace fixtures").
 
-Where the rules live: the store (`packages/shared/inbox/store.ts`: `listRow`, `readAt`, `markSeen`, `markRead`, `tellSetAside`, `markAgentChecked`, `resolveThread`, `sendMessage`, `sendReply`, `savePicks`), the sections (`packages/shared/inbox/list.ts`), the routes (`packages/server/inbox.ts`), the counts (`packages/inbox/held.ts` `waitingCount`) and the wire (`adr/implementation/inbox-mobile.md`, section 2).
+Where the rules live: the store (`packages/shared/inbox/store.ts`: `listRow`, `readAt`, `markSeen`, `markRead`, `markUnread`, `tellSetAside`, `markAgentChecked`, `resolveThread`, `sendMessage`, `sendReply`, `savePicks`), the sections (`packages/shared/inbox/list.ts`), the routes (`packages/server/inbox.ts`), the counts (`packages/inbox/held.ts` `waitingCount`) and the wire (`adr/implementation/inbox-mobile.md`, section 2).
 
 ## Terms
 
@@ -80,6 +80,7 @@ A came-back thread is in the sections in both views and is not in the archived l
 | The Send that skips | the same, `skip: [keys]` | Also every listed question still open, as a sent skip (`by_reply`). Only what the person chose with "Skip them"; a Send skips nothing else, and `skip_unanswered` is ignored (approval "inbox-explicit-skip") |
 | Mark read | `POST /api/inbox/threads/:id/read` | The read fields and the look on the root; `set_aside` on each waiting question |
 | Undo | `POST /api/inbox/threads/:id/unread` | The read fields cleared, the look put back while the read stood, the questions that Mark read closed restored; one reopened note per asking message for those of them the agent had been told about. Nothing when the root has no Mark read |
+| Mark unread | `POST /api/inbox/threads/:id/mark-unread` | The look on the root set to just before the latest agent message (it is unseen again: New); a standing Mark read's fields cleared, the questions it set aside left closed. Nothing when no agent wrote, the person's real reply came after the latest agent message, or it is unseen already |
 | Set-aside note | the server, 10 s after a Mark read (and after an Unarchive) | One person note per asking message naming the questions a Mark read closed and no note named yet, whatever happened since. None for a message closed by the archive |
 | Archive | `POST /api/inbox/messages/:id/resolve` `{ resolved: true }` | `resolved_at`. No write when already resolved |
 | Unarchive | the same, `{ resolved: false }` | `resolved_at` cleared; a Mark read made after the archive line is cleared in the same root line |

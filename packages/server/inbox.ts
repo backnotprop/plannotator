@@ -3076,6 +3076,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ thread: row });
       }
 
+      // Mark unread: the latest agent message is new again (New, bold); nothing is sent (store.markUnread).
+      const unreadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/mark-unread$/.exec(path);
+      if (unreadMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json({ thread: store.markUnread(unreadMatch[1]!) });
+      }
+
       // 👍 Looks good (design record "inbox-acknowledge"): silent, nothing sent and no
       // session woken; an ack on the agent's latest message and a Mark read.
       // `{ ack: false }` takes it back (the toast's Undo, the pressed button).

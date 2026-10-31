@@ -116,6 +116,8 @@ type Op =
   | { op: "seen"; target: number; through?: number }
   // Mark read, or its Undo (POST /api/inbox/threads/:id/read and /unread).
   | { op: "read"; target: number; read: boolean }
+  // Mark unread (POST /api/inbox/threads/:id/mark-unread): the latest agent message is new again.
+  | { op: "unread"; target: number }
   // An agent read the thread (read_thread, or wait_for_reply handed it the reply).
   | { op: "agentRead"; target: number }
   // The Undo window passed: the server tells the asking agent what a Mark read set aside.
@@ -358,6 +360,10 @@ function run(store: InboxStore, op: Op, messageIds: string[]): Outcome {
       case "read":
         if (!target) return "noop";
         store.markRead(threadOf(target), op.read);
+        return "ok";
+      case "unread":
+        if (!target) return "noop";
+        store.markUnread(threadOf(target));
         return "ok";
       case "agentRead":
         if (!target) return "noop";
@@ -1018,6 +1024,8 @@ function stateOpArbOf(body: fc.Arbitrary<string>, agentKeys: boolean): fc.Arbitr
           { arbitrary: fc.record({ op: fc.constant("draft" as const), target: fc.nat(), words: fc.boolean() }), weight: 2 },
           // Re-ask, in the property runs only; "s1" is also a Send's key, so a key used by the other is exercised.
           { arbitrary: fc.record({ op: fc.constant("reask" as const), target: fc.nat(), key: fc.constantFrom("r1", "r2", "s1") }), weight: 2 },
+          // Mark unread, in the property runs only (the trace fixtures were drawn without it).
+          { arbitrary: fc.record({ op: fc.constant("unread" as const), target: fc.nat() }), weight: 2 },
         ]
       : []),
   );
@@ -1495,6 +1503,27 @@ class ThreadStateModel {
         }
         return "ok";
       }
+      case "unread": {
+        // Mark unread: the latest agent message is unseen again; a standing Mark read is cleared, and the
+        // questions it set aside stay closed. Nothing when the person's reply came after it (a reply is a
+        // look), when no agent wrote, or when it is unseen already.
+        if (thread.resolved && !this.agentAfter(thread)) return "refused:thread_resolved";
+        let latestAgent = 0;
+        let lastPerson = 0;
+        for (const m of thread.messages) {
+          if (m.author === "agent") latestAgent = Math.max(latestAgent, m.tick);
+          else if (m.note === null) lastPerson = Math.max(lastPerson, m.tick);
+        }
+        if (latestAgent === 0 || lastPerson > latestAgent) return "ok";
+        const holds = this.readHolds(thread);
+        if (!holds && this.lookTick(thread) < latestAgent) return "ok";
+        if (holds) {
+          thread.read = null;
+          thread.seenBeforeRead = undefined;
+        }
+        thread.seen = latestAgent - 1;
+        return "ok";
+      }
       case "agentRead": {
         let latestPerson = 0;
         for (const m of thread.messages) if (m.author === "person") latestPerson = Math.max(latestPerson, m.tick);
@@ -1837,6 +1866,16 @@ function stateStep(world: StateWorld, op: Op, sameTick = false): StepResult {
     }
     // Mark read then Undo, back to back, gives the thread back exactly as it was.
     if (lastRead?.threadId === thread.id) expect(readSnapshot(world, thread.id)).toEqual(lastRead.before);
+  }
+  if (op.op === "unread" && !wasResolved) {
+    // Mark unread on an open thread an agent wrote last in: no Mark read stands, and its latest message is new.
+    const last = [...thread.messages].reverse().find((m) => m.note === null)!;
+    if (last.author === "agent") {
+      expect(row.read_at ?? null).toBeNull();
+      expect(row.unseen).toBeGreaterThan(0);
+    }
+    // Nothing reaches an agent: Mark unread writes no message.
+    expect(created).toEqual([]);
   }
   if (op.op === "ack" && op.on && readBefore && readBefore.read_at === null) {
     // 👍 then its Undo, back to back, gives the thread back exactly as it was (as Mark read's does).

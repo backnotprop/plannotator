@@ -231,6 +231,19 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
   expect(rowMenuActions(seen, false, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
   expect(rowMenuActions({ ...seen, read_at: '2026-10-20T00:00:00Z' }, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'unread', 'archive']);
   expect(rowMenuActions({ ...seen, resolved_at: '2026-10-20T00:00:00Z' }, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id']);
+  // Mark unread (canMarkUnread): a read row an agent wrote last in (`sent` null), opened or marked read; it takes
+  // Move back's place. Not where Mark read is offered, not after the person's own reply (Sent), not archived.
+  const read = { ...base, section: 'quiet', unread: false, sent: null } as typeof base;
+  expect(rowMenuActions(read, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'mark-unread', 'archive']);
+  expect(rowMenuActions({ ...read, read_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'mark-unread', 'archive']);
+  // Held in New (a seen update): both, Mark read first.
+  expect(rowMenuActions(read, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'mark-unread', 'archive']);
+  // A row that waits on the person takes Mark read only.
+  expect(rowMenuActions({ ...base, unread: true, sent: null } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
+  expect(rowMenuActions({ ...read, sent: { at: '2026-10-20T00:00:00Z' } } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
+  expect(rowMenuActions({ ...read, read_at: '2026-10-20T00:00:00Z', sent: { at: '2026-10-20T00:00:00Z' } } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'unread', 'archive']);
+  expect(rowMenuActions({ ...read, resolved_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id']);
+  expect(rowMenuActions(read, false)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
 });
 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
@@ -282,7 +295,7 @@ test.skipIf(!hasDom)('Copy thread on a row whose thread is not open reads it and
   expect((await serverSections()).get(ids.waiting)).toBe(before);
 });
 
-test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu then offers Move back', async () => {
+test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu then offers Mark unread, which brings it back to New, bold, sending nothing', async () => {
   await renderApp();
   await openMenu(ids.waiting);
   await choose('read');
@@ -297,9 +310,23 @@ test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu 
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Move back', 'Archive']);
-  await choose('unread');
-  await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the row back');
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Mark unread', 'Archive']);
+  const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
+  await choose('mark-unread');
+  expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
+  // New, not Waiting: the question Mark read set aside stays closed; the row is bold again.
+  await until(async () => (await serverSections()).get(ids.waiting) === 'new', 'the row back in New');
+  await until(() => toast()?.textContent?.includes('Marked unread') === true, 'the toast');
+  await until(() => rowWrap(ids.waiting)?.closest('[data-section-id="new"]') != null, 'the row drawn in New');
+  expect(rowButton(ids.waiting)!.classList.contains('ib-u')).toBe(true);
+  const after = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as typeof before;
+  expect(after.thread.messages.length).toBe(before.thread.messages.length);
+  expect(after.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['closed']);
+  // Undo looks again: marked read, it is marked read again.
+  await act(async () => {
+    toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
+  });
+  await until(async () => (await serverSections()).get(ids.waiting) === 'quiet', 'the row back in Quiet');
 });
 
 test.skipIf(!hasDom)('Archive takes the row out of the list with the Archived toast and its Undo', async () => {
