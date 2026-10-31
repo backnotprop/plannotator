@@ -3079,6 +3079,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
 
       // Mark read and its Undo: the thread leaves the top for Quiet, its waiting questions closed (store.markRead).
+      // `/unread` is Move back, which reopens them; Mark unread is `/mark-unread`, below.
       const readMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/(read|unread)$/.exec(path);
       if (readMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -3088,6 +3089,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const row = store.markRead(readMatch[1]!, read);
         if (read) scheduleSetAside(readMatch[1]!);
         return json({ thread: row });
+      }
+
+      // Mark unread: the latest agent message is new again (New, bold); nothing is sent, and a Mark read stands (store.markUnread).
+      const unreadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/mark-unread$/.exec(path);
+      if (unreadMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json(store.markUnread(unreadMatch[1]!));
       }
 
       // 👍 Looks good (design record "inbox-acknowledge"): silent, nothing sent and no
@@ -3175,10 +3185,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (action === "read") {
           const { error, ...batch } = markProjectRead(store, projectId);
           for (const id of batch.read) scheduleSetAside(id);
-          answer = { project: folder(), batch, threads: rows(batch.read), ...incomplete(error) };
+          answer = { project: folder(), batch, threads: rows([...batch.read, ...batch.looked]), ...incomplete(error) };
         } else if (action === "unread") {
           const ids = threadIdList(body.threads, "threads");
-          const result = unmarkProjectRead(store, projectId, ids);
+          const looked = body.looked === undefined ? [] : threadIdList(body.looked, "looked");
+          const result = unmarkProjectRead(store, projectId, ids, looked);
           answer = { project: folder(), threads: rows(result.done), skipped: result.skipped };
         } else {
           if (body.resolved !== undefined && typeof body.resolved !== "boolean") throw new InboxError("validation_error", "resolved: must be a boolean.", { field: "resolved" });

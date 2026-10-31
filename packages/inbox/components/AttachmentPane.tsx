@@ -2089,6 +2089,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 disableCodePathValidation
                 copyLabel="Copy file"
                 allowImages={false}
+                quickLabels={false}
                 refRepo={refRepo}
                 readOnly={props.readOnly}
                 onRestoreReport={(report) => setUnanchored(new Set(report.unanchored))}

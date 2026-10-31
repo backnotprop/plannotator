@@ -992,15 +992,17 @@ export const inboxApi = {
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>
     post<{ thread: InboxListRow }>(threadUrl(threadId, `/${read ? 'read' : 'unread'}`), {}),
+  /** Mark unread: the thread's latest agent message is new again (New, bold). Nothing is sent to the agent. */
+  markUnread: (threadId: string) => post<{ thread: InboxListRow; wrote: boolean; through_seq: number }>(threadUrl(threadId, '/mark-unread'), {}),
   /** 👍 Looks good on the agent's latest message (the thread is marked read; sent to the agent after the Undo window), or its Undo. */
   ack: (messageId: string, on: boolean) =>
     post<{ message: InboxMessageWire; thread: InboxListRow }>(messageUrl(messageId, `/ack`), { ack: on }),
   /** The project menu's Mark all as read: Mark read on every thread waiting on the person. */
   markProjectRead: (projectId: string, batchId: string) =>
-    post<ProjectBatchAnswer<{ read: string[] }>>(projectUrl(projectId, `/read`), { batch_id: batchId }),
-  /** Its Undo: exactly the threads the batch took. */
-  unmarkProjectRead: (projectId: string, threads: readonly string[]) =>
-    post<{ threads: InboxListRow[]; skipped: string[] }>(projectUrl(projectId, `/unread`), { threads }),
+    post<ProjectBatchAnswer<{ read: string[]; looked?: string[] }>>(projectUrl(projectId, `/read`), { batch_id: batchId }),
+  /** Its Undo: exactly the threads the batch took (`looked`: those whose Mark read stood, which go back to unread). */
+  unmarkProjectRead: (projectId: string, threads: readonly string[], looked: readonly string[] = []) =>
+    post<{ threads: InboxListRow[]; skipped: string[] }>(projectUrl(projectId, `/unread`), { threads, looked }),
   /** The project menu's Archive all: every listed thread resolved (one that came back is marked read instead). */
   archiveProject: (projectId: string, batchId: string) =>
     post<ProjectBatchAnswer<{ resolved: string[]; read: string[] }>>(projectUrl(projectId, `/resolve`), { resolved: true, batch_id: batchId }),

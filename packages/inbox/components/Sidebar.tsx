@@ -526,7 +526,7 @@ export function Sidebar(props: SidebarProps) {
       </div>
       <div className="ib-side-foot">
         {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
-        {props.connectPrompt !== false && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
+        {props.connectPrompt !== false && !phone && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
         <UpdateButton
           update={props.update}
           restarting={props.restarting}
@@ -644,8 +644,8 @@ export const CONNECT_COPY_FAILED_ANNOUNCEMENT = "Couldn't copy the connect promp
  * 2 s (or "Couldn't copy"), the marks stay, focus stays on it, and a polite
  * live region says the same. Its name reads "Copy prompt to connect an
  * agent": the visible words first, then what they are for. Not navigation,
- * so the phone sheet stays open to show it. Shown everywhere, the tailnet
- * included.
+ * so the phone sheet stays open to show it. Not drawn on a phone (owner:
+ * it does not need to show there); the tailnet page on a desktop shows it.
  */
 function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | null }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
