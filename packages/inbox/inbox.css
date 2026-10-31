@@ -392,6 +392,8 @@
     outline-offset: 2px;
   }
 }
+/* The head a Send focuses to keep the person's place (Thread.tsx `focusSent`): no ring, as after a click on Send. Cleared on blur. */
+.pn-inbox [data-fold-head][data-sent-focus]:focus-visible { outline: none; }
 .ib-mut { color: var(--muted-foreground); }
 /* A message's Reply and the hold-ups toggle: icon buttons, so the focus ring follows a radius. */
 button.ib-mut { border-radius: 6px; }
@@ -530,6 +532,20 @@ button.ib-mut { border-radius: 6px; }
 /* Shown only because the list shows it (nothing of it is listed): it leaves when the person goes elsewhere. */
 .ib-projrow[data-held] .ib-proj { color: var(--muted-foreground); }
 .ib-projrow[data-held] .ib-name { opacity: 0.7; }
+/* Rename… in the project menu: the row's name as a field, in the row's own place and size, with the window's
+   text-field look (.ib-fbk-contact: the border, the page's background, the ring on focus). */
+.pn-inbox .ib-proj-rename { display: block; width: 100%; height: 30px; padding: 0 8px; border-radius: var(--ib-rl-sm-s, 7px); border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); }
+.pn-inbox .ib-proj-rename::placeholder { color: var(--muted-foreground); opacity: 0.8; }
+/* Inside the field, as the rows' rings are: .ib-sidescroll clips sideways, and the field fills its width. */
+.pn-inbox .ib-proj-rename:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-proj-rename[aria-invalid] { border-color: var(--destructive); }
+/* The rename warning (approval "project-combine"). Its padding leaves room for the buttons' rings inside the same clip. */
+.ib-proj-clash { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; padding: 6px 4px 5px 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-proj-clash b { color: var(--foreground); font-weight: 600; }
+.ib-proj-clash > span { flex: 1 0 100%; min-width: 0; overflow-wrap: anywhere; }
+.pn-inbox .ib-proj-clash .ib-btn { flex: none; min-width: 0; max-width: 100%; }
+.pn-inbox .ib-proj-clash .ib-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-proj-clash .ib-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Pinned threads (approval "inbox-pinned-threads", variant Count): between Inbox / Drafts and Projects, with the
    Projects label's style. A row: the agent's mark, the subject, then the state (a Stopped / Holds N pill in the
    badges' tints, the open questions, a dot for news, the archive glyph for an archived thread). ⋯ is the project
@@ -3101,6 +3117,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-sb-sheet-in .ib-brand, .ib-sb-sheet-in .ib-side-foot { flex: none; }
   .ib-sb-sheet-in .ib-sidescroll { flex: 0 1 auto; min-height: 88px; }
   .ib-proj { height: 44px; font-size: var(--ib-fs-15, 15px); flex: none; }
+  /* Rename… on a phone: the row's 44 px, and 16 px text so the phone does not zoom into the field. */
+  .pn-inbox .ib-proj-rename { height: 44px; padding: 0 10px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-proj-clash .ib-btn { height: 44px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
   /* The project menu on a phone: ⋯ always shown (a 44 px target after the count), the menu a sheet from the
      bottom edge titled by the project, with 48 px items. No right-click and no long-press. */
   .ib-projrow > .ib-proj, .ib-projrow:has(:focus-visible) > .ib-proj, .ib-projrow[data-menu] > .ib-proj { padding-right: 46px; }

@@ -137,6 +137,37 @@ export function inboxThreadNameKey(name: string): string {
     .toLowerCase();
 }
 
+// ─────────────────────────────── Project names ───────────────────────────────
+
+/** The longest name a person can give a project (Rename… in the project menu), in characters. */
+export const INBOX_PROJECT_NAME_MAX = 64;
+
+/**
+ * A project's display name as the person typed it: trimmed, runs of
+ * whitespace as one space, NFC, 1..64 characters, no control characters or
+ * line breaks, no bidi controls, and something visible in it. The same rules
+ * as a thread name, with a shorter cap: the name has to fit the sidebar.
+ */
+export function checkInboxProjectName(value: unknown): { ok: true; name: string } | { ok: false; message: string } {
+  if (typeof value !== "string") return { ok: false, message: "must be a string or null." };
+  if (THREAD_NAME_CONTROL.test(value.replace(/[\t\n\r]/g, " "))) return { ok: false, message: "must not contain control characters." };
+  const name = value.normalize("NFC").replace(/\s+/g, " ").trim();
+  if (name === "" || inboxThreadNameKey(name) === "") return { ok: false, message: "must not be empty." };
+  if ([...name].length > INBOX_PROJECT_NAME_MAX) return { ok: false, message: `at most ${INBOX_PROJECT_NAME_MAX} characters.` };
+  if (THREAD_NAME_BIDI.test(name)) return { ok: false, message: "must not contain bidirectional control characters." };
+  return { ok: true, name };
+}
+
+/**
+ * A project record's `display_name` when it can be shown: a non-empty
+ * string, else null. A hand-edited file or another machine's list could
+ * carry anything, and a label must always be a string.
+ */
+export function inboxProjectDisplayName(project: { display_name?: unknown }): string | null {
+  const name = project.display_name;
+  return typeof name === "string" && name !== "" ? name : null;
+}
+
 // ─────────────────────────────── Subjects ───────────────────────────────
 
 /** A line break in any spelling: CR, LF, U+2028, U+2029. */
@@ -207,6 +238,13 @@ export interface InboxProject {
   /** Absolute realpath of the repository root (git toplevel) or folder. */
   root: string;
   created_at: string;
+  /**
+   * The name the person gave the project (Rename… in the project menu),
+   * shown as it is in place of its folder's name. Additive: absent until
+   * someone renames, and absent again after Reset name. Id, key, `name` (the
+   * slug) and root never change with it.
+   */
+  display_name?: string;
 }
 
 /**
