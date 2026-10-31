@@ -16,6 +16,8 @@ export interface TypeWorld {
   agents: SimAgent[];
   /** The ten attachments whose names say "relay" (the Files a "relay" query finds). */
   relayFiles: number;
+  /** Add a thread in a project with a 54-character name (the filter row's worst case); returns the name. */
+  longProject: () => Promise<string>;
 }
 
 const ask = (prompt: string, choices: string[]) => ['', ':::question', prompt, '', ...choices.map((c) => `- [ ] ${c}`), ':::'].join('\n');
@@ -107,5 +109,13 @@ export async function seedTypeWorld(input: { binary: string; env: Record<string,
   });
   await personReply(input.url, msg(latency), 'Good. Keep the relay on high priority only for questions.');
 
-  return { agents: [claude, pi, opencode, codex], relayFiles: 10 };
+  return {
+    agents: [claude, pi, opencode, codex],
+    relayFiles: 10,
+    longProject: async () => {
+      const name = 'northwind-industries-holdings-customer-portal-frontend';
+      await claude.send({ project_path: scratchProject(src, name), subject: 'Relay webhook for the customer portal', thread: 'portal-webhook', body: 'The customer portal now gets relay webhooks for new orders.' });
+      return name;
+    },
+  };
 }

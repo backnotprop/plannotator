@@ -693,6 +693,7 @@ test.skipIf(!hasDom)('the Type chip: All types sends the request as before; a pi
   expect(input().getAttribute('aria-activedescendant')).toBe(options()[0]!.id);
   expect(live()).toBe('60 files');
   expect(typeChip().textContent).toBe('Files');
+  // Pinned on purpose: the ×'s accessible name from the approved design notes.
   expect(host!.querySelector('[data-unset="type"]')!.getAttribute('aria-label')).toBe('Clear the type filter');
 
   // Show 10 more asks from 50, and appends.
@@ -744,7 +745,7 @@ test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filte
   respond = async (call) => (call.url.searchParams.get('group') === 'projects' ? answer({ q: 'relay', terms: ['relay'], totals: typeTotals, groups: { projects: [] }, recent: null }) : typeAnswers(call));
   await pickType('Projects');
   await waitFor(() => host!.querySelector('[data-search-none]') !== null);
-  expect(host!.querySelector('[data-search-none]')!.textContent).toBe('No matches for “relay”Searched only Projects. Search everywhere');
+  expect(host!.querySelector('[data-search-none] .ib-sp-e2')!.textContent).toContain('projects');
   await act(async () => {
     host!.querySelector<HTMLElement>('[data-search-none] [data-clear-filters]')!.click();
   });
@@ -758,4 +759,58 @@ test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filte
   expect(typeChip().textContent).toBe('All types');
   await type('relay');
   await plainAgain();
+});
+
+test.skipIf(!hasDom)('a type change on its way draws the last answer as it was asked, never under the new chip', async () => {
+  // Answers to a type's page wait until let go, so the last answer is still the one on screen.
+  let holding = false;
+  let release: (() => void) | null = null;
+  respond = async (call) => {
+    if (holding) {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    }
+    return typeAnswers(call);
+  };
+  const drawn = () => options().map((o) => o.getAttribute('data-result-id') ?? o.getAttribute('data-show-more') ?? o.getAttribute('data-compose-action'));
+  const dimmed = () => host!.querySelector('[role="listbox"]')!.hasAttribute('data-dim');
+  const highlighted = () => host!.querySelector(`#${input().getAttribute('aria-activedescendant')}`);
+  await renderTyped(true);
+  await type('relay');
+  await waitFor(() => groupHeadings().includes('Threads'));
+  const allTypes = drawn();
+  expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
+  await key(input(), { key: 'ArrowDown' });
+  await key(input(), { key: 'ArrowDown' });
+  const row = highlighted();
+  holding = true;
+
+  // All types → Files, its page held: the chip says Files, the list is still the All types answer, whole and dimmed.
+  await pickType('Files');
+  await waitFor(() => release !== null);
+  expect(typeChip().textContent).toBe('Files');
+  expect(dimmed()).toBe(true);
+  expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
+  expect(drawn()).toEqual(allTypes);
+  expect(highlighted()).toBe(row);
+  await act(async () => release!());
+  await waitFor(() => groupHeadings()[0] === 'Files60');
+  release = null;
+  expect(groupHeadings()).toEqual(['Files60']);
+  const filesPage = drawn();
+  expect(filesPage).toHaveLength(51);
+
+  // Files → All types, its answer held: the Files page as it was, no Actions added, its Show more kept.
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-unset="type"]')!.click();
+  });
+  await waitFor(() => release !== null);
+  expect(typeChip().textContent).toBe('All types');
+  expect(dimmed()).toBe(true);
+  expect(groupHeadings()).toEqual(['Files60']);
+  expect(drawn()).toEqual(filesPage);
+  await act(async () => release!());
+  await waitFor(() => groupHeadings().includes('Actions'));
+  expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
 });

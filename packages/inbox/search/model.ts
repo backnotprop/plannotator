@@ -144,10 +144,11 @@ export function projectNames(projects: readonly { id: string; name: string; root
   return out;
 }
 
-/** "Searched only plannotator, Archived": the scope a "No matches" names. */
-export function scopeWords(filters: SearchFilters, projectName: (id: string) => string): string[] {
+/** "Searched only plannotator, Archived", or with a picked type "Searched only files in plannotator": the scope a "No matches" names. */
+export function scopeWords(filters: SearchFilters, projectName: (id: string) => string, type: InboxSearchGroupId | null = null): string[] {
   const out: string[] = [];
-  if (filters.project) out.push(projectName(filters.project));
+  if (type) out.push(filters.project ? `${GROUP_LABELS[type].noun} in ${projectName(filters.project)}` : GROUP_LABELS[type].noun);
+  else if (filters.project) out.push(projectName(filters.project));
   if (filters.status) out.push(STATUS_OPTIONS.find((o) => o.value === filters.status)!.label);
   if (filters.from) out.push(filters.from === 'me' ? 'From me' : 'From agents');
   return out;
@@ -176,7 +177,7 @@ export function countWords(answer: { totals: Record<InboxSearchGroupId, number> 
 export function typeCountWords(answer: { totals: Record<InboxSearchGroupId, number> | null; indexing?: boolean } | null, q: string, type: InboxSearchGroupId): string {
   if (!answer || answer.indexing || !answer.totals || !q.trim()) return '';
   const n = answer.totals[type];
-  if (n === 0) return `No matches for ${q.trim()}`;
+  if (n === 0) return `No ${GROUP_LABELS[type].noun} match ${q.trim()}`;
   return `${formatCount(n)} ${n === 1 ? GROUP_LABELS[type].one : GROUP_LABELS[type].noun}`;
 }
 

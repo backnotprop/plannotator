@@ -97,6 +97,8 @@ interface Answered {
   key: string;
   q: string;
   model: SearchModel;
+  /** The type it was asked for (null: All types). The list draws an answer as its own type, so a pick still on its way never redraws the last answer under the new chip. */
+  type: InboxSearchGroupId | null;
 }
 
 const FOCUSABLE = 'input:not([disabled]), button:not([disabled]):not([tabindex="-1"])';
@@ -436,13 +438,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
           if (seq !== requestSeq.current) return;
           if (model.indexing) {
             // Skeletons and the indexing line until the index is built; ask again.
-            setAnswered({ key, q: query.trim(), model });
+            setAnswered({ key, q: query.trim(), model, type: nextType });
             retryTimer.current = setTimeout(() => run(query, nextFilters, nextType), SEARCH_INDEXING_RETRY_MS);
             return;
           }
           setPending(false);
           setExpanded({});
-          setAnswered({ key, q: query.trim(), model });
+          setAnswered({ key, q: query.trim(), model, type: nextType });
           setLive(nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters)));
         })
         .catch((cause) => {
@@ -491,11 +493,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const groups: SearchGroupView[] = useMemo(() => {
     if (!answered) return [];
     // A picked type with no words: nothing yet (the recent view is not that type).
-    if (type && !answered.q) return [];
+    if (answered.type && !answered.q) return [];
     // While the index builds there are no results yet, but the actions still show.
     const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
     // A picked type lists its group alone, without Actions.
-    if (type) return found;
+    if (answered.type) return found;
     const actionList = actions ? actions(answered.q) : [];
     if (actionList.length === 0) return found;
     const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
@@ -503,7 +505,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     // matched, or when the words name an action; below real results otherwise.
     const first = !answered.q.trim() || found.length === 0 || namesActionWord(answered.q);
     return first ? [group, ...found] : [...found, group];
-  }, [answered, expanded, actions, type]);
+  }, [answered, expanded, actions]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
@@ -546,7 +548,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     // Focus stays in the input, so the arrows go on from the expanded group.
     inputRef.current?.focus();
     // A picked type's answer already holds its first page: "Show 50 more" goes on from there.
-    const already = expanded[option.group] ?? (type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
+    const already = expanded[option.group] ?? (answered.type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
     const offset = already ? already.length : 0;
     try {
       const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, group: option.group, offset, limit: SEARCH_PAGE });
@@ -739,9 +741,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </button>
       </Tip>
     );
-    if (!set) return <span key={kind} className="ib-sp-fcell">{button}</span>;
+    if (!set) return <span key={kind} className="ib-sp-fcell" data-cell={kind}>{button}</span>;
     return (
-      <span key={kind} className="ib-sp-fcell ib-sp-fwrap">
+      <span key={kind} className="ib-sp-fcell ib-sp-fwrap" data-cell={kind}>
         {button}
         <button type="button" className="ib-sp-fx" data-unset={kind} aria-label={`Clear the ${kind} filter`} onClick={() => {
           setChip(kind, null);
@@ -827,9 +829,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
       );
     }
     if (options.length === 0) {
-      if (type && !answered.q) return <div className="ib-sp-empty ib-sp-quiet" data-search-type-empty="">Type to search {GROUP_LABELS[type].noun}.</div>;
+      if (answered.type && !answered.q) return <div className="ib-sp-empty ib-sp-quiet" data-search-type-empty="">Type to search {GROUP_LABELS[answered.type].noun}.</div>;
       if (!answered.q && !filtered) return <div className="ib-sp-empty ib-sp-quiet">Type to search threads, messages and files.</div>;
-      const scope = type ? [GROUP_LABELS[type].heading, ...scopeWords(filters, projectName)] : scopeWords(filters, projectName);
+      const scope = scopeWords(filters, projectName, answered.type);
       return (
         <div className="ib-sp-empty" data-search-none="">
           <span>

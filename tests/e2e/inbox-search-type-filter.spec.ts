@@ -329,3 +329,35 @@ test('a phone: the Type chip leads the sideways chip row and picks in the bottom
     await phone.close();
   }
 });
+
+// Last: it adds a project, which would change the counts above.
+test('every filter set with a long project name: the one desktop row keeps every chip and Clear filters inside the panel', async () => {
+  const longName = await world.longProject();
+  await page.reload();
+  await openFromSidebar(page);
+  await input(page).fill('relay');
+  await answered(page);
+  await palette(page).locator('[data-chip="project"]').click();
+  await menu(page).locator('[role="menuitemradio"]').filter({ hasText: longName }).click();
+  await palette(page).locator('[data-chip="status"]').click();
+  await menu(page).locator('[role="menuitemradio"]').filter({ hasText: 'New since you looked' }).click();
+  await palette(page).locator('[data-chip="from"]').click();
+  await menu(page).locator('[role="menuitemradio"]').filter({ hasText: 'Agents' }).click();
+  await pickFromMenu(page, 'Files');
+  await settled(page);
+  await expect(palette(page).locator('[data-unset]')).toHaveCount(4);
+  const row = palette(page).locator('.ib-sp-filters');
+  const clear = row.locator('[data-clear-filters]');
+  await expect(clear).toBeVisible();
+  // One row (every part on the same middle line), no sideways scrolling, nothing past the panel's edge.
+  const fit = await row.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const right = box.right - parseFloat(getComputedStyle(el).paddingRight);
+    const parts = [...el.querySelectorAll<HTMLElement>('.ib-sp-fcell, [data-clear-filters]')].map((p) => p.getBoundingClientRect());
+    return { scrolls: el.scrollWidth > el.clientWidth, past: parts.filter((r) => r.right > right + 0.5).length, rows: new Set(parts.map((r) => Math.round(r.top + r.height / 2))).size };
+  });
+  expect(fit).toEqual({ scrolls: false, past: 0, rows: 1 });
+  // The project chip gave way: its name is cut, whole in its tooltip.
+  expect(await palette(page).locator('[data-chip="project"] .ib-sp-fl').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await shot(page, '06-every-filter-set');
+});

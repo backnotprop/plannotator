@@ -6,7 +6,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxSearchRow } from '@plannotator/core/inbox-search';
-import { countWords, markedRuns, moreLabel, resultTarget, searchGroups, searchRowMark, searchTime, typeCountWords } from './search/model';
+import { countWords, markedRuns, moreLabel, resultTarget, scopeWords, searchGroups, searchRowMark, searchTime, typeCountWords } from './search/model';
 
 const project = { id: 'prj_a', name: 'api' };
 const base = { project, section: 'quiet' as const, archived: false, at: '2026-10-09T14:03:00Z' };
@@ -54,10 +54,21 @@ test('a picked type: the live region counts that type alone, from the totals, si
   expect(typeCountWords({ totals }, 'relay', 'files')).toBe('10 files');
   expect(typeCountWords({ totals }, 'relay', 'messages')).toBe('1,284 messages');
   expect(typeCountWords({ totals }, 'relay', 'projects')).toBe('1 project');
-  expect(typeCountWords({ totals: { ...totals, projects: 0 } }, ' relay ', 'projects')).toBe('No matches for relay');
+  // A no-match names the type, as the screen does.
+  expect(typeCountWords({ totals: { ...totals, projects: 0 } }, ' relay ', 'projects')).toBe('No projects match relay');
   expect(typeCountWords({ totals: null }, '', 'files')).toBe('');
   expect(typeCountWords({ totals }, '  ', 'files')).toBe('');
   expect(typeCountWords({ totals, indexing: true }, 'relay', 'files')).toBe('');
+});
+
+test('a no-match scope names a picked type once, with the project it was searched in', () => {
+  const name = (id: string) => (id === 'prj_a' ? 'relay' : id);
+  const filters = { project: 'prj_a', status: 'archived' as const, from: null };
+  // The type and the project read as one scope, not as two items of a list.
+  expect(scopeWords(filters, name, 'projects')).toEqual(['projects in relay', 'Archived']);
+  expect(scopeWords({ ...filters, project: null }, name, 'files')).toEqual(['files', 'Archived']);
+  // All types: the scope as before.
+  expect(scopeWords(filters, name)).toEqual(['relay', 'Archived']);
 });
 
 test('times: today, this year, another year', () => {
