@@ -136,7 +136,7 @@ function setup(
   };
   cleanup.push(async () => {
     for (const made of hosts) made.close();
-    for (const terminal of fake.terminals()) if (fake.alive(terminal.pid)) process.kill(terminal.pid, "SIGTERM");
+    for (const terminal of fake.terminals()) if (fake.alive(terminal.pid)) process.kill(terminal.pid, "SIGTERM"); // inbox-guard: own child (the fake pi this test's Terminal command ran)
     for (const shell of terminals) shell.kill("SIGTERM");
     await until("every fake pi to end", () => [...fake.starts(), ...fake.terminals()].every((call) => !fake.alive(call.pid)), 4_000).catch(() => fake.stopAll());
     bridge.stop();
@@ -243,7 +243,7 @@ describe("Pi's launch host, against the fake pi", () => {
     await Bun.sleep(900);
     expect(fake.alive(pid)).toBe(true);
     expect(fake.exits()).toHaveLength(0);
-    expect(host.terminal(launch, false)).toContain("kill -0");
+    expect(host.terminal(launch, false)).toContain("kill -0"); // inbox-guard: own child (text of the Terminal command, no signal)
   });
 
   // Round 3, Should 1: a `pi` wrapper that does not exec read as "another process", so Open in Terminal always refused.
@@ -252,7 +252,7 @@ describe("Pi's launch host, against the fake pi", () => {
     fake.setExec(false);
     const { launch, pid } = await started();
     const command = host.terminal(launch, false);
-    expect(command).toContain("kill -0");
+    expect(command).toContain("kill -0"); // inbox-guard: own child (text of the Terminal command, no signal)
     runTerminal(command);
     expect(await until("the Inbox's process to end", () => fake.exits().find((e) => e.pid === pid))).toMatchObject({ aborted: true });
     await until("the terminal's Pi", () => fake.terminals()[0]);
@@ -336,7 +336,7 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.starts()).toHaveLength(1);
     expect(restarted.attach(launch)).toBeNull();
     expect(restarted.terminal(launch, false)).toStartWith("echo ");
-    process.kill(terminal.pid, "SIGTERM");
+    process.kill(terminal.pid, "SIGTERM"); // inbox-guard: own child (the fake pi this test's Terminal command ran)
     await until("it to quit", () => !fake.alive(terminal.pid));
     await Bun.sleep(1_700);
     expect(restarted.live(session)).toBeNull();
@@ -386,7 +386,7 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.starts()).toHaveLength(1);
     expect(host.attach(launch)).toBeNull();
     // It quit there: the next reply continues the session here.
-    process.kill(terminal!.pid, "SIGTERM");
+    process.kill(terminal!.pid, "SIGTERM"); // inbox-guard: own child (the fake pi this test's Terminal command ran)
     await until("the bridge to lose it", () => !bridge.runStateOf(session));
     expect((await host.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(2);
@@ -410,7 +410,7 @@ describe("Pi's launch host, against the fake pi", () => {
     const command = host.terminal(b.launch, false);
     expect(command).toContain(b.session);
     expect(command).not.toStartWith("echo ");
-    expect(command).not.toContain("kill -0");
+    expect(command).not.toContain("kill -0"); // inbox-guard: own child (text of the Terminal command, no signal)
     release();
     expect(await restart).toMatchObject({ failure: null, text: expect.stringContaining("nothing started") });
     expect(fake.starts()).toHaveLength(2);
@@ -449,7 +449,7 @@ describe("Pi's launch host, against the fake pi", () => {
   test("the stopped line's cause is this launch's: ended on its own, open in Terminal, back from it, or the Inbox restarted", async () => {
     const { fake, host, makeHost, sweep, started } = setup({ noConnect: true }, { handoffMs: 300 });
     const crashed = await started();
-    process.kill(crashed.pid, "SIGKILL");
+    process.kill(crashed.pid, "SIGKILL"); // inbox-guard: own child (the fake pi this test started)
     await until("the host to see it end", () => host.stoppedNote(crashed.launch)?.includes("ended on its own"));
 
     const handed = await started();

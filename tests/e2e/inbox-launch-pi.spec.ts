@@ -334,7 +334,7 @@ test('Open in Terminal while the Inbox\'s Pi runs: it ends, the Terminal\'s Pi t
     expect(ours()).toHaveLength(1);
     expect(await menuItems(page)).not.toContain('Copy attach command');
     // It quit in Terminal. Once the bridge lost it, a reply starts Pi here again on the same session.
-    process.kill(terminal.pid, 'SIGTERM');
+    process.kill(terminal.pid, 'SIGTERM'); // inbox-guard: own child (the fake pi this spec's Terminal command ran)
     await reply(page, 'And the warm start.');
     await expect(p.locator('article.ib-message[data-author="agent"]').filter({ hasText: 'Done: And the warm start.' })).toBeVisible({ timeout: 120_000 });
     expect(ours()).toHaveLength(2);
