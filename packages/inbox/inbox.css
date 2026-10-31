@@ -2866,9 +2866,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-rtext, .ib-rmirror { font-size: var(--ib-fs-16-in, 16px); max-height: min(32vh, 30dvh); }
   /* With the keyboard up the page no longer pans to what the keyboard covers (phone.ts), so the thread fits the
      ~257 px an iPhone keyboard leaves: the thread's padding may close while you type, and the reply's words scroll
-     in their box past a fifth of that height (about two lines), so Send stays above the keyboard. */
-  :root[data-ib-keyboard] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
-  :root[data-ib-keyboard] :is(.ib-rtext, .ib-rmirror) { max-height: max(44px, calc(var(--ib-vvh, 100dvh) * 0.2)); }
+     in their box past a fifth of that height (about two lines), so Send stays above the keyboard. Only when under
+     400 px are left (`tight`): a roomier screen keeps its layout. */
+  :root[data-ib-keyboard="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
+  :root[data-ib-keyboard="tight"] :is(.ib-rtext, .ib-rmirror) { max-height: max(44px, calc(var(--ib-vvh, 100dvh) * 0.2)); }
   /* The skill picker: full width directly above the reply box, which sits on the keyboard; never a
      sheet (a sheet would close the keyboard and lose the caret). 44 px rows, at most 4½ showing,
      the description under the name; a tap inserts on pointerdown, so the keyboard stays up. */

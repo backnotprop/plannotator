@@ -142,7 +142,9 @@ export function trackKeyboard(): () => void {
     const layout = keyboardLayout(vv, root.clientHeight, window.scrollY, isPhone());
     if (layout.height !== null) {
       root.style.setProperty('--ib-vvh', `${layout.height}px`);
-      root.dataset.ibKeyboard = '';
+      // `tight`: under 400 px left (an iPhone's keyboard leaves ~257), where inbox.css closes the thread's padding
+      // and caps the reply's height so Send stays above the keyboard. A roomier screen (a Pixel's ~585) is untouched.
+      root.dataset.ibKeyboard = layout.height < 400 ? 'tight' : '';
       guard(true);
       if (layout.resetScroll) window.scrollTo(0, 0);
     } else {
