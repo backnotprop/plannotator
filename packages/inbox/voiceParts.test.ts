@@ -117,7 +117,7 @@ test('the mic dims only for what a press cannot get past', () => {
 });
 
 describe('the status line', () => {
-  const view = (over: Partial<VoiceView>): VoiceView => ({ phase: 'listening', prompting: false, mode: 'hold', armed: false, trouble: null, engine: null, kept: false, clipMs: 0, caret: 0, wash: null, said: '', ...over });
+  const view = (over: Partial<VoiceView>): VoiceView => ({ phase: 'listening', prompting: false, slow: false, mode: 'hold', armed: false, trouble: null, engine: null, kept: false, clipMs: 0, caret: 0, wash: null, said: '', ...over });
   const meter = (over: Partial<VoiceMeter>): VoiceMeter => ({ elapsedMs: 3000, level: 0.5, voice: true, voiceSeen: true, quietMs: 0, bars: Array.from({ length: VOICE_BARS }, () => ({ height: 0.1, voice: false })), ...over });
 
   test('a held recording has no Cancel, a running one does: its finger is on the button, and nothing else stops it', () => {
@@ -146,9 +146,11 @@ describe('the status line', () => {
     expect(voiceLine(view({ armed: true }), meter({ elapsedMs: VOICE_COUNTDOWN_MS + 1 }), true)).toMatchObject({ state: 'armed', cancel: false, danger: true });
   });
 
-  test('says nothing while the mic opens with no prompt', () => {
+  test('says nothing in the moment the mic opens, then a stuck mic gets a line with Cancel', () => {
     expect(voiceLine(view({ phase: 'opening', mode: null }), meter({}), false)).toBeNull();
     expect(voiceLine(view({ phase: 'opening', mode: null, prompting: true }), meter({}), false)?.state).toBe('asking');
+    for (const phone of [false, true]) expect(voiceLine(view({ phase: 'opening', mode: null, slow: true }), meter({}), phone)).toMatchObject({ state: 'opening', cancel: true });
+    expect(voiceLine(view({ phase: 'opening', mode: null, slow: true, prompting: true }), meter({}), false)?.state).toBe('asking');
   });
 });
 

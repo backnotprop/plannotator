@@ -5,7 +5,7 @@
 import { voiceClock } from './voiceAudio';
 import { VOICE_CAP_MS, VOICE_COUNTDOWN_MS, VOICE_NO_VOICE_MS, VOICE_QUIET_STOP_MS, VOICE_QUIET_WARN_MS, type VoiceMeter, type VoiceView } from './voiceSession';
 
-export type VoiceLineState = 'asking' | 'hold' | 'tap' | 'quiet' | 'armed' | 'nearcap' | 'silencestop' | 'sending';
+export type VoiceLineState = 'asking' | 'opening' | 'hold' | 'tap' | 'quiet' | 'armed' | 'nearcap' | 'silencestop' | 'sending';
 
 export interface VoiceLine {
   state: VoiceLineState;
@@ -19,12 +19,13 @@ export interface VoiceLine {
   danger?: boolean;
 }
 
-/** Nothing to say while idle, or in the instant the mic opens with no prompt. */
+/** Nothing to say while idle, or in the moment the mic opens with no prompt. */
 export function voiceLine(view: VoiceView, meter: VoiceMeter, phone: boolean): VoiceLine | null {
   const { elapsedMs, voice, voiceSeen, quietMs } = meter;
   const time = voiceClock(elapsedMs);
   if (view.phase === 'opening') {
-    return view.prompting ? { state: 'asking', word: 'Asking for the microphone', hint: phone ? '' : 'Answer the browser’s prompt', cancel: true } : null;
+    if (view.prompting) return { state: 'asking', word: 'Asking for the microphone', hint: phone ? '' : 'Answer the browser’s prompt', cancel: true };
+    return view.slow ? { state: 'opening', word: 'Opening the microphone', hint: '', cancel: true } : null;
   }
   if (view.phase === 'sending') return { state: 'sending', word: 'Transcribing', hint: phone ? '' : `${voiceClock(view.clipMs)} clip`, cancel: true };
   if (view.phase !== 'listening') return null;

@@ -6312,7 +6312,7 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-vbars > span { flex: none; width: 2px; height: 20px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); transform: scaleY(0.08); }
 .ib-vbars > span[data-v] { background: var(--primary); }
 .pn-inbox .ib-vmic { flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.pn-inbox .ib-vmic:hover { background: var(--muted); color: var(--foreground); }
+@media (hover: hover) { .pn-inbox .ib-vmic:hover { background: var(--muted); color: var(--foreground); } }
 .pn-inbox .ib-vmic:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .pn-inbox .ib-vmic[data-state="live"], .pn-inbox .ib-vmic[data-state="live"]:hover { background: var(--primary); color: var(--primary-foreground); }
 .pn-inbox .ib-vmic[data-state="armed"], .pn-inbox .ib-vmic[data-state="armed"]:hover { background: var(--muted); color: var(--destructive); }

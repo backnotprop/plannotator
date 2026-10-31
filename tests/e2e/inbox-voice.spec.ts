@@ -13,6 +13,7 @@
  *  - A touch hold, and a slide off to cancel.
  *  - Reply box, compose, and full screen's composer.
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
+ *  - A file or the artifacts opening over the box closes the microphone.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-voice.spec.ts`. PNGs land in
@@ -429,6 +430,39 @@ test('full screen’s composer: the words land in the reply', async () => {
   await context.close();
 });
 
+test('a file or the artifacts over the box: the mic closes and nothing is posted', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  // The microphone itself, not the window's idea of it.
+  await page.addInitScript(() => {
+    const devices = navigator.mediaDevices;
+    const real = devices.getUserMedia.bind(devices);
+    const streams: MediaStream[] = [];
+    (window as unknown as { micStreams: MediaStream[] }).micStreams = streams;
+    devices.getUserMedia = async (constraints) => {
+      const stream = await real(constraints);
+      streams.push(stream);
+      return stream;
+    };
+  });
+  const open_ = () => page.evaluate(() => (window as unknown as { micStreams: MediaStream[] }).micStreams.flatMap((stream) => stream.getTracks()).filter((track) => track.readyState === 'live').length);
+  const posts = w.upstreamCalls().length;
+  for (const cover of [`#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`, `#thread=${w.filed.thread}&artifacts`]) {
+    await openReply(page, w, w.filed.thread);
+    await mic(pane(page)).click();
+    await expect(line(pane(page), 'tap')).toBeVisible();
+    await expect.poll(open_).toBe(1);
+    await page.evaluate((hash) => {
+      window.location.hash = hash;
+    }, cover);
+    await expect.poll(open_).toBe(0);
+  }
+  await openReply(page, w, w.filed.thread);
+  await expect(line(pane(page), 'tap')).toHaveCount(0);
+  expect(w.upstreamCalls()).toHaveLength(posts);
+  await context.close();
+});
+
 test('a 403 and a challenge page: posted once, the drawn line, and only a press retries the same clip', async () => {
   const w = await mainWorld();
   const { context, page } = await open(speech, w);
@@ -657,6 +691,20 @@ test.describe('the announcement', () => {
     await page.reload();
     await page.waitForTimeout(SETTLE);
     await expect(dialog(page)).toHaveCount(0);
+    await context.close();
+  });
+
+  test('a Turn on voice that was not saved says so and points to Settings: the dialog won’t come back', async () => {
+    const w = await startWorld({ version: '0.30.0', used: true });
+    const { context, page } = await open(speech, w);
+    await page.route('**/api/inbox/settings', (route) => (route.request().method() === 'POST' ? route.fulfill({ status: 500, json: { error: 'Not saved.', code: 'config_not_saved' } }) : route.continue()));
+    await page.goto(w.url);
+    await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
+    await dialog(page).locator('[data-voice-intro-on]').click();
+    const toast = page.locator('.ib-toast');
+    await expect(toast).toContainText('Voice isn’t on');
+    await toast.getByRole('button', { name: 'Voice settings' }).click();
+    await expect(page).toHaveURL(/#settings\/voice$/);
     await context.close();
   });
 

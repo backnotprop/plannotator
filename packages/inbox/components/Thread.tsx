@@ -2126,6 +2126,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   screenRef.current = onScreenChange;
   const paneCovered = covered || fileCovers || artifactsOn;
   showingRef.current = !paneCovered;
+  // The status and Cancel go under the cover with the box, and this pane stays mounted: the mic must not go on unseen.
+  useEffect(() => {
+    if (paneCovered) voice.session.covered();
+  }, [paneCovered, voice.session]);
   useEffect(() => {
     screenRef.current?.({ threadId: thread.thread_id, covered: paneCovered });
   }, [thread.thread_id, paneCovered]);

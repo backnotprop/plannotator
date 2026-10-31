@@ -14,6 +14,7 @@ const hasDom = typeof document !== 'undefined';
 const { ComposerTokenTextarea } = (hasDom ? await import('@plannotator/ui/components/ComposerTokenTextarea') : {}) as typeof import('@plannotator/ui/components/ComposerTokenTextarea');
 const { InboxComposerField } = (hasDom ? await import('./components/ComposerField') : {}) as typeof import('./components/ComposerField');
 const { VoiceFoot } = (hasDom ? await import('./components/VoiceMic') : {}) as typeof import('./components/VoiceMic');
+const { VoiceSettings } = (hasDom ? await import('./components/VoiceSettings') : {}) as typeof import('./components/VoiceSettings');
 const { adoptVoiceSettings, useVoiceSession } = (hasDom ? await import('./voice') : {}) as typeof import('./voice');
 const { textareaField } = (hasDom ? await import('./voiceField') : {}) as typeof import('./voiceField');
 
@@ -111,6 +112,27 @@ describe.skipIf(!hasDom)('off', () => {
       expect(drawn.querySelector('[data-voice-mic]')).toBeNull();
       expect(drawn.querySelector('[data-voice-note]')).toBeNull();
       expect(asked.filter((url) => url.includes('/voice/'))).toEqual([]);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});
+
+describe.skipIf(!hasDom)('Settings for a tailnet guest', () => {
+  test('no switch and no key field, only why, and the status is never asked', () => {
+    const asked: string[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      return Response.json({});
+    }) as typeof fetch;
+    try {
+      adoptVoiceSettings({ on: false, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: 'the Mac', intro_due: false, guest: true });
+      const drawn = draw(<VoiceSettings />);
+      expect(drawn.querySelector('[role="switch"]')).toBeNull();
+      expect(drawn.querySelector('input')).toBeNull();
+      expect(drawn.textContent).toContain('only its owner');
+      expect(asked).toEqual([]);
     } finally {
       globalThis.fetch = real;
     }

@@ -160,7 +160,7 @@ function ApiKey({ onError }: { onError: (message: string | null) => void }) {
         <span className="ib-desc">Kept on this computer. It is never shown again or sent to any page.</span>
       </span>
       <span className="ib-ctl ib-vkeyctl">
-        <input id="ib-vkey" className="ib-vkey" type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" value={typed} onChange={(event) => setTyped(event.target.value)} />
+        <input id="ib-vkey" className="ib-vkey" type="password" autoComplete="new-password" spellCheck={false} placeholder="sk-…" value={typed} onChange={(event) => setTyped(event.target.value)} />
         <button type="submit" className="ib-btn" disabled={saving || !typed.trim()}>
           Save
         </button>
@@ -195,6 +195,13 @@ export function VoiceSettings() {
       setError(cause instanceof Error ? cause.message : 'The setting was not saved.');
     }
   };
+  if (voice?.guest) {
+    return (
+      <section className="ib-sgroup ib-sgroup-first" data-settings-voice="guest" aria-label="Voice">
+        <p className="ib-vpage-note">Voice uses the ChatGPT login or API key on {where}, so only its owner can use it from here.</p>
+      </section>
+    );
+  }
   return (
     <>
       <section className="ib-sgroup ib-sgroup-first" data-settings-voice="" aria-label="Voice">

@@ -127,6 +127,8 @@ function troubleNote(trouble: VoiceTrouble, api: boolean, where: string): Note {
       return { tone: 'quiet', text: 'Nothing heard, so nothing was sent.' };
     case 'nothing':
       return { tone: 'quiet', text: 'Nothing heard in that clip.' };
+    case 'badclip':
+      return { tone: 'error', text: 'That clip didn’t reach the Inbox whole, so nothing was sent. Try again.' };
     case 'blocked':
       return { tone: 'error', text: 'The browser blocked the microphone. Allow it in this site’s settings, then press the mic again.' };
     case 'micfailed':

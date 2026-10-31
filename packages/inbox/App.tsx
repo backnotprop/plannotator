@@ -4674,7 +4674,24 @@ function Inbox() {
             void inboxApi
               .saveVoice({ on: true, phones_only: phonesOnly })
               .then((saved) => adoptVoiceSettings(saved.voice))
-              .catch(() => {});
+              // The dialog never comes back: Settings is the way on from here.
+              .catch(() =>
+                showToast(
+                  {
+                    icon: 'warn',
+                    lead: 'Voice isn’t on',
+                    detail: 'The setting wasn’t saved. You can turn it on in Settings.',
+                    action: {
+                      label: 'Voice settings',
+                      onPress: () => {
+                        dismissToast();
+                        window.location.hash = '#settings/voice';
+                      },
+                    },
+                  },
+                  8000,
+                ),
+              );
           }}
           onKeep={voiceIntro.close}
         />
