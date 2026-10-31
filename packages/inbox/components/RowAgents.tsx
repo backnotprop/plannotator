@@ -4,20 +4,22 @@ import { agentName } from '../tags';
 import { Tip } from './Tip';
 
 /**
- * The agents in a list row. A wide row draws them before its project (`RowAgents`, approval "list-rows-mail-icons",
- * 2026-10-30; before the project since the owner's call of 2026-10-31): one bare 16 px mark per agent host, in the
- * order they joined the thread. A host with two or more sessions is one mark and "×N". Past three hosts, two marks
- * and "+N", N counting the sessions not drawn. The project hugs its own row's marks, 6 px after them (the owner,
- * 2026-10-31: no column that reserves width). A three-line or phone row draws them before its project too
- * (`RowAgentTiles`, approval "inbox-list-row-v2", 2026-10-30): the thread header's overlapping tiles, one per agent,
- * at most two and a "+N" tile counting the other agents. Either run is one image whose name lists every agent, the
- * hidden ones too.
+ * The agents in a list row, before its project, on the same grey tiles in every list row (the owner, 2026-10-31):
+ * 20 px with a 13 px logo, overlapping with no cut, so every logo stays whole and the run reads as one grey shape.
+ * A wide row (`RowAgents`, approval "list-rows-mail-icons", 2026-10-30): one tile per agent host, first to join first.
+ * At most three tiles; past three hosts, two. Then "+N" as plain text, N counting every session not drawn as a tile,
+ * a drawn host's second session too (the owner, 2026-10-31: "always show multiple agents before multiple of the
+ * same"): three Claude Code sessions and a Pi are Claude, Pi, "+2"; two Claude Code sessions are Claude, "+1". The
+ * project hugs its own row's tiles, 6 px after them (the owner, 2026-10-31: no column that reserves width). A
+ * three-line or phone row (`RowAgentTiles`, approval "inbox-list-row-v2", 2026-10-30): one tile per agent, at most
+ * two and a "+N" tile counting the other agents. Either run is one image whose name lists every agent, the hidden
+ * ones too.
  */
 
-/** A row draws up to three hosts' marks; past that two and "+N". */
+/** A wide row draws up to three hosts' tiles; past that two. */
 export const ROW_AGENT_MARKS = 3;
 
-/** One host in the row: its mark, and how many of its sessions are in the thread. */
+/** One host in the row: its tile, and how many of its sessions are in the thread. */
 export interface RowAgentGroup {
   host: string | null;
   name: string;
@@ -28,7 +30,7 @@ export interface RowAgentGroup {
  * The row's agents by host, first to join first. `participants` holds every session when the thread has two or
  * more (the server's `participants`); otherwise the row's one agent (`rowAgent`: the author, or the addressee of
  * a thread the person started). Hosts are told apart by their names, so two spellings of one host
- * (`claude`, `claude-code`) are one mark.
+ * (`claude`, `claude-code`) are one tile.
  */
 export function rowAgentGroups(participants: readonly InboxParticipant[] | undefined, agent: { kind: string; host?: string | null }): RowAgentGroup[] {
   const sessions = participants && participants.length > 0 ? participants : [{ host: agent.kind === 'agent' ? (agent.host ?? null) : null }];
@@ -42,11 +44,13 @@ export function rowAgentGroups(participants: readonly InboxParticipant[] | undef
   return groups;
 }
 
-/** The groups drawn as marks, and how many sessions the "+N" stands for (0: none). */
+/**
+ * The groups a wide row draws as tiles, one per host, and how many sessions the "+N" stands for (0: none): every
+ * session but the one each tile stands for, so a drawn host's second session is in the "+N".
+ */
 export function shownAgentGroups(groups: readonly RowAgentGroup[]): { shown: readonly RowAgentGroup[]; more: number } {
-  if (groups.length <= ROW_AGENT_MARKS) return { shown: groups, more: 0 };
-  const shown = groups.slice(0, ROW_AGENT_MARKS - 1);
-  return { shown, more: groups.slice(shown.length).reduce((n, g) => n + g.sessions, 0) };
+  const shown = groups.length <= ROW_AGENT_MARKS ? groups : groups.slice(0, ROW_AGENT_MARKS - 1);
+  return { shown, more: groups.reduce((n, g) => n + g.sessions, 0) - shown.length };
 }
 
 /** Every agent in words: "Claude Code, OpenCode and Codex", "2 Claude Code sessions". */
@@ -56,8 +60,8 @@ export function rowAgentWords(groups: readonly RowAgentGroup[]): string {
 }
 
 /**
- * The marks, one image named by every agent. `tip`: the words in a tooltip too (not on a phone, where a hover is a
- * first tap).
+ * A wide row's tiles and "+N", one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
+ * where a hover is a first tap).
  */
 export function RowAgents({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null }; tip?: boolean }) {
   const groups = rowAgentGroups(participants, agent);
@@ -65,12 +69,13 @@ export function RowAgents({ participants, agent, tip = true }: { participants: r
   const words = rowAgentWords(groups);
   const marks = (
     <span className="ib-ags" role="img" aria-label={words} data-row-agents={groups.reduce((n, g) => n + g.sessions, 0)}>
-      {shown.map((g) => (
-        <span className="ib-ag" key={g.name} aria-hidden="true" data-agent-host={g.host ?? ''}>
-          <HostMark host={g.host} />
-          {g.sessions > 1 && <span className="ib-agx">×{g.sessions}</span>}
-        </span>
-      ))}
+      <span className="ib-atiles" aria-hidden="true">
+        {shown.map((g) => (
+          <span className="ib-atile" key={g.name} data-agent-host={g.host ?? ''}>
+            <HostMark host={g.host} />
+          </span>
+        ))}
+      </span>
       {more > 0 && (
         <span className="ib-agplus" aria-hidden="true">
           +{more}
@@ -95,9 +100,9 @@ export function rowAgentTiles(groups: readonly RowAgentGroup[]): { shown: readon
 }
 
 /**
- * The three-line and phone rows' agents, drawn before the project (approval "inbox-list-row-v2", 2026-10-30): the
- * thread header's overlapping tiles, at most two, then a "+N" tile; one image named by every agent. `tip`: the words
- * in a tooltip too (not on a phone, where a hover is a first tap).
+ * The three-line and phone rows' agents, drawn before the project (approval "inbox-list-row-v2", 2026-10-30): at most
+ * two tiles, then a "+N" tile; one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
+ * where a hover is a first tap).
  */
 export function RowAgentTiles({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null }; tip?: boolean }) {
   const groups = rowAgentGroups(participants, agent);
