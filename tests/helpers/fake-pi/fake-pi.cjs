@@ -20,7 +20,9 @@
  *    `<uuid>`, only when `PLANNOTATOR_INBOX_TOOL` is on. A command: `delivered`,
  *    `agent_start`, busy, an optional extension dialog (`extension_ui_request`,
  *    waiting for the `extension_ui_response`), then the answer through the
- *    Inbox's MCP `send_message`, idle, `agent_settled`.
+ *    Inbox's MCP `send_message`, idle, `agent_settled`. With `turnError` the
+ *    turn instead ends as a provider error does (no answer; `agent_end` whose
+ *    last assistant message has `stopReason: "error"` and `errorMessage`).
  *
  * State in $FAKE_PI_STATE: config.json (read on each use), calls.jsonl (argv,
  * cwd, env names, the data dir and Inbox-tool values it got), pids.log,
@@ -171,9 +173,34 @@ async function localTurn() {
   busy = true;
   out({ type: "agent_start" });
   await askDialog();
+  if (await errorEnd()) return;
   busy = false;
   out({ type: "agent_end", willRetry: false });
   out({ type: "agent_settled" });
+}
+
+/**
+ * A turn that ends in an error (config `turnError`), as Pi's agent loop ends one: the run's last assistant
+ * message has `stopReason: "error"` and the provider's `errorMessage`, and nothing is answered. `retries`
+ * runs end in the same error with `willRetry: true` first (each followed by `auto_retry_start` and a new
+ * `agent_start`), then `auto_retry_end`; `settles: false` is a Pi before 0.80.4 (no `agent_settled`).
+ */
+async function errorEnd() {
+  const { turnError, retries = 0, settles } = config();
+  if (!turnError) return false;
+  const failed = { role: "assistant", content: [{ type: "text", text: "" }], provider: "openai-codex", model: "gpt-5.5", stopReason: "error", errorMessage: turnError, timestamp: Date.now() };
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    out({ type: "agent_end", messages: [failed], willRetry: true });
+    out({ type: "auto_retry_start", attempt, maxAttempts: retries, delayMs: 50, errorMessage: turnError });
+    await sleep(50);
+    out({ type: "agent_start" });
+  }
+  fs.appendFileSync(sessionFile, `${JSON.stringify({ type: "message", message: failed })}\n`);
+  busy = false;
+  out({ type: "agent_end", messages: [{ role: "user", content: "the prompt", timestamp: Date.now() }, failed], willRetry: false });
+  if (retries > 0) out({ type: "auto_retry_end", success: false, attempt: retries, finalError: turnError });
+  if (settles !== false) out({ type: "agent_settled" });
+  return true;
 }
 
 // ── The extension: the bridge poll ──
@@ -216,6 +243,13 @@ async function extension() {
     const until = Date.now() + (config().workMs ?? 600);
     while (!stopped && (Date.now() < until || config().hold)) await sleep(100);
     if (stopped) return;
+    if (!terminal && config().turnError) {
+      // The provider refused the turn: no answer through the Inbox, only the run's end on RPC.
+      idleSince = new Date().toISOString();
+      await post("/api/inbox/bridge/event", { type: "state", busy: false }).catch(() => {});
+      await errorEnd();
+      return;
+    }
     const first = command.body.split("\n")[0].slice(0, 60);
     const dialogPart = asked ? ` [dialog ${asked.answered && asked.answered.cancelled ? "cancelled" : "unanswered"}]` : "";
     const body = `${config().answer || "Done"}: ${first} (context ${context})${dialogPart}`;
@@ -254,3 +288,5 @@ async function extension() {
 void extension();
 // An extension that asks as the session starts (config `dialogOnStart`), before any turn.
 if (!terminal && config().dialogOnStart) void askDialog();
+// A turn as the session starts (config `turnOnStart`), as an extension's own prompt would run one.
+if (!terminal && config().turnOnStart) setTimeout(() => void localTurn(), 200);

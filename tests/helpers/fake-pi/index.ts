@@ -34,6 +34,14 @@ export interface FakePiConfig {
   hold?: boolean;
   /** The answer's first word. */
   answer?: string;
+  /** Each turn ends in this provider error instead of answering (`stopReason: "error"`, `errorMessage`). */
+  turnError?: string | null;
+  /** With `turnError`: this many runs end in it with `willRetry: true` first (Pi's auto-retry). */
+  retries?: number;
+  /** false: no `agent_settled` (a Pi before 0.80.4). */
+  settles?: boolean;
+  /** One turn of the RPC process's own as the session starts (no Inbox message). */
+  turnOnStart?: boolean;
 }
 
 export interface FakePiCall {

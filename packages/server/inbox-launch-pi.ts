@@ -29,6 +29,11 @@
  * dialog gives it) and says so in the thread: one note from the session, "Pi
  * asked something the Inbox can't show yet (“<title>”); answered Cancel."
  *
+ * A turn that ends in an error (the provider refused the model or the login: the run's last assistant
+ * message has `stopReason: "error"`) answers nothing through the Inbox, so the host says it: once Pi
+ * settles (no retry or compaction follows), one note from the session, "Pi's turn ended with an error:
+ * <Pi's own error text>". The person's agent settings are theirs to fix; the Inbox changes nothing.
+ *
  * One writer per session file, always. Open in Terminal hands the session
  * over: once the terminal shows, the Inbox's process ends (its turn aborted);
  * the Terminal command waits for it and runs Pi with the Inbox tool on (so it
@@ -74,6 +79,13 @@ const HANDOFF_MS = 60_000;
 const TERMINAL_OPEN_MS = 30_000;
 /** The longest dialog title the thread note quotes. */
 const NOTE_TITLE_MAX = 80;
+/** The longest error text a turn's error note quotes. */
+const NOTE_ERROR_MAX = 300;
+/**
+ * A Pi before 0.80.4 sends no `agent_settled`: how long after a run's last `agent_end` its error is held for
+ * one (or for a compaction or retry that may still follow) before the note goes anyway.
+ */
+const SETTLE_MS = 1_500;
 
 const DIALOGS = new Set(["select", "confirm", "input", "editor"]);
 
@@ -177,12 +189,17 @@ export function piSessionProcesses(listing: string, session: string, exclude: It
  * Markdown's marks escaped, at most 80 characters.
  */
 export function piDialogTitle(title: unknown): string {
-  const flat = String(typeof title === "string" ? title : "")
+  return noteText(title, NOTE_TITLE_MAX);
+}
+
+/** Text from Pi as a note quotes it: one line, controls and invisible characters dropped, Markdown's marks escaped, `max` characters at most. */
+function noteText(text: unknown, max: number): string {
+  const flat = String(typeof text === "string" ? text : "")
     // Controls, bidi and other invisible format characters go; the zero-width joiner stays (it holds an emoji together).
     .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const short = [...flat].length > NOTE_TITLE_MAX ? `${[...flat].slice(0, NOTE_TITLE_MAX - 1).join("").trimEnd()}…` : flat;
+  const short = [...flat].length > max ? `${[...flat].slice(0, max - 1).join("").trimEnd()}…` : flat;
   // Only marks the Inbox's inline Markdown both formats and unescapes (InlineMarkdown's
   // backslash rule): an escaped `:` or `<` would show its backslash; React keeps `<` text.
   return short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
@@ -192,6 +209,23 @@ export function piDialogTitle(title: unknown): string {
 export function piDialogNote(title: unknown): string {
   const shown = piDialogTitle(title);
   return shown ? `Pi asked something the Inbox can't show yet (“${shown}”); answered Cancel.` : "Pi asked something the Inbox can't show yet; answered Cancel.";
+}
+
+/**
+ * Pi's own error text when a run ended in an error (an `agent_end` whose last assistant message has
+ * `stopReason: "error"`, as a provider refusing the model or the login); undefined when it did not, "" when Pi gave no text.
+ */
+export function piTurnError(messages: unknown): string | undefined {
+  if (!Array.isArray(messages)) return undefined;
+  const last = [...messages].reverse().find((message) => (message as { role?: unknown } | null)?.role === "assistant") as { stopReason?: unknown; errorMessage?: unknown } | undefined;
+  if (last?.stopReason !== "error") return undefined;
+  return typeof last.errorMessage === "string" ? last.errorMessage : "";
+}
+
+/** The thread note for a turn that ended in an error: Pi's own words, one line. */
+export function piTurnErrorNote(error: string): string {
+  const shown = noteText(error, NOTE_ERROR_MAX);
+  return shown ? `Pi's turn ended with an error: ${shown}` : "Pi's turn ended with an error.";
 }
 
 /** Pi's default sessions folder for `cwd` under `agentDir` (its `getDefaultSessionDirPath`). */
@@ -233,6 +267,8 @@ interface PiProcess {
   ended: Promise<number>;
   /** The session's bridge poll count once it ended: a later poll is another Pi's (the bridge keeps this one live for 30 s). */
   pollsAtExit: number | null;
+  /** The error a run just ended in, held until Pi settles (no retry, compaction or continuation follows). */
+  turnError: { text: string; timer: ReturnType<typeof setTimeout> | null } | null;
 }
 
 /** A restart under way (`resume`): what cancelled it, if anything, and when it is over. */
@@ -302,6 +338,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   /** The engine's permission context, for the thread notes (set once by `permissions`). */
   let threads: LaunchPermissionContext | null = null;
   let rpcIds = 0;
+  let errorNotes = 0;
 
   const running = (session: string): PiProcess | null => {
     const p = procs.get(session);
@@ -463,9 +500,42 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       }
       return;
     }
-    if (event.type === "agent_start") p.busy = true;
-    else if (event.type === "agent_settled" || (event.type === "agent_end" && event.willRetry !== true)) p.busy = false;
+    if (event.type === "agent_start") {
+      p.busy = true;
+      // A retry or continuation: its own end decides.
+      holdError(p, null);
+    } else if (event.type === "agent_settled" || (event.type === "agent_end" && event.willRetry !== true)) p.busy = false;
     else if (event.type === "extension_ui_request" && DIALOGS.has(String(event.method))) dialog(p, event);
+    if (event.type === "agent_end" && event.willRetry !== true) {
+      const error = piTurnError(event.messages);
+      holdError(p, error === undefined ? null : error);
+    } else if (event.type === "agent_settled") turnErrorNote(p);
+    // A compaction may continue the run (an overflow): the held error waits for it.
+    else if (event.type === "compaction_start" && p.turnError?.timer) {
+      clearTimeout(p.turnError.timer);
+      p.turnError.timer = null;
+    } else if (event.type === "compaction_end" && p.turnError && !p.turnError.timer) holdError(p, p.turnError.text);
+  };
+
+  /** Hold a run's error (null: none) until Pi settles, or `SETTLE_MS` for a Pi that never says so. */
+  const holdError = (p: PiProcess, text: string | null) => {
+    if (p.turnError?.timer) clearTimeout(p.turnError.timer);
+    p.turnError = null;
+    if (text === null || p.exited) return;
+    const timer = setTimeout(() => turnErrorNote(p), SETTLE_MS);
+    (timer as { unref?: () => void }).unref?.();
+    p.turnError = { text, timer };
+  };
+  /** The run ended in an error and nothing follows: one note in the thread with Pi's own words (and the logs). */
+  const turnErrorNote = (p: PiProcess) => {
+    const held = p.turnError;
+    if (!held) return;
+    if (held.timer) clearTimeout(held.timer);
+    p.turnError = null;
+    // Never into a launch folder a Delete removed meanwhile.
+    if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `pi ${p.session}: the turn ended with an error: ${held.text.slice(0, 2000)}`);
+    ctx.log(`Inbox launch ${p.launchId}: a Pi turn ended with an error: ${held.text.slice(0, 200)}`);
+    note(p.launchId, p.session, piTurnErrorNote(held.text), `pi-error-${p.launchId}-${Date.now()}-${++errorNotes}`);
   };
 
   type SpawnResult = { ok: true } | { ok: false; cancelled: boolean; missing: boolean; text: string; output: string };
@@ -484,7 +554,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       const text = error instanceof Error ? error.message : String(error);
       return { ok: false, cancelled: false, missing: false, text: `Pi did not start: ${text}`, output: text };
     }
-    const p: PiProcess = { launchId: launch.id, session, proc, exited: false, exitCode: null, busy: false, ending: null, waiters: new Map(), stderr: "", ended: null as never, pollsAtExit: null };
+    const p: PiProcess = { launchId: launch.id, session, proc, exited: false, exitCode: null, busy: false, ending: null, waiters: new Map(), stderr: "", ended: null as never, pollsAtExit: null, turnError: null };
     p.ended = proc.exited.then((code) => {
       p.exited = true;
       p.exitCode = code;

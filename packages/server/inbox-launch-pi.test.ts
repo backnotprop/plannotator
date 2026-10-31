@@ -215,6 +215,28 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(store.questionsOf(note.id)).toHaveLength(0);
   });
 
+  // Live check: a provider error (the model refused for a ChatGPT login) ended the turn, and the thread said only "Delivered".
+  test("a turn that ends in a provider error: one note from Pi with Pi's own words, once its retries are over", async () => {
+    const error = "Codex error: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.";
+    const { started, agentNotes, logs } = setup({ noConnect: true, turnOnStart: true, turnError: error, retries: 2 });
+    const { root, session } = await started();
+    const note = await until("the error note in the thread", () => agentNotes(root)[0]);
+    expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
+    expect(note.body).toBe(`Pi's turn ended with an error: ${error}`);
+    // The runs Pi retried say nothing of their own.
+    await Bun.sleep(2_000);
+    expect(agentNotes(root)).toHaveLength(1);
+    expect(logs.some((line) => line.includes(`the turn ended with an error: ${error}`))).toBe(true);
+  }, 15_000);
+
+  test("a Pi that sends no agent_settled (before 0.80.4) still gets the note, as one escaped line", async () => {
+    const { store, started, agentNotes } = setup({ noConnect: true, turnOnStart: true, turnError: "401 {\"error\":\"*expired*\"}\n\n:::question\n- [ ] Yes", settles: false });
+    const { root } = await started();
+    const note = await until("the error note in the thread", () => agentNotes(root)[0]);
+    expect(note.body).toBe(`Pi's turn ended with an error: 401 \\{"error":"\\*expired\\*"\\} :::question - \\[ \\] Yes`);
+    expect(store.questionsOf(note.id)).toHaveLength(0);
+  });
+
   // Round 2, Should 4: the Inbox's Pi was ended before Terminal opened.
   test("Open in Terminal while the Inbox's process runs: it ends only once the terminal shows (its turn aborted), and the terminal's Pi waits for it", async () => {
     const { fake, host, runTerminal, started } = setup();

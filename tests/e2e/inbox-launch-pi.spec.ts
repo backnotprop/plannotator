@@ -20,6 +20,7 @@
  *     continues it; the reply does.
  *  3. An extension dialog over RPC: answered Cancel at once, and the thread
  *     shows a note from Pi saying so (escaped, one line).
+ *     A turn that ends in a provider error: one note from Pi with its words.
  *  4. Open in Terminal while the Inbox's Pi runs: that process ends (its turn
  *     aborted), the Terminal command (run here in a plain shell) waits for it
  *     and runs Pi with the Inbox tool on; a reply goes to that Pi, nothing
@@ -290,6 +291,27 @@ test('an extension dialog over RPC: answered Cancel at once, and the thread says
     expect(read.thread.messages.filter((m) => m.body.startsWith('Pi asked something'))).toHaveLength(1);
   } finally {
     fake.configure({ dialog: null });
+  }
+});
+
+// Live check: the provider refused the model and the thread said only "Delivered to Pi".
+test('a turn that ends in a provider error: the thread shows Pi\'s own error in one note', async () => {
+  const { page, fake } = world;
+  const error = "Codex error: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.";
+  fake.configure({ turnError: error, retries: 1 });
+  try {
+    const { threadId } = await launch(page, 'Summarize the open issues.');
+    const p = pane(page);
+    const note = p.locator('article.ib-message[data-author="agent"]').filter({ hasText: 'turn ended with an error: Codex error' });
+    await expect(note).toBeVisible({ timeout: 30_000 });
+    await expect(note).toContainText('model is not supported when using Codex with a ChatGPT account.');
+    await expect(p.locator('[data-run]')).toHaveCount(0, { timeout: 20_000 });
+    const read = await readThread(page, threadId);
+    const agents = read.thread.messages.filter((m) => m.author.kind === 'agent');
+    expect(agents.map((m) => m.body)).toEqual([`Pi's turn ended with an error: ${error}`]);
+    expect(agents[0]!.author).toMatchObject({ host: 'pi', name: 'Pi' });
+  } finally {
+    fake.configure({ turnError: null, retries: 0 });
   }
 });
 
