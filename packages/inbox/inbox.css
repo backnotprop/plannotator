@@ -5333,7 +5333,11 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox [data-pn-tooltip]:has(> .ib-wcard) { padding: 0; background: transparent; box-shadow: none; max-width: none; border-color: transparent; }
 .ib-wcard {
   --ib-wc-hair: color-mix(in oklab, var(--foreground) 9%, transparent);
-  width: min(296px, calc(100vw - 16px)); background: var(--popover); color: var(--popover-foreground);
+  /* Sized by its content: as wide as its longest line (a row's label, the header with the thread's name), never
+     under 296 px, never over 460 px (a 60-character label at 13 px is ~400 px, plus the Q label and the padding),
+     and never past the viewport less the 16 px gutter. Only a line past the cap wraps. */
+  width: max-content; min-width: min(296px, calc(100vw - 16px)); max-width: min(460px, calc(100vw - 16px));
+  background: var(--popover); color: var(--popover-foreground);
   border: 1px solid var(--ib-wc-hair); border-radius: var(--ib-lr-lg, 12px); overflow: hidden;
   box-shadow: var(--ib-float-s, var(--float-shadow));
   font-size: var(--ib-fs-13, 13px); line-height: 1.4; font-weight: 400; text-align: left; white-space: normal; overflow-wrap: anywhere;
@@ -5342,12 +5346,12 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-wc-tri { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; flex: none; }
 .ib-wc-stop .ib-wc-tri { background: color-mix(in oklch, var(--destructive) 13%, transparent); color: var(--ib-badge-stop-fg-soft); }
 .ib-wc-hold .ib-wc-tri { background: color-mix(in oklch, var(--warning) 17%, transparent); color: var(--ib-badge-hold-fg-soft); }
-.ib-wc-h { font-weight: 600; }
-.ib-wc-chip { margin-left: auto; font-size: var(--ib-fs-11-5, 11.5px); padding: 1px 7px; border-radius: 999px; background: color-mix(in oklab, var(--foreground) 7%, transparent); color: var(--muted-foreground); max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-wc-h { font-weight: 600; flex: none; white-space: nowrap; }
+.ib-wc-chip { margin-left: auto; font-size: var(--ib-fs-11-5, 11.5px); padding: 1px 7px; border-radius: 999px; background: color-mix(in oklab, var(--foreground) 7%, transparent); color: var(--muted-foreground); flex: 0 1 auto; min-width: 0; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-wc-row { position: relative; display: flex; gap: 10px; align-items: baseline; padding: 7px 12px; }
 .ib-wc-row::before, .ib-wc-sub::before { content: ""; position: absolute; top: 0; left: 12px; right: 0; height: 1px; background: var(--ib-wc-hair); }
 .ib-wc-q { flex: none; min-width: 20px; white-space: nowrap; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-wc-t { min-width: 0; }
+.ib-wc-t { min-width: 0; text-wrap: pretty; }
 .ib-wc-more { color: var(--muted-foreground); }
 .ib-wc-sub { position: relative; padding: 9px 12px 3px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); }
 .ib-wc-sub + .ib-wc-row::before { display: none; }
