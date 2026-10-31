@@ -52,6 +52,8 @@ export interface FakeOpenCodeConfig {
   failReplies?: number;
   /** Until then (epoch ms) the event streams end and every route answers 503. */
   outageUntil?: number;
+  /** The outage only in these servers (pids); absent: in every one. */
+  outagePids?: number[];
 }
 
 export interface FakeOpenCodeCall {

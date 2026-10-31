@@ -8,7 +8,7 @@
  *
  * State lives in the folder the wrapper names (`FAKE_OPENCODE_STATE`):
  *  - config.json   what the test asks for: { version, workMs, hold, answer, prompts, localAnswer, failServe,
- *                  serveDelayMs, acceptAnyAuth, subagent, announceChild, parallel, failReplies, outageUntil }
+ *                  serveDelayMs, acceptAnyAuth, subagent, announceChild, parallel, failReplies, outageUntil, outagePids }
  *  - calls.jsonl   one line per call: argv, cwd, env names, and for `serve` the
  *                  launch's env values the test checks (never the password: only
  *                  whether one was set), and its pid
@@ -29,7 +29,8 @@
  * route (401 otherwise), as the real one does when the password is set
  * (`acceptAnyAuth`: a server that takes anything, as one started without a
  * password does). `outageUntil` (epoch ms): until then the event streams end
- * and every route answers 503, as a server too busy to answer would.
+ * and every route answers 503, as a server too busy to answer would
+ * (`outagePids`: only in those servers).
  * `subagent`: the turn's prompts come from a child session (the task tool's,
  * `parentID` the session; `session.created` only with `announceChild`).
  * `parallel`: the prompts are asked at once, as parallel tool calls are.
@@ -236,7 +237,7 @@ const cascade = (info, reply) => {
   }
 };
 let failedReplies = 0;
-const inOutage = () => (config().outageUntil ?? 0) > Date.now();
+const inOutage = () => (config().outageUntil ?? 0) > Date.now() && (!config().outagePids || config().outagePids.includes(process.pid));
 // An outage ends the open event streams as soon as it starts (a stream is idle between events).
 setInterval(() => {
   if (!inOutage() || listeners.size === 0) return;
