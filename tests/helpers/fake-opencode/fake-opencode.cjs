@@ -8,7 +8,8 @@
  *
  * State lives in the folder the wrapper names (`FAKE_OPENCODE_STATE`):
  *  - config.json   what the test asks for: { version, workMs, hold, answer, prompts, localAnswer, failServe,
- *                  serveDelayMs, acceptAnyAuth, subagent, announceChild, parallel, failReplies, outageUntil, outagePids }
+ *                  serveDelayMs, acceptAnyAuth, subagent, announceChild, parallel, failReplies, outageUntil, outagePids,
+ *                  outageHangs, ignoreSigterm, permissionListDelayMs }
  *  - calls.jsonl   one line per call: argv, cwd, env names, and for `serve` the
  *                  launch's env values the test checks (never the password: only
  *                  whether one was set), and its pid
@@ -247,7 +248,8 @@ setInterval(() => {
 
 const server = http.createServer(async (req, res) => {
   if (!config().acceptAnyAuth && req.headers.authorization !== expected) return send(res, 401, { error: "unauthorized" });
-  if (inOutage()) return send(res, 503, { error: "busy" });
+  // `outageHangs`: a server that is blocked never answers at all (the caller's timeout ends the call).
+  if (inOutage()) return config().outageHangs ? undefined : send(res, 503, { error: "busy" });
   const url = new URL(req.url, "http://127.0.0.1");
   const parts = url.pathname.split("/").filter(Boolean);
   if (req.method === "GET" && url.pathname === "/global/health") return send(res, 200, { healthy: true, version: config().version ?? "1.18.23" });
@@ -266,7 +268,13 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, session);
   }
   if (req.method === "GET" && url.pathname === "/session/status") return send(res, 200, Object.fromEntries([...busy].map((id) => [id, { type: "busy" }])));
-  if (req.method === "GET" && url.pathname === "/permission") return send(res, 200, [...pending.values()].map((p) => p.info));
+  if (req.method === "GET" && url.pathname === "/permission") {
+    // `permissionListDelayMs`: the list answers late (each request logged as it comes), so a turn can arrive meanwhile.
+    append("permission-lists.log", String(Date.now()));
+    const delay = config().permissionListDelayMs ?? 0;
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    return send(res, 200, [...pending.values()].map((p) => p.info));
+  }
   if (req.method === "GET" && url.pathname === "/question") return send(res, 200, []);
   if (parts[0] === "permission" && parts[2] === "reply" && req.method === "POST") {
     const body = await readBody(req);
@@ -309,6 +317,8 @@ const server = http.createServer(async (req, res) => {
   }
   return send(res, 404, { error: "not faked" });
 });
+// `ignoreSigterm`: a server whose SIGTERM handler hangs (only SIGKILL ends it).
+if (config().ignoreSigterm) process.on("SIGTERM", () => append("sigterm-ignored.log", String(process.pid)));
 setTimeout(() => {
   server.listen(portArg(), "127.0.0.1", () => {
     process.stdout.write(`opencode server listening on http://127.0.0.1:${server.address().port}\n`);

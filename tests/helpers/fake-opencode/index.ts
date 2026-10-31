@@ -54,6 +54,12 @@ export interface FakeOpenCodeConfig {
   outageUntil?: number;
   /** The outage only in these servers (pids); absent: in every one. */
   outagePids?: number[];
+  /** In an outage the server never answers (blocked), instead of 503. */
+  outageHangs?: boolean;
+  /** The server's SIGTERM handler hangs: only SIGKILL ends it. */
+  ignoreSigterm?: boolean;
+  /** `GET /permission` answers this late. */
+  permissionListDelayMs?: number;
 }
 
 export interface FakeOpenCodeCall {
@@ -78,6 +84,10 @@ export interface FakeOpenCode {
   replies(): { session: string; request: string; permission: string; reply: string; message?: string | null; local?: boolean; cascade?: boolean }[];
   /** The reply calls that answered 500 (`failReplies`), by request id. */
   failedReplies(): string[];
+  /** How many `GET /permission` calls came. */
+  permissionLists(): number;
+  /** How many SIGTERMs a server ignored (`ignoreSigterm`). */
+  sigtermsIgnored(): number;
   /** The sessions OpenCode keeps (its database). */
   sessions(): { id: string; directory: string; title: string | null; permission: unknown; parentID?: string }[];
   /** The sessions a turn was aborted in. */
@@ -143,6 +153,8 @@ export function installFakeOpenCode(input: { bin: string; state: string; config?
     },
     aborts: () => (existsSync(join(state, "aborts.log")) ? readFileSync(join(state, "aborts.log"), "utf8").split("\n").filter(Boolean) : []),
     failedReplies: () => (existsSync(join(state, "replies-failed.log")) ? readFileSync(join(state, "replies-failed.log"), "utf8").split("\n").filter(Boolean) : []),
+    permissionLists: () => (existsSync(join(state, "permission-lists.log")) ? readFileSync(join(state, "permission-lists.log"), "utf8").split("\n").filter(Boolean).length : 0),
+    sigtermsIgnored: () => (existsSync(join(state, "sigterm-ignored.log")) ? readFileSync(join(state, "sigterm-ignored.log"), "utf8").split("\n").filter(Boolean).length : 0),
     processes,
     childOf(server) {
       const pid = rows("children.log").find((row) => row[1] === server)?.[0];

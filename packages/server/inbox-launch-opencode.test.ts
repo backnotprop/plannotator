@@ -477,6 +477,8 @@ describe("the Inbox stops", () => {
     quiet.host.close!();
     expect(quiet.host.live(quiet.session)).toBeNull();
     await until("the idle server ended", () => !alive(idle), 10_000);
+    // Its file stays until the process is gone; the next Inbox drops it then, signalling nothing.
+    await quiet.next().sessions();
     expect(existsSync(quiet.serverFile)).toBe(false);
 
     const w = await launched({ config: { hold: true } });
@@ -510,7 +512,8 @@ describe("a reply while our server does not answer yet (after an Inbox restart)"
 
   test("it answers within the wait: the reply goes to the same server, even while a sweep's adoption found nothing", async () => {
     const { w, pid } = await restarted(4_000);
-    const again = w.next({ replyWaitMs: 15_000 });
+    // The real wait (20 s): each try it starts must fit in it, counted against a server that hangs.
+    const again = w.next();
     // A sweep's adoption under way (it finds nothing while the server does not answer), then the reply.
     void again.sessions();
     await Bun.sleep(100);
@@ -534,6 +537,110 @@ describe("a reply while our server does not answer yet (after an Inbox restart)"
     expect(w.fake.processes().filter((x) => x.kind === "server" && x.alive)).toHaveLength(1);
     await again.stop(w.session);
   }, 40_000);
+});
+
+describe("Stop, close and a later reply around a server that does not answer", () => {
+  /** A launch running a turn, the Inbox closed; its server then does not answer (an outage in it alone). */
+  const silent = async () => {
+    const w = await launched({ config: { hold: true } });
+    const pid = w.server().pid;
+    await w.turn();
+    await untilAsync("busy", async () => (await w.host.sessions())(w.session)?.status === "busy");
+    w.host.close!();
+    w.fake.configure({ outageUntil: Date.now() + 120_000, outagePids: [pid] });
+    return { w, pid };
+  };
+  const aliveServers = (w: Awaited<ReturnType<typeof launched>>) => w.fake.processes().filter((x) => x.kind === "server" && x.alive);
+
+  test("Stop while a reply waits on a sweep's adoption: the Stop holds; no server starts, none is left", async () => {
+    const { w } = await silent();
+    const again = w.next({ replyWaitMs: 3_000 });
+    void again.sessions();
+    await Bun.sleep(100);
+    const resumed = again.resume(w.record);
+    await Bun.sleep(100);
+    await again.stop(w.session);
+    expect((await resumed).failure).toBeNull();
+    await Bun.sleep(500);
+    expect(w.fake.serves()).toHaveLength(1);
+    expect(aliveServers(w)).toHaveLength(0);
+  }, 40_000);
+
+  test("the Inbox closes while a reply waits on a sweep's adoption: nothing starts during shutdown", async () => {
+    const { w, pid } = await silent();
+    const again = w.next({ replyWaitMs: 3_000 });
+    void again.sessions();
+    await Bun.sleep(100);
+    const resumed = again.resume(w.record);
+    await Bun.sleep(100);
+    again.close!();
+    expect((await resumed).failure).toBeNull();
+    await Bun.sleep(500);
+    expect(w.fake.serves()).toHaveLength(1);
+    // The busy server runs on for the next Inbox, still named by its file.
+    expect(w.server().pid).toBe(pid);
+  }, 40_000);
+
+  test("a server that hangs (no answer at all): the reply's whole wait stays within 20 s, then a new server", async () => {
+    const { w, pid } = await silent();
+    w.fake.configure({ outageHangs: true });
+    const again = w.next();
+    const t0 = Date.now();
+    const resumed = await again.resume(w.record);
+    const took = Date.now() - t0;
+    expect(resumed.failure).toBeNull();
+    // About 20 s of waiting (no call runs past it), then the end of the old server and a new one: well inside the
+    // engine's 60 s start grace.
+    expect(took).toBeGreaterThan(17_000);
+    expect(took).toBeLessThan(25_000);
+    expect(alive(pid)).toBe(false);
+    expect(aliveServers(w)).toHaveLength(1);
+    await again.stop(w.session);
+  }, 60_000);
+
+  test("after Stop of a server that did not answer, a later reply starts at once (no wait for a server that is gone)", async () => {
+    const { w } = await silent();
+    const again = w.next({ replyWaitMs: 8_000 });
+    await again.sessions();
+    await again.stop(w.session);
+    w.fake.configure({ outageUntil: 0 });
+    const t0 = Date.now();
+    const resumed = await again.resume(w.record);
+    expect(resumed.failure).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect(aliveServers(w)).toHaveLength(1);
+    await again.stop(w.session);
+  }, 40_000);
+
+  test("close sends SIGTERM to an idle server that ignores it: its file stays, and the next Inbox adopts and ends it", async () => {
+    const w = await launched({ config: { ignoreSigterm: true } });
+    const pid = w.server().pid;
+    w.host.close!();
+    await until("SIGTERM ignored", () => w.fake.sigtermsIgnored() > 0, 10_000);
+    expect(alive(pid)).toBe(true);
+    expect(w.server().pid).toBe(pid);
+    const again = w.next();
+    await untilAsync("adopted", async () => (await again.sessions())(w.session)?.state === "running");
+    await again.stop(w.session);
+    await until("ended (SIGKILL)", () => !alive(pid), 10_000);
+  }, 40_000);
+});
+
+describe("idle stop and a turn that comes while it reads the server", () => {
+  test("a turn that arrives during the idle stop's last read keeps the server; it is not aborted", async () => {
+    const w = await launched({ idleMs: 600, config: { permissionListDelayMs: 1_500, hold: true } });
+    const pid = w.server().pid;
+    // The idle stop's last read (GET /permission, slow here; the first one is the connection's catch-up) is under
+    // way: a turn comes meanwhile.
+    await until("the idle stop reads the server", () => w.fake.permissionLists() >= 2, 10_000);
+    await w.turn();
+    await Bun.sleep(2_500);
+    expect(alive(pid)).toBe(true);
+    expect(w.host.stoppedNote!(w.record)).toBeNull();
+    expect(w.fake.aborts()).toEqual([]);
+    w.fake.configure({ hold: false, permissionListDelayMs: 0 });
+    await w.host.stop(w.session);
+  }, 30_000);
 });
 
 describe("idle with no sweep", () => {
