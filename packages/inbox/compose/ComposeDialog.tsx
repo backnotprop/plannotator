@@ -54,6 +54,9 @@ import {
   rememberComposeBoardChoice,
   statusLine,
   startStatusLine,
+  scratchFolderOf,
+  scratchProject,
+  SCRATCH_PICK,
   sendThreadName,
   suggestThreadName,
   threadNameStateOf,
@@ -196,6 +199,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
   const start: ComposeStart | null = useMemo(() => {
     const agent = startPick && launch?.agents.find((a) => a.agent === startPick.agent);
+    // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
+    if (agent && startPick.projectId === SCRATCH_PICK && launch?.scratch) return { agent: agent.agent, name: agent.name, project: scratchProject(launch.scratch.root), scratch: true };
     const project = startPick && launch?.projects.find((p) => p.id === startPick.projectId);
     return agent && project ? { agent: agent.agent, name: agent.name, project } : null;
   }, [startPick, launch]);
@@ -333,7 +338,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const skills = transport ? null : await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
       const result = await (transport ? transport.startThread : inboxApi.startThread)({
-        to: start ? { launch: { agent: start.agent, project_id: start.project.id } } : { host: target!.host, session: target!.session },
+        to: start
+          ? { launch: start.scratch ? { agent: start.agent, scratch: true as const } : { agent: start.agent, project_id: start.project.id } }
+          : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(body, skills) : body,
         idempotency_key: sendKey.current,
         uploads: uploadIds,
@@ -385,7 +392,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
-        : start
+        : start && !start.scratch
           ? { id: start.project.id, root: start.project.root, name: start.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
       const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
@@ -474,8 +481,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Save draft only for something written: an empty compose offers none (a phone shows the disabled Send instead).
   const saveOffered = keepsDrafts && !sendable && !loading && !empty;
   const title = draft ? 'Draft' : 'New message';
+  // A scratch start names the folder a Send would make now (from the thread's name).
+  const scratchFolder = launch?.scratch ? scratchFolderOf(launch.scratch.root, threadName.trim() || suggested) : null;
   const status = start
-    ? startStatusLine(start, tildePath(start.project.root, home))
+    ? startStatusLine(start, tildePath(start.scratch && scratchFolder ? scratchFolder : start.project.root, home))
     : statusLine({ target, anyLive: anyLive || canStart, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
 
@@ -632,7 +641,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           selected={target?.session ?? (start ? startKey(start.agent) : null)}
           home={home}
           phone={phone}
-          start={launch && canStart ? { launch, current: start ? { id: start.project.id, root: start.project.root } : current } : null}
+          start={launch && canStart ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
           onStart={(picked) => {
             setStartPick({ agent: picked.agent, projectId: picked.project.id });
             // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
@@ -660,6 +669,23 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <FolderMenu
           projects={launch.projects}
           selected={start.project.id}
+          scratch={
+            launch.scratch && scratchFolder
+              ? {
+                  folder: tildePath(scratchFolder, home),
+                  root: tildePath(launch.scratch.root, home),
+                  // Trust is the agent's own: an agent that never asks for it (no `scratch_trusted`) trusts it.
+                  trusted: launch.agents.find((a) => a.agent === start.agent)?.scratch_trusted !== false,
+                  agentName: start.name,
+                }
+              : null
+          }
+          onScratch={() => {
+            setStartPick({ agent: start.agent, projectId: SCRATCH_PICK });
+            setFolderMenu(false);
+            setError(null);
+            textRef.current?.focus();
+          }}
           home={home}
           phone={phone}
           onPick={(project) => {
@@ -715,7 +741,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <b>
               <bdi>{tildePath(start.project.root, home)}</bdi> isn't there any more.
             </b>
-            <p>It was moved or deleted. Pick another project to start {start.name} in. Nothing is sent until you do.</p>
+            <p>
+              It was moved or deleted. Pick another project{launch?.scratch ? ', or a new scratch folder,' : ''} to start {start.name} in. Nothing is sent until you do.
+            </p>
             <button type="button" className="ib-btn ib-sm" onClick={() => setFolderMenu(true)} data-compose-pick-folder="">
               Pick a project
             </button>

@@ -63,6 +63,9 @@ describe("inboxRunOf", () => {
     const waits = { seenLive: true, turnWaiting: true };
     expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "It did not connect after starting again." }))).toMatchObject({ state: "failed", cause: "It did not connect after starting again." });
     expect(inboxRunOf(evidence({ ...waits, now: T0 + 1, respawnFailed: "exit 1" }))?.state).toBe("failed");
+    // A restart Claude refused for an untrusted folder offers Open in Terminal, as a refused start does.
+    expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "x isn't trusted", respawnUntrusted: true }))).toMatchObject({ state: "failed", untrusted: true, again: true });
+    expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "exit 1" }))?.untrusted).toBe(false);
     expect(inboxRunOf(evidence({ ...waits, now: later, respawnFailed: "exit 1", cliAvailable: false }))?.state).toBe("missing");
     // The reply went to another session: nothing waits here, so no failure is shown.
     expect(inboxRunOf(evidence({ seenLive: true, now: later, respawnFailed: "exit 1", host: "absent" }))?.state).toBe("stopped");

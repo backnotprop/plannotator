@@ -517,6 +517,8 @@ const ERROR_STATUS: Record<string, number> = {
   session_not_live: 409,
   // Launch (inbox-launch.ts): the project's folder is gone, the agent can't be started, or the feature is off.
   folder_missing: 422,
+  // A new scratch folder could not be made (the root can't be written, or every name is taken).
+  scratch_unavailable: 422,
   agent_unavailable: 409,
   launch_not_found: 404,
   launch_off: 404,
