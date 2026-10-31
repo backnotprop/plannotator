@@ -965,6 +965,8 @@ function Inbox() {
     litTimers.current = [];
   }, []);
   useEffect(() => clearLit, [clearLit]);
+  /** The thread a compose send just started, to light once its row is drawn (see the layout effect on the list order). One-shot: taken on the next commit, found or not. */
+  const [sentLight, setSentLight] = useState<{ thread: string } | null>(null);
   /** Clicking Inbox with a thread open: the close adopts the refresh's read instead of settling (refreshInbox). */
   const refreshPending = useRef(false);
   /** The refresh signal: the Inbox row's (or the list title's) refresh icon turns once. */
@@ -2026,8 +2028,14 @@ function Inbox() {
     // started is their own action: it goes into Sent now (held.ts
     // addOwnThreads), the other rows sliding to make room, never behind "N new".
     const adopt = !routeRef.current.thread;
+    const at = routeRef.current;
     void refreshList(adopt, true).then((next) => {
-      if (!next || adopt) return;
+      if (!next) return;
+      // The new row may only be drawn by this read: the light starts in the commit that carries it. A person who went elsewhere meanwhile gets none.
+      const cur = routeRef.current;
+      const stayed = cur.page === at.page && cur.project === at.project && cur.thread === at.thread;
+      if (stayed) setSentLight({ thread: sent.threadId });
+      if (adopt) return;
       armSlide();
       setShown((current) => (current === null ? next.sections : addOwnThreads(current, next.sections, [sent.threadId])));
     });
@@ -3868,6 +3876,23 @@ function Inbox() {
   // left the rows on screen (for folded Quiet) hands it to the row now in its
   // slot; Show (whose line goes away) hands it to the first row it brought in.
   const listOrder = useRef<string[]>([]);
+  // A compose send's thread, lit once (the Show light, no new motion) when its row is on screen in this commit. A row
+  // that is not (another project or filter, a covered list) gets nothing, now or later.
+  useLayoutEffect(() => {
+    if (!sentLight) return;
+    setSentLight(null);
+    const body = listBody(rootRef.current);
+    if (!body || !rowElement(body, sentLight.thread)) return;
+    clearLit();
+    const ids = new Set([sentLight.thread]);
+    // A slide armed for this commit (below) plays first, as for Show.
+    const start = slideFrom.current ? SHOW_LIT_AFTER_SLIDE_MS : 0;
+    setLit(new Set());
+    litTimers.current.push(
+      setTimeout(() => setLit(ids), start),
+      setTimeout(() => setLit(new Set()), start + SHOW_LIT_MS),
+    );
+  }, [sentLight, clearLit]);
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
