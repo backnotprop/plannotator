@@ -65,6 +65,7 @@ packages/inbox/fileViewClean.test.tsx
 packages/inbox/documentContents.test.tsx
 packages/inbox/links.test.tsx
 packages/inbox/replyFileLinks.test.tsx
+packages/inbox/replyFeedback.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx

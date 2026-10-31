@@ -73,6 +73,11 @@ export interface InboxListProps {
   onSendNow?: (row: InboxListRow) => void;
   /** A phone (phone.ts): the list fills the window and its rows are a mail app's. */
   phone?: boolean;
+  /**
+   * The live stream is dead (liveStream.ts): one quiet muted line under the list, "Reconnecting…", gone with the
+   * stream's next frame. The live region says it (App.tsx), so the line itself is not live.
+   */
+  reconnecting?: boolean;
   /** The project shown (null: every project). A phone opens another project's list at its top, as a mail app opens another mailbox. */
   scope?: string | null;
   /** Opens search: on a phone, the list header's search icon (inbox.css shows it there only). */
@@ -132,8 +137,8 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
 
 /**
  * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
- * (Lines). The row itself draws its agents beside the project: after it on a wide row (`RowAgents`), before it on
- * a three-line or phone row (`RowAgentTiles`).
+ * (Lines). The row itself draws its agents before the project: bare marks on a wide row (`RowAgents`), tiles on a
+ * three-line or phone row (`RowAgentTiles`).
  */
 function RowMark({ row }: { row: InboxListRow }) {
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
@@ -242,9 +247,13 @@ function previewOf(row: InboxListRow): string | null {
 }
 
 /**
- * A wide row's first cell (approval "list-rows-mail-icons"): the project, then the agents' marks right after it.
- * The project is left out in one project's list, which leaves the marks alone. The cell is one line: the project
- * gives way with "…" (its tooltip shows it whole), the marks never do.
+ * A wide row's first cell (approval "list-rows-mail-icons"; the owner, 2026-10-31: the marks first, the project
+ * hugging them): the agents' marks, a 6 px gap, then the project, as on a three-line row. The project is left out in
+ * one project's list, which leaves the marks alone, and the title follows them 6 px later. The cell is one line: the
+ * project gives way with "…" (its tooltip shows it whole), the marks never do.
+ *
+ * The project comes first in the DOM, so a screen reader reads where, then who, as on a three-line row
+ * (`LeadLine`); CSS (`order`) draws the marks first.
  */
 function FromLine({ row, project, filtered }: { row: InboxListRow; project: string; filtered: boolean }) {
   return (
@@ -432,26 +441,26 @@ function GuideMark({ row }: { row: InboxListRow }) {
 }
 
 /**
- * The wide row's title cell (approval "list-rows-mail-icons"): the title, the grey preview, the pin and the guided
- * review mark. Short of room the preview gives way first, all the way, then the title; each cut ends in "…" with
- * its tooltip. The mark drops its label to its icon.
+ * The wide row's title cell (approval "list-rows-mail-icons"): the title, the grey preview and the guided review
+ * mark. Short of room the preview gives way first, all the way, then the title; each cut ends in "…" with its
+ * tooltip. The mark drops its label to its icon.
  */
-function TitleCell({ row, pinned = false, pill = false }: { row: InboxListRow; pinned?: boolean; pill?: boolean }) {
+function TitleCell({ row, pill = false }: { row: InboxListRow; pill?: boolean }) {
   const preview = previewOf(row);
   return (
     <>
       <RowTitle row={row} className="ib-title" pill={pill} tip />
       {preview && <ClipText className="ib-pv" text={preview} />}
-      {pinned && <PinMark />}
       <GuideMark row={row} />
     </>
   );
 }
 
 /**
- * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"):
- * after the preview (wide and three-line rows), before the time (a phone's row).
- * For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
+ * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"): always on the right, beside the
+ * counts (the owner, 2026-10-31: "just like the questions, just like the action items"), never right after a short
+ * preview. A three-line or phone row has it on line 3 before the badge and the counts; a wide row in a column of its
+ * own just left of the open counts' column. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
  */
 function PinMark() {
   return (
@@ -481,16 +490,41 @@ export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
  */
 export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
 
+/** The wide rows' open counts column, as inbox.css draws it (`.ib-row`'s grid). */
+const COUNTS_COLUMN_PX = 84;
+
+/**
+ * In a list with the pin's column (`.ib-pincol`), widen the open counts' column for the whole list to the widest
+ * counts drawn ("[□ 12] ?12", "[□ 99+] ?99+" pass its 84px), so every pin stays in one column 8px before its row's
+ * counts and none runs under a pin. The counts sit at their column's right edge, so their width is the column's right
+ * edge less their leftmost part, whatever the column's width: a second pass gives the same answer. Without pins, or
+ * with counts that fit, the column keeps its 84px (`--ib-cq-w` unset).
+ */
+function fitCountsColumn(list: HTMLElement, pinColumn: boolean): void {
+  let widest = 0;
+  if (pinColumn) {
+    for (const cell of list.querySelectorAll<HTMLElement>('.ib-row > .ib-cq')) {
+      const lefts = [...cell.children].map((part) => part.getBoundingClientRect()).filter((box) => box.width > 1).map((box) => box.left);
+      if (lefts.length) widest = Math.max(widest, cell.getBoundingClientRect().right - Math.min(...lefts));
+    }
+  }
+  const width = widest > COUNTS_COLUMN_PX ? `${Math.ceil(widest)}px` : '';
+  if (list.style.getPropertyValue('--ib-cq-w') === width) return;
+  if (width) list.style.setProperty('--ib-cq-w', width);
+  else list.style.removeProperty('--ib-cq-w');
+}
+
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
  * one-line row; its cells as approval "list-rows-mail-icons", 2026-10-30, lays
- * them out). Six columns: the project with the agents' marks after it, the
+ * them out). Six columns: the agents' marks and the project after them, the
  * title cell (the thread's name in bold when unread, then the grey subject),
  * then right-aligned the words, the badge, the open counts (the action pill,
  * `?N`) and the time, each in a column of its own so they line up down the
  * list. In one project's list (`filtered`) the first column holds the marks alone.
+ * A list with a pinned row adds the pin's column just left of the open counts.
  */
-function WideRow({ row, project, away, selected, filtered, lit, pinned, keys, full, pill, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void }) {
+function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void }) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badgeEl = badgeOf(row, kbd, full);
@@ -513,7 +547,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, keys, fu
     >
       <FromLine row={row} project={project} filtered={filtered} />
       <span className="ib-subj">
-        <TitleCell row={row} pinned={pinned} pill={pill} />
+        <TitleCell row={row} pill={pill} />
       </span>
       {/* Every column right of the words has a fixed width, so each lines up down the list. The words (a draft,
           Undelivered, Read …) take the width they need, between the title cell and the badge. */}
@@ -521,6 +555,8 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, keys, fu
         <CountWords row={row} wide={full} tip={!full} />
       </span>
       <span className="ib-bcol">{badgeEl}</span>
+      {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
+      {pinColumn && <span className="ib-cpin">{pinned && <PinMark />}</span>}
       <span className="ib-cq">
         <OpenCounts row={row} tip />
       </span>
@@ -656,12 +692,12 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
           <RowTitle row={row} className="ib-title" pill={pill} tip={pill} />
         </div>
       )}
-      {/* Line 3: the grey preview, cut first, then the pin, the guided review mark, and at the right end the badge
+      {/* Line 3: the grey preview, cut first, then the guided review mark, and at the right end the pin, the badge
           and the count (inbox-row-byline's line 2 without the marks). Nothing to show: no line. */}
       <div className="ib-l3">
         <Preview row={row} />
-        {pinned && <PinMark />}
         <GuideMark row={row} />
+        {pinned && <PinMark />}
         {badge}
         <LineCount row={row} tip />
       </div>
@@ -675,9 +711,10 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
 /**
  * A row on a phone, read like a mail app's, in the three-line row's order
  * (approval "inbox-list-row-v2", 2026-10-30): the agents' tiles and the
- * project, the pin and the time on line 1; the title on line 2, never cut; the
- * grey preview with the guided review book, the badge and the count at the
- * right end of line 3.
+ * project and the time on line 1; the title on line 2, never cut; the grey
+ * preview with the guided review book, then the pin, the badge and the count
+ * at the right end of line 3. A pin with nothing else for line 3 stays at the
+ * right end of line 1, before the time.
  */
 function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, onOpen }: { row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void }) {
   const wordsId = useId();
@@ -685,6 +722,9 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   const badge = rowHasBadge(row) ? <RowBadge row={row} /> : null;
   const guide = row.guide && row.section !== 'sent';
   const preview = previewOf(row);
+  // A pin with nothing else for line 3 (no preview, book, badge or count) stays on line 1, before the time, so the
+  // row never grows a line for the pin alone.
+  const pinOnLine1 = pinned && !preview && !guide && !badge && countWords(row, 0) === null && row.questions.open < 1;
   return (
     <>
     <button
@@ -703,13 +743,13 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
       <span className="ib-m1">
         <LeadLine row={row} project={project} filtered={filtered} tip={false} />
         {compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
-        {pinned && <PinMark />}
+        {pinOnLine1 && <PinMark />}
         <span className="ib-t">
           <TimeWithTick delivery={row.delivery} time={shortTime(rowTimeIso(row))} />
         </span>
       </span>
       {/* Line 2: the title, never cut (in its pill, one line cut with "…"); compact rows have it on line 1. Line 3:
-          the preview (cut first), then the book, the badge and the count. */}
+          the preview (cut first), then the book, the pin, the badge and the count. */}
       {!compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
       <span className="ib-m3">
         {preview && (
@@ -722,6 +762,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             <Icon name="book" size={13} />
           </span>
         )}
+        {pinned && !pinOnLine1 && <PinMark />}
         {badge}
         <LineCount row={row} />
       </span>
@@ -799,7 +840,9 @@ export function InboxList(props: InboxListProps) {
   // Two-line rows in a list too narrow for the wide row's columns: beside an
   // open thread for every list (the column is 380px unless its edge was
   // dragged past the wide rows' width), and in the full list for every
-  // project (one project's wide row fits any width).
+  // project. One project's list keeps the wide row in a narrower list: its
+  // marks' track wraps the run between marks and the title keeps at least
+  // 24px, so its columns hold at the window's narrowest desktop widths.
   const twoLine = narrowList && (props.narrow || !props.filtered);
   // The full words on a wide row need a list of at least 1150px (FULL_WORDS_MIN_LIST_WIDTH); a narrower wide row
   // keeps the short forms and the bare triangles (option A).
@@ -814,6 +857,25 @@ export function InboxList(props: InboxListProps) {
   const refreshHintId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
+  // The wide rows' pin column (the owner, 2026-10-31: the pin beside the counts): only in a list with a pinned row,
+  // Quiet's folded rows included, so a list without pins keeps its columns and opening Quiet moves none.
+  const pinColumn = !props.phone && !twoLine && !!props.pinned && visible.some((s) => s.threads.some((row) => props.pinned!.has(row.thread_id)));
+  // With the pin's column, the counts' column holds the widest counts (`fitCountsColumn`), after every render and
+  // once the fonts are in, so no count runs under a pin.
+  const pinColumnRef = useRef(pinColumn);
+  pinColumnRef.current = pinColumn;
+  useLayoutEffect(() => {
+    if (listRef.current) fitCountsColumn(listRef.current, pinColumn);
+  });
+  useEffect(() => {
+    const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+    if (!fonts?.addEventListener) return;
+    const refit = () => {
+      if (listRef.current) fitCountsColumn(listRef.current, pinColumnRef.current);
+    };
+    fonts.addEventListener('loadingdone', refit);
+    return () => fonts.removeEventListener('loadingdone', refit);
+  }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
   // The row whose right-click menu is open: a muted background, as the project row's.
   const [menuRow, setMenuRow] = useState<string | null>(null);
@@ -845,7 +907,7 @@ export function InboxList(props: InboxListProps) {
     <section
       ref={listEl}
       id={columnId}
-      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${listLookClasses(look)}`}
+      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${pinColumn ? ' ib-pincol' : ''}${listLookClasses(look)}`}
       aria-label={props.title}
     >
       <div className="ib-lhead">
@@ -996,6 +1058,7 @@ export function InboxList(props: InboxListProps) {
                       day={day}
                       menu={menuRow === row.thread_id}
                       pinned={props.pinned?.has(row.thread_id) === true}
+                      pinColumn={pinColumn}
                       keys={rowKeys}
                       pill={look.highlight}
                       compact={look.compact}
@@ -1005,6 +1068,11 @@ export function InboxList(props: InboxListProps) {
             );
           })}
         </ThreadRowMenu>
+      {props.reconnecting && (
+        <p className="ib-relink" data-inbox-reconnecting="">
+          Reconnecting…
+        </p>
+      )}
       {resizable && <ListColumnEdge controls={columnId} />}
     </section>
   );
@@ -1031,8 +1099,10 @@ interface ListRowProps {
   day: string;
   /** Its right-click menu is open (RowMenu.tsx): the muted background. */
   menu: boolean;
-  /** Pinned to the sidebar: a small pin after the subject. */
+  /** Pinned to the sidebar: a small pin on the row's right (`PinMark`). */
   pinned: boolean;
+  /** A wide row in a list that has a pinned row: every row draws the pin's column, so the columns line up. */
+  pinColumn: boolean;
   /** `aria-keyshortcuts` for the row's menu (Shift+F10), when the list has one. */
   keys?: string;
   /** "Highlight thread subject" (listLook.ts): the title in its pill. */
@@ -1047,7 +1117,7 @@ interface ListRowProps {
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onSendNow, menu, pinned, keys, pill, compact }: ListRowProps) {
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onSendNow, menu, pinned, pinColumn, keys, pill, compact }: ListRowProps) {
     const open = () => onOpen(row);
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} onOpen={open} />;
     return (
@@ -1055,7 +1125,7 @@ export const ListRow = memo(
         {shape === 'narrow' ? (
           <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} onOpen={open} />
         ) : (
-          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} full={full} pill={pill} onOpen={open} />
+          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} onOpen={open} />
         )}
       </RowWithAction>
     );
@@ -1072,6 +1142,7 @@ export const ListRow = memo(
     a.day === b.day &&
     a.menu === b.menu &&
     a.pinned === b.pinned &&
+    a.pinColumn === b.pinColumn &&
     a.keys === b.keys &&
     a.pill === b.pill &&
     a.compact === b.compact &&

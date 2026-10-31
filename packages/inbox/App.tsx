@@ -93,11 +93,11 @@ import { useInboxNotifications } from './notify';
 import { useInboxSound } from './sound';
 import { notificationLine, SoundIntroDialog } from './components/SoundIntro';
 import { ListLookIntro, type ListIntroGroup } from './components/ListLookIntro';
-import { LIST_INTRO_LIST_MS, listIntroListAlone, listIntroMayAsk, listIntroWanted, type ListIntroLoad } from './listIntro';
+import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
 import { readListLook, writeListLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
-import { leaveOnPurpose, unsentReply } from './unsent';
+import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, seenHeldInNew } from './markRead';
@@ -193,6 +193,8 @@ const DRAFTS_REFRESH_MS = 10_000;
 const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
+/** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
+const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
 const AGENTS_SESSIONS_REFRESH_MS = 5_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
@@ -205,6 +207,7 @@ const WHATS_NEW_RETRY_MS = 1000;
  * Opening a thread whose read failed (a dropped connection, a 5xx; not a 404): read it again after
  * these waits, then every last one, while it stays open. Before this the pane stayed blank until some
  * agent wrote anywhere in the Inbox (the event stream re-reads the open thread), seconds or forever.
+ * A failed re-read of a thread already on screen waits the same (liveThreadRetry).
  */
 export const THREAD_READ_RETRY_MS = [250, 1000, 2000, 4000, 5000] as const;
 /**
@@ -531,6 +534,16 @@ function replyInProgress(): boolean {
   return !!active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable);
 }
 
+/**
+ * The list options dialog waits (its claim unspent, or a claimed one unopened) while anything else is over the page or
+ * a reply is under way: another dialog, a modal panel ui draws (`aria-modal`), an image opened full size, a pinned
+ * reference card, a reply being typed, or a reply box left open with words or files in it, wherever focus is.
+ */
+function listIntroHeldBack(): boolean {
+  if (modalOpen() || replyInProgress() || replyBeingWritten()) return true;
+  return document.querySelector('[role="dialog"][aria-modal="true"], [data-image-lightbox], [data-ref-card-pinned]') !== null;
+}
+
 function hasRows(sections: readonly InboxListSection[] | null): boolean {
   return !!sections && sections.some((s) => s.threads.length > 0);
 }
@@ -679,6 +692,15 @@ function Inbox() {
   const threadLoaded = useRef<InboxThread | null>(null);
   /** Wakes the open effect's wait between retries when another read lands the thread. */
   const wakeThreadRetry = useRef<(() => void) | null>(null);
+  /**
+   * A re-read of the thread already on screen (a record's, a catch-up's) that failed: read again after
+   * THREAD_READ_RETRY_MS, until one lands or the thread closes or changes. `attempt`: the failures so far.
+   */
+  const liveThreadRetry = useRef<{ threadId: string; attempt: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const stopLiveThreadRetry = useCallback(() => {
+    if (liveThreadRetry.current) clearTimeout(liveThreadRetry.current.timer);
+    liveThreadRetry.current = null;
+  }, []);
   /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
   const focusThreadSubject = useRef(false);
   /** Try again on the placeholder: the open effect reads the thread at once. */
@@ -763,14 +785,14 @@ function Inbox() {
    * Inbox gave it to this page; it opens once the page is free), open, or closed. `listIntroDecided`: this load
    * asked the Inbox and has its answer. `listIntroLatch`: what decides whether this load wants it, read once when
    * the first list and settings are in (a list that grows later never brings it up mid-session).
-   * `tourThisLoad`: the tour was on screen in this load, so the dialog never shows on it. `listIntroListLong`: the
-   * list alone (no thread open) has been on screen for `LIST_INTRO_LIST_MS` since it last came back.
+   * `tourThisLoad`: the tour was on screen in this load, so the dialog never shows on it. `listIntroSettled`: the
+   * Inbox page (the list, a thread open or not) has been clear for `LIST_INTRO_SETTLED_MS` since it last came back.
    */
   const [listIntro, setListIntro] = useState<'none' | 'claimed' | 'open' | 'shown'>('none');
   const [listIntroDecided, setListIntroDecided] = useState(false);
   const listIntroAsked = useRef(false);
   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
-  const [listIntroListLong, setListIntroListLong] = useState(false);
+  const [listIntroSettled, setListIntroSettled] = useState(false);
   const tourThisLoad = useRef(false);
   /** Sidebar → Feedback (components/FeedbackDialog.tsx): open only on the person's click. */
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -822,6 +844,13 @@ function Inbox() {
   const toastDeadline = useRef(0);
   const toastLeft = useRef<number | null>(null);
   const [said, setSaid] = useState('');
+  /**
+   * The live stream is dead (liveStream.ts: silent past its window, and a reconnect brought nothing): the list's
+   * quiet "Reconnecting…" line, until the stream is heard again.
+   */
+  const [streamDead, setStreamDead] = useState(false);
+  /** When the live region last said "Reconnecting…": said once, and not again for a while (a flaky network). */
+  const reconnectSaidAt = useRef<number | null>(null);
   /** The thread whose reply box opens once it is on screen (the warning toast's Reply). */
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
@@ -991,6 +1020,10 @@ function Inbox() {
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
       const next = await inboxApi.list();
+      // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
+      // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
+      const held = latestRef.current;
+      if (held && next.serverSession === held.serverSession && next.cursor < held.cursor) return held;
       setPageSession(next.serverSession);
       // Before the render: what waits on this read (Mark read after a look, markRead) reads the rows it brought.
       latestRef.current = next;
@@ -1119,6 +1152,7 @@ function Inbox() {
         threadReadApplied.current = mine;
         threadLoaded.current = next.thread;
         wakeThreadRetry.current?.();
+        stopLiveThreadRetry();
         setThread(next.thread);
         setThreadRow(next.row ?? null);
         setThreadLoad(null);
@@ -1155,10 +1189,21 @@ function Inbox() {
         const refused = cause instanceof InboxApiError && cause.code === 'machine_conflict';
         if (missing) setThread(null);
         setThreadLoad({ threadId, state: refused ? 'refused' : missing ? 'missing' : 'failed', error: cause instanceof Error ? cause.message : String(cause), waiting });
+        // The thread is on screen already (the open effect retries a first read itself): this re-read is tried again,
+        // or what it would have brought (an agent's new message) waits until some other record re-reads the thread.
+        if (!missing && !refused && threadLoaded.current?.thread_id === threadId) {
+          const attempt = liveThreadRetry.current?.threadId === threadId ? liveThreadRetry.current.attempt : 0;
+          stopLiveThreadRetry();
+          const timer = setTimeout(() => {
+            if (routeRef.current.thread === threadId) void refreshThread(threadId);
+            else stopLiveThreadRetry();
+          }, THREAD_READ_RETRY_MS[Math.min(attempt, THREAD_READ_RETRY_MS.length - 1)]!);
+          liveThreadRetry.current = { threadId, attempt: attempt + 1, timer };
+        }
       }
       return null;
     }
-  }, [setThreadLoad]);
+  }, [setThreadLoad, stopLiveThreadRetry]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -1446,6 +1491,18 @@ function Inbox() {
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
         onConnect: reportWindow,
+        // The stream went silent past its window (or the tab came back after it): read what a record would make the
+        // page read, once, so a message that arrived meanwhile is on screen. Never while the stream is heard.
+        onCatchUp: () => {
+          void refreshList(false).then((next) => next && flushNotifications(next));
+          void refreshDecisions();
+          const open = routeRef.current.thread;
+          if (open) void refreshThread(open);
+          void refreshDrafts();
+          // A card record reads the Board: while it is open, it is read again too.
+          if (routeRef.current.page === 'board') void refreshCards();
+        },
+        onLive: (live) => setStreamDead(!live),
         // Linked machines. A record from another machine: a live one rings like this Inbox's own (a resync after a
         // reconnect never does), and the open thread follows when it is that machine's. Its row moves once this Inbox
         // has read that machine's list again, which the `machines` frame says.
@@ -1583,8 +1640,10 @@ function Inbox() {
       cancelled = true;
       if (retry) clearTimeout(retry);
       wakeThreadRetry.current = null;
+      // Closed or changed: a failed re-read of this thread is not tried again.
+      stopLiveThreadRetry();
     };
-  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook]);
+  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook, stopLiveThreadRetry]);
   // The thread landed while focus was in its place: focus goes to its subject, never to the page.
   useLayoutEffect(() => {
     if (!focusThreadSubject.current || !thread || thread.thread_id !== route.thread) return;
@@ -1739,6 +1798,9 @@ function Inbox() {
   // is open and comes back on leaving, without writing the person's stored choice. ⌘B there opens it
   // for this visit only.
   const [settingsSidebar, setSettingsSidebar] = useState(false);
+  // The thread in full screen (`full` below) and its one way out (`leaveFull` below): Escape's ladder reads them.
+  const threadFullRef = useRef(false);
+  const leaveFullRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (route.page !== 'settings') setSettingsSidebar(false);
   }, [route.page]);
@@ -1765,7 +1827,12 @@ function Inbox() {
       if (selectionToolbarShowing()) return;
       // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
+      // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
+      if (!now.guide && !now.artifacts && threadFullRef.current) {
+        leaveFullRef.current();
+        return;
+      }
       closeTo(now.guide ? { ...now, guide: null } : now.artifacts ? { ...now, artifacts: false } : { ...now, thread: null });
     };
     window.addEventListener('keydown', onKey);
@@ -2069,8 +2136,17 @@ function Inbox() {
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
+  // The thread in full screen (the header's "Hide the sidebar and the list"): the sidebar and the list hide, without
+  // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
+  // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
+  // as full screen (`full` below), so widening it again returns to full screen.
+  const [threadFull, setThreadFull] = useState(false);
+  useEffect(() => {
+    if (!route.thread) setThreadFull(false);
+  }, [route.thread]);
   sidebarHeldNow.current = sidebarHeld;
-  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld]);
+  // Full screen changes the sidebar's and the list's room without a route change: measured again too.
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
   useEffect(() => {
     if (!sidebarHeld) return;
     const check = () => {
@@ -2119,6 +2195,20 @@ function Inbox() {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
   };
+  // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
+  // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
+  useEffect(() => {
+    if (!streamDead) {
+      // Live again: the region drops the words, saying nothing new (a screen reader that reads it later finds no stale state).
+      setSaid((current) => (current === 'Reconnecting…' ? '' : current));
+      return;
+    }
+    const at = reconnectSaidAt.current;
+    if (at !== null && Date.now() - at < RECONNECT_SAY_GAP_MS) return;
+    reconnectSaidAt.current = Date.now();
+    say('Reconnecting…');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is a fresh closure each render; only the change matters.
+  }, [streamDead]);
   /**
    * Click Inbox to refresh (the owner, 2026-10-20: "Just click inbox, it
    * refreshes"): clicking Inbox, or the project folder the list shows, or the
@@ -2765,6 +2855,8 @@ function Inbox() {
         handle: () => {
           const now = routeRef.current;
           if (now.page !== 'inbox') leave({ page: 'inbox', project: null, thread: null });
+          // The list is hidden under a thread in full screen: the list comes back so its row can take focus.
+          if (threadFullRef.current) leaveFullRef.current();
           const open = now.page === 'inbox' ? now.thread : null;
           focusSoon([...(open ? [`.ib-main .ib-lbody [data-thread-id="${CSS.escape(open)}"]`] : []), '.ib-main .ib-lbody [data-thread-id]', '.ib-main .ib-lbody button.ib-band', '.ib-main .ib-empty h2', '.ib-main h1']);
         },
@@ -3109,10 +3201,12 @@ function Inbox() {
   const firstRun = latest !== null && projects.length === 0;
 
   // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
-  // on a load that showed either or the tour, only with three rows or more and only once the list alone (no thread,
-  // so no file or document either) has been on screen for a moment: a load that opens on a thread waits, unclaimed,
-  // until the person is back on the list. It waits while a reply is typed or another dialog is open, then claims it
-  // from the Inbox (only the first claim ever shows it).
+  // on a load that showed either or the tour, only with three rows or more and only once the Inbox page (the list, a
+  // thread open or not) has been settled for a moment with no file, document, guided review, Artifacts view, search or
+  // new message over it (each keeps the claim waiting, unspent); opening another thread, project or machine starts the
+  // wait again. It waits while a reply is typed or left open with words or files, or another dialog, an image opened
+  // full size or a pinned reference card is over the page (listIntroHeldBack), then claims it from the Inbox (only
+  // the first claim ever shows it).
   if (route.page === 'tour') tourThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
     listIntroLatch.current = {
@@ -3123,34 +3217,35 @@ function Inbox() {
     };
   }
   const listIntroAtLoad = listIntroLatch.current;
-  const listIntroAlone = listIntroListAlone(route, { search: searchOpen, compose: compose !== null });
+  const listIntroClear = listIntroPageClear(route, { search: searchOpen, compose: compose !== null });
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad?.due ?? false,
     local: listIntroAtLoad?.local ?? false,
     listLoaded: listIntroAtLoad !== null,
     firstRun: listIntroAtLoad?.firstRun ?? false,
     rows: listIntroAtLoad?.rows ?? 0,
-    // Read with the list on screen now: the wait's flag clears an effect later, never a render late.
-    listAlone: listIntroListLong && listIntroAlone,
+    // Read with the page as it is now: the wait's flag clears an effect later, never a render late.
+    settled: listIntroSettled && listIntroClear,
     tourThisLoad: tourThisLoad.current,
     otherDialogThisLoad: soundDialog !== 'none' || agentNote !== 'none',
     othersSettled: soundSettled && agentNoteSettled,
     updating: updateDialog !== null || restarting,
   };
   const listIntroWant = listIntroWanted(listIntroLoad);
-  // Watched only while the dialog may still show on this load: each time the list alone comes back, the same wait.
+  // Watched only while the dialog may still show on this load: each time the Inbox page is clear again, the same wait.
   const listIntroWatch = listIntroWant && (!listIntroDecided || listIntro === 'claimed');
   useEffect(() => {
-    setListIntroListLong(false);
-    if (!listIntroWatch || !listIntroAlone) return;
-    const timer = setTimeout(() => setListIntroListLong(true), LIST_INTRO_LIST_MS);
+    setListIntroSettled(false);
+    if (!listIntroWatch || !listIntroClear) return;
+    const timer = setTimeout(() => setListIntroSettled(true), LIST_INTRO_SETTLED_MS);
     return () => clearTimeout(timer);
-  }, [listIntroWatch, listIntroAlone]);
+    // Another thread, project or machine opened: the same wait again from there, so it never lands as a page changes.
+  }, [listIntroWatch, listIntroClear, route.thread, route.project, route.machine]);
   const listIntroReady = listIntroMayAsk(listIntroLoad, { modal: false, replying: false });
   useEffect(() => {
     if (!listIntroReady || listIntroAsked.current) return;
     const ask = () => {
-      if (listIntroAsked.current || modalOpen() || replyInProgress()) return false;
+      if (listIntroAsked.current || listIntroHeldBack()) return false;
       listIntroAsked.current = true;
       // Claimed: the Inbox has retired it, so this page shows it, but only once the page is free again (below).
       inboxApi
@@ -3166,15 +3261,16 @@ function Inbox() {
     }, 700);
     return () => clearInterval(timer);
   }, [listIntroReady]);
-  // A claim answered after the person opened a thread, Settings, the Board or an update, began a reply or opened
-  // another dialog: it opens when they are back on the list alone for a moment with nothing open or typed (never
-  // dropped: it is spent).
+  // A claim answered after the person opened Settings, the Board, a file, a guided review, the Artifacts view, a
+  // search, a new message or an update, began a reply
+  // or opened another dialog: it opens when they are back on the Inbox page for a moment with nothing open or typed
+  // (never dropped: it is spent).
   const listIntroClaimed = listIntro === 'claimed';
-  const listIntroPlaceFree = listIntroLoad.listAlone && !listIntroLoad.updating;
+  const listIntroPlaceFree = listIntroLoad.settled && !listIntroLoad.updating;
   useEffect(() => {
     if (!listIntroClaimed || !listIntroPlaceFree) return;
     const open = () => {
-      if (modalOpen() || replyInProgress()) return false;
+      if (listIntroHeldBack()) return false;
       setListIntro('open');
       return true;
     };
@@ -3625,6 +3721,26 @@ function Inbox() {
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
+  // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
+  const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  threadFullRef.current = full;
+  // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
+  // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
+  // does not stack over the list it was asked to show.
+  const holdSidebarIfTight = () => {
+    const root = rootRef.current;
+    if (!root || !sidebarOpen) return;
+    const width = root.getBoundingClientRect().width;
+    const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
+    const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
+    if (width >= room && width - sidebar < room) setSidebarHeld(true);
+  };
+  // Every way out of full screen (‹ Inbox, Escape, ⌘B): the sidebar and the list come back as the window has room.
+  const leaveFull = () => {
+    holdSidebarIfTight();
+    setThreadFull(false);
+  };
+  leaveFullRef.current = leaveFull;
   const backToCard = () => close({ page: 'board', project: route.boardProject ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
@@ -4070,6 +4186,8 @@ function Inbox() {
   } else {
     main = (
       <>
+        {/* In full screen the list stays drawn, hidden (inbox.css `data-thread-full`): J/K and G I read its order, and
+            its scroll stays where it was. */}
         {!fileOpen && !fromCard && (
         <InboxList
           scope={route.project}
@@ -4124,6 +4242,7 @@ function Inbox() {
           onSearch={(opener) => openSearch(opener)}
           onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
+          reconnecting={streamDead}
           empty={
             projectAllArchived(filterProject) ? (
               <div className="ib-empty-list" data-project-archived="">
@@ -4269,19 +4388,18 @@ function Inbox() {
             cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}
             phone={phone}
             stacked={stack.thread || !!fromCard}
+            threadAlone={full}
+            fullSidebar={sidebarOpen && !sidebarHeld}
+            onFull={fromCard ? undefined : (on) => (on ? setThreadFull(true) : leaveFull())}
             fileStacked={stack.file}
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             onToast={(t) => showToast(t)}
             linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
             onBackToList={(fileName) => {
               // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
-              const root = rootRef.current;
-              if (root && sidebarOpen) {
-                const width = root.getBoundingClientRect().width;
-                const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-                const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
-                if (width >= room && width - sidebar < room) setSidebarHeld(true);
-              }
+              holdSidebarIfTight();
+              // ‹ Inbox beside a file opened from full screen ends full screen too: the list comes back.
+              setThreadFull(false);
               backFromFile.current = { thread: thread.thread_id, name: fileName, label: listTitle };
               closeTo({ ...routeRef.current, file: null });
             }}
@@ -4301,6 +4419,8 @@ function Inbox() {
       data-enter={tourOn ? undefined : (entered.current ?? undefined)}
       // The tour draws its stacked layouts itself (tour/Tour.tsx): the window's stacking rules stay out of it.
       data-stack={!tourOn && (stack.thread || stack.file) ? [stack.thread && 'thread', stack.file && 'file'].filter(Boolean).join(' ') : undefined}
+      // The thread in full screen: the list is hidden under it (inbox.css), not taken off the page.
+      data-thread-full={full ? '' : undefined}
       data-tour={tourOn ? String(tourState.step) : undefined}
     >
       {tourOn && (
@@ -4316,10 +4436,16 @@ function Inbox() {
       <SidebarShell
         className="ib-shell"
         toggleNotice={sidebarToggleNotice}
-        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld}
+        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld && !full}
         onOpenChange={(next) => {
           if (routeRef.current.page === 'settings') {
             setSettingsSidebar(next);
+            return;
+          }
+          // ⌘B in full screen leaves it (the sidebar and the list come back) and keeps the person's stored choice. Not
+          // while a file is open from it: closing the file comes back to the thread in full screen.
+          if (next && full && !fileOpen) {
+            leaveFull();
             return;
           }
           setSidebarHeld(false);

@@ -231,6 +231,14 @@ const THEME_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Remote mode's fixed port: the Inbox never takes it. */
 export const INBOX_FORBIDDEN_PORT = 19432;
 const SSE_HEARTBEAT_MS = 15_000;
+/**
+ * A window's stream (`window=`) beats every 10 s with a named frame
+ * (`event: heartbeat`), not the `: ping` comment the other streams get:
+ * EventSource never shows a comment to the page, and the page needs to hear
+ * the stream to tell a quiet Inbox from a dead connection
+ * (packages/inbox/liveStream.ts treats 25 s of silence as dead).
+ */
+export const INBOX_WINDOW_HEARTBEAT_MS = 10_000;
 const DEFAULT_HEALTH_TICK_MS = 60_000;
 /** How often the sidebar's "Reload Claude Code N" is checked against the live sessions (a session restarted or went away). */
 const INBOX_RESTART_WATCH_MS = 5_000;
@@ -341,6 +349,8 @@ export interface InboxServerOptions {
   phones?: boolean;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
   machineLinkTimings?: Partial<PeerLinkTimings>;
+  /** Tests: how often a window's event stream sends `event: heartbeat` (default `INBOX_WINDOW_HEARTBEAT_MS`). */
+  windowHeartbeatMs?: number;
   /** The Board, decided here instead of config.json `inboxBoard` (tests). Absent: config.json decides on every request. */
   board?: boolean;
   /**
@@ -1929,7 +1939,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const sendMachine = (frame: MachineFrame) => send(`event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`);
         const stopMachines = url.searchParams.get("machines") === "1" ? machines.subscribe(sendMachine) : () => {};
         if (url.searchParams.get("machines") === "1") sendMachine({ event: "machines", data: { machines: machines.machinesView() } });
-        const heartbeat = setInterval(() => send(": ping\n\n"), SSE_HEARTBEAT_MS);
+        // A window hears its heartbeat (a named frame, so the page sees it and can tell a dead connection from a
+        // quiet Inbox); the phone's door, a linked machine and agents keep the comment line, as before.
+        const heartbeat = windowId
+          ? setInterval(() => send("event: heartbeat\ndata: {}\n\n"), options.windowHeartbeatMs ?? INBOX_WINDOW_HEARTBEAT_MS)
+          : setInterval(() => send(": ping\n\n"), SSE_HEARTBEAT_MS);
         cleanup = () => {
           if (counted) {
             counted = false;

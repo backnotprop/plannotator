@@ -72,7 +72,7 @@ export function tailscaleCheckLines(checks: PairingChecks['tailscale']): CheckLi
   const later: CheckLine = { status: 'later', text: 'The rest is checked once it runs.' };
   switch (checks.state) {
     case 'cli_missing':
-      // ENOENT: the command is missing, which the Mac App Store app is until its command-line tool is turned on.
+      // ENOENT: no command on PATH and (on a Mac) no /Applications/Tailscale.app whose own CLI stands in for it.
       return [
         {
           status: 'fail',
