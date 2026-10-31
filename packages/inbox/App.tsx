@@ -193,6 +193,8 @@ const DRAFTS_REFRESH_MS = 10_000;
 const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
+/** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
+const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
 const AGENTS_SESSIONS_REFRESH_MS = 5_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
@@ -205,6 +207,7 @@ const WHATS_NEW_RETRY_MS = 1000;
  * Opening a thread whose read failed (a dropped connection, a 5xx; not a 404): read it again after
  * these waits, then every last one, while it stays open. Before this the pane stayed blank until some
  * agent wrote anywhere in the Inbox (the event stream re-reads the open thread), seconds or forever.
+ * A failed re-read of a thread already on screen waits the same (liveThreadRetry).
  */
 export const THREAD_READ_RETRY_MS = [250, 1000, 2000, 4000, 5000] as const;
 /**
@@ -689,6 +692,15 @@ function Inbox() {
   const threadLoaded = useRef<InboxThread | null>(null);
   /** Wakes the open effect's wait between retries when another read lands the thread. */
   const wakeThreadRetry = useRef<(() => void) | null>(null);
+  /**
+   * A re-read of the thread already on screen (a record's, a catch-up's) that failed: read again after
+   * THREAD_READ_RETRY_MS, until one lands or the thread closes or changes. `attempt`: the failures so far.
+   */
+  const liveThreadRetry = useRef<{ threadId: string; attempt: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const stopLiveThreadRetry = useCallback(() => {
+    if (liveThreadRetry.current) clearTimeout(liveThreadRetry.current.timer);
+    liveThreadRetry.current = null;
+  }, []);
   /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
   const focusThreadSubject = useRef(false);
   /** Try again on the placeholder: the open effect reads the thread at once. */
@@ -832,6 +844,13 @@ function Inbox() {
   const toastDeadline = useRef(0);
   const toastLeft = useRef<number | null>(null);
   const [said, setSaid] = useState('');
+  /**
+   * The live stream is dead (liveStream.ts: silent past its window, and a reconnect brought nothing): the list's
+   * quiet "Reconnecting…" line, until the stream is heard again.
+   */
+  const [streamDead, setStreamDead] = useState(false);
+  /** When the live region last said "Reconnecting…": said once, and not again for a while (a flaky network). */
+  const reconnectSaidAt = useRef<number | null>(null);
   /** The thread whose reply box opens once it is on screen (the warning toast's Reply). */
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
@@ -1001,6 +1020,10 @@ function Inbox() {
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
       const next = await inboxApi.list();
+      // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
+      // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
+      const held = latestRef.current;
+      if (held && next.serverSession === held.serverSession && next.cursor < held.cursor) return held;
       setPageSession(next.serverSession);
       // Before the render: what waits on this read (Mark read after a look, markRead) reads the rows it brought.
       latestRef.current = next;
@@ -1129,6 +1152,7 @@ function Inbox() {
         threadReadApplied.current = mine;
         threadLoaded.current = next.thread;
         wakeThreadRetry.current?.();
+        stopLiveThreadRetry();
         setThread(next.thread);
         setThreadRow(next.row ?? null);
         setThreadLoad(null);
@@ -1165,10 +1189,21 @@ function Inbox() {
         const refused = cause instanceof InboxApiError && cause.code === 'machine_conflict';
         if (missing) setThread(null);
         setThreadLoad({ threadId, state: refused ? 'refused' : missing ? 'missing' : 'failed', error: cause instanceof Error ? cause.message : String(cause), waiting });
+        // The thread is on screen already (the open effect retries a first read itself): this re-read is tried again,
+        // or what it would have brought (an agent's new message) waits until some other record re-reads the thread.
+        if (!missing && !refused && threadLoaded.current?.thread_id === threadId) {
+          const attempt = liveThreadRetry.current?.threadId === threadId ? liveThreadRetry.current.attempt : 0;
+          stopLiveThreadRetry();
+          const timer = setTimeout(() => {
+            if (routeRef.current.thread === threadId) void refreshThread(threadId);
+            else stopLiveThreadRetry();
+          }, THREAD_READ_RETRY_MS[Math.min(attempt, THREAD_READ_RETRY_MS.length - 1)]!);
+          liveThreadRetry.current = { threadId, attempt: attempt + 1, timer };
+        }
       }
       return null;
     }
-  }, [setThreadLoad]);
+  }, [setThreadLoad, stopLiveThreadRetry]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -1456,6 +1491,18 @@ function Inbox() {
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
         onConnect: reportWindow,
+        // The stream went silent past its window (or the tab came back after it): read what a record would make the
+        // page read, once, so a message that arrived meanwhile is on screen. Never while the stream is heard.
+        onCatchUp: () => {
+          void refreshList(false).then((next) => next && flushNotifications(next));
+          void refreshDecisions();
+          const open = routeRef.current.thread;
+          if (open) void refreshThread(open);
+          void refreshDrafts();
+          // A card record reads the Board: while it is open, it is read again too.
+          if (routeRef.current.page === 'board') void refreshCards();
+        },
+        onLive: (live) => setStreamDead(!live),
         // Linked machines. A record from another machine: a live one rings like this Inbox's own (a resync after a
         // reconnect never does), and the open thread follows when it is that machine's. Its row moves once this Inbox
         // has read that machine's list again, which the `machines` frame says.
@@ -1593,8 +1640,10 @@ function Inbox() {
       cancelled = true;
       if (retry) clearTimeout(retry);
       wakeThreadRetry.current = null;
+      // Closed or changed: a failed re-read of this thread is not tried again.
+      stopLiveThreadRetry();
     };
-  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook]);
+  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook, stopLiveThreadRetry]);
   // The thread landed while focus was in its place: focus goes to its subject, never to the page.
   useLayoutEffect(() => {
     if (!focusThreadSubject.current || !thread || thread.thread_id !== route.thread) return;
@@ -2146,6 +2195,20 @@ function Inbox() {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
   };
+  // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
+  // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
+  useEffect(() => {
+    if (!streamDead) {
+      // Live again: the region drops the words, saying nothing new (a screen reader that reads it later finds no stale state).
+      setSaid((current) => (current === 'Reconnecting…' ? '' : current));
+      return;
+    }
+    const at = reconnectSaidAt.current;
+    if (at !== null && Date.now() - at < RECONNECT_SAY_GAP_MS) return;
+    reconnectSaidAt.current = Date.now();
+    say('Reconnecting…');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is a fresh closure each render; only the change matters.
+  }, [streamDead]);
   /**
    * Click Inbox to refresh (the owner, 2026-10-20: "Just click inbox, it
    * refreshes"): clicking Inbox, or the project folder the list shows, or the
@@ -4160,6 +4223,7 @@ function Inbox() {
           onSearch={(opener) => openSearch(opener)}
           onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
+          reconnecting={streamDead}
           empty={
             projectAllArchived(filterProject) ? (
               <div className="ib-empty-list" data-project-archived="">

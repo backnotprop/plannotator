@@ -54,7 +54,7 @@ import type {
   InboxWindowPermission,
 } from '@plannotator/core/inbox-types';
 
-import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeSharedInboxEvents } from './sharedEvents';
+import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
 
@@ -1372,6 +1372,13 @@ export interface InboxEventHandlers {
   onMachines?: (machines: MachineView[]) => void;
   /** A write held for another machine changed state (queued, sending, delivered, refused…). */
   onOutbox?: (entry: OutboxView) => void;
+  /**
+   * The live stream went silent past its window (liveStream.ts), or the tab came back after it: read the list and
+   * the open thread again, so nothing it missed stays missed. Never called while the stream is heard.
+   */
+  onCatchUp?: () => void;
+  /** The live stream is dead (`false`: a reconnect brought nothing) or heard again (`true`). Called on a change only. */
+  onLive?: (live: boolean) => void;
 }
 
 /** The `machine` frame: one record of another machine's event stream. */
@@ -1390,7 +1397,8 @@ export interface InboxEventWindow {
 }
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'machine', 'machines', 'outbox'] as const;
+// `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1427,6 +1435,9 @@ export function openInboxEventFrames(cursor: number, onFrame: (frame: InboxEvent
 /** One frame to the handlers: what each named event means. */
 export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventHandlers): void {
   switch (frame.name) {
+    case 'heartbeat':
+      // Only proof the stream is alive: no read, nothing to show.
+      return;
     case 'hello':
       handlers.onConnect?.();
       return;
@@ -1532,6 +1543,15 @@ export function subscribeInboxEvents(
 ): () => void {
   if (win && sharedInboxEventsSupported()) {
     return subscribeSharedInboxEvents(cursor, handlers, win, browserSharedEventsEnv({ open: openInboxEventFrames, dispatch: dispatchInboxFrame }));
+  }
+  // A window's own stream beats too: the same silence watch, reopening this tab's stream.
+  if (win && typeof document !== 'undefined') {
+    return subscribeOwnInboxEvents(cursor, handlers, win, {
+      open: openInboxEventFrames,
+      dispatch: dispatchInboxFrame,
+      lifecycle: { document, window },
+      isVisible: () => document.visibilityState === 'visible',
+    });
   }
   return openInboxEventFrames(cursor, (frame) => dispatchInboxFrame(frame, handlers), win);
 }

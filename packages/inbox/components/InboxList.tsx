@@ -73,6 +73,11 @@ export interface InboxListProps {
   onSendNow?: (row: InboxListRow) => void;
   /** A phone (phone.ts): the list fills the window and its rows are a mail app's. */
   phone?: boolean;
+  /**
+   * The live stream is dead (liveStream.ts): one quiet muted line under the list, "Reconnecting…", gone with the
+   * stream's next frame. The live region says it (App.tsx), so the line itself is not live.
+   */
+  reconnecting?: boolean;
   /** The project shown (null: every project). A phone opens another project's list at its top, as a mail app opens another mailbox. */
   scope?: string | null;
   /** Opens search: on a phone, the list header's search icon (inbox.css shows it there only). */
@@ -1063,6 +1068,11 @@ export function InboxList(props: InboxListProps) {
             );
           })}
         </ThreadRowMenu>
+      {props.reconnecting && (
+        <p className="ib-relink" data-inbox-reconnecting="">
+          Reconnecting…
+        </p>
+      )}
       {resizable && <ListColumnEdge controls={columnId} />}
     </section>
   );
