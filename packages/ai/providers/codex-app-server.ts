@@ -56,6 +56,13 @@ const IDLE_TIMEOUT_MS = 10 * 60_000;
 /** Reject a JSON-RPC request that gets no response in this long (RPC acks are
  *  fast — turn output streams via notifications, not the turn/start response). */
 const RPC_TIMEOUT_MS = 30_000;
+/**
+ * The longest unfinished stdout line, in characters. One line can hold a whole `thread/resume` answer or a command's
+ * `aggregatedOutput`, and neither has a size Plannotator knows, so this stops a runaway and not a long message.
+ */
+export const CODEX_LINE_MAX = 256 * 1024 * 1024;
+/** How long a Codex gets to stop on SIGTERM before SIGKILL. */
+const CODEX_STOP_GRACE_MS = 2_000;
 /** Model discovery must not gate the AI panel: cap its handshake + model/list
  *  RPCs much shorter than RPC_TIMEOUT_MS so a codex that's installed but not
  *  logged in (or otherwise unresponsive) falls back to the static model list
@@ -296,6 +303,21 @@ export function mapApprovalRequest(
 // JSON-RPC over stdio (bidirectional: responses, notifications, server requests)
 // ---------------------------------------------------------------------------
 
+/** SIGTERM, then SIGKILL for a Codex that ignores it. On Windows the tree kill is already forced. */
+function stopChild(proc: ChildProcess, now = false): void {
+  if (killWindowsProcessTree(proc.pid)) return;
+  if (now) {
+    proc.kill("SIGKILL");
+    return;
+  }
+  proc.kill();
+  const timer = setTimeout(() => {
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+  }, CODEX_STOP_GRACE_MS);
+  timer.unref();
+  proc.once("exit", () => clearTimeout(timer));
+}
+
 type NotificationListener =(notification: { method: string; params: RpcMessage }) => void;
 type RequestHandler = (method: string, id: string | number, params: RpcMessage) => void;
 
@@ -316,6 +338,9 @@ export class CodexAppServerProcess {
   private startPromise: Promise<void> | null = null;
   /** The initialize response's `userAgent` ("plannotator/<codex version> (…)"). */
   userAgent: string | undefined;
+
+  /** `lineMax`: past this many characters with no newline, the process is failed and stopped. */
+  constructor(private readonly lineMax: number = CODEX_LINE_MAX) {}
 
   /** Spawn + JSON-RPC initialize handshake, once. `initTimeoutMs` bounds the
    *  initialize wait (model discovery passes a short value so it can't hang).
@@ -412,7 +437,7 @@ export class CodexAppServerProcess {
     this.handleProcessEnd(error);
     if (proc) {
       try {
-        if (!killWindowsProcessTree(proc.pid)) proc.kill();
+        stopChild(proc);
       } catch {
         // Already gone.
       }
@@ -432,18 +457,30 @@ export class CodexAppServerProcess {
 
   private readStream(): void {
     if (!this.proc?.stdout) return;
-    this.proc.stdout.on("data", (chunk: Buffer) => {
-      this.buffer += this.decoder.decode(chunk, { stream: true });
-      const lines = this.buffer.split("\n");
-      this.buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.replace(/\r$/, "");
-        if (!trimmed) continue;
-        try {
-          this.routeMessage(JSON.parse(trimmed));
-        } catch {
-          // Ignore malformed lines.
+    const stdout = this.proc.stdout;
+    stdout.on("data", (chunk: Buffer) => {
+      const text = this.decoder.decode(chunk, { stream: true });
+      // Only a chunk with a newline splits: searching the whole buffer on every chunk starves the event loop on a long line.
+      const end = text.lastIndexOf("\n");
+      if (end >= 0) {
+        const lines = `${this.buffer}${text.slice(0, end)}`.split("\n");
+        this.buffer = text.slice(end + 1);
+        for (const line of lines) {
+          const trimmed = line.replace(/\r$/, "");
+          if (!trimmed) continue;
+          try {
+            this.routeMessage(JSON.parse(trimmed));
+          } catch {
+            // Ignore malformed lines.
+          }
         }
+      } else {
+        this.buffer += text;
+      }
+      if (this.buffer.length > this.lineMax) {
+        this.buffer = "";
+        stdout.destroy();
+        this.failProcess(new Error("Codex app-server wrote a line past the limit"));
       }
     });
   }
@@ -549,14 +586,13 @@ export class CodexAppServerProcess {
     return this._alive;
   }
 
-  kill(): void {
+  /** `now`: SIGKILL at once, for when this process is exiting and no later timer would run. */
+  kill(now = false): void {
     this._alive = false;
     this.startPromise = null;
     const proc = this.proc;
     this.proc = null;
-    if (proc) {
-      if (!killWindowsProcessTree(proc.pid)) proc.kill();
-    }
+    if (proc) stopChild(proc, now);
     this.listeners.length = 0;
     this.requestHandlers.length = 0;
     for (const [, pending] of this.pendingRequests) {

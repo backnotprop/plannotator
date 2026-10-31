@@ -2312,6 +2312,8 @@ export interface InboxVoiceSettings {
   computer: string | null;
   /** The one-time announcement may still show here (`POST /api/inbox/voice/intro` claims it). */
   intro_due: boolean;
+  /** A tailnet login other than the owner's: `on` is false and voice's routes answer `owner_only`, as Feedback's does. */
+  guest: boolean;
 }
 
 /**
