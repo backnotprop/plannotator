@@ -22,6 +22,7 @@ import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
 import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
+import { splitReplyFeedback } from '../replyFeedback';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { OpenInSurface } from './OpenIn';
@@ -435,10 +436,17 @@ export function MessageBody({
         : text,
     [replyFileList, replyPeople, projectRoot, message.created_at],
   );
-  const shown = useMemo(() => linkFiles(replyParts ? replyParts.words : sent), [linkFiles, replyParts, sent]);
-  const restShown = useMemo(() => (replyParts ? linkFiles(replyParts.rest) : ''), [linkFiles, replyParts]);
+  // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
+  // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.
+  const wordsText = replyParts ? replyParts.words : sent;
+  const restText = replyParts ? replyParts.rest : '';
+  const feedback = useMemo(() => (ownReply ? splitReplyFeedback(replyParts ? restText : wordsText) : null), [ownReply, replyParts, restText, wordsText]);
+  const shown = useMemo(() => linkFiles(feedback && !replyParts ? feedback.words : wordsText), [linkFiles, feedback, replyParts, wordsText]);
+  const restShown = useMemo(() => (replyParts ? linkFiles(feedback ? feedback.words : restText) : ''), [linkFiles, feedback, replyParts, restText]);
+  const feedbackShown = useMemo(() => (feedback ? linkFiles(feedback.feedback) : ''), [linkFiles, feedback]);
   const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false }), [shown]);
   const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false }) : []), [restShown]);
+  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false }) : []), [feedbackShown]);
   const refRepo = useRefRepo(repo);
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
@@ -754,11 +762,37 @@ export function MessageBody({
     [message.questions],
   );
 
+  /** The sent reply's parts after the words (the rest, the feedback): read-only text. */
+  const readOnlyViewer = (parts: Block[], markdown: string) => (
+    <Viewer
+      blocks={parts}
+      markdown={markdown}
+      annotations={NO_ANNOTATIONS}
+      onAddAnnotation={noop}
+      onSelectAnnotation={noop}
+      selectedAnnotationId={null}
+      allowImages={false}
+      mode="selection"
+      taterMode={false}
+      maxWidth={null}
+      stickyActions={false}
+      disableCodePathValidation
+      imageBaseDir={imageBaseDir}
+      onImageClick={onImageClick}
+      resolveLocalLink={resolveLocalLink}
+      refRepo={refRepo}
+      answerOnly
+      htmlEmbeds={htmlEmbeds}
+      readOnly
+      questionDecisionLines={false}
+    />
+  );
+
   return (
     <ImageResolverContext.Provider value={resolveImage}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
       {refCard}
-      {(!(replyParts || actionsSent) || shown !== '') && (
+      {(!(replyParts || actionsSent || feedbackShown) || shown !== '') && (
       <Viewer
         ref={viewerRef}
         blocks={blocks}
@@ -802,32 +836,8 @@ export function MessageBody({
       )}
       {replyParts && sentAnswers && sentAnswers.length > 0 && <SentAnswers groups={sentAnswers} onJump={onJumpQuestion} />}
       {actionsSent && <ReplyActions actions={sentActions!} sent onJump={onJumpQuestion} />}
-      {replyParts && restShown && (
-        <div data-sent-rest="">
-        <Viewer
-          blocks={restBlocks}
-          markdown={restShown}
-          annotations={NO_ANNOTATIONS}
-          onAddAnnotation={noop}
-          onSelectAnnotation={noop}
-          selectedAnnotationId={null}
-          allowImages={false}
-          mode="selection"
-          taterMode={false}
-          maxWidth={null}
-          stickyActions={false}
-          disableCodePathValidation
-          imageBaseDir={imageBaseDir}
-          onImageClick={onImageClick}
-          resolveLocalLink={resolveLocalLink}
-          refRepo={refRepo}
-          answerOnly
-          htmlEmbeds={htmlEmbeds}
-          readOnly
-          questionDecisionLines={false}
-        />
-        </div>
-      )}
+      {replyParts && restShown && <div data-sent-rest="">{readOnlyViewer(restBlocks, restShown)}</div>}
+      {feedbackShown && <div data-reply-feedback="">{readOnlyViewer(feedbackBlocks, feedbackShown)}</div>}
       {skills && <SkillsLine split={skills} />}
       {tagLabels && (
         <div className="ib-tg-marks" ref={tagLayerRef} aria-hidden="true" data-tag-marks="">

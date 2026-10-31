@@ -1187,6 +1187,15 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* the message body: Plannotator's Viewer without its document card */
 .ib-body [data-print-region="article"] { padding: 0; background: transparent; }
 .ib-body [data-print-region="article"] > .mt-4:first-child { margin-top: 0; }
+/* The feedback a Send wrote after the person's own words (replyFeedback.ts; the owner's ask, 2026-10-31: "Is
+   there a reason the inline comments appear like so big? Like a header?"): part of the reply, not page headings.
+   The section ("Feedback on the attached files") a small bold label, a file's or message's name at text size,
+   each comment's "Feedback on: …" as text. Only the person's own reply has this block; an agent's headings,
+   and every other Viewer, draw as before. The text the agent gets is unchanged. */
+.ib-body [data-reply-feedback] :is(h1, h2, h3, h4, h5, h6) { font-size: var(--ib-fs-15, 15px); line-height: 1.5; letter-spacing: normal; margin: 14px 0 4px; }
+.ib-body [data-reply-feedback] h1 { font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); margin-top: 0; }
+.ib-body [data-reply-feedback] h2 { font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--foreground); margin-top: 18px; }
+.ib-body [data-reply-feedback] :is(h3, h4, h5, h6) { font-weight: 500; color: var(--foreground); }
 /* What an agent pastes (a long URL, a key in inline code, a bare token, a
    choice that is one long ID) wraps inside the message: nothing in a message
    scrolls the thread sideways. `break-word` breaks only what would overflow,
