@@ -1,11 +1,14 @@
 /**
  * When a load may ask for the one-time list options dialog (approval "inbox-list-options-intro"). What regresses: the
  * dialog on the same load as the tour or another one-time dialog, over a reply or another dialog, on a page that is
- * not the list, over a thread (or its file or document) a load opened on, through the tailnet, on a short list, or
- * before this load's other dialogs are decided.
+ * not the Inbox's (Settings, the Board), over a file, document, guided review or Artifacts view (side by side or full
+ * screen), over a search or a new message, through the tailnet, on a short list, or before this load's other dialogs
+ * are decided; and, since the owner's note (2026-10-31, "it should show if I have a thread open"), a thread open
+ * keeping it away.
  */
 import { describe, expect, test } from 'bun:test';
-import { listIntroListAlone, listIntroMayAsk, listIntroWanted, type ListIntroLoad } from './listIntro';
+import { LIST_INTRO_PREVIEW, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
+import { LIST_LOOK_OPTIONS } from './listLook';
 
 const ready: ListIntroLoad = {
   due: true,
@@ -13,7 +16,7 @@ const ready: ListIntroLoad = {
   listLoaded: true,
   firstRun: false,
   rows: 5,
-  listAlone: true,
+  settled: true,
   tourThisLoad: false,
   otherDialogThisLoad: false,
   othersSettled: true,
@@ -45,23 +48,47 @@ describe('the list options dialog: when a load may ask for it', () => {
     expect(listIntroWanted({ ...ready, rows: 3 })).toBe(true);
   });
 
-  test('only the list alone: never over a thread (on a phone or beside the desktop list), Settings, the Board or a search', () => {
+  test('the Inbox page, a thread open or not (on a phone or a desktop); never Settings, the Board, a search or a new message', () => {
     const none = { search: false, compose: false };
-    expect(listIntroListAlone({ page: 'inbox', thread: null }, none)).toBe(true);
-    // A thread link, a notification, a reload on a thread: a file, document or guided review rides on it too.
-    expect(listIntroListAlone({ page: 'inbox', thread: 'thr_1' }, none)).toBe(false);
-    for (const page of ['settings', 'board', 'whats-new', 'tour', 'drafts']) expect(listIntroListAlone({ page, thread: null }, none)).toBe(false);
-    expect(listIntroListAlone({ page: 'inbox', thread: null }, { search: true, compose: false })).toBe(false);
-    expect(listIntroListAlone({ page: 'inbox', thread: null }, { search: false, compose: true })).toBe(false);
+    expect(listIntroPageClear({ page: 'inbox' }, none)).toBe(true);
+    // A thread link, a notification, a reload on a thread: the thread is the Inbox page too (the owner, 2026-10-31).
+    const onThread = { page: 'inbox', thread: 'thr_1', file: null, guide: null, artifacts: false };
+    expect(listIntroPageClear(onThread, none)).toBe(true);
+    for (const page of ['settings', 'board', 'whats-new', 'tour', 'drafts']) expect(listIntroPageClear({ page }, none)).toBe(false);
+    for (const thread of [null, 'thr_1']) {
+      const route = { page: 'inbox', thread };
+      expect(listIntroPageClear(route, { search: true, compose: false })).toBe(false);
+      expect(listIntroPageClear(route, { search: false, compose: true })).toBe(false);
+    }
   });
 
-  test('wanted, but it waits: until the list alone has been on screen a moment, before the other dialogs settle, over an update, another dialog or a reply', () => {
-    expect(listIntroMayAsk({ ...ready, listAlone: false }, calm)).toBe(false);
+  test('never over a file, document, guided review or Artifacts view on the thread, side by side or full screen', () => {
+    const none = { search: false, compose: false };
+    const onThread = { page: 'inbox', thread: 'thr_1', file: null, guide: null, artifacts: false };
+    for (const view of ['side', 'full', null] as const) {
+      // A file or a document (both are attachments), in either view or the remembered one.
+      expect(listIntroPageClear({ ...onThread, file: { id: 'att_1', version: 'current', focus: null, view } }, none)).toBe(false);
+    }
+    expect(listIntroPageClear({ ...onThread, guide: 'msg_1' }, none)).toBe(false);
+    expect(listIntroPageClear({ ...onThread, artifacts: true }, none)).toBe(false);
+    // Closed again: the thread alone is clear.
+    expect(listIntroPageClear(onThread, none)).toBe(true);
+  });
+
+  test('wanted, but it waits: until the page has been settled a moment, before the other dialogs settle, over an update, another dialog or a reply', () => {
+    expect(listIntroMayAsk({ ...ready, settled: false }, calm)).toBe(false);
     expect(listIntroMayAsk({ ...ready, othersSettled: false }, calm)).toBe(false);
     expect(listIntroMayAsk({ ...ready, updating: true }, calm)).toBe(false);
     expect(listIntroMayAsk(ready, { modal: true, replying: false })).toBe(false);
     expect(listIntroMayAsk(ready, { modal: false, replying: true })).toBe(false);
     // Still wanted meanwhile: the notification lines keep waiting for it.
-    expect(listIntroWanted({ ...ready, listAlone: false, othersSettled: false, updating: true })).toBe(true);
+    expect(listIntroWanted({ ...ready, settled: false, othersSettled: false, updating: true })).toBe(true);
+  });
+
+  test('the preview turns on every option of the ⋮ menu, in its order, then all off last', () => {
+    const steps = LIST_INTRO_PREVIEW.map((step) => step.key);
+    expect(steps).toEqual([...LIST_LOOK_OPTIONS.map((option) => option.key), null]);
+    const at = LIST_INTRO_PREVIEW.map((step) => step.at);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
   });
 });
