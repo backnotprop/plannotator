@@ -276,6 +276,8 @@ Running only `build:opencode` will copy stale HTML files.
 
 `apps/marketing/` is the plannotator.ai website — landing page, documentation, and blog. Built with Astro 5 (static output, zero client JS except a theme toggle island). Docs are markdown files in `src/content/docs/`, blog posts in `src/content/blog/`, both using Astro content collections. Tailwind CSS v4 via `@tailwindcss/vite`. Deploys to S3/CloudFront via GitHub Actions on push to main.
 
+The `/vscode/` page (Guided Reviews for VS Code) is built only while `GUIDES_VSCODE_LAUNCHED` (`src/lib/guides-vscode-launch.ts`) is on; it is committed off until the extension release with the Guides view ships, and its screens live in `guides-vscode-assets/`, copied into `dist/assets/guides-vscode/` only when on. Preview: `GUIDES_VSCODE_LAUNCHED=true bun run --cwd apps/marketing build`, then `preview`. Its film shows only when `public/assets/guides-vscode.mp4` exists at build time.
+
 The `/docs/reference/keyboard-shortcuts` page is auto-generated from the shortcut registry at build time — see the Keyboard Shortcuts section above. Editing the markdown body has no effect; update the scope files instead.
 
 ## Test plugin locally
