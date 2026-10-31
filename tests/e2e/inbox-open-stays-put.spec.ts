@@ -568,6 +568,10 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   page.on('request', (request) => {
     if (request.method() === 'POST' && /\/(read|unread)$/.test(request.url())) written.push(request.url());
   });
+  const markedUnread: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/mark-unread')) markedUnread.push(request.url());
+  });
   const { id } = world.projects.seen;
   await page.goto(`${world.url}/#project=${id}`);
   await expect(page.locator('[data-section-id="new"] [data-thread-id]')).toHaveCount(4);
@@ -616,6 +620,21 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await page.keyboard.press('e');
   await expect(row).toHaveCount(0);
   await page.keyboard.press('z');
+  await expect.poll(() => sectionOf(page, first)).toBe('new');
+  expect(await rowsOf(page)).toEqual(before);
+
+  // A double-click on Mark read: the first click swaps the button, so the second lands on Mark unread in its place
+  // and does nothing. The delay is a person's: the swap is on screen before the second click. Undo for what follows.
+  const markReadAt = (await header.boundingBox())!;
+  await page.mouse.dblclick(markReadAt.x + markReadAt.width / 2, markReadAt.y + markReadAt.height / 2, { delay: 60 });
+  await expect(row).toHaveCount(0);
+  await expect(quietCount).toHaveText('1');
+  await expect(headerUnread).toBeEnabled();
+  await page.waitForTimeout(300);
+  await expect(page.locator('section.ib-pane')).toHaveCount(1);
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Moved to Quiet');
+  expect(markedUnread).toEqual([]);
+  await page.locator('[data-toast-undo]').click();
   await expect.poll(() => sectionOf(page, first)).toBe('new');
   expect(await rowsOf(page)).toEqual(before);
 

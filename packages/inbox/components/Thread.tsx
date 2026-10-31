@@ -3947,7 +3947,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   };
   const markReadButton = markUnreadOffered ? (
     <Tip content="Back to New, bold, as if you had not opened it. Nothing is sent.">
-      <button type="button" className="ib-hbtn" data-mark-unread="" onClick={() => onMarkUnread!()}>
+      <button
+        type="button"
+        className="ib-hbtn"
+        data-mark-unread=""
+        onClick={(event) => {
+          // A double-click on Mark read: this button took its place after the first click. The second is not meant for it.
+          if (event.detail > 1) return;
+          onMarkUnread!();
+        }}
+      >
         <Icon name="envelope" size={16} />
         <span className="ib-hbtn-l">Mark unread</span>
       </button>
