@@ -9,8 +9,8 @@
  * activation line is 80 px below the top (it was 52), plan review's
  * `TableOfContents` scroll offset, so a pick lands where plan review's does.
  *
- * Plan review's own list keeps `hooks/useActiveSection` (an
- * IntersectionObserver band). One mechanism per surface: the rail, and a
+ * Plan review's own list uses `hooks/useActiveSection` (live heading
+ * positions at the same activation line). One mechanism per surface: the rail, and a
  * Contents list on the rail's surface (`DocumentContents`), use this one.
  */
 
