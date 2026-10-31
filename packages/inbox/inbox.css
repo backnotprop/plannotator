@@ -1627,6 +1627,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-pane.ib-withfile .ib-annpop { width: 400px; }
 .ib-pane.ib-withfile .ib-pbody { padding: 16px 20px 0; }
 .ib-pane.ib-withfile .ib-pfoot { padding: 12px 20px 14px; }
+/* The thread in full screen (the header's "Hide the sidebar and the list"): a reading measure, centred. */
+.pn-inbox .ib-pane[data-full] .ib-pbody,
+.pn-inbox .ib-pane[data-full] .ib-pfoot { padding-inline: max(30px, calc((100% - 760px) / 2)); }
 .ib-pane.ib-withfile .ib-msg { padding-left: 0; }
 .ib-pane.ib-withfile .ib-att-t { min-width: 0; flex: 1 1 250px; }
 .ib-view { position: relative; z-index: 1; flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-rows: 46px auto minmax(0, 1fr) auto auto; background: var(--background); }
