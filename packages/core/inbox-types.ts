@@ -2290,3 +2290,49 @@ export interface InboxPromptsChange {
     runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
   };
 }
+
+/** Who turns a voice clip into text: Codex's ChatGPT login, or an OpenAI API key. */
+export type InboxVoiceEngine = "codex" | "api";
+
+/** Where the API key comes from. A page never gets the key: the last 4 of a saved one at most. */
+export interface InboxVoiceKeyState {
+  source: "saved" | "env" | null;
+  last4: string | null;
+}
+
+/** Settings → Voice (`GET /api/inbox/settings` `voice`). */
+export interface InboxVoiceSettings {
+  on: boolean;
+  phones_only: boolean;
+  engine: InboxVoiceEngine;
+  key: InboxVoiceKeyState;
+  /** This computer's name, for a page over the tailnet; null on the computer itself. */
+  computer: string | null;
+  /** The one-time announcement may still show here (`POST /api/inbox/voice/intro` claims it). */
+  intro_due: boolean;
+}
+
+/**
+ * Whether voice can work here (`GET /api/inbox/voice/status`). `off`: nothing was asked. `ready`: Codex has a ChatGPT
+ * login, or a key is there. `missing`, `signedout`, `apikey`, `other`: what Codex says of itself. `nokey`: the API
+ * engine has no key. `unknown`: Codex did not answer.
+ */
+export interface InboxVoiceStatus {
+  state: "off" | "ready" | "missing" | "signedout" | "apikey" | "other" | "nokey" | "unknown";
+  plan: string | null;
+}
+
+/** Why a clip came back with no words: the `code` of a `POST /api/inbox/voice/transcribe` failure. */
+export type InboxVoiceFailure =
+  | "voice_off"
+  | "voice_not_ready"
+  | "voice_bad_clip"
+  | "voice_expired"
+  | "voice_refused"
+  | "voice_key_refused"
+  | "voice_unreachable"
+  | "voice_codex_failed"
+  | "voice_empty";
+
+/** The largest clip the Inbox takes: a 2:00 clip at 24 kHz, 16-bit mono is 5.76 MB. */
+export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;
