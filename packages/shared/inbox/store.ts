@@ -821,18 +821,23 @@ export class InboxStore {
    * starts anew). No session and no name: always a new thread.
    */
   private routeThread(projectId: string, session: string | null, name: string | null): string | null {
-    if (name !== null) {
-      const roots = this.rootsNamed(projectId, name);
-      for (let i = roots.length - 1; i >= 0; i--) if (!this.isResolved(roots[i]!)) return roots[i]!;
-      return null;
-    }
+    if (name !== null) return this.newestOpen(projectId, this.rootsNamed(projectId, name));
     if (!session) return null;
-    // A session that wrote from both folders of a combined project: its newest open thread in either.
-    const open = this.projectGroup(projectId)
+    const roots = this.projectGroup(projectId)
       .map((id) => this.sessionThreads.get(`${id}\0${session}`))
-      .filter((rootId): rootId is string => rootId !== undefined && !this.isResolved(rootId))
-      .sort((a, b) => (this.messageSeq.get(b) ?? 0) - (this.messageSeq.get(a) ?? 0));
-    return open[0] ?? null;
+      .filter((rootId): rootId is string => rootId !== undefined)
+      .sort((a, b) => (this.messageSeq.get(a) ?? 0) - (this.messageSeq.get(b) ?? 0));
+    return this.newestOpen(projectId, roots);
+  }
+
+  /**
+   * The newest open thread of `roots` (oldest first): in `projectId`'s own
+   * folder when it has one, so a combine never moves a live conversation;
+   * else the newest in the rest of a combined project.
+   */
+  private newestOpen(projectId: string, roots: readonly string[]): string | null {
+    const open = roots.filter((rootId) => !this.isResolved(rootId));
+    return open.filter((rootId) => this.messages.get(rootId)!.project_id === projectId).at(-1) ?? open.at(-1) ?? null;
   }
 
   /** The highest seq written: the event-log cursor "now". */
@@ -1051,14 +1056,17 @@ export class InboxStore {
 
   /**
    * The projects combined into `projectId`, each named by its own folder or
-   * given name: the name it goes back to, which is what Separate says. Oldest first.
+   * given name: the name it goes back to, which is what Separate says. Oldest
+   * first. Named beside the project they are in, so a clone of it keeps its parent
+   * ("billing-svc · old"), never a second "billing-svc".
    */
   combinedInto(projectId: string): InboxProject[] {
     if (this.canonicalProjectId(projectId) !== projectId) return [];
     const members = this.projectGroup(projectId)
       .slice(1)
       .map((id) => this.projectsById.get(id)!);
-    const names = inboxProjectLabels(members);
+    const head = this.projectsById.get(projectId);
+    const names = inboxProjectLabels(head ? [head, ...members] : members);
     return members.map((project) => ({ ...project, name: names.get(project.id) ?? project.name }));
   }
 
@@ -2760,7 +2768,8 @@ export class InboxStore {
       const threads = [...perThread.entries()]
         .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.threadSubject(threadId), bytes: threadBytes }))
         .sort((a, b) => b.bytes - a.bytes || a.thread_id.localeCompare(b.thread_id));
-      const combined = this.combinedInto(project.id).map((member) => member.name);
+      // The ones a Delete leaves on their own: a project deeper in the chain stays in the one it went into.
+      const combined = this.combinedInto(project.id).flatMap((member) => (member.merged_into === project.id ? [member.name] : []));
       projects.push({
         id: project.id,
         name: project.name,
@@ -5465,6 +5474,8 @@ export class InboxStore {
     const target = sending ? this.cardSendTarget(project.id, input.send_thread_id) : null;
     const threads = this.cardThreads(input.threads ?? [], project.id);
     if (target && !threads.includes(target.thread)) threads.push(target.thread);
+    // Made for a thread of a combined project: filed in that thread's folder, so a Separate takes the card along.
+    const owner = threads.length > 0 ? this.messages.get(threads[0]!)!.project_id : project.id;
     let titleValue = input.title;
     if ((titleValue === undefined || titleValue === null || titleValue === "") && threads.length > 0) {
       // The agent did not write the subject: characters a title refuses (bidi controls) are dropped, not refused.
@@ -5504,7 +5515,7 @@ export class InboxStore {
     const at = this.stamp();
     const card: InboxCard = {
       id: inboxId("crd"),
-      project_id: project.id,
+      project_id: owner,
       title,
       column,
       you,
@@ -5691,7 +5702,7 @@ export class InboxStore {
   sendCard(id: string, input: { thread_id: unknown }): InboxCard {
     const card = this.cards.get(id);
     if (!card) throw new InboxError("card_not_found", `No card ${id}.`);
-    const { thread, to } = this.cardSendTarget(card.project_id, input.thread_id);
+    const { thread, to } = this.cardSendTarget(card.project_id, input.thread_id, card.threads);
     // A retry of the same send (the window's Send or Start, after an answer that was lost) changes nothing.
     if (isInboxCardSentWaiting(card) && card.sent!.thread_id === thread && card.sent!.to.kind === "agent" && to.kind === "agent" && card.sent!.to.session === to.session) {
       return card;
@@ -5716,12 +5727,14 @@ export class InboxStore {
   /**
    * Where a card goes when the person sends it: `threadId` is the person's
    * message for it (a thread they started, or a New message in the card's
-   * thread), in `projectId`, addressed to one agent session. Checked before
-   * anything is written, so a refused send leaves no card and no line.
+   * thread), in `projectId` or already on the card (`linked`: a thread linked
+   * while two projects were combined stays linked after a Separate), addressed
+   * to one agent session. Checked before anything is written, so a refused
+   * send leaves no card and no line.
    */
-  private cardSendTarget(projectId: string, threadId: unknown): { thread: string; to: InboxAuthor } {
-    const [thread] = this.cardThreads([threadId], projectId);
+  private cardSendTarget(projectId: string, threadId: unknown, linked: readonly string[] = []): { thread: string; to: InboxAuthor } {
     const sentMessage = typeof threadId === "string" ? this.messages.get(threadId.trim()) : undefined;
+    const [thread] = sentMessage && linked.includes(sentMessage.thread_id) ? [sentMessage.thread_id] : this.cardThreads([threadId], projectId);
     if (!sentMessage || sentMessage.author.kind !== "person" || !sentMessage.to || (sentMessage.id === sentMessage.thread_id && !sentMessage.started_by_person)) {
       throw new InboxError("validation_error", "thread_id: the person's message for this card (a thread they started, or a message in its thread), addressed to one agent session.", { field: "thread_id" });
     }

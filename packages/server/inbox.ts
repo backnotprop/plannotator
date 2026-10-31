@@ -1003,7 +1003,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const own = store.listRows().map((row) => (pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     const rows: InboxListRow[] = merged ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id))] : own;
-    const scoped = projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows;
+    // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
+    const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
+    const scoped = shownProject ? rows.filter((row) => row.project.id === shownProject) : rows;
     const byId = new Map(rows.map((row) => [row.thread_id, row]));
     return {
       serverSession,
@@ -1146,7 +1148,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       entry.archived += 1;
       counts.set(row.project.id, entry);
     }
-    const scoped = projectFilter ? archived.filter((row) => row.project.id === projectFilter) : archived;
+    const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
+    const scoped = shownProject ? archived.filter((row) => row.project.id === shownProject) : archived;
     return {
       serverSession,
       cursor: store.cursor(),
@@ -2495,9 +2498,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody,
     json,
     combineSuggestions: () => {
-      const threads = new Map<string, number>();
-      for (const row of store.listRows()) threads.set(row.project.id, (threads.get(row.project.id) ?? 0) + 1);
-      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.get(root), threads: (id) => threads.get(id) ?? 0 });
+      // Runs on every list read, so it costs nothing without a duplicate: the repo cache as it stands (no git), and threads counted only for a pair.
+      let threads: Map<string, number> | null = null;
+      const threadsOf = (id: string) => {
+        if (!threads) {
+          threads = new Map();
+          for (const row of store.listRows()) threads.set(row.project.id, (threads.get(row.project.id) ?? 0) + 1);
+        }
+        return threads.get(id) ?? 0;
+      };
+      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.peek(root), threads: threadsOf });
     },
   });
 
@@ -2659,7 +2669,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // Each decision's project carries its repo (as a thread does), so refs on its card link there.
         const decisions = store.openDecisions({ projectId: projectFilterOf(url) }).map((decision) => {
-          const root = store.project(decision.thread.project.id)?.root;
+          // The thread's own folder: `thread.project` is the head of a combined project.
+          const root = store.thread(decision.thread.id)?.project.root;
           return { ...decision, thread: { ...decision.thread, project: { ...decision.thread.project, repo: root ? repos.get(root) : null } } };
         });
         return json({ serverSession, cursor: store.cursor(), decisions });
@@ -3199,7 +3210,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (seen) return json({ ...(seen.answer as object), replayed: true });
         }
         const rows = (ids: readonly string[]) => ids.map((id) => store.listRow(id)).filter((row): row is InboxListRow => row !== null);
-        const folder = () => projectFolders().find((p) => p.id === projectId) ?? null;
+        const folder = () => projectFolders().find((p) => p.id === store.canonicalProjectId(projectId)) ?? null;
         let answer: Record<string, unknown>;
         // A batch that stopped partway (a write failed): the threads it changed get their notes, and the
         // answer names them with `error`, so the window offers Undo for what did apply and says the rest

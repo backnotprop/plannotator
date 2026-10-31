@@ -12,6 +12,7 @@ import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
+import { memberNames } from '../projectCombine';
 import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
 import { selfMachineId } from '../inboxUrl';
@@ -182,10 +183,6 @@ export function Sidebar(props: SidebarProps) {
   // Another machine's project keeps what that machine gives it: only this machine's are renamed, combined or separated.
   const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
   // A project combined into another reads as it did on its own, which is what Separate gives back.
-  const namedMembers = (members: NonNullable<ProjectFolder['combined']>) => {
-    const names = shortProjectNames(members);
-    return members.map((member) => ({ ...member, name: names.get(member.id) ?? member.name }));
-  };
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
@@ -542,13 +539,15 @@ export function Sidebar(props: SidebarProps) {
                       ? async (into) => {
                           combinedInto.current = { from: project.id, into: into.id };
                           setOpenMobile(false);
-                          const done = await props.onProjectCombine!({ from: project.id, fromName: project.name, into: into.id, intoName: into.name, undoInto: null });
+                          // The name it will have: alone again, it loses a clash's parent.
+                          const intoName = shortProjectNames([into]).get(into.id) ?? into.name;
+                          const done = await props.onProjectCombine!({ from: project.id, fromName: project.name, into: into.id, intoName, undoInto: null });
                           if (!done) combinedInto.current = null;
                           return done;
                         }
                       : undefined
                   }
-                  combined={local(project) && project.combined ? namedMembers(project.combined) : []}
+                  combined={local(project) && project.combined ? memberNames(project, project.combined) : []}
                   onSeparate={
                     props.onProjectCombine && local(project)
                       ? (member) => {

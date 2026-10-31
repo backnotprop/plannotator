@@ -159,6 +159,17 @@ describe("the group", () => {
     expect(store.project(two.id)!.name).toBe("billing · old");
   });
 
+  test("a clone combined into its namesake keeps its parent: Separate and Settings never show two of one name", () => {
+    const { store } = open();
+    const one = store.ensureProject({ name: "billing", root: "/code/billing" });
+    const two = store.ensureProject({ name: "billing", root: "/old/billing" });
+    store.combineProject(two.id, one.id);
+    expect(store.combinedInto(one.id).map((member) => member.name)).toEqual(["billing · old"]);
+    const usage = store.diskUsage().projects;
+    expect(usage.find((row) => row.id === two.id)!.name).toBe("billing · old");
+    expect(usage.find((row) => row.id === one.id)).toMatchObject({ name: "billing", combined: ["billing · old"] });
+  });
+
   test("a thread shows the group's id and name, and keeps its own folder for its files", () => {
     const { store, docs, site } = open();
     const sent = say(store, site.id, "From the site.");
@@ -218,6 +229,33 @@ describe("the group", () => {
     expect(say(store, docs.id, "Someone else.", { session: "ses_y" }).thread_id).not.toBe(first.thread_id);
   });
 
+  test("a combine takes over no live conversation: a name open in both folders stays each folder's, through a Separate", () => {
+    const { store, docs, site } = open();
+    const inA = say(store, docs.id, "A's release.", { thread: "release" });
+    const inB = say(store, site.id, "B's release.", { thread: "release" });
+    store.combineProject(site.id, docs.id);
+    const fromA = say(store, docs.id, "A goes on.", { thread: "release" });
+    const fromB = say(store, site.id, "B goes on.", { thread: "release" });
+    expect(fromA.thread_id).toBe(inA.thread_id);
+    expect(fromB.thread_id).toBe(inB.thread_id);
+    expect([fromA.project_id, fromB.project_id]).toEqual([docs.id, site.id]);
+    expect([fromA.base_path, fromB.base_path]).toEqual([undefined, undefined]);
+    store.combineProject(site.id, null);
+    expect(store.thread(inA.thread_id)!.messages.map((m) => m.id)).toEqual([inA.id, fromA.id]);
+    expect(store.thread(inB.thread_id)!.messages.map((m) => m.id)).toEqual([inB.id, fromB.id]);
+  });
+
+  test("a session with an open thread in each folder stays in the one it writes from, and joins the other's only when its own is done", () => {
+    const { store, docs, site } = open();
+    const inA = say(store, docs.id, "From A.", { session: "ses_x" });
+    const inB = say(store, site.id, "From B.", { session: "ses_x" });
+    store.combineProject(site.id, docs.id);
+    expect(say(store, docs.id, "A again.", { session: "ses_x" }).thread_id).toBe(inA.thread_id);
+    expect(say(store, site.id, "B again.", { session: "ses_x" }).thread_id).toBe(inB.thread_id);
+    store.resolveThread(inA.thread_id, true);
+    expect(say(store, docs.id, "A's is done.", { session: "ses_x" }).thread_id).toBe(inB.thread_id);
+  });
+
   test("a retry from the other folder with the same idempotency key lands once", () => {
     const { store, docs, site } = open();
     const first = store.sendMessage({ project_id: site.id, author: agent(), body: "Once.", idempotency_key: "k1" });
@@ -251,6 +289,31 @@ describe("the group", () => {
     // The record keeps its project, so a Separate gives the card back.
     store.combineProject(site.id, null);
     expect(store.cardWire(store.listCards({ projectIds: new Set([site.id]) }).find((c) => c.id === card.id)!).project_id).toBe(site.id);
+  });
+
+  test("a card made for the other folder's thread goes back with that thread, and still sends after a Separate", () => {
+    const { store, docs, site } = open();
+    const { message } = store.startPersonThread({ project_id: site.id, body: "Hero copy", to: { host: "codex", session: "ses_x" }, idempotency_key: "k1" });
+    store.combineProject(site.id, docs.id);
+    // The window passes the id it shows: the head's.
+    const { card } = store.createCard({ project_id: docs.id, by: { kind: "person" }, title: "Hero copy", threads: [message.id] });
+    expect(store.cardWire(card).project_id).toBe(docs.id);
+    store.combineProject(site.id, null);
+    expect(store.listCards({ projectIds: new Set([site.id]) }).map((c) => c.id)).toEqual([card.id]);
+    expect(store.listCards({ projectIds: new Set([docs.id]) })).toEqual([]);
+    expect(store.sendCard(card.id, { thread_id: message.id }).sent?.thread_id).toBe(message.thread_id);
+  });
+
+  test("a card linking threads of both folders still sends into either after a Separate; a thread not on it is refused", () => {
+    const { store, docs, site } = open();
+    const inA = say(store, docs.id, "In A.");
+    const { message } = store.startPersonThread({ project_id: site.id, body: "Go", to: { host: "codex", session: "ses_x" }, idempotency_key: "k1" });
+    const notLinked = store.startPersonThread({ project_id: site.id, body: "Other", to: { host: "codex", session: "ses_y" }, idempotency_key: "k2" });
+    store.combineProject(site.id, docs.id);
+    const { card } = store.createCard({ project_id: docs.id, by: { kind: "person" }, title: "Both", threads: [inA.id, message.id] });
+    store.combineProject(site.id, null);
+    expect(code(() => store.sendCard(card.id, { thread_id: notLinked.message.id }))).toBe("card_other_project");
+    expect(store.sendCard(card.id, { thread_id: message.id }).sent?.thread_id).toBe(message.thread_id);
   });
 
   test("the card-link rule still refuses another project's thread", () => {
@@ -397,6 +460,13 @@ describe("disk usage", () => {
     const member = after.projects.find((p) => p.id === site.id)!;
     expect([member.name, member.combined_into, member.threads.length]).toEqual(["docs-site", "docs", 1]);
     expect(after.projects.find((p) => p.id === docs.id)!.combined).toEqual(["docs-site"]);
+  });
+
+  test("a chain: the head names only what a Delete leaves on its own", () => {
+    const { store, docs, site, web } = open();
+    store.combineProject(site.id, docs.id);
+    store.combineProject(docs.id, web.id);
+    expect(store.diskUsage().projects.find((p) => p.id === web.id)!.combined).toEqual(["docs"]);
   });
 
   test("a project with nothing combined reads exactly as before", () => {

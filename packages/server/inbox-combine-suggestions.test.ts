@@ -36,6 +36,18 @@ describe("combineSuggestions", () => {
     expect(pairs({ projects, repoOf: () => null, threads: noThreads })).toEqual([]);
   });
 
+  test("counts threads only for a pair: a person with no duplicates pays nothing", () => {
+    const projects = [project("prj_a", "/a"), project("prj_b", "/b"), project("prj_c", "/c")];
+    const origins: Record<string, InboxProjectRepo> = { "/a": repo("acme/a"), "/b": repo("acme/b") };
+    let counted = 0;
+    const threads = () => {
+      counted += 1;
+      return 0;
+    };
+    expect(pairs({ projects, repoOf: (root) => origins[root] ?? null, threads })).toEqual([]);
+    expect(counted).toBe(0);
+  });
+
   test("keeps the project with the most threads, then the oldest", () => {
     const projects = [project("prj_old", "/a", { created_at: "2025-01-01T00:00:00.000Z" }), project("prj_new", "/b", { created_at: "2026-01-01T00:00:00.000Z" })];
     const repoOf = () => repo("acme/app");

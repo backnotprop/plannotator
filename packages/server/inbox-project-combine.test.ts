@@ -175,6 +175,22 @@ describe("POST /api/inbox/projects/:id/combine", () => {
   });
 });
 
+describe("an id from before the combine", () => {
+  test("the list, the archive and the project menu's batches answer for the project it is in now", async () => {
+    const w = await combined();
+    const listed = (await (await fetch(url(w.server, `/api/inbox/threads?project=${w.from}`))).json()) as { sections: InboxListSection[] };
+    expect(listed.sections.flatMap((section) => section.threads).map((row) => row.thread_id).sort()).toEqual([w.inLedger.thread_id, w.inClone.thread_id].sort());
+
+    const batch = await post(w.server, `/api/inbox/projects/${w.from}/read`, {});
+    expect(batch.status).toBe(200);
+    expect(((await batch.json()) as { project: { id: string } | null }).project?.id).toBe(w.into);
+
+    w.server.store.resolveThread(w.inClone.thread_id, true);
+    const archived = (await (await fetch(url(w.server, `/api/inbox/threads/archived?project=${w.from}`))).json()) as { threads: { thread_id: string }[] };
+    expect(archived.threads.map((row) => row.thread_id)).toEqual([w.inClone.thread_id]);
+  });
+});
+
 describe("an agent in either folder of a combined project", () => {
   test("read_thread lists the threads of both, from either folder", async () => {
     const w = await combined();
@@ -239,6 +255,13 @@ describe("the window on a combined project", () => {
     expect(await offered()).not.toContain("ses_clone");
   });
 
+  test("Tag calls a session in the other folder \"here\": its project is the thread's", async () => {
+    const w = await combined();
+    await poll(w.server, "ses_clone", w.clone);
+    const model = (await (await fetch(url(w.server, `/api/inbox/threads/${w.inLedger.thread_id}/taggable`))).json()) as { sessions: { session: string; project: { id: string | null; root: string } | null }[] };
+    expect(model.sessions.find((session) => session.session === "ses_clone")?.project).toMatchObject({ id: w.into, root: w.clone });
+  });
+
   test("an agent replying from the other folder stays in that thread's project; its relative files start at its own folder", async () => {
     const w = await combined();
     const sent = await send(w.client, { project_path: w.clone, reply_to: w.inLedger.message_id, body: "Marlin read it.", agent_session: "ses_clone" });
@@ -294,6 +317,27 @@ describe("the window on a combined project", () => {
 });
 
 describe("Tidy's Combine projects", () => {
+  test("a plan read runs no git: it reads the repo cache as it stands", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-combine-")));
+    scratch.push(root);
+    const reads: string[] = [];
+    const server = await startInboxServer({
+      dataDir: join(root, "data"),
+      phones: false,
+      readProjectRepo: async (folder) => {
+        reads.push(folder);
+        return null;
+      },
+    });
+    servers.push(server);
+    // Past the read of every project's origin at startup, and not in the cache: the Inbox did not resolve this one.
+    await Bun.sleep(100);
+    server.store.ensureProject({ name: "ledger", root: join(root, "ledger") });
+    await tidyPlan(server);
+    await Bun.sleep(20);
+    expect(reads).toEqual([]);
+  });
+
   test("offers a repository cloned twice on the list only, into the project with more threads, and counts it", async () => {
     const w = await world();
     await send(w.client, { project_path: w.clone, body: "One.", agent_session: "ses_clone" });

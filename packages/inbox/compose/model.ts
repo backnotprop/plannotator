@@ -61,7 +61,7 @@ export function composeGroups(
   const groups = projects.map((group) => ({
     project: group.project,
     current: isCurrent(group.project, current),
-    sessions: group.sessions.map((session) => ({ ...session, project: group.project })),
+    sessions: composeTargets([group]),
   }));
   const ordered = [...groups.filter((g) => g.current), ...groups.filter((g) => !g.current)];
   const at = last ? ordered.findIndex((g) => g.sessions.some((s) => s.session === last)) : -1;
