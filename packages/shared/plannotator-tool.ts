@@ -244,9 +244,34 @@ export function isPlannotatorToolOpenAction(action: PlannotatorToolAction): acti
 }
 
 /**
+ * An optional field a model sent empty: `null`, `""`, `[]` or `{}`. A
+ * provider that makes every property required (GitHub Copilot's Responses
+ * models with a strict schema, #2292) fills each field it means to omit this
+ * way, so the parser reads it as absent. A required field stays required:
+ * `annotate` with `target: ""` still needs a target, `close` with
+ * `session: ""` still needs a session.
+ */
+function isEmptyOptional(value: unknown): boolean {
+  if (value === null || value === '') return true
+  if (Array.isArray(value)) return value.length === 0
+  return isRecord(value) && Object.keys(value).length === 0
+}
+
+/** The record without its empty optional members (see `isEmptyOptional`). */
+function withoutEmptyOptionals(value: Record<string, unknown>): Record<string, unknown> {
+  const kept: Record<string, unknown> = {}
+  for (const [key, member] of Object.entries(value)) {
+    if (!isEmptyOptional(member)) kept[key] = member
+  }
+  return kept
+}
+
+/**
  * Validates a tool call strictly: unknown keys, wrong types, and a field the
- * action does not take are errors (a `false` the action ignores is allowed,
- * since models often fill defaults). The error text is for the model.
+ * action does not take are errors. A `false` the action ignores is allowed,
+ * since models often fill defaults, and an empty optional field (`null`, `""`,
+ * `[]`, `{}`, also inside `options`) is read as absent. The error text is for
+ * the model.
  */
 export function parsePlannotatorToolInput(value: unknown, parseOptions: PlannotatorToolParseOptions = {}): PlannotatorToolParse {
   const fail = (error: string): PlannotatorToolParse => ({ ok: false, error: `Invalid plannotator call: ${error}.` })
@@ -258,16 +283,24 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
   if (typeof action !== 'string' || !ACTIONS.includes(action as PlannotatorToolAction)) {
     return fail('action must be "annotate", "review", "last", "list" or "close"')
   }
+  const fields = withoutEmptyOptionals(value)
+  if (isRecord(fields.options)) {
+    for (const key of Object.keys(fields.options)) {
+      if (!OPTION_KEYS.includes(key)) return fail(`unknown option "${key}"`)
+    }
+    const options = withoutEmptyOptionals(fields.options)
+    if (isEmptyOptional(options)) delete fields.options
+    else fields.options = options
+  }
   const input: PlannotatorToolInput = { action: action as PlannotatorToolAction }
   const opens = isPlannotatorToolOpenAction(input.action)
 
-  if (value.target !== undefined) {
+  if (fields.target !== undefined) {
     if (!opens || action === 'last') return fail(`action "${action}" takes no target`)
-    if (Array.isArray(value.target)) {
+    if (Array.isArray(fields.target)) {
       if (action !== 'annotate') return fail('a list of targets is for action "annotate" only')
-      if (value.target.length === 0) return fail('target must not be an empty list')
       const targets: string[] = []
-      for (const [index, item] of value.target.entries()) {
+      for (const [index, item] of fields.target.entries()) {
         const problem = checkWord(`target[${index}]`, item)
         if (problem) return fail(problem)
         const trimmed = (item as string).trim()
@@ -275,32 +308,29 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
       }
       input.target = targets.length === 1 ? targets[0] : targets
     } else {
-      const problem = checkWord('target', value.target)
+      const problem = checkWord('target', fields.target)
       if (problem) return fail(problem)
-      input.target = (value.target as string).trim()
+      input.target = (fields.target as string).trim()
     }
   } else if (action === 'annotate') {
     return fail('action "annotate" needs a target (a file, folder or URL)')
   }
 
-  if (value.gate !== undefined) {
-    if (typeof value.gate !== 'boolean') return fail('gate must be true or false')
-    if (value.gate && action !== 'annotate' && action !== 'review') return fail('gate is for actions "annotate" and "review" only')
-    if (value.gate) input.gate = true
+  if (fields.gate !== undefined) {
+    if (typeof fields.gate !== 'boolean') return fail('gate must be true or false')
+    if (fields.gate && action !== 'annotate' && action !== 'review') return fail('gate is for actions "annotate" and "review" only')
+    if (fields.gate) input.gate = true
   }
 
-  if (value.tailscale !== undefined) {
-    if (typeof value.tailscale !== 'boolean') return fail('tailscale must be true or false')
-    if (value.tailscale && !opens) return fail('tailscale is for actions "annotate", "review" and "last" only')
-    if (value.tailscale) input.tailscale = true
+  if (fields.tailscale !== undefined) {
+    if (typeof fields.tailscale !== 'boolean') return fail('tailscale must be true or false')
+    if (fields.tailscale && !opens) return fail('tailscale is for actions "annotate", "review" and "last" only')
+    if (fields.tailscale) input.tailscale = true
   }
 
-  if (value.options !== undefined) {
-    const options = value.options
+  if (fields.options !== undefined) {
+    const options = fields.options
     if (!isRecord(options)) return fail('options must be an object')
-    for (const key of Object.keys(options)) {
-      if (!OPTION_KEYS.includes(key)) return fail(`unknown option "${key}"`)
-    }
     const parsed: NonNullable<PlannotatorToolInput['options']> = {}
     if (options.base !== undefined) {
       if (action !== 'review') return fail('options.base is for action "review" only')
@@ -317,13 +347,13 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
     if (Object.keys(parsed).length > 0) input.options = parsed
   }
 
-  if (value.session !== undefined) {
+  if (fields.session !== undefined) {
     if (action !== 'close') return fail('session is for action "close" only')
-    if (typeof value.session !== 'string') return fail('session must be a string')
-    if (action === 'close' && value.session.trim().toLowerCase() === 'all') {
+    if (typeof fields.session !== 'string') return fail('session must be a string')
+    if (action === 'close' && fields.session.trim().toLowerCase() === 'all') {
       input.session = 'all'
     } else {
-      const id = normalizePlannotatorSessionId(value.session)
+      const id = normalizePlannotatorSessionId(fields.session)
       if (!id) return fail('session must be a session id such as "pn-3f2a9c" or "all"')
       input.session = id
     }

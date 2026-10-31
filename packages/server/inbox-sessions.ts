@@ -40,6 +40,7 @@ import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -251,7 +252,7 @@ export function createInboxLiveSessions(options: {
     const entry = mcpEntry(session);
     entry.lastSeen = now();
     if (typeof who.host === "string" && who.host.trim() && who.host.length <= 64) entry.host = who.host.trim();
-    if (typeof who.name === "string" && who.name.trim() && who.name.length <= 80) entry.name = who.name.trim();
+    if (typeof who.name === "string" && who.name.trim() && who.name.length <= 80) entry.name = inboxStoredAgentName(who.name) ?? undefined;
   };
   /** A wait_for_reply for this session is open (on `threadId`, or null: every thread it asked): present until it answers. */
   const holdOverMcp = (session: string, threadId: string | null = null): (() => void) => {

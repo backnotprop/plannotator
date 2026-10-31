@@ -1,11 +1,12 @@
 /**
  * Inbox search's palette model (search/model.ts): the group order and its
  * "Show all" rows, where each result opens (the hash and a message's
- * landing), what the live region says, the time format and the marked runs.
+ * landing), what the live region says, the time format, the marked runs and
+ * the mark each row starts with.
  */
 import { expect, test } from 'bun:test';
 import type { InboxSearchRow } from '@plannotator/core/inbox-search';
-import { countWords, markedRuns, moreLabel, resultTarget, searchGroups, searchTime } from './search/model';
+import { countWords, markedRuns, moreLabel, resultTarget, scopeWords, searchGroups, searchRowMark, searchTime, typeCountWords } from './search/model';
 
 const project = { id: 'prj_a', name: 'api' };
 const base = { project, section: 'quiet' as const, archived: false, at: '2026-10-09T14:03:00Z' };
@@ -47,6 +48,29 @@ test('the live region: counts with Intl, no matches by name, silent for the rece
   expect(countWords({ totals: null, recent: null, indexing: true }, 'x', false)).toBe('');
 });
 
+test('a picked type: the live region counts that type alone, from the totals, singular for one; nothing without words', () => {
+  const totals = { threads: 6, messages: 1284, files: 10, projects: 1 };
+  // Not the sum over the groups: only the picked type's total.
+  expect(typeCountWords({ totals }, 'relay', 'files')).toBe('10 files');
+  expect(typeCountWords({ totals }, 'relay', 'messages')).toBe('1,284 messages');
+  expect(typeCountWords({ totals }, 'relay', 'projects')).toBe('1 project');
+  // A no-match names the type, as the screen does.
+  expect(typeCountWords({ totals: { ...totals, projects: 0 } }, ' relay ', 'projects')).toBe('No projects match relay');
+  expect(typeCountWords({ totals: null }, '', 'files')).toBe('');
+  expect(typeCountWords({ totals }, '  ', 'files')).toBe('');
+  expect(typeCountWords({ totals, indexing: true }, 'relay', 'files')).toBe('');
+});
+
+test('a no-match scope names a picked type once, with the project it was searched in', () => {
+  const name = (id: string) => (id === 'prj_a' ? 'relay' : id);
+  const filters = { project: 'prj_a', status: 'archived' as const, from: null };
+  // The type and the project read as one scope, not as two items of a list.
+  expect(scopeWords(filters, name, 'projects')).toEqual(['projects in relay', 'Archived']);
+  expect(scopeWords({ ...filters, project: null }, name, 'files')).toEqual(['files', 'Archived']);
+  // All types: the scope as before.
+  expect(scopeWords(filters, name)).toEqual(['relay', 'Archived']);
+});
+
 test('times: today, this year, another year', () => {
   const now = new Date(2026, 9, 13, 15, 0);
   expect(searchTime(new Date(2026, 9, 13, 11, 42).toISOString(), now)).toBe('11:42 AM');
@@ -62,4 +86,18 @@ test('marked runs follow the marks, ignore overlaps', () => {
     { text: 'lim', mark: true },
     { text: 'it', mark: false },
   ]);
+});
+
+test('the mark a row starts with: the agent for a message, an outline for what the row is otherwise', () => {
+  const agent = (host: string | null | undefined): InboxSearchRow => ({ ...message, author: host === undefined ? { kind: 'agent', name: 'Codex' } : { kind: 'agent', name: 'Codex', host } });
+  expect(searchRowMark(agent('codex'))).toEqual({ kind: 'agent', host: 'codex' });
+  // No host known, or an older Inbox without the field: the generic agent mark, as the list draws it.
+  expect(searchRowMark(agent(null))).toEqual({ kind: 'agent', host: null });
+  expect(searchRowMark(agent(undefined))).toEqual({ kind: 'agent', host: null });
+  // The person's reply never shows an agent's mark.
+  expect(searchRowMark({ ...message, author: { kind: 'me', name: 'You', host: null } })).toEqual({ kind: 'icon', icon: 'user' });
+  expect(searchRowMark(thread)).toEqual({ kind: 'icon', icon: 'comment' });
+  expect(searchRowMark(file)).toEqual({ kind: 'icon', icon: 'doc' });
+  expect(searchRowMark(guide)).toEqual({ kind: 'icon', icon: 'book' });
+  expect(searchRowMark(projectRow)).toEqual({ kind: 'icon', icon: 'folder' });
 });

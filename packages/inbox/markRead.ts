@@ -9,7 +9,7 @@
  */
 
 import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxSectionId } from '@plannotator/core/inbox-types';
-import { agentName, plural } from './format';
+import { agentName, plural, shortAgentName } from './format';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
 export const MARK_READ_UNDO_MS = 7_000;
@@ -65,10 +65,14 @@ export interface MarkReadToast {
   lead: string;
   /** What a phone says instead ("Read": the pressed Read button says the same). */
   phoneLead?: string;
-  /** The muted rest of the line, cut with "…" when it does not fit. */
+  /** The muted rest of the line, cut with "…" where it does not fit (Toast.tsx; the live region says it whole). */
   detail: string;
+  /** A phone's detail: what happened first, the agent's name last, so a cut only ever eats the name. */
+  phoneDetail?: string;
   /** An agent was stopped or held up on the thread: the toast warns and offers Reply. */
   warn: boolean;
+  /** What the live region says instead, when the detail cut the agent's name (shortAgentName). */
+  speech?: string;
 }
 
 /**
@@ -95,7 +99,18 @@ export function markReadToast(
   const warn = before.questions.stopped || before.questions.holds_up.length > 0;
   // Another thread is open: name the row marked, or the toast reads as if the open thread was.
   if (place === 'held') return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn };
-  if (before.questions.stopped) return { lead: 'Marked read', phoneLead: 'Read', detail: `${agentName(before.author)} was stopped`, warn: true };
+  if (before.questions.stopped) {
+    const name = agentName(before.author);
+    const short = shortAgentName(name);
+    return {
+      lead: 'Marked read',
+      phoneLead: 'Read',
+      detail: `${short} was stopped`,
+      phoneDetail: `Stopped · ${short}`,
+      warn: true,
+      ...(short !== name ? { speech: `Marked read. ${name} was stopped.` } : {}),
+    };
+  }
   if (before.questions.holds_up.length > 0) {
     return { lead: 'Marked read', phoneLead: 'Read', detail: `Held up ${plural(before.questions.holds_up.length, 'thing')}`, warn: true };
   }

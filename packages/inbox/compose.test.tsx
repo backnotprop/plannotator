@@ -239,7 +239,7 @@ test.skipIf(!hasDom)('Keep draft: the sidebar\'s Drafts row and the Drafts page 
   // The Drafts row counts the threads holding unsent work too (the world's picks not sent, approval "inbox-reply-drafts").
   const replies = (JSON.parse((await loopback('/api/inbox/drafts')).text) as { replies?: unknown[] }).replies?.length ?? 0;
   await until(() => el.querySelector('[data-drafts-nav]')?.textContent === `Drafts${1 + replies}`, 'the Drafts row');
-  expect(document.querySelector('[data-inbox-toast]')?.textContent).toContain('It waits under Drafts and never sends itself.');
+  expect(document.querySelector('[data-inbox-toast]')?.textContent).toContain('It never sends itself');
 
   act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
   await until(() => el.querySelectorAll('[data-draft-id]').length === 1, 'the draft row');

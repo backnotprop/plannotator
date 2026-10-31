@@ -143,19 +143,19 @@ describe.if(hasDom)('the wide list', () => {
     expect(mark.getAttribute('aria-label')).toBe('Guided review');
   });
 
-  test("beside an open thread: a narrow row's first line is the agents' marks alone in one project, the project and its marks in all", () => {
+  test("beside an open thread: a narrow row's first line is the agents' tiles alone in one project, the tiles and the project in all", () => {
     let el = render(true, true);
     const l1 = (id: string) => el.querySelector<HTMLElement>(`.ib-nrow[data-thread-id="${id}"] .ib-l1 .ib-from`)!;
     expect(el.querySelectorAll('.ib-row').length).toBe(0);
     expect(l1('msg_wait').querySelector('.ib-p')).toBeNull();
-    expect(l1('msg_wait').querySelector('.ib-ags')!.getAttribute('aria-label')).toBe('Claude Code');
-    expect(l1('msg_sent').querySelector('.ib-ags')!.getAttribute('aria-label')).toBe('Pi');
+    expect(l1('msg_wait').querySelector('.ib-atiles')!.getAttribute('aria-label')).toBe('Claude Code');
+    expect(l1('msg_sent').querySelector('.ib-atiles')!.getAttribute('aria-label')).toBe('Pi');
     act(() => root?.unmount());
     host?.remove();
     el = render(false, true);
     expect(l1('msg_wait').querySelector('.ib-p')!.textContent).toBe('billing-svc');
     expect(l1('msg_sent').querySelector('.ib-p')!.textContent).toBe('billing-svc');
-    expect(l1('msg_sent').querySelector('.ib-ags')!.getAttribute('aria-label')).toBe('Pi');
+    expect(l1('msg_sent').querySelector('.ib-atiles')!.getAttribute('aria-label')).toBe('Pi');
   });
 
   test('every project, in a list narrower than the wide row needs: three-line rows; one project keeps its wide rows', () => {

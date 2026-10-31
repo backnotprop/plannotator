@@ -9,7 +9,8 @@ REM Tracks whether a version was explicitly set via --version or positional.
 REM Used to reject mixing --version <tag> with a stray positional token.
 set "VERSION_EXPLICIT=0"
 REM Three-layer opt-in for SLSA provenance verification.
-REM Precedence: CLI flag > env var > %USERPROFILE%\.plannotator\config.json > default.
+REM Precedence: CLI flag > env var > config.json in the Plannotator data folder
+REM (`plannotator data-dir`) > default.
 REM -1 = flag not set (fall through); 0 = disable; 1 = enable.
 set "VERIFY_ATTESTATION_FLAG=-1"
 REM Opt-in install of the pruned CallDiff call-flow core (default off; the
@@ -486,25 +487,46 @@ set "VERIFY_ATTESTATION=0"
 
 REM Layer 3: config file (lowest precedence of the opt-in sources).
 REM Unset PLANNOTATOR_DATA_DIR: an existing %USERPROFILE%\.plannotator
-REM (legacy default) always wins; otherwise an explicitly-set absolute
-REM XDG_DATA_HOME (rare on Windows but honored the same way as the runtime;
-REM drive-rooted or UNC) places the directory at XDG_DATA_HOME\plannotator;
-REM otherwise %USERPROFILE%\.plannotator.
+REM (legacy default) wins, unless it holds none of Plannotator's data while
+REM XDG_DATA_HOME\plannotator does (a stray folder, #2305); otherwise an
+REM explicitly-set absolute XDG_DATA_HOME (rare on Windows but honored the
+REM same way as the runtime, packages/shared/data-dir.ts; drive-rooted or
+REM UNC) places the directory at XDG_DATA_HOME\plannotator; otherwise
+REM %USERPROFILE%\.plannotator.
+REM BEGIN data-dir resolution (windows.yml runs this block: scripts/check-data-dir-windows.ps1)
 if defined PLANNOTATOR_DATA_DIR (
     set "_CONFIG_DIR=!PLANNOTATOR_DATA_DIR!"
 ) else (
     set "_CONFIG_DIR=%USERPROFILE%\.plannotator"
-    if not exist "%USERPROFILE%\.plannotator\" if defined XDG_DATA_HOME (
-        if "!XDG_DATA_HOME:~1,1!"==":" (
-            set "_CONFIG_DIR=!XDG_DATA_HOME!\plannotator"
-        ) else if "!XDG_DATA_HOME:~0,2!"=="\\" (
-            set "_CONFIG_DIR=!XDG_DATA_HOME!\plannotator"
+    set "_XDG_DIR="
+    REM XDG_DATA_HOME is trimmed like the runtime trims it: for /f drops the
+    REM leading spaces and tabs, the loop the trailing ones.
+    set "_XDG_HOME="
+    if defined XDG_DATA_HOME for /f "tokens=*" %%A in ("!XDG_DATA_HOME!") do set "_XDG_HOME=%%A"
+    for /l %%I in (1,1,32) do (
+        if defined _XDG_HOME if "!_XDG_HOME:~-1!"==" " set "_XDG_HOME=!_XDG_HOME:~0,-1!"
+        if defined _XDG_HOME if "!_XDG_HOME:~-1!"=="	" set "_XDG_HOME=!_XDG_HOME:~0,-1!"
+    )
+    if defined _XDG_HOME (
+        if "!_XDG_HOME:~1,1!"==":" set "_XDG_DIR=!_XDG_HOME!\plannotator"
+        if "!_XDG_HOME:~0,2!"=="\\" set "_XDG_DIR=!_XDG_HOME!\plannotator"
+    )
+    if not exist "%USERPROFILE%\.plannotator\" (
+        if defined _XDG_DIR set "_CONFIG_DIR=!_XDG_DIR!"
+    ) else if defined _XDG_DIR if exist "!_XDG_DIR!\" (
+        set "_XDG_DATA=0"
+        set "_LEGACY_DATA=0"
+        for %%M in (history sessions drafts inbox claude-code-mod install-flags.json) do (
+            if exist "!_XDG_DIR!\%%M" set "_XDG_DATA=1"
+            if exist "%USERPROFILE%\.plannotator\%%M" set "_LEGACY_DATA=1"
         )
+        if "!_XDG_DATA!"=="1" if "!_LEGACY_DATA!"=="0" set "_CONFIG_DIR=!_XDG_DIR!"
     )
 )
 if /i "!_CONFIG_DIR!"=="~" set "_CONFIG_DIR=%USERPROFILE%"
 if "!_CONFIG_DIR:~0,2!"=="~\" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
 if "!_CONFIG_DIR:~0,2!"=="~/" set "_CONFIG_DIR=%USERPROFILE%\!_CONFIG_DIR:~2!"
+REM END data-dir resolution
 if exist "!_CONFIG_DIR!\config.json" (
     findstr /r /c:"\"verifyAttestation\"[ 	]*:[ 	]*true" "!_CONFIG_DIR!\config.json" >nul 2>&1
     if !ERRORLEVEL! equ 0 set "VERIFY_ATTESTATION=1"
@@ -751,7 +773,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         echo   - Pin to !MIN_ATTESTED_VERSION! or later: --version !MIN_ATTESTED_VERSION! >&2
         echo   - Install without provenance verification: --skip-attestation >&2
         echo   - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
-        echo     from %USERPROFILE%\.plannotator\config.json >&2
+        echo     from config.json in your Plannotator data folder ^(plannotator data-dir^) >&2
         exit /b 1
     )
 )
@@ -937,7 +959,7 @@ if "!VERIFY_ATTESTATION!"=="1" (
         echo Install https://cli.github.com ^(no login is needed when the public >&2
         echo attestation bundle fetch succeeds^), or unset >&2
         echo PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation >&2
-        echo from %USERPROFILE%\.plannotator\config.json / pass --skip-attestation. >&2
+        echo from config.json in your Plannotator data folder ^(plannotator data-dir^) / pass --skip-attestation. >&2
         del "!TEMP_FILE!"
         exit /b 1
     )

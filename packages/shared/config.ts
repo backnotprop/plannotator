@@ -414,6 +414,13 @@ export interface PlannotatorConfig {
    */
   inboxBoardIntro?: { shownAt?: string };
   /**
+   * The Inbox's one-time list options dialog (approval "inbox-list-options-intro"): decided at the first release
+   * start that knows it. Someone who used an Inbox before gets `dueAt`; a fresh install is marked `shownAt` and never
+   * sees it. `shownAt` once a page on this computer claimed it (`POST /api/inbox/list-intro`, a compare-and-set):
+   * once per machine.
+   */
+  inboxListIntro?: { dueAt?: string; shownAt?: string };
+  /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on, off by default. On: the sidebar's Board row and page,
    * and the Inbox serves the agents' `card` tool. Off: neither, every card

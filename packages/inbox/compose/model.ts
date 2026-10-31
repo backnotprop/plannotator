@@ -22,6 +22,16 @@ export interface ComposeGroup {
 
 export const hostLabel = (host: string): string => INBOX_HOST_NAMES[host] ?? host;
 
+/**
+ * A project's name in its two parts: the folder's own name, and the parent
+ * folders the Inbox adds when two projects share it ("main · workspaces/worktrees",
+ * `inboxProjectLabels`), or null. To keeps the first whole and cuts the parents.
+ */
+export function splitProjectName(name: string): { folder: string; parents: string | null } {
+  const at = name.indexOf(' · ');
+  return at > 0 ? { folder: name.slice(0, at), parents: name.slice(at + 3) || null } : { folder: name, parents: null };
+}
+
 /** Every live session, in the server's order (the most recently active project first). */
 export function composeTargets(projects: readonly InboxComposeProject[]): ComposeTarget[] {
   return projects.flatMap((group) => group.sessions.map((session) => ({ ...session, project: group.project })));

@@ -66,6 +66,7 @@ import { shareableDocumentMarkdown } from '@plannotator/ui/utils/sharing';
 import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
+import { tocHeadings } from '@plannotator/ui/utils/annotationHelpers';
 import { storage } from '@plannotator/ui/utils/storage';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -203,6 +204,7 @@ import type { GoalSetupBundle } from '@plannotator/shared/goal-setup';
 import type { AIContext } from '@plannotator/core/ai-context';
 import type { CommentAskAIContext } from '@plannotator/ui/components/CommentPopover';
 import {
+  basenameFromPath,
   hasSourceSaveConflictSnapshot,
   isSourceSaveFilePath,
   type SourceSaveCapability,
@@ -1125,13 +1127,10 @@ const App: React.FC = () => {
   });
   const isResizing = panelResize.isDragging || tocResize.isDragging || agentTerminalResize.isDragging;
 
-  // Whether the document has any TOC-eligible headings (level <= 3, matching
-  // buildTocHierarchy). Drives the empty-doc auto-close behavior below — must
+  // Whether the document has any TOC-eligible headings (tocHeadings: levels 1
+  // to 3, what the list shows). Drives the empty-doc auto-close behavior below — must
   // be declared before the effects that reference it (TDZ in dep arrays).
-  const hasTocEntries = useMemo(
-    () => blocks.some(b => b.type === 'heading' && (b.level ?? 0) <= 3),
-    [blocks]
-  );
+  const hasTocEntries = useMemo(() => tocHeadings(blocks).length > 0, [blocks]);
 
   const exitWideMode = useCallback((options?: {
     restore?: boolean;
@@ -2170,14 +2169,14 @@ const App: React.FC = () => {
       , undefined, openOptions);
     } else if (fileBrowser.activeFile && fileBrowser.activeDirPath) {
       // When viewing a file browser doc, resolve links relative to current file's directory
-      const baseDir = linkedDocHook.filepath?.replace(/\/[^/]+$/, '') || fileBrowser.activeDirPath;
+      const baseDir = (linkedDocHook.filepath && dirnameBrowserPath(linkedDocHook.filepath)) || fileBrowser.activeDirPath;
       linkedDocHook.open(docPath, (path) =>
         `/api/doc?path=${encodeURIComponent(path)}&base=${encodeURIComponent(baseDir)}${convertHtml ? '&convert=1' : ''}`
       , undefined, openOptions);
     } else {
       // Pass the current file's directory as base for relative path resolution
       const baseDir = linkedDocHook.filepath
-        ? linkedDocHook.filepath.replace(/\/[^/]+$/, '')
+        ? dirnameBrowserPath(linkedDocHook.filepath)
         : imageBaseDir?.includes('/') ? imageBaseDir : planDir;
       if (baseDir) {
         linkedDocHook.open(docPath, (path) =>
@@ -2290,7 +2289,7 @@ const App: React.FC = () => {
     if (bundleIndex >= 0) return null;
     const root = bundleBackPath ?? sourceFilePath;
     if (!root) return 'Back';
-    return `Back to ${root.split('/').pop() || root}`;
+    return `Back to ${basenameFromPath(root)}`;
   }, [isHtmlSurface, linkedDocHook.isActive, sourceFilePath, bundleIndex, bundleBackPath]);
 
   // Wrap linked doc back to also clear file browser active file
@@ -2817,6 +2816,15 @@ const App: React.FC = () => {
     return getEditedMarkdown();
   }, [editableDocuments, getEditedMarkdown]);
 
+  // This page load's id for the per-document copies (`?client=`): the
+  // decision sends it too, so the server clears only the copies this page
+  // read, wrote or restored, never ones an earlier page left (#1545).
+  const [draftClientId] = useState(() => `${Date.now()}-${generateId()}`);
+  const withDraftClient = useCallback((path: string): string => {
+    const separator = path.includes('?') ? '&' : '?';
+    return `${path}${separator}client=${encodeURIComponent(draftClientId)}`;
+  }, [draftClientId]);
+
   // Every other document's comments, saved under that document's own path.
   const {
     unbackedPaths: unbackedDraftDocuments,
@@ -2825,6 +2833,7 @@ const App: React.FC = () => {
     discardCopies: discardDocumentCopies,
   } = useDocumentDrafts({
     enabled: documentDraftsEnabled && isApiMode && !isSharedSession && !goalSetupMode && !documentReadOnly,
+    clientId: draftClientId,
     submitted: !!submitted || isSubmitting,
     activePath: linkedDocHook.filepath,
     rootPath: sourceFilePath ?? null,
@@ -4054,7 +4063,16 @@ const App: React.FC = () => {
         setFeedbackTemplates(data.feedbackTemplates ?? null);
         setSourceConverted(!!data.sourceConverted);
         if (data.filePath) {
-          setImageBaseDir(folderLike ? data.filePath : data.filePath.replace(/\/[^/]+$/, ''));
+          // A local path's base uses forward slashes on every platform: the
+          // `includes('/')` checks on imageBaseDir tell a real path from
+          // annotate-last's `last-message`, and a Windows `C:\docs\a.md` has
+          // none. A URL keeps its own slashes.
+          const isUrlTarget = /^https?:\/\//i.test(data.filePath);
+          setImageBaseDir(
+            folderLike ? normalizeBrowserPath(data.filePath)
+              : isUrlTarget ? data.filePath.replace(/\/[^/]+$/, '')
+              : dirnameBrowserPath(data.filePath),
+          );
           if (data.mode === 'annotate') {
             setSourceFilePath(data.filePath);
           }
@@ -4595,7 +4613,7 @@ const App: React.FC = () => {
       }
       sentFeedback = body.feedback;
 
-      const res = await fetch('/api/approve', {
+      const res = await fetch(withDraftClient('/api/approve'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(withServerSession(body)),
@@ -4640,7 +4658,7 @@ const App: React.FC = () => {
       const planSaveSettings = getPlanSaveSettings();
       const payload = getCurrentFeedbackPayload(checkedSavedFileChanges);
       sentPayload = payload;
-      const res = await fetch('/api/deny', {
+      const res = await fetch(withDraftClient('/api/deny'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(withServerSession({
@@ -4761,7 +4779,7 @@ const App: React.FC = () => {
         // host that must not start an agent turn for it can tell (#1701).
         ...(isEmptyFeedbackSentinel(feedback) ? { nothingToSend: true } : {}),
       };
-      const res = await fetch('/api/feedback', {
+      const res = await fetch(withDraftClient('/api/feedback'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(withServerSession(body)),
@@ -4825,7 +4843,7 @@ const App: React.FC = () => {
         ? getCurrentFeedbackPayload(checkedSavedFileChanges)
         : '';
       sentFeedback = feedback;
-      const res = await fetch('/api/approve', {
+      const res = await fetch(withDraftClient('/api/approve'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(withServerSession(buildAnnotateApprovalBody({
@@ -4865,7 +4883,7 @@ const App: React.FC = () => {
   const handleAnnotateExit = useCallback(async () => {
     setIsExiting(true);
     try {
-      const res = await fetch(withServerSessionQuery(withDraftGeneration('/api/exit')), { method: 'POST' });
+      const res = await fetch(withDraftClient(withServerSessionQuery(withDraftGeneration('/api/exit'))), { method: 'POST' });
       if (await noteServerSessionMismatch(res)) {
         setIsExiting(false);
         return;
@@ -4878,7 +4896,7 @@ const App: React.FC = () => {
     } catch {
       setIsExiting(false);
     }
-  }, [withDraftGeneration]);
+  }, [withDraftGeneration, withDraftClient]);
 
   const handleGoalSetupSubmit = useCallback(() => {
     goalSetupSurfaceRef.current?.submit();

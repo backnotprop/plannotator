@@ -1,11 +1,12 @@
 name: Windows
 
 # The Windows jobs: the uninstall lifecycle, the Qwen Code installer steps, the
-# Pi extension's Node runtime, and install.cmd / install.ps1 end to end. They
-# are part of the full tier: on a PR they run only once it has the `ci:full`
-# label (adding the label starts them on the current head; every later push
-# runs them again). Pushes to main and manual runs always run them. The
-# `Full CI (all green)` job at the end is what the merge script requires.
+# code review diagram engine build, the Pi extension's Node runtime, and
+# install.cmd / install.ps1 end to end. They are part of the full tier: on a PR
+# they run only once it has the `ci:full` label (adding the label starts them
+# on the current head; every later push runs them again). Pushes to main and
+# manual runs always run them. The `Full CI (all green)` job at the end is what
+# the merge script requires.
 
 on:
   workflow_dispatch:
@@ -133,6 +134,72 @@ jobs:
           PATTERN: ${{ matrix.pattern }}
         run: bun test scripts/install.test.ts --test-name-pattern $env:PATTERN
 
+  # Path gate for the diagram engine build below. Only these files can change
+  # what that build does: the engine's build script and sources, the contract
+  # it is built against, the review app's and the root's dependencies, and this
+  # workflow. Anything this cannot resolve runs the job, as in qwen-gate.
+  diagram-engine-gate:
+    name: Diagram engine build (path gate)
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # The merge commit plus both parents, as in qwen-gate.
+          fetch-depth: 2
+
+      - name: Does this change touch the diagram engine build?
+        id: gate
+        run: |
+          set -eu
+          run=true
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] \
+             && base=$(git rev-parse --verify --quiet 'HEAD^1') \
+             && git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            changed=$(git diff --name-only "$base" HEAD)
+            if grep -Eq '^(apps/review/diagram-engine/|packages/review-editor/utils/diagramEngineContract\.ts$|apps/review/package\.json$|package\.json$|bun\.lock$|\.github/workflows/windows\.yml$)' <<< "$changed"; then
+              run=true
+            else
+              run=false
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  diagram-engine-windows:
+    # Builds code review's diagram engine on real Windows. Its plugins compare
+    # Vite's module ids, which use `/` everywhere, with paths the script builds
+    # itself; on Linux those match whether or not they are normalized, so only
+    # a Windows build catches a comparison that skips normalizePath (the build
+    # stops, or the guard silently checks nothing). The built-output test then
+    # proves the engine carries no runtime and no React of its own. Runs only
+    # when diagram-engine-gate says so.
+    name: Diagram engine build (Windows)
+    needs: diagram-engine-gate
+    if: needs.diagram-engine-gate.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the diagram engine
+        run: bun apps/review/diagram-engine/build.ts
+
+      - name: Check the built engine
+        run: bun test tests/entry-assets.test.ts --test-name-pattern 'apps/review/dist/diagram-engine holds the engine'
+
   pi-extension-ai-runtime-windows:
     # Exercises the Pi extension's Node/jiti server mirror on Windows with an
     # npm-style `pi` shim pair. This catches regressions where `where pi`
@@ -163,6 +230,14 @@ jobs:
 
       - name: Run workspace symlink tests
         run: bun test packages/server/review-workspace.test.ts --test-name-pattern discoverWorkspaceRepoPaths
+
+      # #2372: agent jobs start a stub pi.cmd (never a real agent CLI) through
+      # both servers' real spawn path; skipped off Windows.
+      - name: Run agent job .cmd shim tests (Bun server)
+        run: bun test packages/server/agent-jobs-windows-cmd-shim.test.ts
+
+      - name: Run agent job .cmd shim tests (Pi server)
+        run: bun test apps/pi-extension/server/agent-jobs-windows-cmd-shim.test.ts
 
       - name: Build Pi AI runtime smoke
         run: bun build scripts/smoke-pi-extension-ai-runtime.ts --target=node --outfile "$env:RUNNER_TEMP/pi-ai-runtime-smoke.mjs"
@@ -483,6 +558,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # install.ps1's and install.cmd's data-dir resolution on real PowerShell
+      # and cmd.exe (#2305): home-only, XDG-only, stray, both, and more, in
+      # temp folders, without PLANNOTATOR_DATA_DIR (which skips the branch).
+      - name: Data-dir resolution in install.ps1 and install.cmd
+        shell: pwsh
+        run: .\scripts\check-data-dir-windows.ps1
+
       - name: Run install.ps1 end-to-end
         shell: pwsh
         run: .\scripts\install.ps1 v0.17.1 -SkipAttestation
@@ -607,11 +689,11 @@ jobs:
 
   # The merge script merges a PR only when every `Full CI (all green)` check on
   # its head succeeded. A skipped job counts as passed elsewhere, so this job
-  # passes only when every job above ran and succeeded (the Qwen Code jobs may
-  # skip when qwen-gate found nothing for them).
+  # passes only when every job above ran and succeeded (the Qwen Code jobs and
+  # the diagram engine build may skip when their gate found nothing for them).
   full-ci:
     name: Full CI (all green)
-    needs: [uninstall-windows, qwen-gate, qwen-installers-windows, pi-extension-ai-runtime-windows, install-cmd-windows, install-ps1-windows]
+    needs: [uninstall-windows, qwen-gate, qwen-installers-windows, diagram-engine-gate, diagram-engine-windows, pi-extension-ai-runtime-windows, install-cmd-windows, install-ps1-windows]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -622,6 +704,9 @@ jobs:
         run: |
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
           jq -e 'all(to_entries[]; .value.result == "success"
-            or (.key == "qwen-installers-windows" and .value.result == "skipped"))
+            or (.key == "qwen-installers-windows" and .value.result == "skipped")
+            or (.key == "diagram-engine-windows" and .value.result == "skipped"))
             and .["qwen-gate"].result == "success"
-            and (.["qwen-gate"].outputs.run == "false" or .["qwen-installers-windows"].result == "success")' <<< "$NEEDS" > /dev/null
+            and (.["qwen-gate"].outputs.run == "false" or .["qwen-installers-windows"].result == "success")
+            and .["diagram-engine-gate"].result == "success"
+            and (.["diagram-engine-gate"].outputs.run == "false" or .["diagram-engine-windows"].result == "success")' <<< "$NEEDS" > /dev/null

@@ -471,7 +471,12 @@ export interface InboxSearchMessageRow extends RowBase {
   type: 'message';
   id: string;
   thread_id: string;
-  author: { kind: 'agent' | 'me'; name: string };
+  /**
+   * Who wrote it. `host` (additive): an agent's host as the store has it
+   * (`claude-code`, `codex`, ...; null when unknown), so the window draws
+   * that agent's mark; null for the person. An older Inbox omits it.
+   */
+  author: { kind: 'agent' | 'me'; name: string; host?: string | null };
   /** The thread's subject. */
   title: string;
   /** The thread's name (`thread_name`), null for an unnamed thread. Additive. */
