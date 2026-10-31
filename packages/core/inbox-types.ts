@@ -793,9 +793,9 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of. PR 1: Claude Code only.
+ * session of: Claude Code (PR 1), Codex (PR 4).
  */
-export type InboxLaunchAgent = "claude-code";
+export type InboxLaunchAgent = "claude-code" | "codex";
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {

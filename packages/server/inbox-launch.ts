@@ -7,12 +7,14 @@
  * This file is the engine, the same for every agent. What one agent does
  * (its CLI, its settings, trust, how it connects, its permission transport)
  * is its `LaunchHost` (inbox-launch-host.ts), held in `hosts` by the agent's
- * id: `claude-code` is inbox-launch-claude.ts. A record whose agent has no
+ * id: `claude-code` is inbox-launch-claude.ts, `codex` inbox-launch-codex.ts. A record whose agent has no
  * host here (a downgrade) gets no line, no sweep and `404 launch_not_found`.
  *
  * We start nothing that lives on its own: the agent's own background host
- * keeps the session (`claude --bg`). Messages move over the links the Inbox
- * already has (Claude Code: the mod's bridge poll). Behind
+ * keeps the session (`claude --bg`, Codex's app-server daemon). Messages move
+ * over the links the Inbox already has (Claude Code: the mod's bridge poll;
+ * Codex: the Codex wake, which hands a launched session's items to its host,
+ * `deliver`). Behind
  * `inboxLaunch.enabled` (config only, default off): off, every route here
  * answers 404 and nothing else changes.
  *
@@ -72,8 +74,9 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchLive, LaunchSessions } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchLive, LaunchSessions } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
@@ -142,7 +145,7 @@ export function createInboxLaunch(options: {
   onChange: () => void;
   /** The argv that runs this Plannotator (the permission hook's command): the Inbox's own `selfCommand`. */
   selfCommand: readonly string[];
-  /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
+  /** More agents beside Claude Code and Codex, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
   hosts?: (context: LaunchHostContext) => LaunchHost[];
   now?: () => number;
   log?: (line: string) => void;
@@ -341,7 +344,7 @@ export function createInboxLaunch(options: {
   };
   const claude = createClaudeLaunchHost(context);
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
-  const hosts: Record<string, LaunchHost> = Object.fromEntries([claude, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
+  const hosts: Record<string, LaunchHost> = Object.fromEntries([claude, createCodexLaunchHost(context), ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
   const hostList = Object.values(hosts);
   /** The host of a launch's agent; null for an agent with no host here. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
@@ -817,7 +820,10 @@ export function createInboxLaunch(options: {
     },
     route,
     sweep,
-    stop: () => unsubscribe(),
+    stop: () => {
+      unsubscribe();
+      for (const host of hostList) host.close?.();
+    },
 
     /**
      * A launched session's permission hook (`POST /api/inbox/launch/:id/permission`), after the
@@ -953,6 +959,21 @@ export function createInboxLaunch(options: {
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       return runOfRoot(store.message(threadId)!);
+    },
+
+    /**
+     * The wake's text for a person's item to `session` of `agent` (the Codex wake asks before `codex queue`): a
+     * launched session's host takes it as a turn (`deliver`); anything else, or launch off, goes the wake's own way.
+     */
+    async deliver(agent: string, session: string, text: string): Promise<LaunchDelivery> {
+      if (!enabled() || !Object.hasOwn(hosts, agent)) return "queue";
+      const host = hosts[agent]!;
+      const root = roots().find((m) => !m.launch!.deleted_at && m.launch!.agent === agent && m.to?.host === agent && m.to.session === session && m.launch!.session_ref);
+      if (!root || !host.deliver) return "queue";
+      const result = await host.deliver(root.launch!, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }));
+      if (typeof result === "object") startLog(root.launch!.id, `deliver: ${result.failed}`);
+      options.onChange();
+      return result;
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */

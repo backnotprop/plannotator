@@ -39,6 +39,12 @@
  *    for the next look (any person's item, a Codex thread's next message, a
  *    thread coming back, an Inbox restart).
  *
+ * A session the Inbox launched (packages/server/inbox-launch-codex.ts) is
+ * asked first (`deliver`): its host puts the text in as a turn over Codex's
+ * app-server socket and it is delivered at once; only while that session is
+ * busy does it go through `codex queue` as above. (Codex keeps a queued
+ * message from running after a turn was interrupted, which Stop does.)
+ *
  * The text goes to `codex queue` as an argument, so while the call runs (a
  * few hundred milliseconds) it can be read in the process list (`ps`) by
  * other processes of this user and, on a shared machine, by anyone who can
@@ -58,6 +64,7 @@ import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannot
 import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { AgentEnvironment } from "./inbox-agents";
+import type { LaunchDelivery } from "./inbox-launch-host";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
 export const INBOX_CODEX_DESKTOP_CLI = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
@@ -171,6 +178,8 @@ export function createInboxCodexWake(options: {
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
   /** The session holds a wait_for_reply open now that returns items of this thread: those are not queued as well. */
   waitingOverMcp?: (session: string, threadId: string) => boolean;
+  /** A launched session's host, asked before `codex queue` (the launch engine's `deliver`): `queue` lets the CLI carry it. */
+  deliver?: (session: string, text: string) => Promise<LaunchDelivery>;
   /** Where to look for a Codex CLI besides PATH. Default: the ChatGPT and Codex apps' own (macOS), never under the test sandbox. */
   extraClis?: readonly string[];
   now?: () => number;
@@ -326,6 +335,22 @@ export function createInboxCodexWake(options: {
     // An idle thread starts its turn while `codex queue` still runs; that turn's tool call is kept until the call exits 0.
     const flight = { at, session, itemId: item.id, taken: false };
     inFlight.set(key, flight);
+    // A launched session: its host puts it in as a turn now (delivered), or leaves it to `codex queue` (busy).
+    const own = options.deliver ? await options.deliver(session, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) })) : "queue";
+    if (own === "delivered") {
+      inFlight.delete(key);
+      retryAt.delete(key);
+      delivered(item.id, session);
+      return;
+    }
+    if (own !== "queue") {
+      inFlight.delete(key);
+      dropClaim(item.id, session);
+      const wait = Math.min((retry?.wait ?? RETRY_FIRST_MS / 2) * 2, RETRY_MAX_MS);
+      retryAt.set(key, { at: now() + wait, wait });
+      log(`the Codex launch could not deliver ${item.id} to ${session}: ${own.failed}. Trying again later.`);
+      return;
+    }
     // `--name=value`: a value that starts with "-" would be read as a flag.
     const run = await environment.run([path, "queue", `--thread=${session}`, `--message=${text}`], { timeoutMs: options.queueTimeoutMs ?? INBOX_CODEX_QUEUE_TIMEOUT_MS, signal: stopping.signal });
     inFlight.delete(key);

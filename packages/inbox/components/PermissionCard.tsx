@@ -55,6 +55,8 @@ function Ticks({ text }: { text: string }) {
 const upFirst = (text: string) => (text.startsWith('`') ? text : text.charAt(0).toUpperCase() + text.slice(1));
 /** "Claude Code wants to write a file" → "write a file". */
 const wantsOf = (prompt: string) => prompt.replace(/^.*? wants to /, '');
+/** The agent that asks, as the question was written (its author's name: "Claude Code", "Codex"). */
+const agentNameOf = (author: { kind: string; name?: string | null }) => (author.kind === 'agent' && author.name ? author.name : 'Claude Code');
 function kindOf(prompt: string): Kind {
   const wants = wantsOf(prompt);
   if (wants === 'run a command') return 'bash';
@@ -291,7 +293,7 @@ function Record({ message, q, outcome, read, title, time, kind, followUp, run, t
   const reason = outcome === 'deny' ? (q.answer?.other?.trim() || q.answer?.note?.trim() || null) : null;
   const allowed = outcome === 'once' || outcome === 'session' || outcome === 'auto' || outcome === 'full';
   return (
-    <section className="pc-card pc-rec" data-perm-record={outcome} aria-label={`Claude Code: ${title}`}>
+    <section className="pc-card pc-rec" data-perm-record={outcome} aria-label={`${agentNameOf(message.author)}: ${title}`}>
       <button type="button" className="pc-rec-line" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <AuthorMark author={message.author} />
         <span className="pc-rec-icon" data-kind={allowed ? 'allow' : 'other'}>
@@ -447,7 +449,7 @@ export function PermissionCard({
       data-permission=""
       data-perm-kind={kind}
       data-perm-armed={armed ? '' : undefined}
-      aria-label={`Claude Code asks permission to ${wantsOf(prompt)}`}
+      aria-label={`${agentNameOf(message.author)} asks permission to ${wantsOf(prompt)}`}
       onPointerDownCapture={() => {
         pointerAt.current = Date.now();
       }}
@@ -459,7 +461,7 @@ export function PermissionCard({
     >
       <header className="pc-head" data-run={live ? 'waiting_answer' : undefined}>
         <AuthorMark author={message.author} />
-        <span className="pc-app">Claude Code</span>{' '}
+        <span className="pc-app">{agentNameOf(message.author)}</span>{' '}
         <span className="pc-sub">
           {phone ? 'waiting' : terminalOnly ? 'is waiting on a safety check' : 'is waiting for your permission'}
           {minutes && minutes >= 1 ? ` · ${minutes} min` : ''}

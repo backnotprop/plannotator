@@ -6,8 +6,10 @@
  *
  *   inbox-launch-claude.ts             Claude Code (`claude --bg`, its settings file, trust)
  *   inbox-launch-claude-permission.ts  Claude Code's permission hook, key and leases
+ *   inbox-launch-codex.ts              Codex (its app-server daemon, over the control socket)
+ *   inbox-launch-codex-permission.ts   Codex's approval requests, pushed over that socket
  *
- * The engine holds `{ "claude-code": claude }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, codex }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
@@ -27,6 +29,13 @@ export interface LaunchHostResult {
   exitCode: number;
   text: string;
 }
+
+/**
+ * What a host did with the Inbox's wake text for one of its sessions (`deliver`): it went in as a turn
+ * (`delivered`, recorded at once), the wake's own way should carry it (`queue`: Codex's `codex queue`, for a
+ * session busy with a turn), or it could not (`failed`: tried again later, as a failed `codex queue` is).
+ */
+export type LaunchDelivery = "delivered" | "queue" | { failed: string };
 
 /** Why a start or a restart did not take, in words for the run line. */
 export type LaunchStartFailure = { code: InboxLaunchError["code"]; text: string };
@@ -139,4 +148,11 @@ export interface LaunchHost {
   terminal(launch: InboxLaunchRecord, untrusted: boolean): string;
   /** Its permission transport, made once. */
   permissions(context: LaunchPermissionContext): LaunchHostPermissions;
+  /**
+   * Only a host whose sessions the Inbox wakes itself (Codex: inbox-codex-wake.ts, no mod poll): the wake text
+   * of a person's item for a launched session goes in as that session's turn. Without it, the wake's own way.
+   */
+  deliver?(launch: InboxLaunchRecord, text: string): Promise<LaunchDelivery>;
+  /** The Inbox stops: let go of what it holds open (a connection); the agent's sessions stay. */
+  close?(): void;
 }

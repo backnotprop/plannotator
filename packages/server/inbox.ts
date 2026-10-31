@@ -2264,6 +2264,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session)],
   });
 
+  /** The launch engine exists (the Codex wake is made before it, and its first sweep may already run). */
+  let launchReady = false;
   // The Codex wake: the person's items for a Codex thread go in as a new turn through `codex queue`,
   // once each (inbox-codex-wake.ts). Worded like any bridge command.
   const codexWake = createInboxCodexWake({
@@ -2272,6 +2274,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     commandOf: (item, session) => replyCommand(item, false, session),
     // A thread blocked in wait_for_reply gets the reply from that call, not as another turn as well.
     waitingOverMcp: (session, threadId) => live.waitingOverMcp(session, threadId),
+    // A Codex session the Inbox launched: its host puts the item in as a turn (launch is made below; until then, the queue).
+    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve("queue" as const)),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
@@ -2382,6 +2386,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The permission hook runs this Plannotator.
     selfCommand,
   });
+  launchReady = true;
   // The login shell read ahead, off any request's path (launch on only).
   launch.warm();
 
