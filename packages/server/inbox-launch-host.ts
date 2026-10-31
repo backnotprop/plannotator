@@ -6,8 +6,9 @@
  *
  *   inbox-launch-claude.ts             Claude Code (`claude --bg`, its settings file, trust)
  *   inbox-launch-claude-permission.ts  Claude Code's permission hook, key and leases
+ *   inbox-launch-pi.ts                 Pi (`pi --mode rpc`, one process per session, owned by the Inbox)
  *
- * The engine holds `{ "claude-code": claude }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, pi }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
