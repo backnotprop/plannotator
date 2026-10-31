@@ -3480,7 +3480,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-folders .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }
 .ib-cp-fopt > svg.ib-ic { color: var(--muted-foreground); }
 .ib-cp-fopt s { color: var(--muted-foreground); }
-/* Last, under a line: "New scratch folder" (· trust it once, while Claude Code does not trust its root). */
+/* Last, under a line: "New scratch folder" (· trust it once, while the agent does not trust its root). */
 .ib-cp-folders .ib-cp-list > .ib-cp-cap-line { grid-column: 1 / -1; margin: 4px 2px; }
 .ib-cp-scratch .ib-cp-trust { color: var(--muted-foreground); }
 /* Under an untrusted scratch row: what the first start asks (the root is the folder to trust). */
