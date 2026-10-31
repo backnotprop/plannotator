@@ -1451,12 +1451,14 @@ export function inboxRowWaitsOnPerson(row: Pick<InboxListRow, "section" | "unsee
  * person, and the thread is open or came back from the archive (Mark read
  * sends a came-back thread back to the archive). Never on a thread whose Mark
  * read still stands: unsent work can keep it in New ("inbox-reply-drafts"),
- * and marking it again then undoing would drop the earlier Mark read.
+ * and marking it again then undoing would drop the earlier Mark read. A
+ * standing Mark read that Mark unread took the look back from (`unseen`) does
+ * take it: the store only gives the look back, and writes no new Mark read.
  */
 export function inboxRowOffersMarkRead(
   row: Pick<InboxListRow, "section" | "unseen" | "answered_not_sent" | "resolved_at" | "back_from_archive"> & { read_at?: string | null },
 ): boolean {
-  return (row.resolved_at === null || row.back_from_archive === true) && (row.read_at ?? null) === null && inboxRowWaitsOnPerson(row);
+  return (row.resolved_at === null || row.back_from_archive === true) && ((row.read_at ?? null) === null || row.unseen > 0) && inboxRowWaitsOnPerson(row);
 }
 
 export interface InboxThread {
