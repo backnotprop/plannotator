@@ -27,6 +27,11 @@
  *  5. A link never lets a scratch folder leave the root: a link already at the
  *     name is skipped (`-2`), and a folder swapped for a link to a folder outside
  *     is neither purged nor removed by Delete.
+ *  6. Delete acts on the folder the Inbox made, once, and never purges past it:
+ *     another folder made at the same path is kept; a double-click Delete purges
+ *     once and answers both alike; a folder made a linked git worktree (its
+ *     `.git` a file, which Claude's purge maps to the main repository, dropping
+ *     that project's own entry) is removed but never purged.
  *
  * Pictures: LAUNCH_PR3_SHOTS_DIR (default .local/proof/launch-pr3), wide light at 2x.
  * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-scratch.spec.ts`.
@@ -254,7 +259,11 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   await deleteFromMenu(page, first!.threadId, 'delete-confirm-scratch');
   await waitFor('the folder removed', () => !existsSync(first!.folder));
   const purges = fake.calls().filter((c) => c.argv[0] === 'purge');
-  expect(purges.map((c) => c.argv)).toEqual([['purge', '--yes', first!.folder]]);
+  // A dry run first: purge runs only when its plan names this folder alone.
+  expect(purges.map((c) => c.argv)).toEqual([
+    ['purge', '--dry-run', first!.folder],
+    ['purge', '--yes', first!.folder],
+  ]);
   expect(existsSync(join(world.dataDir, 'inbox', 'launch', first!.launchId))).toBe(false);
   // The other scratch folder and its session stay; the thread stays too.
   expect(lstatSync(second!.folder).isDirectory()).toBe(true);
@@ -304,7 +313,7 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   await waitFor('the second folder removed', () => !existsSync(second!.folder));
   await deleteFromMenu(page, third.thread_id);
   await waitFor('the third folder removed', () => !existsSync(thirdFolder));
-  expect(fake.calls().filter((c) => c.argv[0] === 'purge').map((c) => c.argv)).toEqual([
+  expect(fake.calls().filter((c) => c.argv[0] === 'purge' && c.argv[1] === '--yes').map((c) => c.argv)).toEqual([
     ['purge', '--yes', first!.folder],
     ['purge', '--yes', second!.folder],
     ['purge', '--yes', thirdFolder],
@@ -429,5 +438,64 @@ test('a link never takes a scratch folder out of the root: one at the name is sk
   expect(lstatSync(folder).isSymbolicLink()).toBe(true);
   expect(readdirSync(outside)).toEqual(['keep.txt']);
   expect(fake.agents().some((a) => a.cwd === folder)).toBe(false);
+  expect(world.errors).toEqual([]);
+});
+
+test('Delete acts on the folder the Inbox made, once, and never purges past it: another folder at the path, a double click, a linked worktree', async () => {
+  const { page, fake } = world;
+  const purges = () => fake.calls().filter((c) => c.argv[0] === 'purge').map((c) => c.argv);
+  const launch = async (words: string, name: string) => {
+    await openFolderMenu(page, words, name);
+    const sent = await sendToScratch(page);
+    const folder = sent.project.root;
+    // Started and answered (so the start is done, and Delete does the folder's part itself).
+    await openThread(page, sent.thread_id);
+    await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+    return { ...sent, folder };
+  };
+
+  // Another folder at the same path (the first removed by hand, a new one made there): kept, never purged.
+  const swapped = await launch('Check the inode guard.', 'Inode check');
+  rmSync(swapped.folder, { recursive: true });
+  mkdirSync(swapped.folder);
+  writeFileSync(join(swapped.folder, 'keep.txt'), 'another folder');
+  let before = purges().length;
+  await deleteFromMenu(page, swapped.thread_id);
+  await expect(page.getByText('its scratch folder was kept')).toBeVisible();
+  expect(purges()).toHaveLength(before);
+  expect(readdirSync(swapped.folder)).toEqual(['keep.txt']);
+  expect(fake.agents().some((a) => a.cwd === swapped.folder)).toBe(false);
+
+  // A double click: both Deletes answer alike, and the folder is purged and removed once.
+  const twice = await launch('Delete me twice at once.', 'Double click');
+  before = purges().length;
+  const answers = await page.evaluate(async (id) => {
+    const remove = async () => {
+      const response = await fetch(new URL(`/api/inbox/launch/${id}/delete`, location.href), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      return { status: response.status, body: await response.json() };
+    };
+    return Promise.all([remove(), remove()]);
+  }, twice.launch.id);
+  expect(answers).toEqual([
+    { status: 200, body: { ok: true, scratch_removed: true } },
+    { status: 200, body: { ok: true, scratch_removed: true } },
+  ]);
+  expect(purges().slice(before)).toEqual([
+    ['purge', '--dry-run', twice.folder],
+    ['purge', '--yes', twice.folder],
+  ]);
+  expect(existsSync(twice.folder)).toBe(false);
+
+  // The agent made its folder a linked worktree of a project (`git worktree add` writes a `.git` file): Claude's purge
+  // would drop that project's entry, so it is never purged; the folder itself goes as Delete says.
+  const main = git(join(world.home, 'code', 'app'));
+  const worktree = await launch('Work in a worktree of the app.', 'Worktree notes');
+  writeFileSync(join(worktree.folder, '.git'), `gitdir: ${main}/.git/worktrees/worktree-notes\n`);
+  before = purges().length;
+  await deleteFromMenu(page, worktree.thread_id);
+  await waitFor('the worktree folder removed', () => !existsSync(worktree.folder));
+  expect(purges()).toHaveLength(before);
+  expect(existsSync(join(main, '.git'))).toBe(true);
+  expect(fake.agents().some((a) => a.cwd === worktree.folder)).toBe(false);
   expect(world.errors).toEqual([]);
 });

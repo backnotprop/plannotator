@@ -22,8 +22,8 @@
  * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
-import { existsSync, realpathSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { readAgentFile } from "./agent-files";
 import { CLAUDE_JSON_MAX_BYTES, claudeGlobalConfigPath, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
@@ -193,6 +193,48 @@ export function claudeRepositoryAbove(folder: string): string | null {
   }
 }
 
+/** Claude's transcripts folder name for a project path: every character but a letter or digit as `-`. */
+function claudeProjectDirName(folder: string): string {
+  return folder.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+/**
+ * Why `claude purge <folder>` may reach past that folder, or null when it may run. `plan` is the stdout of
+ * `claude purge --dry-run <folder>` (null: before the dry run, the folder's own checks only).
+ *
+ * As run on 2.1.314 (the purge smoke), purge deletes the `projects[...]` entries of the folder and of the git
+ * repository Claude maps it to. A folder below a repository's root maps to that root, and a linked worktree
+ * (a `.git` FILE: `gitdir: <repo>/.git/worktrees/<name>`) maps to its main repository, so either would drop the
+ * person's own project entry (its trust, allowed tools, MCP servers, history). A folder that is its own repository
+ * (a `.git` folder) maps to itself. So: no `.git` above, none in the folder but a real folder, and the plan must
+ * name only this folder's entry and its own transcripts folder; anything else, or a plan that can't be read, is
+ * refused.
+ */
+export function claudePurgeRefusal(folder: string, plan: string | null): string | null {
+  const repository = claudeRepositoryAbove(folder);
+  if (repository) return `inside the repository ${repository}, whose own entry purge would remove`;
+  try {
+    if (!lstatSync(join(folder, ".git")).isDirectory()) return "its .git is not a folder (a linked worktree maps to its main repository)";
+  } catch {
+    // No .git: a plain folder.
+  }
+  if (plan === null) return null;
+  const configs: string[] = [];
+  const dirs: string[] = [];
+  for (const line of plan.split("\n")) {
+    const config = /^\s*config:\s+projects\["(.*)"\]\s*$/.exec(line);
+    if (config) configs.push(config[1]!);
+    const dir = /^\s*dir:\s+(\S.*?)\s*$/.exec(line);
+    if (dir) dirs.push(dir[1]!);
+  }
+  if (configs.length === 0 && dirs.length === 0) return "its dry run listed nothing it can read";
+  const other = configs.find((key) => key !== folder);
+  if (other !== undefined) return `its dry run also lists projects["${other}"]`;
+  const otherDir = dirs.find((dir) => /\/projects\/[^/]+\/?$/.test(dir) && basename(dir) !== claudeProjectDirName(folder));
+  if (otherDir !== undefined) return `its dry run also lists ${otherDir}`;
+  return null;
+}
+
 /**
  * Claude Code 2.1.314 takes a PermissionRequest hook's allow only when the ask
  * lets hooks allow it. Its own safety checks (removing the working folder, for
@@ -321,11 +363,18 @@ export function createClaudeHost(options: {
     rm: async (short: string) => (await run(["rm", short], undefined)).result,
     /**
      * `claude purge --yes <folder>`: every session, transcript and `~/.claude.json` entry Claude keeps for that folder
-     * (`--yes`: no confirmation, which would wait on a terminal no one sees). Only ever a scratch folder.
+     * (`--yes`: no confirmation, which would wait on a terminal no one sees). Only ever a scratch folder, and only
+     * when it reaches nothing else (`claudePurgeRefusal`): `--dry-run` first, and the plan must name that folder alone.
      */
     purge: async (folder: string): Promise<AgentRunResult & { skipped?: string }> => {
-      const repository = claudeRepositoryAbove(folder);
-      if (repository) return { exitCode: 0, timedOut: false, stdout: "", stderr: "", skipped: `inside the repository ${repository}, whose own entry purge would remove` };
+      const skip = (why: string, result?: AgentRunResult) => ({ ...(result ?? { exitCode: 0, timedOut: false, stdout: "", stderr: "" }), skipped: why });
+      const before = claudePurgeRefusal(folder, null);
+      if (before) return skip(before);
+      const dry = (await run(["purge", "--dry-run", folder], undefined)).result;
+      // Exit 1 with nothing found ("No Claude Code project state found"): nothing to purge.
+      if (dry.exitCode !== 0) return skip(`the dry run exited ${dry.exitCode}`, dry);
+      const planned = claudePurgeRefusal(folder, dry.stdout);
+      if (planned) return skip(planned, dry);
       return (await run(["purge", "--yes", folder], undefined)).result;
     },
     /** Whether Claude Code trusts `folder` already (its real path or its path as given; read only). */

@@ -233,15 +233,30 @@ export function createInboxLaunch(options: {
       return false;
     }
   };
+  /** `path` with its links resolved: the real path of the nearest folder that exists, then the rest as given. */
+  const realPathOf = (path: string): string => {
+    const rest: string[] = [];
+    for (let dir = resolve(path); ; dir = dirname(dir)) {
+      try {
+        return join(realpathSync(dir), ...rest.reverse());
+      } catch {
+        if (dirname(dir) === dir) return resolve(path);
+        rest.push(basename(dir));
+      }
+    }
+  };
   /**
-   * The git repository holding `path` (a `.git` in it or a folder above it), or null. A scratch root is never in
-   * one: each folder would join that repository's project, not its own.
+   * The git repository holding `path` (a `.git` in it or a folder above it, as given or through a link), or null. A
+   * scratch root is never in one: each folder would join that repository's project, not its own.
    */
   const repositoryHolding = (path: string): string | null => {
-    for (let dir = resolve(path); ; dir = dirname(dir)) {
-      if (existsSync(join(dir, ".git"))) return dir;
-      if (dirname(dir) === dir) return null;
+    for (const start of new Set([resolve(path), realPathOf(path)])) {
+      for (let dir = start; ; dir = dirname(dir)) {
+        if (existsSync(join(dir, ".git"))) return dir;
+        if (dirname(dir) === dir) break;
+      }
     }
+    return null;
   };
   const scratchRefused = (text: string) => new InboxError("scratch_unavailable", `${text} Nothing was sent.`, { field: "to.launch" });
   /** Make the new scratch folder for a thread name: the first free `<slug>`, `<slug>-2`, … under the root's real path. Never follows a link. */
@@ -546,6 +561,8 @@ export function createInboxLaunch(options: {
 
   /** Launches whose `claude --bg` is running now: Try again waits, and Delete leaves the new session to `run` to remove. */
   const starting = new Set<string>();
+  /** A Delete under way, by launch id: a second one (a double click) waits for it and answers the same. */
+  const deleting = new Map<string, Promise<Record<string, unknown>>>();
 
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
   const run = async (root: InboxMessage, again: boolean): Promise<void> => {
@@ -764,25 +781,36 @@ export function createInboxLaunch(options: {
         return json({ ok: true, command });
       }
       case "delete": {
+        // A Delete under way (a double click): the same answer, once it is done.
+        const under = deleting.get(launch.id);
+        if (under) return json(await under);
         // Deleted already (a second Delete, from a stale window): nothing more. Its folder path may be another launch's now.
         if (launch.deleted_at) return json({ ok: true });
-        // Still starting: `run` removes the session it makes once it sees `deleted_at`.
-        if (launch.session_ref) {
-          const stop = await host.stop(launch.session_ref);
-          const rm = await host.rm(launch.session_ref);
-          log(`Inbox launch ${launch.id}: deleted (stop ${stop.exitCode}, rm ${rm.exitCode})`);
+        const done = (async (): Promise<Record<string, unknown>> => {
+          // Still starting: `run` removes the session it makes once it sees `deleted_at`.
+          if (launch.session_ref) {
+            const stop = await host.stop(launch.session_ref);
+            const rm = await host.rm(launch.session_ref);
+            log(`Inbox launch ${launch.id}: deleted (stop ${stop.exitCode}, rm ${rm.exitCode})`);
+          }
+          permissions.withdrawAll(root);
+          permissions.forget(launch.id);
+          // A project folder: never `claude purge` (it clears every session of the folder, and this is the person's
+          // project). A scratch folder the Inbox made: purged and removed, by `run` when it still starts.
+          const scratchRemoved = starting.has(launch.id) ? null : await removeScratch(launch);
+          rmSync(launchDir(launch.id), { recursive: true, force: true });
+          store.settleLaunch(root.id, { deleted_at: new Date(now()).toISOString() });
+          memos.delete(launch.id);
+          options.onChange();
+          // `scratch_removed: false`: the folder was kept (not the one the Inbox made). Still starting: `run` removes it.
+          return { ok: true, ...(launch.scratch && scratchRemoved !== null ? { scratch_removed: scratchRemoved } : {}) };
+        })();
+        deleting.set(launch.id, done);
+        try {
+          return json(await done);
+        } finally {
+          deleting.delete(launch.id);
         }
-        permissions.withdrawAll(root);
-        permissions.forget(launch.id);
-        // A project folder: never `claude purge` (it clears every session of the folder, and this is the person's
-        // project). A scratch folder the Inbox made: purged and removed, by `run` when it still starts.
-        const scratchRemoved = starting.has(launch.id) ? null : await removeScratch(launch);
-        rmSync(launchDir(launch.id), { recursive: true, force: true });
-        store.settleLaunch(root.id, { deleted_at: new Date(now()).toISOString() });
-        memos.delete(launch.id);
-        options.onChange();
-        // `scratch_removed: false`: the folder was kept (not the one the Inbox made). Still starting: `run` removes it.
-        return json({ ok: true, ...(launch.scratch && scratchRemoved !== null ? { scratch_removed: scratchRemoved } : {}) });
       }
       case "retry": {
         if (starting.has(launch.id) || respawning.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");

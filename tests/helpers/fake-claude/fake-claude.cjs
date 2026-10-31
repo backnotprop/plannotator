@@ -25,7 +25,7 @@
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
  *                            and starts the session process.
  *  agents --json [--all] [--cwd D]  without --all, done and stopped sessions are left out
- *  stop <id> / respawn <id> / rm <id> / purge --yes <folder> / attach <id>
+ *  stop <id> / respawn <id> / rm <id> / purge [--dry-run | --yes] <folder> / attach <id>
  *
  * The session process (`__session <sessionId>`) reads the settings file's env
  * (PLANNOTATOR_DATA_DIR), finds the Inbox in <dataDir>/inbox/inbox.json and
@@ -286,6 +286,33 @@ function main() {
   if (command === "purge") {
     // Without -y/--yes Claude asks to confirm: with no terminal, nothing is purged.
     const folder = args.slice(1).filter((a) => !a.startsWith("-")).pop();
+    // --dry-run: the plan as 2.1.314 prints it. The entries are the folder's and its git root's: a repository above
+    // it maps to that root, and a linked worktree (a `.git` file, `gitdir: <repo>/.git/worktrees/<name>`) to its
+    // main repository; a folder that is its own repository maps to itself.
+    if (args.includes("--dry-run")) {
+      const keys = [folder];
+      const own = path.join(folder, ".git");
+      let gitRoot = null;
+      if (fs.existsSync(own) && !fs.lstatSync(own).isDirectory()) {
+        const gitdir = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(own, "utf8"));
+        const main = gitdir && /^(.*)\/\.git\/worktrees\/[^/]+\/?$/.exec(gitdir[1].trim());
+        if (main) gitRoot = main[1];
+      } else if (!fs.existsSync(own)) {
+        for (let dir = path.dirname(folder); dir !== path.dirname(dir); dir = path.dirname(dir)) {
+          if (fs.existsSync(path.join(dir, ".git"))) {
+            gitRoot = dir;
+            break;
+          }
+        }
+      }
+      if (gitRoot && gitRoot !== folder) keys.unshift(gitRoot);
+      const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || "", ".claude");
+      const lines = [``, `Purge plan for ${folder}:`, ``, `  dir:    ${path.join(configDir, "projects", folder.replace(/[^A-Za-z0-9]/g, "-"))}`, `           project transcripts (.jsonl) and memory/`];
+      for (const key of keys) lines.push(`  config: projects["${key}"]`, `           project entry in ~/.claude.json (trust, history, MCP servers)`);
+      lines.push(``, `Dry run: ${keys.length + 1} item(s) would be deleted.`, ``);
+      process.stdout.write(lines.join("\n"));
+      return;
+    }
     if (!args.includes("--yes") && !args.includes("-y")) {
       process.stderr.write("fake claude: purge needs --yes without a terminal\n");
       process.exit(1);

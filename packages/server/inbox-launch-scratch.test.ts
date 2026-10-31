@@ -3,18 +3,20 @@
  * test guards: Settings → Agents' "Scratch folders" saves only a full path (`~/` is the home; empty is the
  * default) outside any git repository, never from the tailnet; the trust-once row reads Claude Code's own
  * trust record, where a trusted folder above the root counts and the root's own untrusted entry does not, and
- * a rewrite of that record is read again; and a folder below a repository's root is never purged (Claude's
- * purge there also drops the repository's own entry).
+ * a rewrite of that record is read again; and `claude purge` runs only on a folder whose purge reaches nothing
+ * else: never below a repository's root or in a linked worktree (Claude's purge maps both to a repository and
+ * drops that repository's own entry, as run on 2.1.314), and only after a dry run whose plan names that folder
+ * alone (tested through the host's `purge`, with a stub `claude`).
  * Making, naming and removing the folders runs end to end in tests/e2e/inbox-launch-scratch.spec.ts.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
 import { createAgentEnvironmentFor } from "./inbox-agents";
-import { claudeRepositoryAbove, claudeTrustsFolder } from "./inbox-launch-claude";
+import { claudePurgeRefusal, claudeRepositoryAbove, claudeTrustsFolder, createClaudeHost } from "./inbox-launch-claude";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -92,7 +94,90 @@ describe("Settings → Agents: Scratch folders", () => {
     mkdirSync(join(home, "code", "app", ".git"), { recursive: true });
     for (const scratch_dir of ["~/code/app", "~/code/app/scratch/new"]) expect(await post({ scratch_dir })).toMatchObject({ status: 422, body: { code: "validation_error" } });
     expect(saved()).toEqual({ enabled: true, fullPermissions: false });
+    // Through a link into the repository too: the real path decides.
+    symlinkSync(join(home, "code", "app"), join(home, "app-link"));
+    expect(await post({ scratch_dir: "~/app-link/scratch" })).toMatchObject({ status: 422, body: { code: "validation_error" } });
+    expect(saved()).toEqual({ enabled: true, fullPermissions: false });
     expect((await post({ scratch_dir: "~/code/scratch" })).status).toBe(200);
+  });
+});
+
+/** A stub `claude` that logs its argv and prints `plan` for `purge --dry-run`. */
+function stubClaude(plan: (folder: string) => string) {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-purge-host-")));
+  restore.push(() => rmSync(dir, { recursive: true, force: true }));
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  const log = join(dir, "calls.log");
+  const plans = join(dir, "plans");
+  mkdirSync(plans);
+  writeFileSync(join(bin, "claude"), `#!/bin/sh\necho "$*" >> '${log}'\nif [ "$2" = "--dry-run" ]; then cat "${plans}/$(printf '%s' "$3" | tr -c 'A-Za-z0-9' '-')"; fi\n`);
+  chmodSync(join(bin, "claude"), 0o755);
+  const host = createClaudeHost({
+    environment: async () => createAgentEnvironmentFor({ platform: "darwin", homeDir: dir, env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir } }),
+    files: () => createAgentEnvironmentFor({ platform: "darwin", homeDir: dir, env: {} }),
+  });
+  const folder = (path: string) => {
+    mkdirSync(join(dir, path), { recursive: true });
+    const full = join(dir, path);
+    writeFileSync(join(plans, full.replace(/[^A-Za-z0-9]/g, "-")), plan(full));
+    return full;
+  };
+  const calls = () => {
+    try {
+      return readFileSync(log, "utf8").trim().split("\n").filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  return { dir, host, folder, calls };
+}
+
+/** A dry-run plan as 2.1.314 prints it, for these `projects[...]` keys. */
+const planOf = (folder: string, keys: string[]) =>
+  [`Purge plan for ${folder}:`, ``, `  dir:    /h/.claude/projects/${folder.replace(/[^A-Za-z0-9]/g, "-")}`, `           project transcripts (.jsonl) and memory/`, ...keys.flatMap((k) => [`  config: projects["${k}"]`, `           project entry in ~/.claude.json (trust, history, MCP servers)`]), ``, `Dry run: ${keys.length + 1} item(s) would be deleted.`].join("\n");
+
+describe("claude purge, through the host (a stub claude)", () => {
+  test("a plain folder: a dry run, then the purge", async () => {
+    const { host, folder, calls } = stubClaude((f) => planOf(f, [f]));
+    const plain = folder("scratch/notes");
+    expect((await host.purge(plain)).skipped).toBeUndefined();
+    expect(calls()).toEqual([`purge --dry-run ${plain}`, `purge --yes ${plain}`]);
+  });
+
+  test("a linked worktree (a .git file) is never purged, not even a dry run; nor a folder below a repository's root", async () => {
+    const { dir, host, folder, calls } = stubClaude((f) => planOf(f, [f]));
+    const worktree = folder("scratch/worktree-notes");
+    writeFileSync(join(worktree, ".git"), `gitdir: ${dir}/code/app/.git/worktrees/worktree-notes\n`);
+    expect((await host.purge(worktree)).skipped).toContain("not a folder");
+    mkdirSync(join(dir, "repo", ".git"), { recursive: true });
+    const below = folder("repo/scratch/notes");
+    expect((await host.purge(below)).skipped).toContain(`inside the repository ${join(dir, "repo")}`);
+    expect(calls()).toEqual([]);
+  });
+
+  test("a dry run that lists another project's entry or transcripts, or nothing it can read, or that fails: no purge", async () => {
+    const plans: Record<string, (f: string) => string> = {
+      other: (f) => planOf(f, ["/Users/me/code/app", f]),
+      dirs: (f) => `${planOf(f, [f])}\n  dir:    /h/.claude/projects/-Users-me-code-app`,
+      unreadable: () => "Something else entirely.",
+    };
+    const { host, folder, calls } = stubClaude((f) => plans[f.split("/").pop()!]!(f));
+    for (const name of Object.keys(plans)) {
+      const f = folder(`scratch/${name}`);
+      expect((await host.purge(f)).skipped).toBeTruthy();
+    }
+    expect(calls().filter((c) => c.startsWith("purge --yes"))).toEqual([]);
+    expect(calls()).toHaveLength(3);
+  });
+
+  test("its own repository (a .git folder) maps to itself: purged when the plan says so", () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-purge-own-")));
+    restore.push(() => rmSync(home, { recursive: true, force: true }));
+    const own = join(home, "scratch", "own-repo");
+    mkdirSync(join(own, ".git"), { recursive: true });
+    expect(claudePurgeRefusal(own, null)).toBeNull();
+    expect(claudePurgeRefusal(own, planOf(own, [own]))).toBeNull();
   });
 });
 
