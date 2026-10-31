@@ -66,6 +66,8 @@ export interface SidebarProps {
    * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
    */
   onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** Says a line in the window's live region (the rename field's refusals). */
+  announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -515,6 +517,7 @@ export function Sidebar(props: SidebarProps) {
                       ? (name) => props.onProjectRename!(project.id, name)
                       : undefined
                   }
+                  announce={props.announce}
                 />
               );
             })

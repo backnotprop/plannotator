@@ -10,7 +10,7 @@
  * store's single project line no longer loading.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_PROJECT_NAME_MAX, checkInboxProjectName } from "@plannotator/core/inbox-types";
@@ -72,13 +72,18 @@ describe("renameProject", () => {
     expect(store.listProjects()).toHaveLength(3);
   });
 
-  test("display_name survives a reload, and an older line written after a newer one never wins", () => {
+  test("display_name survives a reload, and a lower-seq line appended after a higher one never wins", () => {
     const { dir, store, acme } = open();
     store.renameProject(acme.id, "acme");
     const reopened = InboxStore.open(dir);
     expect(reopened.project(acme.id)).toMatchObject({ name: "acme", display_name: "acme", key: acme.key, root: acme.root });
-    // The seq decides, not the order of lines in the file: lines are sorted by seq on load.
     reopened.renameProject(acme.id, "acme two");
+    expect(InboxStore.open(dir).project(acme.id)?.name).toBe("acme two");
+    // The seq decides, not the place in the file: a line with a lower seq appended after the rename is older.
+    const newest = projectLines(reopened, acme.key).at(-1)!;
+    const stale = { ...newest, seq: newest.seq - 1, record: { ...newest.record, display_name: "stale" } };
+    appendFileSync(join(reopened.dir, "projects", acme.key, "project.json"), `${JSON.stringify(stale)}\n`);
+    expect(projectLines(reopened, acme.key).at(-1)!.record.display_name).toBe("stale");
     expect(InboxStore.open(dir).project(acme.id)?.name).toBe("acme two");
   });
 
@@ -128,7 +133,8 @@ describe("renameProject", () => {
   test("refuses an empty, blank, too long or undrawable name, and a missing project, writing nothing", () => {
     const { store, acme } = open();
     const cursor = store.cursor();
-    for (const bad of ["", "   ", "​", "a".repeat(INBOX_PROJECT_NAME_MAX + 1), "ac me", "ac‮me", "ac\u0007me"]) {
+    // Empty, blank, a zero-width space alone, one too long, a line separator, a right-to-left override, a bell.
+    for (const bad of ["", "   ", "\u200b", "a".repeat(INBOX_PROJECT_NAME_MAX + 1), "ac\u2028me", "ac\u202eme", "ac\u0007me"]) {
       expect(code(() => store.renameProject(acme.id, bad))).toBe("validation_error");
     }
     expect(code(() => store.renameProject("prj_00000000000000000000000000", "acme"))).toBe("project_not_found");

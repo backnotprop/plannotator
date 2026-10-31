@@ -107,4 +107,13 @@ describe("inboxProjectLabels with a display_name", () => {
     expect(labels.get("a")).toBe("main · acme");
     expect(labels.get("b")).toBe("main · initech");
   });
+
+  test("a display_name that is not a string (a hand-edited file, another machine's list) is ignored, so a label is always a string", () => {
+    const labels = inboxProjectLabels([
+      { ...p("a", "/code/acme/main"), display_name: 42 },
+      { ...p("b", "/code/initech/main"), display_name: { name: "x" } },
+    ]);
+    expect(labels.get("a")).toBe("main · acme");
+    expect(labels.get("b")).toBe("main · initech");
+  });
 });

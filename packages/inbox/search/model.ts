@@ -14,7 +14,7 @@ import {
   type InboxSearchStatus,
   type InboxSearchThreadRow,
 } from '@plannotator/core/inbox-search';
-import { INBOX_SECTIONS, type InboxSectionId } from '@plannotator/core/inbox-types';
+import { INBOX_SECTIONS, inboxProjectDisplayName, type InboxSectionId } from '@plannotator/core/inbox-types';
 import { threadChipName } from '../threadChip';
 
 export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string; noun: string; one: string }>> = {
@@ -135,13 +135,14 @@ export function chipText(kind: keyof SearchFilters, filters: SearchFilters, proj
  * Project names as the person reads them: a second project with the same name gets its parent folder ("api · work").
  * A project the person renamed (`display_name`) reads that name as it is.
  */
-export function projectNames(projects: readonly { id: string; name: string; root: string; display_name?: string | null }[]): Map<string, string> {
+export function projectNames(projects: readonly { id: string; name: string; root: string; display_name?: unknown }[]): Map<string, string> {
   const counts = new Map<string, number>();
-  for (const p of projects) if (!p.display_name) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
+  for (const p of projects) if (inboxProjectDisplayName(p) === null) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
   const out = new Map<string, string>();
   for (const p of projects) {
-    if (p.display_name) {
-      out.set(p.id, p.display_name);
+    const given = inboxProjectDisplayName(p);
+    if (given !== null) {
+      out.set(p.id, given);
       continue;
     }
     const parts = p.root.split(/[\\/]+/).filter(Boolean);

@@ -138,6 +138,15 @@ test('a renamed project reads its display_name as it is, and the others no longe
   expect(named.get(notes.id)).toBe('notes');
 });
 
+test('a display_name that is not a non-empty string is ignored: the folder names the project', () => {
+  const names = shortProjectNames([
+    { id: 'a', root: '/code/acme/main', name: 'main', display_name: 42 },
+    { id: 'b', root: '/code/notes', name: 'notes', display_name: '' },
+  ]);
+  expect(names.get('a')).toBe('main');
+  expect(names.get('b')).toBe('notes');
+});
+
 test('the window-wide names (a pin outside the sidebar included) carry the display_name too', () => {
   const acme = { id: 'prj_acme', root: '/Users/me/code/acme/main', name: 'acme', display_name: 'acme' };
   const names = windowProjectNames({ projects: [acme], sidebar: [], sections: [], pins: [{ project: { id: acme.id } }] });

@@ -9,7 +9,9 @@
  *  - Rename… from the sidebar's menu: the sidebar, the thread rows' project
  *    name, search and the project's own list all read the new name;
  *  - the name survives a reload;
- *  - Escape cancels;
+ *  - Escape cancels; an empty or too long name (65 emoji, counted as
+ *    characters, never cut) is refused and said in the live region;
+ *  - a click into the reply box closes the field and keeps focus there;
  *  - keyboard only: ⋯, the arrows, Enter, typing, Enter;
  *  - Reset name brings back "main";
  *  - a phone: the item in the menu's sheet, the field in the navigation sheet.
@@ -205,15 +207,43 @@ test('Escape cancels: the name stays, focus is back on ⋯', async () => {
   await expect(row(page, 'acme')).toBeVisible();
   await expect(row(page, 'zzz')).toHaveCount(0);
   await expect(row(page, 'acme').locator('.ib-pmore')).toBeFocused();
-  // An empty name is not saved either: the field stays, marked.
+  // An empty name is not saved either: the field stays, marked, and the live region says why.
   await row(page, 'acme').locator('.ib-proj').click({ button: 'right' });
   await page.locator('[data-project-action="rename"]').click();
   await page.keyboard.press('Backspace');
   await page.keyboard.press('Enter');
   await expect(field(page)).toBeVisible();
   await expect(field(page)).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('[data-inbox-live]')).toHaveText('A name cannot be empty.');
+  // The cap counts characters as the server does: 65 emoji are all kept in the field, and refused on Enter.
+  const emoji = '🚀'.repeat(65);
+  await field(page).fill(emoji);
+  await expect(field(page)).toHaveValue(emoji);
+  await page.keyboard.press('Enter');
+  await expect(field(page)).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('[data-inbox-live]')).toHaveText('A name can be at most 64 characters.');
   await page.keyboard.press('Escape');
   await expect(row(page, 'acme')).toBeVisible();
+});
+
+test('clicking into the reply box closes the field and leaves focus in the reply box', async () => {
+  const { page, threads } = world;
+  await page.locator(`.ib-lbody [data-thread-id="${threads.featX}"]`).click();
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
+  const reply = page.locator('.ib-rtext');
+  await expect(reply).toBeVisible();
+  await row(page, 'acme').locator('.ib-proj').click({ button: 'right' });
+  await page.locator('[data-project-action="rename"]').click();
+  await expect(field(page)).toBeFocused();
+  await page.keyboard.type('zzz');
+  await reply.click();
+  await expect(field(page)).toHaveCount(0);
+  await expect(reply).toBeFocused();
+  // Still focused a moment later: nothing takes it back to ⋯.
+  await page.waitForTimeout(200);
+  await expect(reply).toBeFocused();
+  await expect(row(page, 'acme')).toBeVisible();
+  await page.goto(world.url);
 });
 
 test('keyboard only: ⋯, the arrows to Rename…, typing, Enter', async () => {
@@ -251,7 +281,8 @@ test('Reset name brings back "main", and the item goes until a name is set again
   await expect(page.locator('.ib-lhead-tt')).toHaveText('main');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Name reset to main.');
   await page.locator('.ib-nav', { hasText: 'Inbox' }).first().click();
-  for (const id of [threads.main, threads.featX, threads.fixY]) await expect.poll(() => rowProject(page, id)).toBe('main');
+  // The feat-x thread was opened (the reply box case), so it sits in the folded Quiet section: the other two are drawn.
+  for (const id of [threads.main, threads.fixY]) await expect.poll(() => rowProject(page, id)).toBe('main');
   await row(page, 'main').locator('.ib-proj').click({ button: 'right' });
   await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
   await page.keyboard.press('Escape');

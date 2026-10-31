@@ -4355,6 +4355,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            announce={say}
             // Not on a page opened over the tailnet: the update routes answer 403 local_only there.
             update={pageUpdate}
             restarting={restarting}

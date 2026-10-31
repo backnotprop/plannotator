@@ -2674,7 +2674,7 @@ export class InboxStore {
     const folder = this.projectFolder(project);
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     const line: InboxLine = { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "project", id: project.id, record: project };
-    // One line, written whole: temp file then rename.
+    // The first line, written whole: temp file then rename (a rename appends later lines through write()).
     const path = join(folder, PROJECT_FILE);
     const temp = `${path}.${process.pid}.tmp`;
     writeFileSync(temp, `${JSON.stringify(line)}\n`, { mode: 0o600 });

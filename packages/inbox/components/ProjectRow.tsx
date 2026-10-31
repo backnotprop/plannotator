@@ -31,6 +31,8 @@ export interface ProjectRowProps {
    * name. Resolves true once the new name is in the list. Absent: neither item is offered.
    */
   onRename?: (name: string | null) => Promise<boolean>;
+  /** Says a line in the window's live region (the field's refusals: an empty or too long name). */
+  announce?: (text: string) => void;
 }
 
 /**
@@ -48,7 +50,8 @@ export interface ProjectRowProps {
  * Rename… (after a separator) turns the row into a field holding its name:
  * Enter saves, Escape or leaving the field cancels, and an empty name is not
  * saved. Reset name, offered only once a name is set, goes back to the
- * folder's name. Focus goes back to ⋯ after either.
+ * folder's name. Focus goes back to ⋯ after Enter, Escape or Reset name; a
+ * click elsewhere keeps focus where it landed.
  */
 export function ProjectRow(props: ProjectRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -86,7 +89,7 @@ export function ProjectRow(props: ProjectRowProps) {
       name={project.name}
       readable={props.readable}
       rename={onRename !== undefined}
-      named={Boolean(project.display_name)}
+      named={typeof project.display_name === 'string' && project.display_name !== ''}
       onAction={(action) => {
         setMenuOpen(false);
         setContextOpen(false);
@@ -103,9 +106,10 @@ export function ProjectRow(props: ProjectRowProps) {
       }}
     />
   );
-  const doneRenaming = () => {
+  /** The field closes. `refocus`: after Enter or Escape, ⋯ takes focus; after a click elsewhere, focus stays there. */
+  const doneRenaming = (refocus: boolean) => {
     toField.current = false;
-    backToMore.current = true;
+    backToMore.current = refocus;
     setRenaming(false);
   };
   if (renaming && onRename) {
@@ -113,10 +117,11 @@ export function ProjectRow(props: ProjectRowProps) {
       <ProjectNameField
         name={project.name}
         folder={folderName(project.root)}
+        announce={props.announce}
         onCancel={doneRenaming}
         onSave={async (name) => {
           const saved = await onRename(name);
-          if (saved) doneRenaming();
+          if (saved) doneRenaming(true);
           return saved;
         }}
       />,
@@ -222,15 +227,25 @@ function folderName(root: string): string {
 
 /**
  * The row's name as a field (Rename…), in the row's own place and size. It opens holding the name, all of
- * it selected. Enter saves (an empty name is not sent, the same name just closes); Escape or leaving the
- * field cancels. While the save is on its way the field stays, read only; a refused save leaves it open
- * (the window's toast says why).
+ * it selected. Enter saves (an empty or too long name is refused, said in the window's live region; the
+ * same name just closes); Escape cancels. Leaving the field cancels too, and focus stays where the person
+ * went (the reply box, search); leaving the window (switching apps) keeps the field. While the save is on its
+ * way the field stays, read only; a refused save leaves it open (the window's toast says why). The cap
+ * counts characters (code points) as the server does, so an emoji name is not cut at half.
  */
-function ProjectNameField(props: { name: string; folder: string; onSave: (name: string) => Promise<boolean>; onCancel: () => void }) {
+function ProjectNameField(props: {
+  name: string;
+  folder: string;
+  announce?: (text: string) => void;
+  onSave: (name: string) => Promise<boolean>;
+  onCancel: (refocus: boolean) => void;
+}) {
   const [value, setValue] = useState(props.name);
   const [busy, setBusy] = useState(false);
-  const [empty, setEmpty] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  // Enter or Escape closed the field: a blur as it goes is not "leaving the field".
+  const closing = useRef(false);
   const hint = useId();
   useEffect(() => {
     const field = input.current;
@@ -238,18 +253,23 @@ function ProjectNameField(props: { name: string; folder: string; onSave: (name: 
     field.focus();
     field.select();
   }, []);
+  const refuse = (why: string) => {
+    setRefused(why);
+    props.announce?.(why);
+  };
+  const close = (refocus: boolean) => {
+    closing.current = true;
+    props.onCancel(refocus);
+  };
   const save = async () => {
     const name = value.replace(/\s+/g, ' ').trim();
-    if (name === '') {
-      setEmpty(true);
-      return;
-    }
-    if (name === props.name) {
-      props.onCancel();
-      return;
-    }
+    if (name === '') return refuse('A name cannot be empty.');
+    if ([...name].length > INBOX_PROJECT_NAME_MAX) return refuse(`A name can be at most ${INBOX_PROJECT_NAME_MAX} characters.`);
+    if (name === props.name) return close(true);
     setBusy(true);
+    closing.current = true;
     if (!(await props.onSave(name))) {
+      closing.current = false;
       setBusy(false);
       input.current?.focus();
     }
@@ -262,9 +282,8 @@ function ProjectNameField(props: { name: string; folder: string; onSave: (name: 
         className="ib-proj-rename"
         aria-label="Project name"
         aria-describedby={hint}
-        aria-invalid={empty ? true : undefined}
+        aria-invalid={refused ? true : undefined}
         placeholder={props.folder}
-        maxLength={INBOX_PROJECT_NAME_MAX}
         spellCheck={false}
         autoComplete="off"
         autoCapitalize="none"
@@ -273,11 +292,13 @@ function ProjectNameField(props: { name: string; folder: string; onSave: (name: 
         value={value}
         readOnly={busy}
         onChange={(event) => {
-          setEmpty(false);
+          setRefused(null);
           setValue(event.target.value);
         }}
         onBlur={() => {
-          if (!busy) props.onCancel();
+          // The window lost focus (another app): the field is still here when the person comes back.
+          if (busy || closing.current || !document.hasFocus()) return;
+          close(false);
         }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -287,13 +308,13 @@ function ProjectNameField(props: { name: string; folder: string; onSave: (name: 
             // The field's own Escape: nothing above it (the phone's sheet, the list) takes this press.
             event.preventDefault();
             event.stopPropagation();
-            if (!busy) props.onCancel();
+            if (!busy) close(true);
           }
         }}
         data-project-name-field=""
       />
       <span id={hint} hidden>
-        {empty ? 'A name cannot be empty. ' : ''}Enter to save, Escape to cancel.
+        {refused ? `${refused} ` : ''}Enter to save, Escape to cancel.
       </span>
     </>
   );

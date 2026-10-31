@@ -11,6 +11,8 @@
  * the window shortens it. Pure.
  */
 
+import { inboxProjectDisplayName } from '@plannotator/core/inbox-types';
+
 /** The parts of a path, either separator, without empty ones. */
 function segments(path: string): string[] {
   return path.split(/[\\/]+/).filter((part) => part.length > 0);
@@ -22,7 +24,7 @@ function sameKey(name: string): string {
 }
 
 /** What the window names a project by: its folder, or the name the person gave it (`display_name`). */
-export type LabeledProject = { id: string; root: string; name: string; display_name?: string | null };
+export type LabeledProject = { id: string; root: string; name: string; display_name?: unknown };
 
 /** The folders that hold a repository's checkouts (Workspaces' `<repo>/worktrees/<branch>`). */
 const CHECKOUTS = new Set(['worktrees', '.worktrees']);
@@ -60,8 +62,9 @@ export function shortProjectNames(projects: readonly LabeledProject[]): Map<stri
   const base = new Map<string, { parts: string[]; name: string; checkout: string | null }>();
   const out = new Map<string, string>();
   for (const project of projects) {
-    if (project.display_name) {
-      out.set(project.id, project.display_name);
+    const given = inboxProjectDisplayName(project);
+    if (given !== null) {
+      out.set(project.id, given);
       continue;
     }
     const { parts, checkout } = labelPath(project.root);

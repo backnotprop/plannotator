@@ -16,6 +16,8 @@
  * the others' clashes. Pure.
  */
 
+import { inboxProjectDisplayName } from "@plannotator/core/inbox-types";
+
 /** The parts of a path, either separator, without empty ones. */
 function segments(path: string): string[] {
   return path.split(/[\\/]+/).filter((part) => part.length > 0);
@@ -30,12 +32,13 @@ function sameKey(name: string): string {
  * Each project's display name by id. `name` (the stored slug) is the fallback
  * when the root has no last segment (a filesystem root).
  */
-export function inboxProjectLabels(projects: readonly { id: string; root: string; name: string; display_name?: string | null }[]): Map<string, string> {
+export function inboxProjectLabels(projects: readonly { id: string; root: string; name: string; display_name?: unknown }[]): Map<string, string> {
   const base = new Map<string, { parts: string[]; name: string }>();
   const labels = new Map<string, string>();
   for (const project of projects) {
-    if (project.display_name) {
-      labels.set(project.id, project.display_name);
+    const given = inboxProjectDisplayName(project);
+    if (given !== null) {
+      labels.set(project.id, given);
       continue;
     }
     const parts = segments(project.root);

@@ -158,6 +158,16 @@ export function checkInboxProjectName(value: unknown): { ok: true; name: string 
   return { ok: true, name };
 }
 
+/**
+ * A project record's `display_name` when it can be shown: a non-empty
+ * string, else null. A hand-edited file or another machine's list could
+ * carry anything, and a label must always be a string.
+ */
+export function inboxProjectDisplayName(project: { display_name?: unknown }): string | null {
+  const name = project.display_name;
+  return typeof name === "string" && name !== "" ? name : null;
+}
+
 // ─────────────────────────────── Subjects ───────────────────────────────
 
 /** A line break in any spelling: CR, LF, U+2028, U+2029. */
