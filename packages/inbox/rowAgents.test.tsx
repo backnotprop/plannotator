@@ -208,6 +208,8 @@ describe.if(hasDom)("a wide row's agents", () => {
       // The marks' track: at least the slot, wider only for a run that outgrows it; then the project's.
       expect(cascade.winner(from, 'grid-template-columns')?.value).toBe('minmax(var(--ib-agslot, auto), max-content) minmax(0, 1fr)');
       expect(cascade.resolved(from.querySelector<HTMLElement>('.ib-ags')!, 'grid-area')).toBe('1 / 1');
+      // The marks keep their own width (their tooltip is theirs alone), never stretched across the slot.
+      expect(cascade.resolved(from.querySelector<HTMLElement>('.ib-ags')!, 'justify-self')).toBe('start');
       expect(cascade.resolved(from.querySelector<HTMLElement>('.ib-p')!, 'grid-area')).toBe('1 / 2');
       // The slot is the widest run's: three bare marks (58px) against two marks, "×2" and "+2" (54px and four
       // characters of text); neither outgrows the other at every text size, so both are in the max().

@@ -813,7 +813,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    DOM, so a screen reader reads where, then who; the grid draws the marks first. With Hide agent icons the marks
    leave and the project starts the cell, as before. */
 .ib-listcol:not(.ib-noproj):not(.ib-lk-noagents) .ib-row .ib-from { display: grid; grid-template-columns: minmax(var(--ib-agslot, auto), max-content) minmax(0, 1fr); column-gap: 8px; }
-.ib-listcol:not(.ib-noproj):not(.ib-lk-noagents) .ib-row .ib-from > .ib-ags { grid-area: 1 / 1; }
+.ib-listcol:not(.ib-noproj):not(.ib-lk-noagents) .ib-row .ib-from > .ib-ags { grid-area: 1 / 1; justify-self: start; }
 .ib-listcol:not(.ib-noproj):not(.ib-lk-noagents) .ib-row .ib-from > .ib-p { grid-area: 1 / 2; justify-self: start; max-width: 100%; }
 .ib-row.ib-u .ib-title { font-weight: 600; }
 /* The thread chip: it can shrink to its border (flex), and its name keeps its
