@@ -63,12 +63,15 @@ function testBridge(dataDir: string) {
   };
 }
 
-function setup(config: Parameters<typeof installFakePi>[0]["config"] = { noConnect: true }, options: { handoffMs?: number } = {}) {
+function setup(
+  config: Parameters<typeof installFakePi>[0]["config"] = { noConnect: true },
+  options: { handoffMs?: number; terminalOpenMs?: number; dataDirName?: string; folderName?: string } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-pi-")));
   const home = join(root, "home");
   const bin = join(root, "bin");
-  const dataDir = join(root, "data");
-  const folder = join(root, "project");
+  const dataDir = join(root, options.dataDirName ?? "data");
+  const folder = join(root, options.folderName ?? "project");
   for (const dir of [home, bin, dataDir, folder]) mkdirSync(dir, { recursive: true });
   const fake: FakePi = installFakePi({ bin, state: join(root, "fake-pi"), home, config });
   const env = { HOME: home, PATH: `${bin}:/usr/bin:/bin` };
@@ -124,9 +127,9 @@ function setup(config: Parameters<typeof installFakePi>[0]["config"] = { noConne
   };
   const { host, sweep } = makeHost();
   const terminals: ReturnType<typeof Bun.spawn>[] = [];
-  /** What Open in Terminal would run, run here (in a plain shell, with the fake on PATH). */
-  const runTerminal = (command: string) => {
-    const shell = Bun.spawn(["/bin/sh", "-c", command], { env, stdout: "ignore", stderr: "ignore" });
+  /** What Open in Terminal would run, run here as the person's shell runs a typed line (with the fake on PATH). */
+  const runTerminal = (command: string, personShell = "/bin/sh") => {
+    const shell = Bun.spawn([personShell, "-c", command], { env, stdout: "ignore", stderr: "ignore" });
     terminals.push(shell);
     return shell;
   };
@@ -211,18 +214,110 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(store.questionsOf(note.id)).toHaveLength(0);
   });
 
-  test("Open in Terminal while the Inbox's process runs: it ends (its turn aborted), the command waits for it, Copy attach is not offered meanwhile", async () => {
-    const { fake, host, folder, dataDir, started } = setup();
+  // Round 2, Should 4: the Inbox's Pi was ended before Terminal opened.
+  test("Open in Terminal while the Inbox's process runs: it ends only once the terminal shows (its turn aborted), and the terminal's Pi waits for it", async () => {
+    const { fake, host, runTerminal, started } = setup();
     const { launch, session, pid } = await started();
     // Copy attach command is not offered while the Inbox's process runs the session.
     expect(host.attach(launch)).toBeNull();
     const command = host.terminal(launch, false);
-    expect(command).toBe(`cd '${folder}' && while kill -0 ${pid} 2>/dev/null; do sleep 0.2; done; PLANNOTATOR_INBOX_TOOL=1 PLANNOTATOR_DATA_DIR='${dataDir}' pi --session-id ${session}`);
+    // No terminal yet (osascript has not run, or failed): the Inbox's Pi keeps running.
+    await Bun.sleep(700);
+    expect(fake.alive(pid)).toBe(true);
+    runTerminal(command);
     const exit = await until("the Inbox's process to end", () => fake.exits().find((e) => e.pid === pid));
     expect(exit).toMatchObject({ why: "stdin", aborted: true });
-    // The Terminal's Pi has not shown up yet: a reply starts no second process here.
+    const terminal = await until("the terminal's Pi", () => fake.terminals()[0]);
+    expect(terminal.at).toBeGreaterThanOrEqual(exit.at);
+    expect(terminal.argv).toEqual(["--session-id", session]);
+    // A reply starts no second process here.
     expect((await host.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(1);
+  });
+
+  test("Open in Terminal that no terminal took: the Inbox's Pi keeps the session, and Open in Terminal works again", async () => {
+    const { fake, host, started } = setup({ noConnect: true }, { terminalOpenMs: 400 });
+    const { launch, pid } = await started();
+    host.terminal(launch, false);
+    await Bun.sleep(900);
+    expect(fake.alive(pid)).toBe(true);
+    expect(fake.exits()).toHaveLength(0);
+    expect(host.terminal(launch, false)).toContain("kill -0");
+  });
+
+  // Round 2, Must 1: a second Open in Terminal (or Copy attach) before the bridge saw the first terminal's Pi.
+  test("a second Open in Terminal, or Copy attach, during a hand-off gives no second Pi on the session", async () => {
+    const { fake, host, runTerminal, started } = setup();
+    const running = await started();
+    const first = host.terminal(running.launch, false);
+    const second = host.terminal(running.launch, false);
+    expect(host.attach(running.launch)).toBeNull();
+    runTerminal(first);
+    runTerminal(second);
+    await until("the first terminal's Pi", () => fake.terminals().length === 1);
+    await Bun.sleep(800);
+    expect(fake.terminals().filter((call) => fake.alive(call.pid))).toHaveLength(1);
+    expect(second).toStartWith("echo ");
+
+    // The same on a stopped session.
+    const stopped = await started();
+    await host.stop(stopped.session);
+    const one = host.terminal(stopped.launch, false);
+    expect(host.attach(stopped.launch)).toBeNull();
+    runTerminal(one);
+    runTerminal(host.terminal(stopped.launch, false));
+    await until("its terminal's Pi", () => fake.terminals().some((call) => call.argv[1] === stopped.session));
+    await Bun.sleep(800);
+    expect(fake.terminals().filter((call) => call.argv[1] === stopped.session && fake.alive(call.pid))).toHaveLength(1);
+  });
+
+  // Round 2, Must 2: an Inbox started again forgot the hand-off, and a reply started an RPC Pi beside the terminal's.
+  test("after an Inbox restart, a Pi open in a terminal on the session keeps every restart off, until it quit", async () => {
+    const { fake, host, makeHost, dataDir, runTerminal, started } = setup();
+    const { launch, session } = await started();
+    await host.stop(session);
+    // The terminal's Pi cannot reach the new Inbox yet (it retries on its own backoff).
+    rmSync(join(dataDir, "inbox", "inbox.json"));
+    runTerminal(host.terminal(launch, false));
+    const terminal = await until("the terminal's Pi", () => fake.terminals()[0]);
+    const restarted = makeHost().host;
+    // The reply waits for that Pi: held, not restarted; no attach command, no second terminal.
+    expect(restarted.live(session)).toMatchObject({ busy: null });
+    expect((await restarted.resume(launch)).failure).toBeNull();
+    expect(fake.starts()).toHaveLength(1);
+    expect(restarted.attach(launch)).toBeNull();
+    expect(restarted.terminal(launch, false)).toStartWith("echo ");
+    process.kill(terminal.pid, "SIGTERM");
+    await until("it to quit", () => !fake.alive(terminal.pid));
+    await Bun.sleep(1_700);
+    expect(restarted.live(session)).toBeNull();
+    expect((await restarted.resume(launch)).failure).toBeNull();
+    expect(fake.starts()).toHaveLength(2);
+  });
+
+  // Round 2, Should 3: a reply during a hand-off read as a restart ("Starting Pi again…", then "did not connect").
+  test("during a hand-off the session reads as held, so a reply waits for the terminal's Pi; once it is over, it reads as stopped", async () => {
+    const { host, started } = setup({ noConnect: true }, { handoffMs: 300 });
+    const { launch, session } = await started();
+    await host.stop(session);
+    expect(host.live(session)).toBeNull();
+    host.terminal(launch, false);
+    expect(host.live(session)).toMatchObject({ busy: null });
+    await Bun.sleep(400);
+    expect(host.live(session)).toBeNull();
+  });
+
+  // Round 2, Should 1 and 5: the Terminal command in another shell's syntax, an odd data dir and folder.
+  test("the Terminal command runs the same from sh and from csh, with spaces, quotes and shell marks in the data dir and the folder", async () => {
+    const odd = { dataDirName: `data dir 'q' "dq" $HOME \`x\` ; &`, folderName: `pro'ject $(x) "y"` };
+    const { fake, host, dataDir, folder, runTerminal, started } = setup({ noConnect: true }, odd);
+    for (const personShell of ["/bin/sh", "/bin/csh"]) {
+      if (!existsSync(personShell)) continue;
+      const { launch, session } = await started();
+      runTerminal(host.terminal(launch, false), personShell);
+      const terminal = await until(`the terminal's Pi from ${personShell}`, () => fake.terminals().find((call) => call.argv[1] === session));
+      expect(terminal).toMatchObject({ argv: ["--session-id", session], cwd: folder, dataDir, inboxTool: "1" });
+    }
   });
 
   // Must 1: the Terminal's Pi polled nothing (no Inbox tool), and a timer alone ended the hand-off.
@@ -263,7 +358,10 @@ describe("Pi's launch host, against the fake pi", () => {
     const restart = host.resume(b.launch);
     // A restart under way: no Copy attach; Open in Terminal gives the Terminal the session, and the restart stops.
     expect(host.attach(b.launch)).toBeNull();
-    expect(host.terminal(b.launch, false)).toBe(`cd '${folder}' && PLANNOTATOR_INBOX_TOOL=1 PLANNOTATOR_DATA_DIR='${dataDir}' pi --session-id ${b.session}`);
+    const command = host.terminal(b.launch, false);
+    expect(command).toContain(b.session);
+    expect(command).not.toStartWith("echo ");
+    expect(command).not.toContain("kill -0");
     release();
     expect(await restart).toMatchObject({ failure: null, text: expect.stringContaining("nothing started") });
     expect(fake.starts()).toHaveLength(2);
@@ -366,9 +464,16 @@ describe("Pi's launch host, against the fake pi", () => {
 
   test("offered only with pi new enough and Plannotator's Pi extension in Pi's settings", async () => {
     const { fake, host } = setup();
+    const versionRuns = () => fake.calls().filter((call) => call.argv[0] === "--version").length;
     expect(await host.available()).toEqual({ ok: true, version: "0.85.1" });
+    // Asked again (compose asks every few seconds): the same pi binary is not run again.
+    expect(await host.available()).toEqual({ ok: true, version: "0.85.1" });
+    expect(versionRuns()).toBe(1);
     fake.setExtension(false);
-    expect(await host.available()).toMatchObject({ ok: false, missing: false, reason: expect.stringContaining("Pi extension") });
+    // Without the extension, Pi is never started to ask its version.
+    const before = versionRuns();
+    for (let i = 0; i < 3; i++) expect(await host.available()).toMatchObject({ ok: false, missing: false, reason: expect.stringContaining("Pi extension") });
+    expect(versionRuns()).toBe(before);
     fake.setExtension(true);
     fake.configure({ version: "0.70.0" });
     expect(await host.available()).toMatchObject({ ok: false, missing: false, reason: "Pi 0.70.0 is older than 0.79.1" });
