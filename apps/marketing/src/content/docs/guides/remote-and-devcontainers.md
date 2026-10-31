@@ -49,7 +49,7 @@ Plannotator then advertises `http://my-machine.tailnet.ts.net:<port>` (the port 
 
 Note that the session is served over plain `http`, so some in-app features that require a secure context (such as creating short share links from the UI) are unavailable from other devices unless you put the session behind HTTPS (e.g. `tailscale serve`). The core review, annotate, and approve flows work over plain `http`.
 
-`plannotator review --tailscale` (also `annotate` and `last`) does that for you: it publishes the session over your tailnet with `tailscale serve`, over HTTPS and never publicly. It needs Tailscale Serve and HTTPS certificates turned on for your tailnet, a setting in Tailscale's admin console. If it is off, Plannotator says so and prints Tailscale's link to turn it on: a one-time page where you keep "HTTPS certificates" ticked and press **Enable HTTPS** (Funnel is not needed). The same command without `--tailscale` still works on this computer.
+`plannotator review --tailscale` (also `annotate` and `last`) does that for you: it publishes the session over your tailnet with `tailscale serve`, over HTTPS and never publicly. On a Mac the Tailscale app is enough: you do not need to turn on its command-line tool. It needs Tailscale Serve and HTTPS certificates turned on for your tailnet, a setting in Tailscale's admin console. If it is off, Plannotator says so and prints Tailscale's link to turn it on: a one-time page where you keep "HTTPS certificates" ticked and press **Enable HTTPS** (Funnel is not needed). The same command without `--tailscale` still works on this computer.
 
 ## HTTPS reverse proxies
 

@@ -314,13 +314,13 @@ function expectLineThree(l: ReturnType<typeof lineThree>, id: string) {
     return;
   }
   expect(l.shown, `row ${id}`).toBe(true);
-  // The preview, when there is one, starts the line; then the pin and the book; the badge before the count, last.
+  // The preview, when there is one, starts the line; then the book, the pin; the badge before the count, last.
   const parts = l.order.filter((p) => p !== 'preview');
   if (l.order.includes('preview')) {
     expect(l.order[0], `row ${id}`).toBe('preview');
     expect(Math.abs(l.previewLeft! - l.lineLeft), `row ${id}`).toBeLessThanOrEqual(0.5);
   }
-  const rank = { pin: 0, guide: 1, badge: 2, words: 3, action: 3, count: 4 } as Record<string, number>;
+  const rank = { guide: 0, pin: 1, badge: 2, words: 3, action: 3, count: 4 } as Record<string, number>;
   for (const p of parts) expect(rank[p], `row ${id}: ${l.order}`).toBeDefined();
   expect(parts.map((p) => rank[p]), `row ${id}: ${l.order}`).toEqual([...parts.map((p) => rank[p]!)].sort((a, b) => a - b));
   // Left to right on screen in that order, and the last ends the line.
