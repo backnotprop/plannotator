@@ -86,16 +86,31 @@ export function keyboardLayout(
 }
 
 /**
- * Whether a drag that starts at this event's target has something of its own
- * to scroll: a field, or a box that scrolls and has more than it shows. Read
- * through the event's composed path, so a scroller inside a shadow root counts.
+ * iOS or iPadOS, where every browser is WebKit and Safari pans the whole page
+ * under the keyboard whatever the page's own overflow says: an iPhone, iPad or
+ * iPod user agent, or iPadOS's desktop-class one (it names itself a Mac, but a
+ * Mac has no touch points). Android and the desktop never match.
+ */
+export function isIOSWebKit(nav: { userAgent: string; platform?: string; maxTouchPoints?: number }): boolean {
+  return /\b(iPhone|iPad|iPod)\b/.test(nav.userAgent) || (nav.platform === 'MacIntel' && (nav.maxTouchPoints ?? 0) > 1);
+}
+
+/**
+ * Whether a drag that starts at this event's target has a box of its own to
+ * scroll: one with more than it shows, across the drag's axis or along it. A
+ * field counts only when its words overflow it (a short draft has nothing to
+ * scroll, so a drag on it would pan the page). Read through the event's
+ * composed path, so a scroller inside a shadow root counts.
  */
 function dragHasScroller(event: Event): boolean {
   for (const node of event.composedPath()) {
     if (node === document.body || node === document.documentElement) break;
     // A shadow root, an SVG shape, a text node: the box that scrolls is further up.
     if (!(node instanceof HTMLElement)) continue;
-    if (node instanceof HTMLTextAreaElement || node instanceof HTMLInputElement || node.isContentEditable) return true;
+    if (node instanceof HTMLTextAreaElement || node.isContentEditable) {
+      if (node.scrollHeight > node.clientHeight + 1) return true;
+      continue;
+    }
     const style = getComputedStyle(node);
     if (/auto|scroll/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1) return true;
     if (/auto|scroll/.test(style.overflowX) && node.scrollWidth > node.clientWidth + 1) return true;
@@ -104,37 +119,76 @@ function dragHasScroller(event: Event): boolean {
 }
 
 /**
- * With the keyboard up, a one-finger drag on something that does not scroll
- * (a header, a toolbar, the reply foot's buttons) pans the whole page in iOS
- * Safari, whatever the page's own overflow says: refused. A drag in the thread,
- * the list or a field scrolls as before; a pinch is left alone.
+ * On iOS with the keyboard up, a one-finger drag on something that does not
+ * scroll (a header, a toolbar, the reply foot's buttons, a short draft) pans
+ * the whole page: refused. A drag in the thread, the list, a wide code block or
+ * an overflowing draft scrolls as before; a pinch is left alone. Decided once
+ * per gesture, at its first move (as iOS decides who scrolls), so a long
+ * gesture costs one walk up the tree, not one per move.
  */
-function refusePagePan(event: TouchEvent): void {
-  if (event.touches.length !== 1 || !event.cancelable) return;
-  if (!dragHasScroller(event)) event.preventDefault();
+function pagePanGuard(): { on: () => void; off: () => void } {
+  let refuse: boolean | null = null;
+  const start = () => {
+    refuse = null;
+  };
+  const move = (event: TouchEvent) => {
+    if (event.touches.length !== 1) return;
+    if (refuse === null) refuse = !dragHasScroller(event);
+    if (refuse && event.cancelable) event.preventDefault();
+  };
+  return {
+    on: () => {
+      refuse = null;
+      document.addEventListener('touchstart', start, { passive: true });
+      document.addEventListener('touchmove', move, { passive: false });
+      document.addEventListener('touchend', start, { passive: true });
+      document.addEventListener('touchcancel', start, { passive: true });
+    },
+    off: () => {
+      document.removeEventListener('touchstart', start);
+      document.removeEventListener('touchmove', move);
+      document.removeEventListener('touchend', start);
+      document.removeEventListener('touchcancel', start);
+    },
+  };
 }
 
 /**
  * Keeps `--ib-vvh` on the document element equal to the visual viewport's
- * height while a phone's keyboard is up, so the window shrinks to the part
- * the keyboard leaves and the reply box sits on top of the keyboard. iOS
- * Safari does not resize the layout for the keyboard; it pans the page
- * instead. Three things keep the window still while the keyboard is up: the
- * page itself (html, body) is no taller than the visible part (inbox.css, on
- * `data-ib-keyboard`), any pan is reset to the top on the next frame, and a
- * drag on something that does not scroll is refused. Returns the cleanup.
+ * height while a phone's keyboard is up (`data-ib-keyboard`), so the window
+ * shrinks to the part the keyboard leaves and the reply box sits on top of the
+ * keyboard, and undoes a pan of the page.
+ *
+ * On iOS (`isIOSWebKit`) it also pins the page, since Safari pans the whole
+ * page under the keyboard: `data-ib-keyboard-pin` on the root makes html no
+ * taller than the visible part and lets the reply foot shrink and scroll with
+ * Send kept at its bottom (inbox.css); `tight` (under 400 px left: an iPhone in
+ * portrait leaves ~257, on its side ~140) also closes the thread's padding and
+ * caps the reply's words. A drag on something that does not scroll is refused.
+ * Android keeps what it had: Chrome resizes only the visual viewport and pans
+ * nothing it is not asked to.
+ *
+ * The state is read again on every visual viewport change, the window's
+ * resize and scroll, a rotation, and a return to the tab, so a keyboard that
+ * closed while the tab was away never leaves the page pinned. Returns the
+ * cleanup.
  */
 export function trackKeyboard(): () => void {
   const vv = typeof window !== 'undefined' ? window.visualViewport : null;
   if (!vv) return () => {};
   const root = document.documentElement;
-  let frame = 0;
+  const ios = typeof navigator !== 'undefined' && isIOSWebKit(navigator);
+  const guard = pagePanGuard();
   let guarding = false;
-  const guard = (on: boolean) => {
+  let frame = 0;
+  const pin = (state: 'tight' | '' | null) => {
+    if (state === null) delete root.dataset.ibKeyboardPin;
+    else root.dataset.ibKeyboardPin = state;
+    const on = state !== null;
     if (on === guarding) return;
     guarding = on;
-    if (on) document.addEventListener('touchmove', refusePagePan, { passive: false });
-    else document.removeEventListener('touchmove', refusePagePan);
+    if (on) guard.on();
+    else guard.off();
   };
   const apply = () => {
     frame = 0;
@@ -142,31 +196,38 @@ export function trackKeyboard(): () => void {
     const layout = keyboardLayout(vv, root.clientHeight, window.scrollY, isPhone());
     if (layout.height !== null) {
       root.style.setProperty('--ib-vvh', `${layout.height}px`);
-      // `tight`: under 400 px left (an iPhone's keyboard leaves ~257), where inbox.css closes the thread's padding
-      // and caps the reply's height so Send stays above the keyboard. A roomier screen (a Pixel's ~585) is untouched.
-      root.dataset.ibKeyboard = layout.height < 400 ? 'tight' : '';
-      guard(true);
+      root.dataset.ibKeyboard = '';
+      pin(ios ? (layout.height < 400 ? 'tight' : '') : null);
       if (layout.resetScroll) window.scrollTo(0, 0);
     } else {
       root.style.removeProperty('--ib-vvh');
       delete root.dataset.ibKeyboard;
-      guard(false);
+      pin(null);
     }
   };
   const schedule = () => {
     if (!frame) frame = requestAnimationFrame(apply);
   };
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') schedule();
+  };
   vv.addEventListener('resize', schedule);
   vv.addEventListener('scroll', schedule);
+  window.addEventListener('resize', schedule);
+  window.addEventListener('orientationchange', schedule);
+  document.addEventListener('visibilitychange', onVisible);
   // iOS 26 reports a pan as the window's scroll as often as the visual viewport's (the probe's readings).
-  window.addEventListener('scroll', schedule, { passive: true });
+  if (ios) window.addEventListener('scroll', schedule, { passive: true });
   apply();
   return () => {
     vv.removeEventListener('resize', schedule);
     vv.removeEventListener('scroll', schedule);
-    window.removeEventListener('scroll', schedule);
+    window.removeEventListener('resize', schedule);
+    window.removeEventListener('orientationchange', schedule);
+    document.removeEventListener('visibilitychange', onVisible);
+    if (ios) window.removeEventListener('scroll', schedule);
     if (frame) cancelAnimationFrame(frame);
-    guard(false);
+    pin(null);
     root.style.removeProperty('--ib-vvh');
     delete root.dataset.ibKeyboard;
   };
