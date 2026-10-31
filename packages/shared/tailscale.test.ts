@@ -163,13 +163,15 @@ describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
     stdout: "",
     stderr: "",
   });
-  const world = (onPath: TailscaleRunResult) => {
+  const world = (onPath: TailscaleRunResult, fromApp: TailscaleRunResult = ok("1.104.4\n")) => {
     const calls: { command: string; args: string[]; timeoutMs: number }[] = [];
-    const spawn = (command: string, args: string[], timeoutMs: number) => {
+    const envs: Record<string, string | undefined>[] = [];
+    const spawn = (command: string, args: string[], timeoutMs: number, env: Record<string, string | undefined>) => {
       calls.push({ command, args, timeoutMs });
-      return command === "tailscale" ? onPath : ok("1.104.4\n");
+      envs.push(env);
+      return command === "tailscale" ? onPath : fromApp;
     };
-    return { calls, spawn };
+    return { calls, envs, spawn };
   };
   const mac = { platform: "darwin" as const, exists: (path: string) => path === MAC_TAILSCALE_APP_CLI, env: {} };
 
@@ -209,6 +211,31 @@ describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
       expect(createTailscaleRunner(spawn, mac)(["status", "--json"], 3_000)).toEqual(onPath);
       expect(calls.map((call) => call.command)).toEqual(["tailscale"]);
     }
+  });
+
+  // The app's program acts as a CLI only with SHLVL or a non-empty TERM set;
+  // an Inbox started without a terminal (the Claude app, launchd) has neither.
+  test("the app's CLI gets SHLVL when the parent has none; the PATH spawn's env and a parent's own SHLVL are kept", () => {
+    const parent = { PATH: "/usr/bin:/bin", HOME: "/Users/someone" };
+    const { envs, spawn } = world(enoent());
+    createTailscaleRunner(spawn, mac, () => ({ ...parent }))(["version"], 3_000);
+    expect(envs[0]).toEqual(parent);
+    expect(envs[1]).toEqual({ ...parent, SHLVL: "1" });
+
+    for (const [given, expected] of [["", "1"], ["3", "3"]] as const) {
+      const run = world(enoent());
+      createTailscaleRunner(run.spawn, mac, () => ({ ...parent, SHLVL: given }))(["version"], 3_000);
+      expect(run.envs[1]!.SHLVL).toBe(expected);
+    }
+  });
+
+  test("the app printing that its GUI failed to start (exit 0) is a failure in plain words, not unparseable JSON", () => {
+    const gui = { status: 0, stdout: "", stderr: "The Tailscale GUI failed to start: The operation couldn’t be completed. (Tailscale.CLIError error 3.)\n" };
+    const { spawn } = world(enoent(), gui);
+    const result = createTailscaleRunner(spawn, mac, () => ({}))(["serve", "status", "--json"], 3_000);
+    expect(result.error).toBeDefined();
+    expect(describeTailscaleFailure(result)).toContain("Install CLI");
+    expect(detectTailnetHost(createTailscaleRunner(spawn, mac, () => ({})))).toEqual({ error: describeTailscaleFailure(result) });
   });
 
   test("a test run (PLANNOTATOR_TEST_SANDBOX) never reaches the real app", () => {

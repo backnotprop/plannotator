@@ -110,12 +110,36 @@ export function tailscaleAppFallback(result: TailscaleRunResult, lookup: Tailsca
   return (lookup.exists ?? existsSync)(MAC_TAILSCALE_APP_CLI) ? MAC_TAILSCALE_APP_CLI : undefined;
 }
 
-/** Spawn one `tailscale` command (bare name or absolute path) without a shell. */
-export type TailscaleSpawn = (command: string, args: string[], timeoutMs: number) => TailscaleRunResult;
+/**
+ * The environment for the app's CLI: `env` with `SHLVL=1` when it has none.
+ * The app's program acts as a CLI only when its environment looks like a
+ * shell's (SHLVL or a non-empty TERM); with neither it tries to start the
+ * GUI instead. Tailscale's own `/usr/local/bin/tailscale` wrapper gets SHLVL
+ * from `sh`; an Inbox started without a terminal (the Claude app, launchd)
+ * has neither. TERM is left alone.
+ */
+export function tailscaleAppEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  return env.SHLVL ? env : { ...env, SHLVL: "1" };
+}
 
-const spawnTailscale: TailscaleSpawn = (command, args, timeoutMs) => {
+/** What Tailscale's Mac app prints (exit 0) when run as a CLI without a shell-like environment. */
+const APP_GUI_FAILED = /The Tailscale GUI failed to start/;
+
+export const TAILSCALE_APP_NOT_CLI =
+  "The Tailscale app did not answer as a command-line tool; turn on Tailscale → Settings → Install CLI, then try again.";
+
+/** The app's CLI answer, with "the GUI failed to start" (which exits 0) turned into a failure callers report in plain words. */
+export function checkTailscaleAppAnswer(result: TailscaleRunResult): TailscaleRunResult {
+  if (result.error || !APP_GUI_FAILED.test(`${result.stdout}\n${result.stderr}`)) return result;
+  return { ...result, error: new Error(TAILSCALE_APP_NOT_CLI) };
+}
+
+/** Spawn one `tailscale` command (bare name or absolute path) without a shell, in `env`. */
+export type TailscaleSpawn = (command: string, args: string[], timeoutMs: number, env: Record<string, string | undefined>) => TailscaleRunResult;
+
+const spawnTailscale: TailscaleSpawn = (command, args, timeoutMs, env) => {
   const result = spawnSync(command, args, {
-    env: childEnv(),
+    env,
     encoding: "utf8",
     windowsHide: true,
     timeout: timeoutMs,
@@ -128,12 +152,20 @@ const spawnTailscale: TailscaleSpawn = (command, args, timeoutMs) => {
   };
 };
 
-/** A runner that tries `tailscale` on PATH, then the app's CLI (`tailscaleAppFallback`) with the same args and timeout. */
-export function createTailscaleRunner(spawn: TailscaleSpawn = spawnTailscale, lookup: TailscaleAppLookup = {}): TailscaleRunner {
+/**
+ * A runner that tries `tailscale` on PATH, then the app's CLI
+ * (`tailscaleAppFallback`) with the same args and timeout, in `tailscaleAppEnv`.
+ * `baseEnv` is the child environment (the live `process.env` by default).
+ */
+export function createTailscaleRunner(
+  spawn: TailscaleSpawn = spawnTailscale,
+  lookup: TailscaleAppLookup = {},
+  baseEnv: () => Record<string, string | undefined> = childEnv,
+): TailscaleRunner {
   return (args, timeoutMs) => {
-    const onPath = spawn("tailscale", args, timeoutMs);
+    const onPath = spawn("tailscale", args, timeoutMs, baseEnv());
     const app = tailscaleAppFallback(onPath, lookup);
-    return app ? spawn(app, args, timeoutMs) : onPath;
+    return app ? checkTailscaleAppAnswer(spawn(app, args, timeoutMs, tailscaleAppEnv(baseEnv()))) : onPath;
   };
 }
 
@@ -157,6 +189,7 @@ export const runTailscale: TailscaleRunner = createTailscaleRunner();
 export function explainTailscaleSetup(result: TailscaleRunResult): string | undefined {
   const output = `${result.stdout}\n${result.stderr}`;
   const links = output.match(/https:\/\/[^\s"'<>]+/g) ?? [];
+  if (APP_GUI_FAILED.test(output)) return TAILSCALE_APP_NOT_CLI;
   const enableLink = links.find((link) => /\/f\/(?:serve|https)\b/.test(link));
   if (enableLink || /\b(?:serve|https)\b[^\n]*\bnot enabled\b/i.test(output)) {
     const link = enableLink ?? links.find((candidate) => /login\.tailscale\.com/.test(candidate));

@@ -22,13 +22,15 @@
  * state.
  */
 
-import { childPath } from "@plannotator/shared/child-env";
+import { childEnv, childPath } from "@plannotator/shared/child-env";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
+  checkTailscaleAppAnswer,
   parseTailscaleSelfIdentity,
+  tailscaleAppEnv,
   tailscaleAppFallback,
   TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
@@ -105,7 +107,7 @@ const SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw";
  * close. Settling on exit alone would not hold either, for the same reason:
  * `close` waits for the pipes, so only the timer ends a lingering read.
  */
-export function runQuietly(command: string, args: string[], timeoutMs: number): Promise<TailscaleRunResult> {
+export function runQuietly(command: string, args: string[], timeoutMs: number, env?: Record<string, string | undefined>): Promise<TailscaleRunResult> {
   const path = command.includes("/") ? (existsSync(command) ? command : null) : Bun.which(command, { PATH: childPath() });
   if (!path) return Promise.resolve({ error: Object.assign(new Error(`${command}: not found on PATH`), { code: "ENOENT" }), status: null, stdout: "", stderr: "" });
   const group = process.platform !== "win32";
@@ -122,7 +124,7 @@ export function runQuietly(command: string, args: string[], timeoutMs: number): 
       resolve(result);
     };
     try {
-      child = spawn(path, args, { stdio: ["ignore", "pipe", "pipe"], detached: group, windowsHide: true });
+      child = spawn(path, args, { stdio: ["ignore", "pipe", "pipe"], detached: group, windowsHide: true, ...(env ? { env } : {}) });
     } catch (cause) {
       finish({ error: cause instanceof Error ? cause : new Error(String(cause)), status: null, stdout: "", stderr: "" });
       return;
@@ -170,11 +172,15 @@ function withDeadline<T>(value: T | Promise<T>, ms: number, fallback: T): Promis
 /** The most one read of the checks takes: past it, a probe that has not answered reads as not answering. */
 export const PAIRING_CHECKS_DEADLINE_MS = 15_000;
 
-/** The default Tailscale runner for the checks: the CLI on PATH, then the Mac app's own CLI (`tailscaleAppFallback`), asynchronously. */
+/**
+ * The default Tailscale runner for the checks: the CLI on PATH, then the Mac
+ * app's own CLI (`tailscaleAppFallback`) in a shell-like env
+ * (`tailscaleAppEnv`), asynchronously.
+ */
 export const runTailscaleQuietly: PairingTailscaleRunner = async (args, timeoutMs) => {
   const onPath = await runQuietly("tailscale", args, timeoutMs);
   const app = tailscaleAppFallback(onPath);
-  return app ? runQuietly(app, args, timeoutMs) : onPath;
+  return app ? checkTailscaleAppAnswer(await runQuietly(app, args, timeoutMs, tailscaleAppEnv(childEnv()))) : onPath;
 };
 
 /**
