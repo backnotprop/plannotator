@@ -12,7 +12,10 @@
  *     `<dataDir>/scratch`), named by the thread's name, `-2` on a clash; Claude
  *     Code starts there and the project appears.
  *  2. Delete removes the folder and runs `claude purge` for it only: the other
- *     scratch folder and its session stay.
+ *     scratch folder and its session stay. A deleted launch's path is never
+ *     given again, and a second Delete of it (a stale window) does nothing, so
+ *     a folder made there later is never purged or removed. A Send the Inbox
+ *     refuses leaves no folder and no project behind.
  *  3. A moved root (Settings → Agents) is used for the next launch. It is not
  *     trusted yet, so the row reads "trust it once"; the start fails as
  *     untrusted, Open in Terminal runs `claude` in the root, and once the person
@@ -258,12 +261,53 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   expect(fake.agents().some((a) => a.cwd === second!.folder)).toBe(true);
   await expect(pane(page).locator('[data-launched]')).toBeVisible();
 
-  // Then the second: its own folder, purged once; the folder menu offers neither removed folder again.
+  // The same name once more: the deleted launch's path is never given again (one path, one launch), so it is -3.
+  await openFolderMenu(page, 'Once more, in a third folder.', 'Settings search');
+  const third = await sendToScratch(page);
+  const thirdFolder = `${first!.folder}-3`;
+  expect(third.project.root).toBe(thirdFolder);
+  await waitFor('the third session', () => fake.agents().some((a) => a.cwd === thirdFolder));
+  // A folder made at the first's path later, then a second Delete of the first (a stale window): nothing is
+  // stopped, purged or removed, and the other launches keep their folders and sessions.
+  mkdirSync(first!.folder);
+  writeFileSync(join(first!.folder, 'keep.txt'), 'made later');
+  const callsBefore = fake.calls().length;
+  const again = await page.evaluate(async (id) => {
+    const response = await fetch(new URL(`/api/inbox/launch/${id}/delete`, location.href), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    return { status: response.status, body: await response.json() };
+  }, first!.launchId);
+  expect(again).toEqual({ status: 200, body: { ok: true } });
+  expect(fake.calls()).toHaveLength(callsBefore);
+  expect(readdirSync(first!.folder)).toEqual(['keep.txt']);
+  for (const folder of [second!.folder, thirdFolder]) {
+    expect(lstatSync(folder).isDirectory()).toBe(true);
+    expect(fake.agents().some((a) => a.cwd === folder)).toBe(true);
+  }
+  rmSync(first!.folder, { recursive: true });
+
+  // A Send the Inbox refuses after the folder was made (a thread name too long): no folder and no project stay.
+  const refused = await page.evaluate(async () => {
+    const response = await fetch(new URL('/api/inbox/messages', location.href), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idempotency_key: 'scratch-too-long', body: 'A name too long.', thread_name: 'x'.repeat(5000), to: { launch: { agent: 'claude-code', scratch: true } } }),
+    });
+    return response.status;
+  });
+  expect(refused).toBe(422);
+  expect(readdirSync(join(world.dataDir, 'scratch')).filter((name) => name.startsWith('xxx'))).toEqual([]);
+  const sessions = (await page.evaluate(async () => (await fetch(new URL('/api/inbox/sessions', location.href))).json())) as { launch: { projects: { root: string }[] } };
+  expect(sessions.launch.projects.filter((p) => p.root.includes('xxxxxxxx'))).toEqual([]);
+
+  // Then the second and the third: each its own folder, purged once; the folder menu offers no removed folder again.
   await deleteFromMenu(page, second!.threadId);
   await waitFor('the second folder removed', () => !existsSync(second!.folder));
+  await deleteFromMenu(page, third.thread_id);
+  await waitFor('the third folder removed', () => !existsSync(thirdFolder));
   expect(fake.calls().filter((c) => c.argv[0] === 'purge').map((c) => c.argv)).toEqual([
     ['purge', '--yes', first!.folder],
     ['purge', '--yes', second!.folder],
+    ['purge', '--yes', thirdFolder],
   ]);
   await openFolderMenu(page, 'Anything.', 'Anything');
   await expect(dialog(page).locator('[data-compose-folder-option]')).toHaveCount(2);
@@ -292,7 +336,12 @@ test('a moved root is used for the next launch; untrusted, the row reads "trust 
   const row = dialog(page).locator('[data-compose-folder-option="scratch"]');
   await expect(row).toHaveAttribute('data-untrusted', '');
   await expect(row).toContainText('New scratch folder · trust it once');
-  await expect(row).toContainText('~/Plannotator/scratch/onboarding-checklist');
+  // It names the root (the folder to trust), and says under it what the first start asks.
+  await expect(row).toContainText('~/Plannotator/scratch');
+  await expect(row).not.toContainText('onboarding-checklist');
+  await expect(dialog(page).locator('[data-compose-scratch-hint]')).toHaveText(
+    "Claude Code doesn't trust ~/Plannotator/scratch yet. Your first Send asks you to open it in Terminal once; after that every scratch folder there starts.",
+  );
   await row.hover();
   await shot(page, 'trust-once-row');
   const sent = await sendToScratch(page);
@@ -374,6 +423,8 @@ test('a link never takes a scratch folder out of the root: one at the name is sk
   const before = fake.calls().filter((c) => c.argv[0] === 'purge').length;
   // The route answers after stop and rm.
   await deleteFromMenu(page, sent.thread_id);
+  // The toast says the folder was kept.
+  await expect(page.getByText('its scratch folder was kept')).toBeVisible();
   expect(fake.calls().filter((c) => c.argv[0] === 'purge')).toHaveLength(before);
   expect(lstatSync(folder).isSymbolicLink()).toBe(true);
   expect(readdirSync(outside)).toEqual(['keep.txt']);

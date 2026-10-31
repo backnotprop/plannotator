@@ -1,18 +1,20 @@
 /**
  * Scratch folders (launch PR 3), on a real launch module over a temp data dir and a temp home. What each
  * test guards: Settings → Agents' "Scratch folders" saves only a full path (`~/` is the home; empty is the
- * default), never from the tailnet; and the trust-once row reads Claude Code's own trust record, where a
- * trusted folder above the root counts and the root's own untrusted entry does not.
+ * default) outside any git repository, never from the tailnet; the trust-once row reads Claude Code's own
+ * trust record, where a trusted folder above the root counts and the root's own untrusted entry does not, and
+ * a rewrite of that record is read again; and a folder below a repository's root is never purged (Claude's
+ * purge there also drops the repository's own entry).
  * Making, naming and removing the folders runs end to end in tests/e2e/inbox-launch-scratch.spec.ts.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
 import { createAgentEnvironmentFor } from "./inbox-agents";
-import { claudeTrustsFolder } from "./inbox-launch-claude";
+import { claudeRepositoryAbove, claudeTrustsFolder } from "./inbox-launch-claude";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -72,9 +74,9 @@ function setup() {
 describe("Settings → Agents: Scratch folders", () => {
   test("a full path or ~/ is saved and used; empty goes back to the default; the switch beside it is kept", async () => {
     const { post, saved, dataDir, home } = setup();
-    expect((await post({ scratch_dir: "~/work/scratch" })).body.launch).toMatchObject({ scratch_dir: join(home, "work", "scratch"), scratch_default: false });
+    expect((await post({ scratch_dir: "~/work/scratch" })).body.launch).toMatchObject({ scratch_dir: join(home, "work", "scratch") });
     expect(saved()).toEqual({ enabled: true, fullPermissions: false, scratchDir: join(home, "work", "scratch") });
-    expect((await post({ scratch_dir: "  " })).body.launch).toMatchObject({ scratch_dir: join(dataDir, "scratch"), scratch_default: true });
+    expect((await post({ scratch_dir: "  " })).body.launch).toMatchObject({ scratch_dir: join(dataDir, "scratch") });
     expect(saved()).toEqual({ enabled: true, fullPermissions: false });
   });
 
@@ -83,6 +85,27 @@ describe("Settings → Agents: Scratch folders", () => {
     for (const scratch_dir of ["scratch", "/", 7]) expect(await post({ scratch_dir })).toMatchObject({ status: 422, body: { code: "validation_error" } });
     expect(await post({ scratch_dir: "/tmp/x" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
     expect(saved()).toEqual({ enabled: true, fullPermissions: false });
+  });
+
+  test("a folder in a git repository, or not made yet below one, is refused: its scratch folders would join that repository's project", async () => {
+    const { post, saved, home } = setup();
+    mkdirSync(join(home, "code", "app", ".git"), { recursive: true });
+    for (const scratch_dir of ["~/code/app", "~/code/app/scratch/new"]) expect(await post({ scratch_dir })).toMatchObject({ status: 422, body: { code: "validation_error" } });
+    expect(saved()).toEqual({ enabled: true, fullPermissions: false });
+    expect((await post({ scratch_dir: "~/code/scratch" })).status).toBe(200);
+  });
+});
+
+describe("claudeRepositoryAbove (purge guard)", () => {
+  test("a folder below a repository's root names it; a repository's own root, or a plain folder, names none", () => {
+    const home = mkdtempSync(join(tmpdir(), "plannotator-purge-guard-"));
+    restore.push(() => rmSync(home, { recursive: true, force: true }));
+    mkdirSync(join(home, "repo", ".git"), { recursive: true });
+    mkdirSync(join(home, "repo", "scratch", "notes"), { recursive: true });
+    mkdirSync(join(home, "plain", "made", ".git"), { recursive: true });
+    expect(claudeRepositoryAbove(join(home, "repo", "scratch", "notes"))).toBe(join(home, "repo"));
+    expect(claudeRepositoryAbove(join(home, "plain", "made"))).toBeNull();
+    expect(claudeRepositoryAbove(join(home, "plain"))).toBeNull();
   });
 });
 
@@ -100,6 +123,10 @@ describe("claudeTrustsFolder", () => {
     writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { "/work/scratch": { hasTrustDialogAccepted: false }, "/work": { hasTrustDialogAccepted: true } } }));
     expect(claudeTrustsFolder(env(home), "/work/scratch")).toBe(true);
     expect(claudeTrustsFolder(env(home), "/workshop")).toBe(false);
+    // Read once and kept while the file stays; a rewrite of the same size (Claude replaces the file) is read again.
+    writeFileSync(join(home, "next.json"), JSON.stringify({ projects: { "/work/scratch": { hasTrustDialogAccepted: false }, "/wor": { hasTrustDialogAccepted: true } } }) + " ");
+    renameSync(join(home, "next.json"), join(home, ".claude.json"));
+    expect(claudeTrustsFolder(env(home), "/work/scratch")).toBe(false);
   });
 
   test("a git repository under a trusted folder is not covered: only its own entry counts (a scratch folder the agent made a repository)", () => {

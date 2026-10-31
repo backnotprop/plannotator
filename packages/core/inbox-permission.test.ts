@@ -417,6 +417,11 @@ describe("the answer and the decision", () => {
     // Where allows count, Approve in Terminal is no choice: a deny.
     expect(inboxPermissionAnswer(answer(["Approve in Terminal"]), e).choice).toBe("deny");
     expect(inboxPermissionDecisionFor(e, { choice: "terminal" })).toBeNull();
+    // Offered beside the allows (`terminal`): last, and picked it hands over too.
+    expect(inboxPermissionChoices(e, { terminal: true }).at(-1)).toBe("Approve in Terminal");
+    expect(inboxPermissionChoices(e, { terminal: true }).slice(0, -1)).toEqual(inboxPermissionChoices(e));
+    expect(inboxPermissionAnswer(answer(["Approve in Terminal"]), e, { terminal: true }).choice).toBe("terminal");
+    expect(inboxPermissionAnswer(answer(["Allow once"]), e, { terminal: true }).choice).toBe("once");
   });
 
   test("the hook input's permission mode is read (Claude's common hook input), and absent is null", () => {

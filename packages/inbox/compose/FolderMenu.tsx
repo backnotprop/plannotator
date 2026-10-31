@@ -13,10 +13,11 @@ import { filterLaunchProjects, scratchMatches, SCRATCH_PICK, type LaunchProject 
  * picking it gets compose's folder-missing note (screen 13).
  *
  * Last, under a line: "New scratch folder" and the folder a Send would make
- * (`<root>/<thread-name slug>`). While Claude Code does not trust the root yet
- * it reads "New scratch folder · trust it once": the first start then fails
- * as untrusted, and its Open in Terminal runs `claude` in the root, so one
- * trust covers every scratch folder after it.
+ * (`<root>/<thread-name slug>`). While the agent does not trust the root yet
+ * it reads "New scratch folder · trust it once", shows the root, and says
+ * under it that the first start asks to open the root in Terminal once: that
+ * start fails as untrusted, and its Open in Terminal runs the agent in the
+ * root, so one trust covers every scratch folder after it.
  */
 export function FolderMenu({
   projects,
@@ -33,8 +34,11 @@ export function FolderMenu({
   home: string | null;
   phone: boolean;
   onPick: (project: LaunchProject) => void;
-  /** "New scratch folder": the folder a Send would make (`~/…`), and whether Claude Code trusts its root. Null: no row. */
-  scratch?: { folder: string; trusted: boolean } | null;
+  /**
+   * "New scratch folder": the folder a Send would make and its root (`~/…`), whether the agent (`agentName`)
+   * trusts the root already, else the row names the root and says how the first start asks for it. Null: no row.
+   */
+  scratch?: { folder: string; root: string; trusted: boolean; agentName: string } | null;
   onScratch?: () => void;
   onClose: () => void;
 }) {
@@ -162,7 +166,7 @@ export function FolderMenu({
               id={optionId(options.length)}
               role="option"
               aria-selected={hl === options.length}
-              aria-label={`New scratch folder, ${scratch.folder}${scratch.trusted ? '' : ', Claude Code trusts it once you open it in Terminal'}`}
+              aria-label={scratch.trusted ? `New scratch folder, ${scratch.folder}` : `New scratch folder in ${scratch.root}. ${untrustedHint(scratch)}`}
               className={`ib-cp-opt ib-cp-fopt ib-cp-scratch${hl === options.length ? ' ib-hl' : ''}`}
               data-compose-folder-option={SCRATCH_PICK}
               data-untrusted={scratch.trusted ? undefined : ''}
@@ -175,14 +179,24 @@ export function FolderMenu({
                 New scratch folder
                 {!scratch.trusted && <span className="ib-cp-trust"> · trust it once</span>}
               </span>
-              <FolderPath path={scratch.folder} />
+              <FolderPath path={scratch.trusted ? scratch.folder : scratch.root} />
               <span className="ib-cp-check" aria-hidden="true">
                 {selected === SCRATCH_PICK && <Icon name="check" size={15} />}
               </span>
             </div>
+            {!scratch.trusted && (
+              <div className="ib-cp-scratch-hint" aria-hidden="true" data-compose-scratch-hint="">
+                {untrustedHint(scratch)}
+              </div>
+            )}
           </>
         )}
       </div>
     </div>
   );
+}
+
+/** Under an untrusted "New scratch folder" row: what "trust it once" asks of the person. */
+function untrustedHint(scratch: { root: string; agentName: string }): string {
+  return `${scratch.agentName} doesn't trust ${scratch.root} yet. Your first Send asks you to open it in Terminal once; after that every scratch folder there starts.`;
 }

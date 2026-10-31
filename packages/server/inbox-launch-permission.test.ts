@@ -92,7 +92,7 @@ describe("the permission route", () => {
     expect(question.reply_to).toBe(root.id);
     expect(question.author).toEqual({ kind: "agent", host: "claude-code", session: `perm:${SESSION}`, name: "Claude Code" });
     expect(question.wakes).toBeUndefined();
-    expect(store.questionsOf(question.id)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode"]);
+    expect(store.questionsOf(question.id)[0]!.choices.map((c) => c.label)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Approve in Terminal"]);
     // The same request again (the hook's first call answered, but the answer was lost): the same question.
     const again = await call({ key: KEY, request_id: "req-00000001", event: EVENT });
     expect(again.body.message_id).toBe(question.id);
@@ -128,7 +128,7 @@ describe("the permission route", () => {
     const event = { ...EVENT, tool_input: { command } };
     const { body } = await call({ key: KEY, request_id: "req-00000012", event });
     expect(body.status).toBe("waiting");
-    expect(store.questionsOf(body.message_id!).map((q) => q.choices.map((c) => c.label))).toEqual([["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode"]]);
+    expect(store.questionsOf(body.message_id!).map((q) => q.choices.map((c) => c.label))).toEqual([["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Approve in Terminal"]]);
     answer(body.message_id!, { selected: ["Deny"] });
     expect((await call({ key: KEY, request_id: "req-00000012", event, message_id: body.message_id })).body).toMatchObject({ status: "decided", choice: "deny" });
   });
@@ -179,7 +179,7 @@ describe("the permission route", () => {
     // A launch made with the person's bypass consent (`bypass_available`) offers it; one without never does (above).
     const full = setup({ bypassAvailable: true });
     const fullAsked = await full.call({ key: KEY, request_id: "req-00000019", event: EVENT });
-    expect(full.store.questionsOf(fullAsked.body.message_id!)[0]!.choices.map((c) => c.label).slice(-1)).toEqual(["Allow and switch to Full permissions"]);
+    expect(full.store.questionsOf(fullAsked.body.message_id!)[0]!.choices.map((c) => c.label).slice(-2)).toEqual(["Allow and switch to Full permissions", "Approve in Terminal"]);
     // The first time in the session, Full permissions needs the person's confirmation (the store's rule, not only the window's).
     expect(() => full.answer(fullAsked.body.message_id!, { selected: ["Allow and switch to Full permissions"] })).toThrow("confirm_full");
     full.answer(fullAsked.body.message_id!, { selected: ["Allow and switch to Full permissions"], confirmFull: true });
@@ -411,7 +411,7 @@ describe("bypass mode: Deny, or Approve in Terminal (the host's own dialog)", ()
     const full = setup({ bypassAvailable: true, full: true });
     const plain = await full.call({ key: KEY, request_id: "req-00000040", event: { ...EVENT, permission_mode: "default" } });
     // (Its bypass consent stands: switching back to Full permissions is offered.)
-    expect(labels(full, plain.body.message_id!)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Allow and switch to Full permissions"]);
+    expect(labels(full, plain.body.message_id!)).toEqual(["Allow once", "Allow `bun run` for this session", "Deny", "Allow and switch to Auto mode", "Allow and switch to Full permissions", "Approve in Terminal"]);
     // An auto launch that switched to bypass: its safety check offers no allow, and says why.
     const auto = setup({ bypassAvailable: true });
     const safety = await auto.call({ key: KEY, request_id: "req-00000041", event: BYPASS });
@@ -420,6 +420,15 @@ describe("bypass mode: Deny, or Approve in Terminal (the host's own dialog)", ()
       note: "Claude Code only accepts this approval in Terminal.",
       handoff: "Approve it in Claude Code within 2 minutes.",
     });
+  });
+
+  test("every card offers Approve in Terminal (an ask rule or a safety check takes no allow, and nothing in the input says so): it answers `terminal`, with its own line", async () => {
+    const t = setup();
+    const asked = await t.call({ key: KEY, request_id: "req-00000046", event: { ...EVENT, permission_mode: "default" } });
+    expect(labels(t, asked.body.message_id!).at(-1)).toBe("Approve in Terminal");
+    expect(readInboxPermissionBody(t.store.message(asked.body.message_id!)!.body)).toMatchObject({ note: null, handoff: "Approve it in Claude Code, in Terminal." });
+    t.answer(asked.body.message_id!, { selected: ["Approve in Terminal"] });
+    expect((await t.call({ key: KEY, request_id: "req-00000046", event: { ...EVENT, permission_mode: "default" }, message_id: asked.body.message_id })).body).toMatchObject({ status: "decided", choice: "terminal" });
   });
 
   test("Approve in Terminal answers the hook with no decision (`terminal`), and a deny still counts", async () => {

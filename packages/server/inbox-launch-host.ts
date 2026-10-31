@@ -131,8 +131,8 @@ export interface LaunchHost {
   stop(ref: string): Promise<LaunchHostResult>;
   /** Delete, after stop: the host forgets the session. */
   remove(ref: string): Promise<LaunchHostResult>;
-  /** Delete of a scratch folder: everything the agent keeps for that folder. Never a project folder. */
-  purge(folder: string): Promise<LaunchHostResult>;
+  /** Delete of a scratch folder: everything the agent keeps for that folder. Never a project folder. `skipped`: why it was not run. */
+  purge(folder: string): Promise<LaunchHostResult & { skipped?: string }>;
   /** The command that opens the session in a terminal (⋯'s Copy attach command); null before it exists. */
   attach(launch: InboxLaunchRecord): string | null;
   /** What Open in Terminal runs: the attach command, else (no session, or `untrusted`) what lets the person trust the folder. */

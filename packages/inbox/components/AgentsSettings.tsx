@@ -640,8 +640,8 @@ export function AgentsSettings({
         }
         sub={
           <>
-            Each New scratch folder you start from New message is made here, named after its thread. Moving it applies to new folders only; the ones
-            already made stay where they are.
+            New scratch folders are made here, named after their thread. A change applies to new folders only. Pick a folder outside any git
+            repository.
           </>
         }
         data={{ 'data-launch-scratch-row': '' }}

@@ -14,12 +14,12 @@
  * security dialog's delay), so a stray or second Enter never allows a prompt
  * the person has not seen.
  *
- * The record states the person's own answer ("You allowed this once"), never
- * what the agent did with it: the run line says that. A prompt the host takes
- * no allow for from here (its choices hold Approve in Terminal) offers Deny,
- * Deny with a reason and Approve in Terminal, with the host's note; Approve in
- * Terminal answers with no decision, so the host's own dialog comes up, and
- * opens Terminal attached on a computer.
+ * The record states the person's click ("You chose Allow once"), never what
+ * the agent did with it: the run line says that. Approve in Terminal answers
+ * with no decision, so the host's own dialog comes up, and opens Terminal
+ * attached on a computer: a quiet link under the answers on every card that
+ * offers it, and with Deny the only answers where the host takes no allow
+ * from here (no Allow once), with the host's note.
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -65,8 +65,6 @@ function kindOf(prompt: string): Kind {
 }
 /** A path inside the session's folder, as the folder sees it. */
 const rel = (path: string, folder: string | null) => (folder && path.startsWith(`${folder}/`) ? path.slice(folder.length + 1) : path);
-/** "Allow `bun run` for this session" → "`bun run`". */
-const scopeOf = (label: string) => label.replace(/^Allow /, '').replace(/ for this session$/, '');
 
 /** The session choice: the one label that is none of the fixed ones. */
 const sessionLabelOf = (labels: string[]) =>
@@ -277,14 +275,14 @@ function Reason({ busy, onDeny, onCancel }: { busy: boolean; onDeny: (reason: st
 function Record({ message, q, outcome, read, title, time, kind, followUp, run, terminal }: { message: InboxMessageWire; q: InboxQuestion; outcome: Outcome; read: InboxPermissionBody; title: string; time: string; kind: Kind; followUp: string | null; run: InboxRun | null; terminal: PermissionTerminal | null }) {
   const [open, setOpen] = useState(false);
   const labels = q.choices.map((c) => c.label);
-  // The person's own answer, as a fact; what the agent did with it is the run line's to say.
+  // The person's click, as a fact (never a promise about the agent): the run line says what it did.
   const verb: ReactNode =
-    outcome === 'once' ? 'You allowed this once'
-    : outcome === 'session' ? <>You allowed <Ticks text={scopeOf(sessionLabelOf(labels) ?? '')} /> for this session</>
-    : outcome === 'auto' ? 'You allowed this and asked to switch to Auto mode'
-    : outcome === 'full' ? 'You allowed this and asked to switch to Full permissions'
-    : outcome === 'deny' ? 'You denied this'
-    : outcome === 'terminal' ? 'You chose to approve this in Terminal'
+    outcome === 'once' ? 'You chose Allow once'
+    : outcome === 'session' ? <>You chose <Ticks text={sessionLabelOf(labels) ?? ''} /></>
+    : outcome === 'auto' ? 'You chose Allow and switch to Auto mode'
+    : outcome === 'full' ? 'You chose Allow and switch to Full permissions'
+    : outcome === 'deny' ? 'You chose Deny'
+    : outcome === 'terminal' ? 'You chose Approve in Terminal'
     : outcome === 'closed' ? 'Not answered'
     : (followUp ?? 'No longer waiting').replace(/\.$/, '');
   // After Approve in Terminal: the host's line, and on a phone (no Open in Terminal) Copy attach command until the
@@ -359,8 +357,9 @@ export function PermissionCard({
   const labels = q?.choices.map((c) => c.label) ?? [];
   const session = sessionLabelOf(labels);
   const fullOn = labels.includes(INBOX_PERMISSION_FULL);
-  // The host takes no allow from here: Deny, or hand it to its own dialog in Terminal.
-  const terminalOnly = labels.includes(INBOX_PERMISSION_TERMINAL);
+  // The host can take it in its own dialog (Approve in Terminal); with no Allow once, that and Deny are all.
+  const toTerminal = labels.includes(INBOX_PERMISSION_TERMINAL);
+  const terminalOnly = toTerminal && !labels.includes(INBOX_PERMISSION_ALLOW_ONCE);
   const waiting = q?.state === 'open' || q?.state === 'picked';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -439,6 +438,8 @@ export function PermissionCard({
     if (e.repeat && (e.key === 'Enter' || e.key === ' ')) e.preventDefault();
   };
   const full = () => (fullUsed ? void answer(INBOX_PERMISSION_FULL) : setMode('confirmFull'));
+  /** No decision from here: the host's own dialog comes up; on a computer, Terminal opens attached to it. */
+  const handOff = act(() => void answer(INBOX_PERMISSION_TERMINAL).then((sent) => sent && terminal?.open?.()));
 
   return (
     <section
@@ -515,14 +516,7 @@ export function PermissionCard({
               <button type="button" className="ib-btn ib-ghost" disabled={busy} onClick={act(() => setMode('reason'))} data-perm="reason">
                 Deny with a reason
               </button>
-              {/* No decision from here: the host's own dialog comes up; on a computer, Terminal opens attached to it. */}
-              <button
-                type="button"
-                className="ib-btn"
-                disabled={busy}
-                onClick={act(() => void answer(INBOX_PERMISSION_TERMINAL).then((sent) => sent && terminal?.open?.()))}
-                data-perm="terminal"
-              >
+              <button type="button" className="ib-btn" disabled={busy} onClick={handOff} data-perm="terminal">
                 Approve in Terminal
               </button>
             </div>
@@ -564,6 +558,13 @@ export function PermissionCard({
                     Full permissions
                   </button>
                 )}
+              </p>
+            )}
+            {toTerminal && (
+              <p className="pc-modes">
+                <button type="button" className="pc-link pc-quiet" disabled={busy} onClick={handOff} data-perm="terminal">
+                  Approve in Terminal
+                </button>
               </p>
             )}
           </>

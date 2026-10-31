@@ -330,10 +330,9 @@ export interface InboxLaunchSettings {
   needs_consent?: boolean;
   /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
   bypass_off?: boolean;
-  /** Where new scratch folders go (absolute), as shown (`~/…`), and whether it is the default (`<dataDir>/scratch`). Absent from an older Inbox. */
+  /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
   scratch_dir?: string;
   scratch_dir_shown?: string;
-  scratch_default?: boolean;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */

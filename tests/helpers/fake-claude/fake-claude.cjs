@@ -57,7 +57,10 @@
  * counts, and an allow is ignored (`ignoredAllow`, no setMode). With no
  * decision, or an ignored allow, the built-in dialog comes up then, and blocks
  * the call on its own `safetyBlockMs` after the hook ended (default 2 minutes;
- * outcome `autoblocked`) unless `localAnswer` answers it first.
+ * outcome `autoblocked`) unless `localAnswer` answers it first. An `askRule`
+ * prompt (the person's own `permissions.ask` rule: "Permission rule …
+ * requires confirmation") is person-only the same way, in any mode, but its
+ * dialog waits until answered. Nothing in the hook's input marks either.
  *
  * Permission prompts (`prompts`: a list of { tool_name, tool_input,
  * permission_suggestions, safetyCheck }, played in each turn, in order): as Claude Code
@@ -346,7 +349,8 @@ async function session(sessionId) {
     const user = readJson(path.join(process.env.HOME || "", ".claude", "settings.json"), {}) || {};
     const pluginHook = config().pluginPermissionHook !== false && Object.entries(user.enabledPlugins || {}).some(([id, on]) => /^plannotator@/.test(id) && on === true);
     const anyHook = Boolean(entry && entry.command) || pluginHook;
-    if (mode === "bypassPermissions" && (!spec.safetyCheck || (!anyHook && skipEnv))) {
+    const personOnly = Boolean(spec.safetyCheck || spec.askRule);
+    if (mode === "bypassPermissions" && (!personOnly || (!anyHook && skipEnv))) {
       fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output: null, exitCode: null, outcome: "ran", asked: false, mode, ms: 0 })}\n`);
       return { tool: spec.tool_name, outcome: "ran" };
     }
@@ -379,7 +383,7 @@ async function session(sessionId) {
       void exited.then(() => (done = true));
       while (!done && !stopped) {
         // A safety check's dialog shows only after the hook: nothing to answer in Terminal meanwhile.
-        if (config().localAnswer && !spec.safetyCheck) {
+        if (config().localAnswer && !personOnly) {
           // Answered in `claude attach`: Claude Code closes the dialog and ends the hook.
           local = true;
           child.kill("SIGTERM");
@@ -399,7 +403,7 @@ async function session(sessionId) {
     } catch {}
     const decision = output && output.hookSpecificOutput && output.hookSpecificOutput.decision;
     // A safety check takes no allow from a hook: the dialog stays for the person (a deny still counts).
-    const ignoredAllow = Boolean(spec.safetyCheck && decision && decision.behavior === "allow");
+    const ignoredAllow = Boolean(personOnly && decision && decision.behavior === "allow");
     let outcome = local ? "local" : decision && !ignoredAllow ? (decision.behavior === "allow" ? "ran" : "denied") : "blocked";
     // A switch of mode: bypass only when it is available (the person's consent and the allow flag), else ignored.
     let modeIgnored = false;

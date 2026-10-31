@@ -42,6 +42,7 @@ import { timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  INBOX_PERMISSION_ALLOW_ONCE,
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
   INBOX_PERMISSION_TERMINAL,
@@ -89,24 +90,36 @@ export function launchPermissionHooks(self: readonly string[]) {
  * it in bypass mode, gets the same card although a hook could allow it). So a
  * session in bypass mode is offered Deny, or Approve in Terminal: the hook says
  * nothing, Claude's own dialog comes up, and the person approves it there.
+ *
+ * In any other mode a prompt can be person-only too, and nothing in the hook's
+ * input says so (it carries tool_name, tool_input, permission_suggestions,
+ * mcp_server and the common fields): a `permissions.ask` rule ("Permission rule
+ * … requires confirmation") ignores a hook's allow, and so, very likely, does a
+ * safety check. So every card also offers Approve in Terminal, the honest way
+ * when Claude wants a person; the run line says when an allow did not count.
  */
 export const CLAUDE_TERMINAL_ONLY = "Claude Code only accepts this approval in Terminal.";
-/** After Approve in Terminal: Claude's dialog waits about 2 minutes, then blocks the call. */
+/** After Approve in Terminal on a safety check: Claude's dialog waits about 2 minutes, then blocks the call. */
 export const CLAUDE_HANDOFF = "Approve it in Claude Code within 2 minutes.";
+/** After Approve in Terminal on any other prompt. */
+export const CLAUDE_HANDOFF_PLAIN = "Approve it in Claude Code, in Terminal.";
 
 /** Whether the session runs in bypass mode: its hook input's `permission_mode`; the launch record only when the input has none. */
 export function claudeInBypass(launch: Pick<InboxLaunchRecord, "full_permissions">, event: { permission_mode: string | null }): boolean {
   return event.permission_mode !== null ? event.permission_mode === "bypassPermissions" : launch.full_permissions === true;
 }
 
-/** What a permission card may offer: in bypass mode no mode switch, and no allow from here (Deny, or Approve in Terminal). */
+/**
+ * What a permission card may offer: Approve in Terminal always; in bypass mode no mode switch and no allow from here
+ * (Deny, or Approve in Terminal).
+ */
 export function claudePermissionTerms(
   launch: Pick<InboxLaunchRecord, "full_permissions">,
   event: { permission_mode: string | null },
-): { full: boolean; allowHere: boolean; note: string | null; handoff: string | null } {
+): { full: boolean; allowHere: boolean; terminal: true; note: string | null; handoff: string } {
   return claudeInBypass(launch, event)
-    ? { full: true, allowHere: false, note: CLAUDE_TERMINAL_ONLY, handoff: CLAUDE_HANDOFF }
-    : { full: false, allowHere: true, note: null, handoff: null };
+    ? { full: true, allowHere: false, terminal: true, note: CLAUDE_TERMINAL_ONLY, handoff: CLAUDE_HANDOFF }
+    : { full: false, allowHere: true, terminal: true, note: null, handoff: CLAUDE_HANDOFF_PLAIN };
 }
 
 interface Lease {
@@ -256,7 +269,8 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
         // Claude Code went on without our answer (a host read since the question): the person answered in Terminal,
         // unless the host takes no allow from here (its dialog may have blocked the call by itself: not known).
         if (fresh && state !== null && state !== "absent" && state.status !== "waiting" && state.state !== "stopped" && state.state !== "done") {
-          const terminalOnly = store.questionsOf(messageId)[0]?.choices.some((c) => c.label === INBOX_PERMISSION_TERMINAL) === true;
+          const offered = store.questionsOf(messageId)[0]?.choices.map((c) => c.label) ?? [];
+          const terminalOnly = offered.includes(INBOX_PERMISSION_TERMINAL) && !offered.includes(INBOX_PERMISSION_ALLOW_ONCE);
           questions.withdraw(messageId, terminalOnly ? INBOX_PERMISSION_NO_LONGER_WAITING : INBOX_PERMISSION_ANSWERED_IN_TERMINAL);
           continue;
         }
