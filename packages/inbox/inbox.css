@@ -6299,14 +6299,17 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-dtfoot { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .ib-rfoot > .ib-dtfoot, .ib-fcomp-foot > .ib-dtfoot { flex: 1 1 0; margin-left: 6px; }
 .ib-dtfoot.ib-vlead { justify-content: flex-start; }
+/* Full screen's card has one short row: the status takes it from the chips until the words land. */
+.ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-chips { display: none; }
 .ib-vline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
-.ib-vline b { font-weight: 600; color: var(--foreground); }
+.ib-vline b { flex: none; font-weight: 600; color: var(--foreground); }
 .ib-vline.ib-vdanger b { color: var(--destructive); }
 .ib-vhint { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-vsp { flex: 1; }
-.ib-dttime { font-variant-numeric: tabular-nums; font-weight: 500; color: var(--foreground); }
-.ib-vbars { flex: none; display: flex; align-items: center; gap: 2px; height: 22px; }
-.ib-vbars > span { width: 2px; height: 20px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); transform: scaleY(0.08); }
+.ib-dttime { flex: none; font-variant-numeric: tabular-nums; font-weight: 500; color: var(--foreground); }
+/* The bars give way in a tight row, oldest first (the newest are at the right), so the clock and the button never move. */
+.ib-vbars { flex: 0 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 22px; }
+.ib-vbars > span { flex: none; width: 2px; height: 20px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); transform: scaleY(0.08); }
 .ib-vbars > span[data-v] { background: var(--primary); }
 .pn-inbox .ib-vmic { flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .pn-inbox .ib-vmic:hover { background: var(--muted); color: var(--foreground); }

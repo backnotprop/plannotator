@@ -76,7 +76,7 @@ function speechWav(path: string, seconds: number, loud: boolean) {
   writeFileSync(path, Buffer.concat([header, Buffer.from(samples.buffer)]));
 }
 
-async function startWorld(options: { version?: string; config?: Record<string, unknown>; used?: boolean; codex?: Record<string, unknown> | null } = {}): Promise<World> {
+async function startWorld(options: { version?: string; config?: Record<string, unknown>; used?: boolean; fresh?: boolean; codex?: Record<string, unknown> | null } = {}): Promise<World> {
   const root = join(scratch, `world-${worlds.length}`);
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
@@ -85,7 +85,8 @@ async function startWorld(options: { version?: string; config?: Record<string, u
     join(dataDir, 'config.json'),
     JSON.stringify({
       inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' },
-      inboxNotifications: { dismissed: true },
+      // A notification setting means someone used an Inbox here (inboxUsedBefore).
+      ...(options.fresh ? {} : { inboxNotifications: { dismissed: true } }),
       inboxAgentNotes: { offered: true },
       inboxSound: { dialogShownFor: '0.29.0' },
       inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
@@ -94,7 +95,7 @@ async function startWorld(options: { version?: string; config?: Record<string, u
   );
   const child: ChildProcessWithoutNullStreams = spawn('bun', [join(repo, 'tests/e2e/voice-inbox.ts'), root, JSON.stringify({ html, version: options.version, codex: options.codex })], {
     cwd: repo,
-    env: { PATH: process.env.PATH ?? '', HOME: join(root, 'home'), PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_PHONES: '0' },
+    env: { PATH: process.env.PATH ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', HOME: join(root, 'home'), PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_PHONES: '0' },
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => (stderr += String(chunk)));
@@ -122,6 +123,16 @@ async function startWorld(options: { version?: string; config?: Record<string, u
   };
   worlds.push(world);
   return world;
+}
+
+let main: World | null = null;
+/** The world most tests share, voice on. */
+async function mainWorld(): Promise<World> {
+  if (!main) {
+    main = await startWorld();
+    await turnOn(main);
+  }
+  return main;
 }
 
 const saved = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
@@ -187,10 +198,10 @@ const consoleErrors = (page: Page) => {
 
 const shot = async (page: Page, name: string) => {
   mkdirSync(shotsDir, { recursive: true });
+  // Past the button's color fade, so a screen shows the state and not the way into it.
+  await page.waitForTimeout(250);
   await page.screenshot({ path: join(shotsDir, `${name}.png`) });
 };
-
-test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
   expect(existsSync(html), 'build the apps first').toBe(true);
@@ -233,7 +244,7 @@ test('off: no mic in any composer and no Codex started; Settings turns it on bet
   await section.getByRole('switch', { name: 'Voice' }).click();
   await expect(page.locator('[data-voice-status="ready"]')).toContainText('Signed in with ChatGPT');
   await expect(page.locator('[data-voice-status="ready"]')).toContainText('Pro plan');
-  await expect(page.locator('.ib-main, body')).toContainText('OpenAI’s terms for your ChatGPT account apply.');
+  await expect(page.locator('main.ib-main')).toContainText('OpenAI’s terms for your ChatGPT account apply.');
   expect(saved(w).inboxVoice?.on).toBe(true);
   await shot(page, 'settings');
 
@@ -244,7 +255,7 @@ test('off: no mic in any composer and no Codex started; Settings turns it on bet
 });
 
 test('a hold: words land at the cursor, Send waits, nothing sends itself', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   const errors = consoleErrors(page);
   const box = await openReply(page, w, w.threads[1]!);
@@ -264,7 +275,7 @@ test('a hold: words land at the cursor, Send waits, nothing sends itself', async
 
   await expect(line(pane(page), 'sending')).toBeVisible();
   await expect(sendButton(page)).toBeDisabled();
-  await expect(pane(page).locator('.ib-vph')).toBeVisible();
+  await expect(pane(page).locator('.ib-vph i')).toHaveText('…');
   await expect(box).toHaveValue('Cards. and more');
   await shot(page, 'transcribing');
   w.send({ release: true });
@@ -286,14 +297,14 @@ test('a hold: words land at the cursor, Send waits, nothing sends itself', async
   expect(calls[0]!.userAgent).toMatch(/^Plannotator\//);
   // Nothing went: the thread still has no reply from the person.
   await expect(pane(page).locator('.ib-rbox')).toBeVisible();
-  const thread = (await (await fetch(new URL(`/api/inbox/threads/${w.threads[1]}`, w.url))).json()) as { messages: { author: { kind: string } }[] };
+  const { thread } = (await (await fetch(new URL(`/api/inbox/threads/${w.threads[1]}`, w.url))).json()) as { thread: { messages: { author: { kind: string } }[] } };
   expect(thread.messages.filter((message) => message.author.kind !== 'agent')).toEqual([]);
   expect(errors).toEqual([]);
   await context.close();
 });
 
 test('a tap: runs with no finger on it, Cancel is there, a second tap stops it', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   const box = await openReply(page, w, w.threads[2]!);
   const before = w.upstreamCalls().length;
@@ -318,7 +329,7 @@ test('a tap: runs with no finger on it, Cancel is there, a second tap stops it',
 });
 
 test('the keyboard: Space on the focused button toggles, with no new shortcut', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   const box = await openReply(page, w, w.threads[2]!);
   await box.fill('');
@@ -333,7 +344,7 @@ test('the keyboard: Space on the focused button toggles, with no new shortcut', 
 });
 
 test('Esc: cancels only what runs, in the reply box and in compose; at rest it is the box’s as ever', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   const box = await openReply(page, w, w.threads[3]!);
   await box.fill('Kept words');
@@ -374,7 +385,7 @@ test('Esc: cancels only what runs, in the reply box and in compose; at rest it i
 });
 
 test('compose: the words land, and Send waits', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   await page.goto(w.url);
   await page.locator('.ib-side [data-open-compose]').click();
@@ -389,12 +400,13 @@ test('compose: the words land, and Send waits', async () => {
   await shot(page, 'compose-transcribing');
   w.send({ release: true });
   await expect(dialog.locator('textarea')).toHaveValue('A new idea.');
-  await expect(dialog.locator('[data-compose-send]')).toBeEnabled();
+  // The real `disabled` is voice's. This world has no agent to send to, so the button stays aria-disabled for that.
+  await expect(dialog.locator('[data-compose-send]')).toHaveJSProperty('disabled', false);
   await context.close();
 });
 
 test('full screen’s composer: the words land in the reply', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   await page.goto(`${w.url}#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`);
   const card = page.locator('[data-fcomp]');
@@ -406,15 +418,19 @@ test('full screen’s composer: the words land in the reply', async () => {
   await mic(card).click();
   await expect(line(card, 'tap')).toBeVisible();
   await expect(card.locator('[data-fcomp-send]')).toBeDisabled();
-  await shot(page, 'fullscreen-listening');
+  // The card is narrow: the clock, the button and Open in thread each keep their own room.
+  const [clock, button, link] = await Promise.all(['.ib-dttime', '[data-voice-mic]', '[data-fcomp-open-thread]'].map((part) => card.locator(part).boundingBox()));
+  expect(clock!.x + clock!.width).toBeLessThanOrEqual(button!.x);
+  expect(button!.x + button!.width).toBeLessThanOrEqual(link!.x);
   await page.waitForTimeout(1200);
+  await shot(page, 'fullscreen-listening');
   await mic(card).click();
   await expect(field).toHaveValue('Looks right.');
   await context.close();
 });
 
 test('a 403 and a challenge page: posted once, the drawn line, and only a press retries the same clip', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   const box = await openReply(page, w, w.threads[4]!);
   await box.fill('');
@@ -441,7 +457,7 @@ test('a 403 and a challenge page: posted once, the drawn line, and only a press 
 });
 
 test('the network: the clip is kept, Discard drops it; an expired login says what to run', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w);
   const box = await openReply(page, w, w.threads[4]!);
   await box.fill('');
@@ -461,7 +477,7 @@ test('the network: the clip is kept, Discard drops it; an expired login says wha
 });
 
 test('no voice heard: says so, then posts nothing', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(silence, w);
   const box = await openReply(page, w, w.threads[5]!);
   await box.fill('');
@@ -476,7 +492,7 @@ test('no voice heard: says so, then posts nothing', async () => {
 });
 
 test('the browser’s prompt: says so, and the press becomes a tap; a block says how to allow it', async () => {
-  const w = worlds[0]!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w, { grant: false });
   await page.addInitScript(() => {
     const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -568,10 +584,10 @@ test('Phones only is the touch query: a narrow desktop window has no mic, a touc
 });
 
 test('a phone: hold to talk, the keyboard stays down, slide off to cancel', async () => {
-  const w = worlds.at(-1)!;
+  const w = await mainWorld();
   const { context, page } = await open(speech, w, { phone: true });
   const cdp: CDPSession = await context.newCDPSession(page);
-  const box = await openReply(page, w, w.threads[1]!);
+  const box = await openReply(page, w, w.threads[7]!);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   const target = (await mic(pane(page)).boundingBox())!;
   const x = target.x + target.width / 2;
@@ -673,7 +689,7 @@ test.describe('the announcement', () => {
   });
 
   test('a fresh install, and a load with the list options dialog due: not shown', async () => {
-    const fresh = await startWorld({ version: '0.30.0' });
+    const fresh = await startWorld({ version: '0.30.0', fresh: true });
     const first = await open(speech, fresh);
     await first.page.goto(fresh.url);
     await first.page.waitForTimeout(SETTLE);

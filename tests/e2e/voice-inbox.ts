@@ -41,6 +41,8 @@ mkdirSync(home, { recursive: true });
 
 let answers: Answer[] = [{ text: "Rename the build step." }];
 let release: (() => void) | null = null;
+/** A release that came before the clip did: the spec can't see the post arrive. */
+let released = false;
 const upstream = Bun.serve({
   hostname: "127.0.0.1",
   port: 0,
@@ -53,7 +55,8 @@ const upstream = Bun.serve({
     const rate = bytes.length > 28 ? new DataView(bytes.buffer, bytes.byteOffset).getUint32(24, true) : 0;
     appendFileSync(join(root, "upstream.jsonl"), `${JSON.stringify({ path: new URL(req.url).pathname, bytes: bytes.length, riff, rate, model: form.get("model"), userAgent: req.headers.get("user-agent") })}\n`);
     const answer = answers.length > 1 ? answers.shift()! : answers[0]!;
-    if (answer.hold) await new Promise<void>((resolve) => (release = resolve));
+    if (answer.hold && !released) await new Promise<void>((resolve) => (release = resolve));
+    released = false;
     if (answer.html) return new Response("<html>Just a moment</html>", { status: answer.status ?? 403, headers: { "Content-Type": "text/html" } });
     return Response.json({ text: answer.text ?? "" }, { status: answer.status ?? 200 });
   },
@@ -93,8 +96,12 @@ process.stdin.on("data", (chunk: string) => {
     buffer = buffer.slice(at + 1);
     if (!line.trim()) continue;
     const command = JSON.parse(line) as { upstream?: Answer[]; release?: boolean; codex?: FakeCodexState; stop?: boolean };
-    if (command.upstream) answers = command.upstream;
+    if (command.upstream) {
+      answers = command.upstream;
+      released = false;
+    }
     if (command.release) {
+      released = release === null;
       release?.();
       release = null;
     }
