@@ -306,7 +306,7 @@ export function FullScreenComposer({
       onKeyDown={(event) => {
         // Mod+Enter sends the reply from anywhere in the card (the tabs, the buttons, the tags), as it does from the
         // reply field, whose own handler has stopped it by now. Never from the comment tab (its Enter is the file's).
-        if (mode !== 'reply' || event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.defaultPrevented || event.repeat || event.nativeEvent.isComposing) return;
+        if (mode !== 'reply' || event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.defaultPrevented || event.repeat || event.shiftKey || event.altKey || event.nativeEvent.isComposing) return;
         if (!reply.canSend || reply.sending) return;
         event.preventDefault();
         event.stopPropagation();

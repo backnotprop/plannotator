@@ -20,6 +20,7 @@
  */
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
+import { FIXTURE_V1_LOCAL } from '../../packages/core/guide-format-fixtures';
 import { copyFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
@@ -63,12 +64,26 @@ const SPOTS = {
   action: [':::action', 'Spot action: approve the prompt', 'It lands on your phone.', ':::'].join('\n'),
   actionNote: [':::action', 'Spot action note: approve the prompt', 'It lands on your phone.', ':::'].join('\n'),
   page: spotQuestion('question', 'Spot page: which flavour?'),
+  menu: spotQuestion('question', 'Spot menu: which flavour?'),
+  link: `${spotQuestion('question', 'Spot link: which flavour?')}\n\nThe menu is at [the flavour page](https://example.com/flavours).`,
+  boxopen: spotQuestion('question', 'Spot boxopen: which flavour?'),
+  late: spotQuestion('question-text', 'Spot late: what should we call it?'),
+  ring: spotQuestion('question', 'Spot ring: which flavour?'),
+  cant: [spotQuestion('question', 'Spot cant: which flavour?'), '', ':::action', 'Spot cant: open the vault', 'Needs your badge.', ':::'].join('\n'),
+  cover: spotQuestion('question', 'Spot cover: which flavour?'),
+  coverimg: spotQuestion('question', 'Spot coverimg: which flavour?'),
+  guided: spotQuestion('question', 'Spot guided: which flavour?'),
+  click: spotQuestion('question', 'Spot click: which flavour?'),
 };
+/** Files a spot's message carries (the project's own files), and which spot also gets a guided review reply. */
+const SPOT_FILES: Partial<Record<keyof typeof SPOTS, string[]>> = { cover: ['notes.md'], coverimg: ['after.webp'] };
 
 interface World {
   url: string;
   agent: SimAgent;
   codex: SimAgent;
+  /** The guided review's message id (in the `guided` thread). */
+  guideMessage: string;
   threads: { release: string; news: string } & Record<keyof typeof SPOTS, string>;
 }
 
@@ -106,9 +121,17 @@ async function createWorld(): Promise<World> {
 
   // The spots first (they sink down the list as newer threads arrive).
   const threads: Record<string, string> = {};
+  let guideMessage = '';
+  copyFileSync(join(repo, 'packages/inbox/tour/content/vs-b.webp'), join(project, 'after.webp'));
   for (const [name, body] of Object.entries(SPOTS)) {
-    const sent = await agent.send({ project_path: project, subject: `Spot ${name}`, thread: `spot-${name}`, body });
+    const files = SPOT_FILES[name as keyof typeof SPOTS];
+    const sent = await agent.send({ project_path: project, subject: `Spot ${name}`, thread: `spot-${name}`, body, ...(files ? { attachments: files } : {}) });
     threads[name] = sent.thread_id as string;
+    if (name === 'guided') {
+      // A guided review in the same thread, from another session, so the question stays open beneath it.
+      const guide = await codex.submitGuide({ project_path: project, snapshot: FIXTURE_V1_LOCAL, reply_to: sent.message_id as string, subject: 'A guided review', body: 'Read it in order.' });
+      guideMessage = guide.message_id as string;
+    }
     await pause();
   }
   const news = await agent.send({ project_path: project, subject: 'Nightly build is green', thread: 'news', body: 'The nightly build is green again. Nothing for you.' });
@@ -128,7 +151,7 @@ async function createWorld(): Promise<World> {
   await post(url, `/api/inbox/threads/${encodeURIComponent(release)}/seen`, {});
   await pause();
   await agent.send({ project_path: project, reply_to: last.message_id as string, body: NEW_BODY, attachments: ['notes.md'] });
-  return { url, agent, codex, threads: { release, news: news.thread_id as string, ...threads } as World['threads'] };
+  return { url, agent, codex, guideMessage, threads: { release, news: news.thread_id as string, ...threads } as World['threads'] };
 }
 
 let world: World;
@@ -201,14 +224,20 @@ async function load() {
 
 /** Arrow to a thread's row and open it with Enter: keys only. */
 async function openThread(thread: string) {
-  if (process.env.Q_BEFORE) await load(); // the build under test sends nothing, so the last thread is still open
   await press('g', 'i');
   for (let i = 0; i < 30; i++) {
-    const where = await row(thread).evaluate((el) => {
-      const active = document.activeElement;
-      if (el === active) return 'here';
-      return active && el.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING ? 'above' : 'below';
-    });
+    // A row the list has not drawn yet (it draws what is near the focus) is further down.
+    const where = await row(thread)
+      .evaluate(
+        (el) => {
+          const active = document.activeElement;
+          if (el === active) return 'here';
+          return active && el.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING ? 'above' : 'below';
+        },
+        undefined,
+        { timeout: 1500 },
+      )
+      .catch(() => 'below' as const);
     if (where === 'here') break;
     await press(where === 'above' ? 'ArrowUp' : 'ArrowDown');
   }
@@ -217,6 +246,14 @@ async function openThread(thread: string) {
   await expect(page.locator('section.ib-pane')).toBeVisible();
   await expect.poll(() => new URL(page.url()).hash).toBe(`#thread=${thread}`);
   await page.waitForTimeout(500);
+}
+
+/** A thread by its address, fresh page (focus on the page itself, as after a link): where the walk to its row is no part of the proof. */
+async function gotoThread(thread: string) {
+  landed = false;
+  await page.goto(`${world.url}#thread=${thread}`);
+  await expect(page.locator('section.ib-pane')).toBeVisible();
+  await page.waitForTimeout(700);
 }
 
 /** Tab until `target` has focus (bounded, each look short). */
@@ -333,7 +370,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
 
       // 6. J to a thread with nothing open: Q does nothing, no error.
       let hops = 0;
-      while (new URL(page.url()).hash !== `#thread=${t.news}` && hops < 14) {
+      while (new URL(page.url()).hash !== `#thread=${t.news}` && hops < 40) {
         await press('j');
         hops += 1;
       }
@@ -408,7 +445,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
       const fileOpens = await popup().count();
       test.info().annotations.push({ type: 'Q with a file beside the thread', description: `focus ${fileFocus}; popup opened: ${fileOpens > 0}` });
       await shot('file-beside-q');
-      if (fileOpens > 0) await press('Escape');
+      // Like O: from the file's pane the key is the file's own, so Q opens nothing.
+      expect(fileOpens, `Q from the file pane (focus ${fileFocus}) opens no popup`).toBe(0);
       // From the thread (focus moved into the foot's reply button), Q works with the file open.
       console.log(`STEP9 file open: focus ${fileFocus}; Q opened the popup: ${fileOpens > 0}; thread foot visible: ${await button().isVisible()}`);
       if (await button().isVisible()) {
@@ -451,6 +489,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 800, height: 900 
 // ── Mod+Enter ──
 
 test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
+  test.setTimeout(420_000);
   const title = 'Mod+Enter sends from every place focus can be';
   await start(browser, title, { width: 1440, height: 900 });
   const report: string[] = [];
@@ -464,12 +503,6 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
     async function sendAndCheck(spot: string, thread: string, words: RegExp) {
       const was = sentCount();
       await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+Enter`); // no pause: as fast as a person can
-      if (process.env.Q_BEFORE) {
-        // The run against a build without the handler: record what happens, never fail.
-        await page.waitForTimeout(2500);
-        report.push(`BEFORE ${spot}: ${sentCount() === was + 1 ? 'sent' : 'NOTHING SENT'}; focus ${await focusedText()}`);
-        return;
-      }
       await expect.poll(sentCount, { message: `${spot}: a reply was posted` }).toBe(was + 1);
       await page.waitForTimeout(700);
       expect(sentCount(), `${spot}: no second send`).toBe(was + 1);
@@ -494,7 +527,8 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
     keys++;
     report.push(`keys to pick a choice after opening the thread by keyboard: ${keys} (${tabs} Tab, then Space), and Mod+Enter to send; the radio group takes the arrows for the next choice`);
     await expect(card('Spot radio').getByRole('radio', { checked: true })).toHaveCount(1);
-    await sendAndCheck('radio focused', t.radio, /Vanilla/);
+    // The picked choice itself (`selected`), not the choice's text, which is in the thread whether it was sent or not.
+    await sendAndCheck('radio focused', t.radio, /"selected":\["Vanilla"\]/);
     // After the send, focus holds the sent message's head and draws no ring (as after a click on Send); keys that move
     // focus onto a head draw it, the same head again included.
     const ring = () =>
@@ -503,12 +537,18 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
         const style = el ? getComputedStyle(el) : null;
         return { head: !!el?.matches('[data-fold-head]'), outline: style ? `${style.outlineStyle} ${style.outlineWidth}` : '', marked: el?.hasAttribute('data-sent-focus') ?? false, id: el?.closest('[data-message-article]')?.getAttribute('data-message-article') ?? null };
       });
-    if (!process.env.Q_BEFORE) {
     await expect.poll(async () => (await ring()).head, { message: `focus on a message head after the send (on ${await focusedText()})` }).toBe(true);
     const afterSend = await ring();
     report.push(`ring after Mod+Enter send: ${JSON.stringify(afterSend)}`);
-    if (!process.env.Q_BEFORE) expect.soft(afterSend.outline, 'no ring on the sent message head').toMatch(/^(none|hidden) |^\S+ 0px$/);
+    expect(afterSend.marked, 'the chord Send marks the head').toBe(true);
+    expect(afterSend.outline, 'no ring on the sent message head').toMatch(/^none /);
     await shot('after-send-no-ring');
+    // Shift+J on the last head leaves focus where it is: the key itself must bring the ring back.
+    await page.keyboard.press('Shift+J');
+    await page.waitForTimeout(200);
+    const sameHead = await ring();
+    expect(sameHead.id, 'Shift+J on the last head keeps focus on it').toBe(afterSend.id);
+    expect(sameHead.outline, 'ring drawn after the next key, with focus not moved').toMatch(/solid 2px/);
     await page.keyboard.press('Shift+K');
     await page.waitForTimeout(200);
     const moved = await ring();
@@ -521,7 +561,6 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
     expect(moved.outline, 'ring on the head Shift+K lands on').toMatch(/solid 2px/);
     expect(back.outline, 'ring on the sent head when a key lands on it again').toMatch(/solid 2px/);
     await shot('after-shift-j-ring');
-    }
 
     // Free text, typed fast and sent at once.
     await openThread(t.text);
@@ -607,18 +646,206 @@ test('Mod+Enter sends from every place focus can be', async ({ browser }) => {
     expect(sentCount(), 'nothing to send: nothing sent').toBe(none);
     report.push('nothing to send: nothing sent, no error');
 
-    // A menu open: Mod+Enter keeps the menu's keys (here: the open-questions popup).
+    // A menu open: Mod+Enter keeps the menu's keys (the open-questions popup), with a pick waiting that it could send.
+    await gotoThread(t.menu);
+    const menuRadio = card('Spot menu').getByRole('radio').first();
+    await tabTo(menuRadio);
+    await page.keyboard.press('Space');
+    await expect(page.locator('.ib-footbtns .ib-pri')).toBeVisible();
     await page.locator('[data-reply-button]').focus();
     await page.keyboard.press('q');
     await expect(popup()).toBeVisible();
+    const beforeMenu = sentCount();
     await mod('Enter');
-    await page.waitForTimeout(300);
-    expect(sentCount()).toBe(none);
-    report.push('menu open: Mod+Enter sends nothing');
+    await page.waitForTimeout(500);
+    expect(sentCount(), 'menu open: nothing sent').toBe(beforeMenu);
     await page.keyboard.press('Escape');
+    await expect(popup()).toHaveCount(0);
+    // (On the list's own button Enter opens the list, as on any menu button: the chord is sent from the Reply button.)
+    await page.locator('[data-reply-button]').focus();
+    await mod('Enter');
+    await expect.poll(sentCount, { message: 'menu closed: the same key sends' }).toBe(beforeMenu + 1);
+    report.push('menu open: Mod+Enter sends nothing; closed, it sends');
   } finally {
     test.info().annotations.push({ type: 'report', description: report.join('\n') });
     console.log(report.join('\n'));
+    await finish(title);
+  }
+});
+
+// ── where Mod+Enter and Q must stand down (review of #2439) ──
+
+test('Mod+Enter and Q stand down where Send is not on screen or the key is not theirs', async ({ browser }) => {
+  test.setTimeout(420_000);
+  const title = 'Mod+Enter and Q stand down';
+  await start(browser, title, { width: 1440, height: 900 });
+  try {
+    await load();
+    const t = world.threads;
+    const sent = () => replies.length;
+    const card = (text: string) => page.locator(`${BODY} [data-question-key]`).filter({ hasText: text });
+    const hashNow = () => new URL(page.url()).hash;
+    /** Pick the first choice of a spot's question by keys (Tab to the group, Space), and wait for the Send to be drawn. */
+    async function pickFirst(spot: string) {
+      await tabTo(card(spot).getByRole('radio').first(), 90);
+      await expect(card(spot).getByRole('radio').first(), `focus reached the first choice of ${spot} (on ${await focusedText()})`).toBeFocused();
+      await page.keyboard.press('Space');
+      await expect(page.locator('.ib-footbtns .ib-pri')).toBeVisible();
+    }
+    /** From the foot's Reply button, the chord sends the waiting pick: proof that every "nothing sent" above was the guard. */
+    async function chordFromFoot(label: string) {
+      const was = sent();
+      await page.locator('[data-reply-button]').focus();
+      await mod('Enter');
+      await expect.poll(sent, { message: `${label}: the pick goes with the chord from the foot` }).toBe(was + 1);
+    }
+    const quiet = async (ms = 800) => page.waitForTimeout(ms);
+
+    // S2: ⌘Enter on a focused link is the link's own (open in a tab), never a send.
+    await gotoThread(t.link);
+    await pickFirst('Spot link');
+    const link = page.locator(`${BODY} a[href="https://example.com/flavours"]`);
+    await link.focus();
+    const linkWas = sent();
+    await mod('Enter');
+    await quiet();
+    expect(sent(), 'a focused link keeps the chord').toBe(linkWas);
+    await chordFromFoot('link');
+
+    // M1: a file in full screen covers the thread: the chord (and Q) do nothing; the Markdown file has no composer.
+    await gotoThread(t.cover);
+    await pickFirst('Spot cover');
+    await page.keyboard.press('f');
+    await expect(page.locator('[data-attachment-pane][data-full-view]')).toBeVisible();
+    expect(hashNow()).toMatch(/view=full/);
+    let was = sent();
+    await mod('Enter');
+    await page.keyboard.press('q');
+    await quiet();
+    expect(sent(), 'full-screen file: nothing sent behind it').toBe(was);
+    expect(hashNow(), 'full-screen file: still full screen').toMatch(/view=full/);
+    await expect(popup()).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await chordFromFoot('full-screen file');
+
+    // M1: a full-screen image, its composer's Comment tab (the card's handler stands down, the thread's must too), then
+    // the Reply tab: the chord from the card sends with the pick and the words, and stays in full screen.
+    await gotoThread(t.coverimg);
+    await pickFirst('Spot coverimg');
+    await page.keyboard.press('f');
+    await expect(page.locator('[data-attachment-pane][data-full-view]')).toBeVisible();
+    const commentTab = page.locator('[data-fcomp] [data-fcomp-mode="comment"]');
+    await commentTab.focus();
+    was = sent();
+    await mod('Enter');
+    await quiet();
+    expect(sent(), 'full-screen image, Comment tab: nothing sent').toBe(was);
+    expect(hashNow()).toMatch(/view=full/);
+    await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
+    const composerField = page.locator('[data-fcomp] textarea').first();
+    await composerField.focus();
+    await page.keyboard.type('looks fine', { delay: 0 });
+    await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').focus();
+    await mod('Enter');
+    await expect.poll(sent, { message: 'full-screen composer: the chord from its tab sends' }).toBe(was + 1);
+    await quiet();
+    expect(sent(), 'full-screen composer: sent once').toBe(was + 1);
+    expect(replies.at(-1)!.body).toContain('looks fine');
+    expect(hashNow(), 'full-screen composer: stays in full screen').toMatch(/view=full/);
+    expect(await activeIs('[data-fcomp]'), 'full-screen composer: focus stays in the card').toBe(true);
+    await page.keyboard.press('Escape');
+
+    // M2, S6: behind a guided review the chord and Q do nothing.
+    await gotoThread(t.guided);
+    await pickFirst('Spot guided');
+    await page.evaluate((h) => { location.hash = h; }, `#thread=${t.guided}&guide=${world.guideMessage}`);
+    await expect(page.locator('section.ib-pane')).toBeHidden({ timeout: 5000 }).catch(() => {});
+    await quiet(1200);
+    expect(hashNow()).toContain('guide=');
+    was = sent();
+    await page.keyboard.press('q');
+    await mod('Enter');
+    await quiet();
+    expect(sent(), 'behind a guide: nothing sent').toBe(was);
+    await expect(popup()).toHaveCount(0);
+    await page.evaluate((h) => { location.hash = h; }, `#thread=${t.guided}`);
+    await expect(button()).toBeVisible();
+    await quiet(600);
+    await chordFromFoot('guided');
+
+    // S1: a save still in flight, then the reply box opens and words are typed: the waiting key is spent, never sent.
+    await page.route('**/picks', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await route.continue();
+    });
+    await gotoThread(t.late);
+    await tabTo(card('Spot late').getByRole('textbox'));
+    // One character: one delayed save (a longer word would queue several, and outlast the wait below).
+    await page.keyboard.type('h', { delay: 0 });
+    was = sent();
+    await mod('Enter');
+    await page.locator('[data-reply-button]').focus();
+    await page.keyboard.press('r');
+    const lateBox = page.getByRole('textbox', { name: /Reply to/ });
+    await expect(lateBox).toBeFocused();
+    await page.keyboard.type('half a thou', { delay: 0 });
+    await page.waitForTimeout(4500);
+    expect(sent(), 'the key waited for a save, the box opened: nothing sent').toBe(was);
+    await expect(lateBox).toHaveValue('half a thou');
+    await page.unroute('**/picks');
+
+    // S3: the reply box is open and focus is on a question's choice: the chord sends (the box's words with the pick).
+    await gotoThread(t.boxopen);
+    const boxRadio = card('Spot boxopen').getByRole('radio').first();
+    await tabTo(boxRadio);
+    await page.keyboard.press('Space');
+    await page.locator('[data-reply-button]').focus();
+    await page.keyboard.press('r');
+    await expect(page.getByRole('textbox', { name: /Reply to/ })).toBeFocused();
+    await page.keyboard.type('note words', { delay: 0 });
+    await boxRadio.focus();
+    was = sent();
+    await mod('Enter');
+    await expect.poll(sent, { message: 'reply box open, focus on a choice: sent' }).toBe(was + 1);
+    await quiet();
+    expect(sent(), 'sent once').toBe(was + 1);
+    expect(replies.at(-1)!.body).toContain('note words');
+
+    // S4: the "Can't do it" reason box: the chord neither sends the pick nor leaves the reason behind.
+    await gotoThread(t.cant);
+    await pickFirst('Spot cant');
+    const cant = page.getByRole('button', { name: /^Can't do it/ }).first();
+    await cant.focus();
+    await page.keyboard.press('Enter');
+    const reason = page.locator('.ib-chk-note');
+    await expect(reason).toBeFocused();
+    await page.keyboard.type('no badge', { delay: 0 });
+    was = sent();
+    await mod('Enter');
+    await quiet();
+    expect(sent(), 'the reason box keeps the chord: nothing sent').toBe(was);
+    await expect(reason).toHaveValue('no badge');
+
+    // S5: a Send by Tab and Enter keeps the ring (the person is steering by keys); a click on Send never had one.
+    await gotoThread(t.ring);
+    await pickFirst('Spot ring');
+    await page.locator('.ib-footbtns .ib-pri').focus();
+    was = sent();
+    await page.keyboard.press('Enter');
+    await expect.poll(sent).toBe(was + 1);
+    await expect.poll(() => page.evaluate(() => !!document.activeElement?.matches('[data-fold-head]'))).toBe(true);
+    const ringOf = () => page.evaluate(() => { const s = getComputedStyle(document.activeElement!); return { outline: `${s.outlineStyle} ${s.outlineWidth}`, marked: document.activeElement!.hasAttribute('data-sent-focus') }; });
+    expect(await ringOf(), 'Send by Enter on the button: ring kept').toEqual({ outline: 'solid 2px', marked: false });
+    await gotoThread(t.click);
+    await pickFirst('Spot click');
+    was = sent();
+    await page.locator('.ib-footbtns .ib-pri').click();
+    await expect.poll(sent).toBe(was + 1);
+    await expect.poll(() => page.evaluate(() => !!document.activeElement?.matches('[data-fold-head]'))).toBe(true);
+    const clicked = await ringOf();
+    expect(clicked.marked, 'a click on Send sets no mark').toBe(false);
+    expect(clicked.outline, 'after a click on Send: no ring (never was)').toMatch(/^none /);
+  } finally {
     await finish(title);
   }
 });

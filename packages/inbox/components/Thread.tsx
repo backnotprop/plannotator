@@ -2539,13 +2539,18 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         handle: () => openNewestByKey(),
       },
       send: {
-        when: (event) => {          // The closed foot's Send, from wherever focus is in the thread: the page, a question's field or choice, an
-          // action row, a file beside it. The one place this is decided; the reply box (and compose) keep their own
-          // keydown, which stops it here. Not typing-guarded: Mod+Enter is no character, so a field is where it is most
-          // needed. A menu, dialog or popover layer keeps its keys; a held key sends once (and `send` ignores a second).
-          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || box.open || modalOpen()) return false;
+        when: (event) => {
+          // The foot's Send (the closed foot's, or the open reply box's), from wherever focus is in the thread: the page,
+          // a question's field or choice, an action row, a file beside it. The one place this is decided; the reply
+          // box's (and compose's) own keydown prevents the default first, so it never doubles here. Not typing-guarded:
+          // Mod+Enter is no character, so a field is where it is most needed. A menu, dialog or popover layer keeps its
+          // keys, a link keeps ⌘Enter (open in a tab), a held key sends once (and `send` ignores a second). Never while
+          // something covers the thread (a file in full screen, a guide, Artifacts): its Send is not on screen.
+          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || paneCovered || modalOpen()) return false;
+          // The open-items list is up (focus may not have reached its first row yet): its keys are the menu's.
+          if (reaskRef.current?.getAttribute('aria-expanded') === 'true') return false;
           const target = keyTarget(event);
-          if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe'))) return false;
+          if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe, a[href]'))) return false;
           const origin = keyOrigin(event);
           if (origin !== 'thread' && origin !== 'row' && origin !== 'file') return false;
           const button = sendRef.current;
@@ -2556,16 +2561,24 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         // Exactly the click: its guards (stale, route choice, uploads) and its wait for notes and picks still saving.
         handle: () => {
           const ready = (b: HTMLButtonElement | null) => !!b && b.isConnected && !b.disabled && b.getClientRects().length > 0;
-          if (ready(sendRef.current)) {
+          const press = () => {
+            sentByChord.current = true;
             sendRef.current!.click();
+          };
+          if (ready(sendRef.current)) {
+            press();
             return;
           }
           // Waits for the saves in flight, then the draw that brings the Send; nothing to send then: nothing happens.
+          // The person may have moved on meanwhile (opened the reply box and be typing, a guide or a dialog came up):
+          // then the key is spent, never a Send of half-typed words.
+          const wasOpen = boxRef.current.open;
           void (async () => {
             await actionSavesSettled();
             await pickChain.current;
             for (let i = 0; i < 8 && !ready(sendRef.current); i += 1) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            if (ready(sendRef.current)) sendRef.current!.click();
+            if (boxRef.current.open !== wasOpen || !showingRef.current || modalOpen()) return;
+            if (ready(sendRef.current)) press();
           })();
         },
       },
@@ -2573,7 +2586,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         when: (event) => {
           // Only where the button shows (nothing open, or the reply box, route choice or stale guard hides it), and not
           // with its list open: then Q is the menu's type-ahead. A key from a file beside the thread is the file's own.
-          if (!bareKeyAllowed(event) || artifactsOn) return false;
+          if (!bareKeyAllowed(event) || paneCovered) return false;
           const origin = keyOrigin(event);
           if (origin !== 'thread' && origin !== 'row') return false;
           const trigger = reaskRef.current;
@@ -2906,6 +2919,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   /** Write a reply from an open file (the strip's button, R): full screen goes back beside the thread, the box opens. */
   /** A Send went: focus moves to the reply once the thread shows it. */
   const focusSent = useRef(false);
+  /** The next Send was pressed by ⌘Enter (`send` in the thread's key scope), not clicked. */
+  const sentByChord = useRef(false);
   const writeReplyFromFile = () => {
     setFull(false);
     // The box open already (the full-screen composer opens it): its words stay as they are, and focus goes
@@ -3103,6 +3118,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * takes them there, on the device's route.
    */
   const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean } = {}) => {
+    // Whether this Send came from the ⌘Enter key (it draws no focus ring on the head it focuses): read at once.
+    const byChord = sentByChord.current;
+    sentByChord.current = false;
     if (sending) return;
     // A pick was replaced while the person was answering: nothing goes until they have read that.
     if (staleQuestions.length > 0 && !options.despiteReplaced) {
@@ -3327,11 +3345,20 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         const heads = bodyRef.current?.querySelectorAll<HTMLElement>('[data-message-article] [data-fold-head]');
         const head = heads?.[heads.length - 1];
         if (head) {
-          // Focus is kept (it holds the person's place), but no ring: after a keyboard Send (⌘Enter) the browser counts
-          // it :focus-visible, which a click on Send never does. The mark ends with the next blur, so a key that moves
-          // focus onto this head again (Shift+K) draws the ring as it does on any head.
-          head.setAttribute('data-sent-focus', '');
-          head.addEventListener('blur', () => head.removeAttribute('data-sent-focus'), { once: true });
+          // Focus is kept (it holds the person's place). After ⌘Enter the browser counts it :focus-visible, which a
+          // click on Send never does, so that Send alone draws no ring (a Send by Tab and Enter keeps it: the person
+          // is steering by keys). The mark ends with the next key or blur, so Shift+J / Shift+K onto this head draws
+          // the ring as it does on any head, even with focus already there.
+          if (byChord) {
+            head.setAttribute('data-sent-focus', '');
+            const clear = () => {
+              head.removeAttribute('data-sent-focus');
+              head.removeEventListener('blur', clear);
+              head.removeEventListener('keydown', clear);
+            };
+            head.addEventListener('blur', clear);
+            head.addEventListener('keydown', clear);
+          }
           head.focus({ preventScroll: true });
           return;
         }
@@ -4886,7 +4913,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     event.preventDefault();
                     // With the choice open, the shortcut goes to it.
                     if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
-                    else void send();
+                    else {
+                      sentByChord.current = true;
+                      void send();
+                    }
                   } else if (event.key === 'Escape') {
                     event.preventDefault();
                     event.stopPropagation();

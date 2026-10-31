@@ -336,7 +336,7 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function render(t: InboxThread, options: { phone?: boolean } = {}) {
+async function render(t: InboxThread, options: { phone?: boolean; covered?: boolean } = {}) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -348,13 +348,14 @@ async function render(t: InboxThread, options: { phone?: boolean } = {}) {
   return host;
 }
 
-function pane(t: InboxThread, options: { phone?: boolean } = {}) {
+function pane(t: InboxThread, options: { phone?: boolean; covered?: boolean } = {}) {
   return (
     <ThreadPane
       thread={t}
       sent={null}
       lookSeq={6}
       phone={options.phone === true}
+      covered={options.covered === true}
       onQuestions={() => {}}
       onChanged={async () => {}}
       onClose={() => {}}
@@ -525,7 +526,7 @@ describe('Q opens the list (shortcuts/thread.shortcuts.ts openItems)', () => {
     return () => n;
   }
 
-  test.skipIf(!hasDom)('Mod+Enter presses the closed foot\'s Send from the page, a row of the thread and a field; not repeated, not under a menu', async () => {
+  test.skipIf(!hasDom)('Mod+Enter presses the closed foot\'s Send from the page and a field; not repeated, not under a menu', async () => {
     const el = await render(thread(sample()));
     expect(sendButton()).not.toBeNull();
     const sends = countSends();
@@ -544,6 +545,56 @@ describe('Q opens the list (shortcuts/thread.shortcuts.ts openItems)', () => {
     await openList();
     await modEnter(document.activeElement!);
     expect(sends()).toBe(2);
+  });
+
+  test.skipIf(!hasDom)('under a guide, a full-screen file or Artifacts (the pane is covered) Mod+Enter and Q do nothing; a focused link keeps the chord', async () => {
+    const el = await render(thread(sample()), { covered: true });
+    expect(sendButton()).not.toBeNull();
+    const sends = countSends();
+    await modEnter(document.body);
+    await pressKey('q');
+    expect(sends()).toBe(0);
+    expect(list()).toBeNull();
+    // Uncovered, the same thread sends from the page, but never from a link: ⌘Enter there opens it in a tab.
+    act(() => root?.unmount());
+    host?.remove();
+    const uncovered = await render(thread(sample()));
+    const again = countSends();
+    const link = document.createElement('a');
+    link.href = 'https://example.com/';
+    link.textContent = 'docs';
+    uncovered.querySelector('section')!.appendChild(link);
+    await act(async () => link.focus());
+    await modEnter(link);
+    expect(again()).toBe(0);
+    await modEnter(document.body);
+    expect(again()).toBe(1);
+    void el;
+  });
+
+  test.skipIf(!hasDom)('with the reply box open, Mod+Enter from a question\'s choice sends the box\'s Send once', async () => {
+    await render(thread(sample()));
+    await pressKey('r');
+    const box = document.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Reply to"]');
+    expect(box).not.toBeNull();
+    let clicks = 0;
+    const count = (e: Event) => {
+      if ((e.target as HTMLElement).closest('button.ib-pri')) {
+        clicks += 1;
+        e.stopImmediatePropagation();
+      }
+    };
+    document.addEventListener('click', count, true);
+    try {
+      const choice = document.createElement('input');
+      choice.type = 'radio';
+      document.querySelector('section')!.appendChild(choice);
+      await act(async () => choice.focus());
+      await modEnter(choice);
+      expect(clicks).toBe(1);
+    } finally {
+      document.removeEventListener('click', count, true);
+    }
   });
 
   test.skipIf(!hasDom)('Mod+Enter does nothing where no Send shows', async () => {
