@@ -795,10 +795,12 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of, one per line. PR 1: Claude Code only.
+ * session of, one per line: Claude Code (`claude --bg`), OpenCode 1.18+
+ * (`opencode serve`, one per launch: packages/server/inbox-launch-opencode.ts).
  */
 export type InboxLaunchAgent =
-  | "claude-code";
+  | "claude-code"
+  | "opencode";
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {
