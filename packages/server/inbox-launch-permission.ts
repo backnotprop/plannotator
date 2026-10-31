@@ -47,6 +47,7 @@ import { readFileSync } from "node:fs";
 import { lstat, readlink, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import {
+  INBOX_PERMISSION_ALLOW_ONCE,
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
@@ -407,7 +408,8 @@ export function createLaunchPermissions(options: {
         // Claude Code went on without our answer (a host read since the question): the person answered in Terminal,
         // unless the host takes no allow from here (its dialog may have blocked the call by itself: not known).
         if (fresh && state !== null && state !== "absent" && state.status !== "waiting" && state.state !== "stopped" && state.state !== "done") {
-          const terminalOnly = store.questionsOf(messageId)[0]?.choices.some((c) => c.label === INBOX_PERMISSION_TERMINAL) === true;
+          const offered = store.questionsOf(messageId)[0]?.choices.map((c) => c.label) ?? [];
+          const terminalOnly = offered.includes(INBOX_PERMISSION_TERMINAL) && !offered.includes(INBOX_PERMISSION_ALLOW_ONCE);
           withdraw(messageId, terminalOnly ? INBOX_PERMISSION_NO_LONGER_WAITING : INBOX_PERMISSION_ANSWERED_IN_TERMINAL);
           continue;
         }

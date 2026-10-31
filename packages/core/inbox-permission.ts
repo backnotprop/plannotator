@@ -403,6 +403,8 @@ export interface InboxPermissionOptions {
   full?: boolean;
   /** False when the host takes only a deny from here (its own dialog keeps the approval): Deny, or hand it to Terminal. */
   allowHere?: boolean;
+  /** The host can take the prompt in its own dialog: Approve in Terminal is offered too (an allow from here may not count). */
+  terminal?: boolean;
   /** One plain line from the host the card shows by the answers (why it is approved only in Terminal), or null. */
   note?: string | null;
   /** One plain line from the host the record shows after Approve in Terminal (how long its dialog waits), or null. */
@@ -476,9 +478,10 @@ export function inboxPermissionQuestion(event: InboxPermissionEvent, options: { 
 /**
  * The choices a prompt's question must have, in order: Allow once, the
  * session choice when there is one, Deny, then the mode switches (Auto mode
- * always, Full permissions only when the session can switch to it). Deny
- * and Approve in Terminal when the host takes no allow from here
- * (`allowHere: false`).
+ * always, Full permissions only when the session can switch to it), then
+ * Approve in Terminal when the host can take it in its own dialog
+ * (`terminal`). Deny and Approve in Terminal alone when the host takes no
+ * allow from here (`allowHere: false`).
  */
 export function inboxPermissionChoices(event: InboxPermissionEvent, options: InboxPermissionOptions = {}): string[] {
   if (options.allowHere === false) return [INBOX_PERMISSION_DENY, INBOX_PERMISSION_TERMINAL];
@@ -488,6 +491,7 @@ export function inboxPermissionChoices(event: InboxPermissionEvent, options: Inb
     ...(session ? [session.label] : []),
     INBOX_PERMISSION_DENY,
     ...(options.full ? [] : [INBOX_PERMISSION_AUTO, ...(options.fullPermissions ? [INBOX_PERMISSION_FULL] : [])]),
+    ...(options.terminal ? [INBOX_PERMISSION_TERMINAL] : []),
   ];
 }
 
@@ -597,6 +601,7 @@ export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: Inbo
     const allows = [INBOX_PERMISSION_TERMINAL, INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_FULL, inboxPermissionSessionChoice(event, options.shownPath)?.label];
     return picked !== undefined && allows.includes(picked) ? { choice: "terminal", reason: null } : { choice: "deny", reason };
   }
+  if (picked === INBOX_PERMISSION_TERMINAL && options.terminal) return { choice: "terminal", reason: null };
   if (picked === INBOX_PERMISSION_ALLOW_ONCE) return { choice: "once", reason: null };
   if (picked === INBOX_PERMISSION_AUTO) return { choice: options.full ? "once" : "auto", reason: null };
   if (picked === INBOX_PERMISSION_FULL) return { choice: options.fullPermissions ? "full" : "once", reason: null };

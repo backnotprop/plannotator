@@ -100,3 +100,5 @@
 
 /* After Approve in Terminal: the host's line, and on a phone Copy attach command beside it. */
 .pc-term { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+/* Approve in Terminal beside the allows: a quiet way to Claude's own dialog. */
+.pn-inbox .pc-link.pc-quiet { font-weight: 400; color: var(--muted-foreground); }
