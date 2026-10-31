@@ -1,8 +1,9 @@
 /**
  * The agent-host seam (inbox-launch-host.ts), on a real launch engine over a temp data dir. What each test
  * guards: a second agent registered as a `LaunchHost` drives the whole shared flow with no engine change
- * (To offers it, Send starts it and addresses the thread to it, the run line follows its own live state, a
- * reply after Stop restarts it once, Stop calls its stop), so Claude Code is not wired into the engine; and a
+ * (To offers it, Send starts it and addresses the thread to it, the run line follows its own live state, its
+ * permission question is written as its own agent, a reply after Stop restarts it once, Stop calls its stop
+ * and withdraws through its transport, Delete calls its remove), so Claude Code is not wired into the engine; and a
  * record whose agent has no host here (after a downgrade) shows no line, is skipped by the sweep and answers
  * `launch_not_found`, never a crash.
  *
@@ -10,14 +11,15 @@
  * idles by hand. Claude Code's host is there too and stays out of the way: no `claude` is on the sandbox PATH.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InboxLaunchAgent, InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import type { InboxLaunchAgent, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
 import type { LaunchHost, LaunchLive } from "./inbox-launch-host";
+import { createLaunchQuestions } from "./inbox-launch-permission";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -36,9 +38,10 @@ function setEnv(name: string, value: string) {
 /** Not an agent the product knows (`InboxLaunchAgent` is Claude Code's alone until the next agent widens it). */
 const FAKE = "fake-agent" as InboxLaunchAgent;
 
-/** An in-memory agent: `start` makes a session that is not connected; the test connects it (`connect`), and works and idles it. */
+/** An in-memory agent: `start` makes a session that is not connected; the test works and idles it (`poll`), and asks its permission questions (`ask`). */
 function fakeLaunchHost() {
   const calls: string[] = [];
+  let questions: ReturnType<typeof createLaunchQuestions> | null = null;
   const sessions = new Map<string, { ref: string; live: LaunchLive | null; state: "running" | "stopped" }>();
   const byRef = (ref: string) => [...sessions.values()].find((s) => s.ref === ref);
   const host: LaunchHost = {
@@ -75,14 +78,29 @@ function fakeLaunchHost() {
     purge: async (folder) => (calls.push(`purge ${folder}`), { exitCode: 0, text: "" }),
     attach: (launch) => (launch.session_ref ? `fake attach ${launch.session_ref}` : null),
     terminal: (launch) => `fake attach ${launch.session_ref}`,
-    permissions: () => ({ sweep() {}, withdrawAll() {} }),
+    // Pushed prompts: no hook route; its questions are written by the shared question code.
+    permissions(ctx) {
+      questions = createLaunchQuestions({ store: ctx.store, name: "Fake Agent", displayFolder: ctx.displayFolder, onChange: ctx.onChange, log: () => {} });
+      return {
+        sweep() {},
+        withdrawAll(root) {
+          calls.push(`withdrawAll ${root.launch!.session_ref}`);
+          questions!.withdrawAll(root);
+        },
+      };
+    },
   };
   /** The session polls: live, busy or idle; each poll shows new life. */
   const poll = (session: string, busy: boolean, at: number) => {
     const s = sessions.get(session)!;
     s.live = { busy, busySince: busy ? (s.live?.busySince ?? at) : null, polls: (s.live?.polls ?? 0) + 1 };
   };
-  return { host, calls, poll };
+  /** The session asks to run a command: the question lands in the launch's thread. */
+  const ask = (root: InboxMessage, session: string) => {
+    const event = { session_id: session, tool_name: "Bash", tool_input: { command: "ls" }, cwd: root.launch!.folder, permission_suggestions: [], permission_mode: null };
+    return questions!.ask(root, event, "req-1", questions!.questionFor(root, event, {}))!;
+  };
+  return { host, calls, poll, ask };
 }
 
 function setup() {
@@ -132,11 +150,11 @@ async function until(check: () => boolean) {
 }
 
 describe("a second agent behind LaunchHost", () => {
-  test("drives the shared flow: offered, started, its line, Stop, and a reply restarts it once", async () => {
+  test("drives the shared flow: offered, started, its line, its question, Stop, a reply restarts it once, Delete", async () => {
     const { store, clock, project, fake, launch, post } = setup();
 
     // To offers it (Claude Code is not on the sandbox PATH).
-    expect((await launch.composeBlock())!.agents).toEqual([{ agent: FAKE, name: "Fake Agent" }]);
+    expect((await launch.composeBlock())!.agents).toEqual([{ agent: FAKE, name: "Fake Agent", scratch_trusted: true }]);
 
     // Send: the thread is addressed to the agent's placeholder, then its own session.
     const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
@@ -158,10 +176,16 @@ describe("a second agent behind LaunchHost", () => {
     fake.poll("session-f1", false, clock.now);
     expect(await launch.runOf(root.id)).toBeNull();
 
-    // Stop goes to its host.
+    // Its permission question is written by the shared code as its own agent, never as Claude Code.
+    const asked = fake.ask(store.message(root.id)!, "session-f1");
+    expect(store.message(asked)!.author).toMatchObject({ kind: "agent", host: FAKE, name: "Fake Agent" });
+    expect(store.questionsOf(asked)[0]!.state).toBe("open");
+
+    // Stop goes to its host, and withdraws the open question through its transport.
     const stopped = (await (await post(prepared.launch.id, "stop"))!.json()) as { run: { state: string; stopped_by_person: boolean } };
-    expect(fake.calls.at(-1)).toBe("stop f1");
+    expect(fake.calls.slice(-2)).toEqual(["stop f1", "withdrawAll f1"]);
     expect(stopped.run).toMatchObject({ state: "stopped", stopped_by_person: true });
+    expect(store.questionsOf(asked)[0]!.state).toBe("superseded");
 
     // A reply to the stopped session restarts it, once per reply.
     clock.now += 1_000;
@@ -170,6 +194,25 @@ describe("a second agent behind LaunchHost", () => {
     expect(await launch.runOf(root.id)).toMatchObject({ state: "starting", again: true });
     launch.sweep(true);
     expect(fake.calls.filter((call) => call === "resume f1")).toHaveLength(1);
+
+    // Delete: stopped and removed by its host, withdrawn through its transport; a project folder is never purged.
+    const before = fake.calls.length;
+    expect(await (await post(prepared.launch.id, "delete"))!.json()).toEqual({ ok: true });
+    expect(fake.calls.slice(before)).toEqual(["stop f1", "remove f1", "withdrawAll f1"]);
+    expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
+  });
+
+  test("a scratch launch's Delete purges its folder through its host", async () => {
+    const { store, fake, launch, post } = setup();
+    const target = launch.target({ launch: { agent: FAKE, scratch: true } })!;
+    const prepared = await launch.prepare(target, { name: "Try a thing", body: "Try a thing.", resolveProject: async (folder) => store.ensureProject({ name: "try-a-thing", root: folder }) });
+    const root = store.startPersonThread({ project_id: prepared.project.id, body: "Try a thing.", to: prepared.to, idempotency_key: "send-scratch", thread_name: "Try a thing", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+
+    expect(await (await post(prepared.launch.id, "delete"))!.json()).toEqual({ ok: true, scratch_removed: true });
+    expect(fake.calls).toEqual(["start Try a thing", "stop f1", "remove f1", "withdrawAll f1", `purge ${prepared.launch.folder}`]);
+    expect(existsSync(prepared.launch.folder)).toBe(false);
   });
 
   test("a launch whose agent has no host here: no line, skipped by the sweep, launch_not_found on its routes", async () => {

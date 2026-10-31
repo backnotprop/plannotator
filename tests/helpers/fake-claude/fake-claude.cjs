@@ -68,8 +68,9 @@
  * the settings file's PermissionRequest command (`/bin/sh -c`, matcher `*`)
  * with the real stdin JSON (bg-perm-test/RESULTS.md) and the settings' env.
  * Allow runs the tool, deny goes on without it; no output leaves it blocked
- * on the built-in dialog until `localAnswer` is set: that is the person
- * answering in `claude attach`, which ends the hook (SIGTERM) and goes on.
+ * on the built-in dialog until `localAnswer` names the session: that is the
+ * person answering in `claude attach`, which ends the hook (SIGTERM) and goes
+ * on. Only that session's dialog: another session still on one stays there.
  * Each prompt is one line of permissions.jsonl: the tool, the hook's stdout
  * (parsed), its exit code and time, and the outcome (ran, denied, local, autoblocked).
  */
@@ -339,6 +340,8 @@ async function session(sessionId) {
   });
   const post = (p, body) => fetch(base + p, { method: "POST", headers, body: JSON.stringify({ session: sessionId, host: "claude-code", ...body }) });
   const taken = new Set();
+  /** The person answered this session's dialog in `claude attach` (`localAnswer` is its session id). */
+  const answeredLocally = () => config().localAnswer === sessionId;
 
   /** One permission prompt, as Claude Code plays it: the hook, then allow, deny, or blocked until answered locally. */
   const prompt = async (spec) => {
@@ -383,7 +386,7 @@ async function session(sessionId) {
       void exited.then(() => (done = true));
       while (!done && !stopped) {
         // A safety check's dialog shows only after the hook: nothing to answer in Terminal meanwhile.
-        if (config().localAnswer && !personOnly) {
+        if (answeredLocally() && !personOnly) {
           // Answered in `claude attach`: Claude Code closes the dialog and ends the hook.
           local = true;
           child.kill("SIGTERM");
@@ -415,8 +418,8 @@ async function session(sessionId) {
     // No decision (or an allow it ignored): the built-in dialog stays until someone answers it locally;
     // a safety check's dialog, up only now, blocks the call on its own after a while.
     const blockAt = spec.safetyCheck ? Date.now() + (config().safetyBlockMs ?? 120_000) : Infinity;
-    while (outcome === "blocked" && !stopped && !config().localAnswer && Date.now() < blockAt) await sleep(150);
-    if (outcome === "blocked") outcome = config().localAnswer ? "local" : "autoblocked";
+    while (outcome === "blocked" && !stopped && !answeredLocally() && Date.now() < blockAt) await sleep(150);
+    if (outcome === "blocked") outcome = answeredLocally() ? "local" : "autoblocked";
     fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, mode, modeIgnored, ignoredAllow, ms: Date.now() - started })}\n`);
     updateAgent(sessionId, { status: "busy", waitingFor: null });
     return { tool: spec.tool_name, outcome };
