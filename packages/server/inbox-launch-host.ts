@@ -6,8 +6,9 @@
  *
  *   inbox-launch-claude.ts             Claude Code (`claude --bg`, its settings file, trust)
  *   inbox-launch-claude-permission.ts  Claude Code's permission hook, key and leases
+ *   inbox-launch-pi.ts                 Pi (`pi --mode rpc`, one process per session, owned by the Inbox)
  *
- * The engine holds `{ "claude-code": claude }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, pi }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
@@ -126,8 +127,17 @@ export interface LaunchHost {
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */
   live(session: string): LaunchLive | null;
+  /**
+   * `resume` starts a new process with the person's login env, as `start` does (Pi): the engine reads the login
+   * shell for it and passes `login`. Absent (Claude Code): a restart reads no shell.
+   */
+  readonly loginOnResume?: boolean;
   /** Start a session that is not live again (a reply to it, Try again). `failure` when it did not take. */
-  resume(launch: InboxLaunchRecord): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null }>;
+  resume(launch: InboxLaunchRecord, input?: { login: LaunchEnv }): Promise<LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null }>;
+  /** Words the run line adds when the session stopped without the person's Stop (Pi: it lives only while the Inbox runs). */
+  readonly stoppedNote?: string;
+  /** The Inbox stops: the sessions it owns end (Pi). Absent: the agent's own host keeps them. */
+  dispose?(): void;
   stop(ref: string): Promise<LaunchHostResult>;
   /** Delete, after stop: the host forgets the session. */
   remove(ref: string): Promise<LaunchHostResult>;
