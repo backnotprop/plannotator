@@ -1,8 +1,10 @@
 /**
  * The agents in a list row. A wide row (approval "list-rows-mail-icons",
- * 2026-10-30): one bare mark per agent host after the project, first to join
- * first; a host with two or more sessions is one mark and "×N"; past three
- * hosts, two marks and "+N" counting the sessions not drawn. A three-line or
+ * 2026-10-30): one bare mark per agent host before the project (the owner,
+ * 2026-10-31), first to join first; a host with two or more sessions is one
+ * mark and "×N"; past three hosts, two marks and "+N" counting the sessions
+ * not drawn; the project hugs its own row's marks, 6px after them, no width
+ * reserved (pixels: tests/e2e/inbox-row-badges.spec.ts). A three-line or
  * phone row (approval "inbox-list-row-v2", 2026-10-30): the agents' tiles
  * drawn before the project, one per agent, at most two, then a "+N" tile
  * counting the other agents; the project on one line that never wraps, cut
@@ -29,7 +31,6 @@ import { loadCascade } from './cssCascade.testing';
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-
 const CSS = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
 
 const session = (host: string | null, n: number): InboxParticipant => ({ host, session: `ses_${host ?? 'none'}_${n}` });
@@ -191,20 +192,26 @@ describe.if(hasDom)("a wide row's agents", () => {
         for (const name of ['Claude Code', 'Codex', 'OpenCode', 'Pi']) expect(text).not.toContain(name);
       }
       expect(r.querySelector('[title]')).toBeNull();
-      // The marks sit after the project, never in a column of their own.
+      // The marks share the project's cell, never a column of their own; the project is first in the DOM (read
+      // first), `order` draws the marks first.
       expect(r.querySelector('.ib-from > .ib-p + .ib-ags')).not.toBeNull();
       expect(r.querySelectorAll('.ib-ags').length).toBe(1);
     });
+
+    test(`${shape}: the project is read first and the marks are drawn first`, () => {
+      const el = render(shape);
+      const from = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from`)!;
+      // Read: the project, then the agents (the DOM). Drawn: the marks, then the project (`order`; the pixels, 6px
+      // apart on every row, are proved in tests/e2e/inbox-row-badges.spec.ts and inbox.spec.ts).
+      expect([...from.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-p', 'ib-ags']);
+      expect(loadCascade(CSS).resolved(from.querySelector<HTMLElement>('.ib-ags')!, 'order')).toBe('-1');
+    });
   }
 
-  test("one project's wide list: the marks alone, a run that can wrap inside its column, never one line forced over the title", () => {
+  test("one project's wide list: the marks alone, no project", () => {
     const el = render('wide', true);
-    const marks = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from > .ib-ags`)!;
-    expect(marks.parentElement!.querySelector('.ib-p')).toBeNull();
-    const cascade = loadCascade(CSS);
-    expect(cascade.resolved(marks, 'flex-wrap')).toBe('wrap');
-    expect(cascade.resolved(marks, 'max-width')).toBe('100%');
-    expect(cascade.resolved(marks, 'height')).toBe('auto');
+    const from = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from`)!;
+    expect([...from.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-ags']);
   });
 });
 

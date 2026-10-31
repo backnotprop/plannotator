@@ -132,8 +132,8 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
 
 /**
  * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
- * (Lines). The row itself draws its agents beside the project: after it on a wide row (`RowAgents`), before it on
- * a three-line or phone row (`RowAgentTiles`).
+ * (Lines). The row itself draws its agents before the project: bare marks on a wide row (`RowAgents`), tiles on a
+ * three-line or phone row (`RowAgentTiles`).
  */
 function RowMark({ row }: { row: InboxListRow }) {
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
@@ -242,9 +242,13 @@ function previewOf(row: InboxListRow): string | null {
 }
 
 /**
- * A wide row's first cell (approval "list-rows-mail-icons"): the project, then the agents' marks right after it.
- * The project is left out in one project's list, which leaves the marks alone. The cell is one line: the project
- * gives way with "…" (its tooltip shows it whole), the marks never do.
+ * A wide row's first cell (approval "list-rows-mail-icons"; the owner, 2026-10-31: the marks first, the project
+ * hugging them): the agents' marks, a 6 px gap, then the project, as on a three-line row. The project is left out in
+ * one project's list, which leaves the marks alone, and the title follows them 6 px later. The cell is one line: the
+ * project gives way with "…" (its tooltip shows it whole), the marks never do.
+ *
+ * The project comes first in the DOM, so a screen reader reads where, then who, as on a three-line row
+ * (`LeadLine`); CSS (`order`) draws the marks first.
  */
 function FromLine({ row, project, filtered }: { row: InboxListRow; project: string; filtered: boolean }) {
   return (
@@ -508,7 +512,7 @@ function fitCountsColumn(list: HTMLElement, pinColumn: boolean): void {
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
  * one-line row; its cells as approval "list-rows-mail-icons", 2026-10-30, lays
- * them out). Six columns: the project with the agents' marks after it, the
+ * them out). Six columns: the agents' marks and the project after them, the
  * title cell (the thread's name in bold when unread, then the grey subject),
  * then right-aligned the words, the badge, the open counts (the action pill,
  * `?N`) and the time, each in a column of its own so they line up down the
@@ -831,7 +835,9 @@ export function InboxList(props: InboxListProps) {
   // Two-line rows in a list too narrow for the wide row's columns: beside an
   // open thread for every list (the column is 380px unless its edge was
   // dragged past the wide rows' width), and in the full list for every
-  // project (one project's wide row fits any width).
+  // project. One project's list keeps the wide row in a narrower list: its
+  // marks' track wraps the run between marks and the title keeps at least
+  // 24px, so its columns hold at the window's narrowest desktop widths.
   const twoLine = narrowList && (props.narrow || !props.filtered);
   // The full words on a wide row need a list of at least 1150px (FULL_WORDS_MIN_LIST_WIDTH); a narrower wide row
   // keeps the short forms and the bare triangles (option A).
