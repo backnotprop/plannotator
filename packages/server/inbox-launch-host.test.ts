@@ -116,7 +116,7 @@ function setup() {
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
-    hosts: () => ({ [FAKE]: fake.host }),
+    hosts: () => [fake.host],
     now: () => clock.now,
   });
   restore.push(() => launch.stop());

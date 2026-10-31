@@ -142,8 +142,8 @@ export function createInboxLaunch(options: {
   onChange: () => void;
   /** The argv that runs this Plannotator (the permission hook's command): the Inbox's own `selfCommand`. */
   selfCommand: readonly string[];
-  /** More agents beside Claude Code, by agent id, made with the engine's context (a test's fake host). */
-  hosts?: (context: LaunchHostContext) => Record<string, LaunchHost>;
+  /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
+  hosts?: (context: LaunchHostContext) => LaunchHost[];
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -281,7 +281,6 @@ export function createInboxLaunch(options: {
 
   // ── The hosts: one per agent ──
   const context: LaunchHostContext = {
-    store,
     dataDir: options.dataDir,
     homeDir: options.homeDir,
     platform: options.platform,
@@ -294,11 +293,11 @@ export function createInboxLaunch(options: {
     startLog,
     displayFolder: options.displayFolder,
     bridge: options.live,
-    now,
     log,
   };
   const claude = createClaudeLaunchHost(context);
-  const hosts: Record<string, LaunchHost> = { "claude-code": claude, ...options.hosts?.(context) };
+  /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
+  const hosts: Record<string, LaunchHost> = Object.fromEntries([claude, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
   const hostList = Object.values(hosts);
   /** The host of a launch's agent; null for an agent with no host here. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);

@@ -51,9 +51,9 @@ import {
   type InboxPermissionOptions,
   type InboxPermissionQuestion,
 } from "@plannotator/core/inbox-permission";
-import type { InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, type InboxLaunchRecord, type InboxMessage } from "@plannotator/core/inbox-types";
 import type { LaunchPermissionContext } from "./inbox-launch-host";
-import { createLaunchQuestions, openPermissionQuestions, openPermissionSince, type PermissionAnswer, type PermissionTarget } from "./inbox-launch-permission";
+import { createLaunchQuestions, openPermissionQuestions, type PermissionAnswer, type PermissionTarget } from "./inbox-launch-permission";
 
 export const PERMISSION_HOLD_MS = 25_000;
 export const PERMISSION_LEASE_MS = 60_000;
@@ -63,7 +63,8 @@ const HOST_SETTLE_MS = 5_000;
 export const ANSWER_SETTLE_MS = 3_000;
 const CHECK_EVERY_MS = 200;
 
-const AGENT_NAME = "Claude Code";
+/** Claude Code's name: To's row, a refusal, its questions' author. */
+export const CLAUDE_NAME = INBOX_HOST_NAMES["claude-code"] ?? "Claude Code";
 
 /** Claude Code's hook timeout for the permission hook: four days, as the plugin's ExitPlanMode hook. */
 const PERMISSION_HOOK_TIMEOUT_S = 345_600;
@@ -126,7 +127,7 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
   const leases = new Map<string, Lease>();
   /** The latest answer handed to a hook, per launch. */
   const answeredAt = new Map<string, number>();
-  const questions = createLaunchQuestions({ store, name: AGENT_NAME, displayFolder: options.displayFolder, onChange: options.onChange, log, forget: (messageId) => leases.delete(messageId) });
+  const questions = createLaunchQuestions({ store, name: CLAUDE_NAME, displayFolder: options.displayFolder, onChange: options.onChange, log, forget: (messageId) => leases.delete(messageId) });
 
   /** The key in the launch's settings file; null when there is no such file. */
   const keyOf = (launchId: string): string | null => {
@@ -222,11 +223,6 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
       return json({ status: "waiting", message_id: messageId } satisfies PermissionAnswer);
     },
 
-    /** When the oldest open permission question of a launched thread was asked, or null (the run line's waiting_answer). */
-    openSince(root: InboxMessage): number | null {
-      return openPermissionSince(store, root.thread_id);
-    },
-
     /** Stop or Delete: every open question of this launch is withdrawn at once. */
     withdrawAll: questions.withdrawAll,
 
@@ -294,5 +290,3 @@ export function createLaunchPermissions(options: LaunchPermissionContext & { hol
     },
   };
 }
-
-export type LaunchPermissions = ReturnType<typeof createLaunchPermissions>;

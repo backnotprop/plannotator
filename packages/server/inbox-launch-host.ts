@@ -43,7 +43,6 @@ export type LaunchSessions = (ref: string) => InboxRunHostState;
 
 /** What the engine gives a host when it makes it (one per Inbox). */
 export interface LaunchHostContext {
-  store: InboxStore;
   dataDir: string;
   homeDir: string;
   platform: NodeJS.Platform;
@@ -65,7 +64,6 @@ export interface LaunchHostContext {
   displayFolder: (path: string) => string;
   /** The mod's bridge poll (createInboxLaunch's `live`), for a host whose sessions connect through the mod. */
   bridge: { runStateOf(session: string): LaunchLive | null };
-  now: () => number;
   log: (line: string) => void;
 }
 

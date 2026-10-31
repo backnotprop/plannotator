@@ -30,7 +30,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
-import { INBOX_HOST_NAMES, type InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { readAgentFile } from "./agent-files";
@@ -44,7 +44,7 @@ import {
   type AgentEnvironment,
   type AgentRunResult,
 } from "./inbox-agents";
-import { createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
+import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult } from "./inbox-launch-host";
 
@@ -275,7 +275,6 @@ export type ClaudeHost = ReturnType<typeof createClaudeHost>;
 // ── The launch host ──
 
 const CLAUDE = "claude-code" as const;
-const CLAUDE_NAME = INBOX_HOST_NAMES[CLAUDE] ?? "Claude Code";
 /** The agent's own Inbox call never prompts, whatever the person's permission mode. */
 const INBOX_TOOL_PERMISSION = `mcp__plannotator__${INBOX_TOOL_NAME}`;
 
@@ -440,5 +439,3 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     },
   } satisfies LaunchHost & { settingsState(): unknown };
 }
-
-export type ClaudeLaunchHost = ReturnType<typeof createClaudeLaunchHost>;

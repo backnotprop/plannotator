@@ -235,5 +235,3 @@ export function createLaunchQuestions(options: {
     },
   };
 }
-
-export type LaunchQuestions = ReturnType<typeof createLaunchQuestions>;
