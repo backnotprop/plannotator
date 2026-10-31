@@ -166,6 +166,15 @@ describe("off", () => {
     expect(w.codex.starts()).toBe(0);
   });
 
+  test("a save that didn't reach config.json says so", async () => {
+    const w = await world();
+    // Not valid JSON: never written over.
+    writeFileSync(join(w.dataDir, "config.json"), "{ broken");
+    const answer = await w.json("/api/inbox/settings", { voice: { on: true } });
+    expect(answer.status).toBe(500);
+    expect((await body(answer)).code).toBe("config_not_saved");
+  });
+
   test("settings refuse anything but the three fields, and save nothing", async () => {
     const w = await world();
     expect((await w.json("/api/inbox/settings", { voice: { on: "yes" } })).status).toBe(422);
@@ -236,6 +245,7 @@ describe("through Codex's ChatGPT login", () => {
     ["a challenge marked by Cloudflare on a 200", () => new Response("<html></html>", { status: 200, headers: { "cf-mitigated": "challenge", "Content-Type": "text/html" } })],
     ["a 200 that is a page, not JSON", () => new Response("<html></html>", { status: 200, headers: { "Content-Type": "text/html" } })],
     ["a 429", () => new Response("{}", { status: 429, headers: { "Content-Type": "application/json" } })],
+    ["a 401 marked by Cloudflare", () => new Response("<html></html>", { status: 401, headers: { "cf-mitigated": "challenge", "Content-Type": "text/html" } })],
     ["a redirect", () => new Response("", { status: 302, headers: { Location: "https://example.com/" } })],
   ])("%s is refused once, with no retry and no refresh", async (_name, answer) => {
     const chatgpt = fakeEndpoint([answer]);
@@ -343,6 +353,17 @@ describe("through Codex's ChatGPT login", () => {
 });
 
 describe("the status Settings and the mic read", () => {
+  test("a `codex` that floods stdout with no newline answers unknown, promptly, and the Inbox stays up", async () => {
+    const w = await world();
+    await w.turnOn();
+    writeFileSync(join(w.codex.bin, "codex"), "#!/bin/sh\nexec tr -d '\\n' < /dev/zero\n");
+    const began = Date.now();
+    const answer = await w.status("?fresh=1");
+    expect(answer.state).toBe("unknown");
+    expect(Date.now() - began).toBeLessThan(5_000);
+    expect((await fetch(`${w.base}/api/inbox/health`)).status).toBe(200);
+  }, 15_000);
+
   test("comes from account/read: the type and the plan, never a token or the email, and never getAuthStatus", async () => {
     const w = await world();
     await w.turnOn();
@@ -506,6 +527,61 @@ describe("over the tailnet", () => {
     expect(await response.json()).toEqual({ show: false });
     expect(w.codex.starts()).toBe(0);
     expect(w.saved().inboxVoiceIntro?.shownAt).toBeUndefined();
+  });
+
+  describe("a login the owner allowed, who isn't the owner", () => {
+    const GUEST = "guest@example.com";
+    async function guestWorld(options: WorldOptions = {}) {
+      const w = await tailnetWorld({ ...options, config: { ...options.config, inboxTailscaleAllow: [GUEST] } });
+      const asGuest = (path: string, init: RequestInit = {}) => w.through(path, { ...init, headers: { "Tailscale-User-Login": GUEST, ...init.headers } });
+      const post = (path: string, payload: Record<string, unknown>) =>
+        asGuest(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.session, ...payload }) });
+      return { ...w, asGuest, post };
+    }
+
+    test("gets no use of the owner's login or key: no route, no Codex, nothing upstream", async () => {
+      const chatgpt = fakeEndpoint([ok("Never.")]);
+      const w = await guestWorld({ chatgpt });
+      await w.turnOn();
+      const started = w.codex.starts();
+      const answers = [
+        await w.asGuest(`/api/inbox/voice/transcribe?serverSession=${w.session}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav() }),
+        await w.asGuest("/api/inbox/voice/status?fresh=1"),
+        await w.post("/api/inbox/voice/intro", {}),
+        await w.post("/api/inbox/voice/key", { key: KEY }),
+      ];
+      for (const answer of answers) {
+        expect(answer.status).toBe(403);
+        expect((await body(answer)).code).toBe("owner_only");
+      }
+      expect(w.codex.starts()).toBe(started);
+      expect(chatgpt.seen).toHaveLength(0);
+    });
+
+    test("can't change voice, and a mixed save writes nothing", async () => {
+      const w = await guestWorld();
+      await w.turnOn();
+      for (const voice of [{ on: false }, { engine: "api" }, { phones_only: true }]) {
+        const answer = await w.post("/api/inbox/settings", { voice });
+        expect(answer.status).toBe(403);
+        expect((await body(answer)).code).toBe("owner_only");
+      }
+      expect((await w.post("/api/inbox/settings", { text_size: 15, voice: { on: false } })).status).toBe(403);
+      expect((await w.settings()).voice).toMatchObject({ on: true, engine: "codex", phones_only: false });
+      expect(((await (await fetch(`${w.base}/api/inbox/settings`)).json()) as { text_size: number }).text_size).not.toBe(15);
+    });
+
+    test("is told voice is off here, with no sign of the key, and the owner isn't", async () => {
+      const w = await guestWorld();
+      await w.turnOn();
+      expect((await w.json("/api/inbox/voice/key", { key: KEY })).status).toBe(200);
+      const seen = (await (await w.asGuest("/api/inbox/settings")).json()) as { voice: Record<string, unknown> };
+      expect(seen.voice).toMatchObject({ on: false, guest: true, intro_due: false, key: { source: null, last4: null } });
+      expect(JSON.stringify(seen)).not.toContain(KEY.slice(-4));
+      const owner = (await (await w.through("/api/inbox/settings")).json()) as { voice: Record<string, unknown> };
+      expect(owner.voice).toMatchObject({ on: true, guest: false });
+      expect((await w.through(`/api/inbox/voice/status`)).status).toBe(200);
+    });
   });
 
   test("the window's worklet is served from this origin, as a script", async () => {

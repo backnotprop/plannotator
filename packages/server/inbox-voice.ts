@@ -54,6 +54,8 @@ const UPSTREAM_MS = 120_000;
 const CODEX_MS = 10_000;
 /** How long Settings and the mic share one `account/read`. */
 const STATUS_TTL_MS = 30_000;
+/** Voice asks Codex for an account and a token, a few KB each: a longer line is a broken `codex`. */
+const CODEX_LINE_MAX = 1024 * 1024;
 
 /** The worklet that hands the window its samples. Served from this origin: the window's CSP refuses `blob:` and `data:` here. */
 export const VOICE_WORKLET_SOURCE = `class PlannotatorVoiceTap extends AudioWorkletProcessor {
@@ -116,7 +118,8 @@ export interface InboxVoiceOptions {
 }
 
 export interface InboxVoice {
-  settings(via: "local" | "tailnet"): InboxVoiceSettings;
+  /** `guest`: a tailnet login other than the owner's, for whom voice is off and the key unsaid. */
+  settings(via: "local" | "tailnet", guest?: boolean): InboxVoiceSettings;
   /** `validateOnly`: check `input` and write nothing. */
   save(input: unknown, validateOnly?: boolean): void;
   route(req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null>;
@@ -203,7 +206,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
   const withCodex = async <T>(job: (codex: CodexAppServerProcess) => Promise<T>, signal?: AbortSignal): Promise<T | "missing"> => {
     const path = codexCliCandidates(environment, options.extraClis)[0];
     if (!path) return "missing";
-    const codex = new CodexAppServerProcess();
+    const codex = new CodexAppServerProcess(CODEX_LINE_MAX);
     const kill = () => codex.kill();
     running.add(codex);
     signal?.addEventListener("abort", kill, { once: true });
@@ -311,14 +314,14 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
       if (!first.token) return { ok: false, code: "voice_not_ready", reason: first.state };
       let sent = await post(chatgptUrl, first.token, clipForm(clip), signal);
       // The one automatic retry: Codex refreshes the login, and the same clip goes once more.
-      if (sent instanceof Response && sent.status === 401) {
+      if (sent instanceof Response && sent.status === 401 && !sent.headers.has("cf-mitigated")) {
         const second = await auth(true);
         if (second.token) sent = await post(chatgptUrl, second.token, clipForm(clip), signal);
       }
       if (!(sent instanceof Response)) return sent;
-      if (sent.status === 401) return { ok: false, code: "voice_expired" };
       // Cloudflare's mark, whatever the status: stop here.
       if (sent.headers.has("cf-mitigated")) return { ok: false, code: "voice_refused" };
+      if (sent.status === 401) return { ok: false, code: "voice_expired" };
       if (sent.status >= 500) return { ok: false, code: "voice_unreachable" };
       if (!sent.ok || !(sent.headers.get("content-type") ?? "").includes("json")) return { ok: false, code: "voice_refused" };
       return words(sent);
@@ -353,15 +356,16 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     json({ error: "Voice did not transcribe this clip.", code, engine: engine(), ...(reason ? { reason } : {}) }, FAILURE_STATUS[code]);
 
   return {
-    settings: (via) => {
+    settings: (via, guest = false) => {
       const value = saved();
       return {
-        on: value.on === true,
+        on: !guest && value.on === true,
         phones_only: value.phonesOnly === true,
         engine: engine(),
-        key: keyState(),
+        key: guest ? { source: null, last4: null } : keyState(),
         computer: via === "tailnet" ? options.computerName() : null,
-        intro_due: introDue() && introAudience !== false,
+        intro_due: !guest && introDue() && introAudience !== false,
+        guest,
       };
     },
 
@@ -378,7 +382,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
       if (!valid) throw new InboxError("validation_error", "voice: { on?: boolean, phones_only?: boolean, engine?: 'codex' | 'api' }.", { field: "voice" });
       if (validateOnly) return;
       const value = saved();
-      saveConfig({
+      const written = saveConfig({
         inboxVoice: {
           ...value,
           ...(body.on === undefined ? {} : { on: body.on as boolean }),
@@ -386,6 +390,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
           ...(body.engine === undefined ? {} : { engine: body.engine as InboxVoiceEngine }),
         },
       });
+      if (!written) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
       // Turned on (the dialog, or Settings first): nothing left to announce.
       const intro = loadConfig().inboxVoiceIntro;
       if (body.on === true && intro && !intro.shownAt) saveConfig({ inboxVoiceIntro: { ...intro, shownAt: new Date().toISOString() } });
@@ -436,7 +441,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     },
 
     stop: () => {
-      for (const codex of running) codex.kill();
+      for (const codex of running) codex.kill(true);
       running.clear();
     },
   };

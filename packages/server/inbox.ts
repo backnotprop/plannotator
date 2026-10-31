@@ -1766,7 +1766,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /** What Settings and the connect snippets read. */
-  const settingsModel = (via: RequestVia) => ({
+  /** Voice spends the owner's ChatGPT login or key: a tailnet guest's page gets no use of them, as with Feedback. */
+  const voiceGuest = (req: Request, via: RequestVia) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
+  const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
+  const settingsModel = (via: RequestVia, guest: boolean) => ({
     serverSession,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
@@ -1789,7 +1792,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
-    voice: voice.settings(via),
+    voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
     /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184); only for a page on this computer. */
@@ -2812,7 +2815,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Not found", code: "not_found" }, 404);
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via));
+        if (req.method === "GET") return json(settingsModel(via, voiceGuest(req, via)));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -2837,6 +2840,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // The Board changes what agents on this computer are offered (the card tool): changed only here.
         if (body.board !== undefined && via === "tailnet") return localOnly();
+        if (body.voice !== undefined && voiceGuest(req, via)) throw voiceOwnerOnly();
         // Updating changes this computer: never from a page that came through the tailnet.
         if (updateSwitches && via === "tailnet") return localOnly();
         // The reminder goes to every agent session on this computer: changed only here, like Settings → Agents.
@@ -2893,13 +2897,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via), prompts: promptsState(via), ...(via === "local" ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, voiceGuest(req, via)), prompts: promptsState(via), ...(via === "local" ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
+        if (voiceGuest(req, via)) throw voiceOwnerOnly();
         const answer = await voice.route(req, url, via);
         if (answer) return answer;
       }
