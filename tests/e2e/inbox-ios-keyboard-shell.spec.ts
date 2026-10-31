@@ -112,10 +112,12 @@ test.beforeAll(async () => {
     ...Array.from({ length: 6 }, (_, i) => `${i + 7}. ${PARAGRAPH}`),
     [':::question', 'Keep the footer sticky on phones?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'),
   ].join('\n\n');
-  const reply = await agent.send({ project_path: project, subject: 'Checkout: the sticky footer on phones', body }, { wakes: true });
+  // Named threads: without one, both go to the session's default thread, and the question folds behind the newer message.
+  const reply = await agent.send({ project_path: project, subject: 'Checkout: the sticky footer on phones', thread: 'checkout-footer', body }, { wakes: true });
   const action = await agent.send({
     project_path: project,
     subject: 'Publish blocked on a token',
+    thread: 'publish-token',
     body: [
       'The publish failed with E401.',
       '',
@@ -263,8 +265,11 @@ async function openReply(page: Page, thread: string): Promise<Locator> {
   const box = pane.locator('.ib-pfoot textarea');
   const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
   await expect(box.or(open).first()).toBeVisible();
-  if (!(await box.isVisible())) await open.click();
-  await expect(box).toBeVisible();
+  // A saved draft can open the box by itself just after "Edit draft" showed: then there is nothing left to click.
+  await expect(async () => {
+    if (!(await box.isVisible())) await open.click({ timeout: 2_000 });
+    await expect(box).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
   return box;
 }
 
@@ -384,6 +389,8 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     expect.soft(r.htmlHeight, 'html is no taller than the visible part').toBeLessThanOrEqual(r.vvBottom + 0.5);
     await aboveKeyboard(page, send(page), 'Send on its side');
     await fieldShows(page, field);
+    // After the foot scrolled to the field, as iOS does for the caret.
+    await shot(page, 'iphone-landscape-keyboard-field');
     await page.context().close();
   });
 
