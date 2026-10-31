@@ -7,7 +7,9 @@
  *    unread, which puts the row back in New, bold; a reload keeps it there;
  *    no message is written to the thread (nothing reaches the agent);
  *  - on a thread read by opening it, the header's Mark unread closes the
- *    thread and the row is back in New, bold.
+ *    thread and the row is back in New, bold;
+ *  - the row's hover action toggles: on a read row it is Mark unread, which
+ *    puts the row back in New, bold, without opening the thread.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-mark-unread.spec.ts`.
@@ -160,5 +162,34 @@ test('a thread read by opening it: the header’s Mark unread closes it, and the
   expect(await messageCount(threads.deploy)).toBe(1);
   // The question thread is untouched.
   expect(await sectionOf(page, threads.search)).toBe('waiting');
+  expect(world.errors).toEqual([]);
+});
+
+test('the row’s hover action on a read row is Mark unread: the row is back in New, bold, and the thread stays closed', async () => {
+  const { page, threads } = world;
+  // Read it again by opening it, then leave: Quiet.
+  await page.goto(`${world.url}#thread=${threads.nightly}`);
+  const pane = page.locator('section.ib-pane');
+  await expect(pane.getByRole('heading', { name: 'Nightly build is green' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(pane).toHaveCount(0);
+  await openQuiet(page);
+  await expect.poll(() => sectionOf(page, threads.nightly)).toBe('quiet');
+
+  // A row that waits keeps Mark read; the read row's action is Mark unread.
+  await row(page, threads.search).hover();
+  await expect(page.locator(`.ib-lbody [data-row="${threads.search}"] [data-row-mark-read]`)).toBeVisible();
+  await row(page, threads.nightly).hover();
+  const action = page.locator(`.ib-lbody [data-row="${threads.nightly}"] [data-row-mark-unread]`);
+  await expect(action).toBeVisible();
+  await expect(action).toHaveText('Mark unread');
+  await expect(page.locator(`.ib-lbody [data-row="${threads.nightly}"] [data-row-mark-read]`)).toHaveCount(0);
+  await action.click();
+
+  await expect.poll(() => sectionOf(page, threads.nightly)).toBe('new');
+  await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked unread');
+  await expect(pane).toHaveCount(0);
+  expect(await messageCount(threads.nightly)).toBe(1);
   expect(world.errors).toEqual([]);
 });

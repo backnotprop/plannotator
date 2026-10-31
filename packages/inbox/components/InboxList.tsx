@@ -13,7 +13,7 @@ import { ProjectTipText, Tip } from './Tip';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
-import { offersRowMarkRead } from '../markRead';
+import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { useNarrowerThan } from '../narrower';
 import { inboxHasUnsent, inboxRowArchived, type InboxSectionId } from '@plannotator/core/inbox-types';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
@@ -69,6 +69,8 @@ export interface InboxListProps {
   onOpen: (row: InboxListRow) => void;
   /** The row's hover action (a row that waits on the person): Mark read, without opening it. Absent: no action. */
   onMarkRead?: (row: InboxListRow) => void;
+  /** The row's hover action on a read row (markRead.ts `canMarkUnread`): Mark unread, in Mark read's place. Absent: none. */
+  onMarkUnread?: (row: InboxListRow) => void;
   /** The row's hover action on a reply waiting on a busy agent that can take it now: Send now. Absent: no action. */
   onSendNow?: (row: InboxListRow) => void;
   /** A phone (phone.ts): the list fills the window and its rows are a mail app's. */
@@ -536,7 +538,8 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, keys, fu
 
 /**
  * A row and its quiet hover action: Mark read on a row that waits on the
- * person, shown on hover or keyboard focus where the count and time are. It
+ * person, Mark unread on a read row (markRead.ts `canMarkUnread`), shown on
+ * hover or keyboard focus where the count and time are. It
  * never opens the thread. The action is the row's sibling (a button cannot
  * hold a button).
  */
@@ -545,6 +548,7 @@ function RowWithAction({
   drawn,
   menu,
   onMarkRead,
+  onMarkUnread,
   onSendNow,
   children,
 }: {
@@ -553,12 +557,15 @@ function RowWithAction({
   drawn: InboxSectionId;
   menu: boolean;
   onMarkRead?: (row: InboxListRow) => void;
+  onMarkUnread?: (row: InboxListRow) => void;
   onSendNow?: (row: InboxListRow) => void;
   children: ReactNode;
 }) {
   const offer = onMarkRead && offersRowMarkRead(row, drawn);
+  // The action toggles (owner, 2026-10-31): on a read row (the row menu's rule, `canMarkUnread`) it is Mark unread.
+  const unread = !offer && onMarkUnread && canMarkUnread(row);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
-  const sendNow = onSendNow && !offer && row.delivery?.send_now === true && rowWait(row.delivery) !== null;
+  const sendNow = onSendNow && !offer && !unread && row.delivery?.send_now === true && rowWait(row.delivery) !== null;
   return (
     <div
       className="ib-rw"
@@ -613,6 +620,23 @@ function RowWithAction({
           >
             <Icon name="checkCircle" size={15} />
             Mark read
+          </button>
+        </Tip>
+      )}
+      {unread && (
+        <Tip content="Mark unread: back to New, bold. Nothing is sent.">
+          <button
+            type="button"
+            className="ib-ract"
+            data-row-mark-unread=""
+            aria-label={`Mark unread: ${titleOf(row)}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMarkUnread(row);
+            }}
+          >
+            <Icon name="envelope" size={15} />
+            Mark unread
           </button>
         </Tip>
       )}
@@ -838,6 +862,7 @@ export function InboxList(props: InboxListProps) {
   });
   const openRow = useCallback((row: InboxListRow) => latest.current.onOpen(row), []);
   const markRead = useCallback((row: InboxListRow) => latest.current.onMarkRead?.(row), []);
+  const markUnread = useCallback((row: InboxListRow) => latest.current.onMarkUnread?.(row), []);
   const sendNow = useCallback((row: InboxListRow) => latest.current.onSendNow?.(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
@@ -992,6 +1017,7 @@ export function InboxList(props: InboxListProps) {
                       lit={lit(row)}
                       onOpen={openRow}
                       onMarkRead={props.onMarkRead ? markRead : undefined}
+                      onMarkUnread={props.onMarkUnread ? markUnread : undefined}
                       onSendNow={props.onSendNow ? sendNow : undefined}
                       day={day}
                       menu={menuRow === row.thread_id}
@@ -1026,6 +1052,7 @@ interface ListRowProps {
   lit: boolean;
   onOpen: (row: InboxListRow) => void;
   onMarkRead?: (row: InboxListRow) => void;
+  onMarkUnread?: (row: InboxListRow) => void;
   onSendNow?: (row: InboxListRow) => void;
   /** Today's date: the row's time is written against it (shortTime). */
   day: string;
@@ -1047,11 +1074,11 @@ interface ListRowProps {
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onSendNow, menu, pinned, keys, pill, compact }: ListRowProps) {
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, menu, pinned, keys, pill, compact }: ListRowProps) {
     const open = () => onOpen(row);
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} onOpen={open} />;
     return (
-      <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onSendNow={onSendNow}>
+      <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onMarkUnread={onMarkUnread} onSendNow={onSendNow}>
         {shape === 'narrow' ? (
           <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} onOpen={open} />
         ) : (
@@ -1077,6 +1104,7 @@ export const ListRow = memo(
     a.compact === b.compact &&
     a.onOpen === b.onOpen &&
     a.onMarkRead === b.onMarkRead &&
+    a.onMarkUnread === b.onMarkUnread &&
     a.onSendNow === b.onSendNow &&
     sameValue(a.row, b.row),
 );

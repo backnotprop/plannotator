@@ -6,7 +6,9 @@
  * proved: on a thread read by opening it the header's disabled Mark read is
  * Mark unread (and `E` still does nothing there); the header's ⋯ More offers
  * Mark unread also while the list holds the row in New and with a Mark read
- * standing (whose pressed Read button stays); Mark unread closes the thread
+ * standing (whose pressed Read button stays); the row's hover action toggles
+ * (Mark read on a row that waits, Mark unread on a read row, never opening
+ * the thread); Mark unread from the open thread closes it
  * and puts the row back in New, bold, sends nothing to the agent, leaves set
  * aside questions closed; its toast's Undo reads the thread again.
  *
@@ -62,7 +64,7 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 3;
+const TESTS = 4;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -232,6 +234,46 @@ test.skipIf(!hasDom)('a plain update opened from New keeps Mark read in the head
   const messages = (await threadOf(id)).thread.messages.length;
   await act(async () => item!.click());
   await expectBackInNew(id, messages);
+});
+
+test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that waits, Mark unread on a read row, which puts it back in New, bold", async () => {
+  const id = ids.news[0]!;
+  await loopback(`/api/inbox/threads/${id}/seen`, 'POST', '{}');
+  window.location.hash = `#project=${ids.project}`;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<InboxApp />);
+  });
+  await until(() => !!rowButton(ids.waiting), 'the list');
+  const action = (threadId: string, kind: 'read' | 'unread') =>
+    document.querySelector<HTMLButtonElement>(`.ib-lbody [data-row="${threadId}"] [data-row-mark-${kind}]`);
+  // A row that waits on the person: Mark read, never Mark unread.
+  expect(action(ids.waiting, 'read')).not.toBeNull();
+  expect(action(ids.waiting, 'unread')).toBeNull();
+  // The read row, in Quiet (folded): Mark unread in Mark read's place, the menu item's envelope.
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!.click();
+  });
+  await until(() => sectionOfRow(id) === 'quiet', 'the read row in Quiet');
+  expect(action(id, 'read')).toBeNull();
+  const button = action(id, 'unread')!;
+  expect(button.textContent?.trim()).toBe('Mark unread');
+  expect(button.getAttribute('aria-label')).toContain('Mark unread');
+  expect(button.querySelector('svg')).not.toBeNull();
+
+  const messages = (await threadOf(id)).thread.messages.length;
+  await act(async () => button.click());
+  // It never opens the thread.
+  expect(window.location.hash).toBe(`#project=${ids.project}`);
+  expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${id}/mark-unread`);
+  await until(() => sectionOfRow(id) === 'new', 'the row back in New');
+  expect(rowButton(id)!.classList.contains('ib-u')).toBe(true);
+  expect(toast()?.querySelector('.ib-tlead')?.textContent).toBe('Marked unread');
+  expect((await threadOf(id)).thread.messages.length).toBe(messages);
+  // Back in New with news, the action is Mark read again.
+  await until(() => action(id, 'read') !== null && action(id, 'unread') === null, 'Mark read on the row again');
 });
 
 test.skipIf(!hasDom)('a thread marked read keeps its pressed Read button; ⋯ More marks it unread, its question still set aside', async () => {
