@@ -102,6 +102,6 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
   if (!e.seenLive && !hostStopped) return line("failed", { cause: "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?" });
   const byPerson = e.stoppedByPersonAt !== null;
-  // Not the person's Stop: the host's own words, when it has some (Pi lives only while the Inbox runs).
+  // Not the person's Stop: the host's own words, when it has some.
   return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });
 }

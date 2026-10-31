@@ -20,8 +20,10 @@ export interface FakePiConfig {
   version?: string;
   /** The process prints this on stderr and exits 1 before it answers (a start that fails). */
   startFail?: string | null;
-  /** The extension never polls (not connected to the Inbox). */
+  /** The RPC process's extension never polls (not connected to the Inbox); a terminal's Pi still does. */
   noConnect?: boolean;
+  /** The RPC process answers its first `get_state` this much later (ms): a Pi slow to come up. */
+  readyDelayMs?: number;
   /** Each turn first asks this extension dialog over RPC, and waits for the answer (10 s at most). */
   dialog?: { method?: "select" | "confirm" | "input" | "editor"; title: string; options?: string[] } | null;
   /** Ask `dialog` once as the session starts, before any turn (an extension's session_start). */
@@ -51,9 +53,11 @@ export interface FakePi {
   calls(): FakePiCall[];
   /** The `--mode rpc` processes it ran. */
   starts(): FakePiCall[];
+  /** The terminal Pis it ran (`pi --session-id` without `--mode rpc`). */
+  terminals(): FakePiCall[];
   delivered(): string[];
   dialogs(): { sessionId: string; title: string; response: { cancelled?: boolean; value?: string; confirmed?: boolean } | null }[];
-  exits(): { sessionId: string; pid: number; why: string; at: number }[];
+  exits(): { sessionId: string; pid: number; why: string; aborted?: boolean; terminal?: boolean; at: number }[];
   osascript(): string[][];
   /** Every session file of Pi's agent dir in the test HOME. */
   sessionFiles(): string[];
@@ -106,6 +110,7 @@ export function installFakePi(input: { bin: string; state: string; home: string;
     },
     calls: () => lines<FakePiCall>("calls.jsonl"),
     starts: () => lines<FakePiCall>("calls.jsonl").filter((c) => c.argv.includes("--mode")),
+    terminals: () => lines<FakePiCall>("calls.jsonl").filter((c) => c.argv.includes("--session-id") && !c.argv.includes("--mode")),
     delivered: () => (existsSync(join(state, "delivered.log")) ? readFileSync(join(state, "delivered.log"), "utf8").split("\n").filter(Boolean) : []),
     dialogs: () => lines("dialogs.jsonl"),
     exits: () => lines("exits.jsonl"),

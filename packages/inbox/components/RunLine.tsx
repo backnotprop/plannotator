@@ -129,7 +129,7 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       break;
     case 'stopped':
       icon = 'stop';
-      // `cause`: the agent's own words for a stop that was not the person's (Pi: it runs only while the Inbox runs).
+      // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`).
       text =
         run.stopped_by_person && run.since
           ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`

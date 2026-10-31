@@ -10,8 +10,11 @@
  *    `abort` answers at once. The session file is
  *    `<agent dir>/sessions/--<cwd with / as ->--/<stamp>_<uuid>.jsonl`, its
  *    first line the header `{ type: "session", id, cwd }`; an existing file
- *    for the id is reopened (its lines are the context). stdin's end ends the
- *    process with exit 0, as Pi's RPC mode does.
+ *    for the id is reopened (its lines are the context); with none, Pi's
+ *    warning on stderr and a new one. stdin's end ends the process with exit 0,
+ *    as Pi's RPC mode does (exits.jsonl says whether `abort` came first).
+ *  - `pi --session-id <uuid>` alone: Pi in a terminal on the session (Open in
+ *    Terminal). No RPC; the extension below only; it ends on SIGTERM or SIGINT.
  *  - It acts as Plannotator's Pi extension: it polls the bridge of the Inbox in
  *    `$PLANNOTATOR_DATA_DIR` (else ~/.plannotator) as host `pi`, session
  *    `<uuid>`, only when `PLANNOTATOR_INBOX_TOOL` is on. A command: `delivered`,
@@ -58,13 +61,16 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 
-if (flag("--mode") !== "rpc") {
-  process.stderr.write("fake pi: only --version and --mode rpc\n");
+// Without `--mode rpc`: Pi in a terminal on `--session-id` (Open in Terminal, Copy attach command). No RPC;
+// the extension's bridge poll only (with the Inbox tool on, as there); it runs until SIGTERM or SIGINT.
+const terminal = flag("--mode") !== "rpc";
+if (terminal && !flag("--session-id")) {
+  process.stderr.write("fake pi: only --version, --mode rpc and a terminal on --session-id\n");
   process.exit(2);
 }
 
 const sessionId = flag("--session-id");
-if (config().startFail) {
+if (!terminal && config().startFail) {
   process.stderr.write(`${config().startFail}\n`);
   process.exit(1);
 }
@@ -79,6 +85,8 @@ fs.mkdirSync(sessionDir, { recursive: true });
 let sessionFile = fs.readdirSync(sessionDir).find((name) => name.endsWith(`_${sessionId}.jsonl`));
 if (sessionFile) sessionFile = path.join(sessionDir, sessionFile);
 else {
+  // As Pi 0.85.1 (main.js): no file for the id, so a new session with that id, and this warning.
+  process.stderr.write(`Warning: No project session found with id '${sessionId}'; creating a new session with that id.\n`);
   sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
   fs.writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`);
 }
@@ -88,9 +96,19 @@ const messageCount = () => fs.readFileSync(sessionFile, "utf8").split("\n").filt
 const out = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
 const dialogs = new Map();
 let stopped = false;
+let aborted = false;
 let input = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
+if (terminal) {
+  // Pi in a terminal: it reads keys, never RPC; it ends when the person quits (a signal here).
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => {
+      stopped = true;
+      append("exits.jsonl", { sessionId, pid: process.pid, why: signal, terminal: true, at: Date.now() });
+      process.exit(0);
+    });
+  }
+} else process.stdin.setEncoding("utf8");
+if (!terminal) process.stdin.on("data", (chunk) => {
   input += chunk;
   for (let at = input.indexOf("\n"); at >= 0; at = input.indexOf("\n")) {
     const line = input.slice(0, at);
@@ -113,19 +131,29 @@ process.stdin.on("data", (chunk) => {
       void localTurn();
       continue;
     }
-    if (command.type === "get_state") out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName: flag("--name") } });
-    else out({ id: command.id, type: "response", command: command.type, success: true });
+    if (command.type === "get_state") {
+      const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName: flag("--name") } });
+      // A Pi slow to come up (config `readyDelayMs`): its first answer waits.
+      const delay = config().readyDelayMs ?? 0;
+      if (delay > 0) setTimeout(answer, delay);
+      else answer();
+      continue;
+    }
+    if (command.type === "abort") aborted = true;
+    out({ id: command.id, type: "response", command: command.type, success: true });
   }
 });
-process.stdin.on("end", () => {
-  stopped = true;
-  append("exits.jsonl", { sessionId, pid: process.pid, why: "stdin", at: Date.now() });
-  process.exit(0);
-});
-process.on("SIGTERM", () => {
-  append("exits.jsonl", { sessionId, pid: process.pid, why: "SIGTERM", at: Date.now() });
-  process.exit(143);
-});
+if (!terminal) {
+  process.stdin.on("end", () => {
+    stopped = true;
+    append("exits.jsonl", { sessionId, pid: process.pid, why: "stdin", aborted, at: Date.now() });
+    process.exit(0);
+  });
+  process.on("SIGTERM", () => {
+    append("exits.jsonl", { sessionId, pid: process.pid, why: "SIGTERM", aborted, at: Date.now() });
+    process.exit(143);
+  });
+}
 
 // ── A turn's extension dialog: asked over RPC, answered (or not) by the client ──
 let busy = false;
@@ -151,7 +179,8 @@ async function localTurn() {
 // ── The extension: the bridge poll ──
 const on = (value) => ["1", "true", "on"].includes(String(value || "").toLowerCase());
 async function extension() {
-  if (!on(process.env.PLANNOTATOR_INBOX_TOOL) || config().noConnect) return;
+  // `noConnect` is the RPC process's; a terminal's Pi connects whenever the Inbox tool is on.
+  if (!on(process.env.PLANNOTATOR_INBOX_TOOL) || (!terminal && config().noConnect)) return;
   const dataDir = process.env.PLANNOTATOR_DATA_DIR || path.join(home, ".plannotator");
   const registryFile = path.join(dataDir, "inbox", "inbox.json");
   const read = () => {
@@ -183,7 +212,7 @@ async function extension() {
     out({ type: "agent_start" });
     await post("/api/inbox/bridge/event", { type: "state", busy: true }).catch(() => {});
     fs.appendFileSync(sessionFile, `${JSON.stringify({ type: "message", role: "user", text: command.body.split("\n")[0] })}\n`);
-    const asked = await askDialog();
+    const asked = terminal ? null : await askDialog();
     const until = Date.now() + (config().workMs ?? 600);
     while (!stopped && (Date.now() < until || config().hold)) await sleep(100);
     if (stopped) return;
@@ -224,4 +253,4 @@ async function extension() {
 }
 void extension();
 // An extension that asks as the session starts (config `dialogOnStart`), before any turn.
-if (config().dialogOnStart) void askDialog();
+if (!terminal && config().dialogOnStart) void askDialog();
