@@ -139,8 +139,8 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
 
 /**
  * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
- * (Lines). The row itself draws its agents before the project: bare marks on a wide row (`RowAgents`), tiles on a
- * three-line or phone row (`RowAgentTiles`).
+ * (Lines). The row itself draws its agents before the project, on tiles: `RowAgents` on a wide row, `RowAgentTiles`
+ * on a three-line or phone row.
  */
 function RowMark({ row }: { row: InboxListRow }) {
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
@@ -484,6 +484,14 @@ function PinnedWords() {
  * the three-line rows instead.
  */
 export const WIDE_ROWS_MIN_LIST_WIDTH = 900;
+
+/**
+ * One project's list has no project column, so it keeps the wide row down to this list width: what the row can't
+ * give up with the pin's column (303px: its padding, gaps, badge, pin, open counts and time), three tiles and "+99"
+ * (73px), the words' floor (62px) and that row's title floor (56px). The default sidebar leaves a 500px list at the
+ * narrowest desktop window, so only a wider sidebar reaches this; the list then draws the three-line rows.
+ */
+export const ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH = 496;
 
 /**
  * From this list width a wide row draws the full words and the badge's words (the owner, 2026-10-29: full words in
@@ -854,20 +862,28 @@ export function InboxList(props: InboxListProps) {
   }, [pullOn]);
   const [listRef, narrowList] = useNarrowerThan(WIDE_ROWS_MIN_LIST_WIDTH, props.narrow);
   const [fullRef, shortWords] = useNarrowerThan(FULL_WORDS_MIN_LIST_WIDTH, props.narrow);
+  const [thinRef, thinList] = useNarrowerThan(ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH, props.narrow);
   const listEl = useCallback(
     (el: HTMLElement | null) => {
       listRef.current = el;
       fullRef.current = el;
+      thinRef.current = el;
     },
-    [listRef, fullRef],
+    [listRef, fullRef, thinRef],
   );
   // Two-line rows in a list too narrow for the wide row's columns: beside an
   // open thread for every list (the column is 380px unless its edge was
   // dragged past the wide rows' width), and in the full list for every
-  // project. One project's list keeps the wide row in a narrower list: its
-  // marks' track wraps the run between marks and the title keeps at least
-  // 24px, so its columns hold at the window's narrowest desktop widths.
-  const twoLine = narrowList && (props.narrow || !props.filtered);
+  // project. One project's list keeps the wide row in a narrower list, down to
+  // ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH: its words column gives way first
+  // (inbox.css), so its title and columns hold at the window's narrowest
+  // desktop widths. Past that, which only a wide sidebar reaches, it too draws
+  // two-line rows, so no column runs off the row. On the commit that closes a
+  // thread `thinList` still holds the 380px column's answer: trusting it would
+  // swap every row twice, at the moment the close hands a row its focus.
+  const [besideThread, setBesideThread] = useState(props.narrow);
+  useLayoutEffect(() => setBesideThread(props.narrow), [props.narrow]);
+  const twoLine = (narrowList && (props.narrow || !props.filtered)) || (thinList && (props.narrow || !besideThread));
   // The full words on a wide row need a list of at least 1150px (FULL_WORDS_MIN_LIST_WIDTH); a narrower wide row
   // keeps the short forms and the bare triangles (option A).
   const fullWords = !twoLine && !shortWords;
