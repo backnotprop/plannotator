@@ -78,8 +78,10 @@ const CLAUDES_PI = row('msg_claudes_pi', [session('claude-code', 1), session('cl
 const FOUR_HOSTS = row('msg_four_hosts', [session('claude-code', 1), session('pi', 1), session('codex', 1), session('opencode', 1)]);
 /** Four hosts, Codex twice: two marks (Claude Code, Codex), then "+3" for Codex's second session, OpenCode and Pi. */
 const FOUR = row('msg_four', [session('claude-code', 1), session('codex', 1), session('opencode', 1), session('codex', 2), session('pi', 1)]);
+/** Three hosts, the hidden one twice: a three-line row's "+N" counts agents ("+1"), a wide row's sessions. */
+const HIDDEN_TWICE = row('msg_hidden_twice', [session('claude-code', 1), session('codex', 1), session('pi', 1), session('pi', 2)]);
 /** Two spellings of one host are one mark. */
-const ALIAS = row('msg_alias', [session('claude', 1), session('claude-code', 2)]);
+const ALIAS =row('msg_alias', [session('claude', 1), session('claude-code', 2)]);
 /** A person-started thread: the agent it is addressed to. */
 const ADDRESSED = row('msg_to', undefined, { author: { kind: 'person' }, addressee: { host: 'pi', session: 'ses_pi' } });
 const LONG_NAME = 'ledger-reconciliation-dry-run-before-the-quarterly-close-and-the-external-audit';
@@ -89,7 +91,7 @@ const LONG_PROJECT = 'acme-global-payments-ledger-reconciliation-and-settlement-
 const FIVE = row('msg_five', [session('claude-code', 1), session('codex', 1), session('opencode', 1), session('pi', 1), session('cursor', 1)], { project_id: 'prj_2', project: { id: 'prj_2', name: LONG_PROJECT } });
 /** Claude Code twice, then Codex: two agents, so one Claude tile and a Codex tile, never two Claude tiles and "+1". */
 const REPEAT = row('msg_repeat', [session('claude-code', 1), session('claude-code', 2), session('codex', 1)]);
-const SECTIONS: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [ONE, TWICE, THREE, THREE_REPEAT, CLAUDES_PI, FOUR_HOSTS, FOUR, ALIAS, ADDRESSED, NAMED, FIVE, REPEAT] }];
+const SECTIONS: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [ONE, TWICE, THREE, THREE_REPEAT, CLAUDES_PI, FOUR_HOSTS, FOUR, HIDDEN_TWICE, ALIAS, ADDRESSED, NAMED, FIVE, REPEAT] }];
 
 type Shape = 'wide' | 'narrow' | 'phone';
 const LEAD_SHAPES: Shape[] = ['narrow', 'phone'];
@@ -240,6 +242,8 @@ describe.if(hasDom)("a three-line or phone row's agents", () => {
       // Codex's second session is no tile and no "+N": "+2" is OpenCode and Pi.
       expect(tiles(el, FOUR.thread_id)).toEqual({ drawn: ['claude-code', 'codex'], more: '+2', name: 'Claude Code, 2 Codex sessions, OpenCode and Pi', role: 'img' });
       expect(tiles(el, FIVE.thread_id)).toEqual({ drawn: ['claude-code', 'codex'], more: '+3', name: 'Claude Code, Codex, OpenCode, Pi and Cursor', role: 'img' });
+      // The "+N" tile counts agents, not sessions: Pi's two sessions are one more agent (a wide row's "+N" would say "+2").
+      expect(tiles(el, HIDDEN_TWICE.thread_id)).toEqual({ drawn: ['claude-code', 'codex'], more: '+1', name: 'Claude Code, Codex and 2 Pi sessions', role: 'img' });
       for (const r of el.querySelectorAll('[data-thread-id]')) expect(r.querySelectorAll('.ib-atile:not(.ib-atmore)').length).toBeLessThanOrEqual(2);
     });
 

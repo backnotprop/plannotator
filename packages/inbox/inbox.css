@@ -792,13 +792,27 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
 /* One project's list: the first column holds the agents' tiles alone (InboxList's WideRow), as wide as this row's
    tiles and no wider (the owner, 2026-10-31: no blank before the title), so the title follows its own tiles. The
-   list keeps the wide row at any width, so short of room something has to give, and it is the words column: the
-   title keeps at least 96px (about nine characters), the words track gives up its 124px down to nothing, its words
-   ending in "…" (they are in the tooltip), and the columns right of it never move. The tiles and "+N" stay whole on
-   one line. A track that can shrink fills up before the title's `1fr` grows, so with room the words keep their
-   124px and nothing changes. At 768px with the pin's column and the widest run (three tiles, "+N") the words keep
-   34px: "Draft" fits, an Undelivered pill is down to its first letter. */
-.ib-noproj .ib-row { grid-template-columns: max-content minmax(96px, 1fr) minmax(0, 124px) 52px 84px 76px; }
+   list keeps the wide row down to 496px (`ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH`, past the default sidebar at the
+   narrowest desktop window), and short of room in that band the words column gives way first: the title keeps at
+   least 96px (about nine characters) and the words track gives up its 124px, its words ending in "…" (they are in
+   the tooltip), while the tiles and "+N" stay whole on one line and the columns right of the words stay in line. A
+   track that can shrink fills up before the title's `1fr` grows, so with room the words keep their 124px and nothing
+   changes. Words with nothing else on the row to say them (Draft, Answered, Read …) have their track fit the words,
+   up to 124px, so the title keeps what they do not use (they end on the column's right edge either way). Short of
+   room they keep 4.4em, "Answered" whole at any text size, and the title gives up the difference, down to 56px. Such
+   a row's cell drops the size containment below: it would measure the words as nothing. An Undelivered pill has the
+   clock before the time to say it waits, so its row keeps the title's 96px and the pill leaves at 72px or less
+   (below) rather than shrink to a letter. Its empty cell then fills the column, so its tooltip stays under a resting
+   pointer: a hovered row with Mark read or Send now hides the clock, and the clock's tooltip with it. Under 496px,
+   which only a wide sidebar reaches, the list draws three-line rows, where nothing is cut. */
+.ib-noproj .ib-row { --ib-title-min: 96px; --ib-words-track: minmax(0, 124px); grid-template-columns: max-content minmax(var(--ib-title-min), 1fr) var(--ib-words-track) 52px 84px 76px; }
+.ib-noproj .ib-row .ib-cw { container-type: inline-size; }
+.ib-noproj .ib-row:has(.ib-cw :is(.ib-cst, .ib-draft-l)) { --ib-title-min: 56px; --ib-words-track: fit-content(124px); }
+.ib-noproj .ib-row:has(.ib-cw :is(.ib-cst, .ib-draft-l)) .ib-cw { container-type: normal; min-width: 4.4em; }
+@container (max-width: 72px) {
+  .ib-noproj .ib-row .ib-cs > .ib-badge.ib-b-wait { display: none; }
+  .ib-noproj .ib-row .ib-c.ib-cwords:has(.ib-b-wait) { flex: 1 1 100%; min-height: 20px; }
+}
 .ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(96px, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
 /* The pin's column (the owner, 2026-10-31: the pin beside the counts, as on the three-line row), only in a list with a
    pinned row (`.ib-pincol`), between the badge and the open counts, so the pins line up next to `?N` and the badge
@@ -810,7 +824,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    The one-project list with Hide agent icons has its own two templates (with the list's look options, below). */
 .ib-pincol .ib-row { grid-template-columns: 220px minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-pincol.ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
-.ib-pincol.ib-noproj .ib-row { grid-template-columns: max-content minmax(96px, 1fr) minmax(0, 124px) 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj .ib-row { grid-template-columns: max-content minmax(var(--ib-title-min), 1fr) var(--ib-words-track) 52px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(96px, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; }
 /* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
@@ -969,7 +983,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-atiles { display: inline-flex; align-items: center; flex: none; height: 20px; margin: -1.5px 0; }
 .ib-lead > .ib-atiles { order: -1; }
 .ib-atile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--muted); }
-:is(.ib-row, .ib-nrow):hover:not(.ib-sel) .ib-atile, .ib-rw[data-menu] :is(.ib-row, .ib-nrow):not(.ib-sel) .ib-atile { background: color-mix(in oklch, var(--muted) 50%, var(--border)); }
+:is(.ib-row, .ib-nrow):hover:not(.ib-sel) .ib-atile, .ib-rw[data-menu] :is(.ib-row, .ib-nrow):not(.ib-sel) .ib-atile, .ib-mrow[data-menu] .ib-atile { background: color-mix(in oklch, var(--muted) 50%, var(--border)); }
 .ib-atile + .ib-atile { margin-left: -5px; }
 .ib-atile > .ib-mk { position: relative; }
 .ib-atile > .ib-mk, .ib-atile > .ib-mk > svg, .ib-atile > .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }

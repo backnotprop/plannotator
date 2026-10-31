@@ -656,21 +656,36 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   for (const a of [codexA, opencodeA]) await a!.send({ project_path: ops, reply_to: plain.thread_id, body: 'Joined.' });
   // One agent: the shortest run, beside the widest at a narrow width below.
   const solo = await claudeA!.send({ project_path: ops, thread: 'one-mark', subject: 'One agent', body: ask('One tile?') });
-  // The words column's longest short form on the widest run, and a draft on the next, put on rows the server sent:
-  // each needs a live session or the reply box to arise for real (as inbox-row-badges.spec.ts does).
+  // The words that must stay (the longest, "Answered", on the widest run, and a draft) and the Undelivered pill, put
+  // on rows the server sent: each needs a live session or the reply box to arise for real (as inbox-row-badges.spec.ts does).
   const listRoute = '**/api/inbox/threads?archived=exclude*';
   await page.route(listRoute, async (route) => {
     const response = await route.fetch();
     const model = (await response.json()) as { sections: { threads: Record<string, unknown>[] }[] };
     for (const row of model.sections.flatMap((s) => s.threads)) {
-      if (row.thread_id === trio.thread_id) row.delivery = { kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_waiting', at: null, host: 'claude-code', name: 'Claude Code', waiting_since: new Date(Date.now() - 14 * 60_000).toISOString(), steerable: false, auto_send_at: null };
-      if (row.thread_id === plain.thread_id) row.unsent = { reply_at: new Date().toISOString(), picks: 2, comments: 3 };
+      if (row.thread_id === trio.thread_id) row.answered_not_sent = true;
+      if (row.thread_id === plain.thread_id) row.delivery = { kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_waiting', at: null, host: 'claude-code', name: 'Claude Code', waiting_since: new Date(Date.now() - 14 * 60_000).toISOString(), steerable: false, auto_send_at: null };
+      if (row.thread_id === solo.thread_id) row.unsent = { reply_at: new Date().toISOString(), picks: 2, comments: 3 };
     }
     await route.fulfill({ response, json: model });
   });
 
+  // These sessions bring the agent-note dialog, decided once per load (docs/agent-guides/inbox-foundation.md, asked
+  // once per agent): answer it "Not now", or it stands over the hovers below and opens again over the Update test.
+  const answerNote = async () => {
+    const note = page.locator('dialog[data-dialog="agent-note"]');
+    await note.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
+    if (await note.isVisible()) {
+      const notNow = note.locator('[data-anote-notnow]');
+      if (await notNow.count()) await notNow.click();
+      else await page.keyboard.press('Escape');
+      await expect(note).toHaveCount(0);
+    }
+  };
+
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(world.url);
+  await answerNote();
   await side(page).getByRole('button', { name: /^ops-console(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'ops-console' })).toBeVisible();
   await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(3);
@@ -743,9 +758,15 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
       expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
     }
   }
-  // The narrowest desktop windows (780, 768: a list of about 530px), with and without the pin's column: the tiles and
-  // "+N" stay whole on one line, every row keeps a title of at least 96px (the words column gives way first, its
-  // words staying in it), its counts and time stay in line down the list, and nothing runs past the row.
+  // With room (the loop above ended at 1000) the pill is whole.
+  const waitPill = page.locator(`.ib-row[data-thread-id="${plain.thread_id}"] [data-undelivered]`);
+  await expect(waitPill).toBeVisible();
+  expect(await waitPill.locator('.ib-bwt').evaluate((t) => t.scrollWidth > t.clientWidth + 0.5), 'the pill is cut at 1000').toBe(false);
+  // The narrowest desktop windows (780, 768: a list of 500 to 512px), with and without the pin's column: the tiles and
+  // "+N" stay whole on one line, its counts and time stay in line down the list, and nothing runs past the row. The
+  // words column gives way first: a row without words that must stay keeps a 96px title, and the pill leaves at 72px
+  // or less, never a letter, the clock and the spoken words staying. "Draft" and "Answered" stay whole, whatever the
+  // run; that row's title gives way for them, only as far as they need, down to 56px.
   const narrowRows = async (label: string) => {
     for (const width of [780, 768]) {
       await page.setViewportSize({ width, height: 900 });
@@ -755,7 +776,8 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
           const box = (sel: string) => r.querySelector(sel)!.getBoundingClientRect();
           const parts = [...r.querySelector('.ib-ags')!.children].map((c) => c.getBoundingClientRect());
           const words = r.querySelector('.ib-cw > .ib-c')?.getBoundingClientRect() ?? null;
-          const draft = r.querySelector('.ib-cw .ib-draft-l');
+          const staying = r.querySelector('.ib-cw :is(.ib-cst, .ib-draft-l)');
+          const pill = r.querySelector('.ib-cw [data-undelivered]');
           return {
             id: (r as HTMLElement).dataset.threadId,
             counts: box('.ib-cq').right,
@@ -765,7 +787,11 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
             spill: r.scrollWidth - r.clientWidth,
             drift: Math.max(...parts.map((b) => (b.top + b.bottom) / 2)) - Math.min(...parts.map((b) => (b.top + b.bottom) / 2)),
             wordsIn: words ? words.left >= box('.ib-cw').left - 0.5 && words.left >= box('.ib-subj').right && words.right <= box('.ib-bcol').left : null,
-            draftCut: draft ? draft.scrollWidth > draft.clientWidth + 0.5 : null,
+            staying: staying ? { text: staying.textContent, cut: staying.scrollWidth > staying.clientWidth + 0.5 } : null,
+            wordsWidth: box('.ib-cw').width,
+            pillShown: pill ? getComputedStyle(pill).display !== 'none' : null,
+            pillSpoken: pill ? (r.querySelector('.ib-cw .ib-sr')?.textContent ?? '') : null,
+            clock: pill ? r.querySelector('.ib-t [data-tick="queued"]') !== null : null,
             marksTop: Math.min(...[...r.querySelector('.ib-ags')!.children].map((c) => c.getBoundingClientRect().top)),
             marksBottom: Math.max(...[...r.querySelector('.ib-ags')!.children].map((c) => c.getBoundingClientRect().bottom)),
             rowTop: r.getBoundingClientRect().top,
@@ -780,14 +806,20 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
         expect(Math.abs(r.time - rows[0]!.time), `${where}: the time moves`).toBeLessThanOrEqual(0.5);
         expect(r.time, `${where}: the time runs past the row`).toBeLessThanOrEqual(r.inner + 0.5);
         expect(r.spill, `${where}: the row spills`).toBeLessThanOrEqual(0);
-        expect(r.title, `${where}: the title collapsed`).toBeGreaterThanOrEqual(95.5);
+        expect(r.title, `${where}: the title collapsed`).toBeGreaterThanOrEqual(r.staying ? 55.5 : 95.5);
         expect(r.drift, `${where}: the run must stay on one line`).toBeLessThanOrEqual(1);
-        if (r.wordsIn !== null) expect(r.wordsIn, `${where}: the words leave their column`).toBe(true);
-        if (r.draftCut !== null) expect(r.draftCut, `${where}: "Draft" is cut`).toBe(false);
+        expect(r.wordsIn, `${where}: the words leave their column`).toBe(true);
+        if (r.staying) expect(r.staying.cut, `${where}: "${r.staying.text}" is cut`).toBe(false);
+        // "Draft" needs little: its title keeps the rest, instead of a blank column beside the word.
+        if (r.staying?.text === 'Draft') expect(r.title, `${where}: the title gave up more than "Draft" needs`).toBeGreaterThanOrEqual(95.5);
         expect(r.marksTop, where).toBeGreaterThanOrEqual(r.rowTop);
         expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
       }
-      expect(rows.filter((r) => r.wordsIn !== null).length, `${label} at ${width}: rows with words`).toBe(2);
+      expect(rows.filter((r) => r.staying).map((r) => r.staying!.text).sort(), `${label} at ${width}`).toEqual(['Answered', 'Draft']);
+      const waiting = rows.find((r) => r.id === plain.thread_id)!;
+      expect(waiting.pillShown, `${label} at ${width}: the pill at ${waiting.wordsWidth}px`).toBe(waiting.wordsWidth > 72);
+      expect(waiting.clock, `${label} at ${width}: the clock`).toBe(true);
+      expect(waiting.pillSpoken, `${label} at ${width}: the spoken words`).toMatch(/^Undelivered 1[345] min$/);
     }
   };
   await narrowRows('no pin');
@@ -799,6 +831,56 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   await pin(true);
   await expect(page.locator('.ib-listcol.ib-pincol')).toHaveCount(1);
   await narrowRows('the pin column');
+  // The pill gone at 768: its words stay under the pointer, on the column. Not on the clock: this row offers Mark read,
+  // so hovering the row hides the clock and its tooltip with it.
+  await expect(waitPill).toBeHidden();
+  await page.locator(`.ib-row[data-thread-id="${plain.thread_id}"] .ib-cw .ib-cwords`).hover({ timeout: 10_000 });
+  await expect(page.locator('[data-pn-tooltip]:not([data-closed])')).toContainText(/Undelivered 1[345] min/);
+  await page.mouse.move(5, 5);
+  // A wide sidebar with the pin's column on: down to 496px the list keeps its wide rows with the words whole; under it
+  // the rows go three-line, so no column runs off. "Draft" and "Answered" are drawn whole either way.
+  for (const [width, sidebarWidth, wide] of [[1000, 448, true], [1000, 520, false], [900, 448, false], [900, 520, false], [768, 520, false]] as const) {
+    await page.context().addCookies([{ name: 'plannotator-inbox-sidebar-width', value: String(sidebarWidth), url: world.url }]);
+    await page.setViewportSize({ width, height: 900 });
+    await page.reload();
+    await expect(page.locator('.ib-listcol.ib-noproj')).toHaveCount(1);
+    await expect(page.locator(`.ib-lbody ${wide ? '.ib-row' : '.ib-nrow'}`)).toHaveCount(3);
+    const where = `window ${width}, sidebar ${sidebarWidth}`;
+    const rows = await page.locator('.ib-lbody [data-thread-id]').evaluateAll((els) =>
+      els.map((r) => {
+        const words = r.querySelector(':is(.ib-cwords .ib-cst, .ib-cwords .ib-draft-l)');
+        return {
+          words: words?.textContent ?? null,
+          cut: words ? words.scrollWidth > words.clientWidth + 0.5 : null,
+          blob: [...r.querySelectorAll('[data-undelivered]')].some((p) => getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().width < 60),
+          spill: r.scrollWidth - r.clientWidth,
+          timeRight: r.querySelector('.ib-t')!.getBoundingClientRect().right,
+          right: r.getBoundingClientRect().right,
+        };
+      }),
+    );
+    expect(rows.map((r) => r.words).filter(Boolean).sort(), where).toEqual(['Answered', 'Draft']);
+    for (const r of rows) {
+      expect(r.cut ?? false, `${where}: "${r.words}" is cut`).toBe(false);
+      expect(r.blob, `${where}: a pill too small to read`).toBe(false);
+      expect(r.spill, `${where}: the row spills`).toBeLessThanOrEqual(0);
+      expect(r.timeRight, `${where}: the time runs off the row`).toBeLessThanOrEqual(r.right + 0.5);
+    }
+  }
+  // A thread opened and closed on a list that thin (the thread covers the list there): its rows come back three-line.
+  // InboxList ignores this measure on the commit that closes a thread, and that must not leave a thin list wide.
+  await answerNote();
+  await page.locator(`.ib-nrow[data-thread-id="${trio.thread_id}"]`).click({ timeout: 10_000 });
+  await expect(page.locator('section.ib-pane')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('section.ib-pane')).toHaveCount(0);
+  await expect(page.locator('.ib-lbody .ib-nrow')).toHaveCount(3);
+  await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(0);
+  await page.context().clearCookies({ name: 'plannotator-inbox-sidebar-width' });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(3);
+  await answerNote();
   await pin(false);
   await expect(page.locator('.ib-listcol.ib-pincol')).toHaveCount(0);
   await page.unroute(listRoute);
@@ -808,7 +890,7 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
     const row = page.locator(`.ib-row[data-thread-id="${solo.thread_id}"]`);
-    await row.locator('.ib-title').hover();
+    await row.locator('.ib-title').hover({ timeout: 10_000 });
     const contrast = () =>
       row.evaluate((r) => {
         const c = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
@@ -829,16 +911,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   }
   await page.mouse.move(5, 5);
   await page.emulateMedia({ colorScheme: 'light' });
-  // These sessions bring the agent-note dialog on this load (docs/agent-guides/inbox-foundation.md, asked once per
-  // agent): answer it "Not now", or it opens again over the Update test below.
-  const note = page.locator('dialog[data-dialog="agent-note"]');
-  await note.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
-  if (await note.isVisible()) {
-    const notNow = note.locator('[data-anote-notnow]');
-    if (await notNow.count()) await notNow.click();
-    else await page.keyboard.press('Escape');
-    await expect(note).toHaveCount(0);
-  }
   await shot('1.3-project-filter-agents');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
   // Every project's list: the same three-tile rows draw their project 6px after their own tiles, never further.
