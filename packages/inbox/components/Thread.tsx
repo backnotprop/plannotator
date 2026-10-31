@@ -4940,6 +4940,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
+                    // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
+                    // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
+                    event.stopPropagation();
                     // With the choice open, the shortcut goes to it.
                     if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
                     else {
