@@ -372,7 +372,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     QUESTION_AUTHORING_GUIDE.trimEnd(),
     "",
     // Here, not in the guide: the guide is send_message's description, which Claude Code cuts at 2,048 characters.
-    "Keep choice labels plain; mark the pick only with the `Recommended:` line, never \"(Recommended)\" in a label.",
+    "Keep choice labels plain; mark the pick only with the `Recommended:` line, never \"(Recommended)\" in a label. Keep the choices in their natural order and never move your recommendation first.",
     "",
     "(In the Inbox the person's words come before the answers.)",
     "",

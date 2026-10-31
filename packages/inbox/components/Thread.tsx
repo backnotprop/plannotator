@@ -855,6 +855,15 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
+  /**
+   * The thread in full screen: the sidebar and the list hidden, the thread at a reading measure. The header leads with
+   * "‹ Inbox" (back to them) in place of the button that hid them, and has no ×.
+   */
+  threadAlone?: boolean;
+  /** The sidebar is open beside the list (the person's choice, not held closed): full screen hides it and brings it back. */
+  fullSidebar?: boolean;
+  /** Enter or leave the thread's full screen; absent where it has none (a thread opened from a Board card). */
+  onFull?: (on: boolean) => void;
   /** A line under the subject, from the window (the tour's notifications ask, once more, in the first real thread). */
   notice?: React.ReactNode;
   thread: InboxThread;
@@ -1202,7 +1211,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -3845,6 +3854,33 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
   const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  // The thread's full screen: the button pressed goes away (the other one takes its place), so focus follows to it
+  // when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
+  // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
+  // frame, so focus is checked again until the frame ends, and falls back to the stacked ‹ Inbox, then the subject.
+  const aloneWas = useRef(threadAlone);
+  const aloneFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (aloneWas.current !== threadAlone) {
+      aloneWas.current = threadAlone;
+      aloneFocus.current = true;
+      requestAnimationFrame(() => {
+        aloneFocus.current = false;
+      });
+    }
+    if (!aloneFocus.current) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const section = sectionRef.current;
+    const order = threadAlone ? ['[data-full-back]'] : ['[data-full-in]', '[data-stack-back]', 'h2.ib-subject'];
+    for (const selector of order) {
+      const el = section?.querySelector<HTMLElement>(selector);
+      if (el) {
+        el.focus({ preventScroll: true });
+        return;
+      }
+    }
+  }, [threadAlone, stacked]);
   const backToList = () => {
     const name = openAttachment?.name ?? null;
     const go = () => {
@@ -3954,6 +3990,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     <section
       ref={sectionRef}
       className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
+      data-full={threadAlone && !fileOpen ? '' : undefined}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
       {...paneDrop.handlers}
@@ -4001,6 +4038,29 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} data-stack-back="">
                     <Icon name="chevL" size={16} />
                     <span className="ib-pback-l">{backLabel}</span>
+                  </button>
+                </Tip>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
+            {/* The thread in full screen (approval "inbox-files-tabs", amendment 2026-10-30, B): the button that hid
+                the sidebar and the list becomes the way back to them. A file beside the thread leads with its own. */}
+            {threadAlone && !stacked && !backBesideFile && (
+              <>
+                <Tip content={fullSidebar ? 'Show the sidebar and the list' : 'Show the list'}>
+                  <button type="button" className="ib-pback" onClick={() => onFull?.(false)} aria-label={`Back to ${backLabel}`} data-full-back="">
+                    <Icon name="chevL" size={16} />
+                    <span className="ib-pback-l">{backLabel}</span>
+                  </button>
+                </Tip>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
+            {!threadAlone && !stacked && !backBesideFile && onFull && (
+              <>
+                <Tip content={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'}>
+                  <button type="button" className="ib-iconbtn" onClick={() => onFull(true)} aria-label={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'} data-full-in="">
+                    <Icon name="panelsHide" size={17} />
                   </button>
                 </Tip>
                 <span className="ib-vsep" aria-hidden="true" />
@@ -4063,13 +4123,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   onClick={expandAll}
                   aria-label={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
                 >
-                  <Icon name={allOpen ? 'collapse' : 'expand'} size={16} />
+                  <Icon name={allOpen ? 'fold' : 'unfold'} size={16} />
                 </button>
               </Tip>
             )}
             {archiveButton}
             <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} />
-            {phone || stacked || backBesideFile ? null : (
+            {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
                 <Tip content="Close">
