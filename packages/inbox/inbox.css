@@ -392,6 +392,8 @@
     outline-offset: 2px;
   }
 }
+/* The head a Send focuses to keep the person's place (Thread.tsx `focusSent`): no ring, as after a click on Send. Cleared on blur. */
+.pn-inbox [data-fold-head][data-sent-focus]:focus-visible { outline: none; }
 .ib-mut { color: var(--muted-foreground); }
 /* A message's Reply and the hold-ups toggle: icon buttons, so the focus ring follows a radius. */
 button.ib-mut { border-radius: 6px; }
