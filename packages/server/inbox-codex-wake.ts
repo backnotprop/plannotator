@@ -343,6 +343,16 @@ export function createInboxCodexWake(options: {
       delivered(item.id, session);
       return;
     }
+    if (typeof own === "object" && "uncertain" in own) {
+      // Sent, and no answer: the turn may have started. Kept claimed and uncertain, never sent again (as a timed-out `codex queue`).
+      inFlight.delete(key);
+      retryAt.delete(key);
+      log(`the Codex launch may have delivered ${item.id} to ${session} (${own.uncertain}); it is not sent again: the agent sees it when it reads the thread.`);
+      if (!claimed.has(key)) return;
+      uncertain.add(key);
+      writeFileSync(join(claimDir(item.id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
+      return;
+    }
     if (own !== "queue") {
       inFlight.delete(key);
       dropClaim(item.id, session);

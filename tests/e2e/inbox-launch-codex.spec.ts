@@ -112,7 +112,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     codexHome,
     config: { workMs: 600 },
     inboxMcp: join(bin, 'plannotator'),
-    configToml: `model = "gpt-5"\n# the person's own comment\n[projects."${join(home, 'elsewhere')}"]\ntrust_level = "untrusted"\n`,
+    // Their threads can write their folder (workspace-write), so Codex would record a new folder's trust: the Inbox passes it in memory instead.
+    configToml: `model = "gpt-5"\nsandbox_mode = "workspace-write"\n# the person's own comment\n[projects."${join(home, 'elsewhere')}"]\ntrust_level = "untrusted"\n`,
   });
   // Open in Terminal: what it would have run, recorded; nothing opens.
   writeFileSync(join(bin, 'osascript'), `#!/bin/sh\nfor a in "$@"; do printf '%s\\037' "$a"; done >> ${q(join(root, 'osascript.log'))}\nprintf '\\n' >> ${q(join(root, 'osascript.log'))}\n`, { mode: 0o755 });

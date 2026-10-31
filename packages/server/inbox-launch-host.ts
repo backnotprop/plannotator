@@ -33,9 +33,11 @@ export interface LaunchHostResult {
 /**
  * What a host did with the Inbox's wake text for one of its sessions (`deliver`): it went in as a turn
  * (`delivered`, recorded at once), the wake's own way should carry it (`queue`: Codex's `codex queue`, for a
- * session busy with a turn), or it could not (`failed`: tried again later, as a failed `codex queue` is).
+ * session busy with a turn), it could not (`failed`: tried again later, as a failed `codex queue` is), or it
+ * may have gone (`uncertain`: sent and never answered; kept claimed and never sent again, as a `codex queue`
+ * that ran out of time is).
  */
-export type LaunchDelivery = "delivered" | "queue" | { failed: string };
+export type LaunchDelivery = "delivered" | "queue" | { failed: string } | { uncertain: string };
 
 /** Why a start or a restart did not take, in words for the run line. */
 export type LaunchStartFailure = { code: InboxLaunchError["code"]; text: string };

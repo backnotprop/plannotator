@@ -34,8 +34,8 @@
  * fake daemon socket first on PATH (tests/helpers/fake-codex/).
  */
 
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { INBOX_CODEX_HOST, INBOX_CODEX_NAME, parseCodexCliVersion, type InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER_NAME, readCodexEntry } from "./inbox-agents";
@@ -76,32 +76,136 @@ export function parseDaemonStart(stdout: string): { socketPath: string | null; a
 }
 
 /**
- * The trust a thread for `folder` needs in memory so Codex writes none into `config.toml`: nothing when the
- * person's file already has a trust level for the folder (as given or its real path) or for its repository's
- * root (Codex then reads theirs and writes nothing); else that folder trusted, for this thread only. Codex keys
- * a folder's entry before its repository's, so a trust set here never hides one the person set.
+ * Whether Codex itself would write a folder's trust for this thread (thread_processor.rs: only when the effective
+ * permissions can write the folder): a full launch (`danger-full-access`), or the person's `sandbox_mode` (their
+ * selected `profile`'s first) being `workspace-write` or `danger-full-access`. Unset is `read-only` (Codex's
+ * default for a folder with no trust decision), which writes nothing. A named `default_permissions` profile is
+ * not read here: no trust is passed, and Codex decides as it would in its own TUI.
  */
-export function codexTrustOverride(configText: string | null, folder: string, realFolder: string, repoRoot: string | null): Record<string, unknown> {
+export function codexWritesTrust(configText: string | null, full: boolean): boolean {
+  if (full) return true;
+  let parsed: Record<string, any> = {};
+  try {
+    parsed = configText ? (Bun.TOML.parse(configText) as Record<string, any>) : {};
+  } catch {
+    return false;
+  }
+  const profile = typeof parsed.profile === "string" ? parsed.profiles?.[parsed.profile] : undefined;
+  if ((profile && profile.default_permissions !== undefined) || parsed.default_permissions !== undefined) return false;
+  const mode = profile?.sandbox_mode ?? parsed.sandbox_mode;
+  return mode === "workspace-write" || mode === "danger-full-access";
+}
+
+/**
+ * The trust a thread for `folder` needs in memory so Codex writes none into `config.toml`, found as Codex finds the
+ * folder's project (config_toml.rs `get_active_project`): the first of the folder's real path, the folder as given,
+ * then its trust root (`codexTrustRoot`: a linked worktree's main checkout) that has an entry. That entry with a trust
+ * level (trusted or untrusted): nothing, Codex reads it and writes nothing. No entry, or one with no trust level:
+ * the folder trusted for this thread only, and only when Codex itself would have written it (`writes`).
+ */
+export function codexTrustOverride(configText: string | null, folder: string, realFolder: string, trustRoot: string | null, writes: boolean): Record<string, unknown> {
   let projects: Record<string, unknown> = {};
   try {
     const parsed = configText ? (Bun.TOML.parse(configText) as Record<string, unknown>) : {};
     if (parsed.projects && typeof parsed.projects === "object") projects = parsed.projects as Record<string, unknown>;
   } catch {
-    // Unreadable: Codex itself would fail on it; trust in memory changes nothing on disk either way.
+    // Unreadable: Codex itself would fail on it; nothing is passed.
+    return {};
   }
-  const hasTrust = (key: string | null) => {
-    const entry = key ? projects[key] : undefined;
-    return !!entry && typeof entry === "object" && typeof (entry as { trust_level?: unknown }).trust_level === "string";
-  };
-  if ([folder, realFolder, repoRoot].some(hasTrust)) return {};
+  const keys = [realFolder, folder, ...(trustRoot ? [realPathOr(trustRoot), trustRoot] : [])];
+  const found = keys.map((key) => projects[key]).find((entry) => entry !== undefined);
+  if (found && typeof found === "object" && typeof (found as { trust_level?: unknown }).trust_level === "string") return {};
+  if (!writes) return {};
   return { projects: Object.fromEntries([...new Set([realFolder, folder])].map((key) => [key, { trust_level: "trusted" }])) };
 }
 
-/** The git repository holding `folder` (a `.git` in it or above it), as Codex looks for it, or null. */
-function repositoryOf(folder: string): string | null {
-  for (let dir = folder; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, ".git"))) return dir;
-    if (dirname(dir) === dir) return null;
+const realPathOr = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+/** A small git metadata file's text (a regular file, not a link, at most 64 KiB), or null. */
+function metadataFile(path: string): string | null {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.size > 64 * 1024) return null;
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** A `.git` file's `gitdir:` target, resolved from its folder, or null. */
+function gitdirOf(dotGit: string): string | null {
+  const text = metadataFile(dotGit)?.trim();
+  if (!text?.startsWith("gitdir:")) return null;
+  const target = text.slice("gitdir:".length).trim();
+  return target ? resolve(dirname(dotGit), target) : null;
+}
+
+const isDir = (path: string) => {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The folder Codex keys a folder's trust by after the folder itself (codex git-utils trust.rs
+ * `resolve_root_git_project_for_trust`): the nearest folder with a `.git` (a folder holding `HEAD`, or a file);
+ * for a linked worktree, its main checkout, once the worktree's and the main checkout's git metadata agree. Null
+ * when there is none, or for a `.git` file that is not a linked worktree (a submodule).
+ */
+export function codexTrustRoot(folder: string): string | null {
+  let base = isDir(folder) ? folder : dirname(folder);
+  let root: string | null = null;
+  for (;;) {
+    let dir = base;
+    let candidate: string | null = null;
+    for (;;) {
+      if (existsSync(join(dir, ".git"))) {
+        candidate = dir;
+        break;
+      }
+      if (dirname(dir) === dir) return null;
+      dir = dirname(dir);
+    }
+    const dotGit = join(candidate, ".git");
+    if (!isDir(dotGit) || existsSync(join(dotGit, "HEAD"))) {
+      root = candidate;
+      break;
+    }
+    if (dirname(candidate) === candidate) return null;
+    base = dirname(candidate);
+  }
+  const dotGit = join(root, ".git");
+  if (isDir(dotGit)) return root;
+  const gitDir = gitdirOf(dotGit);
+  if (!gitDir) return null;
+  try {
+    const stat = lstatSync(gitDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+    const canonical = realpathSync(gitDir);
+    if (basename(dirname(canonical)) !== "worktrees") return null;
+    const commonDir = dirname(dirname(canonical));
+    const registered = metadataFile(join(canonical, "gitdir"))?.trim();
+    const common = metadataFile(join(canonical, "commondir"))?.trim();
+    if (!registered || !common) return null;
+    const worktreeDotGit = resolve(canonical, registered);
+    if (basename(worktreeDotGit) !== ".git") return null;
+    if (realpathSync(dirname(worktreeDotGit)) !== realpathSync(root) || realpathSync(resolve(canonical, common)) !== commonDir) return null;
+    // The main checkout, spelled from the worktree's own pointer (Codex keeps that spelling), owning that common dir.
+    const mainRoot = dirname(dirname(dirname(gitDir)));
+    const mainDotGit = join(mainRoot, ".git");
+    const mainGitDir = isDir(mainDotGit) ? mainDotGit : gitdirOf(mainDotGit);
+    if (!mainGitDir || realpathSync(mainGitDir) !== commonDir) return null;
+    return mainRoot;
+  } catch {
+    return null;
   }
 }
 
@@ -122,6 +226,27 @@ export function codexHostState(status: CodexThreadStatus | null): InboxRunHostSt
 
 // ── The JSON-RPC client ──
 
+/** The request never went (the connection was closed before it): nothing reached Codex. */
+export class CodexNotSentError extends Error {}
+
+/** Codex's streamed text, which the Inbox never reads: not sent to this connection (`initialize`'s opt-out). */
+export const CODEX_OPT_OUT_NOTIFICATIONS = [
+  "command/exec/outputDelta",
+  "item/agentMessage/delta",
+  "item/commandExecution/outputDelta",
+  "item/fileChange/outputDelta",
+  "item/plan/delta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/textDelta",
+  "process/outputDelta",
+  "thread/realtime/item/transcript/delta",
+  "thread/realtime/outputAudio/delta",
+  "thread/realtime/transcript/delta",
+];
+
+/** A request whose outcome is unknown: it went, and no answer came (timed out, or the connection closed after it). */
+export const codexAnswerUnknown = (error: unknown): boolean => !(error instanceof CodexNotSentError) && !(error instanceof CodexRpcError && error.code !== null);
+
 export class CodexRpcError extends Error {
   constructor(
     readonly method: string,
@@ -135,7 +260,8 @@ export class CodexRpcError extends Error {
 export interface CodexConnection {
   readonly open: boolean;
   request(method: string, params: unknown, timeoutMs?: number): Promise<any>;
-  respond(id: number | string, result: unknown): void;
+  /** False when the connection is closed (nothing went). */
+  respond(id: number | string, result: unknown): boolean;
   close(): void;
 }
 
@@ -202,7 +328,7 @@ export async function connectCodex(
       return open;
     },
     request(method, params, ms = REQUEST_TIMEOUT_MS) {
-      if (!open) return Promise.reject(new Error("the Codex app-server connection is closed"));
+      if (!open) return Promise.reject(new CodexNotSentError("the Codex app-server connection is closed"));
       const id = next++;
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -214,7 +340,9 @@ export async function connectCodex(
       });
     },
     respond(id, result) {
-      if (open) send({ id, result });
+      if (!open) return false;
+      send({ id, result });
+      return true;
     },
     close() {
       open = false;
@@ -222,7 +350,7 @@ export async function connectCodex(
     },
   };
   try {
-    await connection.request("initialize", { clientInfo: { name: "plannotator_inbox", title: "Plannotator Inbox", version: "1" }, capabilities: null }, timeoutMs);
+    await connection.request("initialize", { clientInfo: { name: "plannotator_inbox", title: "Plannotator Inbox", version: "1" }, capabilities: { optOutNotificationMethods: CODEX_OPT_OUT_NOTIFICATIONS } }, timeoutMs);
   } catch (error) {
     connection.close();
     throw error;
@@ -317,9 +445,14 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
   };
 
   /** The daemon (started when `start` and not running) and the one connection. Null when it is not running and `start` is false. */
-  const connect = (options: { start: false } | { start: true; env: LaunchEnv; launchId?: string }): Promise<CodexConnection | null> => {
-    if (connection?.open) return Promise.resolve(connection);
-    if (connecting) return connecting;
+  const connect = async (options: { start: false } | { start: true; env: LaunchEnv; launchId?: string }): Promise<CodexConnection | null> => {
+    if (connection?.open) return connection;
+    if (connecting) {
+      // One attempt at a time; one that would not start the daemon (and found none) is followed by this one's start.
+      const got = await connecting;
+      if (got || !options.start) return got;
+      return connect(options);
+    }
     connecting = (async () => {
       try {
         if (!options.start && !existsSync(socket())) return null;
@@ -353,12 +486,21 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
           });
         }
         connectedAt = now();
+        // A new connection is on no thread: rejoin the launched threads that run a turn (their approvals come again).
+        const fresh = connection;
+        queueMicrotask(() => void rejoinThreads(fresh).catch(() => undefined));
         return connection;
       } finally {
         connecting = null;
       }
     })();
     return connecting;
+  };
+  /** `connect` with the daemon started when needed: a connection, or an error saying why not. */
+  const connectStarted = async (env: LaunchEnv, launchId?: string): Promise<CodexConnection> => {
+    const conn = await connect({ start: true, env, ...(launchId ? { launchId } : {}) });
+    if (!conn) throw new Error("the Codex app-server did not start");
+    return conn;
   };
 
   /** The plain env (every call but a start): the daemon may be started by a resume or a delete too. */
@@ -383,7 +525,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
     }
     const isDefaultDataDir = ctx.dataDir === getDefaultPlannotatorDataDir(ctx.homeDir);
     const config: Record<string, unknown> = {
-      ...codexTrustOverride(configText, launch.folder, real, repositoryOf(real)),
+      ...codexTrustOverride(configText, launch.folder, real, codexTrustRoot(real), codexWritesTrust(configText, launch.full_permissions === true)),
       // A test or second Inbox: the launched thread's Inbox MCP talks to this one.
       ...(isDefaultDataDir ? {} : { [`mcp_servers.${INBOX_MCP_SERVER_NAME}.env.PLANNOTATOR_DATA_DIR`]: ctx.dataDir }),
     };
@@ -426,10 +568,18 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
   const rejoin = async () => {
     if (connection?.open || connecting || now() - lastLook < 15_000) return;
     lastLook = now();
+    if (!myRoots().some((root) => root.launch!.session_ref && !root.launch!.error)) return;
+    // A new connection rejoins its threads by itself (`connect`).
+    await connect({ start: false }).catch(() => null);
+  };
+  /**
+   * On every new connection (an Inbox restart, a daemon restart, a dropped socket): each launched thread that is
+   * loaded and runs a turn, and that this connection is not on, is rejoined, so Codex sends its pending approval
+   * again and the card's answer can go.
+   */
+  const rejoinThreads = async (conn: CodexConnection) => {
     const launches = myRoots().filter((root) => root.launch!.session_ref && !root.launch!.error);
-    if (launches.length === 0) return;
-    const conn = await connect({ start: false }).catch(() => null);
-    if (!conn) return;
+    if (launches.length === 0 || !conn.open) return;
     const loaded = await loadedThreads(conn);
     for (const root of launches) {
       const ref = root.launch!.session_ref!;
@@ -439,8 +589,8 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       }
       const read = await conn.request("thread/read", { threadId: ref }).catch(() => null);
       const status = read?.thread?.status as CodexThreadStatus | undefined;
-      if (status) setStatus(ref, status);
-      if (status?.type === "active") await resumeThread(conn, root.launch!).catch(() => undefined);
+      if (status) setStatus(ref, status, threads.get(ref)?.subscribed === true);
+      if (status?.type === "active" && !threads.get(ref)?.subscribed) await resumeThread(conn, root.launch!).catch(() => undefined);
     }
   };
 
@@ -502,7 +652,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       const e = await ctx.environment();
       if (!e.which("codex")) return { ok: false as const, code: "missing" as const, text: "codex is not on the Inbox's PATH." };
       try {
-        const conn = (await connect({ start: true, env: input.login, launchId: launch.id }))!;
+        const conn = await connectStarted(input.login, launch.id);
         const before = configStamp();
         const settings = threadSettings(launch);
         const result = await conn.request("thread/start", settings);
@@ -552,7 +702,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
     /** A reply to a thread that is not live: the daemon (started again after a reboot), then `thread/resume`. The Codex wake delivers the reply. */
     async resume(launch: InboxLaunchRecord) {
       try {
-        const conn = (await connect({ start: true, env: await plainEnv() }))!;
+        const conn = await connectStarted(await plainEnv());
         const view = await resumeThread(conn, launch);
         return { ...ok(`thread/resume: ${view.status.type}`), failure: null };
       } catch (error) {
@@ -567,6 +717,10 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       if (!conn) return ok("not running");
       const view = viewOf(ref);
       const said: string[] = [];
+      // What this Inbox last saw may be old (a turn started from Terminal): the thread as it is now, 5 s at most.
+      const read = await conn.request("thread/read", { threadId: ref }, INTERRUPT_TIMEOUT_MS).catch(() => null);
+      const status = read?.thread?.status as CodexThreadStatus | undefined;
+      if (status && JSON.stringify(status) !== JSON.stringify(view.status)) setStatus(ref, status, false);
       if (view.status.type === "active") {
         const turnId = await runningTurn(conn, ref);
         if (turnId) {
@@ -587,10 +741,17 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       return ok(said.join("; "));
     },
 
-    /** Delete: `thread/delete` (Codex's own history of it goes too). */
+    /**
+     * Delete: `thread/delete` (Codex's own history of it goes too). Never starts the daemon: with none running the
+     * thread is left in Codex's history, and the log says so.
+     */
     async remove(ref: string) {
       try {
-        const conn = (await connect({ start: true, env: await plainEnv() }))!;
+        const conn = await connect({ start: false }).catch(() => null);
+        if (!conn) {
+          ctx.log(`Inbox launch: the Codex app-server is not running; thread ${ref} was not deleted in Codex (\`codex resume\` still lists it)`);
+          return ok("skipped: the Codex app-server is not running");
+        }
         await conn.request("thread/unsubscribe", { threadId: ref }).catch(() => undefined);
         await conn.request("thread/delete", { threadId: ref });
         threads.delete(ref);
@@ -611,7 +772,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       permissionContext = context;
       permissions = createCodexPermissions({
         ...context,
-        respond: (id, result) => connection?.respond(id, result),
+        respond: (id, result) => connection?.respond(id, result) ?? false,
         steer: (threadId, turnId, text) =>
           void connection?.request("turn/steer", { threadId, expectedTurnId: turnId, input: [{ type: "text", text, text_elements: [] }] }).catch(() => undefined),
         status: (threadId) => (connection?.open ? (threads.get(threadId)?.status ?? null) : null),
@@ -628,11 +789,17 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
      */
     async deliver(launch: InboxLaunchRecord, text: string): Promise<LaunchDelivery> {
       const threadId = launch.session_ref!;
-      const conn = (await connect({ start: true, env: await plainEnv() }))!;
+      const conn = await connectStarted(await plainEnv());
       let view = threads.get(threadId);
       if (!view?.subscribed) view = await resumeThread(conn, launch);
       if (view.status.type === "active") return "queue";
-      await conn.request("turn/start", { threadId, input: [{ type: "text", text, text_elements: [] }] });
+      try {
+        await conn.request("turn/start", { threadId, input: [{ type: "text", text, text_elements: [] }] });
+      } catch (error) {
+        // It went and no answer came: the turn may have started. Never sent again (a second turn).
+        if (codexAnswerUnknown(error)) return { uncertain: error instanceof Error ? error.message : String(error) };
+        throw error;
+      }
       return "delivered";
     },
 

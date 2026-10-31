@@ -172,6 +172,11 @@ function daemon() {
       real = fs.realpathSync(cwd);
     } catch {}
     if (keyed(cwd) || keyed(real) || overridden(cwd) || overridden(real)) return;
+    // Only when the thread's permissions can write the folder: a sandbox the request names, else config.toml's
+    // top-level `sandbox_mode`, else read-only (Codex's default for a folder with no trust decision).
+    const top = text.split(/^\[/m)[0];
+    const mode = params.sandbox || ((/^sandbox_mode\s*=\s*"([^"]+)"/m.exec(top) || [])[1]) || "read-only";
+    if (mode !== "workspace-write" && mode !== "danger-full-access") return;
     fs.appendFileSync(file, `\n[projects."${real}"]\ntrust_level = "trusted"\n`);
     log(`wrote trust for ${real}`);
   };
@@ -345,12 +350,14 @@ function daemon() {
       save();
       return {};
     },
-    "turn/start": (params) => {
+    "turn/start": (params, c) => {
       const thread = threads.get(params.threadId);
       if (!thread || !thread.loaded) throw { code: -32600, message: `thread not found: ${params.threadId}` };
       if (thread.running) throw { code: -32600, message: "a turn is already running" };
       const text = (params.input || []).map((i) => i.text || "").join("\n");
       const turn = runTurn(thread, text, "turn/start");
+      // The turn starts, and the connection drops before its answer (config dropOnTurnStart).
+      if (config().dropOnTurnStart) return turn.then(() => (c.drop(), NO_ANSWER));
       return turn.then((t) => ({ turn: { id: t.id, status: "inProgress", items: [], error: null } }));
     },
     "turn/interrupt": (params) => {
@@ -447,7 +454,7 @@ function daemon() {
       })();
       if (!socket.destroyed) socket.write(Buffer.concat([head, payload]));
     };
-    const c = { send: (value) => frame(1, Buffer.from(JSON.stringify(value))) };
+    const c = { send: (value) => frame(1, Buffer.from(JSON.stringify(value))), drop: () => socket.destroy() };
     conns.add(c);
     let buffer = Buffer.alloc(0);
     let fragments = [];

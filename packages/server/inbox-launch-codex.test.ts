@@ -10,16 +10,18 @@
  * again is the same card, and one answered in Terminal is withdrawn; Delete deletes the thread.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices } from "@plannotator/core/inbox-permission";
+import { spawnSync } from "node:child_process";
+import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_ASK_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices } from "@plannotator/core/inbox-permission";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { installFakeCodex, type FakeCodex, type FakeCodexConfig } from "../../tests/helpers/fake-codex";
 import { createInboxLaunch } from "./inbox-launch";
-import { codexHostState, codexTrustOverride, parseDaemonStart } from "./inbox-launch-codex";
-import { CODEX_COMMAND_APPROVAL, CODEX_FILE_APPROVAL, CODEX_PERMISSION_TERMS, CODEX_PERMISSIONS_APPROVAL, codexDecision, codexDiffEdits, codexPermissionEvent, createCodexPermissions } from "./inbox-launch-codex-permission";
+import { codexHostState, codexTrustOverride, codexTrustRoot, codexWritesTrust, parseDaemonStart } from "./inbox-launch-codex";
+import { CODEX_COMMAND_APPROVAL, CODEX_FILE_APPROVAL, CODEX_PERMISSION_TERMS, CODEX_PERMISSIONS_APPROVAL, codexApprovalKey, codexDecision, codexDiffEdits, codexPermissionEvent, createCodexPermissions } from "./inbox-launch-codex-permission";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -37,17 +39,64 @@ function setEnv(name: string, value: string) {
 
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 const messagesOf = (store: InboxStore, threadId: string): InboxMessage[] => store.thread(threadId)?.messages ?? [];
+const cardsOf = (store: InboxStore, root: InboxMessage, threadId: string) => messagesOf(store, root.thread_id).filter((m) => m.author.session === `perm:${threadId}`);
+/** The window's way: the pick, then the Send. */
+function answerCard(store: InboxStore, cardId: string, label: string) {
+  const q = store.questionsOf(cardId)[0]!;
+  const picked = { v: 1 as const, key: q.key, kind: "single" as const, prompt: q.prompt, selected: [label] };
+  const saved = store.savePicks(cardId, [{ key: q.key, revision: q.revision, answer: picked }], { unsentOnly: true });
+  store.sendReply(cardId, { idempotency_key: `answer-${cardId}`, questions: [{ key: q.key, revision: saved[0]!.revision }] });
+}
 
 describe("the pure parts", () => {
-  test("a folder with no trust gets it in memory; one the person trusted (itself, its real path or its repository) gets none", () => {
+  test("trust goes in memory only where Codex would write it, found as Codex finds the folder's project", () => {
     const trusted = { projects: { "/real/app": { trust_level: "trusted" }, "/link/app": { trust_level: "trusted" } } };
-    expect(codexTrustOverride(null, "/link/app", "/real/app", null)).toEqual(trusted);
-    expect(codexTrustOverride('model = "gpt-5"\n', "/link/app", "/real/app", null)).toEqual(trusted);
-    expect(codexTrustOverride('[projects."/real/app"]\ntrust_level = "untrusted"\n', "/link/app", "/real/app", null)).toEqual({});
-    expect(codexTrustOverride('[projects."/link/app"]\ntrust_level = "trusted"\n', "/link/app", "/real/app", null)).toEqual({});
-    expect(codexTrustOverride('[projects."/repo"]\ntrust_level = "trusted"\n', "/repo/app", "/repo/app", "/repo")).toEqual({});
-    // An entry with no trust level is no trust: Codex would write one.
-    expect(codexTrustOverride('[projects."/repo/app"]\nnote = "x"\n', "/repo/app", "/repo/app", null)).toEqual({ projects: { "/repo/app": { trust_level: "trusted" } } });
+    expect(codexTrustOverride(null, "/link/app", "/real/app", null, true)).toEqual(trusted);
+    // Codex would write nothing (read-only: no write to the folder): nothing in memory either, so nothing widens.
+    expect(codexTrustOverride(null, "/link/app", "/real/app", null, false)).toEqual({});
+    // The person's trust level, trusted or untrusted, on the folder (either spelling) or its trust root: theirs.
+    expect(codexTrustOverride('[projects."/real/app"]\ntrust_level = "untrusted"\n', "/link/app", "/real/app", null, true)).toEqual({});
+    expect(codexTrustOverride('[projects."/link/app"]\ntrust_level = "trusted"\n', "/link/app", "/real/app", null, true)).toEqual({});
+    expect(codexTrustOverride('[projects."/main"]\ntrust_level = "untrusted"\n', "/wt/app", "/wt/app", "/main", true)).toEqual({});
+    // The folder's own entry comes first, even with no trust level: Codex reads it (not the root's) and would write.
+    expect(codexTrustOverride('[projects."/wt/app"]\nnote = "x"\n[projects."/main"]\ntrust_level = "untrusted"\n', "/wt/app", "/wt/app", "/main", true)).toEqual({ projects: { "/wt/app": { trust_level: "trusted" } } });
+    expect(codexTrustOverride('[projects."/wt/app"]\ntrust_level = "trusted"\n[projects."/main"]\ntrust_level = "untrusted"\n', "/wt/app", "/wt/app", "/main", true)).toEqual({});
+  });
+
+  test("Codex writes trust only when the thread can write the folder", () => {
+    expect(codexWritesTrust(null, false)).toBe(false);
+    expect(codexWritesTrust('sandbox_mode = "read-only"\n', false)).toBe(false);
+    expect(codexWritesTrust('sandbox_mode = "workspace-write"\n', false)).toBe(true);
+    expect(codexWritesTrust('sandbox_mode = "danger-full-access"\n', false)).toBe(true);
+    expect(codexWritesTrust('sandbox_mode = "read-only"\n', true)).toBe(true);
+    // The selected profile's sandbox wins; a named permissions profile is not guessed at.
+    expect(codexWritesTrust('sandbox_mode = "read-only"\nprofile = "w"\n[profiles.w]\nsandbox_mode = "workspace-write"\n', false)).toBe(true);
+    expect(codexWritesTrust('sandbox_mode = "workspace-write"\ndefault_permissions = "mine"\n', false)).toBe(false);
+  });
+
+  test.skipIf(process.platform === "win32")("a linked worktree's trust root is its main checkout, as Codex resolves it; a plain checkout's is itself", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-codex-trust-")));
+    restore.push(() => rmSync(dir, { recursive: true, force: true }));
+    const env = { PATH: "/usr/bin:/bin", HOME: dir, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+    const git = (cwd: string, ...args: string[]) => expect(spawnSync("/usr/bin/git", args, { cwd, env }).status).toBe(0);
+    const main = join(dir, "main");
+    mkdirSync(join(main, "src"), { recursive: true });
+    git(main, "init", "-q");
+    git(main, "commit", "-q", "--allow-empty", "-m", "first");
+    git(main, "worktree", "add", "-q", join(dir, "wt"));
+    mkdirSync(join(dir, "wt", "pkg"));
+    expect(codexTrustRoot(join(main, "src"))).toBe(main);
+    expect(codexTrustRoot(join(dir, "wt", "pkg"))).toBe(main);
+    expect(codexTrustRoot(dir)).toBeNull();
+    // The person marked the main checkout untrusted: the worktree gets no trust from the Inbox.
+    const config = `sandbox_mode = "workspace-write"\n[projects."${main}"]\ntrust_level = "untrusted"\n`;
+    const wt = join(dir, "wt", "pkg");
+    expect(codexTrustOverride(config, wt, wt, codexTrustRoot(wt), codexWritesTrust(config, false))).toEqual({});
+    // A `.git` file that is not a linked worktree's (a forged pointer): no root, as Codex finds none.
+    const forged = join(dir, "forged");
+    mkdirSync(forged);
+    writeFileSync(join(forged, ".git"), `gitdir: ${join(main, ".git")}\n`);
+    expect(codexTrustRoot(forged)).toBeNull();
   });
 
   test("a thread's status is the run line's host state; one not loaded is absent", () => {
@@ -72,6 +121,8 @@ describe("the pure parts", () => {
     expect(inboxPermissionChoices(event, CODEX_PERMISSION_TERMS)).toEqual([INBOX_PERMISSION_ALLOW_ONCE, "Allow `bun run build` for this session", INBOX_PERMISSION_DENY, INBOX_PERMISSION_TERMINAL]);
     // A trailing `:*` reads as a prefix rule on the card; Codex's session cache is for the exact command.
     expect(codexPermissionEvent(CODEX_COMMAND_APPROVAL, { ...params, command: "git log:*" }, undefined)!.permission_suggestions).toEqual([]);
+    // More sandbox access with the command: the card would show the command alone, so it goes to Terminal.
+    expect(codexPermissionEvent(CODEX_COMMAND_APPROVAL, { ...params, additionalPermissions: { network: { enabled: true } } }, undefined)).toBeNull();
   });
 
   test("Codex has no modes: no Auto mode or Full permissions choice, and such a pick from an older card is Allow once", () => {
@@ -115,7 +166,7 @@ describe("the pure parts", () => {
 });
 
 describe("the approval transport", () => {
-  test("a request Codex sends again (a new id, the same item) is the same card, and the answer goes to the latest id", () => {
+  function transport() {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-codex-perm-"));
     restore.push(() => rmSync(dir, { recursive: true, force: true }));
     const store = InboxStore.open(join(dir, "data"));
@@ -123,6 +174,7 @@ describe("the approval transport", () => {
     const launch = { id: "lch_01J00000000000000000000001", agent: "codex" as const, session_ref: THREAD, folder: dir, scratch: false, started_at: new Date().toISOString() };
     const root = store.startPersonThread({ project_id: project.id, body: "Build it.", to: { host: "codex", session: THREAD }, idempotency_key: "send-1", launch }).message;
     const answers: [number | string, unknown][] = [];
+    const link = { up: true };
     const permissions = createCodexPermissions({
       store,
       roots: () => [store.message(root.id)!],
@@ -130,26 +182,62 @@ describe("the approval transport", () => {
       displayFolder: (path) => path,
       host: { stateOf: () => null, readAt: () => null },
       onChange: () => {},
-      respond: (id, result) => answers.push([id, result]),
+      respond: (id, result) => link.up && answers.push([id, result]) > 0,
       steer: () => {},
       status: () => null,
       connectedAt: () => null,
       rejoin: () => {},
     } as never);
-    const params = { threadId: THREAD, turnId: "t1", itemId: "i1", approvalId: null, command: "bun run build", cwd: dir };
-    permissions.asked(7, CODEX_COMMAND_APPROVAL, params);
-    permissions.connectionLost();
-    permissions.asked(12, CODEX_COMMAND_APPROVAL, params);
-    const cards = messagesOf(store, root.thread_id).filter((m: InboxMessage) => m.author.session === `perm:${THREAD}`);
-    expect(cards).toHaveLength(1);
-    expect(cards[0]!.author).toMatchObject({ host: "codex", name: "Codex" });
-    const question = store.questionsOf(cards[0]!.id)[0]!;
-    const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: [INBOX_PERMISSION_ALLOW_ONCE] };
-    const saved = store.savePicks(cards[0]!.id, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true });
-    store.sendReply(cards[0]!.id, { idempotency_key: "answer-1", questions: [{ key: question.key, revision: saved[0]!.revision }] });
-    permissions.sweep();
-    permissions.sweep();
-    expect(answers).toEqual([[12, { decision: "accept" }]]);
+    const cards = () => messagesOf(store, root.thread_id).filter((m: InboxMessage) => m.author.session === `perm:${THREAD}`);
+    const answer = (cardId: string) => {
+      const question = store.questionsOf(cardId)[0]!;
+      const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: [INBOX_PERMISSION_ALLOW_ONCE] };
+      const saved = store.savePicks(cardId, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true });
+      store.sendReply(cardId, { idempotency_key: `answer-${cardId}`, questions: [{ key: question.key, revision: saved[0]!.revision }] });
+    };
+    return { store, root, dir, answers, link, permissions, cards, answer };
+  }
+
+  test("a request Codex sends again (a new id, the same item) is the same card, and the answer goes to the latest id", () => {
+    const t = transport();
+    const params = { threadId: THREAD, turnId: "t1", itemId: "i1", approvalId: null, command: "bun run build", cwd: t.dir };
+    t.permissions.asked(7, CODEX_COMMAND_APPROVAL, params);
+    t.permissions.connectionLost();
+    t.permissions.asked(12, CODEX_COMMAND_APPROVAL, params);
+    expect(t.cards()).toHaveLength(1);
+    expect(t.cards()[0]!.author).toMatchObject({ host: "codex", name: "Codex" });
+    t.answer(t.cards()[0]!.id);
+    t.permissions.sweep();
+    t.permissions.sweep();
+    expect(t.answers).toEqual([[12, { decision: "accept" }]]);
+  });
+
+  test("two approvals of one item (approval ids with a long shared prefix) are two cards, each answered on its own request", () => {
+    const t = transport();
+    const prefix = `zsh-exec-bridge-${"a".repeat(60)}`;
+    const base = { threadId: THREAD, turnId: "t1", itemId: "item-with-a-long-identifier-0001", cwd: t.dir };
+    t.permissions.asked(1, CODEX_COMMAND_APPROVAL, { ...base, approvalId: `${prefix}-1`, command: "ls" });
+    t.permissions.asked(2, CODEX_COMMAND_APPROVAL, { ...base, approvalId: `${prefix}-2`, command: "rm -rf build" });
+    expect(t.cards().map((c) => c.body.split("\n")[1])).toEqual(["ls", "rm -rf build"]);
+    expect(codexApprovalKey(THREAD, base.itemId, `${prefix}-1`)).not.toBe(codexApprovalKey(THREAD, base.itemId, `${prefix}-2`));
+    t.answer(t.cards()[0]!.id);
+    t.permissions.sweep();
+    expect(t.answers).toEqual([[1, { decision: "accept" }]]);
+  });
+
+  test("an answer that could not go (no connection) goes on the request Codex sends again", () => {
+    const t = transport();
+    const params = { threadId: THREAD, turnId: "t1", itemId: "i1", approvalId: null, command: "make", cwd: t.dir };
+    t.permissions.asked(3, CODEX_COMMAND_APPROVAL, params);
+    t.answer(t.cards()[0]!.id);
+    t.link.up = false;
+    t.permissions.sweep();
+    expect(t.answers).toEqual([]);
+    t.link.up = true;
+    t.permissions.connectionLost();
+    t.permissions.asked(9, CODEX_COMMAND_APPROVAL, params);
+    t.permissions.sweep();
+    expect(t.answers).toEqual([[9, { decision: "accept" }]]);
   });
 });
 
@@ -163,7 +251,11 @@ interface World {
   home: string;
   post: (id: string, action: string) => Promise<Response | null>;
   send: (body: string, key: string) => Promise<InboxMessage>;
+  restart: () => { store: InboxStore; launch: ReturnType<typeof createInboxLaunch> };
 }
+
+/** The person's config.toml in these tests: their threads can write their folder, so Codex would write its trust. */
+const WRITES = 'model = "gpt-5"\nsandbox_mode = "workspace-write"\n';
 
 function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMcp?: boolean } = {}): World {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-codex-")));
@@ -180,7 +272,7 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
     state: join(root, "codex-state"),
     home,
     config: { workMs: 100, ...options.config },
-    ...(options.inboxMcp === false ? { configToml: options.configToml ?? 'model = "gpt-5"\n' } : { inboxMcp: join(root, "plannotator", "plannotator"), ...(options.configToml ? { configToml: options.configToml } : {}) }),
+    ...(options.inboxMcp === false ? { configToml: options.configToml ?? WRITES } : { inboxMcp: join(root, "plannotator", "plannotator"), configToml: options.configToml ?? WRITES }),
   });
   restore.push(() => {
     codex.stopAll();
@@ -189,8 +281,9 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
   const store = InboxStore.open(dataDir);
   const project = store.ensureProject({ name: "ledger", root: folder });
   const env = { HOME: home, PATH: `${bin}:/usr/bin:/bin` };
+  const engine = (on: InboxStore, laterMs = 0) => {
   const launch = createInboxLaunch({
-    store,
+    store: on,
     live: { runStateOf: () => null },
     dataDir,
     serverSession: "srv",
@@ -205,8 +298,12 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
     onChange: () => {},
     log: () => {},
     selfCommand: ["plannotator"],
+    now: () => Date.now() + laterMs,
   });
   restore.push(() => launch.stop());
+  return launch;
+  };
+  const launch = engine(store);
   const post = (id: string, action: string) =>
     launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", body: JSON.stringify({ serverSession: "srv" }) }), `/api/inbox/launch/${id}/${action}`, "local");
   const send = async (body: string, key: string) => {
@@ -217,7 +314,16 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
     await until(() => !!store.message(sent.id)!.launch!.session_ref || !!store.message(sent.id)!.launch!.error, 10_000);
     return store.message(sent.id)!;
   };
-  return { store, codex, launch, project, home, post, send };
+  /**
+   * The Inbox restarts: this engine stops (its connection goes, the daemon and its threads stay), a new one opens
+   * the same data dir, its clock past the start's grace (so a read of the thread asks the host).
+   */
+  const restart = () => {
+    launch.stop();
+    const again = InboxStore.open(dataDir);
+    return { store: again, launch: engine(again, INBOX_RUN_START_GRACE_MS * 2) };
+  };
+  return { store, codex, launch, project, home, post, send, restart };
 }
 
 async function until(check: () => boolean, ms = 5_000) {
@@ -379,5 +485,78 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     expect(await (await w.post(root.launch!.id, "delete"))!.json()).toEqual({ ok: true });
     expect(w.codex.rpc("thread/delete").map((r) => r.params.threadId)).toEqual([threadId]);
     expect(w.codex.threads()[threadId]).toBeUndefined();
+  });
+
+  test("a folder Codex would not write trust for (read-only, its default) gets none in memory, and nothing widens", async () => {
+    const w = world({ configToml: 'model = "gpt-5"\n' });
+    const before = w.codex.configToml();
+    await w.send("Fix it.", "send-1");
+    expect(w.codex.rpc("thread/start")[0]!.params.config.projects).toBeUndefined();
+    expect(w.codex.configToml()).toBe(before);
+  });
+
+  test("after an Inbox restart, a card answered there reaches Codex, though the window read the thread before any sweep", async () => {
+    const w = world({ config: { prompts: [{ kind: "command", command: "bun test" }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => cardsOf(w.store, root, threadId).length === 1);
+    const again = w.restart();
+    // The window reads the thread first: that read opens the new connection.
+    await again.launch.runOf(root.id);
+    answerCard(again.store, cardsOf(again.store, root, threadId)[0]!.id, INBOX_PERMISSION_ALLOW_ONCE);
+    for (let i = 0; i < 100 && w.codex.approvals().length === 0; i++) {
+      again.launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()[0]).toMatchObject({ threadId, result: { decision: "accept" }, how: "answered" });
+    expect(cardsOf(again.store, root, threadId)).toHaveLength(1);
+  });
+
+  test("a patch card left open across an Inbox restart (its change is not sent again) is handed to Terminal", async () => {
+    const w = world({ config: { prompts: [{ kind: "fileChange", changes: [{ path: "/p/a.txt", kind: { type: "add" }, diff: "hi\n" }] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => cardsOf(w.store, root, threadId).length === 1);
+    const card = cardsOf(w.store, root, threadId)[0]!;
+    const again = w.restart();
+    await again.launch.runOf(root.id);
+    await until(() => messagesOf(again.store, root.thread_id).some((m) => m.reply_to === card.id && m.body === INBOX_PERMISSION_ASK_IN_TERMINAL));
+    expect(w.codex.approvals()).toEqual([]);
+  });
+
+  test("a turn/start that may have gone (the connection dropped before its answer) is never sent again", async () => {
+    const w = world({ config: { dropOnTurnStart: true, hold: true } });
+    const root = await w.send("Fix it.", "send-1");
+    const result = await w.launch.deliver("codex", root.launch!.session_ref!, wake(root.id, "Fix it."));
+    expect(result).toMatchObject({ uncertain: expect.any(String) });
+    expect(w.codex.turns().filter((t) => t.how === "turn/start")).toHaveLength(1);
+  });
+
+  test("Stop reads the thread first: a turn this Inbox did not see (started from Terminal) is interrupted", async () => {
+    const w = world({ config: { hold: true } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.post(root.launch!.id, "stop");
+    // The person goes on in Terminal: this Inbox is off the thread and sees none of it.
+    expect(w.codex.cli(["queue", `--thread=${threadId}`, "--message=Keep going."]).status).toBe(0);
+    await until(() => w.codex.turns().length === 1);
+    await w.post(root.launch!.id, "stop");
+    expect(w.codex.rpc("turn/interrupt").map((r) => r.params.turnId)).toEqual([w.codex.turns()[0]!.turnId]);
+  });
+
+  test("Delete never starts the daemon: with none running, the thread is left in Codex", async () => {
+    const w = world();
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    expect(w.codex.cli(["app-server", "daemon", "stop"]).status).toBe(0);
+    await until(() => !existsSync(join(w.codex.home, "app-server-control", "app-server-control.sock")));
+    const starts = () => w.codex.calls().filter((c) => c.argv.join(" ") === "app-server daemon start").length;
+    const before = starts();
+    expect(await (await w.post(root.launch!.id, "delete"))!.json()).toEqual({ ok: true });
+    expect(starts()).toBe(before);
+    expect(w.codex.rpc("thread/delete")).toEqual([]);
+    expect(w.codex.threads()[threadId]).toBeDefined();
   });
 });

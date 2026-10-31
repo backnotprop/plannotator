@@ -971,7 +971,7 @@ export function createInboxLaunch(options: {
       const root = roots().find((m) => !m.launch!.deleted_at && m.launch!.agent === agent && m.to?.host === agent && m.to.session === session && m.launch!.session_ref);
       if (!root || !host.deliver) return "queue";
       const result = await host.deliver(root.launch!, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }));
-      if (typeof result === "object") startLog(root.launch!.id, `deliver: ${result.failed}`);
+      if (typeof result === "object") startLog(root.launch!.id, "failed" in result ? `deliver: ${result.failed}` : `deliver: may have gone, not sent again: ${result.uncertain}`);
       options.onChange();
       return result;
     },

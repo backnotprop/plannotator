@@ -167,6 +167,7 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
+import type { LaunchDelivery } from "./inbox-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
@@ -383,7 +384,8 @@ export interface InboxServerOptions {
    * Codex CLI besides `agentEnvironment`'s PATH (default: the ChatGPT app's,
    * never under the test sandbox), and how often to look for replies to queue.
    */
-  codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
+  /** `deliver`: tests stand in for the launch engine's (what a launched thread's host answers). */
+  codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number; deliver?: (session: string, text: string) => Promise<LaunchDelivery> };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
 }
@@ -2275,7 +2277,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A thread blocked in wait_for_reply gets the reply from that call, not as another turn as well.
     waitingOverMcp: (session, threadId) => live.waitingOverMcp(session, threadId),
     // A Codex session the Inbox launched: its host puts the item in as a turn (launch is made below; until then, the queue).
-    deliver: (session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve("queue" as const)),
+    deliver: options.codexWake?.deliver ?? ((session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve("queue" as const))),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),

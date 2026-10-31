@@ -27,9 +27,12 @@
  * is not asked: the run line says Codex waits on Terminal.
  */
 
+import { createHash } from "node:crypto";
 import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
+  INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
+  isInboxPermissionSession,
   type InboxPermissionChoice,
   type InboxPermissionEvent,
   type InboxPermissionOptions,
@@ -52,6 +55,15 @@ const ADOPT_MS = 5_000;
 
 /** Codex's terms for every card: no mode switch, Approve in Terminal (`codex resume` shows the request). */
 export const CODEX_PERMISSION_TERMS: InboxPermissionOptions = { modes: false, full: false, fullPermissions: false, allowHere: true, terminal: true, note: null, handoff: CODEX_HANDOFF };
+
+/**
+ * The question's key for one approval request: the whole (thread, item, approval id), hashed, so two requests
+ * of one item never share a card however long their ids. The store's idempotency key is `perm-<key>` (75 characters).
+ */
+export function codexApprovalKey(threadId: string, itemId: unknown, approvalId: unknown): string {
+  const whole = JSON.stringify([threadId, itemId ?? null, approvalId ?? null]);
+  return `codex-${createHash("sha256").update(whole).digest("hex")}`;
+}
 
 /** One change of a Codex patch (`FileUpdateChange`). */
 export interface CodexFileChange {
@@ -85,6 +97,8 @@ export function codexPermissionEvent(method: string, params: Record<string, any>
   const reason = typeof params.reason === "string" && params.reason.trim() ? params.reason.trim() : null;
   if (method === CODEX_COMMAND_APPROVAL) {
     if ((params.kind ?? "command") !== "command" || typeof params.command !== "string" || !params.command.trim()) return null;
+    // More sandbox access with the command (experimental): the card would show the command only, so Terminal decides.
+    if (params.additionalPermissions !== undefined && params.additionalPermissions !== null) return null;
     const command = params.command as string;
     // Codex's session approval is for this exact command: offered only when the card's rule words show it exactly.
     const exact = !/(?::\*|\s\*)$/.test(command.trim());
@@ -138,7 +152,8 @@ interface Pending {
 
 export function createCodexPermissions(
   options: LaunchPermissionContext & {
-    respond: (id: number | string, result: unknown) => void;
+    /** Answer the request on the connection now; false when it could not go (no connection). */
+    respond: (id: number | string, result: unknown) => boolean;
     steer: (threadId: string, turnId: string, text: string) => void;
     /** A thread's status as this connection last saw it; null while not connected. */
     status: (threadId: string) => CodexThreadStatus | null;
@@ -163,6 +178,13 @@ export function createCodexPermissions(
   const questions = createLaunchQuestions({ store, name: INBOX_CODEX_NAME, displayFolder: options.displayFolder, onChange: options.onChange, log });
   const terms: InboxPermissionOptions = { ...CODEX_PERMISSION_TERMS, shownPath: options.displayFolder };
 
+  /** The open card a request with this key wrote before (an earlier Inbox run), or null. */
+  const earlierCard = (root: InboxMessage, key: string): string | null => {
+    for (const { message } of openPermissionQuestions(store, root.thread_id)) {
+      if (message.idempotency_key === `perm-${key}` && message.author.kind === "agent" && isInboxPermissionSession(message.author.session)) return message.id;
+    }
+    return null;
+  };
   const rootOfThread = (threadId: string): InboxMessage | null => options.roots().find((root) => root.launch!.session_ref === threadId) ?? null;
   const drop = (p: Pending) => {
     pending.delete(p.key);
@@ -175,13 +197,16 @@ export function createCodexPermissions(
       const root = rootOfThread(params.threadId);
       // Not a launched thread of this Inbox: another client of the daemon answers it.
       if (!root) return;
-      const key = `codex-${params.threadId}-${String(params.itemId ?? "")}-${String(params.approvalId ?? "")}`.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+      const key = codexApprovalKey(params.threadId, params.itemId, params.approvalId);
       const known = pending.get(key);
       if (known) {
-        // Sent again (a dropped connection, `thread/resume`): the same question, answered on this request's id.
+        // Sent again (a dropped connection, `thread/resume`): the same question, answered on this request's id. An
+        // answer given before is sent again on it (Codex still asks, so the last one did not reach it).
         if (known.rpcId !== null) byRpc.delete(String(known.rpcId));
         known.rpcId = id;
+        known.answered = false;
         byRpc.set(String(id), key);
+        options.onChange();
         return;
       }
       const event = codexPermissionEvent(method, params, changesByItem.get(String(params.itemId)));
@@ -192,6 +217,10 @@ export function createCodexPermissions(
         entry.messageId = questions.ask(root, event, key, question);
       } else {
         log(`Inbox launch ${root.launch!.id}: a Codex ${method} the card cannot show whole; left to Terminal`);
+        // Its card from an earlier Inbox run (a patch's change is seen only in its `item/started`, never sent again):
+        // it cannot be answered from here any more.
+        const earlier = earlierCard(root, key);
+        if (earlier) questions.withdraw(earlier, INBOX_PERMISSION_ASK_IN_TERMINAL);
       }
       pending.set(key, entry);
       byRpc.set(String(id), key);
@@ -239,9 +268,13 @@ export function createCodexPermissions(
         const done = questions.settled(p.messageId, p.event, p.question, terms);
         if (!done || done.status !== "decided") continue;
         const result = codexDecision(p.method, p.params, done.choice);
+        if (result === null) {
+          p.answered = true;
+          continue;
+        }
+        // Answered only once it went: with no connection it goes on the request Codex sends again.
+        if (!options.respond(p.rpcId, result)) continue;
         p.answered = true;
-        if (result === null) continue;
-        options.respond(p.rpcId, result);
         log(`Inbox launch: Codex ${p.method} answered ${done.choice}`);
         if (done.choice === "deny" && done.reason && typeof p.params.turnId === "string") options.steer(p.threadId, p.params.turnId, `The person denied that in the Inbox: ${done.reason}`);
         options.onChange();

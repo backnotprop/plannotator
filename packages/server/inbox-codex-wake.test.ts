@@ -23,6 +23,7 @@ import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agen
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_WAITS_TEXT } from "./inbox-mcp";
+import type { LaunchDelivery } from "./inbox-launch-host";
 
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 const OTHER_THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5c";
@@ -47,7 +48,7 @@ interface World {
   start: () => Promise<InboxServer>;
 }
 
-async function world(options: { codex?: boolean; env?: Record<string, string> } = {}): Promise<World> {
+async function world(options: { codex?: boolean; env?: Record<string, string>; deliver?: (session: string, text: string) => Promise<LaunchDelivery> } = {}): Promise<World> {
   const fake = createFakeAgents("plannotator-codex-wake-");
   fakes.push(fake);
   if (options.codex !== false) fake.install("codex");
@@ -56,7 +57,7 @@ async function world(options: { codex?: boolean; env?: Record<string, string> } 
   mkdirSync(project, { recursive: true });
   const environment = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, ...options.env } });
   const start = async () => {
-    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] } });
+    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [], ...(options.deliver ? { deliver: options.deliver } : {}) } });
     servers.push(server);
     return server;
   };
@@ -556,5 +557,35 @@ describe("tags and New message", () => {
     expect(calls.find((c) => c.thread === THREAD)!.message).toContain("for A");
     expect(calls.find((c) => c.thread === OTHER_THREAD)!.message).toContain("for B");
     expect(calls.find((c) => c.thread === THREAD)!.message).not.toContain("for B");
+  });
+});
+
+describe("a thread the Inbox launched", () => {
+  test("a launch's placeholder (launch:<id>, before its thread exists) is never handed to codex queue; the thread, once it is there, is", async () => {
+    const w = await world();
+    const project = w.server.store.ensureProject({ name: "ledger", root: w.project });
+    w.server.store.startPersonThread({ project_id: project.id, body: "Fix it.", to: { host: "codex", session: "launch:lch_01J00000000000000000000009" }, idempotency_key: "p1" });
+    await w.server.codexWake.sweep();
+    expect(queues(w.fake)).toEqual([]);
+    w.server.store.startPersonThread({ project_id: project.id, body: "Fix that.", to: { host: "codex", session: THREAD }, idempotency_key: "p2" });
+    await w.server.codexWake.sweep();
+    expect(queues(w.fake).map((call) => argOf(call.args, "thread"))).toEqual([THREAD]);
+  });
+
+  test("a delivery its host says may have gone (no answer) is kept and never sent again, across a restart, nor queued", async () => {
+    const asked: string[] = [];
+    const w = await world({ deliver: async (session) => (asked.push(session), { uncertain: "no answer" }) });
+    const project = w.server.store.ensureProject({ name: "ledger", root: w.project });
+    const sent = w.server.store.startPersonThread({ project_id: project.id, body: "Fix it.", to: { host: "codex", session: THREAD }, idempotency_key: "p1" }).message;
+    await w.server.codexWake.sweep();
+    await w.server.codexWake.sweep();
+    expect(asked).toEqual([THREAD]);
+    expect(w.server.codexWake.uncertain(THREAD, sent.id)).toBe(true);
+    w.server.stop();
+    const again = await w.start();
+    await again.codexWake.sweep();
+    expect(asked).toEqual([THREAD]);
+    expect(again.codexWake.uncertain(THREAD, sent.id)).toBe(true);
+    expect(queues(w.fake)).toEqual([]);
   });
 });

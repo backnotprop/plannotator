@@ -38,6 +38,8 @@ export interface FakeCodexConfig {
   prompts?: FakeCodexPrompt[];
   /** The person answers this thread's open approval in `codex resume` (accept): Codex settles it itself. */
   localAnswer?: string | null;
+  /** turn/start starts the turn, then the connection drops before its answer. */
+  dropOnTurnStart?: boolean;
   /** A thread no connection is subscribed to unloads at once (Codex: after 30 min). */
   unloadOnUnsubscribe?: boolean;
 }
@@ -86,6 +88,8 @@ export interface FakeCodex {
   threads(): Record<string, { id: string; cwd: string; name: string | null; config: Record<string, unknown>; approvalPolicy: string; sandbox: string; turns: { id: string; status: string }[] }>;
   /** config.toml's text now (null when absent). */
   configToml(): string | null;
+  /** Run the fake `codex` as the person would in a terminal (`queue`, `app-server daemon stop`): exit code and output. */
+  cli(args: string[]): { status: number | null; stdout: string; stderr: string };
   /** Take `codex` off PATH (uninstalled) or put it back. */
   setInstalled(on: boolean): void;
   /** SIGTERM the fake daemon if it still runs; returns how many. */
@@ -145,6 +149,11 @@ export function installFakeCodex(input: { bin: string; state: string; home: stri
     replies: () => lines(join(state, "replies.jsonl")),
     threads: () => (existsSync(join(state, "threads.json")) ? JSON.parse(readFileSync(join(state, "threads.json"), "utf8")) : {}),
     configToml: () => (existsSync(join(home, "config.toml")) ? readFileSync(join(home, "config.toml"), "utf8") : null),
+    cli(args) {
+      const env = { HOME: input.home, PATH: `${bin}:/usr/bin:/bin`, ...(input.codexHome ? { CODEX_HOME: input.codexHome } : {}) };
+      const run = spawnSync(codex, args, { env, encoding: "utf8", timeout: 20_000 });
+      return { status: run.status, stdout: run.stdout, stderr: run.stderr };
+    },
     setInstalled(on) {
       if (on) install();
       else rmSync(codex, { force: true });
