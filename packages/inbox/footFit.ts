@@ -2,8 +2,10 @@
  * Fitting the thread foot's button row on one line (review of PR #2091).
  *
  * The "N open questions" button takes the longest label that keeps every
- * button of the row on one line: "6 open questions", then "6 open", then
- * "6" (the question icon and the count). A phone never takes the long form.
+ * button of the row on one line: "6 open questions" (or "6 questions, 2
+ * action items" when both wait), then "6 open", then "6" (the question icon
+ * and the count; with both kinds, their sum). A phone tries the long form
+ * first too (owner, 2026-10-30: "it should say both"), then "6 open", then "6".
  * Before a form gives way to a shorter one, the row tries it tightened: the
  * buttons' side padding and the gaps get smaller and the button drops its
  * chevron (`data-fit-tight`, inbox.css), as a phone with Send and Edit draft
@@ -14,16 +16,23 @@
  * The rules are pure; `fitFootRow` tries them against the page's own layout.
  */
 
+import { openItemsLabel } from './openQuestions';
+
 /** The button's label, longest first. */
 export type OpenQuestionsLabelForm = 'full' | 'short' | 'count';
 
 export const OPEN_QUESTIONS_LABEL_FORMS: readonly OpenQuestionsLabelForm[] = ['full', 'short', 'count'];
 
-/** The visible words of each form: "6 open questions" / "6 open" / "6". */
-export function openQuestionsFormText(n: number, form: OpenQuestionsLabelForm, noun: 'question' | 'action item' = 'question'): string {
+/**
+ * The visible words of each form: "6 open questions" / "6 open" / "6". With
+ * action items: "2 open action items" alone, "6 questions, 2 action items"
+ * with questions (`openItemsLabel`); the short forms count both ("8 open", "8").
+ */
+export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0): string {
+  const n = questions + actions;
   if (form === 'count') return String(n);
   if (form === 'short') return `${n} open`;
-  return `${n} open ${noun}${n === 1 ? '' : 's'}`;
+  return openItemsLabel(questions, actions);
 }
 
 /** One way to draw the button: a label form, on the row's usual spacing or the tight one. */
@@ -157,17 +166,31 @@ function rowMids(row: Element): number[] {
     .map((r) => r.top + r.height / 2);
 }
 
-/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-noun`, `data-oq-label`). */
+/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-label`). */
 export function drawOpenQuestionsForm(button: HTMLElement, fit: FootFit): void {
   const words = button.querySelector<HTMLElement>('[data-oq-words]');
   const n = Number(button.getAttribute('data-oq-n') ?? '0');
-  const noun = button.getAttribute('data-oq-noun') === 'action item' ? 'action item' : 'question';
-  if (words) words.textContent = openQuestionsFormText(n, fit.form, noun);
+  const actions = Number(button.getAttribute('data-oq-actions') ?? '0');
+  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions);
   button.setAttribute('data-label-form', fit.form);
   button.toggleAttribute('data-fit-tight', fit.tight);
   const label = button.getAttribute('data-oq-label');
   if (fit.form === 'full' || !label) button.removeAttribute('aria-label');
   else button.setAttribute('aria-label', label);
+}
+
+/**
+ * The whole row's fit with the forms a window may take: the long form first;
+ * on a phone, where the long form only fits at the count (or not at all), the
+ * ladder again with "6 open" (`fitWholeFootRow` keeps the long form until its
+ * `oq` step, then shows the count, so "6 open" needs its own pass). The page
+ * is left drawn as the result says. Null as `fitWholeFootRow`.
+ */
+export function fitWholeFootRowForms(row: HTMLElement, phone = false): { level: number; max: OpenQuestionsLabelForm } | null {
+  const level = fitWholeFootRow(row, 'full', phone);
+  if (!phone || (level !== null && footRowOpenQuestionsForm(level, 'full') !== 'count')) return level === null ? null : { level, max: 'full' };
+  const short = fitWholeFootRow(row, 'short', phone);
+  return short === null ? null : { level: short, max: 'short' };
 }
 
 /**

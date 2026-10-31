@@ -686,6 +686,19 @@ describe("Inbox over your tailnet", () => {
     expect(ts.serve.size).toBe(0);
   });
 
+  test("the window's port is never one the door may take (8443 to 8450), even when it is the port kept from last time", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const probe = await start(dataDir, ts.run);
+    probe.stop();
+    servers.splice(0);
+    writeFileSync(join(dataDir, "inbox", "inbox.json"), JSON.stringify({ ...registryOf(dataDir), port: 8445 }));
+    const inbox = await start(dataDir, ts.run);
+    expect(inbox.port).not.toBe(8445);
+    expect([8443, 8444, 8445, 8446, 8447, 8448, 8449, 8450]).not.toContain(inbox.port);
+    expect([...ts.serve.keys()]).toEqual([inbox.port]);
+  });
+
   test("with Phones on, the two publications never meet: Phones on 8443 to its door, the window on its own port to its own listener", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();

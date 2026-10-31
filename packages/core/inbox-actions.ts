@@ -15,10 +15,12 @@
  *   :::
  *
  * The first non-empty line is what to do (an order). Other lines are the why,
- * except these labelled ones (the first of each wins, any case):
+ * except these labelled ones (the first of each wins, any case; `Run:` aside):
  *
  *   Where: <url>, [name](url), "<name> <url>", or a place in words
- *   Run: <a command to copy>             (backticks around it are dropped)
+ *   Run: <a command to copy>             (backticks around it are dropped; one
+ *                                         is the item's command, several are
+ *                                         each fenced in the why, in order)
  *   Stopped: <why> / Holds up: <a>; <b>  (as for questions, with the same
  *                                         negative-word guard)
  *   Watching: <what the agent watches>   (it will notice it done by itself)
@@ -79,9 +81,13 @@ const LABEL_RE = /^(where|run|stopped|holds up|watching|replaces)\s*:\s*(.*)$/i;
 const ID_TOKEN = String.raw`msg_[0-9A-HJKMNP-TV-Z]{26}(?:/a-[0-9a-f]{8}(?:-\d{1,3})?)?\.?`;
 const REPLACES_VALUE_RE = new RegExp(String.raw`^(${ID_TOKEN}(?:[\s,;]+${ID_TOKEN})*)[\s,;]*$`);
 
-/** The first line, plain: a heading mark, a list marker and emphasis around the whole line dropped. */
+/** The first line, plain: a heading mark, a list marker (a task box `[ ]` / `[x]` with it) and emphasis around the whole line dropped. */
 function plainPrompt(line: string): string {
-  let text = line.trim().replace(/^#{1,6}\s+/, "").replace(/^(?:[-*+]|\d{1,3}[.)])\s+/, "");
+  let text = line
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^(?:[-*+]|\d{1,3}[.)])\s+/, "")
+    .replace(/^\[[ xX]\]\s+/, "");
   const emphasis = /^(\*\*|__|\*|_)(.+)\1$/.exec(text);
   if (emphasis) text = emphasis[2]!.trim();
   return cutText(text.replace(/\s+/g, " ").trim(), MAX_QUESTION_PROMPT_CHARS);
@@ -139,6 +145,74 @@ function runCommand(value: string): string | null {
 }
 
 /**
+ * The why's lines with the indentation they all share taken off, so a why
+ * written under a list item (`- [ ] Do this` then fences indented two spaces)
+ * keeps its fences as fences and a command copies without the indent.
+ */
+function dedent(lines: readonly string[]): string[] {
+  let shared: number | null = null;
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const indent = /^[ \t]*/.exec(line)![0].length;
+    shared = shared === null ? indent : Math.min(shared, indent);
+  }
+  return shared ? lines.map((line) => line.slice(Math.min(shared!, /^[ \t]*/.exec(line)![0].length))) : [...lines];
+}
+
+/** A command as its own fenced code block (the card draws it with a copy button), blank lines around it. */
+function fenced(command: string, indent: string): string[] {
+  const ticks = "`".repeat(Math.max(3, ...(command.match(/`+/g) ?? []).map((run) => run.length + 1)));
+  return ["", `${indent}${ticks}`, `${indent}${command}`, `${indent}${ticks}`, ""];
+}
+
+/** Words that name where a command is typed: "Run in Terminal on this Mac: …" is a command, "Run on staging: …" is prose. */
+const SHELL_WORD_RE = /\b(?:terminal|shell|console|command[ -]line|iterm2?|powershell|cmd)\b/i;
+
+/**
+ * A why line that is a command, as agents write them, made a fenced block so it
+ * gets a copy button: a line that is only inline code (`` `npm login` ``), or
+ * "Run in Terminal on this Mac: npm publish …" (the words before the colon
+ * name a shell, and what follows does not end like a sentence; the lead-in
+ * stays). Any other line is returned as written.
+ */
+function commandLines(raw: string, indent: string): string[] {
+  const line = raw.trim();
+  const code = /^`([^`]+)`\.?$/.exec(line);
+  if (code && code[1]!.trim() !== "") return fenced(code[1]!.trim(), indent);
+  const run = /^(run (?:it )?(?:in|on|from) [^:`]{1,80}):\s*(.+)$/i.exec(line);
+  if (run && SHELL_WORD_RE.test(run[1]!)) {
+    const command = runCommand(run[2]!);
+    // "…: the old one has a stale token." is a sentence, not a command: a word then a full stop at the end.
+    if (command !== null && !/[A-Za-z]\.$/.test(command)) return [`${indent}${run[1]!.trim()}:`, ...fenced(command, indent)];
+  }
+  return [raw];
+}
+
+/**
+ * A fence indented under a list item (`1. Log in:` then the fence three spaces
+ * in): the opener's indent comes off the opener, its lines and the closer, so
+ * the block copies `npm login`, not `   npm login` (a line indented deeper
+ * keeps the rest, as CommonMark reads fence content).
+ */
+function unindentFences(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  let open: { marker: string; indent: number } | null = null;
+  const strip = (line: string, n: number) => line.slice(Math.min(n, /^[ \t]*/.exec(line)![0].length));
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const marker = /^(`{3,}|~{3,})/.exec(trimmed)?.[1] ?? null;
+    if (open === null) {
+      if (marker) open = { marker, indent: /^[ \t]*/.exec(line)![0].length };
+      out.push(open ? strip(line, open.indent) : line);
+      continue;
+    }
+    out.push(strip(line, open.indent));
+    if (marker && marker[0] === open.marker[0] && marker.length >= open.marker.length && trimmed.slice(marker.length).trim() === "") open = null;
+  }
+  return out;
+}
+
+/**
  * One `:::action` block's inner text, read. Null when the block has no first
  * line (nothing to do).
  */
@@ -155,15 +229,30 @@ export function parseInboxActionBlock(inner: string): Omit<ParsedInboxAction, "k
   if (promptLine === -1) return null;
   const prompt = plainPrompt(lines[promptLine]!);
   if (prompt === "") return null;
-  const why: string[] = [];
+  // The why's lines; a `Run:` line waits as a slot until the block says whether it has one command or several.
+  const why: (string | { run: string; indent: string })[] = [];
   const seen = new Set<string>();
   const facts: InboxActionFacts = { where: null, where_url: null, run: null, watching: null };
   let stopped: string | null = null;
   let holdsUp: string[] = [];
   let replaces: string[] = [];
+  // A line inside a fenced code block is the why, word for word: a command there is never a label.
+  let fence: string | null = null;
   lines.forEach((raw, index) => {
     if (index === promptLine) return;
     const line = raw.trim();
+    const indent = /^[ \t]*/.exec(raw)![0];
+    const marker = /^(`{3,}|~{3,})/.exec(line)?.[1] ?? null;
+    if (fence !== null) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.slice(marker.length).trim() === "") fence = null;
+      why.push(raw);
+      return;
+    }
+    if (marker) {
+      fence = marker;
+      why.push(raw);
+      return;
+    }
     const label = LABEL_RE.exec(line);
     const name = label?.[1]!.toLowerCase() ?? null;
     if (label && name === "replaces" && !REPLACES_VALUE_RE.test(label[2]!.trim())) {
@@ -171,15 +260,19 @@ export function parseInboxActionBlock(inner: string): Omit<ParsedInboxAction, "k
       why.push(raw);
       return;
     }
+    if (label && name === "run") {
+      const command = runCommand(label[2]!);
+      if (command !== null) why.push({ run: command, indent });
+      return;
+    }
     if (!label || !name) {
-      why.push(raw);
+      why.push(...commandLines(raw, indent));
       return;
     }
     if (seen.has(name)) return;
     seen.add(name);
     const value = label[2]!.trim();
     if (name === "where") Object.assign(facts, parseInboxActionWhere(value));
-    else if (name === "run") facts.run = runCommand(value);
     else if (name === "watching") facts.watching = value === "" ? null : value.replace(/\s+/g, " ");
     else if (name === "stopped") stopped = isNegativeWaitValue(value) ? null : value;
     else if (name === "holds up") holdsUp = value.split(";").map((v) => v.trim()).filter((v) => v !== "" && !isNegativeWaitValue(v));
@@ -190,7 +283,12 @@ export function parseInboxActionBlock(inner: string): Omit<ParsedInboxAction, "k
         .filter((token) => token !== "");
     }
   });
-  const whyText = why.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  // One `Run:` line is the item's command (its Copy box). Several are commands in order: each
+  // becomes a fenced block where it stands, so each gets a copy button and none is dropped.
+  const runs = why.filter((line): line is { run: string; indent: string } => typeof line !== "string");
+  if (runs.length === 1) facts.run = runs[0]!.run;
+  const whyLines = why.flatMap((line) => (typeof line === "string" ? [line] : runs.length === 1 ? [] : fenced(line.run, line.indent)));
+  const whyText = unindentFences(dedent(whyLines)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return { prompt, why: whyText === "" ? null : whyText, action: facts, stopped, holds_up: holdsUp, replaces, promptLine };
 }
 
@@ -497,7 +595,7 @@ export const INBOX_ACTION_EXAMPLE = [
  * the agent guide. Never in QUESTION_AUTHORING_GUIDE: plan review shares it.
  */
 export const INBOX_ACTION_GUIDE = [
-  "An action item, only for a true blocker: something the person must go and do outside this conversation before you can go on, that you cannot do yourself (approve a deploy, sign in, touch a security key, click something in another app, merge a pull request you cannot merge). Write it as an Inbox-only `:::action` block: the first line is what to do, as an order; then why, in a line or two. Optional lines: `Where: <url or place>` (a URL becomes an Open button), `Run: <command>` (a command to copy), `Stopped:` / `Holds up:` as for questions, and `Watching: <what you watch>` when you will notice it done by yourself (then pass its id in `done`).",
+  "An action item, only for a true blocker: something the person must go and do outside this conversation before you can go on, that you cannot do yourself (approve a deploy, sign in, touch a security key, click something in another app, merge a pull request you cannot merge). Write it as an Inbox-only `:::action` block: the first line is what to do, as an order; then why, in a line or two, then any commands. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional lines: `Where: <url or place>` (a URL becomes an Open button), `Stopped:` / `Holds up:` as for questions, and `Watching: <what you watch>` when you will notice it done by yourself (then pass its id in `done`).",
   "Never use it for a decision or a question (ask a :::question), for anything you can do yourself, or as a checklist or a status update: one block per real blocker, and most messages need none. The person marks it Done or Can't do it (with a reason); that comes back in their reply under \"Action items you asked for\".",
 ].join("\n");
 

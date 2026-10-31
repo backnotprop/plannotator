@@ -342,11 +342,11 @@ describe.if(hasDom)('the badges in the list', () => {
     // An unnamed thread's subject is its title: no preview, the count alone; nothing to count: no line 3 at all.
     expect(parts('msg_wait')).toEqual(['?2']);
     expect(parts('msg_news')).toEqual([]);
-    // No mark beside the badge: the agents are line 1's, after the project.
+    // No mark beside the badge: the agents are line 1's, before the project.
     for (const id of ['msg_stop', 'msg_hold', 'msg_wait', 'msg_pair', 'msg_news']) {
       const l = el.querySelector(`.ib-nrow[data-thread-id="${id}"]`)!;
       expect(l.querySelector('.ib-l3 .ib-mk')).toBeNull();
-      expect(l.querySelector('.ib-l1 .ib-from > .ib-ags .ib-mk')).not.toBeNull();
+      expect(l.querySelector('.ib-l1 .ib-from > .ib-atiles .ib-mk')).not.toBeNull();
     }
     act(() => r.focus());
     await settle(50);

@@ -196,6 +196,28 @@ test('a Run command with backticks renders as one code span, the command whole',
   }
 });
 
+test('an action item stored before the reader dropped a task box from its first line keeps its Result line (matched by its place)', () => {
+  const body = [':::action', '- [ ] Publish the tarball', 'It needs your key.', '', '```', 'npm publish dist/core.tgz', '```', ':::'].join('\n');
+  const [parsed] = parseInboxActionBlocks(body);
+  // The record kept the key its first line had then ("[ ] Publish the tarball"), not the one the reader gives now.
+  const stored = {
+    ...questionsOf(M3, ':::question-text\nx\n:::')[0]!,
+    key: 'a-0badc0de',
+    position: 0,
+    kind: 'action',
+    prompt: '[ ] Publish the tarball',
+    context: parsed!.why,
+    state: 'sent',
+    action: parsed!.action,
+    action_result: { outcome: 'done', note: 'published', at: '2026-10-28T19:40:00.000Z', by: 'person' },
+  } as unknown as InboxQuestion;
+  expect(stored.key).not.toBe(parsed!.key);
+  const copied = messageMarkdown(message(M3, CLAUDE, body, 32, { actions: [stored] } as Partial<InboxMessageWire>));
+  expect(copied).toContain('**A1.** Publish the tarball');
+  expect(copied).toContain('```\nnpm publish dist/core.tgz\n```');
+  expect(copied).toContain('Result: Done · published');
+});
+
 test('Markdown inside a question or action prompt renders as written, the label in bold beside it', () => {
   const body = [
     ':::question',

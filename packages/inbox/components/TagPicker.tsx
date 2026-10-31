@@ -138,8 +138,10 @@ export function TagPicker({
 /**
  * Several agents on one thread (Lines): their marks overlapping, the first
  * agent first. Decorative: the words beside it (or the row's label) name them.
- * At most four marks; more read as "+N". (A list row draws its agents with
- * `RowAgents`, approval "list-rows-mail-icons".)
+ * At most four marks; more read as "+N". (A list row draws its agents its
+ * own way: `RowAgents` on a wide row, approval "list-rows-mail-icons", and
+ * `RowAgentTiles`, one tile per agent, on a three-line or phone row, approval
+ * "inbox-list-row-v2".)
  */
 export function TagStack({ participants }: { participants: readonly { host: string | null; session: string }[] }) {
   const shown = participants.slice(0, 4);

@@ -336,6 +336,16 @@
         "fast-check": "4.10.2",
       },
     },
+    "packages/references": {
+      "name": "@plannotator/references",
+      "version": "0.1.0",
+      "dependencies": {
+        "@plannotator/core": "workspace:*",
+      },
+      "devDependencies": {
+        "typescript": "~5.8.2",
+      },
+    },
     "packages/review-editor": {
       "name": "@plannotator/review-editor",
       "version": "0.0.1",
@@ -474,6 +484,7 @@
   },
   "patchedDependencies": {
     "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch",
+    "@pierre/diffs@1.5.2": "patches/@pierre%2Fdiffs@1.5.2.patch",
   },
   "overrides": {
     "dompurify": "^3.4.17",
@@ -1129,6 +1140,8 @@
     "@plannotator/pi-extension": ["@plannotator/pi-extension@workspace:apps/pi-extension"],
 
     "@plannotator/portal": ["@plannotator/portal@workspace:apps/portal"],
+
+    "@plannotator/references": ["@plannotator/references@workspace:packages/references"],
 
     "@plannotator/relay": ["@plannotator/relay@workspace:apps/relay"],
 

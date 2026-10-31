@@ -59,6 +59,7 @@
   "inbox-reply-drafts.spec.ts": 16,
   "inbox-restart.spec.ts": 27,
   "inbox-row-badges.spec.ts": 27,
+  "inbox-row-lead.spec.ts": 5,
   "inbox-row-menu.spec.ts": 9,
   "inbox-search.spec.ts": 37,
   "inbox-seen-on-sight.spec.ts": 40,

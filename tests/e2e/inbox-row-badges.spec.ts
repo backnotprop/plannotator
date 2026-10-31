@@ -15,15 +15,15 @@
  *  - Card A opens on the badge after the tooltip delay, and while the row has
  *    keyboard focus; a click's focus opens nothing.
  *  - Beside an open thread the three-line rows keep the card (approval
- *    "list-rows-mail-icons", 2026-10-30). Line 1 is the project, the agents'
- *    marks and the time; line 2 is the thread's title, never cut (it wraps);
+ *    "inbox-list-row-v2", 2026-10-30). Line 1 is the agents' tiles, the
+ *    project and the time; line 2 is the thread's title, never cut (it wraps);
  *    line 3 is the grey preview, then at its right end the badge and the open
  *    count `?N` last. The preview is cut first: the badge and the count are
- *    never cut and end on the line's edge. A long project wraps, and the marks
- *    follow its last word, never dropped.
+ *    never cut and end on the line's edge. A long project stays on one line
+ *    and ends in "…", after its tiles, never dropped.
  *  - An iPhone (WebKit): icons only, no card, the same three lines. On a 320
  *    or 360 px phone the preview is still cut first, the title is whole, and a
- *    long project's marks wrap after it.
+ *    long project is cut on its one line, after its tiles.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs (desktop light and dark, beside a thread, both cards open, keyboard,
@@ -320,26 +320,25 @@ function expectLineThree(l: ReturnType<typeof lineThree>, id: string) {
   expect(l.whole, `row ${id}: a badge or count is cut`).toBe(true);
 }
 
-/** Lines 1 and 2 of a three-line or phone row, read in the page: the project, its marks, the time and the title. */
+/** Lines 1 and 2 of a three-line or phone row, read in the page: the agents' tiles, the project, the time and the title. */
 function topLines(row: Element) {
   const line = (row.querySelector(':scope > .ib-l1') ?? row.querySelector(':scope > .ib-m1'))!;
   const project = line.querySelector<HTMLElement>('.ib-p');
-  const marks = line.querySelector<HTMLElement>('.ib-ags')!;
+  const marks = line.querySelector<HTMLElement>('.ib-atiles')!;
   const time = line.querySelector<HTMLElement>('.ib-t')!;
   const title = (row.querySelector<HTMLElement>('.ib-l2 > .ib-title') ?? row.querySelector<HTMLElement>(':scope > .ib-m2'))!;
   const rr = row.getBoundingClientRect();
-  const fragments = project ? [...project.getClientRects()] : [];
-  const last = fragments[fragments.length - 1];
+  const p = project?.getBoundingClientRect();
   const m = marks.getBoundingClientRect();
   const t = title.getBoundingClientRect();
   return {
     line1: [...line.children].map((c) => c.className.split(' ')[0]),
     from: [...line.querySelector(':scope > .ib-from')!.children].map((c) => c.className.split(' ')[0]),
-    projectLines: fragments.length,
+    projectLines: project && p ? Math.round(p.height / parseFloat(getComputedStyle(project).lineHeight)) : 0,
     projectCut: project ? project.scrollWidth > project.clientWidth + 0.5 : false,
-    // The marks follow the project's last word: on its last line after it, or at the start of the next.
-    marksAfter: !last || (m.top >= last.top - 4 && m.left >= last.right - 0.5) || m.top >= last.bottom - 4,
-    marksDrawn: marks.querySelectorAll(':scope > .ib-ag').length,
+    // The tiles come right before the project, on its line.
+    marksBefore: !p || (m.right <= p.left + 0.5 && Math.abs((m.top + m.bottom) / 2 - (p.top + p.bottom) / 2) <= 2),
+    marksDrawn: marks.querySelectorAll(':scope > .ib-atile:not(.ib-atmore)').length,
     marksName: marks.getAttribute('aria-label'),
     marksInside: m.width > 0 && m.left >= rr.left - 0.5 && m.right <= rr.right + 0.5,
     timeWhole: time.scrollWidth <= time.clientWidth + 0.5,
@@ -351,12 +350,12 @@ function topLines(row: Element) {
   };
 }
 
-test('beside an open thread: the project, its marks and the time on line 1; the title on line 2, never cut; the preview, the badge and ?N on line 3; the card on keyboard focus', async () => {
+test('beside an open thread: the agents\' tiles, the project and the time on line 1; the title on line 2, never cut; the preview, the badge and ?N on line 3; the card on keyboard focus', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.stopped}`);
   const narrow = page.locator(`.ib-nrow[data-thread-id="${world.holding}"]`);
   await expect(narrow).toBeVisible();
-  // Line 1: the project and its marks, the time; no count and no badge.
+  // Line 1: the agents' tiles and the project, the time; no count and no badge.
   expect(await narrow.locator('.ib-l1 > *').evaluateAll((els) => els.map((e) => e.className.split(' ')[0]))).toEqual(['ib-from', 'ib-t']);
   await expect(narrow.locator('.ib-l1 :is(.ib-c, [data-row-badge])')).toHaveCount(0);
   // The hover's Mark read sits on line 1 and stops above line 2, and the row keeps its height.
@@ -375,8 +374,9 @@ test('beside an open thread: the project, its marks and the time on line 1; the 
   for (const r of rows) {
     expectLineThree(r.l3, r.id);
     expect(r.top.line1, `row ${r.id}`).toEqual(['ib-from', 'ib-t']);
-    expect(r.top.from, `row ${r.id}`).toEqual(['ib-p', 'ib-ags']);
-    expect(r.top.marksAfter, `row ${r.id}: the marks follow the project`).toBe(true);
+    expect(r.top.from, `row ${r.id}`).toEqual(['ib-p', 'ib-atiles']);
+    expect(r.top.marksBefore, `row ${r.id}: the tiles come before the project`).toBe(true);
+    expect(r.top.projectLines, `row ${r.id}: the project wrapped`).toBe(1);
     expect(r.top.marksInside, `row ${r.id}: the marks leave the row`).toBe(true);
     expect(r.top.timeWhole && r.top.timeEnd <= 0.5, `row ${r.id}: the time ends line 1 whole`).toBe(true);
     expect(r.top.titleCut, `row ${r.id}: the title is cut`).toBe(false);
@@ -386,17 +386,16 @@ test('beside an open thread: the project, its marks and the time on line 1; the 
   expect(rows.find((r) => r.id === world.stopped)!.l3.order).toEqual(['preview', 'badge', 'count']);
   // No name, no badge, nothing to count: the subject is the title, and there is no line 3.
   expect(rows.find((r) => r.id === world.news)!.l3.order).toEqual([]);
-  // Two agents: two bare 16 px marks after the project, apart, one name for both.
-  const pair = await page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-l1 .ib-ags > .ib-ag`).evaluateAll((marks) => marks.map((m) => m.getBoundingClientRect().toJSON() as DOMRect));
+  // Two agents: two 20 px tiles before the project, the second over the first by 5 px, one name for both.
+  const pair = await page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-l1 .ib-atiles > .ib-atile`).evaluateAll((marks) => marks.map((m) => m.getBoundingClientRect().toJSON() as DOMRect));
   expect(pair.length).toBe(2);
-  for (const m of pair) expect(Math.round(m.width)).toBe(16);
-  expect(pair[0]!.right).toBeLessThan(pair[1]!.left);
-  await expect(page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-ags`)).toHaveAttribute('aria-label', 'Claude Code and Pi');
-  // The long row at the column's narrowest (380 px): the long project is never cut (it wraps when it must; the
-  // 320 and 360 px phones below prove the wrap), and both marks follow it; the long name wraps on line 2, whole;
-  // the preview is cut first on line 3, and ?2 is whole.
+  for (const m of pair) expect(Math.round(m.width)).toBe(20);
+  expect(Math.round(pair[0]!.right - pair[1]!.left)).toBe(5);
+  await expect(page.locator(`.ib-nrow[data-thread-id="${world.pair}"] .ib-atiles`)).toHaveAttribute('aria-label', 'Claude Code and Pi');
+  // The long row at the column's narrowest (380 px): the long project stays on one line after both tiles (cut with
+  // "…" when it must); the long name wraps on line 2, whole; the preview is cut first on line 3, and ?2 is whole.
   const long = rows.find((r) => r.id === world.long)!;
-  expect(long.top.projectCut).toBe(false);
+  expect(long.top.projectLines).toBe(1);
   expect(long.top.marksDrawn).toBe(2);
   expect(long.top.marksName).toBe('OpenCode and Pi');
   expect(long.top.title).toBe('ledger-migration-dry-run-before-the-q3-close-and-audit');
@@ -434,7 +433,7 @@ test('beside an open thread: the project, its marks and the time on line 1; the 
   await expect(page).not.toHaveURL(new RegExp(`thread=${world.stopped}`));
 });
 
-test('an iPhone (WebKit): icons only, no card; three lines, the project and its marks, the title, then the preview, the badge and ?N', async () => {
+test('an iPhone (WebKit): icons only, no card; three lines, the agents\' tiles and the project, the title, then the preview, the badge and ?N', async () => {
   let own: Browser | null = null;
   try {
     own = await webkit.launch({ args: [] });
@@ -451,15 +450,16 @@ test('an iPhone (WebKit): icons only, no card; three lines, the project and its 
       for (const r of rows) {
         expect(r.lines, `row ${r.id}`).toEqual(['ib-m1', 'ib-m2', 'ib-m3']);
         expect(r.top.line1, `row ${r.id}`).toEqual(['ib-from', 'ib-t']);
-        expect(r.top.from, `row ${r.id}`).toEqual(['ib-p', 'ib-ags']);
-        expect(r.top.marksAfter && r.top.marksInside, `row ${r.id}: the marks follow the project, inside the row`).toBe(true);
+        expect(r.top.from, `row ${r.id}`).toEqual(['ib-p', 'ib-atiles']);
+        expect(r.top.marksBefore && r.top.marksInside, `row ${r.id}: the tiles come before the project, inside the row`).toBe(true);
+        expect(r.top.projectLines, `row ${r.id}: the project wrapped`).toBe(1);
         expect(r.top.titleCut || !r.top.titleInside, `row ${r.id}: the title is cut`).toBe(false);
         expectLineThree(r.l3, r.id);
       }
-      // The long row: its preview is cut, the count is whole; its project wraps with both marks after it.
+      // The long row: its preview is cut, the count is whole; its project is cut on one line, after both tiles.
       const long = rows.find((r) => r.id === world.long)!;
       expect(long.l3.previewCut).toBe(true);
-      expect(long.top.projectCut).toBe(false);
+      expect(long.top.projectCut).toBe(true);
       expect(long.top.marksDrawn).toBe(2);
       await row.locator('[data-row-badge]').tap();
       await page.waitForTimeout(400);
@@ -477,7 +477,7 @@ test('an iPhone (WebKit): icons only, no card; three lines, the project and its 
   }
 });
 
-test('a small phone (320, 360): the preview gives way first; the badge and ?N stay whole; the title is never cut; a long project wraps and its marks follow, never dropped', async () => {
+test('a small phone (320, 360): the preview gives way first; the badge and ?N stay whole; the title is never cut; a long project is cut on one line after its tiles, never dropped', async () => {
   const own = await webkit.launch({ args: [] });
   try {
     for (const width of [320, 360]) {
@@ -494,16 +494,16 @@ test('a small phone (320, 360): the preview gives way first; the badge and ?N st
       expectLineThree(l3, `${world.guided} at ${width}`);
       // The preview is what gives way; it keeps a readable width, never a sliver.
       expect(l3.preview!.width, `at ${width}`).toBeGreaterThanOrEqual(40);
-      // The long project (44 characters, no space) wraps inside the row; both marks follow its last word; the
-      // long name wraps on line 2, whole.
+      // The long project (44 characters, no space) stays on one line inside the row, cut with "…", after both
+      // tiles; the long name wraps on line 2, whole.
       const longRow = page.locator(`.ib-mrow[data-thread-id="${world.long}"]`);
       await longRow.scrollIntoViewIfNeeded();
       await page.waitForTimeout(300);
       const top = (await page.evaluate(`(${topLines.toString()})(document.querySelector('.ib-mrow[data-thread-id="${world.long}"]'))`)) as ReturnType<typeof topLines>;
-      expect(top.projectCut, `at ${width}`).toBe(false);
-      expect(top.projectLines, `at ${width}`).toBeGreaterThan(1);
+      expect(top.projectCut, `at ${width}`).toBe(true);
+      expect(top.projectLines, `at ${width}`).toBe(1);
       expect(top.marksDrawn, `at ${width}`).toBe(2);
-      expect(top.marksAfter && top.marksInside, `at ${width}: the marks follow the project, inside the row`).toBe(true);
+      expect(top.marksBefore && top.marksInside, `at ${width}: the tiles come before the project, inside the row`).toBe(true);
       expect(top.timeWhole && top.timeEnd <= 0.5, `at ${width}: the time ends line 1 whole`).toBe(true);
       expect(top.titleCut, `at ${width}`).toBe(false);
       expect(top.titleInside, `at ${width}`).toBe(true);
@@ -529,7 +529,7 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
   // server sent: each needs a live session or the window's own reply box to arise for real
   // (tests/e2e/inbox-undelivered.spec.ts, inbox-replaced.spec.ts).
   const waitFor = (min: number) => ({ kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_waiting', at: null, host: 'claude-code', name: 'Claude Code', waiting_since: new Date(Date.now() - min * 60_000).toISOString(), steerable: false, auto_send_at: null });
-  await page.route('**/api/inbox/threads?archived=exclude', async (route) => {
+  await page.route('**/api/inbox/threads?archived=exclude*', async (route) => {
     const response = await route.fetch();
     const model = (await response.json()) as { sections: { threads: Record<string, unknown>[] }[] };
     for (const row of model.sections.flatMap((s) => s.threads)) {
@@ -684,7 +684,7 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
       if (!line.whole) expect(line.subject, `${id}: the preview keeps its room in a ${line.line} px line`).toBeGreaterThanOrEqual(120);
     }
   } finally {
-    await page.unroute('**/api/inbox/threads?archived=exclude');
+    await page.unroute('**/api/inbox/threads?archived=exclude*');
   }
   expect(world.errors).toEqual([]);
 });

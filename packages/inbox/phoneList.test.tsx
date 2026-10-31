@@ -89,8 +89,9 @@ function render(filtered: boolean, narrow = false): HTMLElement {
 }
 
 /**
- * A phone row's three lines (approval "list-rows-mail-icons"): line 1 (the project's text, the agents' marks by
- * their name as `agents:<name>`, the time as `time`), the title, and line 3 (the preview by its text, the open count
+ * A phone row's three lines (approval "inbox-list-row-v2"): line 1 in reading order (the project's text, the
+ * agents' tiles by their name as `agents:<name>`, which CSS draws before the project, the time as `time`), the
+ * title, and line 3 (the preview by its text, the open count
  * as `?N`, anything else by its text), or `null` when the row has no line 3.
  */
 function lines(el: HTMLElement, id: string): { l1: string[]; title: string; l3: string[] | null } {
@@ -119,7 +120,7 @@ describe.if(hasDom)('the list on a phone', () => {
     }
   });
 
-  test('three lines: the project, its agents and when; the title; then the preview, the badge and the count at its end', () => {
+  test('three lines: the agents, the project and when; the title; then the preview, the badge and the count at its end', () => {
     const el = render(false);
     // An unnamed thread: its subject is the title, and line 3 holds the badge and ?N alone.
     expect(lines(el, 'msg_stop')).toEqual({
@@ -142,7 +143,7 @@ describe.if(hasDom)('the list on a phone', () => {
     });
   });
 
-  test("one project's list: the agents' marks alone where the project was, no name in words", () => {
+  test("one project's list: the agents' tiles alone where the project was, no name in words", () => {
     const el = render(true);
     expect(lines(el, 'msg_stop').l1).toEqual(['agents:Claude Code', 'time']);
     expect(lines(el, 'msg_sent').l1).toEqual(['agents:Pi', 'time']);

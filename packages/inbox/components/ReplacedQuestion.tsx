@@ -30,8 +30,8 @@ export interface Replacement {
   message: Pick<InboxMessageWire, 'id' | 'created_at'> & { author: InboxAuthor };
 }
 
-/** Where a jump lands: one question's card, or a message. */
-export type JumpTarget = { kind: 'question'; messageId: string; key: string } | { kind: 'message'; messageId: string };
+/** Where a jump lands: a question's card, an action item's checklist row, or a message. */
+export type JumpTarget = { kind: 'question' | 'action'; messageId: string; key: string } | { kind: 'message'; messageId: string };
 
 /** The answer's words, as the card's "Your pick" shows them; a picked label as its plain words (`plainLabel`). */
 export function pickWords(answer: QuestionAnswer): string {

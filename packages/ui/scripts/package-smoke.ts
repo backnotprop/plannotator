@@ -256,6 +256,7 @@ try {
     "configure.ts",
     "HANDOFF.md",
     "styles.css",
+    "contents-rail.css",
     "types.ts",
   ];
   for (const entry of requiredEntries) {

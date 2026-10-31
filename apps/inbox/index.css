@@ -13,6 +13,8 @@
 @source "../../packages/review-editor/components/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
+/* A document's contents rail (its own sheet: not in theme.css). */
+@import "../../packages/ui/contents-rail.css";
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";

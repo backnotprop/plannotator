@@ -58,6 +58,7 @@ import { qwenHome, qwenHomeIsRelative } from "@plannotator/shared/inbox/qwen-ses
 import { INBOX_QWEN_TRUST_ON_CONNECT, QWEN_TRUST_REVOKED_REASON, ensureQwenTrust, retryQwenRevoke, setQwenTrust, type QwenTrustOutcome } from "./inbox-qwen-trust";
 import { addJsonMember, removeJsonMember } from "./json-edit";
 import {
+  agentFileContains,
   describeFsError,
   readAgentFile,
   samePlace,
@@ -354,8 +355,8 @@ export type InboxEntryRead =
   /** It runs this Inbox's stdio entry (or a recorded / Plannotator one; see `ownsEntry`). */
   | { kind: "ours"; argv: string[] }
   | { kind: "other"; argv: string[] | null }
-  /** The file could not be read or parsed; nothing is written to it. */
-  | { kind: "unreadable"; reason: string };
+  /** The file could not be read or parsed; nothing is written to it. `tooBig`: only its size stopped the read. */
+  | { kind: "unreadable"; reason: string; tooBig?: true };
 
 /**
  * Whether argv runs a Plannotator Inbox stdio entry, for uninstall's scan of
@@ -411,16 +412,50 @@ function at(root: unknown, keys: readonly string[]): unknown {
 }
 
 /** The raw `plannotator-inbox` value in a file: absent, a value, or why it cannot be read. */
-type RawEntry = { kind: "absent" } | { kind: "value"; value: unknown } | { kind: "unreadable"; reason: string };
+type RawEntry = { kind: "absent" } | { kind: "value"; value: unknown } | { kind: "unreadable"; reason: string; tooBig?: true };
 
-function rawJsonEntry(path: string, keys: readonly string[], jsonc: boolean, maxBytes?: number): RawEntry {
-  const read = readAgentFile(path, maxBytes);
+/**
+ * How a read-only look reads (uninstall's scan, uninstall-inbox-references.ts);
+ * the Inbox's own reads pass nothing.
+ */
+export type RawReadOptions = {
+  /** The most it reads and parses (readAgentFile's 1 MiB by default). */
+  maxBytes?: number;
+  /** Comments and trailing commas allowed in any agent's JSON, not only the JSONC ones. */
+  lenient?: boolean;
+  /** A file over this size is first searched, raw, for "plannotator-inbox": without it, it is not decoded at all. */
+  searchAbove?: number;
+};
+
+/** A raw search said the entry's name is not in the file, or the file could not be searched. */
+function searchedFirst(path: string, read: RawReadOptions | undefined): RawEntry | null {
+  if (read?.searchAbove === undefined) return null;
+  const found = agentFileContains(path, INBOX_MCP_SERVER_NAME, read.searchAbove);
+  if (found === "absent") return { kind: "absent" };
+  if (typeof found === "object") return { kind: "unreadable", reason: found.refused };
+  return null;
+}
+
+/** Strict JSON; when `lenient`, then with comments and trailing commas too. */
+function parseJsonLeniently(text: string, lenient: boolean): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (!lenient) throw error;
+    return JSON.parse(stripJsonComments(text));
+  }
+}
+
+function rawJsonEntry(path: string, keys: readonly string[], jsonc: boolean, options?: RawReadOptions): RawEntry {
+  const searched = searchedFirst(path, options);
+  if (searched) return searched;
+  const read = readAgentFile(path, options?.maxBytes);
   if (read.kind === "missing") return { kind: "absent" };
-  if (read.kind === "refused") return { kind: "unreadable", reason: read.reason };
+  if (read.kind === "refused") return read.tooBig ? { kind: "unreadable", reason: read.reason, tooBig: true } : { kind: "unreadable", reason: read.reason };
   if (!read.text.trim()) return { kind: "absent" };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(jsonc ? stripJsonComments(read.text) : read.text);
+    parsed = jsonc ? JSON.parse(stripJsonComments(read.text)) : parseJsonLeniently(read.text, options?.lenient === true);
   } catch {
     return { kind: "unreadable", reason: "it is not plain JSON" };
   }
@@ -429,10 +464,12 @@ function rawJsonEntry(path: string, keys: readonly string[], jsonc: boolean, max
 }
 
 /** Codex's config.toml, parsed as TOML (every form: tables, inline tables, dotted keys, quoted parts). */
-function rawCodexEntry(path: string): RawEntry {
-  const read = readAgentFile(path);
+function rawCodexEntry(path: string, options?: RawReadOptions): RawEntry {
+  const searched = searchedFirst(path, options);
+  if (searched) return searched;
+  const read = readAgentFile(path, options?.maxBytes);
   if (read.kind === "missing") return { kind: "absent" };
-  if (read.kind === "refused") return { kind: "unreadable", reason: read.reason };
+  if (read.kind === "refused") return read.tooBig ? { kind: "unreadable", reason: read.reason, tooBig: true } : { kind: "unreadable", reason: read.reason };
   let parsed: unknown;
   try {
     parsed = Bun.TOML.parse(read.text);
@@ -483,7 +520,7 @@ interface AgentSpec {
   /** Where its `plannotator-inbox` entry lives (null: unknown, or not a file). */
   file(e: AgentEnvironment): string | null;
   /** The raw entry, read only. Null: the agent's file is not known; the record decides. */
-  raw(e: AgentEnvironment): RawEntry | null;
+  raw(e: AgentEnvironment, read?: RawReadOptions): RawEntry | null;
   /** How uninstall removes it, when not a JSON key. */
   remove?: { bin: string; args: string[] };
 }
@@ -842,7 +879,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("codex") || codexHomeHasUserConfig(e),
     way: (e, probe) => cliWay(e, "codex", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(codexHome(e), "config.toml"),
-    raw: (e) => rawCodexEntry(join(codexHome(e), "config.toml")),
+    raw: (e, read) => rawCodexEntry(join(codexHome(e), "config.toml"), read),
     remove: { bin: "codex", args: ["mcp", "remove", NAME] },
   },
   {
@@ -850,7 +887,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("gemini") || isDir(geminiDir(e)),
     way: (e, probe) => cliWay(e, "gemini", (cmd) => ["mcp", "add", "-s", "user", NAME, ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(geminiDir(e), "settings.json"),
-    raw: (e) => rawJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(geminiDir(e), "settings.json"), ["mcpServers"], true, read),
     remove: { bin: "gemini", args: ["mcp", "remove", "-s", "user", NAME] },
   },
   {
@@ -858,21 +895,21 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("qwen") || isDir(qwenDir(e)),
     way: (e, probe) => qwenWay(e, probe === true),
     file: (e) => join(qwenDir(e), "settings.json"),
-    raw: (e) => rawJsonEntry(join(qwenDir(e), "settings.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(qwenDir(e), "settings.json"), ["mcpServers"], true, read),
   },
   {
     id: "cursor",
     detect: (e) => isDir(join(e.homeDir, ".cursor")) || !!e.which("cursor") || !!e.which("cursor-agent"),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(e.homeDir, ".cursor", "mcp.json"),
-    raw: (e) => rawJsonEntry(join(e.homeDir, ".cursor", "mcp.json"), ["mcpServers"], false),
+    raw: (e, read) => rawJsonEntry(join(e.homeDir, ".cursor", "mcp.json"), ["mcpServers"], false, read),
   },
   {
     id: "windsurf",
     detect: (e) => !!e.which("devin"),
     way: (e, probe) => cliWay(e, "devin", (cmd) => ["mcp", "add", "-s", "user", NAME, "--", ...cmd], ["mcp", "remove", "-s", "user", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "devin", "config.json"),
-    raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "devin", "config.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(xdgConfigHome(e), "devin", "config.json"), ["mcpServers"], true, read),
     remove: { bin: "devin", args: ["mcp", "remove", "-s", "user", NAME] },
   },
   {
@@ -880,7 +917,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("amp"),
     way: (e, probe) => cliWay(e, "amp", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(xdgConfigHome(e), "amp", "settings.json"),
-    raw: (e) => rawJsonEntry(join(xdgConfigHome(e), "amp", "settings.json"), ["amp.mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(xdgConfigHome(e), "amp", "settings.json"), ["amp.mcpServers"], true, read),
     remove: { bin: "amp", args: ["mcp", "remove", NAME] },
   },
   {
@@ -896,7 +933,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => !!e.which("kiro-cli") || isDir(join(e.homeDir, ".kiro")),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(e.homeDir, ".kiro", "settings", "mcp.json"),
-    raw: (e) => rawJsonEntry(join(e.homeDir, ".kiro", "settings", "mcp.json"), ["mcpServers"], false),
+    raw: (e, read) => rawJsonEntry(join(e.homeDir, ".kiro", "settings", "mcp.json"), ["mcpServers"], false, read),
   },
   {
     id: "pi",
@@ -906,7 +943,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
         ? Promise.resolve({ kind: "tool", host: "pi" } as ConnectWay)
         : cliWay(e, "pi", (cmd) => ["mcp", "add", NAME, "--", ...cmd], ["mcp", "remove", NAME], INBOX_CONNECT_AGENT_TIMEOUT_MS, probe === true),
     file: (e) => join(piAgentDir(e), "mcp.json"),
-    raw: (e) => rawJsonEntry(join(piAgentDir(e), "mcp.json"), ["mcpServers"], true),
+    raw: (e, read) => rawJsonEntry(join(piAgentDir(e), "mcp.json"), ["mcpServers"], true, read),
     remove: { bin: "pi", args: ["mcp", "remove", NAME] },
   },
   {
@@ -922,7 +959,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => isDir(claudeAppDir(e)),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
     file: (e) => join(claudeAppDir(e), "claude_desktop_config.json"),
-    raw: (e) => rawJsonEntry(join(claudeAppDir(e), "claude_desktop_config.json"), ["mcpServers"], false),
+    raw: (e, read) => rawJsonEntry(join(claudeAppDir(e), "claude_desktop_config.json"), ["mcpServers"], false, read),
   },
 ];
 
@@ -1474,6 +1511,16 @@ export interface RemovalPlan {
   items: RemovalPlanItem[];
   /** Entries left with a reason: one Plannotator added that runs something else now, or one no record says it added. */
   skipped: string[];
+  /** The agents whose own entry `skipped` names. */
+  named: InboxAgentId[];
+}
+
+/** How the person removes an agent's `plannotator-inbox` entry themselves. */
+export function inboxEntryRemovalHint(id: InboxAgentId): string {
+  // Claude Code's user scope is in ~/.claude.json, which Claude Code rewrites while it runs.
+  if (id === "claude-code") return `run \`claude mcp remove ${NAME} -s user\``;
+  const remove = agentSpec(id).remove;
+  return jsonFileFor(id) ? "delete that entry by hand" : remove ? `run \`${remove.bin} ${remove.args.join(" ")}\`` : "remove it in the agent's settings";
 }
 
 /**
@@ -1492,7 +1539,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
   /** After every agent's own entry, so a caller looking for an agent's item finds that one first. */
   const strays: RemovalPlanItem[] = [];
   const skipped: string[] = [];
-  if (!agentHomeAllowed(e)) return { items, skipped };
+  const named: InboxAgentId[] = [];
+  if (!agentHomeAllowed(e)) return { items, skipped, named };
   for (const spec of AGENT_SPECS) {
     const record = file.agents[spec.id];
     const label = INBOX_AGENT_LABELS[spec.id];
@@ -1528,8 +1576,8 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
       const unrecorded = raw === null ? null : classify(raw, [[...ourCommand]], false);
       if (unrecorded?.kind === "ours") {
         const at = displayPath(spec.file(e), e);
-        const how = jsonFileFor(spec.id) ? "delete that entry by hand" : spec.remove ? `run \`${spec.remove.bin} ${spec.remove.args.join(" ")}\`` : "remove it in the agent's settings";
-        skipped.push(`${label}'s "${NAME}"${at ? ` in ${at}` : ""} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, ${how})`);
+        skipped.push(`${label}'s "${NAME}"${at ? ` in ${at}` : ""} runs this Plannotator, but no record says Plannotator added it, so it may be yours (to remove it, ${inboxEntryRemovalHint(spec.id)})`);
+        named.push(spec.id);
       }
       continue;
     }
@@ -1537,6 +1585,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
     const read = raw === null ? null : classify(raw, ours, false);
     if (read?.kind === "other") {
       skipped.push(`${label}'s "${NAME}" now runs something else (changed by hand), so it is yours`);
+      named.push(spec.id);
       continue;
     }
     if (read && read.kind !== "ours") continue;
@@ -1560,6 +1609,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
     const bin = e.which(remove.bin);
     if (!bin) {
       skipped.push(`${label}'s "${NAME}"${shown ? ` in ${shown}` : ""}: ${remove.bin} is not on PATH; run \`${remove.bin} ${remove.args.join(" ")}\``);
+      named.push(spec.id);
       continue;
     }
     items.push({
@@ -1573,7 +1623,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
       },
     });
   }
-  return { items: [...items, ...strays], skipped };
+  return { items: [...items, ...strays], skipped, named };
 }
 
 /** The agents whose JSON file Plannotator edits itself: where their entry is and how the file is edited. */
@@ -1630,10 +1680,13 @@ export interface InboxAgentReachState {
  * `~/.claude.json`. Read only, never written: Claude Code is connected through
  * its plugin, and this only says that one added by hand already reaches the Inbox.
  */
-function claudeCodeMcpEntry(e: AgentEnvironment, ours: readonly (readonly string[])[]): InboxEntryRead {
-  const dir = envDir(e, "CLAUDE_CONFIG_DIR");
+export function claudeCodeMcpPath(e: AgentEnvironment): string {
+  return join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json");
+}
+
+export function claudeCodeMcpEntry(e: AgentEnvironment, ours: readonly (readonly string[])[], read: RawReadOptions = { maxBytes: CLAUDE_JSON_MAX_BYTES }): InboxEntryRead {
   // .claude.json holds Claude Code's per-project history and often passes 1 MiB; this read only looks.
-  return classify(rawJsonEntry(join(dir ?? e.homeDir, ".claude.json"), ["mcpServers"], false, CLAUDE_JSON_MAX_BYTES), ours, true);
+  return classify(rawJsonEntry(claudeCodeMcpPath(e), ["mcpServers"], false, read), ours, true);
 }
 
 /** The most `.claude.json` the read-only MCP lookup reads. */

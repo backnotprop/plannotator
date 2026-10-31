@@ -14,6 +14,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
+import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import {
   INBOX_CARD_COLUMN_LABELS,
   INBOX_CARD_COLUMNS,
@@ -151,7 +152,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     );
   }
   const session = input.agent_session?.trim() || null;
-  const by: InboxAuthor = { kind: "agent", host: input.agent_host?.trim() || null, session, name: input.agent_name?.trim() || null };
+  const by: InboxAuthor = { kind: "agent", host: input.agent_host?.trim() || null, session, name: inboxStoredAgentName(input.agent_name) };
   // A title that reads like a sentence gets a hint after the card line (approved 2026-10-27; never refused).
   const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null) => {
     const hint = titled === null ? null : inboxCardTitleHint(titled);

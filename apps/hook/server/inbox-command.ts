@@ -21,6 +21,8 @@
  *                                   only once the pid is proven to be it
  *   plannotator inbox restart       stop it, then start it detached; print
  *                                   the URL
+ *   plannotator inbox link …        link this Inbox with another machine's,
+ *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
  * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
@@ -61,6 +63,7 @@ import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, typ
 import { writeUrlQr } from "@plannotator/server/qr";
 import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
+import { runInboxLinkCommand } from "./inbox-link-command";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -647,6 +650,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     const unknown = rest.find((arg) => arg !== "--tailscale");
     if (unknown) usageError(`Unknown inbox restart option: ${unknown} (restart takes only --tailscale)`);
     process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
+  }
+
+  if (args[0] === "link" || args[0] === "unlink") {
+    process.exit(await runInboxLinkCommand(args, () => ensureInboxRunning(dataDir)));
   }
 
   if (args[0] === "--notes") {

@@ -3,22 +3,27 @@ import { Menu } from '@base-ui/react/menu';
 import { formatCount, whenTime } from '../format';
 import { Icon } from '../icons';
 import {
+  openActionState,
+  openItemsHeading,
+  openItemsLabel,
   openQuestionPlaceWords,
   openQuestionState,
-  openQuestionsHeading,
-  openQuestionsLabel,
   openQuestionSkippable,
   openQuestionSkipped,
   skipAllCandidates,
   skipSelection,
+  type OpenActionItem,
   type OpenQuestion,
   type OpenQuestionPlace,
-  type OpenQuestionsNoun,
+  type OpenQuestionState,
 } from '../openQuestions';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
 import { decideThreadLabel } from '../decisions/entry';
 import { drawOpenQuestionsForm, fitFootRow, footFitCandidates, laidOutChildren, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
+
+/** A row's Stopped or Holds up, as its name says it. */
+const stateWordsOf = (state: OpenQuestionState): string => (state?.kind === 'stopped' ? 'Stopped' : state?.kind === 'holds' ? `Holds up ${state.count}` : '');
 
 /** What "Skip…" says on hover (and as its description): it is not sent now. */
 const SKIP_MODE_TIP = 'Choose questions to skip. Skips ride your next Send.';
@@ -49,10 +54,12 @@ export interface OpenQuestionsDecide {
 export interface OpenQuestionsButtonProps {
   questions: readonly OpenQuestion[];
   /**
-   * Shown with no question listed (only action items wait, and Re-ask is
-   * offered): the button counts the open action items instead.
+   * The open action items (owner, 2026-10-30): counted beside the questions
+   * ("2 questions, 1 action item", or "1 open action item" alone) and listed
+   * after them; a row takes the person to its checklist row. No Skip or select
+   * mode for them: those stay with the questions.
    */
-  actions?: number;
+  actions?: readonly OpenActionItem[];
   /** Re-ask, when it is offered: one item at the list's foot. */
   reask?: OpenQuestionsReask | null;
   /** "Decide these N" (decision mode), when it is offered: the list's first row. */
@@ -65,6 +72,8 @@ export interface OpenQuestionsButtonProps {
   measure: () => ReadonlyMap<string, OpenQuestionPlace>;
   /** A row was chosen: scroll to its card (opening a folded message) and ring it. */
   onPick: (question: OpenQuestion) => void;
+  /** An action item's row was chosen: scroll to its checklist row (opening a folded message) and ring it. */
+  onPickAction?: (action: OpenActionItem) => void;
   /**
    * Skipping from the list (approval "oq-skip-select", variant A): "Skip…"
    * enters a select mode, and its button sets these questions skipped (true)
@@ -92,10 +101,10 @@ export interface OpenQuestionsButtonProps {
  *
  * The label takes the longest form that keeps the foot's buttons on one line
  * ("5 open questions", "5 open", "5"; footFit.ts), trying each on the row's
- * usual spacing and then a tighter one; a phone never takes the long form.
+ * usual spacing and then a tighter one; a phone tries the long form first too.
  * The name always holds the whole count.
  */
-export function OpenQuestionsButton({ questions, actions = 0, reask = null, decide = null, triggerRef, phone, measure, onPick, onSetSkipped, rowForm = null }: OpenQuestionsButtonProps) {
+export function OpenQuestionsButton({ questions, actions = [], reask = null, decide = null, triggerRef, phone, measure, onPick, onPickAction, onSetSkipped, rowForm = null }: OpenQuestionsButtonProps) {
   const [open, setOpen] = useState(false);
   /** Select mode (approval "oq-skip-select"): rows are checkboxes; ticks save nothing until the bar's button. */
   const [selecting, setSelecting] = useState(false);
@@ -115,12 +124,13 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
   // The list is drawn inside the window's root, so the window's styles (and theme) reach it.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
-  // Only action items wait (Re-ask is offered): the button counts them.
-  const noun: OpenQuestionsNoun = questions.length === 0 && actions > 0 ? 'action item' : 'question';
-  const n = noun === 'question' ? questions.length : actions;
+  // The button counts both kinds: "3 open questions", "1 open action item", "2 questions, 1 action item".
+  const n = questions.length;
+  const a = actions.length;
   const reaskTipId = useId();
   const skipTipId = useId();
-  const max: OpenQuestionsLabelForm = phone ? 'short' : 'full';
+  // The long form first on a phone too (owner, 2026-10-30: "it should say both"); "5 open" and "5" when it does not fit.
+  const max: OpenQuestionsLabelForm = 'full';
   const [fitted, setFitted] = useState<FootFit>({ form: max, tight: false });
   const words = useRef<HTMLSpanElement>(null);
   /** What the last fit was made for: the row's width, the other buttons' words, the count. */
@@ -137,7 +147,7 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
       if (!button || !words.current || !buttons || !row) return;
       if (rowForm) {
         // The row chose: draw it (the row's own fit already left the page this way).
-        fittedFor.current = `row:${rowForm}|${n}`;
+        fittedFor.current = `row:${rowForm}|${n}|${a}`;
         const next = { form: rowForm, tight: false };
         drawOpenQuestionsForm(button, next);
         setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
@@ -147,7 +157,7 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
         .filter((el) => el !== button)
         .map((el) => el.textContent ?? '')
         .join('|');
-      const key = `${row.getBoundingClientRect().width}|${n}|${max}|${others}`;
+      const key = `${row.getBoundingClientRect().width}|${n}|${a}|${max}|${others}`;
       if (!force && key === fittedFor.current) return;
       fittedFor.current = key;
       const apply = (next: FootFit) => drawOpenQuestionsForm(button, next);
@@ -156,7 +166,7 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
       apply(next);
       setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
     },
-    [n, max, noun, rowForm],
+    [n, a, max, rowForm],
   );
   // Every render: a button beside it may have come or gone (Send, 👍) with no resize.
   useLayoutEffect(() => fit());
@@ -187,8 +197,8 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
       }, 0);
     };
   }, []);
-  const label = openQuestionsLabel(n, noun);
-  const heading = openQuestionsHeading(n, noun);
+  const label = openItemsLabel(n, a);
+  const heading = openItemsHeading(n, a);
 
   // Skipping from the list (approval "oq-skip-select", variant A).
   const canSkip = !!onSetSkipped && questions.some(openQuestionSkippable);
@@ -308,12 +318,12 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
         data-fit-tight={tight ? '' : undefined}
         // What footFit.ts draws each form from.
         data-oq-n={n}
-        data-oq-noun={noun}
+        data-oq-actions={a}
         data-oq-label={label}
       >
         <Icon name="question" size={15} />
         <span ref={words} data-oq-words="">
-          {openQuestionsFormText(n, form, noun)}
+          {openQuestionsFormText(n, form, a)}
         </span>
         <span className="ib-oq-chev" aria-hidden="true">
           <Icon name="chevU" size={13} />
@@ -454,7 +464,9 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
                     onClick={() => {
                       picked.current = true;
                       close();
-                      onPick(q);
+                      // After the list has closed: focus put on the card while the menu is still open is lost
+                      // with it (the page's body ends up focused).
+                      requestAnimationFrame(() => onPick(q));
                     }}
                   >
                     <span className="ib-oq-n" aria-hidden="true">
@@ -464,6 +476,55 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
                   </Menu.Item>
                 );
               })}
+              {/* The open action items (owner, 2026-10-30), after the questions: each row takes the person to its
+                  checklist row. Not in select mode, which chooses questions to skip. */}
+              {!selecting && actions.length > 0 && (
+                <>
+                  {questions.length > 0 && <Menu.Separator className="ib-oq-sep" />}
+                  {actions.map((item) => {
+                    const state = openActionState(item);
+                    const place = openQuestionPlaceWords(places.get(item.id) ?? 'below');
+                    const when = whenTime(item.at);
+                    const ariaLabel = [item.prompt, 'Action item', stateWordsOf(state), `${when}, ${place}`].filter(Boolean).join('. ');
+                    return (
+                      <Menu.Item
+                        key={item.id}
+                        className="ib-oq-row"
+                        label={item.prompt}
+                        data-open-action={item.id}
+                        aria-label={ariaLabel}
+                        onClick={() => {
+                          picked.current = true;
+                          close();
+                          // After the list has closed: focus put on the row while the menu is still open is lost
+                          // with it (the page's body ends up focused).
+                          requestAnimationFrame(() => onPickAction?.(item));
+                        }}
+                      >
+                        {/* The action item's box (the list row's action badge), where a question has its number. */}
+                        <span className="ib-oq-n ib-oq-act" aria-hidden="true">
+                          <Icon name="todoOpen" size={phone ? 15 : 13} />
+                        </span>
+                        <span className="ib-oq-main">
+                          <span className="ib-oq-p" dir="auto">
+                            {item.prompt}
+                          </span>
+                          <span className="ib-oq-meta">
+                            {state?.kind === 'stopped' && <span className="ib-badge ib-b-stop ib-oq-badge">Stopped</span>}
+                            {state?.kind === 'holds' && <span className="ib-badge ib-b-hold ib-oq-badge">Holds up {state.count}</span>}
+                            <span className="ib-oq-when">
+                              {when} · {place}
+                            </span>
+                          </span>
+                        </span>
+                        <span className="ib-oq-go" aria-hidden="true">
+                          <Icon name="chevR" size={15} />
+                        </span>
+                      </Menu.Item>
+                    );
+                  })}
+                </>
+              )}
             </div>
             {selecting ? (
               <>
@@ -489,7 +550,7 @@ export function OpenQuestionsButton({ questions, actions = 0, reask = null, deci
             ) : (
               (reask || canSkip) && (
                 <>
-                  {questions.length > 0 && <Menu.Separator className="ib-oq-sep" />}
+                  {questions.length + actions.length > 0 && <Menu.Separator className="ib-oq-sep" />}
                   {/* The list's last row (approval "oq-skip-select"): Re-ask on the left, a quiet "Skip…" on the right. */}
                   <div className="ib-oq-last" role="none">
                     {reask && (

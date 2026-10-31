@@ -11,7 +11,7 @@
  * while, reads as Capabilities landing on that group, so an old link works.
  */
 
-export const SETTINGS_SECTIONS = ['general', 'agents', 'prompts', 'devices', 'capabilities', 'archived', 'storage', 'about'] as const;
+export const SETTINGS_SECTIONS = ['general', 'agents', 'prompts', 'devices', 'machines', 'capabilities', 'archived', 'storage', 'about'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 
 export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
@@ -19,6 +19,7 @@ export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
   agents: 'Agents',
   prompts: 'Prompts',
   devices: 'Devices',
+  machines: 'Machines',
   archived: 'Archived',
   storage: 'Storage',
   about: 'About',

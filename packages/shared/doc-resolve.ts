@@ -4,7 +4,7 @@
  *
  * Resolving which file a path names is separated from reading it so
  * authorization sits on one seam: every reachable path comes from
- * `resolveDocTarget`, and `isPathAllowed` alone decides whether it is served.
+ * `resolveDocTarget`, and `isDocServeAllowed` alone decides whether it is served.
  * Resolution may `stat`; it never reads contents (`readPlanFile` reads the
  * plan file once, at server start).
  *
@@ -14,6 +14,12 @@
  * directory. Only exact link targets are served, the directory never becomes
  * an allowed root, and a named file there shadows a project document of the
  * same relative name. That base is not used for root resolution.
+ *
+ * A reader on this machine (`isThisMachineReader`, this-machine-reader.ts) may open a document
+ * anywhere (`anyPath`, #2291): one in a folder added in Settings → Files, or
+ * one the current document links outside the project. Only document types
+ * (`isAnyPathDocument`); code files and data formats keep the roots, and so
+ * does every reader that may be on another machine (`isDocServeAllowed`).
  */
 
 import { readFileSync, realpathSync, statSync } from "fs";
@@ -50,6 +56,8 @@ export interface DocResolveOptions {
 	/** `?doc=1`. Renders annotatable plain text for extensions that overlap code files. */
 	forceDoc?: boolean;
 	roots: string[];
+	/** A reader on this machine (`isThisMachineReader`, this-machine-reader.ts): documents may be anywhere (`isAnyPathDocument`). */
+	anyPath?: boolean;
 }
 
 export interface DocErrorPayload {
@@ -128,11 +136,57 @@ export function isPathAllowed(candidate: string, roots: string[]): boolean {
 	return roots.some((root) => isWithinProjectRoot(real, root));
 }
 
-export function getTrustedBaseDir(base: string | null | undefined, roots: string[]): string | null {
+export function getTrustedBaseDir(base: string | null | undefined, roots: string[], anyPath = false): string | null {
 	if (!base) return null;
 	const resolvedBase = resolveUserPath(base);
-	return isPathAllowed(resolvedBase, roots) ? resolvedBase : null;
+	return isDocPathAllowed(resolvedBase, roots, anyPath) ? resolvedBase : null;
 }
+
+/** The containment half of the gate: `isPathAllowed`, or any path when `anyPath`. */
+export function isDocPathAllowed(candidate: string, roots: string[], anyPath = false): boolean {
+	return anyPath ? !!candidate : isPathAllowed(candidate, roots);
+}
+
+// What a reader on this machine may open outside the roots: the documents the
+// viewer renders (Markdown, MDX, HTML, AsciiDoc, diagram sources) and the
+// user's own markdown extensions. Never plain text, data or config formats,
+// and never a code file: those keep the roots for every reader.
+const ANY_PATH_DOCUMENT_RE = /\.(?:mdx?|html?|adoc|asciidoc|mmd|mermaid|dot|gv)$/i;
+
+/** Whether `path` is a document type a reader on this machine may open anywhere (#2291). */
+export function isAnyPathDocument(path: string): boolean {
+	const trimmed = path.trim();
+	if (ANY_PATH_DOCUMENT_RE.test(trimmed)) return true;
+	const lower = trimmed.toLowerCase();
+	return getExtraMarkdownExtensions().some((ext) => lower.endsWith(ext));
+}
+
+/**
+ * The `/api/doc` gate for a resolved path. `render` is how it would be
+ * served (null for a name that does not exist).
+ *  - A document a reader on this machine asked for (`anyPath`) may be
+ *    anywhere when both its name and its real path are `isAnyPathDocument`.
+ *    Anything else (code files, config and text formats, every reader that
+ *    keeps the roots) must be inside the roots, as written and as resolved.
+ *  - For every reader, the real file must be of the type its name was served
+ *    as, so `key.md -> ~/.ssh/id_ed25519` is refused inside the roots too.
+ */
+export function isDocServeAllowed(
+	candidate: string,
+	render: DocRender | null,
+	roots: string[],
+	anyPath = false,
+): boolean {
+	if (!candidate) return false;
+	const real = realpathAllowingMissingLeaf(candidate);
+	if (!real) return false;
+	const anywhere = anyPath && render !== "code" && isAnyPathDocument(candidate) && isAnyPathDocument(real);
+	if (!isDocPathAllowed(candidate, roots, anywhere)) return false;
+	if (render === "code") return isCodeFilePath(real);
+	if (render === "document") return getAnnotatableDocRegex().test(real);
+	return true;
+}
+
 
 /**
  * A plan file on disk whose contents match the plan under review. Its
@@ -294,12 +348,13 @@ export type ResolveAllowedDocPathResult =
 export function resolveAllowedDocPath(
 	requestedPath: string,
 	base: string | null,
-	options?: { rootPaths?: string[] },
+	options?: { rootPaths?: string[]; anyPath?: boolean },
 ): ResolveAllowedDocPathResult {
 	const allowedRoots = getAllowedRootPaths(options);
-	const resolvedBase = getTrustedBaseDir(base, allowedRoots);
+	const anyPath = options?.anyPath === true;
+	const resolvedBase = getTrustedBaseDir(base, allowedRoots, anyPath);
 	const candidate = resolveUserPath(requestedPath, resolvedBase ?? undefined);
-	return isPathAllowed(candidate, allowedRoots)
+	return isDocServeAllowed(candidate, null, allowedRoots, anyPath)
 		? { kind: "resolved", path: candidate }
 		: { kind: "denied" };
 }
@@ -410,7 +465,7 @@ export async function resolveDocTarget(
 	if (base && !isAbsoluteUserPath(requestedPath) && wantsDocRender(requestedPath)) {
 		const fromBase = resolveUserPath(requestedPath, base);
 		// An escaping name means only itself, so it never falls through.
-		if (!roots.some((root) => isWithinProjectRoot(fromBase, root))) {
+		if (!(options.anyPath && isAnyPathDocument(fromBase)) && !roots.some((root) => isWithinProjectRoot(fromBase, root))) {
 			return { kind: "not_found", input: requestedPath, path: fromBase };
 		}
 		if (isReadableFile(fromBase)) {

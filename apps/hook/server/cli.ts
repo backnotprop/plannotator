@@ -3,6 +3,7 @@ import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
 import { INBOX_REF_LINK_RULE } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
+import { INBOX_LINK_USAGE } from "./inbox-link-command";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
@@ -167,6 +168,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
     "  plannotator sessions",
+    "  plannotator data-dir",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
     "  plannotator inbox mcp",
     "  plannotator inbox status [--json] | stop | restart",
@@ -287,6 +289,8 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
   "  plannotator inbox restart [--tailscale]",
+  "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
+  "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
   "",
   "  plannotator inbox               Start the Inbox and open it in the browser,",
@@ -315,6 +319,7 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox restart       Stop it, then start it in the background (no",
   "                                  browser tab) and print its URL. A run published by",
   "                                  --tailscale is published again.",
+  ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
   "                                  opencode, comma-separated). Only with the",
@@ -330,6 +335,27 @@ export const INBOX_COMMAND_USAGE = [
   "Plannotator's extension or plugin. It never adds back one removed or turned off,",
   "never replaces another plannotator-inbox, and says what it added on stderr.",
   "PLANNOTATOR_INBOX_CONNECT=0 skips it. plannotator uninstall removes what it added.",
+].join("\n");
+
+/**
+ * `plannotator data-dir` (index.ts): the data directory this Plannotator
+ * reads and writes, so skills and agents never have to work it out (#2305).
+ */
+export const DATA_DIR_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator data-dir",
+  "",
+  "Print the absolute path of Plannotator's data directory (plans/, history/,",
+  "config.json, hooks/, ...) and exit. Creates nothing.",
+  "",
+  "Resolution: PLANNOTATOR_DATA_DIR when set; else ~/.plannotator when it exists,",
+  "unless it holds no Plannotator data while $XDG_DATA_HOME/plannotator does; else",
+  "$XDG_DATA_HOME/plannotator when XDG_DATA_HOME is an absolute path; else",
+  "~/.plannotator. When both folders exist, stderr names the one not used; it may",
+  "hold older Plannotator data, so leave it alone.",
+  "",
+  "Agents: use this path instead of writing ~/.plannotator. Creating ~/.plannotator",
+  "on an install that keeps its data elsewhere can hide that data.",
 ].join("\n");
 
 /** `plannotator update`'s usage; the command is update-command.ts. */
@@ -382,7 +408,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                default branch or the \"behind GitHub\" check. The compare target",
     "                stays what local refs resolve to; Fetch still works. Useful when",
     "                SSH auth costs a hardware-key touch. Also PLANNOTATOR_GIT_REMOTE_CHECK=0",
-    "                or { \"gitRemoteCheck\": false } in ~/.plannotator/config.json.",
+    "                or { \"gitRemoteCheck\": false } in the data dir's config.json.",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        You wait for the sign-off: a bare Approve reaches you too. The approval",
     "                is printed either way; an agent host that only logs a bare Approve",
@@ -475,8 +501,10 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Usage:",
     "  plannotator archive",
     "",
-    "Open a read-only browser for saved plan decisions in ~/.plannotator/plans/.",
+    "Open a read-only browser for saved plan decisions in the plans/ folder of the",
+    "data directory ('plannotator data-dir' prints it).",
   ].join("\n"),
+  "data-dir": DATA_DIR_COMMAND_USAGE,
   guide: GUIDE_CLI_USAGE,
   "improve-context": [
     "Usage:",

@@ -215,7 +215,7 @@ test('Reply writes the thread’s reply draft: saved on the server, and the thre
   await expect(card().locator('[data-fcomp-send]')).toBeEnabled();
   await expect.poll(draftOnServer).toBe(WORDS);
   // What rides the Send: the open question, and the way to the thread.
-  await expect(card().locator('[data-fcomp-foot]')).toContainText('1 question open');
+  await expect(card().locator('[data-fcomp-foot]')).toContainText('1 open question');
   await expect(card().locator('[data-fcomp-open-thread]')).toBeVisible();
   // The thread's own box (behind full screen) holds the same words: one draft.
   await expect(page.locator('.ib-rbox textarea')).toHaveValue(WORDS);
