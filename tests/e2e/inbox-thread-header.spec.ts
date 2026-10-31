@@ -296,6 +296,8 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
   await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  // Pressing Full screen was remembered as the person's view (fileView.ts): forgotten, so the next file opens beside.
+  await forgetFileViewChoice(page);
   // ‹ Inbox with a file open closes the file and leaves full screen: the list comes back.
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
   await expect(view).toBeVisible();
