@@ -484,6 +484,109 @@ test.skipIf(!hasDom)('arrow keys move through the rows; Escape closes the list a
   expect(b.getAttribute('aria-expanded')).toBe('false');
 });
 
+describe('Q opens the list (shortcuts/thread.shortcuts.ts openItems)', () => {
+  /** A bare key as the browser sends it: from `from` (the page by default). */
+  async function pressKey(key: string, from: EventTarget = document.body) {
+    await act(async () => {
+      from.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    });
+    await settle();
+  }
+
+  test.skipIf(!hasDom)("Q opens the list with focus on its first row; Q again is the menu's type-ahead, not a toggle", async () => {
+    await render(thread(sample()));
+    expect(list()).toBeNull();
+    await pressKey('q');
+    await until(() => !!list(), 'the list from Q');
+    await until(() => document.activeElement === rows()[0], 'focus on the first row');
+    expect(button()!.getAttribute('aria-expanded')).toBe('true');
+    await pressKey('q', document.activeElement!);
+    expect(list()).not.toBeNull();
+    // The arrows work at once.
+    await pressKey('ArrowDown', document.activeElement!);
+    await until(() => document.activeElement === rows()[1], 'the second row');
+  });
+
+  const sendButton = () => document.querySelector<HTMLButtonElement>('.ib-footbtns .ib-pri');
+  async function modEnter(from: EventTarget, extra: KeyboardEventInit = {}) {
+    await act(async () => {
+      from.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true, ...extra }));
+    });
+    await settle();
+  }
+  /** Counts the Send's clicks (what the foot's button does), without posting anything. */
+  function countSends() {
+    const b = sendButton()!;
+    let n = 0;
+    b.addEventListener('click', (e) => {
+      n += 1;
+      e.stopImmediatePropagation();
+    }, true);
+    return () => n;
+  }
+
+  test.skipIf(!hasDom)('Mod+Enter presses the closed foot\'s Send from the page, a row of the thread and a field; not repeated, not under a menu', async () => {
+    const el = await render(thread(sample()));
+    expect(sendButton()).not.toBeNull();
+    const sends = countSends();
+    await modEnter(document.body);
+    expect(sends()).toBe(1);
+    // From a field inside the thread (a question's note, say): typing is no reason to stand down.
+    const field = document.createElement('textarea');
+    el.querySelector('section')!.appendChild(field);
+    await act(async () => field.focus());
+    await modEnter(field);
+    expect(sends()).toBe(2);
+    // A held key sends once.
+    await modEnter(field, { repeat: true });
+    expect(sends()).toBe(2);
+    // With a menu open the keys are the menu's.
+    await openList();
+    await modEnter(document.activeElement!);
+    expect(sends()).toBe(2);
+  });
+
+  test.skipIf(!hasDom)('Mod+Enter does nothing where no Send shows', async () => {
+    await render(thread(allSent(false)));
+    expect(sendButton()).toBeNull();
+    await modEnter(document.body);
+    expect(list()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('Q does nothing with nothing open', async () => {
+    await render(thread(allSent(false)));
+    await pressKey('q');
+    expect(list()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('Q is typed, not a shortcut, in a field', async () => {
+    const el = await render(thread(sample()));
+    const field = document.createElement('textarea');
+    el.appendChild(field);
+    await act(async () => field.focus());
+    await pressKey('q', field);
+    expect(list()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('Q does nothing with single-key shortcuts off, and works again when they come back', async () => {
+    const prefs = await import('./shortcuts/prefs');
+    await render(thread(sample()));
+    act(() => prefs.setSingleKeys(false));
+    try {
+      await pressKey('q');
+      expect(list()).toBeNull();
+      expect(button()!.hasAttribute('aria-keyshortcuts')).toBe(false);
+      expect(button()!.querySelector('[data-shortcut-hint]')).toBeNull();
+    } finally {
+      act(() => prefs.setSingleKeys(true));
+    }
+    expect(button()!.getAttribute('aria-keyshortcuts')).toBe('Q');
+    expect(button()!.querySelector('[data-shortcut-hint="inbox-thread.openItems"]')).not.toBeNull();
+    await pressKey('q');
+    await until(() => !!list(), 'the list once keys are back');
+  });
+});
+
 test.skipIf(!hasDom)('on a phone: the long form first, and the list is a bottom sheet with a scrim and a close', async () => {
   await render(thread(sample()), { phone: true });
   const b = button()!;

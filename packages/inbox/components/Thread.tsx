@@ -77,7 +77,7 @@ import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replaced
 import { InboxComposerField } from './ComposerField';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
-import { actionSavesSettled } from '../actionSaves';
+import { actionSavesPending, actionSavesSettled } from '../actionSaves';
 import { sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
@@ -115,7 +115,7 @@ import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
 import { ShortcutHint, useShortcutAria, useShortcutHintShown } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
-import { bareKeyAllowed, keyTarget } from '../shortcuts/guards';
+import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -1405,6 +1405,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
   const sectionRef = useRef<HTMLElement>(null);
   const replyKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'reply' });
+  const openItemsKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'openItems' });
   /** After a fold changes: keep the message the person acted on in place, then move focus. */
   const anchorRef = useRef<{ id: string | null; top: number; focus: string | null; folding: boolean } | null>(null);
   /** Stops holding the place put back after a file (threadPlace.ts `holdPlace`); everything that scrolls the thread calls it first. */
@@ -2453,6 +2454,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (target.closest('.ib-listcol')) return 'list';
     return null;
   };
+  const [openItemsRequest, setOpenItemsRequest] = useState(0);
   const readKeysOn = !one && !artifactsOn;
   const readKeyAllowed = (event: KeyboardEvent) => {
     if (!readKeysOn || !bareKeyAllowed(event)) return false;
@@ -2535,6 +2537,49 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           return origin === 'thread' || origin === 'row';
         },
         handle: () => openNewestByKey(),
+      },
+      send: {
+        when: (event) => {          // The closed foot's Send, from wherever focus is in the thread: the page, a question's field or choice, an
+          // action row, a file beside it. The one place this is decided; the reply box (and compose) keep their own
+          // keydown, which stops it here. Not typing-guarded: Mod+Enter is no character, so a field is where it is most
+          // needed. A menu, dialog or popover layer keeps its keys; a held key sends once (and `send` ignores a second).
+          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || box.open || modalOpen()) return false;
+          const target = keyTarget(event);
+          if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe'))) return false;
+          const origin = keyOrigin(event);
+          if (origin !== 'thread' && origin !== 'row' && origin !== 'file') return false;
+          const button = sendRef.current;
+          if (button && button.isConnected && !button.disabled && button.getClientRects().length > 0) return true;
+          // Typed or picked an instant ago: the Send is drawn once the save has landed. The key waits for it.
+          return pending.size > 0 || actionSavesPending();
+        },
+        // Exactly the click: its guards (stale, route choice, uploads) and its wait for notes and picks still saving.
+        handle: () => {
+          const ready = (b: HTMLButtonElement | null) => !!b && b.isConnected && !b.disabled && b.getClientRects().length > 0;
+          if (ready(sendRef.current)) {
+            sendRef.current!.click();
+            return;
+          }
+          // Waits for the saves in flight, then the draw that brings the Send; nothing to send then: nothing happens.
+          void (async () => {
+            await actionSavesSettled();
+            await pickChain.current;
+            for (let i = 0; i < 8 && !ready(sendRef.current); i += 1) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            if (ready(sendRef.current)) sendRef.current!.click();
+          })();
+        },
+      },
+      openItems: {
+        when: (event) => {
+          // Only where the button shows (nothing open, or the reply box, route choice or stale guard hides it), and not
+          // with its list open: then Q is the menu's type-ahead. A key from a file beside the thread is the file's own.
+          if (!bareKeyAllowed(event) || artifactsOn) return false;
+          const origin = keyOrigin(event);
+          if (origin !== 'thread' && origin !== 'row') return false;
+          const trigger = reaskRef.current;
+          return !!trigger && trigger.isConnected && trigger.getAttribute('aria-expanded') !== 'true' && trigger.getClientRects().length > 0;
+        },
+        handle: () => setOpenItemsRequest((n) => n + 1),
       },
       fullScreen: {
         when: (event) => {
@@ -3280,7 +3325,17 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         const active = document.activeElement;
         if (active && active !== document.body && active.isConnected) return;
         const heads = bodyRef.current?.querySelectorAll<HTMLElement>('[data-message-article] [data-fold-head]');
-        (heads?.[heads.length - 1] ?? sectionRef.current?.querySelector<HTMLElement>('[data-reply-button]'))?.focus({ preventScroll: true });
+        const head = heads?.[heads.length - 1];
+        if (head) {
+          // Focus is kept (it holds the person's place), but no ring: after a keyboard Send (⌘Enter) the browser counts
+          // it :focus-visible, which a click on Send never does. The mark ends with the next blur, so a key that moves
+          // focus onto this head again (Shift+K) draws the ring as it does on any head.
+          head.setAttribute('data-sent-focus', '');
+          head.addEventListener('blur', () => head.removeAttribute('data-sent-focus'), { once: true });
+          head.focus({ preventScroll: true });
+          return;
+        }
+        sectionRef.current?.querySelector<HTMLElement>('[data-reply-button]')?.focus({ preventScroll: true });
       });
     } catch (cause) {
       failure = cause;
@@ -3768,7 +3823,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // What the row shows; a change re-fits it (with its width).
   // The Reply keycap (Show keys on buttons) takes room too: turning it on or off re-fits the row.
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
-  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown].join('|');
+  const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
+  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {
@@ -4979,6 +5035,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   onPickAction={(a) => jumpTo({ kind: 'action', messageId: a.messageId, key: a.key })}
                   onSetSkipped={setSkippedFromList}
                   rowForm={rowFit && footStatusShown ? footRowOpenQuestionsForm(rowFit.level, rowFit.max) : null}
+                  openRequest={openItemsRequest}
+                  keyShortcuts={openItemsKeys}
+                  keyHint={<ShortcutHint scope={inboxThreadShortcuts} action="openItems" className="ib-kbd ib-btn-kbd" />}
                 />
               )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits. */}
