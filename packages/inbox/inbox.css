@@ -6332,6 +6332,7 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-cfield[data-voice-live] .ib-rtext { caret-color: transparent; }
 /* Paint only (ComposerTokenTextarea's metric rule): zero net width, so the text never moves under them. */
 .ib-vcaret { display: inline-block; width: 2px; height: 1.15em; margin: 0 -1px 0 -1px; border-radius: 1px; background: var(--primary); vertical-align: -0.2em; transform: scaleY(0.3); }
+.ib-vcaret.ib-vstill { transform: none; opacity: 0.5; }
 .ib-vph { position: relative; }
 .ib-vph i { position: absolute; left: 3px; top: -0.15em; font-style: normal; white-space: nowrap; color: color-mix(in oklch, var(--muted-foreground) 62%, transparent); }
 mark.ib-vmark { color: inherit; background: color-mix(in oklch, var(--primary) 16%, transparent); border-radius: 3px; transition: background-color 1s ease-out; }

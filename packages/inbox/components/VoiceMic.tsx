@@ -217,9 +217,11 @@ function VoiceCaret({ session }: { session: VoiceSession }) {
 
 /** The dim marker reads as text, so it says its word only where nothing follows on the line. */
 function Marker({ wide }: { wide: boolean }) {
+  // Between words there's no room for a word: the caret stays, still, where they will land.
+  if (!wide) return <span className="ib-vcaret ib-vstill" />;
   return (
     <span className="ib-vph">
-      <i>{wide ? 'Transcribing…' : '…'}</i>
+      <i>Transcribing…</i>
     </span>
   );
 }

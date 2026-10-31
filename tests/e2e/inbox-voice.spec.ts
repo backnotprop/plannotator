@@ -275,7 +275,7 @@ test('a hold: words land at the cursor, Send waits, nothing sends itself', async
 
   await expect(line(pane(page), 'sending')).toBeVisible();
   await expect(sendButton(page)).toBeDisabled();
-  await expect(pane(page).locator('.ib-vph i')).toHaveText('…');
+  await expect(pane(page).locator('.ib-vcaret.ib-vstill')).toBeVisible();
   await expect(box).toHaveValue('Cards. and more');
   await shot(page, 'transcribing');
   w.send({ release: true });
