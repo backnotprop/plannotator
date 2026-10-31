@@ -5,7 +5,8 @@
  * The Inbox decides who gets it (packages/server/inbox.ts `inboxListIntro`): someone who used an Inbox before, once
  * per machine. The page decides when: never on the same load as another one-time dialog or the tour, only once the
  * Inbox page (the list, or a thread open on it: `listIntroPageClear`) has been settled for a moment, only with a list
- * of three rows or more, and never over a search, a new message, a reply being typed or another dialog. A page that
+ * of three rows or more, and never over a file, document, guided review or Artifacts view, a search, a new message,
+ * a reply being typed or another dialog. A page that
  * may show it claims it (POST /api/inbox/list-intro); only the first claim ever gets `show: true`.
  */
 import type { ListLookKey } from './listLook';
@@ -21,14 +22,27 @@ export const LIST_INTRO_MIN_ROWS = 3;
  */
 export const LIST_INTRO_SETTLED_MS = 2500;
 
+/** What of the route the gate reads: the page, and the views that open on a thread. */
+export interface ListIntroRoute {
+  page: string;
+  /** An attachment (a file or a document) open beside the thread or full screen. */
+  file?: unknown;
+  /** A guided review open over the window. */
+  guide?: string | null;
+  /** The thread's Artifacts view. */
+  artifacts?: boolean;
+}
+
 /**
  * Whether the person is on the Inbox page with nothing over it: the list, with or without a thread open (a thread
  * from a notification, an agent's link or a reload counts, on a phone and a desktop alike: the owner's note, "it
- * should show if I have a thread open"), and no search or new message over it. Settings, the Board, What's new,
- * Drafts and the tour are other pages: never there.
+ * should show if I have a thread open"), and no search or new message over it. A file, document, guided review or
+ * Artifacts view open on the thread (side by side or full screen) keeps it away: the person is reading that, and the
+ * claim waits, unspent, until it closes. Settings, the Board, What's new, Drafts and the tour are other pages: never
+ * there.
  */
-export function listIntroPageClear(route: { page: string }, over: { search: boolean; compose: boolean }): boolean {
-  return route.page === 'inbox' && !over.search && !over.compose;
+export function listIntroPageClear(route: ListIntroRoute, over: { search: boolean; compose: boolean }): boolean {
+  return route.page === 'inbox' && !route.file && !route.guide && !route.artifacts && !over.search && !over.compose;
 }
 
 /** What one load knows when it decides. */

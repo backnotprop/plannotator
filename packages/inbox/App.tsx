@@ -3091,7 +3091,8 @@ function Inbox() {
 
   // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
   // on a load that showed either or the tour, only with three rows or more and only once the Inbox page (the list, a
-  // thread open or not) has been settled for a moment with no search or new message over it. It waits while a reply
+  // thread open or not) has been settled for a moment with no file, document, guided review, Artifacts view, search or
+  // new message over it (each keeps the claim waiting, unspent). It waits while a reply
   // is typed or another dialog is open, then claims it from the Inbox (only the first claim ever shows it).
   if (route.page === 'tour') tourThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
@@ -3146,7 +3147,8 @@ function Inbox() {
     }, 700);
     return () => clearInterval(timer);
   }, [listIntroReady]);
-  // A claim answered after the person opened Settings, the Board, a search, a new message or an update, began a reply
+  // A claim answered after the person opened Settings, the Board, a file, a guided review, the Artifacts view, a
+  // search, a new message or an update, began a reply
   // or opened another dialog: it opens when they are back on the Inbox page for a moment with nothing open or typed
   // (never dropped: it is spent).
   const listIntroClaimed = listIntro === 'claimed';

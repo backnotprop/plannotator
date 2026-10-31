@@ -12,7 +12,8 @@
  *  - Never on the same load as the sound dialog or the tour; the next load shows it.
  *  - With a thread open too (the owner, 2026-10-31): a first load on a thread link (desktop or phone) shows it over the
  *    thread after the same short wait as a first load on the list, with the picture's rows drawn (a phone hides the
- *    real list under a thread); never while a reply is being typed there, then once it is not.
+ *    real list under a thread); never while a reply is being typed there, then once it is not; never while a file is
+ *    open beside the thread, then after the short wait once it is closed.
  *  - Light for everyone: under a dark window the dialog is drawn light (its text and switches pass WCAG AA there),
  *    and the window behind stays dark.
  *  - The picture's thread names stay on one line, a long one cut with "…" (the owner: no long names in the examples).
@@ -47,6 +48,8 @@ interface World {
   url: string;
   dataDir: string;
   opened: string;
+  /** With `attachment`: the file on the opened thread's reply. */
+  file?: string;
 }
 
 function compileReleaseBinary(): string {
@@ -64,7 +67,7 @@ function compileReleaseBinary(): string {
  * An Inbox with six threads. `earlier`: someone who used an Inbox before (update-state.json names an older version),
  * with the sound dialog and the agent notes already behind them unless `soundDue`.
  */
-async function world(options: { earlier: boolean; soundDue?: boolean }): Promise<World> {
+async function world(options: { earlier: boolean; soundDue?: boolean; attachment?: boolean }): Promise<World> {
   const root = realpathSync(mkdtempSync(join(scratch, 'world-')));
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
@@ -99,12 +102,18 @@ async function world(options: { earlier: boolean; soundDue?: boolean }): Promise
   await say(pi!, 'plannotator', 'Release 0.28.41', 'Release notes for 0.28.41: check the contributor credits', 'Release notes are drafted.');
   await say(claude!, 'billing-svc', 'Refund events', 'Trust the webhook or poll Stripe every 10 minutes?', ask('Webhook?'));
   const opened = await say(claude!, 'plannotator', 'Thread items again', 'The list shows the subject in bold and the thread name as a pill', ask('Which row should I build?'));
-  await codex!.send({ project_path: scratchProject(src, 'plannotator'), reply_to: opened, body: 'I drew the phone rows.' });
+  let file: string | undefined;
+  if (options.attachment) {
+    // The opened thread's reply carries a file, to open beside the thread.
+    writeFileSync(join(scratchProject(src, 'plannotator'), 'row-notes.md'), '# Row notes\n\nThe pill version reads best.\n');
+    const sent = await codex!.send({ project_path: scratchProject(src, 'plannotator'), reply_to: opened, body: 'I drew the phone rows.', attachments: ['row-notes.md'] });
+    file = (sent.attachments as { id: string }[])[0]!.id;
+  } else await codex!.send({ project_path: scratchProject(src, 'plannotator'), reply_to: opened, body: 'I drew the phone rows.' });
   await say(codex!, 'design-system-tokens', 'Spacing scale', 'Drop the 6 px step from the spacing scale?', ask('Drop the 6 px step?'));
   await say(pi!, 'api', 'Raise the batch import rate limit before the Friday migration window opens', 'The import hits 429s at 400 requests a minute', ask('Raise it to 800?'));
   const ledger = await say(claude!, 'northwind-industries-reconciliation-platform', LONG_NAME,'Dry run the ledger reconciliation against last quarter', ask('Run it tonight?'));
   await codex!.send({ project_path: scratchProject(src, 'northwind-industries-reconciliation-platform'), reply_to: ledger, body: 'Codex checked its part.' });
-  return { url, dataDir, opened };
+  return { url, dataDir, opened, file };
 }
 
 function saved(w: World): { dueAt?: string; shownAt?: string } | undefined {
@@ -425,6 +434,30 @@ test('over a thread, never while a reply is being typed: it waits, unspent, and 
   await pane.locator('h2.ib-subject').click();
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+});
+
+test('never over a file open beside a thread: it waits, unspent; closed, it shows after the short wait', async ({ browser }) => {
+  const w = await world({ earlier: true, attachment: true });
+  const page = await (await context(browser, { reduce: true })).newPage();
+  await page.goto(`${w.url}#thread=${w.opened}&file=${w.file}&view=side`);
+  await expect(page.locator('.ib-pane h2.ib-subject').first()).toBeVisible({ timeout: 15_000 });
+  const close = page.getByRole('button', { name: 'Close row-notes.md' });
+  await expect(close).toBeVisible({ timeout: 15_000 });
+  // Well past the wait: nothing over the file, and the claim is not spent.
+  await page.waitForTimeout(6000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(saved(w)?.shownAt).toBeUndefined();
+  await shot(page, 'file-open-no-dialog');
+  // The file closed, the thread alone: after the same short wait, never at once.
+  await close.click();
+  const closed = Date.now();
+  await expect(close).toHaveCount(0);
+  await page.waitForTimeout(1000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
+  expect(Date.now() - closed).toBeGreaterThanOrEqual(2000);
+  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+  expect(await page.evaluate(() => location.hash)).not.toContain('file=');
 });
 
 test('light for everyone: under a dark window the dialog is light and passes WCAG AA; the window stays dark', async ({ browser }) => {

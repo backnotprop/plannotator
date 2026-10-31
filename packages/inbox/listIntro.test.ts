@@ -1,9 +1,10 @@
 /**
  * When a load may ask for the one-time list options dialog (approval "inbox-list-options-intro"). What regresses: the
  * dialog on the same load as the tour or another one-time dialog, over a reply or another dialog, on a page that is
- * not the Inbox's (Settings, the Board), over a search or a new message, through the tailnet, on a short list, or
- * before this load's other dialogs are decided; and, since the owner's note (2026-10-31, "it should show if I have a
- * thread open"), a thread open keeping it away.
+ * not the Inbox's (Settings, the Board), over a file, document, guided review or Artifacts view (side by side or full
+ * screen), over a search or a new message, through the tailnet, on a short list, or before this load's other dialogs
+ * are decided; and, since the owner's note (2026-10-31, "it should show if I have a thread open"), a thread open
+ * keeping it away.
  */
 import { describe, expect, test } from 'bun:test';
 import { LIST_INTRO_PREVIEW, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
@@ -51,13 +52,27 @@ describe('the list options dialog: when a load may ask for it', () => {
     const none = { search: false, compose: false };
     expect(listIntroPageClear({ page: 'inbox' }, none)).toBe(true);
     // A thread link, a notification, a reload on a thread: the thread is the Inbox page too (the owner, 2026-10-31).
-    expect(listIntroPageClear({ page: 'inbox', thread: 'thr_1' } as { page: string }, none)).toBe(true);
+    const onThread = { page: 'inbox', thread: 'thr_1', file: null, guide: null, artifacts: false };
+    expect(listIntroPageClear(onThread, none)).toBe(true);
     for (const page of ['settings', 'board', 'whats-new', 'tour', 'drafts']) expect(listIntroPageClear({ page }, none)).toBe(false);
     for (const thread of [null, 'thr_1']) {
-      const route = { page: 'inbox', thread } as { page: string };
+      const route = { page: 'inbox', thread };
       expect(listIntroPageClear(route, { search: true, compose: false })).toBe(false);
       expect(listIntroPageClear(route, { search: false, compose: true })).toBe(false);
     }
+  });
+
+  test('never over a file, document, guided review or Artifacts view on the thread, side by side or full screen', () => {
+    const none = { search: false, compose: false };
+    const onThread = { page: 'inbox', thread: 'thr_1', file: null, guide: null, artifacts: false };
+    for (const view of ['side', 'full', null] as const) {
+      // A file or a document (both are attachments), in either view or the remembered one.
+      expect(listIntroPageClear({ ...onThread, file: { id: 'att_1', version: 'current', focus: null, view } }, none)).toBe(false);
+    }
+    expect(listIntroPageClear({ ...onThread, guide: 'msg_1' }, none)).toBe(false);
+    expect(listIntroPageClear({ ...onThread, artifacts: true }, none)).toBe(false);
+    // Closed again: the thread alone is clear.
+    expect(listIntroPageClear(onThread, none)).toBe(true);
   });
 
   test('wanted, but it waits: until the page has been settled a moment, before the other dialogs settle, over an update, another dialog or a reply', () => {
