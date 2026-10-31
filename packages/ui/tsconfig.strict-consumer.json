@@ -27,6 +27,7 @@
     "types.ts",
     "utils/parser.ts",
     "components/BlockRenderer.tsx",
+    "components/file-tree/index.ts",
     "components/blocks/QuestionBlock.tsx",
     "utils/questionAnswers.ts",
     "components/QuestionProgressChip.tsx",
