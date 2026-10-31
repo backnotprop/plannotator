@@ -299,7 +299,7 @@ export function mapApprovalRequest(
 type NotificationListener =(notification: { method: string; params: RpcMessage }) => void;
 type RequestHandler = (method: string, id: string | number, params: RpcMessage) => void;
 
-class CodexAppServerProcess {
+export class CodexAppServerProcess {
   private proc: ChildProcess | null = null;
   private listeners: NotificationListener[] = [];
   private requestHandlers: RequestHandler[] = [];
@@ -318,10 +318,11 @@ class CodexAppServerProcess {
   userAgent: string | undefined;
 
   /** Spawn + JSON-RPC initialize handshake, once. `initTimeoutMs` bounds the
-   *  initialize wait (model discovery passes a short value so it can't hang). */
-  start(codexPath: string, cwd: string, initTimeoutMs?: number): Promise<void> {
+   *  initialize wait (model discovery passes a short value so it can't hang).
+   *  `env`: the environment Codex runs in and whose config it reads; default this process's. */
+  start(codexPath: string, cwd: string, initTimeoutMs?: number, env?: Readonly<Record<string, string | undefined>>): Promise<void> {
     if (!this.startPromise) {
-      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs).catch((err) => {
+      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs, env).catch((err) => {
         this.startPromise = null;
         throw err;
       });
@@ -329,9 +330,9 @@ class CodexAppServerProcess {
     return this.startPromise;
   }
 
-  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number): Promise<void> {
+  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number, env: Readonly<Record<string, string | undefined>> = process.env): Promise<void> {
     const commandPath = resolveWindowsCommandShim(codexPath);
-    const appServerArgs = [...codexAskAiConfigArgs(readCodexConfigTexts(cwd)), "app-server"];
+    const appServerArgs = [...codexAskAiConfigArgs(readCodexConfigTexts(cwd, env)), "app-server"];
     const command =
       buildWindowsCommandScriptSpawnCommand(commandPath, appServerArgs) ?? [
         commandPath,
@@ -345,7 +346,7 @@ class CodexAppServerProcess {
       // stderr pipe deadlocks the child once its buffer fills. The env turns
       // Plannotator's integration off in this Codex (ask-ai-env.ts): its hooks
       // read the marker; the Inbox MCP server is off by the `-c` overrides.
-      proc = spawn(file, args, { cwd, env: askAiChildEnv(), stdio: ["pipe", "pipe", "ignore"] });
+      proc = spawn(file, args, { cwd, env: askAiChildEnv(env), stdio: ["pipe", "pipe", "ignore"] });
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.handleProcessEnd(error);
