@@ -351,7 +351,7 @@ The command prints an address such as `https://studio.tail1234.ts.net:52817/`. O
 
 `--tailscale` publishes until the Inbox stops. To publish at every start, also when an agent starts the Inbox, turn on **Over your tailnet** in **Settings**. You can also set `PLANNOTATOR_INBOX_TAILSCALE=1`, or put `{ "inboxTailscale": true }` in `~/.plannotator/config.json`. When the environment variable is set, it decides and the switch is disabled. `PLANNOTATOR_INBOX_TAILSCALE=0` keeps it off, even with `--tailscale`. You can turn the switch on only from this computer.
 
-The address uses the Inbox's own port. The Inbox removes it when it stops or restarts. If Tailscale is not installed, stopped or signed out, the Inbox still runs on this computer. **Settings** shows the reason.
+The address uses the Inbox's own port. The Inbox removes it when it stops or restarts. On a Mac the Tailscale app is enough: you do not need to turn on its command-line tool. If Tailscale is not installed, stopped or signed out, the Inbox still runs on this computer. **Settings** shows the reason.
 
 If the Inbox is killed (for example by `kill -9`, the system running out of memory, or a restart of the computer), the address stays in Tailscale and points at a port nothing uses any more. Until the Inbox starts again, a different program that takes that port is reachable from your tailnet. The Inbox removes the old address first thing at its next start. To remove it at once, run `tailscale serve --https=<port> off`, or `plannotator uninstall --purge`. `review --tailscale` and `annotate --tailscale` sessions have the same window.
 

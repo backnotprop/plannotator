@@ -13,7 +13,10 @@ import {
   buildServeArgs,
   buildServeOffArgs,
   checkServeStatusPort,
+  createTailscaleRunner,
+  MAC_TAILSCALE_APP_CLI,
   serveStatusProxy,
+  tailscaleAppFallback,
   describeTailscaleFailure,
   detectTailnetHost,
   extractServeHttpsUrl,
@@ -146,6 +149,71 @@ describe("describeTailscaleFailure", () => {
 
   test("anything else still shows Tailscale's own text", () => {
     expect(failed("error enabling https feature: some control error\n")).toContain("error enabling https feature: some control error");
+  });
+});
+
+// A Mac with the Tailscale app but without its command-line tool turned on
+// has no `tailscale` on PATH; the app's own program is the CLI when run by its
+// real path. The spawn, the platform and the existence check are injected, so
+// nothing here runs a real tailscale or looks at the real /Applications.
+describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
+  const enoent = (): TailscaleRunResult => ({
+    error: Object.assign(new Error("spawnSync tailscale ENOENT"), { code: "ENOENT" }),
+    status: null,
+    stdout: "",
+    stderr: "",
+  });
+  const world = (onPath: TailscaleRunResult) => {
+    const calls: { command: string; args: string[]; timeoutMs: number }[] = [];
+    const spawn = (command: string, args: string[], timeoutMs: number) => {
+      calls.push({ command, args, timeoutMs });
+      return command === "tailscale" ? onPath : ok("1.104.4\n");
+    };
+    return { calls, spawn };
+  };
+  const mac = { platform: "darwin" as const, exists: (path: string) => path === MAC_TAILSCALE_APP_CLI, env: {} };
+
+  test("PATH without tailscale and the app installed: runs the app's CLI by its real path, same args and timeout", () => {
+    const { calls, spawn } = world(enoent());
+    const result = createTailscaleRunner(spawn, mac)(["serve", "status", "--json"], 3_000);
+    expect(result).toEqual(ok("1.104.4\n"));
+    // The path is pinned on purpose: the app's program works as the CLI only by this real path (a symlink crashes it).
+    expect(calls).toEqual([
+      { command: "tailscale", args: ["serve", "status", "--json"], timeoutMs: 3_000 },
+      { command: "/Applications/Tailscale.app/Contents/MacOS/Tailscale", args: ["serve", "status", "--json"], timeoutMs: 3_000 },
+    ]);
+  });
+
+  test("neither on PATH nor the app: the not-found failure, which names both fixes", () => {
+    const { calls, spawn } = world(enoent());
+    const result = createTailscaleRunner(spawn, { ...mac, exists: () => false })(["version"], 3_000);
+    expect(calls.map((call) => call.command)).toEqual(["tailscale"]);
+    const text = describeTailscaleFailure(result);
+    expect(text).toContain("not found on PATH");
+    expect(text).toContain("Install CLI");
+    expect(text).toContain("https://tailscale.com/download");
+  });
+
+  test("not on macOS: no fallback, even where that path would exist", () => {
+    for (const platform of ["linux", "win32"] as const) {
+      const { calls, spawn } = world(enoent());
+      const result = createTailscaleRunner(spawn, { ...mac, platform, exists: () => true })(["version"], 3_000);
+      expect(calls.map((call) => call.command)).toEqual(["tailscale"]);
+      expect((result.error as NodeJS.ErrnoException).code).toBe("ENOENT");
+    }
+  });
+
+  test("PATH comes first: a tailscale on PATH, failing or not, is never second-guessed", () => {
+    for (const onPath of [ok("{}"), { status: 1, stdout: "", stderr: "Logged out." }]) {
+      const { calls, spawn } = world(onPath);
+      expect(createTailscaleRunner(spawn, mac)(["status", "--json"], 3_000)).toEqual(onPath);
+      expect(calls.map((call) => call.command)).toEqual(["tailscale"]);
+    }
+  });
+
+  test("a test run (PLANNOTATOR_TEST_SANDBOX) never reaches the real app", () => {
+    expect(tailscaleAppFallback(enoent(), { ...mac, env: { PLANNOTATOR_TEST_SANDBOX: "/tmp/x" } })).toBeUndefined();
+    expect(tailscaleAppFallback(enoent(), mac)).toBe(MAC_TAILSCALE_APP_CLI);
   });
 });
 

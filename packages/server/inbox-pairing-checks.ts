@@ -29,6 +29,7 @@ import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
   parseTailscaleSelfIdentity,
+  tailscaleAppFallback,
   TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunResult,
@@ -40,8 +41,8 @@ import type { TailnetDoorPort } from "./inbox-tailnet-door";
 export type FirewallState = "off" | "on" | "block_all" | "unknown";
 
 /**
- * `cli_missing`: no `tailscale` command on PATH (Tailscale may still be
- * installed, as the Mac App Store app is without its command-line tool).
+ * `cli_missing`: no `tailscale` command on PATH and, on a Mac, no
+ * /Applications/Tailscale.app whose own CLI could stand in for it.
  * `no_answer`: the command did not answer within its time limit.
  */
 export type TailscaleBackend = "running" | "stopped" | "signed_out" | "needs_approval" | "starting" | "cli_missing" | "no_answer" | "unknown";
@@ -169,8 +170,12 @@ function withDeadline<T>(value: T | Promise<T>, ms: number, fallback: T): Promis
 /** The most one read of the checks takes: past it, a probe that has not answered reads as not answering. */
 export const PAIRING_CHECKS_DEADLINE_MS = 15_000;
 
-/** The default Tailscale runner for the checks: the CLI on PATH, asynchronously. */
-export const runTailscaleQuietly: PairingTailscaleRunner = (args, timeoutMs) => runQuietly("tailscale", args, timeoutMs);
+/** The default Tailscale runner for the checks: the CLI on PATH, then the Mac app's own CLI (`tailscaleAppFallback`), asynchronously. */
+export const runTailscaleQuietly: PairingTailscaleRunner = async (args, timeoutMs) => {
+  const onPath = await runQuietly("tailscale", args, timeoutMs);
+  const app = tailscaleAppFallback(onPath);
+  return app ? runQuietly(app, args, timeoutMs) : onPath;
+};
 
 /**
  * `socketfilterfw --getglobalstate` and `--getblockall`, as macOS prints them
