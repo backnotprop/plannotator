@@ -11,7 +11,9 @@
  *    following the card into its new lane;
  *  - Icebox, Shipped and a Drop the menu started each show the one toast;
  *    its Undo (and `Z`) puts the card back where it was, in the store too,
- *    and focus on the card in its lane;
+ *    and focus on the card in its lane (a drop from the Icebox page back
+ *    on ice); a card moved on while the toast is up: Undo sends nothing;
+ *  - links in the Board body keep the platform's long-press callout;
  *  - Drop… opens the card with the reason field focused;
  *  - moves from the opened card (its Move menu, its foot) show no toast;
  *  - Shift+F10 on a focused card opens it; Escape and Tab give focus back;
@@ -279,6 +281,55 @@ test('Shipped from the menu: the toast, and Undo moves the card back to the lane
   await expect(cardButton(page, ids.menu)).toBeFocused();
 });
 
+test('a card moved on while its toast is up: Undo sends nothing and says it has moved since', async () => {
+  const { page, ids } = world;
+  await openMenu(page, ids.menu);
+  await menu(page).locator('[data-card-menu-to="shipped"]').click();
+  await expect(toast(page)).toContainText('Shipped');
+  // Moved on elsewhere (as an agent would) while the toast is up; the window hears of it.
+  await personMove(page, ids.menu, { op: 'move', column: 'your_review' });
+  await expect(laneCard(page, 'your_review', ids.menu)).toBeVisible();
+  const posts: string[] = [];
+  const watch = (request: import('@playwright/test').Request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/inbox/cards/')) posts.push(request.url());
+  };
+  page.on('request', watch);
+  await toast(page).locator('[data-toast-undo]').click();
+  await expect(toast(page)).toContainText('It has moved since');
+  await expect(toast(page)).toContainText('“Board card menu”');
+  await page.waitForTimeout(600);
+  page.off('request', watch);
+  expect(posts).toEqual([]);
+  expect((await stored(page, ids.menu))?.column).toBe('your_review');
+  await toast(page).locator('[data-toast-dismiss]').click();
+  await personMove(page, ids.menu, { op: 'move', column: 'designing' });
+  await expect(laneCard(page, 'designing', ids.menu)).toBeVisible();
+});
+
+test('links in the Board body keep the platform’s long-press callout (Base UI’s trigger turns it off)', async () => {
+  const { page, ids } = world;
+  await personMove(page, ids.qr, { op: 'edit', notes: 'Spec: https://example.com/qr-spec' });
+  await cardButton(page, ids.qr).click();
+  const panel = page.locator(`[data-card-panel="${ids.qr}"]`);
+  const link = panel.locator('a[href="https://example.com/qr-spec"]');
+  await expect(link).toBeVisible();
+  const callout = await link.evaluate((el) => {
+    // The value the link inherits: the nearest inline one up the tree (Base UI's trigger sets `none` there).
+    let inline: string | null = null;
+    for (let node: HTMLElement | null = el as HTMLElement; node && !inline; node = node.parentElement) {
+      const style = node.style as CSSStyleDeclaration & { WebkitTouchCallout?: string; webkitTouchCallout?: string };
+      inline = style.WebkitTouchCallout || style.webkitTouchCallout || style.getPropertyValue('-webkit-touch-callout') || null;
+    }
+    const computed = getComputedStyle(el) as CSSStyleDeclaration & { webkitTouchCallout?: string };
+    // iOS-only: desktop WebKit and Chromium do not know the property.
+    return { inline, supported: CSS.supports('-webkit-touch-callout', 'none'), computed: computed.webkitTouchCallout ?? '' };
+  });
+  expect(callout.inline).toBe('default');
+  if (callout.supported) expect(callout.computed).not.toBe('none');
+  await page.evaluate(() => (location.hash = '#board'));
+  await expect(panel).toHaveCount(0);
+});
+
 test('Drop… opens the card with the reason field focused; the drop shows the toast and Undo restores it', async () => {
   const { page, ids } = world;
   await openMenu(page, ids.dark);
@@ -347,6 +398,22 @@ test('the Icebox page: an iced card offers Restore to where it was and Drop…; 
   await page.keyboard.press('Escape');
   await expect(menu(page)).toHaveCount(0);
   await expect(cardButton(page, ids.slack)).toBeFocused();
+  // Drop… on an iced card, confirmed: the toast's Undo puts it back on ice, still remembering its lane.
+  await openMenu(page, ids.slack);
+  await menu(page).locator('[data-card-menu-action="drop"]').click();
+  const panel = page.locator(`[data-card-panel="${ids.slack}"]`);
+  await expect(panel.locator('[data-drop-reason]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(toast(page)).toContainText('Dropped');
+  expect((await stored(page, ids.slack))?.column).toBe('dropped');
+  await toast(page).locator('[data-toast-undo]').click();
+  await expect(toast(page)).toHaveCount(0);
+  await expect.poll(async () => (await stored(page, ids.slack))?.column).toBe('icebox');
+  expect((await stored(page, ids.slack))?.aside_from).toBe('building');
+  await page.evaluate(() => (location.hash = '#board=icebox'));
+  await expect(panel).toHaveCount(0);
+  await expect(page.locator(`.ib-blist .ib-bcard[data-card-id="${ids.slack}"]`)).toBeVisible();
+  await cardButton(page, ids.slack).focus();
   // Restore from the menu: back to where it was (Backlog for a card iced from there), no toast.
   await openMenu(page, ids.offline);
   await expect(menuItems(page)).toHaveText(['Restore to Backlog', 'Drop…']);

@@ -149,7 +149,10 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
       if (!next) aim(null);
     },
   };
-  const trigger: Pick<ContextMenu.Trigger.Props, 'onPointerDown' | 'onTouchStart' | 'onKeyDown' | 'onContextMenu'> = {
+  const trigger: Pick<ContextMenu.Trigger.Props, 'style' | 'onPointerDown' | 'onTouchStart' | 'onKeyDown' | 'onContextMenu'> = {
+    // Base UI's trigger sets `-webkit-touch-callout: none`, which every link inside inherits: links and
+    // buttons in the body keep the platform's own long-press callout (iOS's preview and Copy Link sheet).
+    style: { WebkitTouchCallout: 'default' },
     onPointerDown: (event) => {
       if (event.pointerType === 'touch') lastTouch.current = Date.now();
     },

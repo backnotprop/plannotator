@@ -112,13 +112,8 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   );
   return (
     <ContextMenu.Root {...menu.root}>
-      <ContextMenu.Trigger
-        ref={body}
-        className={props.className}
-        // Buttons and the empty list's link keep the platform's own long-press callout.
-        style={{ WebkitTouchCallout: 'default' }}
-        {...menu.trigger}
-      >
+      {/* Buttons and the empty list's link keep the platform's own long-press callout (the hook's `style`). */}
+      <ContextMenu.Trigger ref={body} className={props.className} {...menu.trigger}>
         {props.children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal container={portal ?? undefined}>

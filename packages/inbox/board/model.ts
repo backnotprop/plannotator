@@ -225,6 +225,16 @@ export function cardMenuToast(card: InboxCardWire, moved: InboxCardWire): { lead
   return null;
 }
 
+/**
+ * Whether a menu move's Undo may still run: the card is still where that
+ * move put it (its column, and no move since: `moved_at`). An agent or the
+ * person moved it on while the toast was up, or it is gone: Undo sends
+ * nothing, so it never pulls a card out of where it went since.
+ */
+export function cardUndoStillApplies(moved: Pick<InboxCardWire, 'column' | 'moved_at'>, now: Pick<InboxCardWire, 'column' | 'moved_at'> | null): boolean {
+  return now !== null && now.column === moved.column && now.moved_at === moved.moved_at;
+}
+
 /** What the live region says after a move. */
 export function moveSaid(card: InboxCardWire, moved: InboxCardWire): string {
   if (moved.column === 'dropped') return `Dropped “${card.title}”. It is kept under Icebox, Dropped.`;

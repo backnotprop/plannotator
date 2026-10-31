@@ -14,7 +14,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
-import { boardCounts, boardLanes, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread, type CardMenuItem } from './model';
+import { boardCounts, boardLanes, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread, type CardMenuItem } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -161,6 +161,18 @@ test('the toast after a menu move: only when the card leaves the lanes, and its 
   expect(cardMenuToast(iced, { ...iced, column: 'building' })).toBeNull();
   expect(cardMenuToast(shipped, { ...shipped, column: 'designing' })).toBeNull();
   expect(cardMenuToast(building, building)).toBeNull();
+});
+
+test('a toast’s Undo runs only while the card is still where the menu put it', () => {
+  const shipped = card('x', { column: 'shipped', moved_at: '2026-10-20T12:00:00.000Z' });
+  // An agent only said something (no move): Undo still applies.
+  expect(cardUndoStillApplies(shipped, card('x', { column: 'shipped', moved_at: shipped.moved_at, heard_at: '2026-10-20T12:05:00.000Z' }))).toBe(true);
+  // An agent moved it on (Shipped to Your review): Undo must not pull it to its old lane.
+  expect(cardUndoStillApplies(shipped, { ...shipped, column: 'your_review', moved_at: '2026-10-20T12:01:00.000Z' })).toBe(false);
+  // Moved away and back to the same column since: a move happened, so the toast's move is not the last word.
+  expect(cardUndoStillApplies(shipped, { ...shipped, moved_at: '2026-10-20T12:02:00.000Z' })).toBe(false);
+  // Gone from the window's cards.
+  expect(cardUndoStillApplies(shipped, null)).toBe(false);
 });
 
 test('the age is short on the card and whole words for a screen reader', () => {

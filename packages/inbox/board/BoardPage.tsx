@@ -36,6 +36,7 @@ import {
   cardLine,
   cardMenuToast,
   cardMessageBody,
+  cardUndoStillApplies,
   messageKey,
   lanesThatFit,
   laneWindowStart,
@@ -116,6 +117,9 @@ export interface BoardPageProps {
 export function BoardPage(props: BoardPageProps) {
   const { model, view, phone } = props;
   const allCards = model?.cards ?? [];
+  /** The cards as the window has them now: a toast's Undo, run later, checks the card against them. */
+  const cardsRef = useRef(allCards);
+  cardsRef.current = allCards;
   const project = props.project ?? null;
   // Filtered to a project: everything below reads only its cards (the opened card is found among all).
   const cards = cardsInProject(allCards, project);
@@ -187,8 +191,15 @@ export function BoardPage(props: BoardPageProps) {
     }
     return moved;
   };
-  /** The toast's Undo (or `Z`): the move back through the same route, then focus on the card where it is now. */
+  /**
+   * The toast's Undo (or `Z`): the move back through the same route, then focus on the card where it is now.
+   * A card moved on since (by an agent, or by the person elsewhere) is left where it is: nothing is sent.
+   */
   const undoMove = async (moved: InboxCardWire, change: BoardMove) => {
+    if (!cardUndoStillApplies(moved, cardsRef.current.find((c) => c.id === moved.id) ?? null)) {
+      props.onToast?.({ icon: 'warn', lead: 'It has moved since', detail: `“${moved.title}”` });
+      return;
+    }
     props.onToast?.(null);
     const back = await move(moved, change);
     if (!back) return;
