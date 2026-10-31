@@ -221,8 +221,14 @@ async function launch(page: Page, words: string): Promise<{ threadId: string; la
   return { threadId: body.thread_id, launchId: body.launch.id };
 }
 
-type ThreadRead = { serverSession: string; thread: { messages: { id: string; author: { kind: string; session?: string | null }; body: string; reply_to?: string | null; delivery?: { session: string } | null }[] }; run?: { state: string } | null };
+type ThreadRead = { serverSession: string; thread: { messages: { id: string; author: { kind: string; session?: string | null }; body: string; reply_to?: string | null; to?: { session: string } | null; delivery?: { session: string } | null }[] }; run?: { state: string } | null };
 const readThread = (page: Page, threadId: string) => page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId) as Promise<ThreadRead>;
+/** The launched thread's Claude session (its root's `to`, once started): what `localAnswer` names. */
+const sessionOf = async (page: Page, threadId: string) => {
+  const session = (await readThread(page, threadId)).thread.messages[0]?.to?.session;
+  expect(session).toMatch(/^[0-9a-f-]{36}$/);
+  return session!;
+};
 
 /** The person's answer on the card: one click (or Deny with a reason: the field, then "Deny and send"). */
 async function answer(page: Page, pick: { choice?: 'Allow once' | 'session' | 'Deny' | 'Auto mode'; reason?: string }): Promise<void> {
@@ -292,7 +298,7 @@ test.afterAll(async () => {
 
 test.afterEach(() => {
   // Each test starts from a quiet fake: no prompt, no local answer.
-  world.fake.configure({ prompts: [], localAnswer: false, hold: false, workMs: 800, body: '', fault: null, refuseAuto: false });
+  world.fake.configure({ prompts: [], localAnswer: null, hold: false, workMs: 800, body: '', fault: null, refuseAuto: false });
   // No bypass consent, no default mode of their own.
   claudeSettings({});
 });
@@ -417,7 +423,7 @@ test('answered in Terminal: the hook is ended, and the question is withdrawn and
   await expect(card(page)).toBeVisible({ timeout: 30_000 });
   await expect(pane(page).locator('[data-run="waiting_answer"]')).toBeVisible({ timeout: 15_000 });
   // The person answers the dialog in `claude attach`: Claude Code ends the hook and goes on.
-  fake.configure({ localAnswer: true });
+  fake.configure({ localAnswer: await sessionOf(page, threadId) });
   const ended = await waitFor('the hook ended', () => fake.hooks()[hooksBefore]);
   expect(ended.local).toBe(true);
   expect(ended.stdout).toBe('');
@@ -497,7 +503,7 @@ test('ExitPlanMode: the hook prints nothing at once and no question appears; pla
   expect(read.thread.messages.some((m) => m.author.session?.startsWith('perm:'))).toBe(false);
   await expect(pane(page).locator('[data-permission]')).toHaveCount(0);
   // The plan was decided elsewhere (plan review); the fake goes on once it is.
-  fake.configure({ localAnswer: true });
+  fake.configure({ localAnswer: await sessionOf(page, threadId) });
   expect(world.errors).toEqual([]);
 });
 
@@ -551,7 +557,7 @@ test('launch turned off while a question waits: the question is withdrawn, and n
     await expect(pane(page).locator('[data-permission]')).toHaveCount(0);
   } finally {
     writeConfig({ inboxLaunch: { enabled: true } });
-    fake.configure({ localAnswer: true });
+    fake.configure({ localAnswer: await sessionOf(page, threadId) });
   }
 });
 
@@ -764,9 +770,9 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     await expect(pane(mobile).locator('[data-run-open], [data-perm-attach]')).toHaveCount(0);
     await shot(mobile, 'approve-in-terminal-phone');
     // The person approves it in Claude Code's dialog: the call goes on.
-    fake.configure({ localAnswer: true });
+    fake.configure({ localAnswer: await sessionOf(page, threadId) });
     expect(await waitFor('the safety check', () => fake.permissions()[asked + 2])).toMatchObject({ outcome: 'local', mode: 'bypassPermissions' });
-    fake.configure({ localAnswer: false });
+    fake.configure({ localAnswer: null });
   } finally {
     writeConfig({ inboxLaunch: { enabled: true, fullPermissions: false } });
     await phone.close();
@@ -820,7 +826,7 @@ test('an ask rule, not in bypass mode: Allow once is stated as the click and the
   const { page, fake } = world;
   const before = fake.permissions().length;
   fake.configure({ prompts: [ASK_TOUCH, ASK_TOUCH_2] });
-  await launch(page, 'Touch two files.');
+  const { threadId } = await launch(page, 'Touch two files.');
   const c = card(page);
   await expect(c.locator('[data-perm-detail]')).toHaveText('touch allowed.txt', { timeout: 30_000 });
   // The ordinary card: the allows, and Approve in Terminal as a quiet link under them.
@@ -838,12 +844,11 @@ test('an ask rule, not in bypass mode: Allow once is stated as the click and the
   await expect(pane(page).locator('[data-run="waiting_terminal"]')).toContainText('Claude Code is waiting on a permission prompt', { timeout: 20_000 });
   await page.mouse.move(0, 0);
   await shot(page, 'ask-rule-allow-ignored');
-  // (By its command: a session of an earlier test may still sit on a dialog that the local answer also settles.)
   const settledOf = (command: string) => fake.permissions().slice(before).find((r) => r.input.command === command);
   expect(settledOf('touch allowed.txt')).toBeUndefined();
-  fake.configure({ localAnswer: true });
+  fake.configure({ localAnswer: await sessionOf(page, threadId) });
   expect(await waitFor('the first ask', () => settledOf('touch allowed.txt'))).toMatchObject({ outcome: 'local', ignoredAllow: true });
-  fake.configure({ localAnswer: false });
+  fake.configure({ localAnswer: null });
   // The next one: Approve in Terminal. No decision, Terminal opens, and the person approves it in Claude's dialog.
   await expect(card(page).locator('[data-perm-detail]')).toHaveText('touch second.txt', { timeout: 30_000 });
   await armed(page);
@@ -855,9 +860,9 @@ test('an ask rule, not in bypass mode: Allow once is stated as the click and the
   const handed = record(page, 'terminal');
   await expect(handed.locator('.pc-rec-verb')).toHaveText('You chose Approve in Terminal');
   await expect(handed.locator('[data-perm-handoff]')).toHaveText('Approve it in Claude Code, in Terminal.');
-  fake.configure({ localAnswer: true });
+  fake.configure({ localAnswer: await sessionOf(page, threadId) });
   expect(await waitFor('the second ask', () => settledOf('touch second.txt'))).toMatchObject({ outcome: 'local', output: null });
-  fake.configure({ localAnswer: false });
+  fake.configure({ localAnswer: null });
   expect(world.errors).toEqual([]);
 });
 

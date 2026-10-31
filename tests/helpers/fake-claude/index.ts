@@ -46,8 +46,11 @@ export interface FakeClaudeConfig {
   busyDelayMs?: number;
   /** Permission prompts each turn plays, in order: the settings file's PermissionRequest hook runs with Claude Code's stdin. */
   prompts?: FakePermissionPrompt[];
-  /** The person answers the open dialog in `claude attach`: the hook is ended (SIGTERM) and the session goes on. */
-  localAnswer?: boolean;
+  /**
+   * The person answers this session's open dialog in `claude attach` (its session id): the hook is ended (SIGTERM)
+   * and the session goes on. Only that session: a session of an earlier test still on a dialog stays on it.
+   */
+  localAnswer?: string | null;
   /** How long a safety check's own dialog (up once the hook ended with no decision) waits before it blocks the call (ms; Claude's is about 2 minutes). */
   safetyBlockMs?: number;
 }
