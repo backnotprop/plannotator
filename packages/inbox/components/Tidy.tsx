@@ -90,7 +90,7 @@ const runLabel = (run: InboxTidyRun) => `Tidy · ${run.done}/${run.agents.length
 /**
  * The header's ⋮: Tidy (with its count, or the run's progress) and Refresh.
  * `className` places it in its header (the list's or the Board's). The list
- * passes its look (`look`, `onLook`): three checkboxes follow Refresh
+ * passes its look (`look`, `onLook`): four checkboxes follow Refresh
  * (approval "inbox-list-options"); the Board passes none.
  */
 export function TidyMenu({

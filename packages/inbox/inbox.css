@@ -36,7 +36,7 @@
    sentence-case labels. Layout corners are one scale (--ib-lr-*, below), a step under the first Soft build's
    (owner, 2026-10-17: "a little bit smaller of a border radius ... specifically for just the layout parts").
    The type's size is not a switch: it is the person's Text size setting (12 to 15 px, 14 today's; --ib-type below). */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   /* Colours (the blind rounds; the rows' lines since asked away, see above). */
   --ib-soft-ground: initial;     /* Soft's tinted ground under the panes (today's: the palette's background, the colour today's sidebar paints) */
   --ib-soft-selection: initial;  /* the open row: a neutral fill (today's: the accent's tint) */
@@ -63,11 +63,12 @@
   --ib-soft-segmented: ;         /* Settings' Light / Dark / System control: a faint well, quiet options (today's: the muted well with a border) */
   --ib-soft-groups: ;            /* Settings' groups, What's new's skipped releases and a dialog's command box as raised cards (today's: outlined cards) */
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.ib-lightscope.light {
   --ib-soft-nav: initial;
   --ib-soft-quiet: initial;
 }
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   /* The shadows' colour: the palette's own background taken toward black in its own hue (dark); the text
      colour (light, below). Without relative colours it is the background, and the ground is the background. */
   --ib-shadow-ink: var(--inbox-shadow-ink, var(--background));
@@ -285,7 +286,7 @@
    own hue, and text Soft draws on the deeper ground or a lifted surface is mixed a little toward black on a light
    surface and toward white on a dark one (whatever the palette calls its half), so it never costs contrast. */
 @supports (color: oklch(from red calc(0.5 - sign(l - 0.6) * 0.5) 0 h)) {
-  .pn-inbox {
+  .pn-inbox, .ib-lightscope {
     --ib-shadow-ink: var(--inbox-shadow-ink, oklch(from var(--background) calc(l * 0.2) calc(c * 0.5) h));
     /* No hue (`none`): mixed into a colour, the ink moves its lightness and keeps its hue. */
     --ib-ink: oklch(from var(--ib-ground) calc(0.5 - sign(l - 0.6) * 0.5) 0 none);
@@ -303,7 +304,8 @@
     --ib-badge-hold-fg-soft: color-mix(in oklab, var(--warning) 45%, var(--ib-card-ink));
   }
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.ib-lightscope.light {
   --ib-badge-act-bg-s: var(--ib-soft-badges) color-mix(in oklch, var(--foreground) 8%, transparent);
   --ib-shadow-ink: var(--inbox-shadow-ink, var(--foreground));
   --ib-ground-soft: var(--inbox-ground, color-mix(in oklch, var(--muted) 55%, var(--background)));
@@ -320,11 +322,12 @@
    a light card, lighter on a dark one), so every palette keeps its panes and lifted surfaces visible while
    keeping its own hue. */
 @supports (color: oklch(from red calc(0.5 - sign(l - 0.6) * 0.5) 0 h)) {
-  .pn-inbox {
+  .pn-inbox, .ib-lightscope {
     --ib-ground-soft: var(--inbox-ground, color-mix(in oklch, color-mix(in oklch, var(--background) 82%, var(--ib-shadow-ink)) 35%, oklch(from var(--card) calc(l - 0.08) c h)));
     --ib-raise: var(--inbox-raise, color-mix(in oklch, color-mix(in oklch, var(--muted) 40%, var(--card)) 35%, oklch(from var(--card) calc(l - sign(l - 0.6) * 0.055) c h)));
   }
-  :root.light .pn-inbox {
+  :root.light .pn-inbox,
+  .ib-lightscope.light {
     --ib-ground-soft: var(--inbox-ground, color-mix(in oklch, color-mix(in oklch, var(--muted) 55%, var(--background)) 35%, oklch(from var(--card) calc(l - 0.08) c h)));
   }
 }
@@ -332,14 +335,15 @@
    under 1.035:1, listed by softGround.test.ts): the muted surface mixed into the background, so the panes have
    a ground to float on. Still the palette's own tokens, no new hue. */
 :root:is(.theme-synthwave-84, .theme-terminal) .pn-inbox,
-:root.light:is(.theme-neutral, .theme-simple, .theme-caffeine) .pn-inbox {
+:root.light:is(.theme-neutral, .theme-simple, .theme-caffeine) .pn-inbox,
+.ib-lightscope.light:is(.theme-neutral, .theme-simple, .theme-caffeine) {
   --ib-ground-panes: color-mix(in oklch, var(--muted) 55%, var(--background));
 }
 /* ui's drawing inside the window (message bodies, the question card, attached documents, panels) follows the
    text size (--ib-type): its named sizes through Tailwind's type scale (text-xs never under 11 px), its fixed
    sizes one by one, in a layer after Tailwind's utilities so the window's own rules still win over them, as
    today. ui's fixed sizes under 12 px and its 16 px inputs are left alone. At 14, every value is ui's own. */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --text-xs: max(11px, calc(0.75rem * var(--ib-type) / 14));
   --text-sm: calc(0.875rem * var(--ib-type) / 14);
   --text-base: calc(1rem * var(--ib-type) / 14);
@@ -408,7 +412,7 @@ button.ib-mut { border-radius: 6px; }
    (-g). Every place that sizes a mark takes its width, height and corner from here (agentMarkScale.test.ts).
    30's corner is Soft's (--ib-soft-shape; 8 with Soft off, today's). Declared on :root too, for marks in
    popovers portaled out of .pn-inbox; .pn-inbox computes them again with its Soft switches. */
-:root, .pn-inbox {
+:root, .pn-inbox, .ib-lightscope {
   --ib-mark-16: 16px; --ib-mark-16-r: 5px; --ib-mark-16-g: 10px;
   --ib-mark-20: 20px; --ib-mark-20-r: 6px; --ib-mark-20-g: 13px;
   --ib-mark-24: 24px; --ib-mark-24-r: 6px; --ib-mark-24-g: 14px;
@@ -552,11 +556,16 @@ button.ib-mut { border-radius: 6px; }
 .ib-pinrow:hover .ib-pin, .ib-pinrow:has(:focus-visible) .ib-pin, .ib-pinrow[data-menu] .ib-pin { padding-right: 32px; }
 .ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow:has(:focus-visible) .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow[data-menu] .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch) { visibility: hidden; position: absolute; }
 .ib-pinrow[data-menu] .ib-pmore { color: var(--foreground); }
-/* A pinned thread's row in the list: a small pin after the subject (wide, three-line), before the time (a phone's row). */
+/* A pinned thread's row in the list: a small pin always on the right, beside the counts (the owner, 2026-10-31).
+   On line 3 of three-line and phone rows its auto margin pushes it before the badge and the counts whether the
+   preview before it is short or cut (a phone row with nothing else for line 3 keeps it on line 1, before the time).
+   A wide row has it in its own column (`.ib-cpin`, below the wide row). */
 .ib-pinmark { display: inline-flex; flex: none; color: var(--muted-foreground); }
 .pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; }
-.ib-m1 .ib-pinmark { margin-left: auto; }
-.ib-m1 .ib-pinmark + .ib-t { margin-left: 0; }
+:is(.ib-nrow .ib-l3, .ib-m3) > .ib-pinmark { margin-left: auto; }
+/* A phone row with nothing else for line 3 keeps its pin on line 1, before the time (PhoneRow's `pinOnLine1`). */
+.ib-m1 > .ib-pinmark { margin-left: auto; }
+.ib-m1 > .ib-pinmark + .ib-t { margin-left: 0; }
 /* The thread header's pin: an icon toggle, pressed while pinned. */
 .pn-inbox .ib-pinbtn[aria-pressed="true"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 13%, transparent); }
 .pn-inbox .ib-pinbtn[aria-pressed="true"] svg.ib-ic { fill: color-mix(in oklch, currentColor 22%, transparent); }
@@ -782,6 +791,19 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* One project's list: the first column holds the agents' marks alone (InboxList's WideRow). */
 .ib-noproj .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) 124px 52px 84px 76px; }
 .ib-noproj.ib-fullw .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
+/* The pin's column (the owner, 2026-10-31: the pin beside the counts, as on the three-line row), only in a list with a
+   pinned row (`.ib-pincol`), between the badge and the open counts, so the pins line up next to `?N` and the badge
+   and the counts keep their columns. It takes the pin's 13px plus an 8px gap from the title cell: an 11px track and
+   the grid's 10px gap, the 13px pin starting at the track's left, so it ends 8px before the counts' column. Open
+   counts wider than 84px (a 12 and 12 pair, "[□ 99+] ?99+") would run under the pin, so in such a list the counts'
+   column takes the widest counts' width (`--ib-cq-w`, set by `fitCountsColumn` in InboxList.tsx) and the pins stay one
+   column, 8px before every row's counts. A list without pins keeps the 84px column and its overflow under the badge.
+   The one-project list with Hide agent icons has its own two templates (with the list's look options, below). */
+.ib-pincol .ib-row { grid-template-columns: 220px minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; }
 /* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
    edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run out
    to the left, never into the time; past the gap they slide under the badge, which paints above them on an opaque
@@ -812,8 +834,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    until the line runs short. */
 .ib-key { font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap; display: inline-flex; flex: 0 1 auto; min-width: 0; }
 .ib-key > .ib-keyt { min-width: 0; max-width: 166px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The title cell (approval "list-rows-mail-icons"): the title, then the grey preview, the pin and the guided review
-   mark, on one line that never spills. Short of room the preview gives way first, all the way, then the title; each
+/* The title cell (approval "list-rows-mail-icons"): the title, then the grey preview and the guided review mark, on
+   one line that never spills. Short of room the preview gives way first, all the way, then the title; each
    ends in "…" (its tooltip shows it whole). The preview's shrink factor is a million, not a thousand: flex shares a
    shortfall by factor times width, so at a thousand the title still lost a fraction of a pixel whenever the preview
    shrank, and Chrome drew an ellipsis on a title that fit (a 0.06 px cut). The guided review mark keeps only its
@@ -821,7 +843,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row .ib-subj { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; container-type: inline-size; }
 .ib-row .ib-title { flex: 0 1 auto; min-width: 0; font-size: var(--ib-fs-14-5, 14.5px); line-height: 1.35; letter-spacing: -0.006em; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-row .ib-pv { flex: 0 1000000 auto; min-width: 0; font-size: var(--ib-fs-14, 14px); line-height: 1.35; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-row .ib-subj > :is(.ib-att, .ib-pinmark) { flex: none; }
+.ib-row .ib-subj > .ib-att { flex: none; }
 @container (max-width: 300px) { .ib-row .ib-att .ib-att-l { display: none; } }
 .ib-nrow .ib-att .ib-att-l { display: none; }
 .ib-row .ib-c { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); text-align: right; white-space: nowrap; }
@@ -834,7 +856,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
  * palette's amber or red reads on the card in light and dark. The time column keeps its width: the
  * glyph sits in the gap to its left.
  */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --ib-tick-queued: var(--ib-badge-hold-fg-soft);
   --ib-tick-undelivered: var(--ib-badge-stop-fg-soft);
   --ib-tick-delivered: color-mix(in oklab, var(--success) 70%, var(--foreground));
@@ -878,14 +900,14 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-nrow .ib-l2 { min-width: 0; }
 .ib-nrow .ib-title { display: block; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.35; letter-spacing: 0; font-weight: 400; color: var(--foreground); overflow-wrap: anywhere; }
 .ib-nrow.ib-u:not(.ib-sent) .ib-title { font-size: var(--ib-fs-15, 15px); font-weight: 600; letter-spacing: -0.006em; }
-/* Line 3: the grey preview, cut first, all the way if it must, then the pin and the guided review mark after it,
-   and at the right end the badge (when there is one) and the count (when there is one). The badge and the count
+/* Line 3: the grey preview, cut first, all the way if it must, then the guided review mark after it, and at the
+   right end the pin, the badge (when there is one) and the count (when there is one). The badge and the count
    never are cut. A row with none of these has no line 3. */
 .ib-nrow .ib-l3 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); overflow: hidden; }
 .ib-nrow .ib-l3:empty { display: none; }
 .ib-nrow .ib-l3 > .ib-pv { flex: 0 1 auto; min-width: 0; margin-right: auto; color: var(--muted-foreground); line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-nrow .ib-l3 > .ib-pv:has(~ :is(.ib-pinmark, .ib-att)) { margin-right: 0; }
-.ib-nrow .ib-l3 > :is(.ib-pinmark, .ib-att):not(:has(~ :is(.ib-pinmark, .ib-att))) { margin-right: auto; }
+.ib-nrow .ib-l3 > .ib-att:not(:has(~ .ib-pinmark)) { margin-right: auto; }
 .ib-nrow .ib-l3 > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-att) { flex: none; }
 /* The count in words (`CountWords`; approval "inbox-row-byline", option A, 2026-10-29): the short form, "Draft",
    "Undelivered 14m", "Read", in a slot of at most 124px (a wide row's column) on every row, so it never takes the
@@ -964,7 +986,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    rule here changes colour, surface, radius or face only: rows, bands, chips and badges keep today's sizes,
    columns and places. A border that goes keeps its width in a transparent colour, so no box moves. */
 /* The section band (switch --ib-soft-band): Soft's raised surface, or today's muted band. */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --ib-band-bg-s: var(--ib-soft-band) var(--ib-raise);
   --ib-band-fg-s: var(--ib-soft-band) var(--ib-raise-fg);
   --ib-band-mfg-s: var(--ib-soft-band) var(--ib-raise-mfg);
@@ -991,7 +1013,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-nrow[data-section="quiet"] .ib-title { color: var(--ib-quiet-dim, var(--muted-foreground)); }
 /* The thread chip (switch --ib-soft-chip): a quiet pill in the window's own face (a name, not code; audit 4), or
    today's outlined monospace tag. Its weight and fill have no today's declaration, so off they fall back to none. */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --ib-chip-font-s: var(--ib-soft-chip) var(--font-sans);
   --ib-chip-w-s: var(--ib-soft-chip) 500;
   --ib-chip-fg-s: var(--ib-soft-chip) var(--ib-raise-mfg);
@@ -1183,6 +1205,15 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* the message body: Plannotator's Viewer without its document card */
 .ib-body [data-print-region="article"] { padding: 0; background: transparent; }
 .ib-body [data-print-region="article"] > .mt-4:first-child { margin-top: 0; }
+/* The feedback a Send wrote after the person's own words (replyFeedback.ts; the owner's ask, 2026-10-31: "Is
+   there a reason the inline comments appear like so big? Like a header?"): part of the reply, not page headings.
+   The section ("Feedback on the attached files") a small bold label, a file's or message's name at text size,
+   each comment's "Feedback on: …" as text. Only the person's own reply has this block; an agent's headings,
+   and every other Viewer, draw as before. The text the agent gets is unchanged. */
+.ib-body [data-reply-feedback] :is(h1, h2, h3, h4, h5, h6) { font-size: var(--ib-fs-15, 15px); line-height: 1.5; letter-spacing: normal; margin: 14px 0 4px; }
+.ib-body [data-reply-feedback] h1 { font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); margin-top: 0; }
+.ib-body [data-reply-feedback] h2 { font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--foreground); margin-top: 18px; }
+.ib-body [data-reply-feedback] :is(h3, h4, h5, h6) { font-weight: 500; color: var(--foreground); }
 /* What an agent pastes (a long URL, a key in inline code, a bare token, a
    choice that is one long ID) wraps inside the message: nothing in a message
    scrolls the thread sideways. `break-word` breaks only what would overflow,
@@ -2597,7 +2628,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-rw { position: relative; }
 .pn-inbox .ib-ract { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: none; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border-radius: var(--ib-pill-s, 7px); border: 1px solid var(--ib-float-line-s, var(--border)); background: var(--card); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); box-shadow: var(--ib-float-s, 0 4px 12px -6px rgba(0, 0, 0, 0.3)); }
 .pn-inbox .ib-ract:hover { background: var(--ib-ract-hover-s, color-mix(in oklch, var(--muted) 60%, var(--card))); }
-.pn-inbox { --ib-ract-hover-s: var(--ib-soft-hover) color-mix(in oklch, var(--muted) 40%, var(--card)); }
+.pn-inbox, .ib-lightscope { --ib-ract-hover-s: var(--ib-soft-hover) color-mix(in oklch, var(--muted) 40%, var(--card)); }
 .ib-rw:hover .ib-ract, .ib-rw:has(:focus-visible) .ib-ract, .ib-rw[data-action-focus] .ib-ract { display: inline-flex; }
 /* The action covers a one-line row's time and `?N` columns only: the words, the marks and the badge stay. */
 .ib-rw:hover:has(.ib-ract) .ib-row :is(.ib-t, .ib-cq), .ib-rw:has(:focus-visible):has(.ib-ract) .ib-row :is(.ib-t, .ib-cq) { visibility: hidden; }
@@ -2786,14 +2817,15 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-m1 .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; }
   .ib-m1 .ib-t { flex: none; margin-left: auto; font-size: var(--ib-fs-13, 13px); line-height: 17px; font-variant-numeric: tabular-nums; }
   /* Line 2: the title, never cut, at the row's text size and weight. Line 3: the preview, cut first, then the guided
-     review book, the badge and the count at the right end, never cut; a row with none of these has no line 3. */
+     review book, and the pin, the badge and the count at the right end, never cut; a row with none of these has no
+     line 3. */
   .ib-m2 { display: block; min-width: 0; font-size: var(--ib-fs-14, 14px); line-height: 1.35; letter-spacing: 0; font-weight: 400; color: var(--foreground); overflow-wrap: anywhere; }
   .ib-m3 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; min-height: 22px; }
   .ib-m3:empty { display: none; }
   .ib-m3 > .ib-pv { flex: 0 1 auto; min-width: 0; margin-right: auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); line-height: 1.35; color: var(--muted-foreground); }
-  .ib-m3 > .ib-pv:has(+ .ib-att) { margin-right: 0; }
-  .ib-m3 > .ib-att { margin-right: auto; }
-  .ib-m3 > :is(.ib-badge, .ib-c, .ib-att) { flex: none; }
+  .ib-m3 > .ib-pv:has(+ :is(.ib-att, .ib-pinmark)) { margin-right: 0; }
+  .ib-m3 > .ib-att:not(:has(+ .ib-pinmark)) { margin-right: auto; }
+  .ib-m3 > :is(.ib-badge, .ib-c, .ib-att, .ib-pinmark) { flex: none; }
   .ib-m3 .ib-c { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
   .ib-mrow.ib-u .ib-m1 .ib-p { color: var(--foreground); font-weight: 550; }
   .ib-mrow.ib-u .ib-m1 .ib-t { color: var(--primary); font-weight: 550; }
@@ -3936,7 +3968,7 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
    reply box and its chips: --ib-soft-foot. Accept recommended: --ib-soft-accept. Raised surfaces in the thread
    (attachment tiles, the read line, the route chooser, the fold): --ib-soft-surfaces. Radii, floating surfaces
    and hovers: the shell's --ib-soft-shape, -float and -hover. */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --ib-sep-s: var(--ib-soft-lines) var(--ib-fill);
   --ib-qc-border-s: var(--ib-soft-card) transparent;
   --ib-qc-r-s: var(--ib-soft-card) var(--ib-lr-xl);
@@ -4087,7 +4119,7 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
   /* The accent's words on the card (Recommended) and the read line: the same step. Accept
      recommended's words sit on its own tint, so they take a further step (AA on every palette, nord dark
      included). */
-  .pn-inbox {
+  .pn-inbox, .ib-lightscope {
     --ib-raise-primary: color-mix(in oklch, var(--primary) 55%, var(--ib-card-ink));
     --ib-raise-primary-on-tint: color-mix(in oklch, var(--primary) 45%, var(--ib-card-ink));
     --ib-qc-primary-s: var(--ib-soft-card) var(--ib-raise-primary);
@@ -4208,7 +4240,7 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
    (--ib-soft-buttons), the Light / Dark / System control (--ib-soft-segmented), Settings' groups and the
    dialogs' command boxes as raised cards (--ib-soft-groups), the Settings nav's current section (the sidebar's
    --ib-soft-nav), small labels (--ib-soft-labels), and the shell's shape, float and hover switches. */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   /* Buttons (--ib-soft-buttons): no outline, a quiet fill; the primary keeps the accent. */
   --ib-bt-line-s: var(--ib-soft-buttons) transparent;
   --ib-bt-bg-s: var(--ib-soft-buttons) color-mix(in oklch, var(--muted) 60%, transparent);
@@ -4506,7 +4538,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
    The row's count slot reads "Draft · Your reply, 2 picks", the word in the accent colour (never colour
    alone: the word says it); the reply box carries a soft pill with when it was saved and Discard; the
    thread's foot reads "Draft · 2 picks" before Send / Edit draft. */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --ib-draft-fg: color-mix(in oklab, var(--primary) 85%, var(--foreground));
   --ib-draft-bg: color-mix(in oklab, var(--primary) 11%, transparent);
 }
@@ -4664,12 +4696,13 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
  * goes in by itself after 5 minutes); grey when it cannot go in sooner. Blue, not amber: amber already means an
  * agent waits on you (Holds up). On the Inbox's own tokens, light and dark.
  */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --ib-wait-fg: color-mix(in oklab, var(--primary) 62%, var(--foreground));
   --ib-wait-bg: color-mix(in oklab, var(--primary) 20%, transparent);
   --ib-wait-band: color-mix(in oklab, var(--primary) 11%, var(--card));
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.ib-lightscope.light {
   --ib-wait-fg: color-mix(in oklab, var(--primary) 74%, var(--foreground));
   --ib-wait-bg: color-mix(in oklab, var(--primary) 12%, transparent);
   --ib-wait-band: color-mix(in oklab, var(--primary) 8%, var(--card));
@@ -5469,13 +5502,14 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-bc-who > .ib-bc-yourdot { width: 13px; height: 13px; }
 /* A linked PR's or issue's state (inbox-card-marks): GitHub's Octicon shapes and colours, the dark
    values first and the light ones below; unknown is the same shape, quiet. */
-.pn-inbox {
+.pn-inbox, .ib-lightscope {
   --ib-ref-open: #3fb950;
   --ib-ref-merged: #a371f7;
   --ib-ref-closed: #f85149;
   --ib-ref-neutral: #9198a1;
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.ib-lightscope.light {
   --ib-ref-open: #1a7f37;
   --ib-ref-merged: #8250df;
   --ib-ref-closed: #cf222e;
@@ -6124,9 +6158,9 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
   .pn-inbox:has(.ib-fcomp) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
 }
 
-/* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): three checkboxes in the list's
+/* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): four checkboxes in the list's
    ⋮ menu, all off by default. Every rule here needs its option's class on the list column (.ib-lk-pill,
-   .ib-lk-compact, .ib-lk-noagents), so with all three off none applies. */
+   .ib-lk-compact, .ib-lk-noagents, .ib-lk-small), so with all four off none applies. */
 /* Highlight thread subject: the row's title in the thread chip's pill (.ib-key: the open thread's pill, its face,
    fill and radius), its text at the title's own size, one line, cut with "…". The text takes the pill's weight and
    colour (500, the chip's grey) only where the row sets none of its own, which is a read row; an unread row keeps its
@@ -6141,6 +6175,9 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-noproj.ib-lk-noagents .ib-from { display: contents; }
 .ib-noproj.ib-lk-noagents .ib-row { grid-template-columns: minmax(0, 1fr) 124px 52px 84px 76px; }
 .ib-noproj.ib-lk-noagents.ib-fullw .ib-row { grid-template-columns: minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
+/* The same with the pin's column (`.ib-pincol`, by the wide row's grid): the first cell gone, the pin's track kept. */
+.ib-pincol.ib-noproj.ib-lk-noagents .ib-row { grid-template-columns: minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj.ib-lk-noagents.ib-fullw .ib-row { grid-template-columns: minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
 /* Compact rows: line 1 is the agents, the project, the title and the time; line 2 the preview. The project (with its
    agents) gives way first, down to a floor of min(its width, --ib-lk-floor), then the title, cut with "…"; the time
    never. flex-basis: content with the floor as its width is that floor (min-width: auto takes the smaller of the
@@ -6168,17 +6205,52 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 @media (max-width: 360px) {
   .ib-lk-compact { --ib-lk-floor: 72px; }
 }
+/* Smaller thread names (the owner, 2026-10-31): an unread row's name back at the read size, still bold (600), the
+   look before "inbox-row-unread-bigger": 13.5px beside a thread, 14px on a phone. A read row, a Sent row and the wide
+   one-line row are the same either way. In its pill too (the pill's text is the same .ib-title / .ib-m2). */
+.ib-lk-small .ib-nrow.ib-u:not(.ib-sent) .ib-title { font-size: var(--ib-fs-13-5, 13.5px); letter-spacing: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-lk-small .ib-mrow.ib-u:not(.ib-sent) .ib-m2 { font-size: var(--ib-fs-14, 14px); letter-spacing: 0; }
+}
 
 /* The one-time list options dialog (approval "inbox-list-options-intro"; components/ListLookIntro.tsx): the Board
    intro's width and well. The picture is the person's own rows in a column the list's width, centred, its bottom
-   fading out so no row is ever cut mid-line; the words, the three switches stacked, the actions. */
+   fading out so no row is ever cut mid-line; the words, the four switches stacked, the actions.
+   The dialog follows the person's mode. Only the picture (.ib-lo-frame, the example rows) is light for everyone (the
+   owner, 2026-10-31: "just the image that changes needs to be light mode"): it is a light scope,
+   `ib-lightscope theme-<the person's light palette> light`. The palette's light tokens apply there, and the window's
+   tokens derived from them are worked out again inside it: every token block of the window names .ib-lightscope
+   beside .pn-inbox, and each light block (`:root.light .pn-inbox`) names `.ib-lightscope.light` too, so it outweighs the base. It is not a
+   .pn-inbox, so the window's layout rules on .pn-inbox (its height, the phone's, position) and the menus' portals
+   (closest('.pn-inbox')) never reach it. */
 dialog.ib-dlg.ib-lo { width: min(560px, calc(100vw - 32px)); }
 .ib-lo .ib-dlg-in { padding: 0; }
 .ib-lo { --lo-well: color-mix(in oklch, var(--background) 70%, var(--card)); }
 :root.light .ib-lo { --lo-well: color-mix(in oklch, var(--muted) 48%, var(--card)); }
+/* The scope's own box: the frame's height and fill below, not the window root's (its token block draws a height and
+   ground for .pn-inbox). Its own text colour, the light palette's, never the dark dialog's inherited near-white (band
+   labels, the list header). */
+.ib-lightscope { color-scheme: light; color: var(--foreground); }
+/* The window's rules for a list hidden under a thread (a phone, or a stacked window, with a thread open) reach the
+   picture's column too, which is a list column inside the window: it is always drawn. */
+dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: auto; visibility: visible; }
+/* A thread name in the picture stays on one line, cut with "…" (the owner: no long names in the examples); the
+   real list still wraps it. A name in its pill (Highlight) is one line already. */
+.ib-lo-frame :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-lo-frame :is(.ib-nrow .ib-l2, .ib-mrow) > .ib-rowkey { max-width: 100%; }
+/* The switches, in either mode: the off track's outline and its thumb in the muted text (3:1 and more against the
+   dialog and the track, WCAG 1.4.11), so an off switch reads as a switch and as off; on is the window's own. */
+.pn-inbox .ib-lo .ib-sw[aria-checked="false"] { border-color: color-mix(in oklch, var(--muted-foreground) 75%, var(--card)); }
+.ib-lo .ib-sw[aria-checked="false"]::after { background: color-mix(in oklch, var(--muted-foreground) 85%, var(--card)); box-shadow: none; }
 .ib-lo-art { background: var(--lo-well); padding: 20px 18px 0; }
 .ib-lo-frame { display: flex; width: 380px; max-width: 100%; height: 380px; margin: 0 auto; overflow: hidden; background: var(--card); border-radius: 10px 10px 0 0; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); }
 .ib-lo-frame .ib-lo-list { flex: 1; width: auto; height: 100%; border-right: 0; }
+/* A dark dialog: the light picture never fades into it (white rows through grey into the dark well read as a smudge).
+   The rows fade out inside the card, into its own light background; the card keeps its edge and rounded bottom, on
+   the well with the same margin below as at its sides. A light dialog keeps the approved fade to transparent. */
+:root:not(.light) .ib-lo-art { padding-bottom: 18px; }
+:root:not(.light) .ib-lo-frame { position: relative; border-radius: 10px; -webkit-mask-image: none; mask-image: none; }
+:root:not(.light) .ib-lo-frame::after { content: ""; position: absolute; inset: auto 0 0; height: 64px; background: linear-gradient(to bottom, color-mix(in oklch, var(--card) 0%, transparent), var(--card)); pointer-events: none; }
 .ib-lo-frame .ib-lbody { overflow: hidden; }
 .ib-lo-frame .ib-lbody > .ib-group > .ib-rw, .ib-lo-frame .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
 .ib-lo-frame .ib-band .ib-ic { margin-left: auto; }
@@ -6192,6 +6264,7 @@ dialog.ib-dlg.ib-lo { width: min(560px, calc(100vw - 32px)); }
   /* A phone: a bottom sheet, the phone's rows (no list header), 44 px targets, Done full width above Keep as it is. */
   dialog.ib-dlg.ib-lo.ib-lo-phone { margin: auto 8px calc(8px + env(safe-area-inset-bottom)); width: calc(100vw - 16px); max-width: none; }
   .ib-lo-phone .ib-lo-art { padding: 14px 14px 0; }
+  :root:not(.light) .ib-lo-phone .ib-lo-art { padding-bottom: 14px; }
   .ib-lo-phone .ib-lo-frame { width: auto; height: 300px; }
   .ib-lo-phone .ib-lo-frame .ib-lbody { padding-top: 8px; }
   .ib-lo-phone .ib-lo-opt { min-height: 44px; font-size: var(--ib-fs-15, 15px); }

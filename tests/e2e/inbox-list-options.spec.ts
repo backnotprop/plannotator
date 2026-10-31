@@ -3,7 +3,7 @@
  * Chromium against the compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR; agents write through
  * `plannotator inbox mcp` (scripts/inbox-sim.ts). Nothing is mocked.
  *
- *  - Beside an open thread, by mouse: the ⋮ menu's three checkboxes start unchecked and the list is today's. Each
+ *  - Beside an open thread, by mouse: the ⋮ menu's four checkboxes start unchecked and the list is today's. Each
  *    one, ticked, changes the rows at once and leaves the menu open: the title in its pill on one line; compact rows
  *    about 20 px shorter, the title on line 1, the project cut first (down to its floor), the time never; no agents'
  *    tiles at the same height. A reload keeps all three. Sent and pinned rows keep their marks; a wider column too.
@@ -16,6 +16,9 @@
  *    about ten characters of each name visible (the project's floor drops on a narrow phone), the time never cut.
  *  - With the agents' icons hidden, Chromium's accessibility tree still names them on every shape (a display: none
  *    would drop them).
+ *  - Smaller thread names: an unread name at the read size (13.5 px beside a thread, 14 px on a phone), still bold,
+ *    in its pill too; read rows, Sent rows and the wide one-line row are the same with it on or off; off is today's
+ *    bigger unread name (15 px, 16 px on a phone); a reload keeps it.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-options.spec.ts`.
@@ -193,8 +196,8 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
     expect(today.ledger!.title.h, 'the long name wraps today').toBeGreaterThan(30);
 
     await page.locator('[data-tidy-menu]').click();
-    await expect(page.locator('[data-tidy-menu-popup] [role="menuitemcheckbox"]')).toHaveText(['Highlight thread subject', 'Compact rows', 'Hide agent icons']);
-    for (const key of ['highlight', 'compact', 'hideAgents']) await expect(option(page, key)).toHaveAttribute('aria-checked', 'false');
+    await expect(page.locator('[data-tidy-menu-popup] [role="menuitemcheckbox"]')).toHaveText(['Highlight thread subject', 'Compact rows', 'Hide agent icons', 'Smaller thread names']);
+    for (const key of ['highlight', 'compact', 'hideAgents', 'smallNames']) await expect(option(page, key)).toHaveAttribute('aria-checked', 'false');
     await page.screenshot({ path: join(proofDir, 'menu-open.png') });
 
     // Highlight thread subject: the title in its pill, one line, cut with "…"; the menu stays open.
@@ -297,9 +300,94 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     await page.keyboard.press(' ');
     await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'false');
     expect(await lookClasses(page)).toEqual(['ib-lk-compact']);
+    // The fourth option, the last one, by the arrows too.
+    await page.keyboard.press('ArrowDown');
+    expect(await highlighted()).toBe('smallNames');
+    await page.keyboard.press(' ');
+    await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true');
+    expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-small']);
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-tidy-menu-popup]')).toHaveCount(0);
     await expect(trigger).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
+/** A row's name as drawn: its size, weight and tracking. */
+async function nameFont(page: Page, rowClass: string, id: string): Promise<{ size: string; weight: string; spacing: string }> {
+  return page.locator(`.ib-lbody .${rowClass}[data-thread-id="${id}"]`).first().evaluate((row) => {
+    const name = row.querySelector<HTMLElement>('.ib-title, .ib-m2')!;
+    const style = getComputedStyle(name);
+    return { size: style.fontSize, weight: style.fontWeight, spacing: style.letterSpacing };
+  });
+}
+
+test('smaller thread names: unread names at the read size, still bold; read, Sent and wide rows the same; off is today\'s', async ({ browser }) => {
+  const shapes = [
+    { name: 'beside a thread', rowClass: 'ib-nrow', ctx: () => desktop(browser), go: `#thread=${threads.opened}`, big: '15px', small: '13.5px' },
+    { name: 'a phone', rowClass: 'ib-mrow', ctx: () => browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'light', reducedMotion: 'reduce' }), go: '', big: '16px', small: '14px' },
+  ];
+  for (const shape of shapes) {
+    const context = await shape.ctx();
+    try {
+      const page = await context.newPage();
+      await page.goto(`${url}${shape.go}`);
+      await expect(page.locator(`.ib-lbody .${shape.rowClass}[data-thread-id="${threads.ledger}"]`)).toBeVisible();
+      await openQuiet(page);
+      // Off (a fresh browser): today's bigger unread name; a read row (CSV export) and a Sent row (Refund events) at the read size.
+      const unread = await nameFont(page, shape.rowClass, threads.ledger);
+      const read = await nameFont(page, shape.rowClass, threads.csv);
+      const sent = await nameFont(page, shape.rowClass, threads.refund);
+      expect(unread, `${shape.name}: today's unread name`).toMatchObject({ size: shape.big, weight: '600' });
+      expect(read.size, `${shape.name}: a read name`).toBe(shape.small);
+      await page.mouse.move(1, 1);
+      await page.screenshot({ path: join(proofDir, `small-names-off-${shape.rowClass}.png`) });
+
+      await page.locator('[data-tidy-menu]').click();
+      await option(page, 'smallNames').click();
+      await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true');
+      await expect(page.locator('[data-tidy-menu-popup]')).toBeVisible();
+      expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+      // On: the unread name drops to the read size, still bold; read and Sent rows unchanged.
+      expect(await nameFont(page, shape.rowClass, threads.ledger), `${shape.name}: smaller unread name`).toEqual({ size: shape.small, weight: '600', spacing: 'normal' });
+      expect(await nameFont(page, shape.rowClass, threads.csv)).toEqual(read);
+      expect(await nameFont(page, shape.rowClass, threads.refund)).toEqual(sent);
+      // In its pill too.
+      await option(page, 'highlight').click();
+      await expect(page.locator(`.ib-lbody .${shape.rowClass}[data-thread-id="${threads.ledger}"] .ib-rowkey`)).toBeVisible();
+      expect((await nameFont(page, shape.rowClass, threads.ledger)).size, `${shape.name}: in its pill`).toBe(shape.small);
+      await option(page, 'highlight').click();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-tidy-menu-popup]')).toHaveCount(0);
+      await page.mouse.move(1, 1);
+      await page.screenshot({ path: join(proofDir, `small-names-on-${shape.rowClass}.png`) });
+      // A reload keeps it; turned off, today's again.
+      await page.reload();
+      await expect(page.locator(`.ib-lbody .${shape.rowClass}[data-thread-id="${threads.ledger}"]`)).toBeVisible();
+      expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+      expect((await nameFont(page, shape.rowClass, threads.ledger)).size).toBe(shape.small);
+      await page.locator('[data-tidy-menu]').click();
+      await option(page, 'smallNames').click();
+      await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'false');
+      expect(await nameFont(page, shape.rowClass, threads.ledger)).toEqual(unread);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // The wide one-line list was never bigger: the same with it on.
+  const context = await desktop(browser);
+  try {
+    const page = await context.newPage();
+    await page.goto(url);
+    await expect(page.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
+    const before = await nameFont(page, 'ib-row', threads.ledger);
+    await context.addCookies([{ name: 'plannotator-inbox-list-small-names', value: '1', url }]);
+    await page.reload();
+    await expect(page.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
+    expect(await lookClasses(page)).toEqual(['ib-lk-small']);
+    expect(await nameFont(page, 'ib-row', threads.ledger)).toEqual(before);
   } finally {
     await context.close();
   }

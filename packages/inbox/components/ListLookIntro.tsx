@@ -1,8 +1,8 @@
 /**
  * The one-time list options dialog (approval "inbox-list-options-intro", 2026-10-31; A-r3 with the r4 preview):
  * shaped like the Board intro. The picture is the person's own list, drawn by the real rows (InboxList's `ListRow`)
- * in a column the list's width, its bottom fading out; under it a title, one line and the three options of the list's
- * ⋮ menu as switches. It opens at the list's look as it stands (the defaults, all off, for someone who never opened
+ * in a column the list's width, its bottom fading out (each thread name on one line, cut with "…"); under it a title,
+ * one line and the four options of the list's ⋮ menu as switches. It opens at the list's look as it stands (the defaults, all off, for someone who never opened
  * the ⋮ menu), so Done never undoes a choice made there. Done saves the switches as shown (every list takes them at
  * once); Keep as it is and Escape change nothing. App retires it either way (the Inbox's claim, once per machine).
  *
@@ -11,6 +11,10 @@
  * accessibility tree, so a screen reader never hears them flip), drawn as usual. Any key, click or touch ends it at
  * once and snaps back to where it opened; the input still does its normal job (so the first Tab reaches the
  * switches). None under reduced motion.
+ *
+ * The dialog follows the person's mode, light or dark; only its picture (the framed example rows that change) is
+ * drawn light for everyone (the owner, 2026-10-31: "just the image that changes needs to be light mode"). The picture is a
+ * light scope on the person's own light palette (`lightScope`), so the window's tokens are worked out again inside it.
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -20,6 +24,18 @@ import { LIST_INTRO_PREVIEW, LIST_INTRO_SWAP_MS } from '../listIntro';
 import { ListRow } from './InboxList';
 import { Modal } from './Updates';
 import { Icon } from '../icons';
+import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { themeSupportsHalf } from '@plannotator/ui/utils/themeRegistry';
+
+/**
+ * The classes that make an element a light scope of the window: `ib-lightscope` (the window's token blocks name it,
+ * so its tokens are worked out again there; it is not a `.pn-inbox`, so the window's layout rules and portals never
+ * reach it), the palette the person picked for light mode (Plannotator's own if that one cannot draw light) and
+ * `light`, as ThemeProvider puts them on <html> in light mode.
+ */
+export function lightScope(lightTheme: string): string {
+  return `ib-lightscope theme-${themeSupportsHalf(lightTheme, 'light') ? lightTheme : 'plannotator'} light`;
+}
 
 /** The list's groups as drawn (Quiet folded: its band only). `count`: the group's threads (`rows` may be fewer). */
 export interface ListIntroGroup {
@@ -78,6 +94,7 @@ function PreviewList({ groups, projectNames, awayMachines, look, phone }: { grou
                   day=""
                   menu={false}
                   pinned={false}
+                  pinColumn={false}
                   pill={look.highlight}
                   compact={look.compact}
                 />
@@ -147,10 +164,12 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
   const set = (key: ListLookKey, on: boolean) => setLook((current) => (current[key] === on ? current : { ...current, [key]: on }));
   const playing = usePreview(set, () => setLook(opened));
   const base = useId();
+  const { lightTheme } = useTheme();
   return (
     <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys className={`ib-lo${phone ? ' ib-lo-phone' : ''}`}>
       <div className="ib-lo-art">
-        <div className="ib-lo-frame" inert>
+        {/* The picture: always light (`lightScope`), whatever the dialog's mode. */}
+        <div className={`ib-lo-frame ${lightScope(lightTheme)}`} inert data-list-intro-picture="">
           <PreviewList groups={groups} projectNames={projectNames} awayMachines={awayMachines} look={look} phone={phone} />
         </div>
       </div>
