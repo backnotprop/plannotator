@@ -4946,12 +4946,12 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
      way back tighten, the Artifacts count leaves the button (its name keeps it), Mark read shows its icon alone
      (its words kept as its name, visually hidden), then the way back shows its chevron alone (its name says where). */
   .ib-phead > .ib-iconbtn, .ib-phead > .ib-artbtn { flex: none; }
-  .pn-inbox .ib-phead[data-fit~="tight"] .ib-hbtn[data-mark-read] { padding: 0 7px; margin: 0; }
+  .pn-inbox .ib-phead[data-fit~="tight"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) { padding: 0 7px; margin: 0; }
   .pn-inbox .ib-phead[data-fit~="tight"] .ib-pback { padding-right: 6px; }
   .ib-phead[data-fit~="count"] .ib-artbtn-n { display: none; }
   .pn-inbox .ib-phead[data-fit~="count"] .ib-iconbtn.ib-artbtn { width: 44px; padding: 0; }
-  .ib-phead[data-fit~="mark"] .ib-hbtn[data-mark-read] .ib-hbtn-l { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .pn-inbox .ib-phead[data-fit~="mark"] .ib-hbtn[data-mark-read] { width: 44px; min-width: 44px; padding: 0; margin: 0; justify-content: center; }
+  .ib-phead[data-fit~="mark"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) .ib-hbtn-l { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .pn-inbox .ib-phead[data-fit~="mark"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) { width: 44px; min-width: 44px; padding: 0; margin: 0; justify-content: center; }
   .ib-phead[data-fit~="back"] .ib-pback-l { display: none; }
   .pn-inbox .ib-phead[data-fit~="back"] .ib-pback { width: 44px; padding: 0; justify-content: center; }
   /* The scrolled-away subject with no room to be read: a sliver of it is a stray glyph. */
