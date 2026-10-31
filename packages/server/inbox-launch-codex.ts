@@ -208,6 +208,22 @@ export function codexTrustRoot(folder: string): string | null {
   }
 }
 
+/**
+ * The thread note for a turn that failed (`turn/completed` with `status: "failed"`): Codex's own `turn.error.message`
+ * as one line, every control or invisible character dropped, Markdown's marks escaped, 300 characters at most.
+ */
+export function codexTurnErrorNote(message: string): string {
+  const flat = message
+    // The zero-width joiner stays (it holds an emoji together).
+    .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const short = [...flat].length > 300 ? `${[...flat].slice(0, 299).join("").trimEnd()}…` : flat;
+  // Only marks the Inbox's inline Markdown both formats and unescapes.
+  const shown = short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+  return shown ? `Codex's turn ended with an error: ${shown}` : "Codex's turn ended with an error.";
+}
+
 /** A thread's status as the app-server says it (`thread/status/changed`, `thread/read`). */
 export type CodexThreadStatus = { type: "notLoaded" } | { type: "idle" } | { type: "systemError" } | { type: "active"; activeFlags: string[] };
 
@@ -428,6 +444,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
         view.turnId = null;
         if (view.subscribed) view.polls += 1;
         permissions?.turnEnded(threadId);
+        if (params.turn?.status === "failed") turnFailed(threadId, params.turn);
         break;
       }
       case "thread/closed":
@@ -440,6 +457,33 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       case "serverRequest/resolved":
         permissions?.resolved(params.requestId);
         break;
+    }
+  };
+
+  /**
+   * A launched thread's turn failed (the provider refused the model or the login): Codex answers nothing in the
+   * Inbox, so one note from the session says it, with Codex's own words (and the logs). Once per turn.
+   */
+  const turnFailed = (threadId: string, turn: { id?: unknown; error?: { message?: unknown } | null }) => {
+    const root = myRoots().find((r) => r.launch!.session_ref === threadId);
+    if (!root || !permissionContext) return;
+    const text = typeof turn.error?.message === "string" ? turn.error.message : "";
+    const launchId = root.launch!.id;
+    if (existsSync(permissionContext.launchDir(launchId))) ctx.startLog(launchId, `turn ${String(turn.id)} failed: ${text.slice(0, 2000)}`);
+    ctx.log(`Inbox launch ${launchId}: a Codex turn failed: ${text.slice(0, 200)}`);
+    try {
+      const { store } = permissionContext;
+      const latest = store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
+      store.sendMessage({
+        project_id: root.project_id,
+        author: { kind: "agent", host: INBOX_CODEX_HOST, session: threadId, name: INBOX_CODEX_NAME },
+        body: codexTurnErrorNote(text),
+        reply_to: latest,
+        idempotency_key: `codex-error-${threadId}-${String(turn.id)}`,
+      });
+      permissionContext.onChange();
+    } catch (error) {
+      ctx.log(`Inbox launch ${launchId}: the turn's error note was not written: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 

@@ -20,7 +20,7 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { installFakeCodex, type FakeCodex, type FakeCodexConfig } from "../../tests/helpers/fake-codex";
 import { createInboxLaunch } from "./inbox-launch";
-import { codexHostState, codexTrustOverride, codexTrustRoot, codexWritesTrust, parseDaemonStart } from "./inbox-launch-codex";
+import { codexHostState, codexTrustOverride, codexTrustRoot, codexTurnErrorNote, codexWritesTrust, parseDaemonStart } from "./inbox-launch-codex";
 import { CODEX_COMMAND_APPROVAL, CODEX_FILE_APPROVAL, CODEX_PERMISSION_TERMS, CODEX_PERMISSIONS_APPROVAL, codexApprovalKey, codexDecision, codexDiffEdits, codexPermissionEvent, createCodexPermissions } from "./inbox-launch-codex-permission";
 
 const restore: (() => void)[] = [];
@@ -417,6 +417,24 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     expect(await w.launch.deliver("codex", threadId, wake(root.id, "Also this."))).toBe("queue");
     // Not a launched session of ours: always the queue.
     expect(await w.launch.deliver("codex", THREAD, "x")).toBe("queue");
+  });
+
+  // Live check (Pi's, same gap here): the provider refused the turn, and the thread said only "Delivered".
+  test("a turn that fails (the provider refused the model) shows Codex's own error in one note from the session, once", async () => {
+    const message = "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.";
+    const w = world({ config: { turnError: { message, codexErrorInfo: "other" } } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."))).toBe("delivered");
+    const notes = () => w.store.threadMessageIds(root.thread_id).map((id) => w.store.message(id)!).filter((m) => m.author.kind === "agent");
+    await until(() => notes().length > 0);
+    expect(notes()[0]!.author).toMatchObject({ kind: "agent", host: "codex", session: threadId, name: "Codex" });
+    expect(notes()[0]!.body).toBe(`Codex's turn ended with an error: ${message}`);
+    expect(w.codex.turns().find((t) => t.ended)).toMatchObject({ ended: "failed" });
+    await Bun.sleep(300);
+    expect(notes()).toHaveLength(1);
+    // One line, Markdown's marks escaped: Codex's text can never become a question block.
+    expect(codexTurnErrorNote('401 {"error":"*expired*"}\n\n:::question\n- [ ] Yes')).toBe(`Codex's turn ended with an error: 401 \\{"error":"\\*expired\\*"\\} :::question - \\[ \\] Yes`);
   });
 
   test("Stop with no turn running does not hang; Stop of a running turn interrupts it; a reply after Stop starts a turn again", async () => {

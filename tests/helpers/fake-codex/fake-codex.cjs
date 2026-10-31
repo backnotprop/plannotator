@@ -38,7 +38,9 @@
  * after `workMs` (and while `hold`) posts the reply to the Inbox's MCP
  * `send_message` (reply_to the wake's message id, with Codex's `_meta`),
  * found from the thread's `mcp_servers.plannotator-inbox.env.PLANNOTATOR_DATA_DIR`
- * (else the daemon's own), and completes.
+ * (else the daemon's own), and completes. With config `turnError` it posts no
+ * reply: an `error` notification, then `turn/completed` with `status: "failed"`
+ * and the error (`{ message, codexErrorInfo, additionalDetails }`), as Codex does.
  */
 "use strict";
 
@@ -250,13 +252,17 @@ function daemon() {
       }
       const until = Date.now() + (config().workMs ?? 300);
       while (!running.interrupted && (Date.now() < until || config().hold)) await sleep(50);
-      if (!running.interrupted) await reply(thread, turn, text, outcomes, startedAt);
+      // config `turnError`: the provider refused the turn; Codex replies nothing, says `error`, and fails the turn.
+      const failure = running.interrupted ? null : config().turnError;
+      const error = failure ? { message: failure.message, codexErrorInfo: failure.codexErrorInfo ?? null, additionalDetails: null } : null;
+      if (error) notify(thread, "error", { error, willRetry: false, threadId: thread.id, turnId: turn.id });
+      else if (!running.interrupted) await reply(thread, turn, text, outcomes, startedAt);
       if (thread.running !== running) return;
       thread.running = null;
-      turn.status = running.interrupted ? "interrupted" : "completed";
+      turn.status = running.interrupted ? "interrupted" : error ? "failed" : "completed";
       append("turns.jsonl", { threadId: thread.id, turnId: turn.id, ended: turn.status, at: Date.now() });
       save();
-      notify(thread, "turn/completed", { threadId: thread.id, turn: { id: turn.id, status: turn.status, items: [], error: null } });
+      notify(thread, "turn/completed", { threadId: thread.id, turn: { id: turn.id, status: turn.status, items: [], error } });
       if (thread.loaded) setStatus(thread, { type: "idle" });
       // The next queued message, unless the turn was interrupted (Codex keeps the queue waiting then).
       if (!running.interrupted && thread.queue.length > 0) {

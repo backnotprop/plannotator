@@ -42,6 +42,8 @@ export interface FakeCodexConfig {
   dropOnTurnStart?: boolean;
   /** A thread no connection is subscribed to unloads at once (Codex: after 30 min). */
   unloadOnUnsubscribe?: boolean;
+  /** Each turn fails with this error instead of replying (an `error` notification, then `turn/completed` with `status: "failed"`). */
+  turnError?: { message: string; codexErrorInfo?: unknown } | null;
 }
 
 export interface FakeCodexRpc {
@@ -66,7 +68,7 @@ export interface FakeCodexTurn {
   turnId: string;
   text?: string;
   how?: "turn/start" | "queue";
-  ended?: "completed" | "interrupted";
+  ended?: "completed" | "interrupted" | "failed";
   steer?: string;
   at: number;
 }
