@@ -70,13 +70,14 @@ const SIGNAL_ALLOWED = new Set(["tests/helpers/inbox-process.ts", ...SCANNER_FIL
 const HOME_PATH_ALLOWED = new Set(["tests/helpers/real-data-dir.ts", ...SCANNER_FILES]);
 /** vibe-plan.test.ts only compares the default it resolves (~/.vibe/plans) with the expected path; it reads and writes nothing there. */
 /**
- * scripts/launch-smoke/{day1,claude}.ts are manual smokes against the real `claude` (never in CI). They already
+ * scripts/launch-smoke/{day1,claude,permission}.ts are manual smokes against the real `claude` (never in CI). They already
  * sandbox the data dir, the Inbox (startInboxServer with dataDir, PLANNOTATOR_DATA_DIR, NO_BROWSER) and the login
  * env; the one real-home path is a READ of ~/.claude/projects/<dir>/<session>.jsonl to count a session's
- * permissionMode, because a real `--bg` worker writes its transcript there and nothing else reports the mode.
+ * permissionMode (permission.ts also checks the deny reason reached Claude), because a real `--bg` worker writes
+ * its transcript there and nothing else reports it.
  * They write nothing under the agent's folder.
  */
-const AGENT_HOME_ALLOWED = new Set(["apps/hook/server/vibe-plan.test.ts", "scripts/launch-smoke/day1.ts", "scripts/launch-smoke/claude.ts", ...SCANNER_FILES]);
+const AGENT_HOME_ALLOWED = new Set(["apps/hook/server/vibe-plan.test.ts", "scripts/launch-smoke/day1.ts", "scripts/launch-smoke/claude.ts", "scripts/launch-smoke/permission.ts", ...SCANNER_FILES]);
 
 const isStandaloneScript = (rel: string) => !/\.(?:test|spec)\.(?:ts|tsx|mts|js|mjs)$/.test(rel);
 

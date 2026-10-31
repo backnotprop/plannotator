@@ -339,7 +339,8 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   const start = await waitFor('claude --bg', () => fake.starts()[0]);
   // The thread was written before --bg ran, and nothing of the message or the key is on argv.
   expect(start.threadExisted).toBe(true);
-  expect(start.argv).toEqual(['--bg', '--name', expect.any(String), '--settings', start.settingsPath!]);
+  // The switch never set, no default mode or shell export: auto mode. No allow flag: this person never accepted Claude Code's bypass notice.
+  expect(start.argv).toEqual(['--bg', '--name', expect.any(String), '--settings', start.settingsPath!, '--permission-mode', 'auto']);
   expect(start.argv.join(' ')).not.toContain('fuzzy');
   expect(start.argv.join(' ')).not.toContain(start.settings!.env!.PLANNOTATOR_LAUNCH_KEY!);
   expect(start.cwd).toBe(world.projects.plannotator);
@@ -350,7 +351,10 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   expect(start.settings!.env!.PLANNOTATOR_DATA_DIR).toBe(world.dataDir);
   expect(start.settings!.env!.PLANNOTATOR_LAUNCH).toBe(launchId);
   expect(start.settings!.env!.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBeUndefined();
+  expect(start.settings!.env!.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBeUndefined();
   expect(start.settings!.permissions!.allow).toContain(INBOX_TOOL_PERMISSION);
+  // An auto launch is pinned to default mode, should Claude drop auto.
+  expect(start.settings!.permissions!.defaultMode).toBe('default');
   // The spawn env: no Plannotator name at all (data dir, ports, markers), no session marker.
   expect(start.env.filter((name) => name.startsWith('PLANNOTATOR_'))).toEqual([]);
   expect(start.env).not.toContain('CLAUDECODE');
@@ -369,8 +373,8 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   expect(runNow.run?.state).toBe('starting');
   await expect(p.locator('[data-run="starting"]')).toBeVisible();
 
-  // 06: the session polls, takes the message as its first turn: "Claude Code is working · 1 min  Stop".
-  await expect(p.locator('[data-run="working"]')).toContainText(/^Claude Code is working · \d+ min/, { timeout: 20_000 });
+  // 06: the session polls, takes the message as its first turn: "Claude Code is working  Stop" (no "· 1 min" under a minute).
+  await expect(p.locator('[data-run="working"]')).toContainText(/^Claude Code is working(?! · \d)/, { timeout: 20_000 });
   await expect(p.locator('[data-run="working"] [data-run-stop]')).toBeVisible();
   await expect(page.locator(`[data-thread-id="${threadId}"] [data-count-words="Working"]`)).toBeVisible();
   await shot(page, '06-working');
@@ -430,8 +434,9 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await shot(page, '10-replied');
   expect(fake.calls().filter((c) => c.argv[0] === 'respawn')).toHaveLength(1);
   expect(fake.starts()).toHaveLength(1);
-  // The login shell was read for the start alone: never for a status read, the stop or the respawn.
-  expect(fake.logins()).toBe(1);
+  // The login shell was read twice, both off the Send's wait: ahead when the composer picked "Start Claude Code",
+  // and by the start for its own env. Never for a status read, the stop or the respawn.
+  expect(fake.logins()).toBe(2);
   // Delivered once: one answer to the reply, and the reply was handed over once.
   const thread = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { id: string; author: { kind: string }; reply_to?: string | null; delivery?: unknown }[] } };
   const reply = thread.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!;
@@ -450,26 +455,35 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   expect(world.errors).toEqual([]);
 });
 
-test('full permissions: Settings → Agents switch puts bypass mode on argv and Claude\'s switch in the file; the header says so', async () => {
+test('full permissions: with the person\'s bypass consent, Settings → Agents switch puts bypass mode on argv, keeps the permission hook, and the header says so', async () => {
   const { page, fake } = world;
-  await page.goto(`${world.url}#settings/agents`);
-  const row = page.locator('[data-launch-full-row]');
-  await expect(row).toBeVisible();
-  await row.getByRole('switch', { name: 'Start new sessions with full permissions' }).click();
-  await expect(row.getByRole('switch', { name: 'Start new sessions with full permissions' })).toHaveAttribute('aria-checked', 'true');
-  expect((JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { inboxLaunch: { fullPermissions?: boolean } }).inboxLaunch.fullPermissions).toBe(true);
-  fake.configure({ startDelayMs: 0, hold: false });
-  await page.goto(world.url);
-  const before = fake.starts().length;
-  const threadId = await launchFrom(page, 'Bump the lockfile and run the tests.');
-  const start = await waitFor('claude --bg', () => fake.starts()[before]);
-  expect(start.argv.slice(-2)).toEqual(['--permission-mode', 'bypassPermissions']);
-  expect(start.settings!.env!.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBe('1');
-  await openThread(page, threadId);
-  await expect(pane(page).locator('[data-launched] [data-launch-full]')).toHaveText('Full permissions');
-  await page.goto(`${world.url}#settings/agents`);
-  await page.locator('[data-launch-full-row]').getByRole('switch').click();
-  await expect(page.locator('[data-launch-full-row]').getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+  // The person accepted Claude Code's bypass notice once (their own user settings): without it a launch never starts in bypass.
+  const userSettings = join(world.home, '.claude', 'settings.json');
+  const ownSettings = readFileSync(userSettings, 'utf8');
+  writeFileSync(userSettings, JSON.stringify({ ...JSON.parse(ownSettings), skipDangerousModePermissionPrompt: true }));
+  try {
+    await page.goto(`${world.url}#settings/agents`);
+    const row = page.locator('[data-launch-full-row]');
+    await expect(row).toBeVisible();
+    await row.getByRole('switch', { name: 'Start new sessions with full permissions' }).click();
+    await expect(row.getByRole('switch', { name: 'Start new sessions with full permissions' })).toHaveAttribute('aria-checked', 'true');
+    expect((JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { inboxLaunch: { fullPermissions?: boolean } }).inboxLaunch.fullPermissions).toBe(true);
+    fake.configure({ startDelayMs: 0, hold: false });
+    await page.goto(world.url);
+    const before = fake.starts().length;
+    const threadId = await launchFrom(page, 'Bump the lockfile and run the tests.');
+    const start = await waitFor('claude --bg', () => fake.starts()[before]);
+    expect(start.argv.slice(-3)).toEqual(['--allow-dangerously-skip-permissions', '--permission-mode', 'bypassPermissions']);
+    expect(start.settings!.env!.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBeUndefined();
+    expect(start.settings!.hooks!.PermissionRequest).toBeDefined();
+    await openThread(page, threadId);
+    await expect(pane(page).locator('[data-launched] [data-launch-full]')).toHaveText('Full permissions');
+    await page.goto(`${world.url}#settings/agents`);
+    await page.locator('[data-launch-full-row]').getByRole('switch').click();
+    await expect(page.locator('[data-launch-full-row]').getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+  } finally {
+    writeFileSync(userSettings, ownSettings);
+  }
 });
 
 test('a replayed Send (same idempotency key) answers the same thread and starts --bg once', async () => {

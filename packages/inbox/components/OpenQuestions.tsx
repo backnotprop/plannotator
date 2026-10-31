@@ -6,6 +6,8 @@ import {
   openActionState,
   openItemsHeading,
   openItemsLabel,
+  openQuestionsHeading,
+  openQuestionsLabel,
   openQuestionPlaceWords,
   openQuestionState,
   openQuestionSkippable,
@@ -17,6 +19,7 @@ import {
   type OpenQuestionPlace,
   type OpenQuestionState,
 } from '../openQuestions';
+import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
 import { decideThreadLabel } from '../decisions/entry';
@@ -127,6 +130,8 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
   // The button counts both kinds: "3 open questions", "1 open action item", "2 questions, 1 action item".
   const n = questions.length;
   const a = actions.length;
+  // Only a launched agent's permission prompts wait (no other question, no action item): "1 permission waiting" (screen 09).
+  const permission = a === 0 && n > 0 && questions.every((q) => isInboxPermissionSession(q.question.asked_by_agent_id));
   const reaskTipId = useId();
   const skipTipId = useId();
   // The long form first on a phone too (owner, 2026-10-30: "it should say both"); "5 open" and "5" when it does not fit.
@@ -147,7 +152,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       if (!button || !words.current || !buttons || !row) return;
       if (rowForm) {
         // The row chose: draw it (the row's own fit already left the page this way).
-        fittedFor.current = `row:${rowForm}|${n}|${a}`;
+        fittedFor.current = `row:${rowForm}|${n}|${a}|${permission}`;
         const next = { form: rowForm, tight: false };
         drawOpenQuestionsForm(button, next);
         setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
@@ -157,7 +162,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         .filter((el) => el !== button)
         .map((el) => el.textContent ?? '')
         .join('|');
-      const key = `${row.getBoundingClientRect().width}|${n}|${a}|${max}|${others}`;
+      const key = `${row.getBoundingClientRect().width}|${n}|${a}|${permission}|${max}|${others}`;
       if (!force && key === fittedFor.current) return;
       fittedFor.current = key;
       const apply = (next: FootFit) => drawOpenQuestionsForm(button, next);
@@ -166,7 +171,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       apply(next);
       setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
     },
-    [n, a, max, rowForm],
+    [n, a, permission, max, rowForm],
   );
   // Every render: a button beside it may have come or gone (Send, 👍) with no resize.
   useLayoutEffect(() => fit());
@@ -197,8 +202,8 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       }, 0);
     };
   }, []);
-  const label = openItemsLabel(n, a);
-  const heading = openItemsHeading(n, a);
+  const label = permission ? openQuestionsLabel(n, 'permission') : openItemsLabel(n, a);
+  const heading = permission ? openQuestionsHeading(n, 'permission') : openItemsHeading(n, a);
 
   // Skipping from the list (approval "oq-skip-select", variant A).
   const canSkip = !!onSetSkipped && questions.some(openQuestionSkippable);
@@ -319,11 +324,12 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         // What footFit.ts draws each form from.
         data-oq-n={n}
         data-oq-actions={a}
+        data-oq-permission={permission ? '' : undefined}
         data-oq-label={label}
       >
         <Icon name="question" size={15} />
         <span ref={words} data-oq-words="">
-          {openQuestionsFormText(n, form, a)}
+          {openQuestionsFormText(n, form, a, permission)}
         </span>
         <span className="ib-oq-chev" aria-hidden="true">
           <Icon name="chevU" size={13} />

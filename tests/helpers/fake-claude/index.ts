@@ -24,6 +24,10 @@ export interface FakeClaudeConfig {
   version?: string;
   /** `untrusted`: `--bg` fails with Claude's untrusted-folder error. `slow`: it never answers in time. */
   fault?: "untrusted" | "slow" | null;
+  /** `--bg --permission-mode auto` fails as a CLI without auto mode does (commander's refusal of the value). */
+  refuseAuto?: boolean;
+  /** Plannotator's plugin brings its own PermissionRequest hook (ExitPlanMode), as on a real install (default true; it turns the skip export off). */
+  pluginPermissionHook?: boolean;
   /** How long a turn takes before the answer (ms, default 800). */
   workMs?: number;
   /** Keep the turn running until cleared. */
@@ -32,12 +36,59 @@ export interface FakeClaudeConfig {
   waiting?: boolean;
   /** The answer's first word. */
   answer?: string;
+  /** The whole answer, in words, in place of the line tests read (screenshots). */
+  body?: string;
   /** A session's first poll waits this long (ms): the Inbox shows "Starting" meanwhile. */
   startDelayMs?: number;
   /** `--bg` answers (and the session exists) only after this long (ms). */
   bgDelayMs?: number;
   /** A session takes a command, then reports busy only after this long (ms): the real mod's gap until its next poll. */
   busyDelayMs?: number;
+  /** Permission prompts each turn plays, in order: the settings file's PermissionRequest hook runs with Claude Code's stdin. */
+  prompts?: FakePermissionPrompt[];
+  /**
+   * The person answers this session's open dialog in `claude attach` (its session id): the hook is ended (SIGTERM)
+   * and the session goes on. Only that session: a session of an earlier test still on a dialog stays on it.
+   */
+  localAnswer?: string | null;
+  /** How long a safety check's own dialog (up once the hook ended with no decision) waits before it blocks the call (ms; Claude's is about 2 minutes). */
+  safetyBlockMs?: number;
+}
+
+/** One tool call that needs permission (Claude Code's PermissionRequest stdin, less what the session fills in). */
+export interface FakePermissionPrompt {
+  tool_name: string;
+  tool_input?: Record<string, unknown>;
+  permission_suggestions?: Record<string, unknown>[];
+  /**
+   * Claude's own safety check (a dangerous rm), for a person only: bypass mode still asks it (to the hook, or waived by
+   * the export when no PermissionRequest hook exists at all), and in any mode a hook's allow is ignored (its deny counts);
+   * its own dialog comes up only after the hook ends.
+   */
+  safetyCheck?: boolean;
+  /** The person's own `permissions.ask` rule: person-only like a safety check (allow ignored, dialog after the hook), with no auto-block. */
+  askRule?: boolean;
+}
+
+/** What a permission prompt came to (permissions.jsonl). */
+export interface FakePermissionResult {
+  sessionId: string;
+  tool: string;
+  input: Record<string, unknown>;
+  /** The hook's stdout, parsed; null when it printed nothing. */
+  output: { hookSpecificOutput?: { hookEventName?: string; decision?: { behavior: string; updatedInput?: unknown; updatedPermissions?: unknown[]; message?: string } } } | null;
+  exitCode: number | null;
+  /** `autoblocked`: a safety check's own dialog blocked the call after `safetyBlockMs` with no answer in Terminal. */
+  outcome: "ran" | "denied" | "local" | "blocked" | "autoblocked";
+  /** False when the session's mode asked nothing (bypass mode). */
+  asked?: boolean;
+  /** The session's mode after the prompt (a hook's setMode changes it). */
+  mode?: string;
+  /** A hook's setMode to bypass that the session ignored (bypass not available: no consent). */
+  modeIgnored?: boolean;
+  /** A safety check whose hook allowed: Claude ignored the allow and kept its own dialog. */
+  ignoredAllow?: boolean;
+  ms: number;
 }
 
 export interface FakeClaudeCall {
@@ -46,7 +97,7 @@ export interface FakeClaudeCall {
   env: string[];
   at: number;
   settingsPath?: string;
-  settings?: { env?: Record<string, string>; permissions?: { allow?: string[] }; [key: string]: unknown } | null;
+  settings?: { env?: Record<string, string>; permissions?: { allow?: string[]; defaultMode?: string }; hooks?: Record<string, unknown>; [key: string]: unknown } | null;
   settingsMode?: number | null;
   threadExisted?: boolean;
 }
@@ -60,6 +111,8 @@ export interface FakeClaudeAgent {
   state: string;
   pid?: number | null;
   permissionMode: string | null;
+  /** Bypass is available to the session (the person's consent, and the allow flag or a bypass start). */
+  bypassAvailable?: boolean;
 }
 
 export interface FakeClaude {
@@ -75,8 +128,14 @@ export interface FakeClaude {
   osascript(): string[][];
   /** How many times the stand-in login shell ran (the Inbox reads it once per start). */
   logins(): number;
+  /** More names the stand-in login shell exports (a person's .zshrc), or none. */
+  setLoginExports(vars: Record<string, string> | null): void;
   /** The ids of the commands sessions took, in order. */
   delivered(): string[];
+  /** Each permission prompt a session played, in order. */
+  permissions(): FakePermissionResult[];
+  /** Each permission hook run, as it exited: its raw stdout and exit code. */
+  hooks(): { sessionId: string; tool: string; stdout: string; exitCode: number | null; local: boolean; ms: number }[];
   /** Take `claude` off PATH (uninstalled) or put it back. */
   setInstalled(on: boolean): void;
   /** SIGTERM every fake session still running that this fake started; returns how many. */
@@ -104,7 +163,7 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
   const shell = join(bin, "login-shell");
   writeFileSync(
     shell,
-    `#!/bin/sh\necho run >> ${q(join(state, "logins.log"))}\n${FAKE_LOGIN_CLAUDE_VALUE.name}=${q(FAKE_LOGIN_CLAUDE_VALUE.value)}\nexport ${FAKE_LOGIN_CLAUDE_VALUE.name}\nPATH=${q(bin)}:"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`,
+    `#!/bin/sh\necho run >> ${q(join(state, "logins.log"))}\n[ -f ${q(join(state, "login-exports.sh"))} ] && . ${q(join(state, "login-exports.sh"))}\n${FAKE_LOGIN_CLAUDE_VALUE.name}=${q(FAKE_LOGIN_CLAUDE_VALUE.value)}\nexport ${FAKE_LOGIN_CLAUDE_VALUE.name}\nPATH=${q(bin)}:"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`,
     { mode: 0o755 },
   );
 
@@ -150,6 +209,13 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
       const file = join(state, "logins.log");
       return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
     },
+    setLoginExports(vars) {
+      const file = join(state, "login-exports.sh");
+      if (!vars) rmSync(file, { force: true });
+      else writeFileSync(file, Object.entries(vars).map(([name, value]) => `${name}=${q(value)}\nexport ${name}\n`).join(""));
+    },
+    permissions: () => lines<FakePermissionResult>(join(state, "permissions.jsonl")),
+    hooks: () => lines<ReturnType<FakeClaude["hooks"]>[number]>(join(state, "hooks.jsonl")),
     delivered() {
       const file = join(state, "delivered.log");
       return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
@@ -159,13 +225,16 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
       else rmSync(claude, { force: true });
     },
     stopAll() {
-      const file = join(state, "pids.log");
-      if (!existsSync(file)) return 0;
       let stopped = 0;
-      for (const pid of new Set(readFileSync(file, "utf8").split("\n").filter(Boolean).map(Number))) {
+      const pidsOf = (name: string) => {
+        const file = join(state, name);
+        return existsSync(file) ? [...new Set(readFileSync(file, "utf8").split("\n").filter(Boolean).map(Number))] : [];
+      };
+      const candidates = [...pidsOf("pids.log").map((pid) => ({ pid, hook: false })), ...pidsOf("hookpids.log").map((pid) => ({ pid, hook: true }))];
+      for (const { pid, hook } of candidates) {
         const command = spawnSync("/bin/ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
-        // Only a process that is still this fake's session (never a reused pid).
-        if (!command.includes(SCRIPT) || !command.includes("__session")) continue;
+        // Only a process that is still this fake's session, or a permission hook it ran (never a reused pid).
+        if (hook ? !command.includes("permission-hook") : !command.includes(SCRIPT) || !command.includes("__session")) continue;
         try {
           process.kill(pid, "SIGTERM");
           stopped++;

@@ -15,8 +15,9 @@
  *
  * Calls:
  *  --version                 "<version> (Claude Code)"
- *  --bg --name N --settings F [--permission-mode M]
+ *  --bg --name N --settings F [--allow-dangerously-skip-permissions] [--permission-mode M]
  *                            no prompt; faults: untrusted (Claude's error, exit 1),
+ *                            refuseAuto (commander's refusal of `auto`, exit 1),
  *                            slow (sleeps 40 s); else (after `bgDelayMs`) prints
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
  *                            and starts the session process.
@@ -30,6 +31,45 @@
  * `workMs` (and while `hold` or `waiting` is set) it answers through the
  * Inbox's MCP `send_message` with `reply_to`, and goes idle. `waiting` makes
  * the host list it as waiting on a permission prompt meanwhile.
+ *
+ * Permission modes, as Claude Code 2.1.314 runs a background session: with no
+ * --permission-mode, the flag settings' then the user's `permissions.defaultMode`
+ * (else default). Bypass needs the person's own recorded consent
+ * (`skipDangerousModePermissionPrompt` in ~/.claude/settings.json, or
+ * `bypassPermissionsModeAccepted` in ~/.claude.json; never the --settings file):
+ * without it the allow flag is ignored, a bypass start runs in default mode, and
+ * a hook's `setMode bypassPermissions` is ignored. In bypass mode a prompt is not
+ * asked, except a `safetyCheck` one (dangerous rm): that goes to the
+ * settings file's PermissionRequest hook when there is one, is waived only when
+ * NO PermissionRequest hook exists at all and
+ * CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1, and else waits on the
+ * built-in dialog. As in Claude, any PermissionRequest hook counts, the matcher
+ * ignored and plugins' included: Plannotator's plugin, enabled in HOME's
+ * settings, has one (ExitPlanMode), unless `pluginPermissionHook` is false.
+ * A hook's setMode changes the session's mode for later prompts.
+ *
+ * A `safetyCheck` prompt is for a person only, in any mode (Claude 2.1.314: the
+ * ask does not let hooks allow it, and it awaits the hooks before its dialog):
+ * no dialog while the hook runs (`localAnswer` does not end it), a hook's deny
+ * counts, and an allow is ignored (`ignoredAllow`, no setMode). With no
+ * decision, or an ignored allow, the built-in dialog comes up then, and blocks
+ * the call on its own `safetyBlockMs` after the hook ended (default 2 minutes;
+ * outcome `autoblocked`) unless `localAnswer` answers it first. An `askRule`
+ * prompt (the person's own `permissions.ask` rule: "Permission rule …
+ * requires confirmation") is person-only the same way, in any mode, but its
+ * dialog waits until answered. Nothing in the hook's input marks either.
+ *
+ * Permission prompts (`prompts`: a list of { tool_name, tool_input,
+ * permission_suggestions, safetyCheck }, played in each turn, in order): as Claude Code
+ * does, the session lists itself `waiting` on a "permission prompt" and runs
+ * the settings file's PermissionRequest command (`/bin/sh -c`, matcher `*`)
+ * with the real stdin JSON (bg-perm-test/RESULTS.md) and the settings' env.
+ * Allow runs the tool, deny goes on without it; no output leaves it blocked
+ * on the built-in dialog until `localAnswer` names the session: that is the
+ * person answering in `claude attach`, which ends the hook (SIGTERM) and goes
+ * on. Only that session's dialog: another session still on one stays there.
+ * Each prompt is one line of permissions.jsonl: the tool, the hook's stdout
+ * (parsed), its exit code and time, and the outcome (ran, denied, local, autoblocked).
  */
 const fs = require("fs");
 const path = require("path");
@@ -147,11 +187,24 @@ function main() {
       setTimeout(() => process.exit(1), 40_000);
       return;
     }
+    // A CLI without auto mode: commander refuses the flag's value.
+    if (cfg.refuseAuto && flag("--permission-mode") === "auto") {
+      process.stderr.write("error: option '--permission-mode <mode>' argument 'auto' is invalid. Allowed choices are acceptEdits, bypassPermissions, default, dontAsk, plan.\n");
+      process.exit(1);
+    }
+    // The person's own recorded consent and default mode (never the --settings file's consent).
+    const home = process.env.HOME || "";
+    const user = readJson(path.join(home, ".claude", "settings.json"), {}) || {};
+    const global = readJson(path.join(home, ".claude.json"), {}) || {};
+    const consent = user.skipDangerousModePermissionPrompt === true || global.bypassPermissionsModeAccepted === true;
+    let permissionMode = flag("--permission-mode") || ((settings && settings.permissions) || {}).defaultMode || (user.permissions || {}).defaultMode || "default";
+    const bypassAvailable = consent && (args.includes("--allow-dangerously-skip-permissions") || permissionMode === "bypassPermissions");
+    if (permissionMode === "bypassPermissions" && !consent) permissionMode = "default";
     const background = () => {
       const sessionId = crypto.randomUUID();
       const id = sessionId.replace(/-/g, "").slice(0, 8);
       const name = flag("--name") || "session";
-      saveAgent({ id, sessionId, cwd: process.cwd(), name, kind: "background", startedAt: Date.now(), status: "idle", state: "running", settingsPath, permissionMode: flag("--permission-mode") || null });
+      saveAgent({ id, sessionId, cwd: process.cwd(), name, kind: "background", startedAt: Date.now(), status: "idle", state: "running", settingsPath, permissionMode, bypassAvailable });
       startSession(sessionId);
       process.stdout.write(`Starting background service…\nbackgrounded · ${id} · ${name} (idle — send a prompt to start)\n`);
     };
@@ -172,7 +225,8 @@ function main() {
       .map((a) => {
         const out = { pid: a.pid || null, id: a.id, cwd: a.cwd, kind: a.kind, startedAt: a.startedAt, sessionId: a.sessionId, name: a.name, status: a.status, state: a.state };
         if (waiting && a.state === "running" && a.status === "busy") return { ...out, status: "waiting", waitingFor: "permission prompt" };
-        return out;
+        // A prompt the session plays lists what it waits for, as Claude Code does ("permission prompt").
+        return a.status === "waiting" && a.waitingFor ? { ...out, waitingFor: a.waitingFor } : out;
       });
     process.stdout.write(`${JSON.stringify(list)}\n`);
     return;
@@ -227,18 +281,118 @@ async function session(sessionId) {
   const dataDir = env.PLANNOTATOR_DATA_DIR;
   const registry = readJson(path.join(dataDir, "inbox", "inbox.json"), null);
   if (!registry) return;
-  const base = `http://127.0.0.1:${registry.port}`;
-  const headers = { authorization: `Bearer ${registry.token}`, "content-type": "application/json" };
+  // Read again after a failed poll: a restarted Inbox may have a new port and token.
+  let base = `http://127.0.0.1:${registry.port}`;
+  let headers = { authorization: `Bearer ${registry.token}`, "content-type": "application/json" };
+  const reconnect = () => {
+    const next = readJson(path.join(dataDir, "inbox", "inbox.json"), null);
+    if (!next) return;
+    base = `http://127.0.0.1:${next.port}`;
+    headers = { authorization: `Bearer ${next.token}`, "content-type": "application/json" };
+  };
+  /** The session's permission mode now (a hook's setMode changes it). */
+  let mode = agent.permissionMode || "default";
   const startedAt = new Date(agent.startedAt).toISOString();
   let busy = false;
   let idleSince = new Date().toISOString();
   let stopped = false;
+  /** The permission hook running now: it ends with the session, as Claude Code's own hooks do. */
+  let hookChild = null;
   process.on("SIGTERM", () => {
     stopped = true;
+    if (hookChild) {
+      try {
+        hookChild.kill("SIGTERM");
+      } catch {}
+    }
     process.exit(0);
   });
   const post = (p, body) => fetch(base + p, { method: "POST", headers, body: JSON.stringify({ session: sessionId, host: "claude-code", ...body }) });
   const taken = new Set();
+  /** The person answered this session's dialog in `claude attach` (`localAnswer` is its session id). */
+  const answeredLocally = () => config().localAnswer === sessionId;
+
+  /** One permission prompt, as Claude Code plays it: the hook, then allow, deny, or blocked until answered locally. */
+  const prompt = async (spec) => {
+    const entry = (((settings.hooks || {}).PermissionRequest || [])[0] || { hooks: [] }).hooks[0];
+    // Bypass mode asks nothing, but a safety check: to the hook when there is one, waived by the export only
+    // when no PermissionRequest hook exists anywhere (the plugin's ExitPlanMode one counts, matcher ignored).
+    const skipEnv = (env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS || process.env.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS) === "1";
+    const user = readJson(path.join(process.env.HOME || "", ".claude", "settings.json"), {}) || {};
+    const pluginHook = config().pluginPermissionHook !== false && Object.entries(user.enabledPlugins || {}).some(([id, on]) => /^plannotator@/.test(id) && on === true);
+    const anyHook = Boolean(entry && entry.command) || pluginHook;
+    const personOnly = Boolean(spec.safetyCheck || spec.askRule);
+    if (mode === "bypassPermissions" && (!personOnly || (!anyHook && skipEnv))) {
+      fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output: null, exitCode: null, outcome: "ran", asked: false, mode, ms: 0 })}\n`);
+      return { tool: spec.tool_name, outcome: "ran" };
+    }
+    const event = {
+      session_id: sessionId,
+      transcript_path: path.join(STATE, `${sessionId}.jsonl`),
+      cwd: agent.cwd,
+      prompt_id: crypto.randomUUID(),
+      permission_mode: mode,
+      effort: { level: "low" },
+      hook_event_name: "PermissionRequest",
+      tool_name: spec.tool_name,
+      tool_input: spec.tool_input || {},
+      ...(spec.permission_suggestions ? { permission_suggestions: spec.permission_suggestions } : {}),
+    };
+    updateAgent(sessionId, { status: "waiting", waitingFor: "permission prompt" });
+    const started = Date.now();
+    let stdout = "";
+    let exitCode = null;
+    let local = false;
+    if (entry && entry.command) {
+      const hookEnv = { ...process.env, ...env, CLAUDE_CODE_SESSION_ID: sessionId, CLAUDE_PROJECT_DIR: agent.cwd };
+      const child = spawn("/bin/sh", ["-c", `exec ${entry.command}`], { cwd: agent.cwd, env: hookEnv, stdio: ["pipe", "pipe", "ignore"] });
+      hookChild = child;
+      fs.appendFileSync(path.join(STATE, "hookpids.log"), `${child.pid}\n`);
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stdin.end(JSON.stringify(event));
+      let done = false;
+      const exited = new Promise((resolve) => child.on("exit", (code) => resolve(code)));
+      void exited.then(() => (done = true));
+      while (!done && !stopped) {
+        // A safety check's dialog shows only after the hook: nothing to answer in Terminal meanwhile.
+        if (answeredLocally() && !personOnly) {
+          // Answered in `claude attach`: Claude Code closes the dialog and ends the hook.
+          local = true;
+          child.kill("SIGTERM");
+          break;
+        }
+        await sleep(100);
+      }
+      if (stopped) child.kill("SIGTERM");
+      exitCode = await exited;
+      // The hook's own result, as soon as it exits (permissions.jsonl follows once the prompt is settled).
+      fs.appendFileSync(path.join(STATE, "hooks.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, stdout, exitCode, local, ms: Date.now() - started })}\n`);
+      hookChild = null;
+    }
+    let output = null;
+    try {
+      output = stdout.trim() ? JSON.parse(stdout) : null;
+    } catch {}
+    const decision = output && output.hookSpecificOutput && output.hookSpecificOutput.decision;
+    // A safety check takes no allow from a hook: the dialog stays for the person (a deny still counts).
+    const ignoredAllow = Boolean(personOnly && decision && decision.behavior === "allow");
+    let outcome = local ? "local" : decision && !ignoredAllow ? (decision.behavior === "allow" ? "ran" : "denied") : "blocked";
+    // A switch of mode: bypass only when it is available (the person's consent and the allow flag), else ignored.
+    let modeIgnored = false;
+    for (const update of (decision && decision.behavior === "allow" && !ignoredAllow && decision.updatedPermissions) || []) {
+      if (!update || update.type !== "setMode") continue;
+      if (update.mode === "bypassPermissions" && !agent.bypassAvailable) modeIgnored = true;
+      else mode = update.mode;
+    }
+    // No decision (or an allow it ignored): the built-in dialog stays until someone answers it locally;
+    // a safety check's dialog, up only now, blocks the call on its own after a while.
+    const blockAt = spec.safetyCheck ? Date.now() + (config().safetyBlockMs ?? 120_000) : Infinity;
+    while (outcome === "blocked" && !stopped && !answeredLocally() && Date.now() < blockAt) await sleep(150);
+    if (outcome === "blocked") outcome = answeredLocally() ? "local" : "autoblocked";
+    fs.appendFileSync(path.join(STATE, "permissions.jsonl"), `${JSON.stringify({ sessionId, tool: spec.tool_name, input: spec.tool_input || {}, output, exitCode, outcome, mode, modeIgnored, ignoredAllow, ms: Date.now() - started })}\n`);
+    updateAgent(sessionId, { status: "busy", waitingFor: null });
+    return { tool: spec.tool_name, outcome };
+  };
 
   const work = async (command) => {
     await post("/api/inbox/bridge/event", { type: "delivered", id: command.id }).catch(() => {});
@@ -247,10 +401,17 @@ async function session(sessionId) {
     busy = true;
     updateAgent(sessionId, { status: "busy" });
     await post("/api/inbox/bridge/event", { type: "state", busy: true }).catch(() => {});
+    const outcomes = [];
+    for (const spec of config().prompts || []) {
+      if (stopped) return;
+      outcomes.push(await prompt(spec));
+    }
     const until = Date.now() + (config().workMs ?? 800);
     while (!stopped && (Date.now() < until || config().hold || config().waiting)) await sleep(150);
     const first = command.body.split("\n")[0].slice(0, 60);
-    const body = `${config().answer || "Done"}: ${first} (${env.PLANNOTATOR_LAUNCH || "no launch"})`;
+    const tools = outcomes.length > 0 ? ` [${outcomes.map((o) => `${o.tool} ${o.outcome}`).join(", ")}]` : "";
+    // `body`: the whole answer, in words (a screenshot's realistic reply); otherwise the line tests read.
+    const body = config().body || `${config().answer || "Done"}: ${first} (${env.PLANNOTATOR_LAUNCH || "no launch"})${tools}`;
     await fetch(`${base}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
@@ -271,6 +432,7 @@ async function session(sessionId) {
   while (!stopped) {
     const response = await post("/api/inbox/bridge/poll", { waitMs: 1000, project_path: agent.cwd, started_at: startedAt, busy, idle_since: busy ? null : idleSince }).catch(() => null);
     if (!response) {
+      reconnect();
       await sleep(300);
       continue;
     }

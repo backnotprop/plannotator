@@ -635,6 +635,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           start={launch && canStart ? { launch, current: start ? { id: start.project.id, root: start.project.root } : current } : null}
           onStart={(picked) => {
             setStartPick({ agent: picked.agent, projectId: picked.project.id });
+            // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
+            void inboxApi.launchSettingsRead(true).catch(() => {});
             setChosen(null);
             setPicker(false);
             setError(null);

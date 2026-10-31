@@ -652,6 +652,48 @@ export function claudePluginStateFromScopes(
   return { state: registered ? "enabled" : "absent", managed: false };
 }
 
+/**
+ * What the person's own Claude Code setup says about permission modes, read-only (the values below only,
+ * nothing else kept), from the same sources Claude Code 2.1.314 reads:
+ * - consent: `skipDangerousModePermissionPrompt` in managed or user `settings.json`, or
+ *   `bypassPermissionsModeAccepted` in the global config (`~/.claude.json`, `$CLAUDE_CONFIG_DIR/.claude.json`).
+ *   Never a project's or a `--settings` file's (Claude says those do not count), and the Inbox never writes it.
+ * - disabled: `permissions.disableBypassPermissionsMode: "disable"` (that value only) in any settings Claude
+ *   merges: managed, the user's `settings.json`, and the launch folder's `.claude/settings{,.local}.json`
+ *   (Claude never reads `~/.claude/settings.local.json` for a session in another folder).
+ * - defaultMode: `permissions.defaultMode`, the strongest scope that sets one (managed, the folder's local and
+ *   shared settings, then the user's); a folder's `bypassPermissions` is skipped, as Claude ignores it.
+ * `folder` is the launch's folder; Settings → Agents passes none (the person's own files only).
+ */
+export function claudeBypassSetup(e: AgentEnvironment, folder: string | null = null): { consent: boolean; disabled: boolean; defaultMode: string | null } {
+  const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+  const permissions = (settings: unknown) => record(record(settings).permissions);
+  const managedPath = claudeManagedSettingsPath(e);
+  const managed = managedPath ? readClaudeSettings(managedPath) : null;
+  const user = readClaudeSettings(join(claudeConfigDir(e), "settings.json"));
+  const projectLocal = folder ? readClaudeSettings(join(folder, ".claude", "settings.local.json")) : null;
+  const project = folder ? readClaudeSettings(join(folder, ".claude", "settings.json")) : null;
+  const disabled = [managed, user, projectLocal, project].some((settings) => permissions(settings).disableBypassPermissionsMode === "disable");
+  const configDir = envDir(e, "CLAUDE_CONFIG_DIR");
+  const global = readAgentFile(configDir ? join(configDir, ".claude.json") : join(e.homeDir, ".claude.json"));
+  let accepted = false;
+  if (global.kind === "file") {
+    try {
+      accepted = record(JSON.parse(global.text)).bypassPermissionsModeAccepted === true;
+    } catch {
+      accepted = false;
+    }
+  }
+  const consent = accepted || [managed, user].some((settings) => record(settings).skipDangerousModePermissionPrompt === true);
+  const modeOf = (settings: unknown, fromFolder: boolean): string | null => {
+    const mode = permissions(settings).defaultMode;
+    if (typeof mode !== "string" || mode.trim() === "") return null;
+    return fromFolder && mode.trim() === "bypassPermissions" ? null : mode.trim();
+  };
+  const defaultMode = modeOf(managed, false) ?? modeOf(projectLocal, true) ?? modeOf(project, true) ?? modeOf(user, false);
+  return { consent, disabled, defaultMode };
+}
+
 /** Claude Code's managed (enterprise) settings file, per platform. */
 function claudeManagedSettingsPath(e: AgentEnvironment): string | null {
   // A test's agents never read the machine's own managed settings.

@@ -10,6 +10,7 @@ import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxListRow, type InboxSectionId, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -43,6 +44,7 @@ import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenAr
 import { GuideCard } from './GuideCard';
 import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
+import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
@@ -1023,6 +1025,8 @@ export interface ThreadPaneProps {
    * Absent: not a launched thread, or launch is off (the delivery line as always).
    */
   run?: InboxRun | null;
+  /** The host's attach command for a launched thread (the thread route's `attach_command`), also while the agent rests. */
+  attachCommand?: string | null;
   /** Stop, Try again or Delete changed the launch: read the thread again. */
   onRunChanged?: () => void;
 }
@@ -1211,7 +1215,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, run: runLine, onRunChanged }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, run: runLine, attachCommand = null, onRunChanged }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1220,6 +1224,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const asker = startedTo ? hostName(startedTo.host) : agentName(root.author);
   // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
   const launched = root.launch ?? null;
+  // Launch is on for this thread (a launched thread whose read carries a run line).
+  const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const launchAct = async (action: () => Promise<unknown>, done?: string) => {
@@ -1232,13 +1238,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       setLaunchError(cause instanceof InboxApiError ? cause.message : 'That did not work; try again.');
     }
   };
+  // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
+  const attach = runLine?.attach_command ?? attachCommand;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
           name: hostName(launched.agent),
           open: phone || remote === true || (!launched.session_ref && !runLine?.untrusted) ? null : () => void launchAct(() => inboxApi.launchOpen(launched.id)),
-          copyAttach: runLine?.attach_command
-            ? () => void copyTextToClipboard(runLine.attach_command!).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
+          copyAttach: attach
+            ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
           // A resting agent (no line) still runs in the background: Stop is offered then too.
           stop:
@@ -3407,6 +3415,26 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // note) are read past: they are not the person's reply, and the line stays
   // on the reply before them.
   const last = lastNonNote(thread.messages) ?? thread.messages[0]!;
+  // A launched session's permission prompts (with launch on): each is its own card (PermissionCard), the
+  // reply that carried its answer is not shown (the card says it), nor the follow-up that withdrew one
+  // (the card says that too). While the session waits on one, the card's header is the run line.
+  const isPermMessage = (m: InboxMessageWire) => launchOn && m.author.kind === 'agent' && isInboxPermissionSession(m.author.session);
+  const permMessages = thread.messages.filter(isPermMessage);
+  const permAnswerReplies = new Set(permMessages.flatMap((m) => (m.questions ?? []).map((q) => q.sent_reply_id).filter((id): id is string => !!id)));
+  const permWaiting = permMessages.some((m) => (m.questions ?? []).some((q) => q.state === 'open' || q.state === 'picked'));
+  const runInCard = permWaiting && runLine?.state === 'waiting_answer';
+  const newestId = thread.messages.at(-1)?.id ?? null;
+  const permFollowUp = (m: InboxMessageWire): string | null => {
+    const by = m.questions?.[0]?.superseded_by?.message_id;
+    return by ? (thread.messages.find((x) => x.id === by)?.body.trim() ?? null) : null;
+  };
+  // The session already switched to Full permissions from an earlier prompt: no confirm again (the store's rule too).
+  const permFullUsed = (m: InboxMessageWire): boolean => {
+    const session = m.author.kind === 'agent' ? m.author.session : null;
+    return permMessages.some(
+      (x) => x.id !== m.id && x.author.kind === 'agent' && x.author.session === session && (x.questions ?? []).some((q) => q.state === 'sent' && !!q.answer?.selected.includes(INBOX_PERMISSION_FULL)),
+    );
+  };
   const askedBy = (message: InboxMessageWire) => (message.reply_to ? thread.messages.find((m) => m.id === message.reply_to) : undefined);
   // A reply the person sent to another session names the session that took it
   // ("Claude Code (another session)" when it is the asker's own host).
@@ -4321,6 +4349,26 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           // The day too when it is not today, and the whole moment on hover.
           const time = whenTime(message.created_at);
           const fullWhen = fullTime(message.created_at);
+          // A permission prompt: its card, or nothing for the reply that answered it and the follow-up that withdrew it.
+          if (isPermMessage(message) || permAnswerReplies.has(message.id)) {
+            if (isPermMessage(message) && (message.questions?.length ?? 0) > 0) {
+              before.push(
+                <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
+                  <div data-message-id={message.id}>
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
+                  </div>
+                </article>,
+              );
+            }
+            if (message === last && runLine && !runInCard) {
+              before.push(
+                <div className="ib-msg" key="perm-run">
+                  <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />
+                </div>,
+              );
+            }
+            return before;
+          }
           // A Tidy note: one quiet line in place of the message.
           if (message.tidy) {
             before.push(<TidyNote key={message.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
@@ -4624,7 +4672,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
+                {message === last && runLine && !runInCard && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
                 {message === last && !runLine && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
