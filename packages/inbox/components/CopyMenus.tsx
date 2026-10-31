@@ -134,10 +134,12 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
 /**
  * The thread header's ⋯ More: Pin thread (Unpin thread while pinned) first, in its own group, as the row menu
  * leads with it (only when the Inbox keeps pins: `pin` is absent on an older one, and a phone's way to pin
- * is here, it has no row menu); then Copy thread, Copy link and Copy thread ID (a phone's only way to them).
+ * is here, it has no row menu), and Mark unread on a read thread (`markUnread`; markRead.ts `canMarkUnread`,
+ * also while the list still holds the row in New, or with a Mark read standing); then Copy thread, Copy link and
+ * Copy thread ID (a phone's only way to them).
  */
-export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void } }) {
-  const { thread, phone, pin } = props;
+export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void }) {
+  const { thread, phone, pin, markUnread } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   return (
@@ -155,14 +157,18 @@ export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onTo
               {thread.subject ?? '(no subject)'}
             </div>
             {pin && (
-              <>
-                <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unpin thread' : 'Pin thread'} onClick={pin.onToggle} data-thread-pin-item="">
-                  <Icon name={pin.pinned ? 'pinOff' : 'pin'} size={15} />
-                  {pin.pinned ? 'Unpin thread' : 'Pin thread'}
-                </Menu.Item>
-                <Menu.Separator className="ib-pm-sep" />
-              </>
+              <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unpin thread' : 'Pin thread'} onClick={pin.onToggle} data-thread-pin-item="">
+                <Icon name={pin.pinned ? 'pinOff' : 'pin'} size={15} />
+                {pin.pinned ? 'Unpin thread' : 'Pin thread'}
+              </Menu.Item>
             )}
+            {markUnread && (
+              <Menu.Item className="ib-pmi" label="Mark unread" onClick={markUnread} data-thread-unread-item="">
+                <Icon name="envelope" size={15} />
+                Mark unread
+              </Menu.Item>
+            )}
+            {(pin || markUnread) && <Menu.Separator className="ib-pm-sep" />}
             <Menu.Item className="ib-pmi" label="Copy thread" onClick={() => copies.thread()} data-copy-item="thread">
               <Icon name="stack" size={15} />
               Copy thread
