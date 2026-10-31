@@ -68,6 +68,8 @@ export interface FakePermissionPrompt {
    * its own dialog comes up only after the hook ends.
    */
   safetyCheck?: boolean;
+  /** The person's own `permissions.ask` rule: person-only like a safety check (allow ignored, dialog after the hook), with no auto-block. */
+  askRule?: boolean;
 }
 
 /** What a permission prompt came to (permissions.jsonl). */

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { NO_BROWSER } from "../../tests/helpers/no-browser";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, createLoginEnv, launchPlainEnv, launchSettingsEnv, launchSpawnEnv, launchStartOf, parseMarkedEnv, shellSkipsPermissions } from "./inbox-launch-env";
 
 const login = {
@@ -15,7 +16,7 @@ const login = {
   PLANNOTATOR_DATA_DIR: "/tmp/inbox-data",
   PLANNOTATOR_ASK_AI_CHILD: "1",
   PLANNOTATOR_PORT: "19432",
-  PLANNOTATOR_BROWSER: "none",
+  PLANNOTATOR_BROWSER: NO_BROWSER,
   CODEX_THREAD_ID: "t1",
 };
 
