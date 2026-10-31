@@ -790,15 +790,30 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    (no `.ib-fullw`) keeps option A: the short words in 124px and the bare triangle in 52px. */
 .ib-row { display: grid; grid-template-columns: 220px minmax(0, 1fr) 124px 52px 84px 76px; align-items: center; gap: 0 10px; height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-14, 14px); width: 100%; text-align: left; }
 .ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
-/* One project's list: the first column holds the agents' marks alone (InboxList's WideRow), as wide as this row's
-   marks and no wider (the owner, 2026-10-31: no blank before the title), so the title follows its own marks. The
-   list keeps the wide row at any width, so the marks' track is bounded (`minmax(min-content, max-content)`) and the
-   title keeps at least 24px: short of room the run wraps between marks (below) before the title goes, and the
-   columns right of the title never move. With room, the run is one line and the title hugs it. 24px, not more: in a
-   780px window the row has about 102px for the marks and the title, and three "×N" hosts (34px each) need 73px to
-   take two lines; narrower (768px, or the pin's column) they take three, which the 50px row still holds. */
-.ib-noproj .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) 124px 52px 84px 76px; }
-.ib-noproj.ib-fullw .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
+/* One project's list: the first column holds the agents' tiles alone (InboxList's WideRow), as wide as this row's
+   tiles and no wider (the owner, 2026-10-31: no blank before the title), so the title follows its own tiles. The
+   list keeps the wide row down to 496px (`ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH`, past the default sidebar at the
+   narrowest desktop window), and short of room in that band the words column gives way first: the title keeps at
+   least 96px (about nine characters) and the words track gives up its 124px, its words ending in "…" (they are in
+   the tooltip), while the tiles and "+N" stay whole on one line and the columns right of the words stay in line. A
+   track that can shrink fills up before the title's `1fr` grows, so with room the words keep their 124px and nothing
+   changes. Words with nothing else on the row to say them (Draft, Answered, Read …) have their track fit the words,
+   up to 124px, so the title keeps what they do not use (they end on the column's right edge either way). Short of
+   room they keep 4.4em, "Answered" whole at any text size, and the title gives up the difference, down to 56px. Such
+   a row's cell drops the size containment below: it would measure the words as nothing. An Undelivered pill has the
+   clock before the time to say it waits, so its row keeps the title's 96px and the pill leaves at 72px or less
+   (below) rather than shrink to a letter. Its empty cell then fills the column, so its tooltip stays under a resting
+   pointer: a hovered row with Mark read or Send now hides the clock, and the clock's tooltip with it. Under 496px,
+   which only a wide sidebar reaches, the list draws three-line rows, where nothing is cut. */
+.ib-noproj .ib-row { --ib-title-min: 96px; --ib-words-track: minmax(0, 124px); grid-template-columns: max-content minmax(var(--ib-title-min), 1fr) var(--ib-words-track) 52px 84px 76px; }
+.ib-noproj .ib-row .ib-cw { container-type: inline-size; }
+.ib-noproj .ib-row:has(.ib-cw :is(.ib-cst, .ib-draft-l)) { --ib-title-min: 56px; --ib-words-track: fit-content(124px); }
+.ib-noproj .ib-row:has(.ib-cw :is(.ib-cst, .ib-draft-l)) .ib-cw { container-type: normal; min-width: 4.4em; }
+@container (max-width: 72px) {
+  .ib-noproj .ib-row .ib-cs > .ib-badge.ib-b-wait { display: none; }
+  .ib-noproj .ib-row .ib-c.ib-cwords:has(.ib-b-wait) { flex: 1 1 100%; min-height: 20px; }
+}
+.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(96px, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
 /* The pin's column (the owner, 2026-10-31: the pin beside the counts, as on the three-line row), only in a list with a
    pinned row (`.ib-pincol`), between the badge and the open counts, so the pins line up next to `?N` and the badge
    and the counts keep their columns. It takes the pin's 13px plus an 8px gap from the title cell: an 11px track and
@@ -809,8 +824,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    The one-project list with Hide agent icons has its own two templates (with the list's look options, below). */
 .ib-pincol .ib-row { grid-template-columns: 220px minmax(0, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-pincol.ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
-.ib-pincol.ib-noproj .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) 124px 52px 11px var(--ib-cq-w, 84px) 76px; }
-.ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj .ib-row { grid-template-columns: max-content minmax(var(--ib-title-min), 1fr) var(--ib-words-track) 52px 11px var(--ib-cq-w, 84px) 76px; }
+.ib-pincol.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(96px, 1fr) clamp(148px, 14%, 160px) 110px 11px var(--ib-cq-w, 84px) 76px; }
 .ib-row .ib-cpin { display: flex; align-items: center; min-width: 0; overflow: visible; }
 /* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
    edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run out
@@ -828,20 +843,16 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row .ib-bcol .ib-badge.ib-b-stop { background: linear-gradient(var(--ib-badge-stop-bg), var(--ib-badge-stop-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
 .ib-row .ib-bcol .ib-badge.ib-b-hold { background: linear-gradient(var(--ib-badge-hold-bg), var(--ib-badge-hold-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
 .ib-row .ib-c.ib-qn { justify-content: flex-end; }
-/* The project cell (the owner, 2026-10-31): the agents' marks, never cut, then 6px (the three-line row's gap,
+/* The project cell (the owner, 2026-10-31): the agents' tiles, never cut, then 6px (the three-line row's gap,
    approval "inbox-list-row-v2", v2-r3), then the project hugging them, cut with "…". No slot reserves width: each
-   row's project starts right after its own marks. The project is first in the DOM, so a screen reader reads where,
-   then who; `order` draws the marks first. With Hide agent icons the marks leave and the project starts the cell. */
+   row's project starts right after its own tiles. The project is first in the DOM, so a screen reader reads where,
+   then who; `order` draws the tiles first. With Hide agent icons the tiles leave and the project starts the cell. */
 .ib-row .ib-from { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ib-row .ib-from > .ib-ags { order: -1; }
 .ib-row .ib-p { flex: 0 1 auto; min-width: 0; font-weight: 400; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* One project's list: the marks alone in a column as wide as they are, and the title 6px after them, the same gap:
-   the grid's 10px gap less 4px the marks reach into it (a negative margin takes 4px off their track). Short of room
-   (a narrow list, three hosts with "×N") the run wraps between marks inside its track rather than take the title's
-   last 24px or push the columns after it: two lines, or three at the narrowest, with no gap between lines, so three
-   16px lines (48px) still sit inside the 50px row. */
+/* One project's list: the tiles alone in a column as wide as they are, and the title 6px after them, the same gap:
+   the grid's 10px gap less 4px the tiles reach into it (a negative margin takes 4px off their track). */
 .ib-noproj .ib-row .ib-from { margin-right: -4px; }
-.ib-noproj .ib-row .ib-ags { flex: 0 1 auto; flex-wrap: wrap; height: auto; min-height: 16px; row-gap: 0; max-width: 100%; }
 .ib-row.ib-u .ib-title { font-weight: 600; }
 /* The thread chip: it can shrink to its border (flex), and its name keeps its
    own 166px cap and ellipsis (the inner span), so the chip is as wide as before
@@ -930,9 +941,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-c.ib-cwords { display: inline-flex; justify-content: flex-end; align-items: center; max-width: 124px; min-width: 0; flex: none; }
 .ib-cwords > .ib-cs { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: nowrap; }
 .ib-cs > .ib-cst { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* A wide row's full words fill its words column; past it they end in "…" (the draft's words too). */
-.ib-row .ib-c.ib-cwords.ib-cfull { max-width: 100%; }
-.ib-cfull > .ib-cs > .ib-draft-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A wide row's full words fill its words column; past it they end in "…" (the draft's words too). So do the short
+   words in one project's list, whose words column gives way to the title short of room. */
+.ib-row .ib-c.ib-cwords.ib-cfull, .ib-noproj .ib-row .ib-c.ib-cwords { flex: 0 1 auto; max-width: 100%; }
+.ib-row .ib-cwords > .ib-cs > .ib-draft-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The Undelivered pill never spills from its slot (review D1): its age is in minutes, hours or days, and words
    past the slot end in "…" inside the pill. */
 .ib-cs > .ib-badge.ib-b-wait { flex: 0 1 auto; min-width: 0; max-width: 100%; }
@@ -949,32 +961,33 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    outlined, and so is this one. */
 .ib-badge.ib-bicon.ib-b-act { padding: 0 7px 0 6px; background: var(--ib-badge-act-bg); color: var(--foreground); }
 .pn-inbox .ib-b-act svg.ib-ic { stroke-width: 2; }
-/* A wide row's agents' marks before the project (approval "list-rows-mail-icons", `RowAgents`): one bare 16 px mark
-   per host (the scale's row size, no tile), 5px apart; a host's "×N" 2px after its mark; past three hosts two
-   marks and a "+N" pill. The marks take the line's quiet colour (OpenCode's mark is `currentColor`). */
-.ib-ags { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 16px; white-space: nowrap; color: var(--muted-foreground); }
+/* A wide row's agents before the project (approval "list-rows-mail-icons", `RowAgents`; the owner, 2026-10-31): the
+   list's overlapping grey tiles (`.ib-atile`, below), one per host, at most three, then "+N" as plain small text 3px
+   after them. They take the line's quiet colour (OpenCode's mark is `currentColor`). */
+.ib-ags { display: inline-flex; align-items: center; column-gap: 3px; flex: none; white-space: nowrap; color: var(--muted-foreground); }
+.ib-agplus { font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; line-height: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* A three-line or phone row's line 1 (approval "inbox-list-row-v2", 2026-10-30, `RowAgentTiles`): the agents, then
    the project, like a sidebar row. The tiles' run is bounded (at most two tiles, one per agent, and a "+N" tile for
    the other agents) and never shrinks; the project takes the rest of the line on one line, cut with "…". The
    project comes first in the DOM, so a screen reader reads it before the agents, as on a wide row; `order` draws
    the tiles first. The tiles are the thread head's overlapping
-   tiles (`.ib-tg-stack`: the scale's 20, its 13px glyph, 5px under each other). A tile's fill already pads its
-   glyph, so the project sits 6px from the tile's edge. In place of the head's ring, each tile under another is cut
-   1.5px short of it (a mask), so the cut shows the row's own ground on hover, selection and dark alike. A negative
-   block margin keeps the 20px tiles from making the 17px line taller. */
+   tiles (`.ib-tg-stack`: the scale's 20, its 13px glyph, 5px under each other), and a wide row draws the same ones.
+   A tile's fill already pads its glyph, so the project sits 6px from the tile's edge. No ring and no cut (the owner,
+   2026-10-31: every logo whole): the fills run together into one grey shape. 5px under each other takes the tile's
+   padding and 1.5px of its glyph, so the glyphs are positioned and the fills are not: every glyph paints over every
+   fill, whole, 2px clear of the next. On a hovered row, whose pill is this same grey at 45%, the tile steps halfway
+   to the border's grey, so it holds on the pill; in dark it was nearly gone. A negative block margin keeps the 20px
+   tiles from making the 17px line taller. */
 .ib-from.ib-lead { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
 .ib-lead > .ib-p { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-atiles { display: inline-flex; align-items: center; flex: none; height: 20px; margin: -1.5px 0; }
 .ib-lead > .ib-atiles { order: -1; }
-.ib-atile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--muted); position: relative; }
-.ib-atile:has(+ .ib-atile) { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 6.5px), transparent calc(100% - 6.5px)); mask-image: linear-gradient(to right, #000 calc(100% - 6.5px), transparent calc(100% - 6.5px)); }
+.ib-atile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--muted); }
+:is(.ib-row, .ib-nrow):hover:not(.ib-sel) .ib-atile, .ib-rw[data-menu] :is(.ib-row, .ib-nrow):not(.ib-sel) .ib-atile, .ib-mrow[data-menu] .ib-atile { background: color-mix(in oklch, var(--muted) 50%, var(--border)); }
 .ib-atile + .ib-atile { margin-left: -5px; }
+.ib-atile > .ib-mk { position: relative; }
 .ib-atile > .ib-mk, .ib-atile > .ib-mk > svg, .ib-atile > .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
 .ib-atile.ib-atmore { font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; color: var(--muted-foreground); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; min-width: var(--ib-mark-20); width: auto; padding: 0 3px; }
-.ib-ag { display: inline-flex; align-items: center; gap: 2px; }
-.ib-agx { position: relative; top: 2px; font-size: var(--ib-fs-12, 12px); font-weight: 600; line-height: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-row .ib-agx { top: 1px; }
-.ib-agplus { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 999px; font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; color: var(--muted-foreground); background: var(--muted); font-variant-numeric: tabular-nums; }
 /* Hover and the selected row (design record "inbox-polish", item 1, variant A · Inset): a pill 3 px inside
    the row (its ::before, radius 8, no border), so the separators run on unbroken and never touch it, and the
    first row under a band keeps a gap, as the sidebar's active row sits inside its column. Keyboard focus is a
