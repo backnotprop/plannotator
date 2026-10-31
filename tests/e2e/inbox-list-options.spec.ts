@@ -300,6 +300,12 @@ test('by keyboard: Enter opens ⋮, the arrows reach an option, Space and Enter 
     await page.keyboard.press(' ');
     await expect(option(page, 'hideAgents')).toHaveAttribute('aria-checked', 'false');
     expect(await lookClasses(page)).toEqual(['ib-lk-compact']);
+    // The fourth option, the last one, by the arrows too.
+    await page.keyboard.press('ArrowDown');
+    expect(await highlighted()).toBe('smallNames');
+    await page.keyboard.press(' ');
+    await expect(option(page, 'smallNames')).toHaveAttribute('aria-checked', 'true');
+    expect(await lookClasses(page)).toEqual(['ib-lk-compact', 'ib-lk-small']);
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-tidy-menu-popup]')).toHaveCount(0);
     await expect(trigger).toBeFocused();

@@ -12,10 +12,12 @@
  *  - Never on the same load as the sound dialog or the tour; the next load shows it.
  *  - With a thread open too (the owner, 2026-10-31): a first load on a thread link (desktop or phone) shows it over the
  *    thread after the same short wait as a first load on the list, with the picture's rows drawn (a phone hides the
- *    real list under a thread); never while a reply is being typed there, then once it is not; never while a file is
- *    open beside the thread, then after the short wait once it is closed.
- *  - Light for everyone: under a dark window the dialog is drawn light (its text and switches pass WCAG AA there),
- *    and the window behind stays dark.
+ *    real list under a thread); never while a reply is being typed there or left with words in its box, then once
+ *    it is not; never while a file is open beside the thread, then after the short wait once it is closed; never
+ *    under an image opened full size or a modal layer; another thread opened just before the wait ends starts it again.
+ *  - The dialog follows the window's mode, its text and switches at WCAG AA in dark and light (desktop and a dark
+ *    phone); only its picture is light, in both (and under Synthwave '84), and nothing else on the page is a light
+ *    scope or a second window root.
  *  - The picture's thread names stay on one line, a long one cut with "…" (the owner: no long names in the examples).
  *  - Smaller thread names is the fourth switch, in the preview and saved by Done.
  *  - Dark, and a 390 px phone: a bottom sheet with the phone's rows.
@@ -200,8 +202,12 @@ async function dialogContrast(page: Page): Promise<Record<string, number>> {
     const done = dialog.querySelector('[data-list-intro-done]')!;
     const off = dialog.querySelector<HTMLElement>('.ib-sw[aria-checked="false"]')!;
     const offStyle = getComputedStyle(off);
+    const picture = dialog.querySelector('[data-list-intro-picture]')!;
+    const pictureBg = getComputedStyle(picture).backgroundColor;
     return {
       background: lum(bg),
+      picture: lum(pictureBg),
+      pictureName: ratio(getComputedStyle(picture.querySelector('.ib-title, .ib-m2')!).color, pictureBg),
       title: ratio(color('#ib-lo-title'), bg),
       line: ratio(color('#ib-lo-desc'), bg),
       label: ratio(color('.ib-lo-opt > span'), bg),
@@ -214,7 +220,7 @@ async function dialogContrast(page: Page): Promise<Record<string, number>> {
 }
 
 function contrastPasses(c: Record<string, number>) {
-  for (const key of ['title', 'line', 'label', 'keep', 'done']) expect(c[key], `${key}: text 4.5:1`).toBeGreaterThanOrEqual(4.5);
+  for (const key of ['title', 'line', 'label', 'keep', 'done', 'pictureName']) expect(c[key], `${key}: text 4.5:1`).toBeGreaterThanOrEqual(4.5);
   for (const key of ['offOutline', 'offThumb']) expect(c[key], `${key}: 3:1`).toBeGreaterThanOrEqual(3);
 }
 
@@ -429,11 +435,63 @@ test('over a thread, never while a reply is being typed: it waits, unspent, and 
   await page.waitForTimeout(6000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
   expect(saved(w)?.shownAt).toBeUndefined();
+  // Focus leaves the box, its words still in it: still nothing, still unspent.
+  await pane.locator('h2.ib-subject').click();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('TEXTAREA');
+  await expect(box).toHaveValue('Build the pill version.');
+  await page.waitForTimeout(6000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(saved(w)?.shownAt).toBeUndefined();
   // The reply gone and the box left: it shows over the thread.
   await box.fill('');
   await pane.locator('h2.ib-subject').click();
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
   expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+});
+
+test('never under an image opened full size or another modal layer: it waits, unspent, and shows once it is gone', async ({ browser }) => {
+  const w = await world({ earlier: true });
+  const page = await (await context(browser, { reduce: true })).newPage();
+  await page.goto(`${w.url}#thread=${w.opened}`);
+  await expect(page.locator('.ib-pane h2.ib-subject').first()).toBeVisible({ timeout: 15_000 });
+  // The layers ui draws over the page by itself, outside the route and the window's dialogs: the image lightbox's
+  // own marker (`data-image-lightbox`), then a modal panel (`aria-modal`), each as ui renders it on <body>.
+  for (const layer of ['[data-image-lightbox]', '[role="dialog"][aria-modal="true"]']) {
+    // One layer swapped for the next in the same task, so the page is never free in between.
+    await page.evaluate((which) => {
+      document.getElementById('stand-in-layer')?.remove();
+      const el = document.createElement('div');
+      el.id = 'stand-in-layer';
+      if (which === '[data-image-lightbox]') el.setAttribute('data-image-lightbox', '');
+      else {
+        el.setAttribute('role', 'dialog');
+        el.setAttribute('aria-modal', 'true');
+      }
+      document.body.appendChild(el);
+    }, layer);
+    await page.waitForTimeout(4500);
+    await expect(page.locator(DIALOG), layer).toHaveCount(0);
+    expect(saved(w)?.shownAt, layer).toBeUndefined();
+  }
+  await page.evaluate(() => document.getElementById('stand-in-layer')?.remove());
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
+  expect(saved(w)?.shownAt).toMatch(/^\d{4}-/);
+});
+
+test('another thread opened just before the wait ends: the wait starts again from there', async ({ browser }) => {
+  const w = await world({ earlier: true });
+  const page = await (await context(browser, { reduce: true })).newPage();
+  await page.goto(w.url);
+  const rows = page.locator('.ib-lbody [data-thread-id]');
+  await expect(rows.first()).toBeVisible({ timeout: 15_000 });
+  // Just short of the wait from the list's first draw.
+  await page.waitForTimeout(2000);
+  await expect(page.locator(DIALOG)).toHaveCount(0);
+  await rows.first().click();
+  const opened = Date.now();
+  await expect(page.locator('.ib-pane h2.ib-subject').first()).toBeVisible();
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 15_000 });
+  expect(Date.now() - opened).toBeGreaterThanOrEqual(2000);
 });
 
 test('never over a file open beside a thread: it waits, unspent; closed, it shows after the short wait', async ({ browser }) => {
@@ -460,13 +518,26 @@ test('never over a file open beside a thread: it waits, unspent; closed, it show
   expect(await page.evaluate(() => location.hash)).not.toContain('file=');
 });
 
-test('light for everyone: under a dark window the dialog is light and passes WCAG AA; the window stays dark', async ({ browser }) => {
-  for (const dark of [true, false]) {
+test('the dialog follows the window\'s mode and passes WCAG AA in both; only its picture is light', async ({ browser }) => {
+  const cases = [
+    { dark: true, phone: false, name: 'dark-window-dark-dialog-light-preview' },
+    { dark: false, phone: false, name: 'light-window-light-dialog' },
+    { dark: true, phone: true, name: 'phone-dark' },
+  ];
+  for (const { dark, phone, name } of cases) {
     const w = await world({ earlier: true });
-    const page = await (await context(browser, { dark, reduce: true })).newPage();
+    const page = await (await context(browser, { dark, phone, reduce: true })).newPage();
     await page.goto(`${w.url}#thread=${w.opened}`);
     await settledDialog(page);
     expect(await page.evaluate(() => document.documentElement.classList.contains('light'))).toBe(!dark);
+    // The light scope is the picture alone: no other element of the page is light or a scope, and the picture is
+    // not a second window root (`.pn-inbox`), so the window's own layout rules never reach it.
+    const scopes = await page.evaluate(() => ({
+      light: [...document.querySelectorAll('body .light, .ib-lightscope')].map((el) => ({ picture: el.hasAttribute('data-list-intro-picture'), dialogText: el.querySelectorAll('#ib-lo-title, [role="switch"], [data-list-intro-done]').length })),
+      roots: document.querySelectorAll('.pn-inbox').length,
+      pictureRoot: document.querySelector('[data-list-intro-picture]')!.classList.contains('pn-inbox'),
+    }));
+    expect(scopes).toEqual({ light: [{ picture: true, dialogText: 0 }], roots: 1, pictureRoot: false });
     // The thread behind keeps the window's mode.
     const paneLight = await page.locator('section.ib-pane').first().evaluate((el) => {
       const ctx = document.createElement('canvas').getContext('2d')!;
@@ -477,10 +548,26 @@ test('light for everyone: under a dark window the dialog is light and passes WCA
     });
     expect(paneLight, 'the thread behind').toBe(!dark);
     const c = await dialogContrast(page);
-    expect(c.background, `a light dialog: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
+    // The dialog in the window's mode; the picture light in both.
+    if (dark) expect(c.background, `a dark dialog: ${JSON.stringify(c)}`).toBeLessThan(0.1);
+    else expect(c.background, `a light dialog: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
+    expect(c.picture, `a light picture: ${JSON.stringify(c)}`).toBeGreaterThan(0.8);
     contrastPasses(c);
     await namesOneLine(page);
-    await shot(page, dark ? 'dark-window-light-dialog' : 'light-window-light-dialog');
+    await shot(page, name);
+    if (dark && !phone) {
+      // A dark palette with its own ground rule for the window (Synthwave '84, Terminal): the picture keeps its own.
+      const ground = () => page.locator('[data-list-intro-picture]').evaluate((el) => getComputedStyle(el).getPropertyValue('--ib-ground-panes').trim());
+      const before = await ground();
+      await page.evaluate(() => {
+        const root = document.documentElement;
+        for (const cls of [...root.classList]) if (cls.startsWith('theme-')) root.classList.remove(cls);
+        root.classList.add('theme-synthwave-84');
+      });
+      expect(await ground()).toBe(before);
+      const synth = await dialogContrast(page);
+      expect(synth.picture, `a light picture under Synthwave: ${JSON.stringify(synth)}`).toBeGreaterThan(0.8);
+    }
   }
 });
 

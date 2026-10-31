@@ -97,7 +97,7 @@ import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWa
 import { readListLook, writeListLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
-import { leaveOnPurpose, unsentReply } from './unsent';
+import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, seenHeldInNew } from './markRead';
@@ -529,6 +529,16 @@ function replyInProgress(): boolean {
   if (unsentReply()) return true;
   const active = document.activeElement as HTMLElement | null;
   return !!active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable);
+}
+
+/**
+ * The list options dialog waits (its claim unspent, or a claimed one unopened) while anything else is over the page or
+ * a reply is under way: another dialog, a modal panel ui draws (`aria-modal`), an image opened full size, a pinned
+ * reference card, a reply being typed, or a reply box left open with words or files in it, wherever focus is.
+ */
+function listIntroHeldBack(): boolean {
+  if (modalOpen() || replyInProgress() || replyBeingWritten()) return true;
+  return document.querySelector('[role="dialog"][aria-modal="true"], [data-image-lightbox], [data-ref-card-pinned]') !== null;
 }
 
 function hasRows(sections: readonly InboxListSection[] | null): boolean {
@@ -3092,8 +3102,10 @@ function Inbox() {
   // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
   // on a load that showed either or the tour, only with three rows or more and only once the Inbox page (the list, a
   // thread open or not) has been settled for a moment with no file, document, guided review, Artifacts view, search or
-  // new message over it (each keeps the claim waiting, unspent). It waits while a reply
-  // is typed or another dialog is open, then claims it from the Inbox (only the first claim ever shows it).
+  // new message over it (each keeps the claim waiting, unspent); opening another thread, project or machine starts the
+  // wait again. It waits while a reply is typed or left open with words or files, or another dialog, an image opened
+  // full size or a pinned reference card is over the page (listIntroHeldBack), then claims it from the Inbox (only
+  // the first claim ever shows it).
   if (route.page === 'tour') tourThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
     listIntroLatch.current = {
@@ -3126,12 +3138,13 @@ function Inbox() {
     if (!listIntroWatch || !listIntroClear) return;
     const timer = setTimeout(() => setListIntroSettled(true), LIST_INTRO_SETTLED_MS);
     return () => clearTimeout(timer);
-  }, [listIntroWatch, listIntroClear]);
+    // Another thread, project or machine opened: the same wait again from there, so it never lands as a page changes.
+  }, [listIntroWatch, listIntroClear, route.thread, route.project, route.machine]);
   const listIntroReady = listIntroMayAsk(listIntroLoad, { modal: false, replying: false });
   useEffect(() => {
     if (!listIntroReady || listIntroAsked.current) return;
     const ask = () => {
-      if (listIntroAsked.current || modalOpen() || replyInProgress()) return false;
+      if (listIntroAsked.current || listIntroHeldBack()) return false;
       listIntroAsked.current = true;
       // Claimed: the Inbox has retired it, so this page shows it, but only once the page is free again (below).
       inboxApi
@@ -3156,7 +3169,7 @@ function Inbox() {
   useEffect(() => {
     if (!listIntroClaimed || !listIntroPlaceFree) return;
     const open = () => {
-      if (modalOpen() || replyInProgress()) return false;
+      if (listIntroHeldBack()) return false;
       setListIntro('open');
       return true;
     };

@@ -2612,10 +2612,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     replyFiles.add(list);
     setError(null);
   });
+  // The box open with words or files in it, wherever focus is: the list options dialog waits for it (App).
+  const unsentWriting = box.open && (boxWords !== '' || unsentFiles);
   useEffect(() => {
-    reportUnsentReply({ subject: unsentSubject, files: unsentFiles });
+    reportUnsentReply({ subject: unsentSubject, files: unsentFiles, writing: unsentWriting });
     return () => reportUnsentReply(null);
-  }, [unsentSubject, unsentFiles]);
+  }, [unsentSubject, unsentFiles, unsentWriting]);
 
   const questionById = (id: string): InboxQuestion | undefined => {
     for (const message of threadRef.current.messages) {

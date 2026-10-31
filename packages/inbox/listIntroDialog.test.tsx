@@ -3,8 +3,9 @@
  * opens at the list's look (the defaults when the ⋮ menu was never used); the preview turns the options on in turn
  * while the switches are inert (no pointer, no focus, not announced); any key ends the preview at once, back to where
  * it opened; none under reduced motion; Done hands over the switches as they stand; Escape and Keep as it is hand
- * over nothing; Tab stays inside the dialog and never lands on the picture's rows; the dialog is a light scope on the
- * person's light palette whatever the window's mode (the owner, 2026-10-31), and only the dialog.
+ * over nothing; Tab stays inside the dialog and never lands on the picture's rows; the picture is a light scope on the
+ * person's light palette whatever the window's mode (the owner, 2026-10-31), and only the picture: the dialog itself
+ * follows the window's mode.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -178,17 +179,26 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
     expect(seen).toEqual([{ highlight: false, compact: true, hideAgents: false, smallNames: false }]);
   });
 
-  test('light for everyone: the dialog is a light scope on the light palette, the window keeps its mode', () => {
+  test('only the picture is light: a light scope on the light palette; the dialog and the window keep their mode', () => {
     motion(true);
     document.documentElement.classList.remove('light');
     const { dialog } = render();
-    // A scope of the window (its tokens worked out again), the palette's light half, `light`.
-    for (const cls of ['pn-inbox', 'theme-plannotator', 'light', 'ib-lo']) expect(dialog.classList.contains(cls)).toBe(true);
+    // The picture: a light scope (the window's tokens worked out again), the palette's light half, `light`.
+    const picture = dialog.querySelector('[data-list-intro-picture]')!;
+    for (const cls of ['ib-lo-frame', 'ib-lightscope', 'theme-plannotator', 'light']) expect(picture.classList.contains(cls)).toBe(true);
+    expect(picture.querySelector('[data-list-intro-preview]')).not.toBeNull();
+    // Nothing else is: the dialog, its words, switches and actions follow the window's mode.
+    expect([...document.querySelectorAll('.light, .ib-lightscope')]).toEqual([picture]);
+    // Not a second window root: the window's .pn-inbox layout rules and its menus' portals never reach it.
+    expect([...document.querySelectorAll('.pn-inbox')]).toEqual([host!]);
+    expect(picture.closest('.pn-inbox')).toBe(host);
+    expect(dialog.classList.contains('light')).toBe(false);
+    expect(picture.contains(dialog.querySelector('#ib-lo-title'))).toBe(false);
+    expect(picture.contains(dialog.querySelector('[role="switch"]'))).toBe(false);
     expect(document.documentElement.classList.contains('light')).toBe(false);
-    expect(host!.classList.contains('light')).toBe(false);
     // A palette with no light half falls back to Plannotator's own; a light-only one is used.
-    expect(lightScope('kanagawa-lotus')).toBe('pn-inbox theme-kanagawa-lotus light');
-    expect(lightScope('andromeeda')).toBe('pn-inbox theme-plannotator light');
+    expect(lightScope('kanagawa-lotus')).toBe('ib-lightscope theme-kanagawa-lotus light');
+    expect(lightScope('andromeeda')).toBe('ib-lightscope theme-plannotator light');
   });
 
   test('Escape and Keep as it is hand over nothing', () => {

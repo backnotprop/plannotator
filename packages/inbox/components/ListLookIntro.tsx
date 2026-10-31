@@ -12,9 +12,9 @@
  * once and snaps back to where it opened; the input still does its normal job (so the first Tab reaches the
  * switches). None under reduced motion.
  *
- * It is drawn light for everyone, whatever the person's mode (the owner, 2026-10-31): the dialog is a light scope on
- * the person's own light palette (`lightScope`), so the window's tokens are worked out again inside it. The window
- * behind keeps its mode.
+ * The dialog follows the person's mode, light or dark; only its picture (the framed example rows that change) is
+ * drawn light for everyone (the owner, 2026-10-31: "just the image that changes needs to be light mode"). The picture is a
+ * light scope on the person's own light palette (`lightScope`), so the window's tokens are worked out again inside it.
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -28,12 +28,13 @@ import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { themeSupportsHalf } from '@plannotator/ui/utils/themeRegistry';
 
 /**
- * The classes that make an element a light scope of the window: the window's root class (its tokens are worked out
- * again there), the palette the person picked for light mode (Plannotator's own if that one cannot draw light) and
+ * The classes that make an element a light scope of the window: `ib-lightscope` (the window's token blocks name it,
+ * so its tokens are worked out again there; it is not a `.pn-inbox`, so the window's layout rules and portals never
+ * reach it), the palette the person picked for light mode (Plannotator's own if that one cannot draw light) and
  * `light`, as ThemeProvider puts them on <html> in light mode.
  */
 export function lightScope(lightTheme: string): string {
-  return `pn-inbox theme-${themeSupportsHalf(lightTheme, 'light') ? lightTheme : 'plannotator'} light`;
+  return `ib-lightscope theme-${themeSupportsHalf(lightTheme, 'light') ? lightTheme : 'plannotator'} light`;
 }
 
 /** The list's groups as drawn (Quiet folded: its band only). `count`: the group's threads (`rows` may be fewer). */
@@ -164,9 +165,10 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
   const base = useId();
   const { lightTheme } = useTheme();
   return (
-    <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys className={`ib-lo${phone ? ' ib-lo-phone' : ''} ${lightScope(lightTheme)}`}>
+    <Modal labelledBy="ib-lo-title" describedBy="ib-lo-desc" testId="list-look-intro" onClose={onKeep} ownKeys className={`ib-lo${phone ? ' ib-lo-phone' : ''}`}>
       <div className="ib-lo-art">
-        <div className="ib-lo-frame" inert>
+        {/* The picture: always light (`lightScope`), whatever the dialog's mode. */}
+        <div className={`ib-lo-frame ${lightScope(lightTheme)}`} inert data-list-intro-picture="">
           <PreviewList groups={groups} projectNames={projectNames} awayMachines={awayMachines} look={look} phone={phone} />
         </div>
       </div>
