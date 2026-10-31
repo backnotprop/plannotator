@@ -1,3 +1,4 @@
+/// <reference types="bun-types" />
 /**
  * The single-file diff tab must actually REPAINT when the full-content diff
  * arrives.
@@ -26,11 +27,12 @@
  * process on purpose: a file in the shared DOM step mocks '@pierre/diffs'
  * process-wide, and this test is only meaningful against the real renderer.
  */
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { getSingularPatch, processFile } from '@pierre/diffs';
+import { FileDiff as PierreFileDiff, getSingularPatch, processFile } from '@pierre/diffs';
+import { CodeView } from '@pierre/diffs/react';
 
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
 
@@ -102,6 +104,12 @@ function shadowHTML(host: HTMLElement): string {
 
 function countExpandButtons(host: HTMLElement): number {
   return (shadowHTML(host).match(/data-expand-button/g) ?? []).length;
+}
+
+function renderedLines(host: HTMLElement): string {
+  return [...host.querySelectorAll('diffs-container')].flatMap((element) =>
+    [...(element.shadowRoot?.querySelectorAll('[data-line]') ?? [])].map((line) => line.textContent),
+  ).join('\n');
 }
 
 /**
@@ -189,7 +197,102 @@ describe.if(hasDom)('DiffViewer full-content swap (DOM)', () => {
     }
     host?.remove();
     host = null;
+    mock.restore();
     globalThis.fetch = originalFetch;
+  });
+
+  test('full context waits for external contents without crashing the partial render', async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async () => {
+      await gate;
+      return Response.json({ oldContent: OLD_CONTENTS, newContent: NEW_CONTENTS });
+    }, { preconnect: originalFetch.preconnect }));
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    try {
+      await act(async () => root!.render(view({ expandUnchanged: true })));
+      expect(await waitUntil(() => renderedLines(host!).includes('return a + b;'))).toBe(true);
+      expect(countExpandButtons(host!)).toBe(0);
+      expect(renderedLines(host!)).not.toContain('const head0');
+
+      await act(async () => {
+        release();
+      });
+      expect(await waitUntil(() => renderedLines(host!).includes('const head0'))).toBe(true);
+      expect(renderedLines(host!)).toContain('const tail49');
+    } finally {
+      release();
+    }
+  });
+
+  test.each([
+    { name: 'missing contents', status: 200, oldContent: null, newContent: null },
+    { name: 'stale contents', status: 200, oldContent: OLD_CONTENTS, newContent: `${NEW_CONTENTS}extra line\n` },
+    { name: 'rejected snapshot', status: 409, oldContent: null, newContent: null },
+  ])('full context keeps a readable patch with $name', async ({ status, oldContent, newContent }) => {
+    spyOn(globalThis, 'fetch').mockImplementation(Object.assign(
+      async () => Response.json({ oldContent, newContent }, { status }),
+      { preconnect: originalFetch.preconnect },
+    ));
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => root!.render(view({ expandUnchanged: true })));
+    expect(await waitUntil(() => renderedLines(host!).includes('return a + b;'))).toBe(true);
+    expect(renderedLines(host!)).not.toContain('const head0');
+    expect(countExpandButtons(host!)).toBe(0);
+  });
+
+  test('All changes renders partial files with full context enabled', async () => {
+    const fileDiff = getSingularPatch(PATCH);
+    expect(fileDiff.isPartial).toBe(true);
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(
+        <CodeView
+          containerRef={(element) => {
+            // happy-dom has no layout. Give the real virtualizer a viewport.
+            if (element) element.getBoundingClientRect = () => new DOMRect(0, 0, 1000, 800);
+          }}
+          initialItems={[{ id: 'calc.ts', type: 'diff', fileDiff }]}
+          options={{ expandUnchanged: true, diffStyle: 'unified', themeType: 'light' }}
+        />,
+      );
+    });
+    expect(await waitUntil(() => renderedLines(host!).includes('return a + b;'))).toBe(true);
+    expect(countExpandButtons(host!)).toBe(0);
+  });
+
+  test('a configured loader still hydrates partial diffs', async () => {
+    const loadDiffFiles = mock(async () => ({
+      oldFile: { name: 'calc.ts', contents: OLD_CONTENTS },
+      newFile: { name: 'calc.ts', contents: NEW_CONTENTS },
+    }));
+    const instance = new PierreFileDiff({ expandUnchanged: true, loadDiffFiles });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    try {
+      instance.render({ fileDiff: getSingularPatch(PATCH), fileContainer: host.appendChild(document.createElement('diffs-container')) });
+      expect(await waitUntil(() => renderedLines(host!).includes('const head0'))).toBe(true);
+      expect(loadDiffFiles).toHaveBeenCalledTimes(1);
+      await expect(instance.prepareForEditing()).resolves.toBeUndefined();
+    } finally {
+      instance.cleanUp();
+    }
+  });
+
+  test('partial diffs without a loader still cannot enter editing', async () => {
+    const instance = new PierreFileDiff({ expandUnchanged: true });
+    try {
+      instance.render({ fileDiff: getSingularPatch(PATCH), fileContainer: document.createElement('diffs-container') });
+      await expect(instance.prepareForEditing()).rejects.toThrow('a partial diff requires loadDiffFiles');
+    } finally {
+      instance.cleanUp();
+    }
   });
 
   test(

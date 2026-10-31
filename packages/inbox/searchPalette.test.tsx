@@ -20,7 +20,10 @@
  * - the route failing: "Search isn't answering" and Try again;
  * - recent searches: a click runs one; Clear forgets them; opening a
  *   result remembers its query;
- * - the landing highlight finds the words in the message's text nodes.
+ * - the landing highlight finds the words in the message's text nodes;
+ * - a message's mark from its agent's host, every mark first and hidden;
+ *   the time column and the key footer (desktop), the time in the meta
+ *   line and no footer (phone).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -111,12 +114,12 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-async function render(props: { currentProject?: string | null } = {}): Promise<void> {
+async function render(props: { currentProject?: string | null; phone?: boolean } = {}): Promise<void> {
   await act(async () => {
     root!.render(
       <SearchPalette
         open
-        phone={false}
+        phone={props.phone ?? false}
         currentProject={props.currentProject ?? null}
         projects={[{ ...project, root: '/src/plannotator' }, { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api', root: '/w/api' }]}
         onClose={(reason) => closed.push(reason)}
@@ -488,8 +491,8 @@ test.skipIf(!hasDom)('every result in a thread draws the list’s thread chip: i
   expect(named.querySelector('.ib-keyt')!.getAttribute('dir')).toBe('auto');
   expect(named.hasAttribute('title')).toBe(false);
   expect(await tooltipOf(named)).toBe(`Thread: nightly-deploy: ${longSubject}`);
-  // A screen reader hears the thread, then ", " where each "·" is drawn.
-  expect(row('message', 'msg_a').textContent).toContain(`Thread: nightly-deploy, ${longSubject}, Claude Code·, plannotator·, `);
+  // A screen reader hears the thread, then ", " where each "·" is drawn, and before the time (its own column on a desktop).
+  expect(row('message', 'msg_a').textContent).toContain(`Thread: nightly-deploy, ${longSubject}, Claude Code·, plannotator, `);
   // No name: the subject in the chip, even a short one met inside the text.
   expect(chip('message', 'msg_b')!.getAttribute('data-result-thread')).toBe('subject');
   expect(chip('message', 'msg_b')!.querySelector('.ib-keyt')!.textContent).toBe('Deploy');
@@ -548,4 +551,266 @@ test.skipIf(!hasDom)('an action item hit (key a-…) is labelled "Action item", 
   expect(chips[0]).toContain('Action item');
   expect(chips[0]).not.toContain('Question');
   expect(chips[1]).toContain('Question');
+});
+
+const markedResults = (q: string): Answer =>
+  answer({
+    q,
+    terms: [q],
+    totals: totals({ threads: 1, messages: 3, files: 1 }),
+    groups: {
+      threads: [threadRow('msg_t1', 'Bookmarks sidebar syncs', { title_marks: [[0, 6]] })],
+      messages: [
+        { ...(messageRow('msg_c', 'msg_t1', 'saved from codex') as Extract<InboxSearchRow, { type: 'message' }>), author: { kind: 'agent', name: 'Codex', host: 'codex' } },
+        // An older Inbox sends no host: the generic agent mark.
+        messageRow('msg_o', 'msg_t1', 'saved by an older inbox'),
+        { ...(messageRow('msg_y', 'msg_t1', 'saved by me') as Extract<InboxSearchRow, { type: 'message' }>), author: { kind: 'me', name: 'You', host: null } },
+      ],
+      files: [{ type: 'file', id: 'att_1', thread_id: 'msg_t1', message_id: 'msg_c', project, section: 'quiet', archived: false, at: '2026-10-09T14:03:00Z', name: 'saved.md', name_marks: [[0, 5]], folder: 'docs', kind: 'md', title: 'Bookmarks sidebar syncs' }],
+    },
+    recent: null,
+  });
+const resultRows = () => [...host!.querySelectorAll<HTMLElement>('[role="option"][data-result]')];
+const markOf = (row: HTMLElement) => row.querySelector(':scope > .ib-sp-mark')?.getAttribute('data-row-mark') ?? null;
+
+test.skipIf(!hasDom)('a message’s mark follows its agent’s host from the answer (the generic agent mark without one); every mark leads its row, hidden from a screen reader', async () => {
+  respond = async (call) => (call.url.searchParams.get('q') ? markedResults(call.url.searchParams.get('q')!) : answer({}));
+  await render();
+  await type('saved');
+  await waitFor(() => resultRows().length === 5);
+  const byId = Object.fromEntries(resultRows().map((r) => [r.dataset.resultId, markOf(r)]));
+  expect(byId.msg_c).toBe('agent:codex');
+  expect(byId.msg_o).toBe('agent:');
+  for (const row of resultRows()) {
+    expect(row.firstElementChild!.classList.contains('ib-sp-mark')).toBe(true);
+    expect(row.firstElementChild!.getAttribute('aria-hidden')).toBe('true');
+  }
+});
+
+test.skipIf(!hasDom)('desktop: the time in its own column and the key footer; a phone: the time in the meta line, no footer', async () => {
+  respond = async (call) => (call.url.searchParams.get('q') ? markedResults(call.url.searchParams.get('q')!) : answer({}));
+  await render();
+  await type('saved');
+  await waitFor(() => resultRows().length === 5);
+  const thread = resultRows()[0]!;
+  expect(thread.querySelector(':scope > [data-result-time]')!.textContent).toBe(', Oct 9');
+  expect(thread.querySelector('.ib-sp-at')).toBeNull();
+  // A file row shows no time, as before.
+  expect(resultRows()[4]!.querySelector('[data-result-time]')).toBeNull();
+  expect(host!.querySelector('[data-search-keys]')).not.toBeNull();
+
+  act(() => root!.unmount());
+  root = createRoot(host!);
+  await render({ phone: true });
+  await type('saved');
+  await waitFor(() => resultRows().length === 5);
+  const phoneThread = resultRows()[0]!;
+  expect(phoneThread.querySelector('[data-result-time]')).toBeNull();
+  expect(phoneThread.querySelector('.ib-sp-at')!.textContent).toContain('Oct 9');
+  expect(host!.querySelector('[data-search-keys]')).toBeNull();
+});
+
+// ── the Type chip (approval "inbox-search-type-filter", option B) ──
+
+function fileRow(i: number): InboxSearchRow {
+  return { type: 'file', id: `att_f${i}`, thread_id: 'msg_t1', message_id: 'msg_m0', project, section: 'quiet', archived: false, at: '2026-10-09T14:03:00Z', name: `relay-${i}.md`, name_marks: [[0, 5]], folder: 'docs', kind: 'md', title: 'Relay: rate limit' };
+}
+const typeTotals = totals({ threads: 1, messages: 12, files: 60 });
+/** The server's shape: a capped first answer, or one group's page from `offset` (`group=`), totals for all four either way. */
+const typeAnswers = async (call: Call): Promise<Answer> => {
+  const p = call.url.searchParams;
+  const q = p.get('q') ?? '';
+  if (!q) return answer({});
+  if (p.get('group') === 'files') {
+    const offset = Number(p.get('offset') ?? 0);
+    const limit = Number(p.get('limit'));
+    return answer({ q, terms: [q], totals: typeTotals, groups: { files: Array.from({ length: Math.min(limit, 60 - offset) }, (_, i) => fileRow(offset + i)) }, recent: null });
+  }
+  return answer({
+    q,
+    terms: [q],
+    totals: typeTotals,
+    groups: { threads: [threadRow('msg_t1', 'Relay: rate limit')], messages: Array.from({ length: 8 }, (_, i) => messageRow(`msg_m${i}`, 'msg_t1', `relay ${i}`)), files: Array.from({ length: 5 }, (_, i) => fileRow(i)) },
+    recent: null,
+  });
+};
+async function renderTyped(open: boolean, currentProject: string | null = null): Promise<void> {
+  await act(async () => {
+    root!.render(
+      <SearchPalette
+        open={open}
+        phone={false}
+        currentProject={currentProject}
+        projects={[{ ...project, root: '/src/plannotator' }]}
+        onClose={(reason) => closed.push(reason)}
+        onOpenResult={(hash, land) => opened.push({ hash, land })}
+        actions={() => [{ kind: 'new' }]}
+        onAction={() => {}}
+      />,
+    );
+  });
+}
+const groupHeadings = () => [...host!.querySelectorAll('[role="group"]')].map((g) => host!.querySelector(`#${g.getAttribute('aria-labelledby')}`)!.textContent);
+const typeChip = () => host!.querySelector<HTMLElement>('[data-chip="type"]')!;
+const live = () => host!.querySelector('[data-search-live]')!.textContent;
+async function pickType(label: string): Promise<void> {
+  await act(async () => {
+    typeChip().click();
+  });
+  const item = [...host!.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitemradio"]')].find((el) => el.querySelector('.ib-sp-ml')!.textContent === label)!;
+  await act(async () => {
+    item.click();
+  });
+}
+
+test.skipIf(!hasDom)('the Type chip: All types sends the request as before; a picked type asks for its group on every query and lists it alone, Actions hidden, first row highlighted, Show 50 more going on from 50', async () => {
+  respond = typeAnswers;
+  await renderTyped(true);
+  await type('relay');
+  await waitFor(() => groupHeadings().includes('Threads'));
+  // All types: no group, no limit, every group with its cap, Actions after the results.
+  const plain = searches().at(-1)!.url.searchParams;
+  expect([plain.get('group'), plain.get('limit'), plain.get('offset')]).toEqual([null, null, null]);
+  expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
+  expect([...host!.querySelectorAll('[data-chip]')].map((c) => c.getAttribute('data-chip'))).toEqual(['type', 'project', 'status', 'from']);
+
+  // The menu, labelled Type, with each type's total from the answer.
+  await act(async () => {
+    typeChip().click();
+  });
+  const menu = host!.querySelector('[role="menu"]')!;
+  expect(menu.getAttribute('aria-label')).toBe('Type');
+  expect([...menu.querySelectorAll('[role="menuitemradio"]')].map((el) => el.textContent)).toEqual(['All types', 'Threads1', 'Messages12', 'Files60', 'Projects0']);
+  for (let i = 0; i < 3; i++) await key(menu, { key: 'ArrowDown' });
+  await key(menu, { key: 'Enter' });
+  await waitFor(() => groupHeadings()[0] === 'Files60');
+
+  const picked = searches().at(-1)!.url.searchParams;
+  expect([picked.get('q'), picked.get('group'), picked.get('limit'), picked.get('offset')]).toEqual(['relay', 'files', '50', null]);
+  expect(groupHeadings()).toEqual(['Files60']);
+  expect(options()).toHaveLength(51);
+  expect(options().at(-1)!.textContent).toBe('Show 10 more');
+  expect(input().getAttribute('aria-activedescendant')).toBe(options()[0]!.id);
+  expect(live()).toBe('60 files');
+  expect(typeChip().textContent).toBe('Files');
+  // Pinned on purpose: the ×'s accessible name from the approved design notes.
+  expect(host!.querySelector('[data-unset="type"]')!.getAttribute('aria-label')).toBe('Clear the type filter');
+
+  // Show 10 more asks from 50, and appends.
+  await act(async () => {
+    options().at(-1)!.click();
+  });
+  await waitFor(() => options().length === 60);
+  const more = searches().at(-1)!.url.searchParams;
+  expect([more.get('group'), more.get('offset'), more.get('limit')]).toEqual(['files', '50', '50']);
+  expect(new Set(options().map((o) => o.getAttribute('data-result-id'))).size).toBe(60);
+  expect(host!.querySelector('[data-show-more]')).toBeNull();
+
+  // Edited words keep the type; every query asks for the group.
+  await type('relay-');
+  await waitFor(() => searches().at(-1)!.url.searchParams.get('q') === 'relay-' && options().length === 51);
+  expect(searches().at(-1)!.url.searchParams.get('group')).toBe('files');
+  // No words: the request is the recent view's, and the list says what to do.
+  await type('');
+  await waitFor(() => host!.querySelector('[data-search-type-empty]') !== null);
+  expect(searches().at(-1)!.url.searchParams.get('group')).toBeNull();
+  expect(options()).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filters, on Search everywhere and at every open', async () => {
+  respond = typeAnswers;
+  const plainAgain = async () => {
+    await waitFor(() => groupHeadings().includes('Threads'));
+    expect(typeChip().textContent).toBe('All types');
+    expect(searches().at(-1)!.url.searchParams.get('group')).toBeNull();
+  };
+  await renderTyped(true, project.id);
+  await type('relay');
+  await pickType('Files');
+  await waitFor(() => groupHeadings()[0] === 'Files60');
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-unset="type"]')!.click();
+  });
+  await plainAgain();
+
+  await pickType('Files');
+  await waitFor(() => groupHeadings()[0] === 'Files60');
+  await act(async () => {
+    host!.querySelector<HTMLElement>('.ib-sp-filters [data-clear-filters]')!.click();
+  });
+  await plainAgain();
+  expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('All projects');
+
+  // A type with no match: No matches names it, and Search everywhere clears it.
+  respond = async (call) => (call.url.searchParams.get('group') === 'projects' ? answer({ q: 'relay', terms: ['relay'], totals: typeTotals, groups: { projects: [] }, recent: null }) : typeAnswers(call));
+  await pickType('Projects');
+  await waitFor(() => host!.querySelector('[data-search-none]') !== null);
+  expect(host!.querySelector('[data-search-none] .ib-sp-e2')!.textContent).toContain('projects');
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-search-none] [data-clear-filters]')!.click();
+  });
+  await plainAgain();
+
+  // Closed and opened again: All types, whatever was picked.
+  await pickType('Files');
+  await waitFor(() => groupHeadings()[0] === 'Files60');
+  await renderTyped(false);
+  await renderTyped(true);
+  expect(typeChip().textContent).toBe('All types');
+  await type('relay');
+  await plainAgain();
+});
+
+test.skipIf(!hasDom)('a type change on its way draws the last answer as it was asked, never under the new chip', async () => {
+  // Answers to a type's page wait until let go, so the last answer is still the one on screen.
+  let holding = false;
+  let release: (() => void) | null = null;
+  respond = async (call) => {
+    if (holding) {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    }
+    return typeAnswers(call);
+  };
+  const drawn = () => options().map((o) => o.getAttribute('data-result-id') ?? o.getAttribute('data-show-more') ?? o.getAttribute('data-compose-action'));
+  const dimmed = () => host!.querySelector('[role="listbox"]')!.hasAttribute('data-dim');
+  const highlighted = () => host!.querySelector(`#${input().getAttribute('aria-activedescendant')}`);
+  await renderTyped(true);
+  await type('relay');
+  await waitFor(() => groupHeadings().includes('Threads'));
+  const allTypes = drawn();
+  expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
+  await key(input(), { key: 'ArrowDown' });
+  await key(input(), { key: 'ArrowDown' });
+  const row = highlighted();
+  holding = true;
+
+  // All types → Files, its page held: the chip says Files, the list is still the All types answer, whole and dimmed.
+  await pickType('Files');
+  await waitFor(() => release !== null);
+  expect(typeChip().textContent).toBe('Files');
+  expect(dimmed()).toBe(true);
+  expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
+  expect(drawn()).toEqual(allTypes);
+  expect(highlighted()).toBe(row);
+  await act(async () => release!());
+  await waitFor(() => groupHeadings()[0] === 'Files60');
+  release = null;
+  expect(groupHeadings()).toEqual(['Files60']);
+  const filesPage = drawn();
+  expect(filesPage).toHaveLength(51);
+
+  // Files → All types, its answer held: the Files page as it was, no Actions added, its Show more kept.
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-unset="type"]')!.click();
+  });
+  await waitFor(() => release !== null);
+  expect(typeChip().textContent).toBe('All types');
+  expect(dimmed()).toBe(true);
+  expect(groupHeadings()).toEqual(['Files60']);
+  expect(drawn()).toEqual(filesPage);
+  await act(async () => release!());
+  await waitFor(() => groupHeadings().includes('Actions'));
+  expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
 });

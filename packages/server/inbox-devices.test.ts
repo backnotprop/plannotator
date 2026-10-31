@@ -288,7 +288,7 @@ describe("the device door, on the binary", () => {
     const health = await door("health");
     expect(health.status).toBe(200);
     const h = (await health.json()) as Json;
-    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version"]);
+    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "machine_links", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version"]);
     expect(h).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession });
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
@@ -941,20 +941,28 @@ describe("the device door, in process", () => {
       await Bun.sleep(150);
       expect(atRestart).toBeUndefined();
 
-      // After a crash (kill -9): the mapping still points at the dead run's door listener.
+      // The mapping the Inbox made is recorded (port and target) while it may exist; a clean stop takes it down and keeps the port.
+      const recordFile = join(dataDir, "inbox", "tailnet-door.json");
+      const readRecord = () => JSON.parse(readFileSync(recordFile, "utf8"));
       const crashed = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const deadDoor = serve.get(8443)!;
+      const record = readFileSync(recordFile, "utf8");
+      expect(JSON.parse(record)).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: true });
       crashed.stop();
+      expect(readRecord()).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: false });
+      // After a crash (kill -9) both stay: the mapping still points at the dead run's door listener.
       serve.set(8443, deadDoor);
+      writeFileSync(recordFile, record);
       // The next start that cannot publish takes that leftover down rather than leave it.
       down.serve = true;
       const unpublished = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       expect(serve.has(8443)).toBe(false);
+      expect(readRecord().published).toBe(false);
       unpublished.stop();
       down.serve = false;
-      // With the Inbox stopped, uninstall --purge's take-down finds it by door_port.
-      const leftover = `http://127.0.0.1:${JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet.door_port}`;
-      serve.set(8443, leftover);
+      // With the Inbox stopped, uninstall --purge's take-down finds it by its record.
+      serve.set(8443, deadDoor);
+      writeFileSync(recordFile, record);
       expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("removed");
       expect(serve.has(8443)).toBe(false);
       expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("none");
@@ -1201,7 +1209,7 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     await poll("ses-b", "pi");
 
     const sessions = (await (await door("sessions?session=ses-a")).json()) as Json;
-    expect(Object.keys(sessions).sort()).toEqual(["home", "projects", "serverSession", "session"]);
+    expect(Object.keys(sessions).sort()).toEqual(["home", "machine", "projects", "serverSession", "session"]);
     expect(sessions.session).toEqual({ session: "ses-a", live: true });
     expect(sessions.projects.map((group: Json) => group.project.root)).toEqual([ledger]);
     expect(sessions.projects[0].sessions.map((s: Json) => s.session).sort()).toEqual(["ses-a", "ses-b"]);

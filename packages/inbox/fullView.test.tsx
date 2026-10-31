@@ -558,6 +558,12 @@ test.skipIf(!hasDom)('⋯ holds Download and the other version (the changed chip
   await rerender(<Pane start={changed} harness={harnessOf()} startFull={false} />);
   expect(host!.querySelector('[data-full-view-changed]')).toBeNull();
   expect(host!.querySelector('[data-changed-line]')).not.toBeNull();
+  // The header's Download is an icon: no word, named by its aria-label, which says which version it gives.
+  const headerDownload = host!.querySelector<HTMLAnchorElement>('.ib-vhead [data-attachment-download]')!;
+  expect(headerDownload.textContent).toBe('');
+  expect(headerDownload.getAttribute('aria-label')).toBe(`Download ${changed.name}`);
+  await rerender(<Pane start={changed} harness={harnessOf()} startFull={false} version="sent" />);
+  expect(host!.querySelector('.ib-vhead [data-attachment-download]')!.getAttribute('aria-label')).toBe(`Download ${changed.name} (the version it sent)`);
 });
 
 test.skipIf(!hasDom)('N/M opens the file peek under the toolbar; a pick steps there and full screen stays', async () => {

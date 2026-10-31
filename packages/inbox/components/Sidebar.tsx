@@ -8,6 +8,7 @@ import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
+import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
@@ -33,6 +34,16 @@ export interface SidebarProps {
    */
   onBoard?: () => void;
   projectId: string | null;
+  /** The machine the list shows (the Machines filter), or null for every machine. */
+  machineId?: string | null;
+  /**
+   * Linked machines (machines.ts): the Machines section above Projects, this machine first, each a filter of the
+   * list as a project is. No machine linked: no section at all.
+   */
+  machines?: MachinesModel;
+  /** Rows waiting on the person, per machine id. */
+  machineCounts?: ReadonlyMap<string, number>;
+  onMachine?: (machineId: string) => void;
   /** Rows waiting on the person, all projects. */
   inboxCount: number;
   projects: readonly ProjectFolder[];
@@ -211,13 +222,17 @@ export function Sidebar(props: SidebarProps) {
     next?.focus({ preventScroll: true });
   });
   const inboxRef = useRef<HTMLButtonElement>(null);
-  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null;
+  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId;
   const spinOf = (scope: string | null) => (props.refreshSpin && props.refreshSpin.scope === scope ? props.refreshSpin.key : null);
   const refreshHintId = useId();
   const pinnedLabelId = useId();
   const pinnedBodyId = useId();
   const projectsLabelId = useId();
   const projectsBodyId = useId();
+  const machinesLabelId = useId();
+  const machinesBodyId = useId();
+  const machineList = props.machines?.all ?? [];
+  const machinesClosed = sections.closed('machines');
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -238,7 +253,7 @@ export function Sidebar(props: SidebarProps) {
   useEffect(() => {
     const track = (event: FocusEvent) => {
       const target = event.target instanceof Element && asideRef.current?.contains(event.target) ? event.target : null;
-      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('.ib-projs') ? 'projects' : null;
+      focusedIn.current = target?.closest('[data-pinned-section]') ? 'pinned' : target?.closest('[data-machines-section]') ? 'machines' : target?.closest('.ib-projs') ? 'projects' : null;
     };
     document.addEventListener('focusin', track);
     return () => document.removeEventListener('focusin', track);
@@ -307,9 +322,9 @@ export function Sidebar(props: SidebarProps) {
         <button
           ref={inboxRef}
           type="button"
-          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null ? ' ib-on' : ''}`}
+          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId ? ' ib-on' : ''}`}
           onClick={pick(props.onInbox)}
-          aria-current={props.page === 'inbox' && props.projectId === null ? 'page' : undefined}
+          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId ? 'page' : undefined}
           aria-describedby={inboxRefreshes ? refreshHintId : undefined}
           data-refreshes={inboxRefreshes ? '' : undefined}
           data-refreshing={spinOf(null) != null ? '' : undefined}
@@ -387,6 +402,46 @@ export function Sidebar(props: SidebarProps) {
                 />
               )))}
             </section>
+          </>
+        )}
+        {machineList.length > 0 && props.onMachine && (
+          <>
+            {/* Linked machines: a filter as a project is, this machine first. A machine that is away reads quiet, as a
+                project with nothing waiting does, and its tooltip says since when. */}
+            <SectionHeader
+              section="machines"
+              id={machinesLabelId}
+              controls={machinesBodyId}
+              label="Machines"
+              icon="system"
+              open={!machinesClosed}
+              count={0}
+              onToggle={() => sections.toggle('machines')}
+            />
+            <div className="ib-projs" id={machinesBodyId} role="group" aria-labelledby={machinesLabelId} data-machines-section="" data-closed={machinesClosed ? '' : undefined}>
+              {machineList.map((machine) => {
+                const n = props.machineCounts?.get(machine.id) ?? 0;
+                const on = props.page === 'inbox' && props.machineId === machine.id && props.projectId === null;
+                if (machinesClosed && !on) return null;
+                const away = isAway(machine);
+                return (
+                  <Tip key={machine.id} content={machine.self ? 'This machine' : (awayLine(machine) ?? machine.name)} side="right">
+                    <button
+                      type="button"
+                      className={`ib-proj${n === 0 || away ? ' ib-proj-quiet' : ''}${on ? ' ib-on' : ''}`}
+                      onClick={pick(() => props.onMachine?.(machine.id))}
+                      aria-current={on ? 'page' : undefined}
+                      data-machine={machine.id}
+                      data-away={away ? '' : undefined}
+                    >
+                      <span className="ib-name" dir="auto">{machine.name}</span>
+                      {away && <span className="ib-sr">, {awayLine(machine)}</span>}
+                      {n > 0 && <span className="ib-n">{formatCount(n)}</span>}
+                    </button>
+                  </Tip>
+                );
+              })}
+            </div>
           </>
         )}
         <SectionHeader

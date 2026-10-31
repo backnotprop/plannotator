@@ -9,8 +9,8 @@
  *   accessible name and stays);
  * - a cut preview in a row and a sidebar project open the component tooltip
  *   within a moment, and a sidebar project's tooltip names its folder; beside a
- *   thread a long project label is never cut (approval "list-rows-mail-icons":
- *   it wraps);
+ *   thread a long project label stays on one line, cut with "…", and its
+ *   tooltip shows it whole (approval "inbox-list-row-v2");
  * - no wide row's title loses a fraction of a pixel to the preview's shrink
  *   (the old thread chip "reconciliation-run" was drawn "reconciliation-r…" by
  *   a 0.06 px overflow), and a title cut by a fraction of a pixel still opens
@@ -96,9 +96,14 @@ test('nothing in the window has a native title; a cut preview and a sidebar proj
     );
     expect(titles).toEqual([]);
 
-    // The project label of a two-line row is whole: it wraps, never cut.
+    // The project label of a three-line row never wraps (approval "inbox-list-row-v2"): cut with "…" on its one
+    // line, it opens the component tooltip with the whole name.
     const label = page.locator('.ib-lbody .ib-nrow .ib-p', { hasText: LONG }).first();
-    expect(await label.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5)).toBe(true);
+    expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth && el.getBoundingClientRect().height <= parseFloat(getComputedStyle(el).lineHeight) + 0.5)).toBe(true);
+    await label.hover();
+    await expect(tooltip(page)).toHaveText(LONG, { timeout: 1000 });
+    await page.mouse.move(700, 880);
+    await expect(tooltip(page)).toHaveCount(0);
     // Its preview (the named thread's subject), cut with "…".
     const SUBJECT = 'Ledger totals disagree after the nightly batch finished';
     const preview = page.locator('.ib-lbody .ib-nrow .ib-pv', { hasText: SUBJECT }).first();

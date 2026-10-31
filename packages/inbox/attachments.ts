@@ -4,7 +4,7 @@
  * and the feedback text a Send carries after the picks.
  */
 
-import { inboxUrl } from './inboxUrl';
+import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
 import { cutText } from '@plannotator/core/inbox-questions';
@@ -137,21 +137,21 @@ export function attachmentLabel(attachment: Pick<InboxAttachmentState, 'path' | 
 
 /** Where an attachment's bytes are served: an image for `<img src>`, and any kind as a download. By id only. */
 export function attachmentImageUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`);
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 /** A video's bytes for `<video src>` (HTTP Range, by id only). */
 export function attachmentVideoUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/video${version === 'sent' ? '?version=sent' : ''}`);
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/video${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/download${version === 'sent' ? '?version=sent' : ''}`);
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/download${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 /** An attached HTML page in a tab of its own, sandboxed, from its own folder ("Open in" → Browser). */
 export function attachmentPageUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/page${version === 'sent' ? '?version=sent' : ''}`);
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/page${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 /** Wider than this width-to-height ratio, an image is a panorama: the gallery crops it from the left, the viewer scrolls it sideways. */

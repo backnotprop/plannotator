@@ -33,6 +33,7 @@ import { AttachFilesButton, ComposeFileTiles, useFileDrop, type ComposeFile } fr
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
+import { openItemsLabel } from '../openQuestions';
 
 /** The thread's reply, as the composer's Reply tab shows and sends it (Thread.tsx builds it). */
 export interface FullScreenReply {
@@ -63,6 +64,12 @@ export interface FullScreenReply {
   onRemoveFile: (key: string) => void;
   /** Questions in the thread still open (no pick). */
   openQuestions: number;
+  /**
+   * Action items in the thread still open (not marked). Named with the questions in the thread foot's words
+   * (`openItemsLabel`); the counts differ from the foot's in one way: the questions here are those with no pick,
+   * where the foot also counts picked questions not sent yet.
+   */
+  openActions: number;
   /** Another window changed the draft while this one held words (the thread's box offers Keep mine / Discard). */
   conflict: boolean;
   /** The thread's error after a refused Send (the thread's own line announces it). */
@@ -123,10 +130,12 @@ function Rides({ reply }: { reply: FullScreenReply }) {
           {plural(reply.annotations, 'comment')}
         </span>
       )}
-      {reply.openQuestions > 0 && (
+      {/* The thread foot's words (openItemsLabel): "2 open questions", "1 open action item", "2 questions, 1 action item".
+          Its question count leaves out picked questions, which the foot counts until they are sent. */}
+      {reply.openQuestions + reply.openActions > 0 && (
         <button type="button" className="ib-fcomp-q" onClick={reply.onOpenThread} data-fcomp-questions="">
           <Icon name="question" size={12} />
-          {reply.openQuestions === 1 ? '1 question open' : `${reply.openQuestions} questions open`}
+          {openItemsLabel(reply.openQuestions, reply.openActions)}
         </button>
       )}
     </span>

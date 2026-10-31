@@ -201,6 +201,11 @@ Host integrations are always part of uninstall. If a broken or unavailable
 host prevents safe cleanup, the command names the blocking plugin manager or
 configuration, gives exact manual cleanup instructions, and stops before
 deleting the binary. Complete that cleanup and rerun uninstall.
+It also keeps the binary when an agent's config file can't be read (another
+tool's too), or when a hook it did not install still runs Plannotator. The
+error names the file, the tool, and what to do. A `plannotator-inbox` entry
+you added yourself, or a Claude Code or Droid plugin installed for one project,
+is named with how to remove it and does not keep the binary.
 
 The purge removes only known Plannotator entries from the configured data
 directory. Unknown top-level files are preserved rather than guessed at, and

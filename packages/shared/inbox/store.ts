@@ -4214,6 +4214,11 @@ export class InboxStore {
     return files;
   }
 
+  /** One annotation by id, removed or sent ones included; null when this store has none. */
+  annotation(id: string): InboxAnnotationRecord | null {
+    return this.annotations.get(id) ?? null;
+  }
+
   /** Remove an annotation still waiting for a Send. Removing it again changes nothing. */
   removeAnnotation(id: string): InboxAnnotationRecord {
     const record = this.annotations.get(id);

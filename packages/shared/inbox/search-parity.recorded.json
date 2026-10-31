@@ -1,0 +1,2418 @@
+{
+  "bookma (prefix)": {
+    "q": "bookma",
+    "terms": [
+      "bookma"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 4,
+      "messages": 9,
+      "files": 1,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "sidebar",
+          "section": "new",
+          "archived": false,
+          "title": "Bookmarks sidebar syncs",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "bookmarks-sidebar",
+          "id": "sidebar",
+          "project": "web",
+          "at": "2026-10-20T09:15:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "import plan",
+          "section": "new",
+          "archived": false,
+          "title": "Bookmarks import plan",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "bookmarks-import",
+          "id": "import plan",
+          "project": "plannotator",
+          "at": "2026-10-20T09:14:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "thorsten",
+          "section": "waiting",
+          "archived": false,
+          "title": "Bookmark: @thorstenball",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "thorsten",
+          "id": "thorsten",
+          "project": "experiments",
+          "at": "2026-10-20T09:11:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "title_marks": [
+            [
+              4,
+              6
+            ]
+          ],
+          "thread_name": "bookmarks",
+          "id": "bookmark @jsnnsa",
+          "project": "experiments",
+          "at": "2026-10-20T09:10:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "sidebar",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "OpenCode"
+          },
+          "title": "Bookmarks sidebar syncs",
+          "thread_name": "bookmarks-sidebar",
+          "snippet": {
+            "text": "The bookmarks sidebar syncs from the same store.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "sidebar",
+          "project": "web",
+          "at": "2026-10-20T09:15:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "import plan",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Bookmarks import plan",
+          "thread_name": "bookmarks-import",
+          "snippet": {
+            "text": "Import X bookmarks as Inbox threads. Two open choices at the end.",
+            "marks": [
+              [
+                9,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "import plan",
+          "project": "plannotator",
+          "at": "2026-10-20T09:14:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "videos 1",
+          "section": "quiet",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "Lab launch videos",
+          "thread_name": "videos",
+          "snippet": {
+            "text": "The hero: your \"delete all your wikis\" bookmark came back in 56 s.",
+            "marks": [
+              [
+                39,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "videos 2",
+          "project": "content-studio",
+          "at": "2026-10-20T09:13:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "videos 1",
+          "section": "quiet",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "Lab launch videos",
+          "thread_name": "videos",
+          "snippet": {
+            "text": "The cut runs on your real saves. A bookmark from last night opens the video.",
+            "marks": [
+              [
+                35,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "videos 1",
+          "project": "content-studio",
+          "at": "2026-10-20T09:12:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @dflieb: \"the most insane demo I have seen\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @dflieb",
+          "project": "experiments",
+          "at": "2026-10-20T09:10:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @karpathy: \"most of my coding is now reviewing diffs\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @karpathy",
+          "project": "experiments",
+          "at": "2026-10-20T09:09:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @rauchg: \"the best command menus feel like a text field\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @rauchg",
+          "project": "experiments",
+          "at": "2026-10-20T09:08:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @mitchellh: \"the search overlay landed and it is fast\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @mitchellh",
+          "project": "experiments",
+          "at": "2026-10-20T09:07:00.000Z"
+        }
+      ],
+      "files": [
+        {
+          "type": "file",
+          "thread_id": "import plan",
+          "message_id": "import plan",
+          "section": "new",
+          "archived": false,
+          "name": "bookmarks-import-plan.md",
+          "name_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "folder": "plans",
+          "kind": "md",
+          "title": "Bookmarks import plan",
+          "thread_name": "bookmarks-import",
+          "id": "bookmarks-import-plan.md",
+          "project": "plannotator",
+          "at": "2026-10-20T09:14:00.000Z"
+        }
+      ],
+      "projects": []
+    },
+    "recent": null
+  },
+  "bookmarked post (two terms)": {
+    "q": "bookmarked post",
+    "terms": [
+      "bookmarked",
+      "post"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 5,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "title_marks": [
+            [
+              4,
+              10
+            ],
+            [
+              17,
+              4
+            ]
+          ],
+          "thread_name": "bookmarks",
+          "id": "bookmark @jsnnsa",
+          "project": "experiments",
+          "at": "2026-10-20T09:10:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @dflieb: \"the most insane demo I have seen\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                10
+              ],
+              [
+                17,
+                4
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @dflieb",
+          "project": "experiments",
+          "at": "2026-10-20T09:10:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @karpathy: \"most of my coding is now reviewing diffs\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                10
+              ],
+              [
+                17,
+                4
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @karpathy",
+          "project": "experiments",
+          "at": "2026-10-20T09:09:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @rauchg: \"the best command menus feel like a text field\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                10
+              ],
+              [
+                17,
+                4
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @rauchg",
+          "project": "experiments",
+          "at": "2026-10-20T09:08:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @mitchellh: \"the search overlay landed and it is fast\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                10
+              ],
+              [
+                17,
+                4
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @mitchellh",
+          "project": "experiments",
+          "at": "2026-10-20T09:07:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+            "marks": [
+              [
+                4,
+                10
+              ],
+              [
+                17,
+                4
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @jsnnsa",
+          "project": "experiments",
+          "at": "2026-10-20T09:06:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 6,
+      "messages": 7,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-api",
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-web",
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "title": "Deploy log",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-log",
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "title": "Deploy preview",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-preview",
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "title": "Deploy order",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-order",
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-api",
+          "snippet": {
+            "text": "The deploy finished on api.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-web",
+          "snippet": {
+            "text": "The deploy finished on web.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy log",
+          "thread_name": "deploy-log",
+          "snippet": {
+            "text": "The deploy log is attached.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "me",
+            "name": "You"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "Thanks, deploy it to production.",
+            "marks": [
+              [
+                8,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "reply deploy it",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "The deploy preview is up.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:17:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy order",
+          "thread_name": "deploy-order",
+          "snippet": {
+            "text": "Deploy order for tonight?",
+            "marks": [
+              [
+                0,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy rollback",
+          "section": "quiet",
+          "archived": true,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "Deploy rollback",
+          "thread_name": "deploy-rollback",
+          "snippet": {
+            "text": "We rolled the deploy back.",
+            "marks": [
+              [
+                14,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy rollback",
+          "project": "api",
+          "at": "2026-10-20T09:23:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, open in web (tie)": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 6,
+      "messages": 7,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-web",
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "title": "Deploy preview",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-preview",
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-api",
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "title": "Deploy log",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-log",
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "title": "Deploy order",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-order",
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-web",
+          "snippet": {
+            "text": "The deploy finished on web.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "me",
+            "name": "You"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "Thanks, deploy it to production.",
+            "marks": [
+              [
+                8,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "reply deploy it",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "The deploy preview is up.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:17:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-api",
+          "snippet": {
+            "text": "The deploy finished on api.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy log",
+          "thread_name": "deploy-log",
+          "snippet": {
+            "text": "The deploy log is attached.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy order",
+          "thread_name": "deploy-order",
+          "snippet": {
+            "text": "Deploy order for tonight?",
+            "marks": [
+              [
+                0,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy rollback",
+          "section": "quiet",
+          "archived": true,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "Deploy rollback",
+          "thread_name": "deploy-rollback",
+          "snippet": {
+            "text": "We rolled the deploy back.",
+            "marks": [
+              [
+                14,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy rollback",
+          "project": "api",
+          "at": "2026-10-20T09:23:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, project api": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 4,
+      "messages": 4,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-api",
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "title": "Deploy log",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-log",
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "title": "Deploy order",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-order",
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy rollback",
+          "section": "quiet",
+          "archived": true,
+          "title": "Deploy rollback",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-rollback",
+          "id": "deploy rollback",
+          "project": "api",
+          "at": "2026-10-20T09:23:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-api",
+          "snippet": {
+            "text": "The deploy finished on api.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy log",
+          "thread_name": "deploy-log",
+          "snippet": {
+            "text": "The deploy log is attached.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy order",
+          "thread_name": "deploy-order",
+          "snippet": {
+            "text": "Deploy order for tonight?",
+            "marks": [
+              [
+                0,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy rollback",
+          "section": "quiet",
+          "archived": true,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "Deploy rollback",
+          "thread_name": "deploy-rollback",
+          "snippet": {
+            "text": "We rolled the deploy back.",
+            "marks": [
+              [
+                14,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy rollback",
+          "project": "api",
+          "at": "2026-10-20T09:23:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, waiting": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 1,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "title": "Deploy order",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-order",
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy order",
+          "thread_name": "deploy-order",
+          "snippet": {
+            "text": "Deploy order for tonight?",
+            "marks": [
+              [
+                0,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, new": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 2,
+      "messages": 2,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-api",
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-web",
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy finished api",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-api",
+          "snippet": {
+            "text": "The deploy finished on api.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished api",
+          "project": "api",
+          "at": "2026-10-20T09:22:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-web",
+          "snippet": {
+            "text": "The deploy finished on web.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, sent": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 2,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "title": "Deploy preview",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-preview",
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "me",
+            "name": "You"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "Thanks, deploy it to production.",
+            "marks": [
+              [
+                8,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "reply deploy it",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "The deploy preview is up.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:17:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, quiet": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 1,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "title": "Deploy log",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-log",
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy log",
+          "section": "quiet",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy log",
+          "thread_name": "deploy-log",
+          "snippet": {
+            "text": "The deploy log is attached.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy log",
+          "project": "api",
+          "at": "2026-10-20T09:19:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, archived": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 1,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy rollback",
+          "section": "quiet",
+          "archived": true,
+          "title": "Deploy rollback",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-rollback",
+          "id": "deploy rollback",
+          "project": "api",
+          "at": "2026-10-20T09:23:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy rollback",
+          "section": "quiet",
+          "archived": true,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "Deploy rollback",
+          "thread_name": "deploy-rollback",
+          "snippet": {
+            "text": "We rolled the deploy back.",
+            "marks": [
+              [
+                14,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy rollback",
+          "project": "api",
+          "at": "2026-10-20T09:23:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, from me": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 1,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "title": "Deploy preview",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-preview",
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "me",
+            "name": "You"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "Thanks, deploy it to production.",
+            "marks": [
+              [
+                8,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "reply deploy it",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "deploy, from agents, project web": {
+    "q": "deploy",
+    "terms": [
+      "deploy"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 2,
+      "messages": 2,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "title": "Deploy finished",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-web",
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "title": "Deploy preview",
+          "title_marks": [
+            [
+              0,
+              6
+            ]
+          ],
+          "thread_name": "deploy-preview",
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:18:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "deploy finished web",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Deploy finished",
+          "thread_name": "deploy-web",
+          "snippet": {
+            "text": "The deploy finished on web.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy finished web",
+          "project": "web",
+          "at": "2026-10-20T09:21:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "deploy preview",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "Deploy preview",
+          "thread_name": "deploy-preview",
+          "snippet": {
+            "text": "The deploy preview is up.",
+            "marks": [
+              [
+                4,
+                6
+              ]
+            ]
+          },
+          "question": null,
+          "id": "deploy preview",
+          "project": "web",
+          "at": "2026-10-20T09:17:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "rate lim (phrase and prefix)": {
+    "q": "rate lim",
+    "terms": [
+      "rate",
+      "lim"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 2,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "rate limit",
+          "section": "quiet",
+          "archived": false,
+          "title": "Relay: rate limit on mailbox creation",
+          "title_marks": [
+            [
+              7,
+              4
+            ],
+            [
+              12,
+              3
+            ]
+          ],
+          "thread_name": "relay",
+          "id": "rate limit",
+          "project": "plannotator",
+          "at": "2026-10-20T09:28:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "rate limiter",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "Limiter",
+          "thread_name": "limiter",
+          "snippet": {
+            "text": "The rate limiter now counts per key.",
+            "marks": [
+              [
+                4,
+                4
+              ],
+              [
+                9,
+                3
+              ]
+            ]
+          },
+          "question": null,
+          "id": "rate limiter",
+          "project": "api",
+          "at": "2026-10-20T09:29:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "rate limit",
+          "section": "quiet",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Relay: rate limit on mailbox creation",
+          "thread_name": "relay",
+          "snippet": {
+            "text": "The relay rate limits mailbox creation to 20 a minute.",
+            "marks": [
+              [
+                10,
+                4
+              ],
+              [
+                15,
+                3
+              ]
+            ]
+          },
+          "question": null,
+          "id": "rate limit",
+          "project": "plannotator",
+          "at": "2026-10-20T09:28:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "jitter yes (an answer)": {
+    "q": "jitter yes",
+    "terms": [
+      "jitter",
+      "yes"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 0,
+      "messages": 1,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "retry storm",
+          "section": "sent",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "title": "Retry storm",
+          "thread_name": "retry",
+          "snippet": {
+            "text": "Add jitter? → Yes",
+            "marks": [
+              [
+                4,
+                6
+              ],
+              [
+                14,
+                3
+              ]
+            ]
+          },
+          "question": {
+            "key": "q-34a90176",
+            "replaced": false
+          },
+          "id": "retry storm",
+          "project": "api",
+          "at": "2026-10-20T09:25:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "saved posts, Show all messages from 2": {
+    "q": "saved",
+    "terms": [
+      "saved"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 5,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "…command menus feel like a text field\". Saved to the reading list.",
+            "marks": [
+              [
+                40,
+                5
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @rauchg",
+          "project": "experiments",
+          "at": "2026-10-20T09:08:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "…search overlay landed and it is fast\". Saved to the reading list.",
+            "marks": [
+              [
+                40,
+                5
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @mitchellh",
+          "project": "experiments",
+          "at": "2026-10-20T09:07:00.000Z"
+        },
+        {
+          "type": "message",
+          "thread_id": "bookmark @jsnnsa",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "You bookmarked a post by @jsnnsa: \"stop applying old human-centric patterns to agent tools\". Saved to the reading list.",
+          "thread_name": "bookmarks",
+          "snippet": {
+            "text": "…patterns to agent tools\". Saved to the reading list.",
+            "marks": [
+              [
+                27,
+                5
+              ]
+            ]
+          },
+          "question": null,
+          "id": "bookmark @jsnnsa",
+          "project": "experiments",
+          "at": "2026-10-20T09:06:00.000Z"
+        }
+      ]
+    },
+    "recent": null
+  },
+  "plannotator (projects)": {
+    "q": "plannotator",
+    "terms": [
+      "plannotator"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 2,
+      "messages": 0,
+      "files": 0,
+      "projects": 1
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "rate limit",
+          "section": "quiet",
+          "archived": false,
+          "title": "Relay: rate limit on mailbox creation",
+          "title_marks": [],
+          "thread_name": "relay",
+          "id": "rate limit",
+          "project": "plannotator",
+          "at": "2026-10-20T09:28:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "import plan",
+          "section": "new",
+          "archived": false,
+          "title": "Bookmarks import plan",
+          "title_marks": [],
+          "thread_name": "bookmarks-import",
+          "id": "import plan",
+          "project": "plannotator",
+          "at": "2026-10-20T09:14:00.000Z"
+        }
+      ],
+      "messages": [],
+      "files": [],
+      "projects": [
+        {
+          "type": "project",
+          "name": "plannotator",
+          "name_marks": [
+            [
+              0,
+              11
+            ]
+          ],
+          "root": "/src/plannotator",
+          "id": "plannotator",
+          "project": "plannotator",
+          "at": "2026-10-20T09:05:00.000Z"
+        }
+      ]
+    },
+    "recent": null
+  },
+  "Russian": {
+    "q": "отчёт",
+    "terms": [
+      "отчет"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 1,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "russian",
+          "section": "new",
+          "archived": false,
+          "title": "Отчёт о миграции",
+          "title_marks": [
+            [
+              0,
+              5
+            ]
+          ],
+          "thread_name": "ru",
+          "id": "russian",
+          "project": "api",
+          "at": "2026-10-20T09:30:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "russian",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Codex"
+          },
+          "title": "Отчёт о миграции",
+          "thread_name": "ru",
+          "snippet": {
+            "text": "Отчёт готов: миграция прошла без ошибок.",
+            "marks": [
+              [
+                0,
+                5
+              ]
+            ]
+          },
+          "question": null,
+          "id": "russian",
+          "project": "api",
+          "at": "2026-10-20T09:30:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "Japanese": {
+    "q": "請求",
+    "terms": [
+      "請求"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 1,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "japanese",
+          "section": "new",
+          "archived": false,
+          "title": "請求サービスの更新",
+          "title_marks": [
+            [
+              0,
+              2
+            ]
+          ],
+          "thread_name": "ja",
+          "id": "japanese",
+          "project": "api",
+          "at": "2026-10-20T09:31:00.000Z"
+        }
+      ],
+      "messages": [
+        {
+          "type": "message",
+          "thread_id": "japanese",
+          "section": "new",
+          "archived": false,
+          "author": {
+            "kind": "agent",
+            "name": "Pi"
+          },
+          "title": "請求サービスの更新",
+          "thread_name": "ja",
+          "snippet": {
+            "text": "請求サービスを更新しました。",
+            "marks": [
+              [
+                0,
+                2
+              ]
+            ]
+          },
+          "question": null,
+          "id": "japanese",
+          "project": "api",
+          "at": "2026-10-20T09:31:00.000Z"
+        }
+      ],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  },
+  "no words, waiting": {
+    "q": "",
+    "terms": [],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 2,
+      "messages": 0,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "deploy order",
+          "section": "waiting",
+          "archived": false,
+          "title": "Deploy order",
+          "title_marks": [],
+          "thread_name": "deploy-order",
+          "id": "deploy order",
+          "project": "api",
+          "at": "2026-10-20T09:16:00.000Z"
+        },
+        {
+          "type": "thread",
+          "thread_id": "thorsten",
+          "section": "waiting",
+          "archived": false,
+          "title": "Bookmark: @thorstenball",
+          "title_marks": [],
+          "thread_name": "thorsten",
+          "id": "thorsten",
+          "project": "experiments",
+          "at": "2026-10-20T09:11:00.000Z"
+        }
+      ]
+    },
+    "recent": null
+  },
+  "no words, project studio": {
+    "q": "",
+    "terms": [],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 1,
+      "messages": 0,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [
+        {
+          "type": "thread",
+          "thread_id": "videos 1",
+          "section": "quiet",
+          "archived": false,
+          "title": "Lab launch videos",
+          "title_marks": [],
+          "thread_name": "videos",
+          "id": "videos 1",
+          "project": "content-studio",
+          "at": "2026-10-20T09:13:00.000Z"
+        }
+      ]
+    },
+    "recent": null
+  },
+  "nothing (recent)": {
+    "q": "",
+    "terms": [],
+    "indexing": false,
+    "threads": 16,
+    "totals": null,
+    "groups": null,
+    "recent": [
+      {
+        "type": "thread",
+        "thread_id": "rate limit",
+        "title": "Relay: rate limit on mailbox creation",
+        "title_marks": [],
+        "thread_name": "relay",
+        "section": "quiet",
+        "archived": false,
+        "id": "rate limit",
+        "project": "plannotator",
+        "at": "2026-10-20T09:28:00.000Z"
+      },
+      {
+        "type": "thread",
+        "thread_id": "deploy log",
+        "title": "Deploy log",
+        "title_marks": [],
+        "thread_name": "deploy-log",
+        "section": "quiet",
+        "archived": false,
+        "id": "deploy log",
+        "project": "api",
+        "at": "2026-10-20T09:19:00.000Z"
+      },
+      {
+        "type": "thread",
+        "thread_id": "videos 1",
+        "title": "Lab launch videos",
+        "title_marks": [],
+        "thread_name": "videos",
+        "section": "quiet",
+        "archived": false,
+        "id": "videos 1",
+        "project": "content-studio",
+        "at": "2026-10-20T09:13:00.000Z"
+      },
+      {
+        "type": "thread",
+        "thread_id": "thorsten",
+        "title": "Bookmark: @thorstenball",
+        "title_marks": [],
+        "thread_name": "thorsten",
+        "section": "waiting",
+        "archived": false,
+        "id": "thorsten",
+        "project": "experiments",
+        "at": "2026-10-20T09:11:00.000Z"
+      }
+    ]
+  },
+  "no match": {
+    "q": "zebra",
+    "terms": [
+      "zebra"
+    ],
+    "indexing": false,
+    "threads": 16,
+    "totals": {
+      "threads": 0,
+      "messages": 0,
+      "files": 0,
+      "projects": 0
+    },
+    "groups": {
+      "threads": [],
+      "messages": [],
+      "files": [],
+      "projects": []
+    },
+    "recent": null
+  }
+}

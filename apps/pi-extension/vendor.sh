@@ -32,7 +32,7 @@ for f in config-types storage-types workspace-status-types; do
 done
 
 # Everything else in the original flat list stays sourced from packages/shared.
-for f in child-env annotate-bundle plannotator-tool prompts review-core repo-files repo-files-node fuzzy-path review-image review-markdown-image review-progress generated-files feedback-archive cli-pagination jj-core gitbutler-core vcs-core review-args advertised-url review-open-state draft review-draft annotate-draft annotate-history annotate-live-version pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-github-account pr-gitlab pr-bitbucket checklist integrations-common notion repo reference-common markdown-extensions resolve-file doc-resolve file-browser-watch-core file-browser-files annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node app-html packed-app diagram-engine-assets url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav repo-file data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale live-proxy-port plannotator-server-marker plannotator-ports live-proxy-core live-probe live-proxy-node loopback-host host-control request-origin request-host local-image update-check browser-intent agent-program package-metadata package-changes-service ref-cards ref-cards-node; do
+for f in child-env annotate-bundle plannotator-tool prompts review-core repo-files repo-files-node fuzzy-path review-image review-markdown-image review-progress generated-files feedback-archive cli-pagination jj-core gitbutler-core vcs-core review-args advertised-url review-open-state draft review-draft annotate-draft annotate-history annotate-live-version pr-types pr-context-live pr-artifact-document pr-provider pr-stack pr-github pr-github-account pr-gitlab pr-bitbucket checklist integrations-common notion repo reference-common markdown-extensions resolve-file doc-resolve file-browser-watch-core file-browser-files annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node app-html packed-app diagram-engine-assets url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav repo-file data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale live-proxy-port plannotator-server-marker plannotator-ports live-proxy-core live-probe live-proxy-node loopback-host tailnet-audience this-machine-reader reference-reader host-control request-origin request-host local-image update-check browser-intent agent-program package-metadata package-changes-service ref-cards ref-cards-node; do
   src="../../packages/shared/$f.ts"
   # Shared modules that import browser-safe siblings from @plannotator/core
   # (e.g. guide-store → core/guide-format): generated/ is flat and vendors the
@@ -45,9 +45,10 @@ done
 # The Plannotator Inbox connection (plannotator_inbox and the reply wake):
 # the pure contract and the node-runtime link the OpenCode plugin uses too.
 # agent-link imports only ./connection and node: modules, so the folder keeps
-# its own relative import.
+# its own relative import. tailnet (the serve header names, for
+# tailnet-audience and so this-machine-reader) imports ../tailscale.
 mkdir -p generated/inbox
-for f in connection agent-link; do
+for f in connection agent-link tailnet; do
   src="../../packages/shared/inbox/$f.ts"
   printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/%s.ts\n' "$f" | cat - "$src" > "generated/inbox/$f.ts"
 done

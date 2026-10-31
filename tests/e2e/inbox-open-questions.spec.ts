@@ -326,8 +326,8 @@ test('phone (Chromium, Pixel 7): the "N new" pill never lies over a foot button'
     const page = await context.newPage();
     await page.goto(`${world.url}#thread=${first.thread_id as string}`);
     const foot = page.locator('.ib-pfoot');
-    // Reply and "2 open" (Re-ask is in its list): the pill keeps clear of them.
-    await expect(foot.locator('[data-open-questions]')).toHaveAttribute('aria-label', '2 open questions');
+    // Reply and "2 open questions" (a phone tries the long form first; Re-ask is in its list): the pill keeps clear of them.
+    await expect(foot.locator('[data-open-questions]')).toHaveAccessibleName('2 open questions');
     await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
     const pill = page.locator('[data-new-pill]');
     await expect(pill).not.toHaveAttribute('data-off', '');

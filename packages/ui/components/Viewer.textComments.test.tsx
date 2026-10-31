@@ -26,6 +26,10 @@ const MARKDOWN = [
   '- [ ] Half even',
   ':::',
   '',
+  ':::action',
+  'Publish the tarball',
+  ':::',
+  '',
 ].join('\n');
 
 let root: Root | null = null;
@@ -44,7 +48,7 @@ afterEach(async () => {
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
-async function mount(props: { textComments?: boolean; readOnly?: boolean }): Promise<HTMLElement> {
+async function mount(props: { textComments?: boolean; readOnly?: boolean; renderDirectiveBlock?: (block: { directiveKind?: string }) => React.ReactNode | undefined }): Promise<HTMLElement> {
   const Viewer = viewerModule!.Viewer;
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -114,6 +118,35 @@ test.skipIf(!hasDom)('with textComments: the comment-only toolbar (Comment and ð
   expect(card.closest('.annotation-exclude')).not.toBeNull();
   await select(card, 'Which rounding');
   expect(toolbarNames()).toEqual([]);
+});
+
+/** A host's card in place of a `:::action` block (the Inbox's action items): its words are the person's to select and copy. */
+const hostCard = (block: { directiveKind?: string }) =>
+  block.directiveKind === 'action' ? <p data-host-card="">Run npm publish dist/core.tgz in the repo root</p> : undefined;
+
+test.skipIf(!hasDom)('with textComments: a selection inside a question card or a host card stays selected after the pointer goes up (copyable); the text still takes comments', async () => {
+  const el = await mount({ textComments: true, renderDirectiveBlock: hostCard });
+  const card = el.querySelector<HTMLElement>('[data-question-key]')!;
+  await select(card, 'Which rounding');
+  expect(window.getSelection()!.toString()).toBe('Which rounding');
+  expect(toolbarNames()).toEqual([]);
+
+  const action = el.querySelector<HTMLElement>('[data-host-card]')!;
+  expect(action.closest('.annotation-exclude')).not.toBeNull();
+  await select(action, 'npm publish dist/core.tgz');
+  expect(window.getSelection()!.toString()).toBe('npm publish dist/core.tgz');
+  expect(toolbarNames()).toEqual([]);
+  // Copy takes the live selection, not a toolbar's text.
+  const copied = new Map<string, string>();
+  const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { setData: (k: string, v: string) => copied.set(k, v) } });
+  action.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  expect(copied.size).toBe(0);
+
+  // The library listens again: the next selection in the text opens the comment toolbar.
+  await select(el, 'two, four and eight');
+  expect(toolbarNames()).toContain('Comment');
 });
 
 test.skipIf(!hasDom)('readOnly still wins over textComments', async () => {
