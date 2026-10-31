@@ -21,7 +21,6 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PHONE_QUERY } from './phone';
-import { Icon } from './icons';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -182,15 +181,9 @@ test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at t
   expect(expand.textContent).toBe('');
   expect(expand.getAttribute('aria-label')).toMatch(/^(Expand all messages|Fold the earlier messages)$/);
   // Expand all / Fold all are chevrons, never the four-arrow maximize glyph the Inbox draws elsewhere (an image's fit
-  // toggle), so no header icon reads as "maximize" (owner, 2026-10-30).
-  const maximize = document.createElement('div');
-  const maximizeRoot = createRoot(maximize);
-  act(() => maximizeRoot.render(<><Icon name="expand" /><Icon name="collapse" /></>));
-  const maximizeGlyphs = [...maximize.querySelectorAll('path')].map((p) => p.getAttribute('d'));
-  act(() => maximizeRoot.unmount());
-  const glyph = expand.querySelector('path')?.getAttribute('d') ?? '';
-  expect(glyph.length > 0).toBe(true);
-  expect(maximizeGlyphs.includes(glyph)).toBe(false);
+  // toggle), so no header icon reads as "maximize" (owner, 2026-10-30). The glyph matches the label.
+  const glyph = expand.querySelector('svg')?.getAttribute('data-icon');
+  expect(glyph).toBe(expand.getAttribute('aria-label') === 'Expand all messages' ? 'unfold' : 'fold');
   const head = el.querySelector('section.ib-pane .ib-phead')!;
   // The thread's full-screen button and its hairline lead (approval "inbox-files-tabs", amendment 2026-10-30, B).
   const order = [...head.querySelectorAll('[data-full-in], [data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map((n) =>

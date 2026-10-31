@@ -180,7 +180,7 @@ export function TailscaleMark({ size = 16 }: { size?: number }) {
 export function Icon({ name, size, className }: { name: IconName; size?: number; className?: string }) {
   const style = size ? ({ width: size, height: size } as React.CSSProperties) : undefined;
   return (
-    <svg className={`ib-ic${className ? ` ${className}` : ''}`} viewBox="0 0 24 24" style={style} aria-hidden="true" focusable="false">
+    <svg className={`ib-ic${className ? ` ${className}` : ''}`} viewBox="0 0 24 24" style={style} aria-hidden="true" focusable="false" data-icon={name}>
       <path d={PATHS[name]} />
     </svg>
   );

@@ -2728,6 +2728,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox[data-stack~="thread"] .ib-main { position: relative; }
 .pn-inbox[data-stack~="thread"][data-view="thread"] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
 .pn-inbox[data-stack~="file"][data-view="file"] .ib-pane.ib-withfile { display: none; }
+/* The thread in full screen (App.tsx `data-thread-full`): the list stays drawn under it, hidden as a stacked
+   window hides it, so J/K and G I still read its order and its scroll stays. */
+.pn-inbox[data-thread-full] .ib-main { position: relative; }
+.pn-inbox[data-thread-full] .ib-listcol { position: absolute; inset: 0; visibility: hidden; }
 .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 40%; height: 30px; padding: 0 9px 0 4px; border-radius: 7px; color: var(--primary); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; white-space: nowrap; }
 .pn-inbox .ib-pback:hover { background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-pback-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

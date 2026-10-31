@@ -13,8 +13,12 @@
  *    760 px measure, ‹ Inbox leads in the button's place and there is no ×;
  *    ‹ Inbox, Escape or ⌘B brings them back (Escape leaves full screen before
  *    it closes the thread); a file opened there opens beside the thread and
- *    closing it returns to full screen; another thread keeps it; a stacked
- *    window never counts as full screen;
+ *    closing it returns to full screen (⌘B there leaves it alone); another
+ *    thread keeps it, J and K included (the list stays drawn, hidden); G I
+ *    brings the list back; a stacked window never counts as full screen; a
+ *    window narrowed in full screen keeps the list beside the thread on the
+ *    way out (the sidebar held closed); with the sidebar closed the button
+ *    reads "Hide the list";
  *  - a stacked window (1000 px): ‹ Inbox leads, then Mark read; Archive, then
  *    ⋯ More (the copy menu, design record "inbox-copy-message") end it;
  *  - a file beside the thread: the same, with ‹ Inbox closing the file;
@@ -205,7 +209,7 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   // In: the list and the sidebar hide, the thread spans the window at a reading measure, ‹ Inbox in the button's place.
   await enter.click();
   await expect(pane).toHaveAttribute('data-full', '');
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   await expect.poll(leftOf(pane)).toBeLessThan(20);
   await expect(sidebar).toBeHidden();
   await expect(leave).toBeFocused();
@@ -234,16 +238,29 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
 
   // ⌘B leaves full screen too, and still writes no sidebar choice.
   await enter.click();
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   await page.keyboard.press('ControlOrMeta+b');
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await expect(sidebar).toBeVisible();
   await expect(pane).not.toHaveAttribute('data-full', '');
   expect(await sidebarCookie(page)).toBe(cookieBefore);
 
+  // The sidebar closed by the person: the button hides only the list, and leaving full screen leaves the sidebar closed.
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(sidebar).toBeHidden();
+  await expect(enter).toHaveAccessibleName('Hide the list');
+  await enter.click();
+  await expect(page.locator('.ib-listcol')).toBeHidden();
+  await leave.click();
+  await expect(page.locator('.ib-listcol')).toBeVisible();
+  await expect(sidebar).toBeHidden();
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(sidebar).toBeVisible();
+  await expect(enter).toHaveAccessibleName('Hide the sidebar and the list');
+
   // Escape leaves full screen first (the thread stays), then closes the thread.
   await enter.click();
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   await expect(leave).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('.ib-listcol')).toBeVisible();
@@ -259,7 +276,7 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await page.goto(`${world.url}#thread=${threads.invoices}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
   await pane.locator('[data-full-in]').click();
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
   const view = page.locator(`[data-attachment-pane="${world.attachment}"]`);
   await expect(view).toBeVisible();
@@ -274,7 +291,7 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await view.getByRole('button', { name: 'Close invoice-plan.md' }).click();
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   await expect(pane.locator('[data-full-back]')).toBeVisible();
   // Escape from the file closes the file first, still in full screen.
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
@@ -283,7 +300,7 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await page.keyboard.press('Escape');
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   // The file's own full screen, then back beside the thread, then its ×: still the thread in full screen.
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
   await expect(view).toBeVisible();
@@ -295,9 +312,18 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await view.getByRole('button', { name: 'Close invoice-plan.md' }).click();
   await expect(view).toHaveCount(0);
   await expect(pane).toHaveAttribute('data-full', '');
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   // Pressing Full screen was remembered as the person's view (fileView.ts): forgotten, so the next file opens beside.
   await forgetFileViewChoice(page);
+  // ⌘B with a file open from full screen leaves full screen alone: closing the file still returns to it.
+  await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
+  await expect(view).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(view).toBeVisible();
+  await view.getByRole('button', { name: 'Close invoice-plan.md' }).click();
+  await expect(view).toHaveCount(0);
+  await expect(pane).toHaveAttribute('data-full', '');
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   // ‹ Inbox with a file open closes the file and leaves full screen: the list comes back.
   await pane.getByRole('button', { name: 'Open invoice-plan.md' }).first().click();
   await expect(view).toBeVisible();
@@ -317,7 +343,7 @@ test('the thread in full screen is a reading mode: another thread keeps it; a st
   await page.evaluate((id) => (location.hash = `#thread=${id}`), threads.back);
   const other = page.locator(`section.ib-pane[data-thread-id="${threads.back}"]`);
   await expect(other).toHaveAttribute('data-full', '');
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   await expect(other.locator('[data-full-back]')).toBeVisible();
   // A window too narrow for two panes: the stacked thread leads with its own ‹ Inbox, never full screen's.
   await page.setViewportSize({ width: 800, height: 800 });
@@ -330,7 +356,7 @@ test('the thread in full screen is a reading mode: another thread keeps it; a st
   }
   // Wide again: back to full screen, as the person left it.
   await expect(other).toHaveAttribute('data-full', '');
-  await expect(page.locator('.ib-listcol')).toHaveCount(0);
+  await expect(page.locator('.ib-listcol')).toBeHidden();
   // No thread open: it ends.
   await page.evaluate(() => (location.hash = ''));
   await expect(page.locator('.ib-listcol')).toBeVisible();
@@ -338,6 +364,71 @@ test('the thread in full screen is a reading mode: another thread keeps it; a st
   await expect(pane).toBeVisible();
   await expect(pane).not.toHaveAttribute('data-full', '');
   await expect(pane.locator('[data-full-in]')).toBeVisible();
+});
+
+test('the thread in full screen: J and K step through the hidden list and keep full screen; G I brings the list back', async () => {
+  const { page } = world;
+  await page.goto(world.url);
+  const rows = page.locator('.ib-main .ib-lbody [data-thread-id]');
+  await expect(rows.first()).toBeVisible();
+  const order = [...new Set(await rows.evaluateAll((els) => els.map((e) => e.getAttribute('data-thread-id') ?? '')))].filter(Boolean);
+  expect(order.length).toBeGreaterThan(1);
+  const [first, second] = order as [string, string];
+  const hash = () => page.evaluate(() => location.hash);
+  await page.evaluate((id) => (location.hash = `#thread=${id}`), second);
+  const secondPane = page.locator(`section.ib-pane[data-thread-id="${second}"]`);
+  await secondPane.locator('[data-full-in]').click();
+  await expect(secondPane).toHaveAttribute('data-full', '');
+  await expect(page.locator('.ib-listcol')).toBeHidden();
+  // K: the thread above it in the list, still in full screen.
+  await page.keyboard.press('k');
+  await expect.poll(hash).toContain(`thread=${first}`);
+  const firstPane = page.locator(`section.ib-pane[data-thread-id="${first}"]`);
+  await expect(firstPane).toHaveAttribute('data-full', '');
+  await expect(page.locator('.ib-listcol')).toBeHidden();
+  // J: back down.
+  await page.keyboard.press('j');
+  await expect.poll(hash).toContain(`thread=${second}`);
+  await expect(secondPane).toHaveAttribute('data-full', '');
+  // G I: full screen ends so the open thread's row can take focus.
+  await page.keyboard.press('g');
+  await page.keyboard.press('i');
+  await expect(page.locator('.ib-listcol')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('.ib-lbody [data-thread-id]')?.getAttribute('data-thread-id') ?? null)).toBe(second);
+});
+
+test('the thread in full screen, then a narrower window: leaving keeps the list beside the thread, the sidebar held closed', async () => {
+  const { page, threads } = world;
+  await page.goto(`${world.url}#thread=${threads.invoices}`);
+  const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
+  const sidebar = page.getByRole('complementary', { name: 'Inbox navigation' });
+  await expect(sidebar).toBeVisible();
+  const mainWidth = () => page.locator('.ib-main').evaluate((m) => m.getBoundingClientRect().width);
+  try {
+    // ‹ Inbox, then Escape: each way out does the same room check.
+    for (const way of ['‹ Inbox', 'Escape'] as const) {
+      await pane.locator('[data-full-in]').click();
+      await expect(pane).toHaveAttribute('data-full', '');
+      // Room for the thread alone, and for the list beside it, but not for the sidebar too.
+      await page.setViewportSize({ width: 960, height: 800 });
+      await expect(pane).toHaveAttribute('data-full', '');
+      if (way === 'Escape') {
+        await expect(pane.locator('[data-full-back]')).toBeFocused();
+        await page.keyboard.press('Escape');
+      } else await pane.locator('[data-full-back]').click();
+      await expect(pane).not.toHaveAttribute('data-full', '');
+      await expect(page.locator('.ib-listcol')).toBeVisible();
+      await expect(sidebar).toBeHidden();
+      await expect(pane.locator('[data-stack-back]')).toHaveCount(0);
+      expect(await mainWidth()).toBeGreaterThanOrEqual(820);
+      await expect(pane.locator('[data-full-in]')).toBeFocused();
+      // Wide again: the sidebar comes back on its own.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await expect(sidebar).toBeVisible();
+    }
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
 });
 
 test('a stacked window: ‹ Inbox, then Mark read; Archive and ⋯ More end the header', async () => {

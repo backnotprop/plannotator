@@ -1749,8 +1749,9 @@ function Inbox() {
   // is open and comes back on leaving, without writing the person's stored choice. ⌘B there opens it
   // for this visit only.
   const [settingsSidebar, setSettingsSidebar] = useState(false);
-  // The thread in full screen (`full` below): Escape's ladder reads it.
+  // The thread in full screen (`full` below) and its one way out (`leaveFull` below): Escape's ladder reads them.
   const threadFullRef = useRef(false);
+  const leaveFullRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (route.page !== 'settings') setSettingsSidebar(false);
   }, [route.page]);
@@ -1780,7 +1781,7 @@ function Inbox() {
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
       if (!now.guide && !now.artifacts && threadFullRef.current) {
-        setThreadFull(false);
+        leaveFullRef.current();
         return;
       }
       closeTo(now.guide ? { ...now, guide: null } : now.artifacts ? { ...now, artifacts: false } : { ...now, thread: null });
@@ -2772,6 +2773,8 @@ function Inbox() {
         handle: () => {
           const now = routeRef.current;
           if (now.page !== 'inbox') leave({ page: 'inbox', project: null, thread: null });
+          // The list is hidden under a thread in full screen: the list comes back so its row can take focus.
+          if (threadFullRef.current) leaveFullRef.current();
           const open = now.page === 'inbox' ? now.thread : null;
           focusSoon([...(open ? [`.ib-main .ib-lbody [data-thread-id="${CSS.escape(open)}"]`] : []), '.ib-main .ib-lbody [data-thread-id]', '.ib-main .ib-lbody button.ib-band', '.ib-main .ib-empty h2', '.ib-main h1']);
         },
@@ -3639,6 +3642,23 @@ function Inbox() {
   // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
   const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
   threadFullRef.current = full;
+  // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
+  // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
+  // does not stack over the list it was asked to show.
+  const holdSidebarIfTight = () => {
+    const root = rootRef.current;
+    if (!root || !sidebarOpen) return;
+    const width = root.getBoundingClientRect().width;
+    const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
+    const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
+    if (width >= room && width - sidebar < room) setSidebarHeld(true);
+  };
+  // Every way out of full screen (‹ Inbox, Escape, ⌘B): the sidebar and the list come back as the window has room.
+  const leaveFull = () => {
+    holdSidebarIfTight();
+    setThreadFull(false);
+  };
+  leaveFullRef.current = leaveFull;
   const backToCard = () => close({ page: 'board', project: route.boardProject ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
@@ -4084,7 +4104,9 @@ function Inbox() {
   } else {
     main = (
       <>
-        {!fileOpen && !fromCard && !full && (
+        {/* In full screen the list stays drawn, hidden (inbox.css `data-thread-full`): J/K and G I read its order, and
+            its scroll stays where it was. */}
+        {!fileOpen && !fromCard && (
         <InboxList
           scope={route.project}
           // One project's list: its window name, the path beside it.
@@ -4284,20 +4306,15 @@ function Inbox() {
             phone={phone}
             stacked={stack.thread || !!fromCard}
             threadAlone={full}
-            onFull={fromCard ? undefined : setThreadFull}
+            fullSidebar={sidebarOpen && !sidebarHeld}
+            onFull={fromCard ? undefined : (on) => (on ? setThreadFull(true) : leaveFull())}
             fileStacked={stack.file}
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             onToast={(t) => showToast(t)}
             linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
             onBackToList={(fileName) => {
               // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
-              const root = rootRef.current;
-              if (root && sidebarOpen) {
-                const width = root.getBoundingClientRect().width;
-                const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-                const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
-                if (width >= room && width - sidebar < room) setSidebarHeld(true);
-              }
+              holdSidebarIfTight();
               // ‹ Inbox beside a file opened from full screen ends full screen too: the list comes back.
               setThreadFull(false);
               backFromFile.current = { thread: thread.thread_id, name: fileName, label: listTitle };
@@ -4319,6 +4336,8 @@ function Inbox() {
       data-enter={tourOn ? undefined : (entered.current ?? undefined)}
       // The tour draws its stacked layouts itself (tour/Tour.tsx): the window's stacking rules stay out of it.
       data-stack={!tourOn && (stack.thread || stack.file) ? [stack.thread && 'thread', stack.file && 'file'].filter(Boolean).join(' ') : undefined}
+      // The thread in full screen: the list is hidden under it (inbox.css), not taken off the page.
+      data-thread-full={full ? '' : undefined}
       data-tour={tourOn ? String(tourState.step) : undefined}
     >
       {tourOn && (
@@ -4340,9 +4359,10 @@ function Inbox() {
             setSettingsSidebar(next);
             return;
           }
-          // ⌘B in full screen leaves it (the sidebar and the list come back) and keeps the person's stored choice.
-          if (next && full) {
-            setThreadFull(false);
+          // ⌘B in full screen leaves it (the sidebar and the list come back) and keeps the person's stored choice. Not
+          // while a file is open from it: closing the file comes back to the thread in full screen.
+          if (next && full && !fileOpen) {
+            leaveFull();
             return;
           }
           setSidebarHeld(false);
