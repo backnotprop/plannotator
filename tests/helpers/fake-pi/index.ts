@@ -64,6 +64,8 @@ export interface FakePi {
   /** Pi's settings list Plannotator's Pi extension, or not. */
   setExtension(on: boolean): void;
   setInstalled(on: boolean): void;
+  /** Whether `pi` execs the fake (the default), or runs it as its child. */
+  setExec(on: boolean): void;
   /** Whether that pid is still a running fake. */
   alive(pid: number): boolean;
   stopAll(): number;
@@ -76,8 +78,10 @@ export function installFakePi(input: { bin: string; state: string; home: string;
   for (const dir of [bin, state, join(home, ".pi", "agent")]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(state, "config.json"), JSON.stringify(input.config ?? {}));
   const pi = join(bin, "pi");
+  /** `exec` off: the wrapper runs Pi as its child, as Volta's shim or `node …/cli.js "$@"` does. */
+  let exec = true;
   const install = () => {
-    writeFileSync(pi, `#!/bin/sh\nFAKE_PI_STATE=${q(state)} exec ${q(process.execPath)} ${q(SCRIPT)} "$@"\n`);
+    writeFileSync(pi, `#!/bin/sh\nFAKE_PI_STATE=${q(state)} ${exec ? "exec " : ""}${q(process.execPath)} ${q(SCRIPT)} "$@"\n`);
     chmodSync(pi, 0o755);
   };
   install();
@@ -131,6 +135,10 @@ export function installFakePi(input: { bin: string; state: string; home: string;
     setInstalled(on) {
       if (on) install();
       else rmSync(pi, { force: true });
+    },
+    setExec(on) {
+      exec = on;
+      install();
     },
     alive,
     stopAll() {

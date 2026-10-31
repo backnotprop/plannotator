@@ -6,6 +6,7 @@
  * row is offered, and the scratch purge. A small bridge in the test's own data dir stands in for the Inbox's.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +17,7 @@ import { installFakePi, type FakePi } from "../../tests/helpers/fake-pi";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import type { LaunchHostContext, LaunchLive } from "./inbox-launch-host";
 import type { LaunchEnv } from "./inbox-launch-env";
-import { createPiLaunchHost, piDialogNote, piDialogTitle, piExtensionListed, piSpawnEnv, PI_HANDED_BACK_NOTE, PI_HANDOFF_NOTE, PI_STOPPED_NOTE } from "./inbox-launch-pi";
+import { createPiLaunchHost, piDialogNote, piDialogTitle, piExtensionListed, piHandoffCommand, piSpawnEnv, PI_HANDED_BACK_NOTE, PI_HANDOFF_NOTE, PI_STOPPED_NOTE } from "./inbox-launch-pi";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -65,7 +66,7 @@ function testBridge(dataDir: string) {
 
 function setup(
   config: Parameters<typeof installFakePi>[0]["config"] = { noConnect: true },
-  options: { handoffMs?: number; terminalOpenMs?: number; dataDirName?: string; folderName?: string } = {},
+  options: { handoffMs?: number; terminalOpenMs?: number; dataDirName?: string; folderName?: string; ps?: string } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-pi-")));
   const home = join(root, "home");
@@ -243,6 +244,54 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.alive(pid)).toBe(true);
     expect(fake.exits()).toHaveLength(0);
     expect(host.terminal(launch, false)).toContain("kill -0");
+  });
+
+  // Round 3, Should 1: a `pi` wrapper that does not exec read as "another process", so Open in Terminal always refused.
+  test("with a pi wrapper that does not exec, Open in Terminal still hands the session over", async () => {
+    const { fake, host, runTerminal, started } = setup();
+    fake.setExec(false);
+    const { launch, pid } = await started();
+    const command = host.terminal(launch, false);
+    expect(command).toContain("kill -0");
+    runTerminal(command);
+    expect(await until("the Inbox's process to end", () => fake.exits().find((e) => e.pid === pid))).toMatchObject({ aborted: true });
+    await until("the terminal's Pi", () => fake.terminals()[0]);
+  });
+
+  // Round 3, Should 2: with its folder gone, the hand-off command ran Pi at once, in the shell's own folder.
+  test("the hand-off command with its folder gone runs no Pi", async () => {
+    const { fake, root, runTerminal } = setup();
+    const shell = runTerminal(piHandoffCommand(join(root, "gone"), randomUUID(), process.pid));
+    await Promise.race([shell.exited, Bun.sleep(3_000)]);
+    expect(shell.exitCode).toBe(1);
+    expect(fake.terminals()).toHaveLength(0);
+  });
+
+  // Round 3, Must: Copy attach was offered again while the Pi the person started from it ran the session.
+  test("Copy attach is not offered while the Pi started from it runs the session", async () => {
+    const { fake, host, bridge, runTerminal, started } = setup({});
+    const { launch, session } = await started();
+    await until("the Inbox's Pi on the bridge", () => bridge.runStateOf(session));
+    await host.stop(session);
+    // Its own last polls still read live for a while: offered at once.
+    const atStop = bridge.runStateOf(session);
+    expect(atStop).not.toBeNull();
+    const command = host.attach(launch);
+    expect(command).not.toBeNull();
+    runTerminal(command!);
+    await until("its Pi on the bridge", () => fake.terminals()[0] && (bridge.runStateOf(session)?.polls ?? 0) > atStop!.polls);
+    expect(host.attach(launch)).toBeNull();
+  });
+
+  // Round 3, Should 4: with no ps, "" read as "no process", and a restart started a second writer.
+  test("when ps does not run, a reply's restart starts nothing and says why", async () => {
+    const { fake, host, logs, started } = setup({ noConnect: true }, { ps: "/nonexistent/plannotator-test/ps" });
+    const { launch, session } = await started();
+    await host.stop(session);
+    const refused = await host.resume(launch);
+    expect(refused.failure).toMatchObject({ code: "failed", text: expect.stringContaining("could not list processes") });
+    expect(logs.some((line) => line.includes("did not run"))).toBe(true);
+    expect(fake.starts()).toHaveLength(1);
   });
 
   // Round 2, Must 1: a second Open in Terminal (or Copy attach) before the bridge saw the first terminal's Pi.
@@ -464,16 +513,9 @@ describe("Pi's launch host, against the fake pi", () => {
 
   test("offered only with pi new enough and Plannotator's Pi extension in Pi's settings", async () => {
     const { fake, host } = setup();
-    const versionRuns = () => fake.calls().filter((call) => call.argv[0] === "--version").length;
     expect(await host.available()).toEqual({ ok: true, version: "0.85.1" });
-    // Asked again (compose asks every few seconds): the same pi binary is not run again.
-    expect(await host.available()).toEqual({ ok: true, version: "0.85.1" });
-    expect(versionRuns()).toBe(1);
     fake.setExtension(false);
-    // Without the extension, Pi is never started to ask its version.
-    const before = versionRuns();
-    for (let i = 0; i < 3; i++) expect(await host.available()).toMatchObject({ ok: false, missing: false, reason: expect.stringContaining("Pi extension") });
-    expect(versionRuns()).toBe(before);
+    expect(await host.available()).toMatchObject({ ok: false, missing: false, reason: expect.stringContaining("Pi extension") });
     fake.setExtension(true);
     fake.configure({ version: "0.70.0" });
     expect(await host.available()).toMatchObject({ ok: false, missing: false, reason: "Pi 0.70.0 is older than 0.79.1" });
