@@ -793,10 +793,12 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of: Claude Code (`claude --bg`), and OpenCode 1.18+ (`opencode serve`,
- * one per launch: packages/server/inbox-launch-opencode.ts).
+ * session of, one per line: Claude Code (`claude --bg`), OpenCode 1.18+
+ * (`opencode serve`, one per launch: packages/server/inbox-launch-opencode.ts).
  */
-export type InboxLaunchAgent = "claude-code" | "opencode";
+export type InboxLaunchAgent =
+  | "claude-code"
+  | "opencode";
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {
@@ -859,9 +861,7 @@ export interface InboxRun {
   again: boolean;
   /** `stopped`: the person pressed Stop (the line names the time). */
   stopped_by_person: boolean;
-  /** `stopped` by the host after this many minutes idle (OpenCode's server); a reply continues it. */
-  idle_minutes?: number;
-  /** `failed`: the cause in words; `missing`: null. */
+  /** `failed`: the cause in words; `stopped`: the host's note, when it has one (else null); `missing`: null. */
   cause: string | null;
   /** `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there. */
   untrusted: boolean;

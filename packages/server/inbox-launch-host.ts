@@ -146,4 +146,11 @@ export interface LaunchHost {
   terminal(launch: InboxLaunchRecord, untrusted: boolean): string;
   /** Its permission transport, made once. */
   permissions(context: LaunchPermissionContext): LaunchHostPermissions;
+  /**
+   * The words after "<name> stopped." on a launch's line when its session stopped without the person's Stop
+   * (why, and what a reply does). Null, or no `stoppedNote`: "Your reply starts it again." (Claude Code).
+   */
+  stoppedNote?(launch: InboxLaunchRecord): string | null;
+  /** The Inbox stops: let go of what this host holds (a connection, the processes it owns). No `close`: it holds nothing. */
+  close?(): void;
 }

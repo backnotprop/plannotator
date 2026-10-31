@@ -345,9 +345,13 @@ export function createInboxLaunch(options: {
     log,
   };
   const claude = createClaudeLaunchHost(context);
-  const opencode = createOpenCodeLaunchHost(context);
+  /** The agents the Inbox can start, one per line. */
+  const ownHosts: LaunchHost[] = [
+    claude,
+    createOpenCodeLaunchHost(context),
+  ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
-  const hosts: Record<string, LaunchHost> = Object.fromEntries([claude, opencode, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
+  const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
   const hostList = Object.values(hosts);
   /** The host of a launch's agent; null for an agent with no host here. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
@@ -496,6 +500,7 @@ export function createInboxLaunch(options: {
       respawnFailed: respawnFailedOf(memo),
       respawnUntrusted: respawnUntrustedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
+      stoppedNote: host.stoppedNote?.(launch) ?? null,
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
     });
@@ -827,7 +832,10 @@ export function createInboxLaunch(options: {
     },
     route,
     sweep,
-    stop: () => unsubscribe(),
+    stop: () => {
+      unsubscribe();
+      for (const host of hostList) host.close?.();
+    },
 
     /**
      * A launched session's permission hook (`POST /api/inbox/launch/:id/permission`), after the

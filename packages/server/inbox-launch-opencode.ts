@@ -93,6 +93,8 @@ const UNPROVED_MS = 60_000;
 export const OPENCODE_DENIED_EARLIER = "Denied with your earlier answer.";
 /** A card OpenCode answered itself with the person's Allow for this session (its `always` covers it). */
 export const OPENCODE_ALLOWED_EARLIER = "Allowed by your Allow for this session.";
+/** The words after "OpenCode stopped." for a server the host stopped for being idle (`stoppedNote`). */
+export const openCodeIdleNote = (minutes: number) => `It was idle for ${minutes} minute${minutes === 1 ? "" : "s"}. Your reply continues it.`;
 
 /** `1.18.23` (OpenCode prints the bare version) → `1.18.23`. */
 export function parseOpenCodeVersion(stdout: string): string | null {
@@ -925,10 +927,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       }
       return (ref: string) => {
         const conn = connections.get(ref);
-        if (!conn || conn.closed) {
-          const minutes = idleStopped.get(ref);
-          return { status: null, state: "stopped", waitingFor: null, ...(minutes ? { idleMinutes: minutes } : {}) };
-        }
+        if (!conn || conn.closed) return { status: null, state: "stopped", waitingFor: null };
         const unasked = [...conn.permissions.keys()].some((id) => ![...asked.values()].some((entry) => entry.request.id === id));
         if (conn.questions.size > 0) return { status: "waiting", state: "running", waitingFor: "question" };
         if (unasked) return { status: "waiting", state: "running", waitingFor: "permission prompt" };
@@ -1021,6 +1020,17 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
       return openCodeAttachCommand(launch.folder, launch.session_ref, server ? { url: server.url, file: serverFile(launch.id) } : null);
     },
     terminal: (launch: InboxLaunchRecord): string => host.attach(launch) ?? `cd ${shellWord(launch.folder)} && opencode`,
+
+    /** A server this host stopped for being idle: "OpenCode stopped. It was idle for 30 minutes. Your reply continues it." Else today's line. */
+    stoppedNote(launch: InboxLaunchRecord): string | null {
+      const minutes = launch.session_ref ? idleStopped.get(launch.session_ref) : undefined;
+      return minutes ? openCodeIdleNote(minutes) : null;
+    },
+
+    /** The Inbox stops: its event streams and wakes go; the servers run on, adopted by the next Inbox. */
+    close() {
+      for (const conn of [...connections.values()]) close(conn);
+    },
 
     permissions(context: LaunchPermissionContext): LaunchHostPermissions {
       perm = context;

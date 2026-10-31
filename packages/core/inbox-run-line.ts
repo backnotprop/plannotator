@@ -29,11 +29,8 @@ import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
 
-/**
- * The host's view of one session (`claude agents --json --all`), or `absent` when `--all` does not list it.
- * `idleMinutes`: stopped by the host after that long idle (a reply continues it).
- */
-export type InboxRunHostState = { status: string | null; state: string | null; waitingFor: string | null; idleMinutes?: number } | "absent";
+/** The host's view of one session (`claude agents --json --all`), or `absent` when `--all` does not list it. */
+export type InboxRunHostState = { status: string | null; state: string | null; waitingFor: string | null } | "absent";
 
 export interface InboxRunEvidence {
   launch: InboxLaunchRecord;
@@ -61,6 +58,8 @@ export interface InboxRunEvidence {
   respawnUntrusted?: boolean;
   /** When the person pressed Stop, while it still holds. */
   stoppedByPersonAt: number | null;
+  /** The host's words for a stop that was not the person's (`LaunchHost.stoppedNote`): the stopped line's `cause`. */
+  stoppedNote?: string | null;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
   attachCommand: string | null;
   /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
@@ -102,6 +101,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
   if (!e.seenLive && !hostStopped) return line("failed", { cause: "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?" });
-  const idleMinutes = e.stoppedByPersonAt === null && host?.state === "stopped" ? host.idleMinutes : undefined;
-  return line("stopped", { stopped_by_person: e.stoppedByPersonAt !== null, since: iso(e.stoppedByPersonAt), ...(idleMinutes ? { idle_minutes: idleMinutes } : {}) });
+  const byPerson = e.stoppedByPersonAt !== null;
+  // Not the person's Stop: the host's own words, when it has some.
+  return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });
 }

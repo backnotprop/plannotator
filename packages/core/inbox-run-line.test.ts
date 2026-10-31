@@ -84,14 +84,6 @@ describe("inboxRunOf", () => {
     expect(inboxRunOf(evidence({ now: later, seenLive: true, host: "absent", stoppedByPersonAt: later - 10 }))).toMatchObject({ state: "stopped", stopped_by_person: true });
   });
 
-  test("a session the host stopped for being idle says how long; the person's Stop wins over it", () => {
-    const later = T0 + INBOX_RUN_START_GRACE_MS + 1;
-    const idle = { status: null, state: "stopped", waitingFor: null, idleMinutes: 30 };
-    expect(inboxRunOf(evidence({ now: later, seenLive: true, host: idle }))).toMatchObject({ state: "stopped", stopped_by_person: false, idle_minutes: 30 });
-    expect(inboxRunOf(evidence({ now: later, seenLive: true, host: idle, stoppedByPersonAt: later - 10 }))).not.toHaveProperty("idle_minutes");
-    expect(inboxRunOf(evidence({ now: later, seenLive: true, host: { status: null, state: "stopped", waitingFor: null } }))).not.toHaveProperty("idle_minutes");
-  });
-
   test("a start that never connected is failed with the plugin hint, while the host still runs it", () => {
     const run = inboxRunOf(evidence({ now: T0 + INBOX_RUN_START_GRACE_MS + 1, host: { status: "idle", state: "running", waitingFor: null } }));
     expect(run?.state).toBe("failed");

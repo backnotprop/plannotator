@@ -5,7 +5,9 @@
  * permission question is written as its own agent, a reply after Stop restarts it once, Stop calls its stop
  * and withdraws through its transport, Delete calls its remove), so Claude Code is not wired into the engine; and a
  * record whose agent has no host here (after a downgrade) shows no line, is skipped by the sweep and answers
- * `launch_not_found`, never a crash.
+ * `launch_not_found`, never a crash. The optional seams: a host's own login-shell read (`context.loginEnv`),
+ * `close` when the Inbox stops, a per-launch `stoppedNote`, and a `resume` that throws (a failed restart, never
+ * an unhandled rejection).
  *
  * `fakeLaunchHost` is the engine's test fake: an in-memory agent whose sessions the test connects, works and
  * idles by hand. Claude Code's host is there too and stays out of the way: no `claude` is on the sandbox PATH.
@@ -18,7 +20,7 @@ import type { InboxLaunchAgent, InboxLaunchRecord, InboxMessage } from "@plannot
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
-import type { LaunchHost, LaunchLive } from "./inbox-launch-host";
+import type { LaunchHost, LaunchHostContext, LaunchLive } from "./inbox-launch-host";
 import { createLaunchQuestions } from "./inbox-launch-permission";
 
 const restore: (() => void)[] = [];
@@ -122,6 +124,9 @@ function setup() {
   const store = InboxStore.open(dataDir, { now: () => new Date(clock.now) });
   const project = store.ensureProject({ name: "project", root: folder });
   const fake = fakeLaunchHost();
+  /** The login-shell reads the engine made, and the context it gave the hosts. */
+  const logins = { count: 0 };
+  let context: LaunchHostContext | null = null;
   const launch = createInboxLaunch({
     store,
     live: { runStateOf: () => null },
@@ -129,7 +134,7 @@ function setup() {
     serverSession: "srv",
     homeDir: home,
     platform: "darwin",
-    loginEnv: async () => ({ HOME: home, PATH: "" }),
+    loginEnv: async () => (logins.count++, { HOME: home, PATH: "", FAKE_LOGIN: "yes" }),
     ownEnv: () => ({ HOME: home, PATH: "" }),
     installDirs: [],
     displayFolder: (path) => path,
@@ -137,13 +142,13 @@ function setup() {
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
-    hosts: () => [fake.host],
+    hosts: (made) => ((context = made), [fake.host]),
     now: () => clock.now,
   });
   restore.push(() => launch.stop());
   const post = (id: string, action: string) =>
     launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", body: JSON.stringify({ serverSession: "srv" }) }), `/api/inbox/launch/${id}/${action}`, "local");
-  return { store, clock, project, fake, launch, post };
+  return { store, clock, project, fake, launch, post, logins, context: () => context! };
 }
 
 /** Wait for the engine's background work (a start, a restart) to land. */
@@ -232,6 +237,56 @@ describe("a second agent behind LaunchHost", () => {
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }
+  });
+
+  test("a host reads the login shell through its context: a fresh read when it asks, shared with one under way", async () => {
+    const { logins, context } = setup();
+    const [first, second] = await Promise.all([context().loginEnv(), context().loginEnv()]);
+    expect(first).toMatchObject({ FAKE_LOGIN: "yes" });
+    expect(second).toBe(first);
+    expect(logins.count).toBe(1);
+    // Never held: the next ask reads it again.
+    await context().loginEnv();
+    expect(logins.count).toBe(2);
+  });
+
+  test("the Inbox stops: each host's close lets go of what it holds", () => {
+    const { fake, launch } = setup();
+    let closed = 0;
+    fake.host.close = () => void closed++;
+    launch.stop();
+    expect(closed).toBe(1);
+  });
+
+  test("a session that stopped without the person's Stop: the host's note for that launch, else today's line", async () => {
+    const { store, clock, project, fake, launch, post } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const started: InboxMessage[] = [];
+    for (const name of ["One", "Two"]) {
+      const prepared = await launch.prepare(target, { name, body: `${name}.`, resolveProject: async () => project });
+      const root = store.startPersonThread({ project_id: project.id, body: `${name}.`, to: prepared.to, idempotency_key: `send-${name}`, launch: prepared.launch }).message;
+      launch.begin(root);
+      await until(() => !!store.message(root.id)!.launch!.session_ref);
+      started.push(store.message(root.id)!);
+    }
+    const [one, two] = started as [InboxMessage, InboxMessage];
+    // Only the first launch has a note: the note is the host's word on that launch.
+    fake.host.stoppedNote = (record) => (record.id === one.launch!.id ? "It ran out of time. Your reply continues it." : null);
+    for (const root of [one, two]) {
+      const session = store.message(root.id)!.to!.session;
+      fake.poll(session, false, clock.now);
+      store.recordDelivery(root.id, { host: FAKE, session });
+      store.sendMessage({ project_id: project.id, author: { kind: "agent", host: FAKE, session, name: "Fake Agent" }, body: "Done.", reply_to: root.id, idempotency_key: `answer-${root.id}` });
+    }
+    // Both sessions end on their own (not the person's Stop), long after their start.
+    await fake.host.stop("f1");
+    await fake.host.stop("f2");
+    clock.now += INBOX_RUN_START_GRACE_MS * 2;
+    expect(await launch.runOf(one.id)).toMatchObject({ state: "stopped", stopped_by_person: false, cause: "It ran out of time. Your reply continues it." });
+    expect(await launch.runOf(two.id)).toMatchObject({ state: "stopped", stopped_by_person: false, cause: null });
+    // The person's own Stop: "You stopped …", never the host's note.
+    await post(one.launch!.id, "stop");
+    expect(await launch.runOf(one.id)).toMatchObject({ state: "stopped", stopped_by_person: true, cause: null });
   });
 
   test("a scratch launch's Delete purges its folder through its host", async () => {

@@ -443,13 +443,31 @@ describe("an idle server", () => {
     w.fake.configure({ hold: false });
     await until("stopped for idle", () => !alive(pid), 15_000);
     await until("server.json gone", () => !existsSync(w.serverFile));
-    expect((await w.host.sessions())(w.session)).toEqual({ status: null, state: "stopped", waitingFor: null, idleMinutes: 1 });
+    expect((await w.host.sessions())(w.session)).toEqual({ status: null, state: "stopped", waitingFor: null });
+    expect(w.host.stoppedNote!(w.record)).toBe("It was idle for 1 minute. Your reply continues it.");
     expect(w.host.live(w.session)).toBeNull();
     // A reply continues the same session on a new server; the idle mark goes.
     expect((await w.host.resume(w.record)).failure).toBeNull();
     expect((await w.host.sessions())(w.session)).toMatchObject({ state: "running" });
+    expect(w.host.stoppedNote!(w.record)).toBeNull();
     await w.host.stop(w.session);
   }, 40_000);
+});
+
+describe("the Inbox stops", () => {
+  test("close lets go of the event stream and the wake; the server runs on for the next Inbox", async () => {
+    const w = await launched({});
+    const pid = w.server().pid;
+    w.host.close!();
+    expect(w.host.live(w.session)).toBeNull();
+    await Bun.sleep(300);
+    expect(alive(pid)).toBe(true);
+    // The next look adopts the same server again: no second one.
+    await until("adopted again", async () => (await w.host.sessions())(w.session)?.state === "running", 10_000);
+    expect(w.fake.serves()).toHaveLength(1);
+    await w.host.stop(w.session);
+    await until("ended", () => !alive(pid), 10_000);
+  }, 30_000);
 });
 
 describe("pure parts", () => {
