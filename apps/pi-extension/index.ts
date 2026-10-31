@@ -33,7 +33,8 @@ import {
 	parseChecklist,
 	renderCompletedChecklist,
 } from "./generated/checklist.ts";
-import { loadConfig, resolveAgentTool, resolveUseJina } from "./generated/config.ts";
+import { loadConfig, resolveAgentTool, resolveAutoReload, resolveUseJina } from "./generated/config.ts";
+import { setupAutoReload } from "./auto-reload.ts";
 import { detectPiHost, setPiHost } from "./pi-host.ts";
 import { warnRuntimeTlsOnce } from "./runtime-tls.ts";
 import { importFresh, isPlannotatorUpdatedError, launchFailureText } from "./package-version.ts";
@@ -2714,5 +2715,28 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 	// only where the inbox tool switch allows it for Pi and an Inbox was found.
 	// Pi awaits the extension factory, so the tool list is read (bounded) before
 	// the session's first request; otherwise this returns nothing.
-	return setupPiInbox(pi, { isAskActive: () => sessionBridgeHub.hasActiveAsk });
+	// Pi reloads itself, when nothing can be lost, to load an updated Plannotator
+	// (auto-reload.ts); off, an older Pi and Oh My Pi get the note once per version.
+	const autoReload = setupAutoReload(pi, {
+		host: piHost,
+		enabled: resolveAutoReload(loadConfig(), process.env),
+		plannotatorBusy: () => {
+			if (pendingPlanReview) return "a plan review";
+			if (openReviews.openAll().length > 0) return "an open review";
+			if (sessionBridgeHub.hasActiveAsk) return "an Ask question";
+			return null;
+		},
+		piVersion: async () => {
+			try {
+				const sdk = (await import("@earendil-works/pi-coding-agent")) as { VERSION?: unknown };
+				return typeof sdk.VERSION === "string" ? sdk.VERSION : null;
+			} catch {
+				return null;
+			}
+		},
+	});
+	return setupPiInbox(pi, {
+		isAskActive: () => sessionBridgeHub.hasActiveAsk,
+		claimUpdateNotice: (version) => autoReload.claimNotice(version),
+	});
 }

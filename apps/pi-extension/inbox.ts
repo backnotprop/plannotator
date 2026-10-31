@@ -86,6 +86,11 @@ type InboxPi = Pick<ExtensionAPI, "registerTool" | "sendUserMessage" | "getActiv
 export interface PiInboxOptions {
 	/** An "Ask this session" question is running (the session bridge hub). */
 	isAskActive: () => boolean;
+	/**
+	 * Whether the "Plannotator was updated" note may be shown for `version` now
+	 * (auto-reload.ts: once per version, and never while Pi will reload by itself).
+	 */
+	claimUpdateNotice?: (version: string) => boolean;
 }
 
 /**
@@ -291,7 +296,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			const version = loadedPackageVersion();
 			if (!version) return null;
 			const onDisk = readOnDiskVersion();
-			if (onDisk && onDisk !== version && notifiedOnDisk !== onDisk) {
+			if (onDisk && onDisk !== version && notifiedOnDisk !== onDisk && (options.claimUpdateNotice?.(onDisk) ?? true)) {
 				notifiedOnDisk = onDisk;
 				try {
 					ctx?.ui.notify(packageUpdatedMessage(version, onDisk, ohMyPi ? "oh-my-pi" : "pi"), "warning");
