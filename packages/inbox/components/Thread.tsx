@@ -47,7 +47,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { useReplyDraft } from '../replyDraft';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
-import { canToggleRead } from '../markRead';
+import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
@@ -943,6 +943,12 @@ export interface ThreadPaneProps {
   /** Mark read, or move it back (the pressed button). Absent: no Mark read button. */
   onMarkRead?: (read: boolean) => void;
   /**
+   * Mark unread (markRead.ts `canMarkUnread`): on a thread read by opening it
+   * (not marked read) the header's disabled Mark read becomes Mark unread.
+   * Absent: the button stays Mark read.
+   */
+  onMarkUnread?: () => void;
+  /**
    * 👍 Looks good on the agent's latest message (`on`), or take it back:
    * silent, nothing is sent; the thread is marked read. `agent` names the
    * agent for the toast. Absent: no Looks good button.
@@ -1213,7 +1219,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -3851,6 +3857,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const readAt = row?.read_at ?? null;
   const markReadOffered = !resolved && row != null && onMarkRead !== undefined;
   const markReadEnabled = markReadOffered && canToggleRead(row!, drawn);
+  // Mark unread takes the place of the disabled Mark read ("Nothing here waits on you") on a thread the person
+  // read by opening it, an agent having written last (markRead.ts `canMarkUnread`). A thread marked read keeps
+  // the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
+  const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!, drawn);
+  // The header's ⋯ More offers it where that button does not: a thread the list still holds in New, one marked read.
+  // A phone keeps it there too, since its header gives way when short of room (headFit.ts).
+  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
@@ -3936,7 +3949,23 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         }
       });
   };
-  const markReadButton = markReadOffered ? (
+  const markReadButton = markUnreadOffered ? (
+    <Tip content="Back to New, bold, as if you had not opened it. Nothing is sent.">
+      <button
+        type="button"
+        className="ib-hbtn"
+        data-mark-unread=""
+        onClick={(event) => {
+          // A double-click on Mark read: this button took its place after the first click. The second is not meant for it.
+          if (event.detail > 1) return;
+          onMarkUnread!();
+        }}
+      >
+        <Icon name="envelope" size={16} />
+        <span className="ib-hbtn-l">Mark unread</span>
+      </button>
+    </Tip>
+  ) : markReadOffered ? (
     <Tip
       content={
         readAt !== null
@@ -3958,7 +3987,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // then Mark read's words, then the way back's label; the scrolled-away subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, markReadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4132,7 +4161,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               </Tip>
             )}
             {archiveButton}
-            <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} />
+            <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} markUnread={markUnreadInMenu ? onMarkUnread : undefined} />
             {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />

@@ -116,6 +116,8 @@ type Op =
   | { op: "seen"; target: number; through?: number }
   // Mark read, or its Undo (POST /api/inbox/threads/:id/read and /unread).
   | { op: "read"; target: number; read: boolean }
+  // Mark unread (POST /api/inbox/threads/:id/mark-unread): the latest agent message is new again.
+  | { op: "unread"; target: number }
   // An agent read the thread (read_thread, or wait_for_reply handed it the reply).
   | { op: "agentRead"; target: number }
   // The Undo window passed: the server tells the asking agent what a Mark read set aside.
@@ -358,6 +360,10 @@ function run(store: InboxStore, op: Op, messageIds: string[]): Outcome {
       case "read":
         if (!target) return "noop";
         store.markRead(threadOf(target), op.read);
+        return "ok";
+      case "unread":
+        if (!target) return "noop";
+        store.markUnread(threadOf(target));
         return "ok";
       case "agentRead":
         if (!target) return "noop";
@@ -1018,6 +1024,8 @@ function stateOpArbOf(body: fc.Arbitrary<string>, agentKeys: boolean): fc.Arbitr
           { arbitrary: fc.record({ op: fc.constant("draft" as const), target: fc.nat(), words: fc.boolean() }), weight: 2 },
           // Re-ask, in the property runs only; "s1" is also a Send's key, so a key used by the other is exercised.
           { arbitrary: fc.record({ op: fc.constant("reask" as const), target: fc.nat(), key: fc.constantFrom("r1", "r2", "s1") }), weight: 2 },
+          // Mark unread, in the property runs only (the trace fixtures were drawn without it).
+          { arbitrary: fc.record({ op: fc.constant("unread" as const), target: fc.nat() }), weight: 2 },
         ]
       : []),
   );
@@ -1207,6 +1215,8 @@ class ThreadStateModel {
   /** The section, strongest reason first (the doc's table "Sections"). */
   section(t: ModelThread): InboxSectionId {
     if (this.archived(t)) return "quiet";
+    // Mark unread took the look back from a Mark read that stands: its news is new again.
+    if (this.readHolds(t) && this.unseen(t) > 0) return "new";
     // A thread holding unsent work never sits in Quiet (unless archived): it is in New, unless a Re-ask waits.
     if (this.readHolds(t)) return this.unsent(t) && !this.reaskPending(t) ? "new" : "quiet";
     // A Re-ask note waits until the session it went to writes again: Sent, whatever is open.
@@ -1460,6 +1470,9 @@ class ThreadStateModel {
               q.setAside = { answer: q.answer, sent: q.sent, by: tick };
               q.answer = "skip";
             }
+          } else if (this.unseen(thread) > 0) {
+            // Mark unread took the look back from a Mark read that stands: the look comes back, the Mark read is the same one.
+            thread.seen = Math.max(...thread.messages.filter((m) => m.author === "agent").map((m) => m.tick));
           }
           return "ok";
         }
@@ -1493,6 +1506,14 @@ class ThreadStateModel {
           this.addPerson(thread, tick, "reopened");
           for (const q of qs) thread.told.delete(q.id);
         }
+        return "ok";
+      }
+      case "unread": {
+        // Mark unread moves only the look, so a Mark read stands. In the model's own terms: the last real
+        // word is an agent's, and none of its news is unseen yet.
+        if (thread.resolved) return "refused:thread_resolved";
+        const last = [...thread.messages].reverse().find((m) => m.note === null)!;
+        if (last.author === "agent" && this.unseen(thread) === 0) thread.seen = last.tick - 1;
         return "ok";
       }
       case "agentRead": {
@@ -1787,6 +1808,11 @@ function stateStep(world: StateWorld, op: Op, sameTick = false): StepResult {
   const wasResolved = thread?.resolved ?? false;
   const readAfterArchive = thread !== undefined && thread.resolved && thread.read !== null && thread.read > thread.archive;
   const readBefore = thread ? readSnapshot(world, thread.id) : null;
+  const readRecord = (threadId: string) => {
+    const { person_read_seq, person_read_at, person_seen_before_read } = world.store.message(threadId)!;
+    return { seq: person_read_seq ?? null, at: person_read_at ?? null, lookBefore: person_seen_before_read };
+  };
+  const readRecordBefore = thread ? readRecord(thread.id) : null;
 
   const created: string[] = [];
   const stop = world.store.subscribe((line) => {
@@ -1837,6 +1863,15 @@ function stateStep(world: StateWorld, op: Op, sameTick = false): StepResult {
     }
     // Mark read then Undo, back to back, gives the thread back exactly as it was.
     if (lastRead?.threadId === thread.id) expect(readSnapshot(world, thread.id)).toEqual(lastRead.before);
+  }
+  if (op.op === "unread") {
+    // An open thread an agent wrote last in: its latest message is new.
+    const last = [...thread.messages].reverse().find((m) => m.note === null)!;
+    if (last.author === "agent") expect(row.unseen).toBeGreaterThan(0);
+    // Only the look moves: a Mark read stands as it was, so Move back still reopens what it closed.
+    expect(readRecord(thread.id)).toEqual(readRecordBefore!);
+    // Nothing reaches an agent: Mark unread writes no message.
+    expect(created).toEqual([]);
   }
   if (op.op === "ack" && op.on && readBefore && readBefore.read_at === null) {
     // 👍 then its Undo, back to back, gives the thread back exactly as it was (as Mark read's does).
@@ -2010,6 +2045,8 @@ interface BatchDone {
   action: "read" | "archive";
   read: string[];
   resolved: string[];
+  /** Mark all as read only: threads whose Mark read stood, given their look back. */
+  looked?: string[];
 }
 
 /** Each thread of the project, as the store's routing placed it (the model checks routing step by step). */
@@ -2046,11 +2083,14 @@ function batchStep(world: StateWorld, item: Exclude<BatchItem, { kind: "op" }>, 
     return t.resolved && !world.model.agentAfter(t);
   };
   const skipRead = item.kind === "undo" && last ? new Set(last.read.filter(refusesUnread)) : new Set<string>();
+  // Mark unread refuses every archived thread.
+  const lookedBack = item.kind === "undo" && last ? (last.looked ?? []).filter((id) => !world.model.threads.get(id)!.resolved) : [];
+  const skipLooked = item.kind === "undo" && last ? (last.looked ?? []).filter((id) => !lookedBack.includes(id)) : [];
   try {
     if (item.kind === "undo") {
       if (!last) return null;
       if (last.action === "read") {
-        expect(new Set(unmarkProjectRead(world.store, last.projectId, last.read).skipped)).toEqual(skipRead);
+        expect(new Set(unmarkProjectRead(world.store, last.projectId, last.read, last.looked).skipped)).toEqual(new Set([...skipRead, ...skipLooked]));
       } else {
         const result = unarchiveProject(world.store, last.projectId, { resolved: last.resolved, read: last.read });
         expect(new Set(result.skipped)).toEqual(skipRead);
@@ -2069,15 +2109,19 @@ function batchStep(world: StateWorld, item: Exclude<BatchItem, { kind: "op" }>, 
     // The model, thread by thread, in the order the store wrote (resolved before read).
     for (const id of last!.resolved) modelSingle(world, { op: "resolve", target: 0, resolved: false }, id, created, tick);
     for (const id of last!.read) if (!skipRead.has(id)) modelSingle(world, { op: "read", target: 0, read: false }, id, created, tick);
+    for (const id of lookedBack) modelSingle(world, { op: "unread", target: 0 }, id, created, tick);
   } else {
     // The model decides which threads the batch takes, by its own rules.
     const threads = modelThreadsOf(world, done!.projectId).filter((t) => !world.model.archived(t));
     if (item.action === "read") {
       // Every bold row: a row in New only for the person's own unsent words waits on nobody (approval "inbox-reply-drafts"),
-      // and a thread whose Mark read still stands (unsent work keeps it in New) is not marked again.
+      // and a thread whose Mark read still stands (unsent work keeps it in New) is not marked again. One that Mark
+      // unread took the look back from gets the look back, named apart, so its Undo is Mark unread and not a Move back.
       const waits = threads.filter((t) => world.model.unread(t) && !world.model.readHolds(t)).map((t) => t.id);
       expect(new Set(done!.read)).toEqual(new Set(waits));
-      for (const id of done!.read) modelSingle(world, { op: "read", target: 0, read: true }, id, created, tick);
+      const looked = threads.filter((t) => world.model.readHolds(t) && world.model.unseen(t) > 0).map((t) => t.id);
+      expect(new Set(done!.looked)).toEqual(new Set(looked));
+      for (const id of [...done!.read, ...looked]) modelSingle(world, { op: "read", target: 0, read: true }, id, created, tick);
     } else {
       expect(new Set(done!.resolved)).toEqual(new Set(threads.filter((t) => !t.resolved).map((t) => t.id)));
       expect(new Set(done!.read)).toEqual(new Set(threads.filter((t) => t.resolved).map((t) => t.id)));

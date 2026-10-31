@@ -103,7 +103,7 @@ import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
-import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, seenHeldInNew } from './markRead';
+import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
 import type { PinnedAction } from './components/PinnedRow';
@@ -2384,10 +2384,16 @@ function Inbox() {
     }
     if (!before) return;
     const { warn, ...copy } = markReadToast(before, place);
+    // A Mark read that stood (Mark unread took its look back) only got its look back: Undo takes it again, never a Move back.
+    const stood = (before.read_at ?? null) !== null;
     showToast({
       ...copy,
       icon: warn ? 'warn' : 'check',
-      onUndo: () => void markRead(threadId, false),
+      onUndo: () => {
+        if (!stood) return void markRead(threadId, false);
+        dismissToast();
+        void markUnread(threadId);
+      },
       ...(warn
         ? {
             onReply: () => {
@@ -2425,6 +2431,52 @@ function Inbox() {
         armSlide();
         setShown((current) => (current ? putRowBack(current, before, threadId) : current));
         say('Moved back.');
+      },
+    });
+  };
+
+  /**
+   * Mark unread (the owner's ask, 2026-10-31; markRead.ts `canMarkUnread`):
+   * the thread's latest agent message is new again, so its row is New and
+   * bold, as if the person had not opened it. Nothing is sent to the agent,
+   * and a Mark read stands, so Move back still reopens what it closed. From
+   * the open thread the thread closes, as a mail app's Mark unread does: left
+   * open, its next look would read it again, and the list shows the row back
+   * in New. Undo is a look capped at the message Mark unread took back, so it
+   * puts back exactly what was there and leaves anything that arrived since
+   * new. When the server wrote nothing (a stale row: the thread was new
+   * already) the row just shows what is true: no toast, nothing to undo.
+   */
+  const markUnread = async (threadId: string) => {
+    const before = rowOf(threadId);
+    let written: Awaited<ReturnType<typeof inboxApi.markUnread>>;
+    try {
+      written = await inboxApi.markUnread(threadId);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite();
+    if (!written.wrote) return;
+    if (routeRef.current.thread === threadId) {
+      if (fromCard) backToCard();
+      else close({ ...routeRef.current, thread: null, file: null });
+    }
+    showToast({
+      ...markUnreadToast(before ?? { subject: null }),
+      icon: 'unread',
+      onUndo: () => {
+        dismissToast();
+        void (async () => {
+          try {
+            await inboxApi.seen(threadId, written.through_seq);
+          } catch (cause) {
+            showError(cause);
+            return;
+          }
+          await afterWrite();
+          say('Read again.');
+        })();
       },
     });
   };
@@ -2623,6 +2675,7 @@ function Inbox() {
   const rowAction = (row: InboxListRow, action: RowMenuAction) => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
     if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
+    if (action === 'mark-unread') return void markUnread(row.thread_id);
     if (action === 'archive') return void archive(row.thread_id, row.thread_id, true);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
@@ -2657,9 +2710,10 @@ function Inbox() {
     try {
       if (action === 'read') {
         const answer = await inboxApi.markProjectRead(projectId, newBatchId());
-        taken = answer.batch.read;
+        const looked = answer.batch.looked ?? [];
+        taken = [...answer.batch.read, ...looked];
         incomplete = answer.error?.message ?? null;
-        undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read);
+        undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read, looked);
       } else {
         const answer = await inboxApi.archiveProject(projectId, newBatchId());
         taken = [...answer.batch.resolved, ...answer.batch.read];
@@ -4271,6 +4325,7 @@ function Inbox() {
           }}
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
+          onMarkUnread={(row) => void markUnread(row.thread_id)}
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
           pinned={pinsOn ? pinnedIds : undefined}
@@ -4329,6 +4384,7 @@ function Inbox() {
             row={openThreadRow}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
+            onMarkUnread={() => void markUnread(thread.thread_id)}
             onAck={(messageId, on, agent) => void acknowledge(thread.thread_id, messageId, on, agent)}
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
