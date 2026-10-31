@@ -14,10 +14,15 @@
  * while arrowing, and `pointermove` (not enter) moves it. Queries debounce
  * 120 ms, one request in flight, stale answers dropped; the last results stay
  * dimmed while the next are on their way.
+ *
+ * The Type chip (approval "inbox-search-type-filter", option B) leads the
+ * filter row. With All types the request and the groups are what they were
+ * before it; a picked type sends `group=<id>` on every query and lists that
+ * group alone, 50 at a time. It starts on All types at every open.
  */
 
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow } from '@plannotator/core/inbox-search';
+import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow } from '@plannotator/core/inbox-search';
 import { saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
@@ -26,12 +31,14 @@ import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
 import {
   FROM_OPTIONS,
+  GROUP_LABELS,
   NO_FILTERS,
   SEARCH_PAGE,
   STATUS_OPTIONS,
   chipText,
   countWords,
   filtersSet,
+  formatCount,
   markedRuns,
   moreLabel,
   projectNames,
@@ -42,6 +49,7 @@ import {
   searchGroups,
   searchRowMark,
   sectionLabel,
+  typeCountWords,
   type SearchFilters,
   type SearchGroupView,
   type SearchOption,
@@ -81,12 +89,16 @@ export interface SearchPaletteProps {
 }
 
 type FilterKind = keyof SearchFilters;
+/** A chip and its menu: the three filters, and the Type chip that leads them. */
+type ChipKind = FilterKind | 'type';
 
 interface Answered {
   /** The query and filters this answer is for. */
   key: string;
   q: string;
   model: SearchModel;
+  /** The type it was asked for (null: All types). The list draws an answer as its own type, so a pick still on its way never redraws the last answer under the new chip. */
+  type: InboxSearchGroupId | null;
 }
 
 const FOCUSABLE = 'input:not([disabled]), button:not([disabled]):not([tabindex="-1"])';
@@ -344,7 +356,14 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const [error, setError] = useState(false);
   const [expanded, setExpanded] = useState<Partial<Record<InboxSearchGroupId, InboxSearchRow[]>>>({});
   const [hl, setHl] = useState<number | null>(null);
-  const [menu, setMenu] = useState<{ kind: FilterKind; hl: number } | null>(null);
+  const [menu, setMenu] = useState<{ kind: ChipKind; hl: number } | null>(null);
+  /** The Type chip's group, or null for All types. Read by `run` through the ref, so a pick is sent at once. */
+  const [type, setTypeState] = useState<InboxSearchGroupId | null>(null);
+  const typeRef = useRef<InboxSearchGroupId | null>(null);
+  const setType = (next: InboxSearchGroupId | null) => {
+    typeRef.current = next;
+    setTypeState(next);
+  };
   const [live, setLive] = useState('');
   const [fades, setFades] = useState({ top: false, bottom: false });
 
@@ -370,12 +389,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
     }
   }, [open]);
 
-  // Every open starts from an empty query, with the Project chip on the project open in the list.
+  // Every open starts from an empty query, All types, and the Project chip on the project open in the list.
   const startFilters = useMemo<SearchFilters>(() => ({ ...NO_FILTERS, project: currentProject }), [currentProject]);
   useLayoutEffect(() => {
     if (!open) return;
     setQ('');
     setFilters(startFilters);
+    setType(null);
     setExpanded({});
     setMenu(null);
     setError(false);
@@ -402,28 +422,30 @@ export default function SearchPalette(props: SearchPaletteProps) {
   };
 
   const run = useCallback(
-    (query: string, nextFilters: SearchFilters) => {
+    (query: string, nextFilters: SearchFilters, nextType: InboxSearchGroupId | null = typeRef.current) => {
       clearTimers();
       inflight.current?.abort();
       const controller = new AbortController();
       inflight.current = controller;
       const seq = ++requestSeq.current;
-      const key = JSON.stringify([query.trim(), nextFilters]);
+      const key = JSON.stringify([query.trim(), nextFilters, nextType]);
+      // A picked type asks for its group alone, the first page ("Show all"'s request); with no words, the request is today's.
+      const one = nextType && query.trim() ? { group: nextType, limit: SEARCH_PAGE } : {};
       setPending(true);
       setError(false);
-      searchInbox({ q: query, ...nextFilters, current: currentProject }, controller.signal)
+      searchInbox({ q: query, ...nextFilters, current: currentProject, ...one }, controller.signal)
         .then((model) => {
           if (seq !== requestSeq.current) return;
           if (model.indexing) {
             // Skeletons and the indexing line until the index is built; ask again.
-            setAnswered({ key, q: query.trim(), model });
-            retryTimer.current = setTimeout(() => run(query, nextFilters), SEARCH_INDEXING_RETRY_MS);
+            setAnswered({ key, q: query.trim(), model, type: nextType });
+            retryTimer.current = setTimeout(() => run(query, nextFilters, nextType), SEARCH_INDEXING_RETRY_MS);
             return;
           }
           setPending(false);
           setExpanded({});
-          setAnswered({ key, q: query.trim(), model });
-          setLive(countWords(model, query, filtersSet(nextFilters)));
+          setAnswered({ key, q: query.trim(), model, type: nextType });
+          setLive(nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters)));
         })
         .catch((cause) => {
           if (seq !== requestSeq.current || (cause instanceof DOMException && cause.name === 'AbortError')) return;
@@ -460,8 +482,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setFilters(next);
     run(q, next);
   };
-  /** "Clear filters" and "Search everywhere": every chip back to its start, focus back in the input. */
+  /** "Clear filters" and "Search everywhere": every chip back to its start (All types too), focus back in the input. */
   const clearFilters = () => {
+    setType(null);
     changeFilters(NO_FILTERS);
     inputRef.current?.focus();
   };
@@ -469,8 +492,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
   // ── options ──
   const groups: SearchGroupView[] = useMemo(() => {
     if (!answered) return [];
+    // A picked type with no words: nothing yet (the recent view is not that type).
+    if (answered.type && !answered.q) return [];
     // While the index builds there are no results yet, but the actions still show.
     const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
+    // A picked type lists its group alone, without Actions.
+    if (answered.type) return found;
     const actionList = actions ? actions(answered.q) : [];
     if (actionList.length === 0) return found;
     const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
@@ -520,7 +547,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (!answered) return;
     // Focus stays in the input, so the arrows go on from the expanded group.
     inputRef.current?.focus();
-    const already = expanded[option.group] ?? null;
+    // A picked type's answer already holds its first page: "Show 50 more" goes on from there.
+    const already = expanded[option.group] ?? (answered.type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
     const offset = already ? already.length : 0;
     try {
       const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, group: option.group, offset, limit: SEARCH_PAGE });
@@ -628,24 +656,37 @@ export default function SearchPalette(props: SearchPaletteProps) {
   };
 
   // ── filter chips and their menus ──
-  const menuOptions = (kind: FilterKind): { value: string | null; label: string }[] =>
-    kind === 'project'
-      ? [{ value: null, label: 'All projects' }, ...projects.map((p) => ({ value: p.id, label: projectName(p.id) }))]
-      : kind === 'status'
-        ? STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
-        : FROM_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
+  // A type's count, from the answer's totals, once there are words.
+  const typeCount = (id: InboxSearchGroupId): number | null => (answered && answered.q && !answered.model.indexing && answered.model.totals ? answered.model.totals[id] : null);
+  const menuOptions = (kind: ChipKind): { value: string | null; label: string; count?: number | null }[] =>
+    kind === 'type'
+      ? [{ value: null, label: 'All types' }, ...INBOX_SEARCH_GROUPS.map((id) => ({ value: id, label: GROUP_LABELS[id].heading, count: typeCount(id) }))]
+      : kind === 'project'
+        ? [{ value: null, label: 'All projects' }, ...projects.map((p) => ({ value: p.id, label: projectName(p.id) }))]
+        : kind === 'status'
+          ? STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
+          : FROM_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
 
-  const openMenu = (kind: FilterKind) => {
+  const chipValue = (kind: ChipKind): string | null => (kind === 'type' ? type : filters[kind]);
+  /** Set one chip (null: back to its start) and ask again. */
+  const setChip = (kind: ChipKind, value: string | null) => {
+    if (kind === 'type') {
+      const next = value as InboxSearchGroupId | null;
+      setType(next);
+      run(q, filters, next);
+    } else changeFilters({ ...filters, [kind]: value } as SearchFilters);
+  };
+  const openMenu = (kind: ChipKind) => {
     if (menu?.kind === kind) {
       setMenu(null);
       return;
     }
-    const at = menuOptions(kind).findIndex((o) => o.value === filters[kind]);
+    const at = menuOptions(kind).findIndex((o) => o.value === chipValue(kind));
     setMenu({ kind, hl: Math.max(0, at) });
   };
-  const pick = (kind: FilterKind, value: string | null) => {
+  const pick = (kind: ChipKind, value: string | null) => {
     setMenu(null);
-    changeFilters({ ...filters, [kind]: value } as SearchFilters);
+    setChip(kind, value);
     requestAnimationFrame(() => filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${kind}"]`)?.focus());
   };
   const menuRef = useRef<HTMLDivElement>(null);
@@ -679,9 +720,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [menu]);
 
-  const chip = (kind: FilterKind) => {
-    const set = filters[kind] !== null;
-    const label = chipText(kind, filters, projectName);
+  const chip = (kind: ChipKind) => {
+    const set = chipValue(kind) !== null;
+    const label = kind === 'type' ? (type ? GROUP_LABELS[type].heading : 'All types') : chipText(kind, filters, projectName);
     const button = (
       <Tip content={label} when={(trigger) => isTextCut(trigger.querySelector('.ib-sp-fl'))}>
         <button
@@ -700,12 +741,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </button>
       </Tip>
     );
-    if (!set) return <span key={kind} className="ib-sp-fcell">{button}</span>;
+    if (!set) return <span key={kind} className="ib-sp-fcell" data-cell={kind}>{button}</span>;
     return (
-      <span key={kind} className="ib-sp-fcell ib-sp-fwrap">
+      <span key={kind} className="ib-sp-fcell ib-sp-fwrap" data-cell={kind}>
         {button}
         <button type="button" className="ib-sp-fx" data-unset={kind} aria-label={`Clear the ${kind} filter`} onClick={() => {
-          changeFilters({ ...filters, [kind]: null } as SearchFilters);
+          setChip(kind, null);
           requestAnimationFrame(() => filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${kind}"]`)?.focus());
         }}>
           <Icon name="x" />
@@ -719,11 +760,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const items = menuOptions(menu.kind);
     const chipEl = filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${menu.kind}"]`);
     const left = chipEl?.closest<HTMLElement>('.ib-sp-fcell')?.offsetLeft ?? 10;
-    const label = menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : 'From';
+    const label = menu.kind === 'type' ? 'Type' : menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : 'From';
     return (
       <div ref={menuRef} className="ib-sp-menu" role="menu" aria-label={label} style={phone ? undefined : { left }} onKeyDown={onMenuKey}>
         {items.map((item, i) => {
-          const checked = filters[menu.kind] === item.value;
+          const checked = chipValue(menu.kind) === item.value;
           return (
             <div
               key={item.value ?? 'any'}
@@ -741,6 +782,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
                   {item.label}
                 </span>
               </Tip>
+              {item.count != null && <span className="ib-sp-mn">{formatCount(item.count)}</span>}
             </div>
           );
         })}
@@ -787,8 +829,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
       );
     }
     if (options.length === 0) {
+      if (answered.type && !answered.q) return <div className="ib-sp-empty ib-sp-quiet" data-search-type-empty="">Type to search {GROUP_LABELS[answered.type].noun}.</div>;
       if (!answered.q && !filtered) return <div className="ib-sp-empty ib-sp-quiet">Type to search threads, messages and files.</div>;
-      const scope = scopeWords(filters, projectName);
+      const scope = scopeWords(filters, projectName, answered.type);
       return (
         <div className="ib-sp-empty" data-search-none="">
           <span>
@@ -967,6 +1010,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </button>
       </div>
       <div className="ib-sp-filters" ref={filtersRef}>
+        {chip('type')}
         {chip('project')}
         {chip('status')}
         {chip('from')}
