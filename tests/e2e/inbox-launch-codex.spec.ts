@@ -218,6 +218,12 @@ test('the journey: To offers Codex; Send starts a thread (config.toml untouched)
   await expect(card(page).locator('[data-perm-mode]')).toHaveCount(0);
   await expect(card(page).locator('[data-perm="session"]')).toBeVisible();
   await expect(card(page)).toHaveAttribute('data-perm-armed', '', { timeout: 30_000 });
+  // Deny with a reason addresses Codex, never Claude.
+  await card(page).locator('[data-perm="reason"]').click();
+  await expect(card(page).locator('[data-perm-reason] textarea')).toHaveAttribute('placeholder', 'Tell Codex what to do instead');
+  await page.keyboard.press('Escape');
+  await expect(card(page).locator('[data-perm="once"]')).toBeVisible();
+  await expect(card(page)).toHaveAttribute('data-perm-armed', '', { timeout: 30_000 });
   await card(page).locator('[data-perm="once"]').click();
   const approved = await waitFor('the approval answered', () => fake.approvals()[0], 30_000);
   expect(approved).toMatchObject({ method: 'item/commandExecution/requestApproval', result: { decision: 'accept' }, how: 'answered' });

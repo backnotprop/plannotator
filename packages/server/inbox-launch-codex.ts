@@ -445,7 +445,8 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
   };
 
   /** The daemon (started when `start` and not running) and the one connection. Null when it is not running and `start` is false. */
-  const connect = async (options: { start: false } | { start: true; env: LaunchEnv; launchId?: string }): Promise<CodexConnection | null> => {
+  /** `env`: the env the daemon starts with, read only when it must start (a login-shell read is never made for nothing). */
+  const connect = async (options: { start: false } | { start: true; env: () => Promise<LaunchEnv>; launchId?: string }): Promise<CodexConnection | null> => {
     if (connection?.open) return connection;
     if (connecting) {
       // One attempt at a time; one that would not start the daemon (and found none) is followed by this one's start.
@@ -475,7 +476,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
           const e = await ctx.environment();
           const codex = e.which("codex");
           if (!codex) throw new Error("codex is not on the Inbox's PATH");
-          const daemonEnv = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: launchSpawnEnv(options.env) });
+          const daemonEnv = createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: launchSpawnEnv(await options.env()) });
           const result = await daemonEnv.run([codex, "app-server", "daemon", "start"], { timeoutMs: DAEMON_TIMEOUT_MS, killGroup: false });
           if (options.launchId) ctx.startLog(options.launchId, `codex app-server daemon start: exit ${result.exitCode}\n${result.stdout}${result.stderr}`);
           if (result.exitCode !== 0) throw new Error(`codex app-server daemon start exited ${result.exitCode}: ${(result.stderr || result.stdout).trim().slice(0, 300)}`);
@@ -497,17 +498,14 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
     return connecting;
   };
   /** `connect` with the daemon started when needed: a connection, or an error saying why not. */
-  const connectStarted = async (env: LaunchEnv, launchId?: string): Promise<CodexConnection> => {
+  const connectStarted = async (env: () => Promise<LaunchEnv>, launchId?: string): Promise<CodexConnection> => {
     const conn = await connect({ start: true, env, ...(launchId ? { launchId } : {}) });
     if (!conn) throw new Error("the Codex app-server did not start");
     return conn;
   };
 
-  /** The plain env (every call but a start): the daemon may be started by a resume or a delete too. */
-  const plainEnv = async (): Promise<LaunchEnv> => {
-    const e = await ctx.environment();
-    return Object.fromEntries(Object.entries(e.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-  };
+  /** A reply's restart (`resume`, `deliver`) may start the daemon: with a fresh login-shell read, as `start` has, made only then. */
+  const loginEnv = () => ctx.loginEnv();
 
   /** `thread/start` and `thread/resume`'s settings for a launch: full permissions when the record says so, the folder's trust in memory, the Inbox's data dir for its MCP entry. */
   const threadSettings = (launch: InboxLaunchRecord) => {
@@ -652,7 +650,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       const e = await ctx.environment();
       if (!e.which("codex")) return { ok: false as const, code: "missing" as const, text: "codex is not on the Inbox's PATH." };
       try {
-        const conn = await connectStarted(input.login, launch.id);
+        const conn = await connectStarted(async () => input.login, launch.id);
         const before = configStamp();
         const settings = threadSettings(launch);
         const result = await conn.request("thread/start", settings);
@@ -702,7 +700,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
     /** A reply to a thread that is not live: the daemon (started again after a reboot), then `thread/resume`. The Codex wake delivers the reply. */
     async resume(launch: InboxLaunchRecord) {
       try {
-        const conn = await connectStarted(await plainEnv());
+        const conn = await connectStarted(loginEnv);
         const view = await resumeThread(conn, launch);
         return { ...ok(`thread/resume: ${view.status.type}`), failure: null };
       } catch (error) {
@@ -789,7 +787,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
      */
     async deliver(launch: InboxLaunchRecord, text: string): Promise<LaunchDelivery> {
       const threadId = launch.session_ref!;
-      const conn = await connectStarted(await plainEnv());
+      const conn = await connectStarted(loginEnv);
       let view = threads.get(threadId);
       if (!view?.subscribed) view = await resumeThread(conn, launch);
       if (view.status.type === "active") return "queue";
