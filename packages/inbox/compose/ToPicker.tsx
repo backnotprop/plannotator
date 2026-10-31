@@ -3,7 +3,11 @@ import { HostMark, Icon } from '../icons';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { tildePath } from '../format';
 import { splitPath } from '../agents';
-import { filterGroups, hostLabel, pickerRows, splitProjectName, type ComposeGroup, type ComposeTarget } from './model';
+import type { InboxComposeLaunch, InboxLaunchAgent } from '@plannotator/core/inbox-types';
+import { filterGroups, hostLabel, pickerRows, splitProjectName, startBlock, type ComposeGroup, type ComposeStart, type ComposeTarget } from './model';
+
+/** One row of the listbox: a live session, or (launch on) "<agent> New session". Keyed so a re-read never moves the highlight. */
+type PickerOption = { key: string; target: ComposeTarget; started: string | null; start?: undefined } | { key: string; start: ComposeStart; target?: undefined };
 
 /**
  * The To picker (compose; approval "inbox-compose-to-picker"): a filter field
@@ -18,6 +22,11 @@ import { filterGroups, hostLabel, pickerRows, splitProjectName, type ComposeGrou
  * (the first row is the session last sent to: one Enter must not bring back
  * the auto-fill compose dropped); typing or an arrow key highlights the first row.
  * Focus stays in the filter (`aria-activedescendant`).
+ *
+ * Launch on (`start`): after the live sessions, under a hairline, one caption
+ * "Start a new session in <project>" and one row per available agent (UX
+ * screen 01). They join the arrow and Enter order; a filter word that names a
+ * project moves the caption to it.
  */
 export function ToPicker({
   groups,
@@ -26,25 +35,42 @@ export function ToPicker({
   phone,
   onPick,
   onClose,
+  start,
+  onStart,
 }: {
   groups: readonly ComposeGroup[];
+  /** The session To names, or `start:<agent>` for a start. */
   selected: string | null;
   home: string | null;
   phone: boolean;
   onPick: (target: ComposeTarget) => void;
   onClose: () => void;
+  /** Launch on: the agents To offers to start and where (`GET /api/inbox/sessions` `launch`). Absent: sessions only, as always. */
+  start?: { launch: InboxComposeLaunch; current: { id: string | null; root: string | null } | null } | null;
+  onStart?: (start: ComposeStart) => void;
 }) {
   const [query, setQuery] = useState('');
   const shown = useMemo(() => filterGroups(groups, query), [groups, query]);
   const rows = useMemo(() => pickerRows(shown, groups), [shown, groups]);
-  const options = useMemo(() => rows.map((row) => row.target), [rows]);
-  // The highlight follows a session, not a row number: the list is read again
+  const block = useMemo(() => (start ? startBlock(start.launch, start.current, query) : null), [start, query]);
+  const options = useMemo<PickerOption[]>(
+    () => [
+      ...rows.map((row) => ({ key: row.target.session, target: row.target, started: row.started })),
+      ...(block ? block.agents.map((a) => ({ key: startKey(a.agent), start: { agent: a.agent, name: a.name, project: block.project } })) : []),
+    ],
+    [rows, block],
+  );
+  // The highlight follows a row's key, not its number: the list is read again
   // every 5 s, and a re-read that moves rows must not move the highlight.
   // `null`: no row highlighted (-1), only while To is empty and nothing was typed or arrowed.
   const [hlSession, setHlSession] = useState<string | null>(null);
-  const found = options.findIndex((t) => t.session === hlSession);
+  const found = options.findIndex((o) => o.key === hlSession);
   const hl = hlSession === null ? -1 : found >= 0 ? found : 0;
-  const setHl = (index: number) => setHlSession(options[index]?.session ?? null);
+  const setHl = (index: number) => setHlSession(options[index]?.key ?? null);
+  const pick = (option: PickerOption | undefined) => {
+    if (option?.start) onStart?.(option.start);
+    else if (option?.target) onPick(option.target);
+  };
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const optionId = (i: number) => `ib-cp-o-${uid}-${i}`;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,8 +78,8 @@ export function ToPicker({
 
   // The highlight starts on the session To names, else on no row (To empty); a filter snaps it to the first row.
   useLayoutEffect(() => {
-    const at = options.findIndex((t) => t.session === selected);
-    if (query === '') setHlSession(at >= 0 ? options[at]!.session : null);
+    const at = options.findIndex((o) => o.key === selected);
+    if (query === '') setHlSession(at >= 0 ? options[at]!.key : null);
     else setHl(0);
     // Only the filter moves it; the re-read keeps the session it is on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,8 +123,7 @@ export function ToPicker({
     if (event.key === 'Enter') {
       event.preventDefault();
       // Nothing highlighted: Enter picks nothing.
-      const target = hl >= 0 ? options[hl] : undefined;
-      if (target) onPick(target);
+      pick(hl >= 0 ? options[hl] : undefined);
     }
   };
 
@@ -132,8 +157,39 @@ export function ToPicker({
         />
       </div>
       <div className="ib-cp-list" role="listbox" id={`ib-cp-list-${uid}`} aria-label="Live agent sessions">
-        {rows.length === 0 && <div className="ib-cp-none">No live session matches.</div>}
-        {rows.map(({ target, started }, i) => {
+        {options.length === 0 && <div className="ib-cp-none">No live session matches.</div>}
+        {options.map((option, i) => {
+          if (option.start) {
+            const s = option.start;
+            return (
+              <Fragment key={option.key}>
+                {i === rows.length && (
+                  <div className={`ib-cp-cap${rows.length ? ' ib-cp-cap-line' : ''}`} aria-hidden="true" data-compose-start-caption="">
+                    Start a new session in <b dir="auto">{s.project.name}</b>
+                  </div>
+                )}
+                <div
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={i === hl}
+                  aria-label={`New ${s.name} session in ${s.project.name}, ${tildePath(s.project.root, home)}`}
+                  className={`ib-cp-opt ib-cp-start${i === hl ? ' ib-hl' : ''}`}
+                  data-compose-start={s.agent}
+                  onPointerMove={() => i !== hl && setHl(i)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => pick(option)}
+                >
+                  <HostMark host={s.agent} />
+                  <b className="ib-cp-oa">{s.name}</b>
+                  <span className="ib-cp-ons">New session</span>
+                  <span className="ib-cp-check" aria-hidden="true">
+                    {option.key === selected && <Icon name="check" size={15} />}
+                  </span>
+                </div>
+              </Fragment>
+            );
+          }
+          const { target, started } = option;
           const folder = tildePath(target.project.root, home);
           return (
             <div
@@ -147,7 +203,7 @@ export function ToPicker({
               data-compose-project={target.project.name}
               onPointerMove={() => i !== hl && setHl(i)}
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onPick(target)}
+              onClick={() => pick(option)}
             >
               <HostMark host={target.host} />
               <b className="ib-cp-oa">{hostLabel(target.host)}</b>
@@ -170,6 +226,9 @@ export function ToPicker({
     </div>
   );
 }
+
+/** The picker key of a start row (`selected` uses it too). */
+export const startKey = (agent: InboxLaunchAgent): string => `start:${agent}`;
 
 /**
  * To's detail after the agent's name, always one line: "· main · workspaces/worktrees".
@@ -210,7 +269,7 @@ function detailCut(trigger: Element): boolean {
 }
 
 /** A project folder on one line, cut in the middle: the leading folders shrink with "…", the last name stays; the whole path in a tooltip while it is cut. */
-function FolderPath({ path }: { path: string }) {
+export function FolderPath({ path }: { path: string }) {
   const split = splitPath(path);
   // The slash before the last name stays with it, so a cut reads "~/pando/proj…/main".
   const moveSlash = split.head.endsWith('/') && split.head.length > 1;

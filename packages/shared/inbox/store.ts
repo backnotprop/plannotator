@@ -62,6 +62,8 @@ import {
   INBOX_RECORD_VERSION,
   type InboxAck,
   type InboxAddressee,
+  type InboxLaunchError,
+  type InboxLaunchRecord,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -549,6 +551,8 @@ export class InboxStore {
   /** Each project's display name (`inboxProjectLabels`), worked out again when the projects change. */
   private projectLabels: Map<string, string> | null = null;
   private readonly messages = new Map<string, InboxMessage>();
+  /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
+  private readonly launchedRootIds = new Set<string>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   /**
@@ -732,6 +736,7 @@ export class InboxStore {
           this.indexName(line.record.project_id, line.record.thread_name, line.record.id);
         }
         this.messages.set(line.record.id, line.record);
+        if (line.record.launch !== undefined && line.record.thread_id === line.record.id) this.launchedRootIds.add(line.record.id);
         if (!this.messageSeq.has(line.record.id)) {
           this.messageSeq.set(line.record.id, line.seq);
           const members = this.threadMembers.get(line.record.thread_id);
@@ -4387,6 +4392,7 @@ export class InboxStore {
     this.projectsByRoot.clear();
     this.projectLabels = null;
     this.messages.clear();
+    this.launchedRootIds.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
     this.readdressed.clear();
@@ -4930,6 +4936,8 @@ export class InboxStore {
      * first Send's.
      */
     board_request?: unknown;
+    /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
+    launch?: InboxLaunchRecord;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -4979,6 +4987,7 @@ export class InboxStore {
       to: { host: input.to.host, session: input.to.session },
       started_by_person: true,
       ...(input.board_request === true ? { board_request: true as const } : {}),
+      ...(input.launch ? { launch: input.launch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };
@@ -5016,6 +5025,39 @@ export class InboxStore {
     const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
     this.appendMessage(next, at);
     return next;
+  }
+
+  /**
+   * Launch: the host answered for the agent started for this root. Started:
+   * the root moves from its placeholder to the real session (`to`, no
+   * liveness check: the session polls a moment later) and records the host's
+   * own id; an earlier error is cleared. Failed (or Try again clearing it):
+   * `launch.error`; the root keeps its placeholder, so the window shows Not
+   * delivered. Deleted: `launch.deleted_at` (no run line, no respawn). One
+   * snapshot each.
+   */
+  settleLaunch(
+    messageId: string,
+    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string },
+  ): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
+    const next: InboxMessage =
+      "to" in outcome
+        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session_ref: outcome.session_ref, error: null } }
+        : "error" in outcome
+          ? { ...message, launch: { ...message.launch, error: outcome.error } }
+          : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };
+    this.appendMessage(next, this.stamp());
+    return next;
+  }
+
+  /** The launched threads' roots (any project, archived included). */
+  launchedRoots(): InboxMessage[] {
+    return [...this.launchedRootIds].flatMap((id) => {
+      const message = this.messages.get(id);
+      return message ? [message] : [];
+    });
   }
 
   /**

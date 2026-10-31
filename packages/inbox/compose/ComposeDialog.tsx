@@ -18,15 +18,20 @@
  * - A reopened draft keeps the session it was for, struck through when that
  *   session has ended: it is never re-addressed on its own.
  * - Files: the paperclip, a drop or a paste (paste.ts), uploaded at once (ComposeFiles.tsx).
+ * - Launch on (`inboxLaunch.enabled`, docs/agent-guides/inbox-launch.md): To can
+ *   also name a new session ("New Claude Code session ▾ in <project> ▾"); Send
+ *   writes the thread, then the Inbox starts the agent in the project's folder.
+ *   A folder that is gone turns Send off and says so (UX screen 13).
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
-import { whenTime } from '../format';
+import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
-import { SessionDetail, ToPicker } from './ToPicker';
+import { SessionDetail, ToPicker, startKey } from './ToPicker';
+import { FolderMenu } from './FolderMenu';
 import { ThreadNameChip } from './ThreadNameChip';
 import { useComposeSessions } from './useComposeSessions';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
@@ -48,11 +53,13 @@ import {
   composeBoardChoice,
   rememberComposeBoardChoice,
   statusLine,
+  startStatusLine,
   sendThreadName,
   suggestThreadName,
   threadNameStateOf,
   type ThreadNameState,
   type ComposeTarget,
+  type ComposeStart,
 } from './model';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
@@ -84,6 +91,8 @@ export interface ComposeSent {
   draftId: string | null;
   /** The Board card the thread was created for (`ComposeRequest.card`): link the thread to it. */
   cardId?: string | null;
+  /** It started a new agent session (launch), rather than going to a live one. */
+  launched?: boolean;
 }
 
 /**
@@ -181,16 +190,26 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
+  // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
+  const launch = model?.launch;
+  const canStart = !!launch && launch.agents.length > 0 && launch.projects.length > 0;
+  const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
+  const start: ComposeStart | null = useMemo(() => {
+    const agent = startPick && launch?.agents.find((a) => a.agent === startPick.agent);
+    const project = startPick && launch?.projects.find((p) => p.id === startPick.projectId);
+    return agent && project ? { agent: agent.agent, name: agent.name, project } : null;
+  }, [startPick, launch]);
+  const [folderMenu, setFolderMenu] = useState(false);
 
   // To is never filled by itself. Focus that started on To moves to the message when the
   // first read finds no live agent (To is then a line of text, not a button).
   useEffect(() => {
-    if (!model || anyLive || opening.focus !== 'to') return;
+    if (!model || anyLive || canStart || opening.focus !== 'to') return;
     const dialog = dialogRef.current;
     const active = document.activeElement;
     if (dialog && (!active || active === document.body || active === dialog || !dialog.contains(active))) textRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, anyLive]);
+  }, [model, anyLive, canStart]);
 
   // A draft's chosen session that is not live: struck through, never re-addressed on its own.
   const endedTo: InboxDraftTo | null = model && chosen && !target && draft?.to?.session === chosen ? draft.to : null;
@@ -225,7 +244,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const threadName = draftThreadName(nameState);
   useEffect(() => {
     sendKey.current = crypto.randomUUID();
-  }, [body, chosen, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
+  }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
 
   // Nothing written: no words, no files, no typed thread name. An empty compose is never kept as a draft.
@@ -261,8 +280,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, []);
 
   const requestClose = () => {
-    if (picker) {
+    if (picker || folderMenu) {
       setPicker(false);
+      setFolderMenu(false);
       return;
     }
     if (question) {
@@ -284,9 +304,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // Still reading the live sessions: nothing to say yet, the status line says it.
     if (busy || !model) return;
     setError(null);
-    if (!target) {
+    if (start && !start.project.exists) {
+      setError('Nothing sent: pick a folder to start in.');
+      return;
+    }
+    if (!target && !start) {
       // The error is an alert, which says it: no second announcement.
-      setError(anyLive ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
+      setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
       return;
     }
     if (!body.trim()) {
@@ -309,7 +333,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const skills = transport ? null : await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
       const result = await (transport ? transport.startThread : inboxApi.startThread)({
-        to: { host: target.host, session: target.session },
+        to: start ? { launch: { agent: start.agent, project_id: start.project.id } } : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(body, skills) : body,
         idempotency_key: sendKey.current,
         uploads: uploadIds,
@@ -317,11 +341,25 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       });
-      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null, cardId: card?.id ?? null });
+      // A launch's answer names its launch (the window's own startThread; a transport never starts one).
+      const launchId = (result as { launch?: { id: string } }).launch?.id ?? null;
+      const sentTo = start
+        ? {
+            // The placeholder the root is addressed to until the start settles: `launch:<launch id>`.
+            session: launchId ? `launch:${launchId}` : '',
+            host: start.agent as string,
+            projectName: start.project.name,
+          }
+        : { session: target!.session, host: target!.host, projectName: target!.project.name };
+      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: result.project?.name ?? sentTo.projectName, draftId: draft?.id ?? null, cardId: card?.id ?? null, ...(start ? { launched: true } : {}) });
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
         setError('That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.');
+      } else if (cause instanceof InboxApiError && (cause.code === 'folder_missing' || cause.code === 'agent_unavailable')) {
+        // Checked before anything is written: nothing was sent. The re-read strikes the folder through, or drops the agent's row.
+        void load();
+        setError(cause.message);
       } else if (cause instanceof InboxApiError && cause.code === 'thread_name_taken') {
         setNameError('Another open thread in this project has this name.');
       } else if (cause instanceof InboxApiError && cause.code === 'project_unresolved') {
@@ -344,8 +382,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setError(null);
     try {
       const to = target ? draftTo(target) : chosen && draft?.to?.session === chosen ? draft.to : null;
+      // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
+        : start
+          ? { id: start.project.id, root: start.project.root, name: start.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
       const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
       setDraft(result.draft);
@@ -426,20 +467,22 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
   };
 
-  const sendable = !!target;
+  const sendable = !!target || (!!start && start.project.exists);
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
   const loading = !model;
   // Save draft only for something written: an empty compose offers none (a phone shows the disabled Send instead).
   const saveOffered = keepsDrafts && !sendable && !loading && !empty;
   const title = draft ? 'Draft' : 'New message';
-  const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
+  const status = start
+    ? startStatusLine(start, tildePath(start.project.root, home))
+    : statusLine({ target, anyLive: anyLive || canStart, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
 
   const toRow = (
-    <div className="ib-cp-to">
+    <div className="ib-cp-to" data-start={start ? '' : undefined}>
       <span className="ib-cp-tol">To</span>
-      {model && !anyLive && !endedNote ? (
+      {model && !anyLive && !canStart && !endedNote ? (
         <span className="ib-cp-none-to" data-compose-to="none">
           <Icon name="info" size={15} />
           No agent is running
@@ -449,13 +492,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ref={toRef}
           type="button"
           className="ib-cp-tobtn"
-          data-compose-to={target ? target.session : endedNote ? 'ended' : 'choose'}
+          data-compose-to={target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose'}
           aria-haspopup="listbox"
           aria-expanded={picker}
           aria-label={
             target
               ? `To: ${hostLabel(target.host)} in ${target.project.name}. Change`
-              : endedNote
+              : start
+                ? `To: a new ${start.name} session. Change`
+                : endedNote
                 ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
                 : loading
                   ? 'To: looking for live agents'
@@ -465,9 +510,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
           data-loading={loading ? '' : undefined}
           // Focusable while the sessions are read (Tab still reaches it); it opens once they are.
           onClick={() => !loading && setPicker((open) => !open)}
-          disabled={!loading && !anyLive && !endedNote}
+          disabled={!loading && !anyLive && !canStart && !endedNote}
         >
-          {target ? (
+          {start ? (
+            <>
+              <HostMark host={start.agent} />
+              <b>New {start.name} session</b>
+            </>
+          ) : target ? (
             <>
               <HostMark host={target.host} />
               <b>{hostLabel(target.host)}</b>
@@ -488,6 +538,27 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
           <Icon name="chevD" size={15} />
         </button>
+      )}
+      {start && (
+        <span className="ib-cp-startin">
+          <span className="ib-cp-in">in</span>
+          <button
+            type="button"
+            className="ib-cp-tobtn"
+            data-compose-folder={start.project.id}
+            data-missing={start.project.exists ? undefined : ''}
+            aria-haspopup="listbox"
+            aria-expanded={folderMenu}
+            aria-label={`Start in: ${start.project.name}, ${tildePath(start.project.root, home)}${start.project.exists ? '' : ', not there any more'}. Change`}
+            onClick={() => {
+              setPicker(false);
+              setFolderMenu((open) => !open);
+            }}
+          >
+            {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
+            <Icon name="chevD" size={15} />
+          </button>
+        </span>
       )}
       {draft && !phone && <span className="ib-cp-dsaved">Draft · saved {whenTime(draft.updated_at)}</span>}
     </div>
@@ -558,11 +629,20 @@ export function ComposeDialog(props: ComposeDialogProps) {
       {picker && (
         <ToPicker
           groups={groups}
-          selected={target?.session ?? null}
+          selected={target?.session ?? (start ? startKey(start.agent) : null)}
           home={home}
           phone={phone}
+          start={launch && canStart ? { launch, current: start ? { id: start.project.id, root: start.project.root } : current } : null}
+          onStart={(picked) => {
+            setStartPick({ agent: picked.agent, projectId: picked.project.id });
+            setChosen(null);
+            setPicker(false);
+            setError(null);
+            textRef.current?.focus();
+          }}
           onPick={(picked) => {
             setChosen(picked.session);
+            setStartPick(null);
             setPicker(false);
             setError(null);
             textRef.current?.focus();
@@ -571,6 +651,24 @@ export function ComposeDialog(props: ComposeDialogProps) {
             setPicker(false);
             // Still nobody in To: back on To, where the choice is made.
             (target ? textRef.current : (toRef.current ?? textRef.current))?.focus();
+          }}
+        />
+      )}
+      {folderMenu && start && launch && (
+        <FolderMenu
+          projects={launch.projects}
+          selected={start.project.id}
+          home={home}
+          phone={phone}
+          onPick={(project) => {
+            setStartPick({ agent: start.agent, projectId: project.id });
+            setFolderMenu(false);
+            setError(null);
+            textRef.current?.focus();
+          }}
+          onClose={() => {
+            setFolderMenu(false);
+            (dialogRef.current?.querySelector<HTMLButtonElement>('[data-compose-folder]') ?? textRef.current)?.focus();
           }}
         />
       )}
@@ -608,7 +706,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
           />
         )}
       </div>
-      {model && !anyLive && !endedNote && (
+      {start && !start.project.exists && (
+        <div className="ib-cp-note ib-warn" data-compose-note="folder-missing">
+          <Icon name="warn" size={16} />
+          <div>
+            <b>
+              <bdi>{tildePath(start.project.root, home)}</bdi> isn't there any more.
+            </b>
+            <p>It was moved or deleted. Pick another project to start {start.name} in. Nothing is sent until you do.</p>
+            <button type="button" className="ib-btn ib-sm" onClick={() => setFolderMenu(true)} data-compose-pick-folder="">
+              Pick a project
+            </button>
+          </div>
+        </div>
+      )}
+      {model && !anyLive && !canStart && !endedNote && (
         <div className="ib-cp-note" data-compose-note="none">
           <Icon name="info" size={16} />
           <div>

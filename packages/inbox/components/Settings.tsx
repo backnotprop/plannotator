@@ -525,7 +525,7 @@ function AgentsSection({
   if (agents && onAgents) {
     return (
       <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} />
+        <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
       </section>
     );
   }

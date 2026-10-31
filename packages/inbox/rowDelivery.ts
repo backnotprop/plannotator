@@ -70,5 +70,6 @@ export function rowTimeIso(row: InboxListRow): string {
  */
 export function hasMovingDelivery(sections: readonly InboxListSection[] | null): boolean {
   const moves = (d: InboxRowDelivery | null | undefined) => !!d && d.state !== 'delivered' && !(d.state === 'saved' && d.reason === 'reads');
-  return !!sections?.some((section) => section.threads.some((row) => moves(row.delivery)));
+  // A launched thread's row (`run` present, launch only) moves with its agent: Starting, Working, Stopped on you.
+  return !!sections?.some((section) => section.threads.some((row) => moves(row.delivery) || row.run !== undefined));
 }

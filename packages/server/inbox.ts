@@ -166,6 +166,8 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
+import { createInboxLaunch } from "./inbox-launch";
+import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxEmbeds } from "./inbox-embeds";
@@ -512,6 +514,12 @@ const ERROR_STATUS: Record<string, number> = {
   guide_not_found: 404,
   // New message (step 8).
   session_not_live: 409,
+  // Launch (inbox-launch.ts): the project's folder is gone, the agent can't be started, or the feature is off.
+  folder_missing: 422,
+  agent_unavailable: 409,
+  launch_not_found: 404,
+  launch_off: 404,
+  open_unavailable: 409,
   // Send now: the session's connection does not poll now, or cannot deliver into a running turn.
   send_now_unavailable: 409,
   // Tags: a live session whose Plannotator is too old to word a tag truthfully.
@@ -987,7 +995,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // One pass over the store feeds both the folders' counts and the sections.
     // `pinned_at` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
-    const own = store.listRows().map((row) => (pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
+    // Launched threads (only while launch is on): "Starting" / "Working", and a session blocked on a prompt in Stopped on you.
+    // Resolved once per list: off, it is the identity and no row costs anything. Only this Inbox's own rows: a linked
+    // machine's launches are that machine's to decorate.
+    const decorate = launch.rowDecorator();
+    const own = store
+      .listRows()
+      .map((row) => decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     const rows: InboxListRow[] = merged ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id))] : own;
     const scoped = projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows;
@@ -1789,6 +1803,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
+    /** Launch (config.json `inboxLaunch`): present only while it is on; Settings → Agents' full-permissions switch. */
+    ...(launch.enabled() ? { launch: launch.settingsState() } : {}),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable on this computer) and the plan, review and annotate prompts. */
@@ -2387,8 +2403,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const deliveryListeners = new Set<() => void>();
   let lastDeliverySignature = "";
   const deliveryWatch = setInterval(() => {
+    // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
+    launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
-    const signature = live.deliverySignature();
+    const signature = live.deliverySignature() + launch.signature();
     if (signature === lastDeliverySignature) return;
     lastDeliverySignature = signature;
     for (const listener of deliveryListeners) listener();
@@ -2396,6 +2414,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   (deliveryWatch as { unref?: () => void }).unref?.();
 
   const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json });
+
+  // Launch: compose starts Claude Code in a project, behind `inboxLaunch.enabled` (packages/server/inbox-launch.ts).
+  // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
+  const launch = createInboxLaunch({
+    store,
+    live,
+    dataDir,
+    serverSession,
+    homeDir: homedir(),
+    platform: process.platform,
+    loginEnv: process.env.PLANNOTATOR_TEST_SANDBOX
+      ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: "" })
+      : createLoginEnv({
+          run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
+          env: () => process.env,
+          log: (line) => process.stderr.write(`${line}\n`),
+        }),
+    ownEnv: () => (process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: "" } : process.env),
+    installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
+    displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
+    readBody: (req) => readBody(req),
+    json,
+    onChange: () => {
+      for (const listener of deliveryListeners) listener();
+    },
+    log: (line) => process.stderr.write(`${line}\n`),
+  });
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
   const compose = createInboxCompose({
@@ -2406,6 +2451,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     boardOn,
+    launch,
     machine: () => machines.selfId,
   });
   compose.sweep();
@@ -2896,6 +2942,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const skills = inboxSkillsRoute(req, url);
       if (skills) return skills;
 
+      // Launch: Stop, Open in Terminal, Delete, Try again and its setting (404 while `inboxLaunch.enabled` is off).
+      const launched = await launch.route(req, path, via);
+      if (launched) return launched;
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
       const composed = await compose.route(req, url);
       if (composed) return composed;
@@ -3047,8 +3096,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const thread = store.windowThread(threadMatch[1]!);
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
+        // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
+        const run = await launch.runOf(thread.thread_id);
+        const row = store.listRow(thread.thread_id);
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: store.listRow(thread.thread_id) });
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run }) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -3544,6 +3596,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(deliveryWatch);
     clearInterval(autoSendWatch);
     unsubscribeWaits();
+    launch.stop();
     codexWake.stop();
     qwenWake.stop();
     void mcp.close().catch(() => {});

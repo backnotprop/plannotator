@@ -5,7 +5,7 @@
  */
 
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
-import { checkInboxThreadName, INBOX_HOST_NAMES, type InboxComposeProject, type InboxComposeSession, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { checkInboxThreadName, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 
 /** One live session with the project it works in: what To names. */
@@ -340,3 +340,59 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
 
 export const actionLabel = (action: ComposeAction): string =>
   action.kind === 'new' ? 'New message…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
+
+// ── Launch: start a new session from To (behind `inboxLaunch.enabled`; docs/agent-guides/inbox-launch.md) ──
+
+/** A project the folder menu lists (`InboxComposeLaunch.projects`). */
+export type LaunchProject = InboxComposeLaunch['projects'][number];
+
+/** What To names when the person picked "<agent> New session": the agent and the project it starts in. */
+export interface ComposeStart {
+  agent: InboxLaunchAgent;
+  /** "Claude Code". */
+  name: string;
+  project: LaunchProject;
+}
+
+const queryWords = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);
+
+/** The project a new session starts in by default: the one the person is looking at, else the most recently active. */
+export function defaultStartProject(launch: InboxComposeLaunch | undefined, current: { id: string | null; root: string | null } | null): LaunchProject | null {
+  if (!launch || launch.projects.length === 0) return null;
+  return launch.projects.find((p) => isCurrent(p, current)) ?? launch.projects[0]!;
+}
+
+/**
+ * The picker's "Start a new session in <project>" block for a filter: the
+ * project the caption names and the agents to offer. Words naming an agent
+ * ("claude") narrow the rows; the other words pick the project ("billing"
+ * moves the caption to billing-svc). No match: no block.
+ */
+export function startBlock(
+  launch: InboxComposeLaunch | undefined,
+  current: { id: string | null; root: string | null } | null,
+  query: string,
+): { project: LaunchProject; agents: InboxComposeLaunch['agents'] } | null {
+  const fallback = defaultStartProject(launch, current);
+  if (!launch || !fallback || launch.agents.length === 0) return null;
+  const all = queryWords(query);
+  const agentHay = (name: string) => `${name} new session`.toLowerCase();
+  const namesAgent = (word: string) => launch.agents.some((a) => agentHay(a.name).includes(word));
+  const projectWords = all.filter((word) => !namesAgent(word));
+  const project = projectWords.length === 0 ? fallback : launch.projects.find((p) => projectWords.every((w) => `${p.name} ${p.root}`.toLowerCase().includes(w)));
+  if (!project) return null;
+  const agentWords = all.filter(namesAgent);
+  const agents = launch.agents.filter((a) => agentWords.every((w) => agentHay(a.name).includes(w)));
+  return agents.length ? { project, agents } : null;
+}
+
+/** The folder menu's rows for its filter: name or path. */
+export function filterLaunchProjects(projects: readonly LaunchProject[], query: string): LaunchProject[] {
+  const all = queryWords(query);
+  return projects.filter((p) => all.every((w) => `${p.name} ${p.root}`.toLowerCase().includes(w)));
+}
+
+/** The status line beside Send for a start: where it runs, or that the folder is gone (screens 02 and 13). */
+export function startStatusLine(start: ComposeStart, folder: string): string {
+  return start.project.exists ? `${start.name} starts in ${folder} when you send.` : 'Pick a folder to start in.';
+}
