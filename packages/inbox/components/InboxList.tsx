@@ -432,27 +432,26 @@ function GuideMark({ row }: { row: InboxListRow }) {
 }
 
 /**
- * The wide row's title cell (approval "list-rows-mail-icons"): the title, the grey preview, the guided review mark,
- * and the pin on the cell's right edge. Short of room the preview gives way first, all the way, then the title;
- * each cut ends in "…" with its tooltip. The mark drops its label to its icon.
+ * The wide row's title cell (approval "list-rows-mail-icons"): the title, the grey preview and the guided review
+ * mark. Short of room the preview gives way first, all the way, then the title; each cut ends in "…" with its
+ * tooltip. The mark drops its label to its icon.
  */
-function TitleCell({ row, pinned = false, pill = false }: { row: InboxListRow; pinned?: boolean; pill?: boolean }) {
+function TitleCell({ row, pill = false }: { row: InboxListRow; pill?: boolean }) {
   const preview = previewOf(row);
   return (
     <>
       <RowTitle row={row} className="ib-title" pill={pill} tip />
       {preview && <ClipText className="ib-pv" text={preview} />}
       <GuideMark row={row} />
-      {pinned && <PinMark />}
     </>
   );
 }
 
 /**
- * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"): always on the right, in the
- * trailing slot before the badge and the counts (the owner, 2026-10-31: "just like the questions, just like the
- * action items"), never right after a short preview. A three-line or phone row has it on line 3, a wide row at its
- * title cell's right edge. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
+ * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"): always on the right, beside the
+ * counts (the owner, 2026-10-31: "just like the questions, just like the action items"), never right after a short
+ * preview. A three-line or phone row has it on line 3 before the badge and the counts; a wide row in a column of its
+ * own just left of the open counts' column. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
  */
 function PinMark() {
   return (
@@ -490,8 +489,9 @@ export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
  * then right-aligned the words, the badge, the open counts (the action pill,
  * `?N`) and the time, each in a column of its own so they line up down the
  * list. In one project's list (`filtered`) the first column holds the marks alone.
+ * A list with a pinned row adds the pin's column just left of the open counts.
  */
-function WideRow({ row, project, away, selected, filtered, lit, pinned, keys, full, pill, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void }) {
+function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void }) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badgeEl = badgeOf(row, kbd, full);
@@ -514,7 +514,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, keys, fu
     >
       <FromLine row={row} project={project} filtered={filtered} />
       <span className="ib-subj">
-        <TitleCell row={row} pinned={pinned} pill={pill} />
+        <TitleCell row={row} pill={pill} />
       </span>
       {/* Every column right of the words has a fixed width, so each lines up down the list. The words (a draft,
           Undelivered, Read …) take the width they need, between the title cell and the badge. */}
@@ -522,6 +522,8 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, keys, fu
         <CountWords row={row} wide={full} tip={!full} />
       </span>
       <span className="ib-bcol">{badgeEl}</span>
+      {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
+      {pinColumn && <span className="ib-cpin">{pinned && <PinMark />}</span>}
       <span className="ib-cq">
         <OpenCounts row={row} tip />
       </span>
@@ -815,7 +817,10 @@ export function InboxList(props: InboxListProps) {
   const refreshHintId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
-  const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
+  // The wide rows' pin column (the owner, 2026-10-31: the pin beside the counts): only in a list with a pinned row,
+  // Quiet's folded rows included, so a list without pins keeps its columns and opening Quiet moves none.
+  const pinColumn = !props.phone && !twoLine && !!props.pinned && visible.some((s) => s.threads.some((row) => props.pinned!.has(row.thread_id)));
+  const lit =(row: InboxListRow) => props.lit?.has(row.thread_id) === true;
   // The row whose right-click menu is open: a muted background, as the project row's.
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowOf = (threadId: string) => {
@@ -846,7 +851,7 @@ export function InboxList(props: InboxListProps) {
     <section
       ref={listEl}
       id={columnId}
-      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${listLookClasses(look)}`}
+      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${pinColumn ? ' ib-pincol' : ''}${listLookClasses(look)}`}
       aria-label={props.title}
     >
       <div className="ib-lhead">
@@ -997,6 +1002,7 @@ export function InboxList(props: InboxListProps) {
                       day={day}
                       menu={menuRow === row.thread_id}
                       pinned={props.pinned?.has(row.thread_id) === true}
+                      pinColumn={pinColumn}
                       keys={rowKeys}
                       pill={look.highlight}
                       compact={look.compact}
@@ -1032,8 +1038,10 @@ interface ListRowProps {
   day: string;
   /** Its right-click menu is open (RowMenu.tsx): the muted background. */
   menu: boolean;
-  /** Pinned to the sidebar: a small pin after the subject. */
+  /** Pinned to the sidebar: a small pin on the row's right (`PinMark`). */
   pinned: boolean;
+  /** A wide row in a list that has a pinned row: every row draws the pin's column, so the columns line up. */
+  pinColumn: boolean;
   /** `aria-keyshortcuts` for the row's menu (Shift+F10), when the list has one. */
   keys?: string;
   /** "Highlight thread subject" (listLook.ts): the title in its pill. */
@@ -1048,7 +1056,7 @@ interface ListRowProps {
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onSendNow, menu, pinned, keys, pill, compact }: ListRowProps) {
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onSendNow, menu, pinned, pinColumn, keys, pill, compact }: ListRowProps) {
     const open = () => onOpen(row);
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} onOpen={open} />;
     return (
@@ -1056,7 +1064,7 @@ export const ListRow = memo(
         {shape === 'narrow' ? (
           <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} onOpen={open} />
         ) : (
-          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} full={full} pill={pill} onOpen={open} />
+          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} onOpen={open} />
         )}
       </RowWithAction>
     );
@@ -1073,6 +1081,7 @@ export const ListRow = memo(
     a.day === b.day &&
     a.menu === b.menu &&
     a.pinned === b.pinned &&
+    a.pinColumn === b.pinColumn &&
     a.keys === b.keys &&
     a.pill === b.pill &&
     a.compact === b.compact &&

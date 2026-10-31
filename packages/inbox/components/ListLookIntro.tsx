@@ -78,6 +78,7 @@ function PreviewList({ groups, projectNames, awayMachines, look, phone }: { grou
                   day=""
                   menu={false}
                   pinned={false}
+                  pinColumn={false}
                   pill={look.highlight}
                   compact={look.compact}
                 />

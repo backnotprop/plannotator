@@ -12,7 +12,9 @@
  * Highlight thread subject, Hide agent icons, all three), unread and then read:
  *  - three-line and phone rows: the pin is on line 3 after the preview; with something after it (the badge, a
  *    count, the words) it ends 8 px (the line's gap) before that, else on the line's right edge;
- *  - the wide row: the pin ends the title cell, on its right edge;
+ *  - the wide row: the pin in its own column, ending 8 px before the open counts' column, clear of the title cell,
+ *    at one x down the list; every row of the list has that column, so the badge and counts columns line up; a
+ *    list with no pinned row (one project's) keeps today's six columns, with no pin column;
  *  - a short and a long row with the same trailing parts put the pin at the same x;
  *  - the Sent row's ✓ and time end line 1;
  *  - read, "Read" takes the slot's end and the pin sits before it;
@@ -45,6 +47,8 @@ let post: (path: string, body: object) => Promise<void> = async () => {};
 const pins = { short: '', shortQ: '', long: '', longQ: '', sent: '' };
 /** The thread opened to draw the three-line rows beside it (not pinned). */
 let opener = '';
+/** A project none of whose threads is pinned. */
+let unpinnedProject = '';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -71,6 +75,8 @@ test.beforeAll(async () => {
   pins.longQ = await say(claude, 'billing-svc', 'Ledger cutover', LONG_SUBJECT, ask('Run the dry run on Friday?'));
   pins.short = await say(claude, 'workspaces', 'System', '/sharpen', 'Sharpened.');
   pins.shortQ = await say(codex, 'workspaces', 'Production Launch', 'Production Release Plan', ask('Ship on Monday?'));
+  // A project with no pin: its wide list keeps today's columns, no pin column.
+  await say(claude, 'docs-site', 'Install page', 'The install page is up', ask('Ship it?'));
   expect(new Set([opener, ...Object.values(pins)]).size, 'six threads').toBe(6);
   const health = (await (await fetch(new URL('/api/inbox/health', url))).json()) as { serverSession: string };
   post = async (path: string, body: object) => {
@@ -79,6 +85,9 @@ test.beforeAll(async () => {
   };
   await post(`/api/inbox/messages/${pins.sent}/reply`, { idempotency_key: 'row-pin-sent', words: 'Poll every 10 minutes for now.', questions: [] });
   for (const id of Object.values(pins)) await post(`/api/inbox/threads/${id}/pin`, { pinned: true });
+  const model = (await (await fetch(new URL('/api/inbox/projects', url))).json()) as { projects: { id: string; name: string }[] };
+  unpinnedProject = model.projects.find((p) => p.name === 'docs-site')!.id;
+  expect(unpinnedProject).toBeTruthy();
 });
 
 test.afterAll(async () => {
@@ -121,6 +130,9 @@ interface PinGeometry {
   timeEnd: number;
   /** The last part of the pin's line ends on its right edge. */
   lastEnd: number;
+  /** A wide row: its title cell's right edge and its open counts' column's left edge. */
+  subjRight: number | null;
+  cqLeft: number | null;
 }
 
 async function measure(page: Page, shape: Shape): Promise<PinGeometry[]> {
@@ -152,6 +164,8 @@ async function measure(page: Page, shape: Shape): Promise<PinGeometry[]> {
           tick: !!time.querySelector('.ib-tick'),
           timeEnd: Math.abs(box(time).right - (box(l1).right - parseFloat(getComputedStyle(l1).paddingRight))),
           lastEnd: kids.length && line ? Math.abs(box(kids[kids.length - 1]!).right - box(line).right) : 0,
+          subjRight: row.querySelector(':scope > .ib-subj') ? box(row.querySelector(':scope > .ib-subj')!).right : null,
+          cqLeft: row.querySelector(':scope > .ib-cq') ? box(row.querySelector(':scope > .ib-cq')!).left : null,
         };
       }),
     [ROW[shape], Object.values(pins)] as const,
@@ -163,12 +177,15 @@ function expectPinsRight(rows: PinGeometry[], shape: Shape, label: string) {
   const at = (id: string) => rows.find((r) => r.id === id)!;
   for (const r of rows) {
     const name = `${label}: row ${Object.entries(pins).find(([, id]) => id === r.id)![0]}`;
-    expect(r.line, `${name}: the pin's line`).toBe(shape === 'wide' ? 'ib-subj' : shape === 'narrow' ? 'ib-l3' : 'ib-m3');
+    expect(r.line, `${name}: the pin's line`).toBe(shape === 'wide' ? 'ib-cpin' : shape === 'narrow' ? 'ib-l3' : 'ib-m3');
     if (r.previewRight !== null) expect(r.pinLeft, `${name}: the pin follows the preview`).toBeGreaterThanOrEqual(r.previewRight - 0.5);
     if (shape === 'wide') {
-      // The title cell ends with the pin; the words, badge, counts and time have columns of their own after it.
-      expect(r.after, `${name}: the pin ends the title cell`).toEqual([]);
-      expect(Math.abs(r.pinRight - r.lineRight), `${name}: on the title cell's right edge`).toBeLessThanOrEqual(0.5);
+      // Its own column just left of the open counts' column: it ends one 8 px gap before that column, clear of the
+      // title cell, whether the row has counts or not.
+      expect(r.after, `${name}: the pin alone in its column`).toEqual([]);
+      expect(Math.abs(r.cqLeft! - 8 - r.pinRight), `${name}: one gap before the counts' column`).toBeLessThanOrEqual(0.5);
+      expect(r.pinLeft, `${name}: clear of the title cell`).toBeGreaterThanOrEqual(r.subjRight! - 0.5);
+      continue;
     } else if (r.nextLeft !== null) {
       // Before the badge, the counts or the words, one gap from them.
       expect(r.after.every((p) => ['badge', 'action', 'count', 'words'].includes(p)), `${name}: after the pin: ${r.after}`).toBe(true);
@@ -221,6 +238,18 @@ async function everyLook(context: BrowserContext, page: Page, shape: Shape, stat
     // The rows are in the state this pass names (the Sent row is never bold).
     for (const r of rows) if (r.id !== pins.sent) expect(r.unread, `${label}: ${r.id}`).toBe(state === 'unread');
     expectPinsRight(rows, shape, label);
+    if (shape === 'wide') {
+      // Every row of a list with pins has the pin's column, so the badge and counts columns line up down the list.
+      const columns = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-row')].map((r) => ({
+          pinCell: !!r.querySelector(':scope > .ib-cpin'),
+          bcolRight: Math.round(r.querySelector(':scope > .ib-bcol')!.getBoundingClientRect().right),
+          cqLeft: Math.round(r.querySelector(':scope > .ib-cq')!.getBoundingClientRect().left),
+        })),
+      );
+      expect(columns.every((c) => c.pinCell), `${label}: every row has the pin's column`).toBe(true);
+      expect(new Set(columns.map((c) => `${c.bcolRight}/${c.cqLeft}`)).size, `${label}: the columns line up`).toBe(1);
+    }
   }
 }
 
@@ -263,6 +292,23 @@ test('unread pinned rows: the pin in the trailing slot on every shape and look; 
     await expect(row).not.toHaveClass(/\bib-u\b/);
   } finally {
     await hover.close();
+  }
+});
+
+test("a wide list with no pinned row keeps today's six columns: no pin column, no reserved gap", async ({ browser }) => {
+  const context = await desktop(browser);
+  try {
+    const page = await context.newPage();
+    await page.goto(`${url}#project=${unpinnedProject}`);
+    const row = page.locator('.ib-lbody .ib-row').first();
+    await expect(row).toBeVisible();
+    await expect(page.locator('.ib-listcol')).not.toHaveClass(/\bib-pincol\b/);
+    await expect(page.locator('.ib-lbody .ib-cpin')).toHaveCount(0);
+    const cells = await row.evaluate((r) => ({ kids: [...r.children].map((c) => c.className.split(' ')[0]), tracks: getComputedStyle(r).gridTemplateColumns.split(' ').length }));
+    expect(cells.kids).toEqual(['ib-from', 'ib-subj', 'ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
+    expect(cells.tracks).toBe(6);
+  } finally {
+    await context.close();
   }
 });
 
