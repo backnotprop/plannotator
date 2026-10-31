@@ -793,9 +793,11 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of: Claude Code (PR 1), Codex (PR 4).
+ * session of, one per line. PR 1: Claude Code; PR 4: Codex.
  */
-export type InboxLaunchAgent = "claude-code" | "codex";
+export type InboxLaunchAgent =
+  | "claude-code"
+  | "codex";
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {
@@ -858,7 +860,7 @@ export interface InboxRun {
   again: boolean;
   /** `stopped`: the person pressed Stop (the line names the time). */
   stopped_by_person: boolean;
-  /** `failed`: the cause in words; `missing`: null. */
+  /** `failed`: the cause in words; `stopped`: the host's note, when it has one (else null); `missing`: null. */
   cause: string | null;
   /** `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there. */
   untrusted: boolean;
