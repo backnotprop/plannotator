@@ -102,7 +102,7 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
   await expect.poll(() => sidebarState(page)).toBe('collapsed');
   expect(await sidebarCookie(context)).toBe(cookieBefore);
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Agents', 'Prompts', 'Devices', 'Machines', 'Capabilities', 'Archived', 'Storage', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Agents', 'Prompts', 'Devices', 'Machines', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
   await expect(nav.getByRole('link', { name: 'General' })).toHaveAttribute('aria-current', 'page');
   await shot(page, 'general');
 
