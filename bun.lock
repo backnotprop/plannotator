@@ -25,7 +25,7 @@
     },
     "apps/dsh-plugin": {
       "name": "@plannotator/dsh",
-      "version": "0.28.35",
+      "version": "0.28.39",
     },
     "apps/feedback-service": {
       "name": "@plannotator/feedback-service",
@@ -127,7 +127,7 @@
     },
     "apps/opencode-plugin": {
       "name": "@plannotator/opencode",
-      "version": "0.28.33",
+      "version": "0.28.39",
       "devDependencies": {
         "@opencode-ai/plugin": "1.19.3",
         "@opencode/plugin": "2.0.32",
@@ -146,7 +146,7 @@
     },
     "apps/pi-extension": {
       "name": "@plannotator/pi-extension",
-      "version": "0.28.33",
+      "version": "0.28.39",
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@pierre/diffs": "1.5.2",
@@ -218,7 +218,7 @@
     },
     "apps/vscode-extension": {
       "name": "plannotator-webview",
-      "version": "0.16.8",
+      "version": "0.17.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
         "@plannotator/acp-client": "workspace:*",
@@ -336,16 +336,6 @@
         "fast-check": "4.10.2",
       },
     },
-    "packages/references": {
-      "name": "@plannotator/references",
-      "version": "0.1.0",
-      "dependencies": {
-        "@plannotator/core": "workspace:*",
-      },
-      "devDependencies": {
-        "typescript": "~5.8.2",
-      },
-    },
     "packages/review-editor": {
       "name": "@plannotator/review-editor",
       "version": "0.0.1",
@@ -373,7 +363,7 @@
     },
     "packages/server": {
       "name": "@plannotator/server",
-      "version": "0.28.33",
+      "version": "0.28.39",
       "dependencies": {
         "@modelcontextprotocol/server": "2.3.1",
         "@pierre/diffs": "1.5.2",
@@ -484,7 +474,6 @@
   },
   "patchedDependencies": {
     "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch",
-    "@pierre/diffs@1.5.2": "patches/@pierre%2Fdiffs@1.5.2.patch",
   },
   "overrides": {
     "dompurify": "^3.4.17",
@@ -1115,6 +1104,8 @@
 
     "@plannotator/core": ["@plannotator/core@workspace:packages/core"],
 
+    "@plannotator/dsh": ["@plannotator/dsh@workspace:apps/dsh-plugin"],
+
     "@plannotator/editor": ["@plannotator/editor@workspace:packages/editor"],
 
     "@plannotator/feedback-service": ["@plannotator/feedback-service@workspace:apps/feedback-service"],
@@ -1140,8 +1131,6 @@
     "@plannotator/pi-extension": ["@plannotator/pi-extension@workspace:apps/pi-extension"],
 
     "@plannotator/portal": ["@plannotator/portal@workspace:apps/portal"],
-
-    "@plannotator/references": ["@plannotator/references@workspace:packages/references"],
 
     "@plannotator/relay": ["@plannotator/relay@workspace:apps/relay"],
 

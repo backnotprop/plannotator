@@ -1,13 +1,20 @@
 /**
  * Launch agents from the Inbox, PR 1 (PLAN `.ops/work/launch-plan/PLAN.md`):
  * the person picks "New Claude Code session" in compose's To, writes and
- * sends; Claude Code starts in the project with the person's own setup, and
+ * sends; the agent starts in the project with the person's own setup, and
  * the thread is an ordinary thread with one quiet run line.
  *
- * We start nothing that lives on its own: Claude's own supervisor hosts the
- * session (`claude --bg`, inbox-launch-claude.ts). Messages move over the
- * mod's existing bridge poll. Behind `inboxLaunch.enabled` (config only,
- * default off): off, every route here answers 404 and nothing else changes.
+ * This file is the engine, the same for every agent. What one agent does
+ * (its CLI, its settings, trust, how it connects, its permission transport)
+ * is its `LaunchHost` (inbox-launch-host.ts), held in `hosts` by the agent's
+ * id: `claude-code` is inbox-launch-claude.ts. A record whose agent has no
+ * host here (a downgrade) gets no line, no sweep and `404 launch_not_found`.
+ *
+ * We start nothing that lives on its own: the agent's own background host
+ * keeps the session (`claude --bg`). Messages move over the links the Inbox
+ * already has (Claude Code: the mod's bridge poll). Behind
+ * `inboxLaunch.enabled` (config only, default off): off, every route here
+ * answers 404 and nothing else changes.
  *
  * The flow (compose's Send, packages/server/inbox-compose.ts):
  *  1. `prepare`: the project's folder must be there (422 folder_missing) and
@@ -16,82 +23,62 @@
  *     (`-2`, `-3` when taken, never through a link); Delete purges and
  *     removes that folder, and only while it is still the one it made.
  *  2. Compose writes the thread addressed to a placeholder
- *     `{ claude-code, launch:<id> }` with `launch` on the root. No poll can
+ *     `{ <agent>, launch:<id> }` with `launch` on the root. No poll can
  *     claim a placeholder, and a replayed key never starts a second agent.
- *  3. `begin`: the settings file, then `claude --bg` in the background; the
- *     answer comes at once. The host's id moves the root to the real session
- *     (`store.settleLaunch`), whose mod then takes it as its first turn
- *     through the existing new-thread wake. A failed start sets
- *     `launch.error`.
+ *  3. `begin`: the host's `start` in the background; the answer comes at
+ *     once. The host's id moves the root to the real session
+ *     (`store.settleLaunch`), which then takes it as its first turn through
+ *     the existing new-thread wake. A failed start sets `launch.error`.
  *
  * The run line is computed on read (`inboxRunOf`, packages/core/inbox-run-line.ts)
- * from the launch record, the mod's poll, and `claude agents --json --all`,
- * read at most every 10 s and only while a window watches and a line could
+ * from the launch record, the host's `live` state, and its `sessions`, read
+ * at most every 10 s and only while a window watches and a line could
  * change (a turn runs, or the host last said it waits on a prompt). A
- * person's reply to a launched session that is not live respawns it
- * (`claude respawn`), once per reply; one that does not take reads failed.
+ * person's reply to a launched session that is not live restarts it (the
+ * host's `resume`), once per reply; one that does not take reads failed.
  *
  * The person's login shell is read once when the Inbox starts, ahead each
  * time the composer picks "Start Claude Code" and for Settings → Agents when
  * stale (while the switch was never set: what it follows), and by each start
  * for its own env, after the Send answered. A Send decides from the last
- * finished read and waits only for one under way, or when none ever finished. Every other `claude`
+ * finished read and waits only for one under way, or when none ever finished. Every other host
  * call runs with the Inbox's own env through the launch filter
  * (`launchPlainEnv`), and none of them kills a process group.
  *
  * Window routes (same origin and `serverSession`; never over the tailnet for
  * Open and the settings):
- *   POST /api/inbox/launch/:id/stop      claude stop
- *   POST /api/inbox/launch/:id/open      Terminal: `claude attach` (or plain `claude` in an untrusted folder); macOS
- *   POST /api/inbox/launch/:id/delete    stop, rm, and the launch folder; the thread stays
- *   POST /api/inbox/launch/:id/retry     Try again after a failed start, respawn or connection
+ *   POST /api/inbox/launch/:id/stop      the host's stop (`claude stop`)
+ *   POST /api/inbox/launch/:id/open      Terminal: the host's attach command (or what trusts the folder); macOS
+ *   POST /api/inbox/launch/:id/delete    stop, remove, and the launch folder; the thread stays
+ *   POST /api/inbox/launch/:id/retry     Try again after a failed start, restart or connection
  *   POST /api/inbox/launch/settings      `{ full_permissions }` or `{ scratch_dir }` (Settings → Agents)
  *   GET  /api/inbox/launch/settings      the switch as it stands (never set: what the login shell says)
  *
- * And one route for the launched session's own permission hook, guarded like
- * the bridge (inbox-launch-permission.ts):
+ * And one route for a launched session's own permission hook, guarded like
+ * the bridge (Claude Code's: inbox-launch-claude-permission.ts):
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { INBOX_HOST_NAMES, inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
 import { loadConfig, resolveInboxLaunch, saveConfig } from "@plannotator/shared/config";
-import { getDefaultPlannotatorDataDir, getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
+import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { agentVersionRun, claudeBypassSetup, claudeCodeInboxToolOn, claudeCodePluginEnabled, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
-import { claudeAttachCommand, claudeTrustCommand, CLAUDE_LAUNCH_MIN_VERSION, createClaudeHost, parseClaudeVersion, startFailureOf, versionAtLeast, type ClaudeAgent, type ClaudeHost, type ClaudeLaunchMode } from "./inbox-launch-claude";
-import { launchPlainEnv, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
+import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
+import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
+import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions } from "./inbox-launch-host";
+import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
-import { createLaunchPermissions } from "./inbox-launch-permission";
 
-const HOST = "claude-code";
-const AGENT_NAME = INBOX_HOST_NAMES[HOST] ?? "Claude Code";
-/** The agent's own Inbox call never prompts, whatever the person's permission mode. */
-const INBOX_TOOL_PERMISSION = `mcp__plannotator__${INBOX_TOOL_NAME}`;
 const AVAILABLE_TTL_MS = 30_000;
-/** Claude Code's hook timeout for the permission hook: four days, as the plugin's ExitPlanMode hook. */
-const PERMISSION_HOOK_TIMEOUT_S = 345_600;
-
-/** One shell word: single-quoted. */
-const shellWord = (word: string) => (/^[A-Za-z0-9_./:@%+=-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
-
-/** The per-launch PermissionRequest hook: every tool (ExitPlanMode passes straight through to plan review). */
-export function launchPermissionHooks(self: readonly string[]) {
-  const command = [...self, "inbox", "permission-hook"].map(shellWord).join(" ");
-  return { PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command, timeout: PERMISSION_HOOK_TIMEOUT_S }] }] };
-}
 const HOST_TTL_MS = 10_000;
-
-type Availability = { ok: true; version: string } | { ok: false; missing: boolean; reason: string };
 
 /** Compose's `to.launch`: a project's folder, or a new scratch folder. */
 export type InboxLaunchTarget = { agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true };
@@ -122,11 +109,27 @@ interface Memo {
    * instead of blinking out between taking the turn and its next poll.
    */
   busySeen: boolean;
+  /**
+   * The newest reply still waiting when the person pressed Stop: it does not start the session again (that
+   * would undo the Stop); the person's next reply does, and takes it along.
+   */
+  heldReply: string | null;
+}
+
+/** What the engine keeps per host: its availability (30 s), its sessions view (10 s), its permission transport. */
+interface HostState {
+  availability: { at: number; value: Promise<LaunchAvailability> } | null;
+  /** The last answer, without waiting (null before the first). */
+  lastAvailable: LaunchAvailability | null;
+  view: { at: number; sessions: LaunchSessions | null } | null;
+  fetching: Promise<void> | null;
+  permissions: LaunchHostPermissions;
 }
 
 export function createInboxLaunch(options: {
   store: InboxStore;
-  live: { runStateOf(session: string): { busy: boolean | null; busySince: number | null; polls: number } | null };
+  /** The mod's bridge poll: Claude Code's sessions say through it whether they are live and busy. */
+  live: { runStateOf(session: string): LaunchLive | null };
   dataDir: string;
   serverSession: string;
   homeDir: string;
@@ -135,7 +138,7 @@ export function createInboxLaunch(options: {
   loginEnv: () => Promise<LaunchEnv>;
   /** The Inbox's own env (the plain calls: status, stop, respawn, rm). */
   ownEnv: () => Readonly<Record<string, string | undefined>>;
-  /** Folders Claude Code installs itself in, searched after the Inbox's PATH (none in a sandboxed test). */
+  /** Folders agents install themselves in (Claude Code's), searched after the Inbox's PATH (none in a sandboxed test). */
   installDirs: readonly string[];
   displayFolder: (path: string) => string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -144,6 +147,8 @@ export function createInboxLaunch(options: {
   onChange: () => void;
   /** The argv that runs this Plannotator (the permission hook's command): the Inbox's own `selfCommand`. */
   selfCommand: readonly string[];
+  /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
+  hosts?: (context: LaunchHostContext) => LaunchHost[];
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -167,8 +172,8 @@ export function createInboxLaunch(options: {
 
   /**
    * Every call but a start: the Inbox's env through the launch filter, its PATH
-   * followed by the last login shell's and Claude's own install folders
-   * (`installDirs`), so a `claude` the Inbox's PATH lacks is still found
+   * followed by the last login shell's and the agents' own install folders
+   * (`installDirs`), so a CLI the Inbox's PATH lacks is still found
    * without running a shell.
    */
   let loginPath: string[] = [];
@@ -177,10 +182,10 @@ export function createInboxLaunch(options: {
    * The person's login shell: read once when the Inbox starts (`warm`), for Settings → Agents and the
    * composer's "Start Claude Code" while the switch was never set (what it follows), and by each start for
    * its own env, after the Send answered. One read at a time: callers meanwhile share it. Of a read only its
-   * PATH (for the plain env), whether it exports Claude's skip-permissions switch, and its CLAUDE_CONFIG_DIR
-   * are kept; the env itself is never held for a launch.
+   * PATH (for the plain env) and the names the hosts keep (`shellNames`: Claude Code's skip-permissions
+   * export and CLAUDE_CONFIG_DIR) are kept; the env itself is never held for a launch.
    */
-  let shell: { skips: boolean; configDir: string | undefined; at: number } | null = null;
+  let shell: { kept: LaunchEnv; at: number } | null = null;
   /** Settings → Agents reads the shell again only when its last read is older than this. */
   const SHELL_READ_FRESH_MS = 60_000;
   const shellFresh = () => shell !== null && now() - shell.at < SHELL_READ_FRESH_MS;
@@ -190,7 +195,9 @@ export function createInboxLaunch(options: {
       try {
         const login = await options.loginEnv();
         if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
-        shell = { skips: shellSkipsPermissions(login), configDir: login.CLAUDE_CONFIG_DIR, at: now() };
+        const kept: LaunchEnv = {};
+        for (const name of hostList.flatMap((host) => host.shellNames)) if (login[name] !== undefined) kept[name] = login[name]!;
+        shell = { kept, at: now() };
         return login;
       } finally {
         reading = null;
@@ -198,13 +205,6 @@ export function createInboxLaunch(options: {
     })();
     return reading;
   };
-  /** Where the person's own Claude files are: their HOME and CLAUDE_CONFIG_DIR (the last shell read's, else the Inbox's). */
-  const claudeFiles = () => {
-    const configDir = shell?.configDir ?? options.ownEnv().CLAUDE_CONFIG_DIR;
-    return createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: configDir ? { CLAUDE_CONFIG_DIR: configDir } : {} });
-  };
-  /** The person's own Claude setup (bypass consent, a bypass disable, their default mode), read from their files now; `folder` adds that project's settings. */
-  const claudeSetup = (folder: string | null = null) => claudeBypassSetup(claudeFiles(), folder);
 
   // ── Scratch folders (PR 3): `<root>/<thread-name slug>`, then `-2`, `-3` when taken ──
 
@@ -294,10 +294,10 @@ export function createInboxLaunch(options: {
     throw scratchRefused(`Every scratch folder name for this thread is taken in ${options.displayFolder(root)}. Rename the thread.`);
   };
   /**
-   * Delete's last step for a scratch launch: `claude purge --yes <folder>` (that folder's sessions and transcripts)
-   * and the folder itself, only while it is intact. Never for a project folder.
+   * Delete's last step for a scratch launch: the host's purge (that folder's sessions and transcripts) and
+   * the folder itself, only while it is intact. Never for a project folder.
    */
-  const removeScratch = async (launch: InboxLaunchRecord): Promise<boolean> => {
+  const removeScratch = async (host: LaunchHost, launch: InboxLaunchRecord): Promise<boolean> => {
     if (!launch.scratch) return false;
     const kept = () => {
       log(`Inbox launch ${launch.id}: scratch folder ${launch.folder} kept (not the folder the Inbox made: a link, another folder, or gone)`);
@@ -311,76 +311,12 @@ export function createInboxLaunch(options: {
     log(`Inbox launch ${launch.id}: scratch folder removed (${purge.skipped ? `purge skipped: ${purge.skipped}` : `purge ${purge.exitCode}`})`);
     return true;
   };
-  /** The folder a start failure names and Open in Terminal trusts (the host's rule). */
-  const trustFolderOf = (launch: InboxLaunchRecord) => host.trustFolder(launch);
-  /** How a launch made now would start (`launchStartOf`), from the switch, the person's Claude setup and the last shell read. */
-  const startNow = (setup: ReturnType<typeof claudeSetup>) =>
-    launchStartOf({ setting: config().fullPermissions, defaultMode: setup.defaultMode, shellSkips: shell?.skips ?? false, consent: setup.consent, disabled: setup.disabled });
-  /** A launch's `--permission-mode`: bypass for full permissions, none for the person's own default mode, else auto. */
-  const modeOf = (launch: InboxLaunchRecord): ClaudeLaunchMode => (inboxLaunchFullPermissions(launch) ? "bypassPermissions" : launch.own_mode ? null : "auto");
   const environment = async (): Promise<AgentEnvironment> =>
     createAgentEnvironmentFor({
       platform: options.platform,
       homeDir: options.homeDir,
       env: launchPlainEnv(options.ownEnv(), [...loginPath, ...options.installDirs]),
     });
-  const host: ClaudeHost = createClaudeHost({ environment, files: claudeFiles });
-
-  // ── Availability: `claude` on the plain env's PATH (the Inbox's, the last start's login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on ──
-  let availability: { at: number; value: Promise<Availability> } | null = null;
-  const checkAvailable = async (): Promise<Availability> => {
-    const e = await environment();
-    const path = e.which("claude");
-    if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local" };
-    const version = parseClaudeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
-    if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}` };
-    if (!claudeCodePluginEnabled(e) || !claudeCodeInboxToolOn(e)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off" };
-    return { ok: true, version };
-  };
-  const available = (fresh = false): Promise<Availability> => {
-    if (!availability || fresh || now() - availability.at > AVAILABLE_TTL_MS) availability = { at: now(), value: checkAvailable().catch(() => ({ ok: false, missing: false, reason: "could not check" }) as Availability) };
-    return availability.value;
-  };
-  /** The last answer, without waiting (null before the first). */
-  let lastAvailable: Availability | null = null;
-  const refreshAvailable = () => void available().then((value) => (lastAvailable = value));
-
-  // ── The host's view: one `claude agents --json --all`, shared, at most every 10 s, only while something needs it ──
-  let hostView: { at: number; agents: ClaudeAgent[] | null } | null = null;
-  let hostFetch: Promise<void> | null = null;
-  const refreshHost = (): Promise<void> => {
-    if (hostFetch) return hostFetch;
-    hostFetch = host
-      .agents()
-      .then((agents) => {
-        hostView = { at: now(), agents };
-      })
-      .catch(() => {
-        hostView = { at: now(), agents: null };
-      })
-      .finally(() => {
-        hostFetch = null;
-        options.onChange();
-      });
-    return hostFetch;
-  };
-  /** Stale after 10 s, or once an answer settled since the last read (one read then says where the session is). */
-  const hostStale = () => !hostView || now() - hostView.at > HOST_TTL_MS || permissions.readDue(hostView.at);
-  const hostStateOf = (ref: string | null): InboxRunHostState | null => {
-    if (!ref || !hostView?.agents) return null;
-    const agent = hostView.agents.find((a) => a.id === ref || a.sessionId.startsWith(ref));
-    return agent ? { status: agent.status, state: agent.state, waitingFor: agent.waitingFor } : "absent";
-  };
-
-  const memos = new Map<string, Memo>();
-  const memoOf = (launch: InboxLaunchRecord): Memo => {
-    let memo = memos.get(launch.id);
-    if (!memo) {
-      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false };
-      memos.set(launch.id, memo);
-    }
-    return memo;
-  };
 
   const launchDir = (id: string) => join(store.dir, "launch", id);
   const startLog = (id: string, text: string) => {
@@ -392,11 +328,111 @@ export function createInboxLaunch(options: {
     }
   };
 
-  /** The live poll of a launched root's session, with Stop counted at once. */
-  const liveOf = (root: InboxMessage, memo: Memo) => {
+  // ── The hosts: one per agent ──
+  const context: LaunchHostContext = {
+    dataDir: options.dataDir,
+    homeDir: options.homeDir,
+    platform: options.platform,
+    selfCommand: options.selfCommand,
+    ownEnv: options.ownEnv,
+    environment,
+    shell: () => shell?.kept ?? null,
+    loginEnv: () => readLogin(),
+    config,
+    launchDir,
+    startLog,
+    displayFolder: options.displayFolder,
+    bridge: options.live,
+    log,
+  };
+  const claude = createClaudeLaunchHost(context);
+  /** The agents the Inbox can start, one per line. */
+  const ownHosts: LaunchHost[] = [
+    claude,
+  ];
+  /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
+  const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
+  const hostList = Object.values(hosts);
+  /** The host of a launch's agent; null for an agent with no host here. */
+  const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
+  const roots = () => store.launchedRoots();
+  const states = new Map<LaunchHost, HostState>();
+  const stateOf = (host: LaunchHost): HostState => states.get(host)!;
+  /** The host's last word on a session (its cached `sessions`), or null when not read. */
+  const sessionIn = (host: LaunchHost, ref: string | null): InboxRunHostState | null => {
+    const sessions = stateOf(host).view?.sessions;
+    return ref && sessions ? sessions(ref) : null;
+  };
+  for (const host of hostList) {
+    const mine = (root: InboxMessage) => !root.launch!.deleted_at && hostOf(root.launch!) === host;
+    states.set(host, {
+      availability: null,
+      lastAvailable: null,
+      view: null,
+      fetching: null,
+      permissions: host.permissions({
+        store,
+        launchDir,
+        rootOf: (launchId) => roots().find((root) => root.launch!.id === launchId && mine(root)) ?? null,
+        roots: () => roots().filter(mine),
+        displayFolder: options.displayFolder,
+        host: { stateOf: (ref) => sessionIn(host, ref), readAt: () => stateOf(host).view?.at ?? 0 },
+        onChange: options.onChange,
+        now,
+        log,
+      }),
+    });
+  }
+
+  // ── Availability: the host's own check, at most every 30 s ──
+  const available = (host: LaunchHost, fresh = false): Promise<LaunchAvailability> => {
+    const state = stateOf(host);
+    if (!state.availability || fresh || now() - state.availability.at > AVAILABLE_TTL_MS) {
+      state.availability = { at: now(), value: host.available().catch(() => ({ ok: false, missing: false, reason: "could not check" }) as LaunchAvailability) };
+    }
+    return state.availability.value;
+  };
+  const refreshAvailable = (host: LaunchHost) => void available(host).then((value) => (stateOf(host).lastAvailable = value));
+
+  // ── The host's view: one `sessions` read per host, shared, at most every 10 s, only while something needs it ──
+  const refreshHost = (host: LaunchHost): Promise<void> => {
+    const state = stateOf(host);
+    if (state.fetching) return state.fetching;
+    state.fetching = host
+      .sessions()
+      .then((sessions) => {
+        state.view = { at: now(), sessions };
+      })
+      .catch(() => {
+        state.view = { at: now(), sessions: null };
+      })
+      .finally(() => {
+        state.fetching = null;
+        options.onChange();
+      });
+    return state.fetching;
+  };
+  /** Stale after 10 s, or once an answer settled since the last read (one read then says where the session is). */
+  const hostStale = (host: LaunchHost) => {
+    const state = stateOf(host);
+    return !state.view || now() - state.view.at > HOST_TTL_MS || state.permissions.readDue?.(state.view.at) === true;
+  };
+
+  const memos = new Map<string, Memo>();
+  const memoOf = (launch: InboxLaunchRecord): Memo => {
+    let memo = memos.get(launch.id);
+    if (!memo) {
+      memo = { startedAt: Date.parse(launch.started_at), again: false, stoppedAt: null, waitingSince: null, quietPolls: null, respawn: null, busySeen: false, heldReply: null };
+      memos.set(launch.id, memo);
+    }
+    return memo;
+  };
+
+  /** The host's live state of a launched root's session, with Stop counted at once. */
+  const liveOf = (host: LaunchHost, root: InboxMessage, memo: Memo) => {
     const session = root.to?.session;
     if (!session || session.startsWith("launch:")) return null;
-    const state = options.live.runStateOf(session);
+    const state = host.live(session);
     if (state && memo.quietPolls !== null) {
       if (state.polls <= memo.quietPolls) return null;
       // It polled since: started again (a respawn, or by hand in a terminal).
@@ -416,7 +452,7 @@ export function createInboxLaunch(options: {
     return now() - memo.startedAt >= INBOX_RUN_START_GRACE_MS ? "It started again but did not connect to the Inbox." : null;
   };
 
-  /** The reply's restart was refused because Claude Code does not trust the folder. */
+  /** The reply's restart was refused because the agent does not trust the folder. */
   const respawnUntrustedOf = (memo: Memo): boolean => memo.respawn?.untrusted === true && respawnFailedOf(memo) !== null;
 
   /**
@@ -434,25 +470,28 @@ export function createInboxLaunch(options: {
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session);
   };
 
-  /** The run line of a launched root. */
+  /** The run line of a launched root; null for an agent with no host here. */
   const runOfRoot = (root: InboxMessage): InboxRun | null => {
     const launch = root.launch!;
-    if (launch.deleted_at) return null;
+    const host = hostOf(launch);
+    if (launch.deleted_at || !host) return null;
+    const state = stateOf(host);
     const memo = memoOf(launch);
-    const live = liveOf(root, memo);
+    const live = liveOf(host, root, memo);
     // A host read from before the last answer settled still shows our own prompt: never "waiting on Terminal".
-    const settled = permissions.settledAfter(launch.id);
-    const hostState = settled !== null && (hostView?.at ?? 0) < settled ? null : hostStateOf(launch.session_ref);
+    const settled = state.permissions.settledAfter?.(launch.id) ?? null;
+    const hostState = settled !== null && (state.view?.at ?? 0) < settled ? null : sessionIn(host, launch.session_ref);
     if (hostState && hostState !== "absent" && hostState.status === "waiting" && hostState.waitingFor) memo.waitingSince ??= now();
     else memo.waitingSince = null;
     const project = store.project(root.project_id)?.name ?? launch.folder;
+    const last = state.lastAvailable;
     return inboxRunOf({
       launch,
       project,
       now: now(),
       startedAt: memo.startedAt,
       again: memo.again,
-      cliAvailable: lastAvailable === null ? null : !(lastAvailable.ok === false && lastAvailable.missing),
+      cliAvailable: last === null ? null : !(last.ok === false && last.missing),
       live,
       turnWaiting: turnWaitingOf(root, memo),
       seenLive: !!root.delivery,
@@ -461,8 +500,9 @@ export function createInboxLaunch(options: {
       respawnFailed: respawnFailedOf(memo),
       respawnUntrusted: respawnUntrustedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
-      attachCommand: launch.session_ref ? claudeAttachCommand(launch.folder, launch.session_ref) : null,
-      permissionSince: permissions.openSince(root),
+      stoppedNote: host.stoppedNote?.(launch) ?? null,
+      attachCommand: host.attach(launch),
+      permissionSince: openPermissionSince(store, root.thread_id),
     });
   };
 
@@ -471,101 +511,72 @@ export function createInboxLaunch(options: {
    * waits on a prompt (until it says otherwise), a turn runs (a prompt may
    * block it), or it is not live past the start.
    */
-  const needsHost = (root: InboxMessage): boolean => {
+  const needsHost = (host: LaunchHost, root: InboxMessage): boolean => {
     const launch = root.launch!;
     if (launch.deleted_at || launch.error || !launch.session_ref) return false;
     // A permission question waits: the host says whether the person answered it in Terminal meanwhile.
-    if (permissions.holds(launch.id)) return true;
+    const permissions = stateOf(host).permissions;
+    if (permissions.holds?.(launch.id)) return true;
     // An answer not yet read past: the host says whether the session went on or waits on its own dialog.
-    const settled = permissions.settledAfter(launch.id);
-    if (settled !== null && (hostView?.at ?? 0) < settled) return true;
-    const cached = hostStateOf(launch.session_ref);
+    const settled = permissions.settledAfter?.(launch.id) ?? null;
+    if (settled !== null && (stateOf(host).view?.at ?? 0) < settled) return true;
+    const cached = sessionIn(host, launch.session_ref);
     if (cached && cached !== "absent" && cached.status === "waiting") return true;
     const memo = memoOf(launch);
-    const live = liveOf(root, memo);
+    const live = liveOf(host, root, memo);
     if (live) return live.busy === true;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return false;
-    const state = hostStateOf(launch.session_ref);
+    const state = sessionIn(host, launch.session_ref);
     return !(state === "absent" || (state && (state.state === "stopped" || state.state === "done")));
   };
 
-  const roots = () => store.launchedRoots();
-  const permissions = createLaunchPermissions({
-    store,
-    launchDir,
-    rootOf: (launchId) => roots().find((root) => root.launch!.id === launchId && !root.launch!.deleted_at) ?? null,
-    roots: () => roots().filter((root) => !root.launch!.deleted_at),
-    displayFolder: options.displayFolder,
-    host: { stateOf: (ref) => hostStateOf(ref), readAt: () => hostView?.at ?? 0 },
-    onChange: options.onChange,
-    now,
-    log,
-  });
-  const rootById = (launchId: string): InboxMessage => {
+  /** A launch the routes act on: its root and host. An agent with no host here reads as no launch. */
+  const launchById = (launchId: string): { root: InboxMessage; host: LaunchHost } => {
     const root = roots().find((m) => m.launch!.id === launchId);
-    if (!root) throw new InboxError("launch_not_found", `No launch ${launchId}.`);
-    return root;
+    const host = root ? hostOf(root.launch!) : null;
+    if (!root || !host) throw new InboxError("launch_not_found", `No launch ${launchId}.`);
+    return { root, host };
   };
 
   /**
    * Look at every launch: respawn a stopped session someone wrote to, and,
-   * only while a window watches (`watched`), keep the CLI check and the
-   * host's view fresh where a line could change.
+   * only while a window watches (`watched`), keep each host's check and
+   * view fresh where a line could change. An agent with no host is skipped.
    */
   const sweep = (watched: boolean) => {
     if (!enabled()) {
       // Launch turned off: a question no one can answer any more is withdrawn (nothing to do once none is open).
-      for (const root of roots()) if (!root.launch!.deleted_at) permissions.withdrawAll(root);
+      for (const root of roots()) {
+        const host = hostOf(root.launch!);
+        if (host && !root.launch!.deleted_at) stateOf(host).permissions.withdrawAll(root);
+      }
       return;
     }
-    const all = roots().filter((root) => !root.launch!.deleted_at);
+    const all = roots().filter((root) => !root.launch!.deleted_at && hostOf(root.launch!));
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
-    permissions.sweep();
+    for (const host of hostList) stateOf(host).permissions.sweep();
     if (!watched) return;
-    if (lastAvailable === null || (availability && now() - availability.at > AVAILABLE_TTL_MS)) refreshAvailable();
-    if (hostStale() && all.some(needsHost)) void refreshHost();
+    for (const host of hostList) {
+      const mine = all.filter((root) => hostOf(root.launch!) === host);
+      if (mine.length === 0) continue;
+      const state = stateOf(host);
+      if (state.lastAvailable === null || (state.availability && now() - state.availability.at > AVAILABLE_TTL_MS)) refreshAvailable(host);
+      if (hostStale(host) && mine.some((root) => needsHost(host, root))) void refreshHost(host);
+    }
   };
 
   // ── Start ──
 
-  /**
-   * The launch's settings file. Every launch, full included, has the permission hook: whatever Claude still
-   * asks (bypass mode's safety checks; every prompt when Claude declined bypass) comes to a card, never to a
-   * Terminal dialog no one sees. An auto launch pins `defaultMode: "default"`: when Claude drops auto mode
-   * (its killswitch, a CLI without it) the session lands in default mode, never in the person's own bypass.
-   */
-  const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv, model: string | null): string => {
-    const fullPermissions = inboxLaunchFullPermissions(launch);
-    const dir = launchDir(launch.id);
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const path = join(dir, "settings.json");
-    const isDefaultDataDir = resolve(options.dataDir) === resolve(getDefaultPlannotatorDataDir(options.homeDir));
-    const settings = {
-      ...(model ? { model } : {}),
-      env: launchSettingsEnv(login, {
-        launchId: launch.id,
-        key: randomBytes(32).toString("hex"),
-        dataDir: isDefaultDataDir ? null : options.dataDir,
-        fullPermissions,
-        bypassAvailable: launch.bypass_available === true,
-      }),
-      permissions: { allow: [INBOX_TOOL_PERMISSION], ...(modeOf(launch) === "auto" ? { defaultMode: "default" } : {}) },
-      // Permission prompts come to the launch thread as questions (inbox-launch-permission.ts).
-      hooks: launchPermissionHooks(options.selfCommand),
-    };
-    writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(path, 0o600);
-    return path;
-  };
-
-  /** Launches whose `claude --bg` is running now: Try again waits, and Delete leaves the new session to `run` to remove. */
+  /** Launches whose start is running now: Try again waits, and Delete leaves the new session to `run` to remove. */
   const starting = new Set<string>();
   /** A Delete under way, by launch id: a second one (a double click) waits for it and answers the same. */
   const deleting = new Map<string, Promise<Record<string, unknown>>>();
+  /** A Stop under way, by launch id: no reply starts the session again until it is done. */
+  const stopping = new Set<string>();
 
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
-  const run = async (root: InboxMessage, again: boolean): Promise<void> => {
+  const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
     const launch = root.launch!;
     const memo = memoOf(launch);
     memo.startedAt = now();
@@ -573,100 +584,87 @@ export function createInboxLaunch(options: {
     memo.stoppedAt = null;
     memo.respawn = null;
     memo.busySeen = false;
+    memo.heldReply = null;
     starting.add(launch.id);
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
       const login = await readLogin();
-      // How it starts comes from the launch record (fixed when it was made), never the live switch or shell:
-      // a Try again after either changed starts the session the card describes.
-      const { model } = config();
-      const settingsPath = writeSettings(launch, login, model);
       const name = root.thread_name ?? root.subject ?? "Inbox";
-      const startEnvironment = createAgentEnvironmentFor({ platform: options.platform, homeDir: options.homeDir, env: launchSpawnEnv(login) });
-      // Full permissions: bypass mode. The person's own default mode: no flag. Otherwise auto mode; its prompts come to the thread.
-      const mode = modeOf(launch);
-      const result = await host.start({
-        folder: launch.folder,
-        shownFolder: options.displayFolder(trustFolderOf(launch)),
-        name,
-        settingsPath,
-        mode,
-        allowBypass: launch.bypass_available === true,
-        environment: startEnvironment,
-      });
-      startLog(launch.id, result.output);
-      if (result.modeRefused) {
-        startLog(launch.id, `auto mode refused, started in default mode: ${result.modeRefused}`);
-        log(`Inbox launch ${launch.id}: auto mode refused (${result.modeRefused}); started in default mode`);
-      }
+      const result = await host.start(launch, { name, login });
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
         if (result.ok) {
-          const stop = await host.stop(result.short);
-          const rm = await host.rm(result.short);
-          log(`Inbox launch ${launch.id}: deleted while starting; removed ${result.short} (stop ${stop.exitCode}, rm ${rm.exitCode})`);
+          const stop = await host.stop(result.ref);
+          const rm = await host.remove(result.ref);
+          log(`Inbox launch ${launch.id}: deleted while starting; removed ${result.ref} (stop ${stop.exitCode}, rm ${rm.exitCode})`);
         }
-        await removeScratch(launch);
+        await removeScratch(host, launch);
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         return;
       }
-      if (result.ok) store.settleLaunch(root.id, { to: { host: HOST, session: result.session }, session_ref: result.short });
-      else store.settleLaunch(root.id, { error: { code: result.missing ? "missing" : result.code, text: result.text, at: new Date(now()).toISOString() } });
-      log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.short}` : `did not start (${result.code})`}`);
+      if (result.ok) store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref });
+      else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() } });
+      log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.ref}` : `did not start (${result.code})`}`);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       startLog(launch.id, `error: ${text}`);
       if (!store.message(root.id)?.launch?.deleted_at) store.settleLaunch(root.id, { error: { code: "failed", text, at: new Date(now()).toISOString() } });
     } finally {
       starting.delete(launch.id);
-      hostView = null;
+      stateOf(host).view = null;
       options.onChange();
     }
   };
 
   // ── Respawn on reply: a person's message for a launched session that is not live ──
   const respawning = new Set<string>();
-  /** `claude respawn` once; a non-zero exit is kept as the failure (and the CLI looked at again, for screen 15). */
-  const respawn = (root: InboxMessage, forReply: string) => {
+  /** The host's `resume` once; a failure is kept (and the CLI looked at again, for screen 15). */
+  const respawn = (root: InboxMessage, host: LaunchHost, forReply: string) => {
     const launch = root.launch!;
     const memo = memoOf(launch);
     respawning.add(launch.id);
     memo.startedAt = now();
     memo.again = true;
     memo.stoppedAt = null;
-    memo.quietPolls = options.live.runStateOf(root.to!.session)?.polls ?? memo.quietPolls;
+    memo.quietPolls = host.live(root.to!.session)?.polls ?? memo.quietPolls;
     memo.respawn = { for: forReply, connected: false, failed: null };
     memo.busySeen = false;
+    memo.heldReply = null;
     const attempt = memo.respawn;
     options.onChange();
     void host
-      .respawn(launch.session_ref!)
+      .resume(launch)
+      // A host whose resume throws is a failed restart, never an unhandled rejection (it would end the Inbox).
+      .catch((error: unknown) => ({ exitCode: 1, text: `error: ${error instanceof Error ? error.message : String(error)}`, failure: { code: "failed" as const, text: "It did not start again." } }))
       .then(async (result) => {
-        startLog(launch.id, `respawn ${launch.session_ref}: exit ${result.exitCode}\n${result.stdout}${result.stderr}`);
-        if (result.exitCode === 0) return;
-        const failure = startFailureOf(result, options.displayFolder(trustFolderOf(launch)));
-        attempt.failed = failure.text;
-        // Claude checks trust before a restart too (a scratch folder that became its own repository needs its own).
-        attempt.untrusted = failure.code === "untrusted";
-        lastAvailable = await available(true);
+        startLog(launch.id, `respawn ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
+        if (!result.failure) return;
+        attempt.failed = result.failure.text;
+        // The agent may check trust before a restart too (a scratch folder that became its own repository needs its own).
+        attempt.untrusted = result.failure.code === "untrusted";
+        stateOf(host).lastAvailable = await available(host, true);
       })
       .finally(() => {
         options.onChange();
         respawning.delete(launch.id);
-        hostView = null;
+        stateOf(host).view = null;
       });
   };
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
+    const host = hostOf(launch);
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
-    if (launch.deleted_at || launch.error || !launch.session_ref || !root.to || !root.delivery || respawning.has(launch.id) || starting.has(launch.id)) return;
+    if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || !root.delivery || respawning.has(launch.id) || starting.has(launch.id)) return;
+    // A Stop or a Delete under way: the session is going, never started again meanwhile (a host's `live` may
+    // read null as soon as its stop begins).
+    if (stopping.has(launch.id) || deleting.has(launch.id)) return;
     const memo = memoOf(launch);
-    if (liveOf(root, memo)) return;
+    if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
     const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
-    if (!newest || memo.respawn?.for === newest.id) return;
-    respawn(root, newest.id);
+    if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
+    respawn(root, host, newest.id);
   };
   const unsubscribe = store.subscribe((line) => {
     if (line.kind !== "message" || !enabled()) return;
@@ -678,31 +676,14 @@ export function createInboxLaunch(options: {
 
   // ── Routes ──
 
-  /**
-   * Settings → Agents' switch: the person's choice once set; never set, what their own setup says
-   * (`follows`: on because their Claude settings or their shell run Claude in bypass mode). `own_mode`: a
-   * launch starts in their own default mode; `bypass_off`: they want full permissions, and Claude Code's
-   * settings turn bypass mode off (`disableBypassPermissionsMode`); `needs_consent`: they want them, and Claude Code's
-   * bypass notice is not accepted on this computer, so a launch starts without them. `settingsState` uses
-   * the last shell read; the window's GET reads the shell again when that read is older than a minute.
-   */
-  const settingsState = () => {
-    const setting = config().fullPermissions;
-    const setup = claudeSetup();
-    const start = startNow(setup);
-    const follows = setting === null && start.wantsFull ? (setup.defaultMode === "bypassPermissions" ? "claude" : "shell") : null;
-    return {
-      enabled: enabled(),
-      full_permissions: setting ?? start.wantsFull,
-      follows,
-      own_mode: start.ownMode,
-      bypass_off: start.wantsFull && setup.disabled,
-      needs_consent: start.wantsFull && !setup.disabled && !setup.consent,
-      // Settings → Agents' "Scratch folders": where new ones go.
-      scratch_dir: scratchRoot(),
-      scratch_dir_shown: options.displayFolder(scratchRoot()),
-    };
-  };
+  /** Settings → Agents: the full-permissions switch (Claude Code's words, `settingsState`) and the scratch root. */
+  const settingsState = () => ({
+    enabled: enabled(),
+    ...claude.settingsState(),
+    // Settings → Agents' "Scratch folders": where new ones go.
+    scratch_dir: scratchRoot(),
+    scratch_dir_shown: options.displayFolder(scratchRoot()),
+  });
   const route = async (req: Request, path: string, via: "local" | "tailnet" | string): Promise<Response | null> => {
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry))?$/.exec(path);
     if (!match) return null;
@@ -747,30 +728,39 @@ export function createInboxLaunch(options: {
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
       return json({ launch: settingsState() });
     }
-    const root = rootById(match[1]!);
+    const { root, host } = launchById(match[1]!);
     const launch = root.launch!;
+    const state = stateOf(host);
     switch (match[2]) {
       case "stop": {
         if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
         const memo = memoOf(launch);
-        const result = await host.stop(launch.session_ref);
-        startLog(launch.id, `stop ${launch.session_ref}: exit ${result.exitCode}\n${result.stdout}${result.stderr}`);
+        // What waits now was written before the Stop: it stays for the person's next reply.
+        memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
+        stopping.add(launch.id);
+        let result: LaunchHostResult;
+        try {
+          result = await host.stop(launch.session_ref);
+        } finally {
+          stopping.delete(launch.id);
+        }
+        startLog(launch.id, `stop ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
         memo.stoppedAt = now();
         memo.startedAt = Math.min(memo.startedAt, now() - INBOX_RUN_START_GRACE_MS);
         // Nothing waits on a stopped session's prompt: its questions are withdrawn at once.
-        permissions.withdrawAll(root);
+        state.permissions.withdrawAll(root);
         // Its last polls still read as live for a while: from now it counts as live only once it polls anew.
-        if (root.to) memo.quietPolls = options.live.runStateOf(root.to.session)?.polls ?? memo.quietPolls;
-        hostView = null;
+        if (root.to) memo.quietPolls = host.live(root.to.session)?.polls ?? memo.quietPolls;
+        state.view = null;
         options.onChange();
         return json({ run: runOfRoot(store.message(root.id)!) });
       }
       case "open": {
         if (via === "tailnet") return localOnly();
         if (options.platform !== "darwin") throw new InboxError("open_unavailable", "Open in Terminal is for macOS; copy the command instead.");
-        // A start or restart Claude refused for trust: plain `claude` where trust is keyed, so its trust prompt shows.
+        // A start or restart the agent refused for trust: the host's command where trust is accepted.
         const untrusted = !!launch.error || respawnUntrustedOf(memoOf(launch));
-        const command = launch.session_ref && !untrusted ? claudeAttachCommand(launch.folder, launch.session_ref) : claudeTrustCommand(trustFolderOf(launch));
+        const command = host.terminal(launch, untrusted);
         const e = await environment();
         const osascript = e.which("osascript");
         if (!osascript) throw new InboxError("open_unavailable", "osascript is not on PATH; copy the command instead.");
@@ -790,14 +780,14 @@ export function createInboxLaunch(options: {
           // Still starting: `run` removes the session it makes once it sees `deleted_at`.
           if (launch.session_ref) {
             const stop = await host.stop(launch.session_ref);
-            const rm = await host.rm(launch.session_ref);
+            const rm = await host.remove(launch.session_ref);
             log(`Inbox launch ${launch.id}: deleted (stop ${stop.exitCode}, rm ${rm.exitCode})`);
           }
-          permissions.withdrawAll(root);
-          permissions.forget(launch.id);
-          // A project folder: never `claude purge` (it clears every session of the folder, and this is the person's
+          state.permissions.withdrawAll(root);
+          state.permissions.forget?.(launch.id);
+          // A project folder: never purged (it clears every session of the folder, and this is the person's
           // project). A scratch folder the Inbox made: purged and removed, by `run` when it still starts.
-          const scratchRemoved = starting.has(launch.id) ? null : await removeScratch(launch);
+          const scratchRemoved = starting.has(launch.id) ? null : await removeScratch(host, launch);
           rmSync(launchDir(launch.id), { recursive: true, force: true });
           store.settleLaunch(root.id, { deleted_at: new Date(now()).toISOString() });
           memos.delete(launch.id);
@@ -816,22 +806,22 @@ export function createInboxLaunch(options: {
         if (starting.has(launch.id) || respawning.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
         if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
         const memo = memoOf(launch);
-        // A reply's respawn that did not take: respawn once more (the session exists; a new --bg would make a second).
+        // A reply's respawn that did not take: respawn once more (the session exists; a new start would make a second).
         if (!launch.error && launch.session_ref && root.to && respawnFailedOf(memo)) {
-          respawn(root, memo.respawn!.for);
+          respawn(root, host, memo.respawn!.for);
           return json({ run: runOfRoot(store.message(root.id)!) });
         }
         if (!launch.error) {
           // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
           if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
-          if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, memo.respawn?.for ?? root.id);
+          if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, host, memo.respawn?.for ?? root.id);
           // No session was made: a first start, not "again".
-          else void run(root, false);
+          else void run(root, host, false);
           return json({ run: runOfRoot(store.message(root.id)!) });
         }
         const cleared = store.settleLaunch(root.id, { error: null });
         // The start never ran (untrusted, failed): Try again is its first real start, never "Starting … again".
-        void run(cleared, false);
+        void run(cleared, host, false);
         return json({ run: runOfRoot(cleared) });
       }
     }
@@ -855,16 +845,24 @@ export function createInboxLaunch(options: {
     },
     route,
     sweep,
-    stop: () => unsubscribe(),
+    stop: () => {
+      unsubscribe();
+      for (const host of hostList) host.close?.();
+    },
 
     /**
-     * The launched session's permission hook (`POST /api/inbox/launch/:id/permission`), after the
+     * A launched session's permission hook (`POST /api/inbox/launch/:id/permission`), after the
      * caller's connection guard: null for any other path. Off, 404 `launch_off` (the hook then says nothing).
+     * The launch's host answers; an id no thread has goes to the host that takes such calls, which refuses its key.
      */
     async permissionRoute(req: Request, path: string): Promise<Response | null> {
       const match = /^\/api\/inbox\/launch\/(lch_[0-9A-HJKMNP-TV-Z]{26})\/permission$/.exec(path);
       if (!match) return null;
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+      const root = roots().find((m) => m.launch!.id === match[1]);
+      const host = root ? hostOf(root.launch!) : hostList.find((h) => stateOf(h).permissions.handle);
+      const permissions = host ? stateOf(host).permissions : null;
+      if (!permissions?.handle) throw new InboxError("launch_not_found", `No launch ${match[1]}.`);
       return permissions.handle(req, match[1]!);
     },
 
@@ -873,11 +871,13 @@ export function createInboxLaunch(options: {
       if (!to || typeof to !== "object" || !("launch" in to)) return null;
       if (!enabled()) throw new InboxError("launch_off", "Starting agents from the Inbox is off.");
       const value = (to as { launch: unknown }).launch as Record<string, unknown> | null;
-      if (value && typeof value === "object" && value.agent === HOST && value.scratch === true && value.project_id === undefined) return { agent: HOST, scratch: true };
-      if (!value || typeof value !== "object" || value.agent !== HOST || typeof value.project_id !== "string") {
-        throw new InboxError("validation_error", "to.launch: { agent: \"claude-code\", project_id } or { agent: \"claude-code\", scratch: true }.", { field: "to.launch" });
+      const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
+      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true };
+      if (!host || typeof value!.project_id !== "string") {
+        const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
+        throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
       }
-      return { agent: HOST, project_id: value.project_id };
+      return { agent: host.agent, project_id: value!.project_id };
     },
 
     /**
@@ -889,19 +889,22 @@ export function createInboxLaunch(options: {
       target: InboxLaunchTarget,
       input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject> },
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord }> {
+      const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
+      if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
       const chosen = "project_id" in target ? store.project(target.project_id) : null;
       if ("project_id" in target && !chosen) throw new InboxError("project_not_found", `No project ${target.project_id}.`);
       if (chosen && !isFolder(chosen.root)) {
         throw new InboxError("folder_missing", `${options.displayFolder(chosen.root)} isn't there any more. Pick another project. Nothing was sent.`, { field: "to.launch" });
       }
-      const ok = await available(true);
-      lastAvailable = ok;
-      if (!ok.ok) throw new InboxError("agent_unavailable", `${AGENT_NAME} can't be started here: ${ok.reason}. Nothing was sent.`);
+      const ok = await available(host, true);
+      stateOf(host).lastAvailable = ok;
+      if (!ok.ok) throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       const id = inboxId("lch");
-      // How it starts, fixed for this launch (`launchStartOf`): the switch, the person's own Claude setup (with
-      // this folder's settings) and the last finished shell read, however old (the start reads the shell again
-      // for its own env). Send waits on the shell only to finish a read already under way (the composer's read
-      // ahead, or another launch's start), or when no read ever finished (`warm` reads one at Inbox start).
+      // How it starts, fixed for this launch (the host's `startOf`: for Claude Code the switch, the person's own
+      // setup with this folder's settings, and the last finished shell read, however old; the start reads the
+      // shell again for its own env). Send waits on the shell only to finish a read already under way (the
+      // composer's read ahead, or another launch's start), or when no read ever finished (`warm` reads one at
+      // Inbox start).
       if (reading || shell === null) await readLogin();
       const made = chosen ? null : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));
       const folder = made ? made.folder : chosen!.root;
@@ -912,10 +915,10 @@ export function createInboxLaunch(options: {
         if (made) rmSync(folder, { recursive: true, force: true });
         throw error;
       }
-      const start = startNow(claudeSetup(folder));
+      const start = host.startOf(folder);
       const launch: InboxLaunchRecord = {
         id,
-        agent: HOST,
+        agent: host.agent,
         session_ref: null,
         folder,
         scratch: !chosen,
@@ -925,7 +928,7 @@ export function createInboxLaunch(options: {
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
       };
-      return { project, to: { host: HOST, session: `launch:${id}` }, launch };
+      return { project, to: { host: host.agent, session: `launch:${id}` }, launch };
     },
 
     /**
@@ -940,15 +943,24 @@ export function createInboxLaunch(options: {
 
     /** The thread is written: start the agent in the background. */
     begin(root: InboxMessage): void {
-      void run(root, false);
+      const host = hostOf(root.launch!);
+      if (host) void run(root, host, false);
     },
 
     /** `GET /api/inbox/sessions`'s `launch` block: the agents To offers, the projects the folder menu lists. */
     async composeBlock(): Promise<InboxComposeLaunch | undefined> {
       if (!enabled()) return undefined;
-      // Not available last time: look again (the person may have just installed or updated it).
-      const ok = await available(lastAvailable !== null && !lastAvailable.ok);
-      lastAvailable = ok;
+      const root = scratchRoot();
+      const offered = await Promise.all(
+        hostList.map(async (host) => {
+          const state = stateOf(host);
+          // Not available last time: look again (the person may have just installed or updated it).
+          const ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
+          state.lastAvailable = ok;
+          // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
+          return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root) }] : [];
+        }),
+      );
       const recency = new Map<string, string>();
       for (const row of store.listRows()) if ((recency.get(row.project.id) ?? "") < row.last_at) recency.set(row.project.id, row.last_at);
       // A scratch folder Delete removed is not offered again (it would only be listed struck through).
@@ -958,24 +970,27 @@ export function createInboxLaunch(options: {
         .map((p) => ({ id: p.id, name: p.name, root: p.root, exists: isFolder(p.root) }))
         .filter((p) => p.exists || !removed.has(p.root))
         .sort((a, b) => (recency.get(b.id) ?? "").localeCompare(recency.get(a.id) ?? "") || a.name.localeCompare(b.name));
-      const root = scratchRoot();
-      return { agents: ok.ok ? [{ agent: HOST, name: AGENT_NAME, scratch_trusted: host.trusts(root) }] : [], projects, scratch: { root } };
+      return { agents: offered.flat(), projects, scratch: { root } };
     },
 
-    /** The thread route's `run`: waits for a host read when one is due. */
+    /** The thread route's `run`: waits for a host read when one is due. Null (no line) for an agent with no host here. */
     async runOf(threadId: string): Promise<InboxRun | null | undefined> {
       if (!enabled()) return undefined;
       const root = store.message(threadId);
       if (!root?.launch || root.thread_id !== root.id) return undefined;
-      if (lastAvailable === null) lastAvailable = await available();
-      if (hostStale() && needsHost(root)) await refreshHost();
+      const host = hostOf(root.launch);
+      if (!host) return null;
+      const state = stateOf(host);
+      if (state.lastAvailable === null) state.lastAvailable = await available(host);
+      if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       return runOfRoot(store.message(threadId)!);
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
     attachOf(threadId: string): string | null {
       const launch = store.message(threadId)?.launch;
-      return launch?.session_ref && !launch.deleted_at && !launch.error ? claudeAttachCommand(launch.folder, launch.session_ref) : null;
+      const host = launch ? hostOf(launch) : null;
+      return host && launch!.session_ref && !launch!.deleted_at && !launch!.error ? host.attach(launch!) : null;
     },
 
     /** The list's row decorator, resolved once per list (one config read): the identity while launch is off. */
