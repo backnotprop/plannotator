@@ -4,7 +4,7 @@ import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
-import { plural, whenTime } from '../format';
+import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import type { InboxToastModel } from './Toast';
@@ -30,17 +30,20 @@ export interface CopyMenuHost {
   phone: boolean;
 }
 
-/** The message as the toast and the sheet's title name it: "Claude Code, 7:34 PM". */
-function who(message: InboxMessageWire): string {
-  return `${copyAuthor(message)}, ${whenTime(message.created_at)}`;
+/** The message as the toast and the menu's name say it: "Claude Code, 7:34 PM" (`short`: a long agent name cut, for the toast). */
+function who(message: InboxMessageWire, short = false): string {
+  const name = copyAuthor(message);
+  return `${short ? shortAgentName(name) : name}, ${whenTime(message.created_at)}`;
 }
 
 function useCopies({ thread, linkOf, onToast }: CopyMenuHost) {
-  const say = (ok: boolean, lead: string, detail: string) => onToast?.(ok ? { icon: 'check', lead, detail } : { icon: 'warn', lead: "Couldn't copy" });
+  const say = (ok: boolean, lead: string, detail: string, speech?: string) =>
+    onToast?.(ok ? { icon: 'check', lead, detail, ...(speech && speech !== `${lead}. ${detail}` ? { speech } : {}) } : { icon: 'warn', lead: "Couldn't copy" });
+  const named = (lead: string, message: InboxMessageWire) => say(true, lead, who(message, true), `${lead}. ${who(message)}`);
   const subject = `“${thread.subject ?? '(no subject)'}”`;
   return {
-    message: (message: InboxMessageWire) => void copyMarkdown(messageMarkdown(message)).then((ok) => say(ok, 'Message copied', who(message))),
-    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(linkOf(message.id)).then((ok) => say(ok, 'Link copied', who(message))),
+    message: (message: InboxMessageWire) => void copyMarkdown(messageMarkdown(message)).then((ok) => (ok ? named('Message copied', message) : say(false, '', ''))),
+    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(linkOf(message.id)).then((ok) => (ok ? named('Link copied', message) : say(false, '', ''))),
     thread: () => void copyMarkdown(threadMarkdown(thread)).then((ok) => say(ok, 'Thread copied', plural(thread.messages.length, 'message'))),
     threadLink: () => void copyTextToClipboard(linkOf()).then((ok) => say(ok, 'Link copied', subject)),
     threadId: () => void copyTextToClipboard(thread.thread_id).then((ok) => say(ok, 'Thread ID copied', subject)),

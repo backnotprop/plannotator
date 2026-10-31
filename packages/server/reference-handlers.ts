@@ -31,6 +31,7 @@ import {
 	docResolutionError,
 	getAllowedRootPaths,
 	getTrustedBaseDir,
+	isDocServeAllowed,
 	isPathAllowed,
 	isPlanDirBase,
 	relativizeToAllowedRoots,
@@ -43,6 +44,7 @@ import {
 	type ResolveAllowedDocPathResult,
 } from "@plannotator/shared/doc-resolve";
 import { htmlToMarkdown } from "@plannotator/shared/html-to-markdown";
+import { vaultDocRefusal } from "@plannotator/shared/reference-reader";
 import { disabledSourceSave, type SourceFileSnapshot, type SourceSaveCapability } from "@plannotator/shared/source-save";
 import {
 	createBundleSourceSaveCapability,
@@ -81,6 +83,8 @@ export interface HandleDocOptions {
 	sourceSaveBundlePaths?: ReadonlySet<string>;
 	onSourceDocumentServed?: (path: string) => void;
 	rootPaths?: string[];
+	/** A reader on this machine (`isThisMachineReader`, this-machine-reader.ts): documents are served from anywhere, code files keep the roots (`isDocServeAllowed`). */
+	anyPath?: boolean;
 	/** Plan review: the plan file on disk, whose directory serves the documents the plan links. */
 	planFile?: PlanFile | null;
 	/**
@@ -292,7 +296,8 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	// directory base is for the plan's own links (below): root resolution runs
 	// without it, so a plan stored inside the project keeps the project-root
 	// fallback, HTML links included.
-	const resolvedBase = isPlanDirBase(base, options.planFile) ? null : getTrustedBaseDir(base, allowedRoots);
+	const anyPath = options.anyPath === true;
+	const resolvedBase = isPlanDirBase(base, options.planFile) ? null : getTrustedBaseDir(base, allowedRoots, anyPath);
 	// HTML renders raw by default; `?convert=1` (set by the frontend when the session's
 	// --markdown preference is on) forces Turndown conversion instead.
 	const convert = url.searchParams.get("convert") === "1";
@@ -312,11 +317,12 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 		base: resolvedBase,
 		forceDoc,
 		roots: allowedRoots,
+		anyPath,
 	});
 	// The one authorization site. A named path is gated whether or not it
 	// exists, so an escaping name is denied rather than reported absent.
 	const named = resolution.kind === "file" || resolution.kind === "not_found" ? resolution.path : undefined;
-	if (named !== undefined && !isPathAllowed(named, allowedRoots)) {
+	if (named !== undefined && !isDocServeAllowed(named, resolution.kind === "file" ? resolution.render : null, allowedRoots, anyPath)) {
 		return errorResponse(DOC_ACCESS_DENIED);
 	}
 	if (resolution.kind !== "file") {
@@ -426,8 +432,11 @@ export async function handleObsidianFiles(req: Request): Promise<Response> {
 	}
 }
 
-/** Read an Obsidian vault document. Supports direct path and bare filename search. */
-export async function handleObsidianDoc(req: Request): Promise<Response> {
+/**
+ * Read an Obsidian vault document. Supports direct path and bare filename search.
+ * `thisMachine`: the reader is a page on this machine (`vaultDocRefusal`).
+ */
+export async function handleObsidianDoc(req: Request, thisMachine = false): Promise<Response> {
 	const url = new URL(req.url);
 	const vaultPath = url.searchParams.get("vaultPath");
 	const filePath = url.searchParams.get("path");
@@ -474,13 +483,9 @@ export async function handleObsidianDoc(req: Request): Promise<Response> {
 		}
 	}
 
-	// Security: must be within vault
-	if (!resolvedFile.startsWith(resolvedVault + "/")) {
-		return Response.json(
-			{ error: "Access denied: path is outside vault" },
-			{ status: 403 },
-		);
-	}
+	// Inside the vault (after symlinks too, off this machine), a regular Markdown file, within 2MB.
+	const refusal = vaultDocRefusal(resolvedFile, resolvedVault, thisMachine);
+	if (refusal) return Response.json({ error: refusal.error }, { status: refusal.status });
 
 	try {
 		const file = Bun.file(resolvedFile);

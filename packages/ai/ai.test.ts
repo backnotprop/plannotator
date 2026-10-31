@@ -21,6 +21,7 @@ import type {
 import {
   buildWindowsCommandScriptSpawnCommand,
   killWindowsProcessTree,
+  planAgentJobSpawn,
   resolveCommandFromWhichOutput,
   resolveWindowsCommandShim,
   shouldSpawnViaShell,
@@ -195,6 +196,97 @@ describe("command path helpers", () => {
         "win32",
       ),
     ).toBeNull();
+  });
+
+  // #2372: Guided Review with Pi failed on Windows with `spawn pi ENOENT`:
+  // the job launcher spawned the bare name, which Node cannot resolve to
+  // Pi's pi.cmd. These simulate win32 the way the Ask AI shim tests above do.
+  describe("planAgentJobSpawn", () => {
+    const piBin = String.raw`C:\Users\Andrew Ramos\.pi\agent\bin\pi`;
+    const cmdExe = String.raw`C:\Windows\System32\cmd.exe`;
+    const piOnPath = (name: string) => (name === "pi" ? piBin : null);
+    const shimExists = (path: string) => path === `${piBin}.cmd`;
+    const piPromptOnStdin = (argv: string[]) =>
+      argv.at(-2) === "-p" ? { command: argv.slice(0, -1), stdin: argv.at(-1)! } : null;
+    const prompt = 'Organize this diff.\n\n--- a/x.ts\n+++ b/x.ts\n+const s = "100% & | <done>";';
+    const piJob = ["pi", "--mode", "json", "--no-session", "--exclude-tools", "edit,write", "--model", "openai/gpt-5.1", "-p", prompt];
+
+    test("a .cmd shim found on PATH runs through cmd.exe, with the prompt moved to stdin", () => {
+      const launch = planAgentJobSpawn(piJob, {
+        which: piOnPath,
+        promptOnStdin: piPromptOnStdin,
+        platform: "win32",
+        exists: shimExists,
+        comspec: cmdExe,
+      });
+
+      expect(launch).toEqual({
+        command: [
+          cmdExe,
+          "/d",
+          "/s",
+          "/c",
+          String.raw`""C:\Users\Andrew Ramos\.pi\agent\bin\pi.cmd" "--mode" "json" "--no-session" "--exclude-tools" "edit,write" "--model" "openai/gpt-5.1" "-p""`,
+        ],
+        stdinPrompt: prompt,
+        verbatim: true,
+      });
+    });
+
+    test("where's .cmd line is used as found, and a job's own stdin prompt is kept", () => {
+      const launch = planAgentJobSpawn(["claude", "-p", "--output-format", "stream-json"], {
+        which: () => String.raw`C:\npm\claude.cmd`,
+        stdinPrompt: "the prompt",
+        promptOnStdin: () => {
+          throw new Error("not asked: the job already reads its prompt from stdin");
+        },
+        platform: "win32",
+        exists: () => false,
+        comspec: cmdExe,
+      });
+
+      expect(launch.command.at(-1)).toBe(String.raw`""C:\npm\claude.cmd" "-p" "--output-format" "stream-json""`);
+      expect(launch.stdinPrompt).toBe("the prompt");
+    });
+
+    // The failure: an argument cmd.exe would read (a quote, %VAR%, a line
+    // break) reaches cmd.exe, which can run something the job never asked for.
+    test("arguments cmd.exe would misread are never passed to it", () => {
+      for (const arg of ['a"b', "%PATH%", "!x!", "a^b", "line\nbreak"]) {
+        const launch = planAgentJobSpawn(["pi", "--model", arg, "-p"], {
+          which: piOnPath,
+          platform: "win32",
+          exists: shimExists,
+          comspec: cmdExe,
+        });
+        expect(launch.command).toEqual(["pi", "--model", arg, "-p"]);
+        expect(launch.verbatim).toBe(false);
+        expect(launch.unsafeScript).toContain(`${piBin}.cmd`);
+      }
+      // A prompt with no stdin route stays out of cmd.exe too.
+      const noRoute = planAgentJobSpawn(piJob, { which: piOnPath, platform: "win32", exists: shimExists });
+      expect(noRoute.command).toBe(piJob);
+      expect(noRoute.unsafeScript).toBeDefined();
+    });
+
+    test("a trailing backslash is doubled so it cannot escape the closing quote", () => {
+      const launch = planAgentJobSpawn(["pi", "--workspace", String.raw`C:\repo\ `.trim()], {
+        which: piOnPath,
+        platform: "win32",
+        exists: shimExists,
+        comspec: cmdExe,
+      });
+      expect(launch.command.at(-1)).toEndWith(String.raw`"--workspace" "C:\repo\\""`);
+    });
+
+    test("an .exe, a program not on PATH, and every other platform keep the command as built", () => {
+      const asIs = (command: string[], launch: ReturnType<typeof planAgentJobSpawn>) =>
+        expect(launch).toEqual({ command, stdinPrompt: undefined, verbatim: false });
+      asIs(piJob, planAgentJobSpawn(piJob, { which: () => String.raw`C:\tools\pi.exe`, promptOnStdin: piPromptOnStdin, platform: "win32", exists: () => false }));
+      asIs(piJob, planAgentJobSpawn(piJob, { which: () => null, promptOnStdin: piPromptOnStdin, platform: "win32", exists: shimExists }));
+      asIs(piJob, planAgentJobSpawn(piJob, { which: () => "/usr/local/bin/pi", promptOnStdin: piPromptOnStdin, platform: "darwin", exists: () => true }));
+      asIs(piJob, planAgentJobSpawn(piJob, { which: () => "/usr/bin/pi.cmd", promptOnStdin: piPromptOnStdin, platform: "linux", exists: () => true }));
+    });
   });
 
   test("killWindowsProcessTree invokes taskkill with tree flags on Windows", () => {

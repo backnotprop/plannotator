@@ -106,6 +106,95 @@
   border-radius: 999px;
 }
 
+/* An open document's Contents (4 or more headings, packages/inbox/contents.ts):
+   a button at the top right opens ui's DocumentContents, the list plan review
+   shows, as a sheet from the left; a pick scrolls there and closes it. */
+.sf-contents-open {
+  position: fixed;
+  z-index: 100;
+  top: 10px;
+  right: 10px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--card) 82%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.6);
+  backdrop-filter: blur(18px) saturate(1.6);
+  box-shadow:
+    0 6px 24px rgb(0 0 0 / 0.14),
+    0 0 0 0.5px color-mix(in oklch, var(--border) 85%, transparent);
+}
+.sf-contents-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  border: 0;
+  padding: 0;
+  background: color-mix(in oklab, var(--foreground) 16%, transparent);
+}
+.sf-contents {
+  position: fixed;
+  z-index: 111;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(320px, 84vw);
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 0 48px rgb(0 0 0 / 0.2);
+}
+.sf-contents-h {
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding: 6px 4px 6px 18px;
+  font-size: calc(15px * var(--sf-text-scale));
+  font-weight: 600;
+}
+.sf-contents-h span {
+  flex: 1;
+}
+.sf-contents-close {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+/* The window's icons (packages/inbox/icons.tsx) are outlines; inbox.css is not loaded here. */
+.sf-contents-open svg,
+.sf-contents-close svg {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sf-contents-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 6px 16px;
+}
+.sf-contents-list nav button {
+  font-size: calc(15px * var(--sf-text-scale));
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
 /* ─── A guided review: the sections (6.1) ─── */
 
 .sf-guide {

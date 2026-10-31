@@ -29,12 +29,12 @@ import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
   parseTailscaleSelfIdentity,
-  serveStatusProxy,
   TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunResult,
 } from "@plannotator/shared/tailscale";
 import { inboxTlsDir, lanAddress } from "./inbox-lan";
+import type { TailnetDoorPort } from "./inbox-tailnet-door";
 
 /** The macOS application firewall: off, on (macOS asks per app), or blocking every incoming connection. Unknown elsewhere. */
 export type FirewallState = "off" | "on" | "block_all" | "unknown";
@@ -66,8 +66,10 @@ export interface PairingChecks {
     login: string | null;
     /** HTTPS certificates are on for the tailnet (`CertDomains`), which `tailscale serve --https` needs. Null when unknown. */
     https_certs: boolean | null;
-    /** Port 8443 is free, or already the Inbox's own mapping. Null when unknown (not running, or serve did not answer). */
+    /** A tailnet port the door may take (8443 to 8450) is free, or already the Inbox's own mapping. Null when unknown (not running, or serve did not answer). */
     port_free: boolean | null;
+    /** The port the door would take (`port_free`), or the door's kept port another mapping now holds (`port_free: false`); null when every port is held or unknown. */
+    https_port: number | null;
     /** What the CLI said when it could not be read, in its own words. */
     error: string | null;
   };
@@ -265,17 +267,15 @@ export const defaultPairingProbes: PairingProbes = {
 export interface PairingChecksContext {
   dataDir: string;
   tailscale: PairingTailscaleRunner;
-  /** The HTTPS port phones reach the tailnet door on (8443). */
-  httpsPort: number;
-  /** Proxy targets a mapping of the Inbox's own points at (its door listener now or last run). */
-  ownTargets: () => string[];
+  /** The tailnet port the door would take, read from `tailscale serve status --json` (inbox-tailnet-door.ts). */
+  doorPort: (serveStatus: string) => TailnetDoorPort;
   probes?: Partial<PairingProbes>;
   /** The whole read's deadline. Default `PAIRING_CHECKS_DEADLINE_MS`. */
   deadlineMs?: number;
 }
 
 async function tailscaleChecks(context: PairingChecksContext): Promise<PairingChecks["tailscale"]> {
-  const tailscale: PairingChecks["tailscale"] = { state: "unknown", login: null, https_certs: null, port_free: null, error: null };
+  const tailscale: PairingChecks["tailscale"] = { state: "unknown", login: null, https_certs: null, port_free: null, https_port: null, error: null };
   // `--peers=false`: this computer only; the tailnet's other devices are never read.
   const status = await context.tailscale(["status", "--json", "--peers=false"], TAILSCALE_CLI_TIMEOUT_MS);
   if (status.error) {
@@ -296,9 +296,14 @@ async function tailscaleChecks(context: PairingChecksContext): Promise<PairingCh
   if (tailscale.state === "running") {
     const serve = await context.tailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
     if (!serve.error && serve.status === 0) {
-      const mapped = serveStatusProxy(serve.stdout, context.httpsPort);
-      if (mapped.state === "free") tailscale.port_free = true;
-      else if (mapped.state === "mapped") tailscale.port_free = context.ownTargets().includes(mapped.proxy);
+      const port = context.doorPort(serve.stdout);
+      if (port.state === "usable") {
+        tailscale.port_free = true;
+        tailscale.https_port = port.port;
+      } else if (port.state === "held") {
+        tailscale.port_free = false;
+        tailscale.https_port = port.port;
+      } else if (port.state === "taken") tailscale.port_free = false;
     }
   }
   return tailscale;
@@ -311,7 +316,7 @@ export async function readPairingChecks(context: PairingChecksContext): Promise<
   const bonjourTool = process.platform === "darwin" ? "dns-sd" : "avahi-publish";
   const tls = inboxTlsDir(context.dataDir);
   const deadline = context.deadlineMs ?? PAIRING_CHECKS_DEADLINE_MS;
-  const silent: PairingChecks["tailscale"] = { state: "no_answer", login: null, https_certs: null, port_free: null, error: null };
+  const silent: PairingChecks["tailscale"] = { state: "no_answer", login: null, https_certs: null, port_free: null, https_port: null, error: null };
   const [network, firewall, tailscale] = await Promise.all([
     address ? withDeadline(probes.network(address), deadline, null) : null,
     withDeadline(probes.firewall(), deadline, "unknown" as FirewallState),

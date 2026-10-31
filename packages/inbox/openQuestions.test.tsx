@@ -22,11 +22,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import { openQuestionsShown, openQuestionState, placeOf, reaskItemLabel, skipAllCandidates, skipSelection, skipToggledAnswer, threadOpenQuestions } from './openQuestions';
+import { parseInboxActionBlocks } from '@plannotator/core/inbox-actions';
+import { openActionState, openItemsHeading, openItemsLabel, openQuestionsShown, openQuestionState, placeOf, reaskItemLabel, skipAllCandidates, skipSelection, skipToggledAnswer, threadOpenActions, threadOpenQuestions } from './openQuestions';
 import { footFitCandidates, footRowOpenQuestionsForm, footRowTokens, onOneLine, onOneRow, openQuestionsFormText, pillHitsButtons } from './footFit';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+const { FullScreenComposer } = (hasDom ? await import('./components/FullScreenComposer') : {}) as typeof import('./components/FullScreenComposer');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-abcdef', name: 'billing-svc', root: '/work/billing', created_at: '2026-10-22T09:00:00.000Z' };
 const A: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
@@ -155,6 +157,86 @@ describe('the rules (openQuestions.ts)', () => {
   });
 });
 
+/** An agent's message whose body holds `:::action` blocks, its records in `actions` as the window keeps them. */
+function actionMessage(n: number, body: string, seq: number, patch: (a: InboxQuestion, index: number) => Partial<InboxQuestion> = () => ({}), extra: Partial<InboxMessageWire> = {}): InboxMessageWire {
+  const messageId = id(n);
+  const actions = parseInboxActionBlocks(body).map(
+    (p, index): InboxQuestion => ({
+      ...ACTION,
+      key: p.key,
+      position: index,
+      prompt: p.prompt,
+      context: p.why,
+      stopped: p.stopped,
+      holds_up: p.holds_up,
+      message_id: messageId,
+      action: p.action,
+      ...patch(ACTION, index),
+    }),
+  );
+  return agent(n, body, seq, () => ({}), { actions, ...extra });
+}
+
+const actionBlock = (task: string, extra: string[] = []) => [':::action', task, 'Why it matters, in a line.', ...extra, ':::'].join('\n');
+
+describe('open action items beside the questions (owner, 2026-10-30)', () => {
+  test('the label: one kind keeps "open"; both drop it and name each, singular at 1', () => {
+    expect(openItemsLabel(1, 0)).toBe('1 open question');
+    expect(openItemsLabel(3, 0)).toBe('3 open questions');
+    expect(openItemsLabel(0, 1)).toBe('1 open action item');
+    expect(openItemsLabel(0, 4)).toBe('4 open action items');
+    expect(openItemsLabel(1, 2)).toBe('1 question, 2 action items');
+    expect(openItemsLabel(2, 1)).toBe('2 questions, 1 action item');
+    expect(openItemsLabel(1, 1)).toBe('1 question, 1 action item');
+    expect(openItemsLabel(12, 10)).toBe('12 questions, 10 action items');
+    expect(openItemsHeading(2, 1)).toBe('2 questions, 1 action item in this thread');
+  });
+
+  test('listed: the open action items of live agent messages, in thread order; marked, sent, replaced, closed and orphaned ones are not', () => {
+    const body = [actionBlock('Approve the deploy'), '', actionBlock('Sign in to npm'), '', actionBlock('Merge the PR'), '', actionBlock('Rotate the key'), '', actionBlock('Old task'), '', actionBlock('Lost task')].join('\n');
+    const states: Partial<InboxQuestion>[] = [
+      {},
+      // Marked Done in the draft (inside its Undo window): waits on nobody.
+      { state: 'picked', action_result: { outcome: 'done', note: null, by: 'person', at: '2026-10-22T16:40:00.000Z' } },
+      { state: 'sent' },
+      { state: 'closed' },
+      { state: 'superseded', superseded_by: { message_id: M6, key: null } },
+      { orphaned: true },
+    ];
+    const m2 = actionMessage(2, body, 2, (_, index) => states[index]!);
+    const m3 = actionMessage(3, actionBlock('Touch the security key', ['Stopped: the publish']), 3);
+    const m5 = actionMessage(5, actionBlock('Click Approve in Okta', ['Holds up: the release; the notes']), 5);
+    const items = threadOpenActions([agent(1, block('Ship it?'), 1), m2, m3, m5]);
+    expect(items.map((a) => a.prompt)).toEqual(['Approve the deploy', 'Touch the security key', 'Click Approve in Okta']);
+    expect(items.map((a) => a.messageId)).toEqual([M2, M3, M5]);
+    expect(items[0]!.id).toBe(`${M2}/${m2.actions![0]!.key}`);
+    // Questions stay out of it, and a message the archive closed is not listed.
+    expect(threadOpenActions([m2, m3, m5], (m) => m.id !== M3).map((a) => a.messageId)).toEqual([M2, M5]);
+    // Each row's state, as a question's: Stopped, else Holds up.
+    expect(items.map(openActionState)).toEqual([null, { kind: 'stopped' }, { kind: 'holds', count: 2 }]);
+  });
+
+  test('the server\'s form (action items still in `questions`) counts the same as the window\'s (`actions`)', () => {
+    const split = actionMessage(2, actionBlock('Approve the deploy'), 2);
+    const { actions, ...rest } = split;
+    const asServed: InboxMessageWire = { ...rest, questions: [...(split.questions ?? []), ...actions!] };
+    expect(threadOpenActions([asServed]).map((a) => a.key)).toEqual(threadOpenActions([split]).map((a) => a.key));
+    expect(threadOpenActions([asServed])).toHaveLength(1);
+    // And the questions list still leaves it out.
+    expect(threadOpenQuestions([asServed]).questions).toHaveLength(0);
+  });
+
+  test('a person\'s message is never listed', () => {
+    const own = actionMessage(2, actionBlock('Approve the deploy'), 2);
+    expect(threadOpenActions([{ ...own, author: { kind: 'person' } as InboxAuthor }])).toHaveLength(0);
+  });
+
+  test('shown with only action items open, no question and no Re-ask', () => {
+    expect(openQuestionsShown([], false, 1)).toBe(true);
+    expect(openQuestionsShown([], false, 0)).toBe(false);
+  });
+});
+
 describe('fitting the foot on one line (footFit.ts)', () => {
   test('the forms read "6 open questions", "6 open", "6"', () => {
     expect(openQuestionsFormText(6, 'full')).toBe('6 open questions');
@@ -163,7 +245,16 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(openQuestionsFormText(12, 'count')).toBe('12');
   });
 
-  test('each form is tried on the usual spacing, then tightened, longest first; a phone starts at "6 open"', () => {
+  test('with action items: the long form names each kind; the short forms count both (the fallback the row already had)', () => {
+    expect(openQuestionsFormText(0, 'full', 1)).toBe('1 open action item');
+    expect(openQuestionsFormText(0, 'full', 3)).toBe('3 open action items');
+    expect(openQuestionsFormText(12, 'full', 10)).toBe('12 questions, 10 action items');
+    expect(openQuestionsFormText(12, 'short', 10)).toBe('22 open');
+    expect(openQuestionsFormText(12, 'count', 10)).toBe('22');
+    expect(openQuestionsFormText(0, 'short', 2)).toBe('2 open');
+  });
+
+  test('each form is tried on the usual spacing, then tightened, longest first; from the short form, "6 open" first', () => {
     const order = (max: Parameters<typeof footFitCandidates>[0]) => footFitCandidates(max).map((f) => `${f.form}${f.tight ? '+tight' : ''}`);
     expect(order('full')).toEqual(['full', 'full+tight', 'short', 'short+tight', 'count', 'count+tight']);
     expect(order('short')).toEqual(['short', 'short+tight', 'count', 'count+tight']);
@@ -276,7 +367,9 @@ function pane(t: InboxThread, options: { phone?: boolean } = {}) {
 
 const button = () => document.querySelector<HTMLButtonElement>('[data-open-questions]');
 const list = () => document.querySelector<HTMLElement>('[data-open-questions-list]');
-const rows = () => [...(list()?.querySelectorAll<HTMLElement>('.ib-oq-row') ?? [])];
+/** The question rows (an action item's row is `actionRows`). */
+const rows = () => [...(list()?.querySelectorAll<HTMLElement>('.ib-oq-row[data-open-question]') ?? [])];
+const actionRows = () => [...(list()?.querySelectorAll<HTMLElement>('.ib-oq-row[data-open-action]') ?? [])];
 const reaskItem = () => list()?.querySelector<HTMLElement>('[data-reask]') ?? null;
 
 /** Base UI opens on the pointer's press, as a person's click does. */
@@ -295,21 +388,22 @@ async function openList() {
   await until(() => !!list(), 'the list');
 }
 
-test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), counts 4 (no replaced question, no action item), and opens a menu', async () => {
+test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), counts 4 questions (no replaced one) and the action item, and opens a menu', async () => {
   const el = await render(thread(sample()));
   const b = button()!;
-  expect(b.textContent?.trim()).toBe('4 open questions');
+  // Both kinds wait: "open" goes and each is named (owner, 2026-10-30).
+  expect(b.textContent?.trim()).toBe('4 questions, 1 action item');
   const foot = [...el.querySelectorAll('[data-foot-buttons] button')].map((n) => n.textContent?.trim());
   expect(foot).not.toContain('Re-ask');
   expect(el.querySelector('[data-foot-buttons] [data-reask]')).toBeNull();
-  expect(foot.indexOf('4 open questions')).toBe(foot.indexOf('Edit draft') + 1);
+  expect(foot.indexOf('4 questions, 1 action item')).toBe(foot.indexOf('Edit draft') + 1);
   expect(b.getAttribute('aria-haspopup')).toBe('menu');
   expect(b.getAttribute('aria-expanded')).toBe('false');
   expect(b.hasAttribute('title')).toBe(false);
   await openList();
   expect(b.getAttribute('aria-expanded')).toBe('true');
   expect(list()!.getAttribute('role')).toBe('menu');
-  expect(list()!.getAttribute('aria-label')).toBe('4 open questions in this thread');
+  expect(list()!.getAttribute('aria-label')).toBe('4 questions, 1 action item in this thread');
   // No drawn heading, count line or foot line: the name carries the count.
   expect(list()!.textContent).not.toContain('in this thread');
   expect(list()!.querySelector('.ib-oq-head, .ib-oq-sub, .ib-oq-foot')).toBeNull();
@@ -326,6 +420,12 @@ test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), count
   expect(rows()[1]!.querySelector('.ib-oq-when')!.textContent).toMatch(/· in a folded message$/);
   expect(rows()[3]!.querySelector('.ib-oq-when')!.textContent).toMatch(/· (below|above)$/);
   expect(list()!.textContent).not.toContain('Choose one');
+  // The action item after the questions, with its box where a question has its number, and no Skip of its own.
+  expect(actionRows().map((r) => r.querySelector('.ib-oq-p')!.textContent)).toEqual(['Approve the 2FA prompt']);
+  const all = [...list()!.querySelectorAll('.ib-oq-row')];
+  expect(all.indexOf(actionRows()[0]!)).toBe(4);
+  expect(actionRows()[0]!.querySelector('.ib-oq-n.ib-oq-act svg')).not.toBeNull();
+  expect(actionRows()[0]!.getAttribute('aria-label')).toMatch(/^Approve the 2FA prompt\. Action item\. /);
   // Re-ask on the list's last row, a menu item after the rows, then "Skip…" (approval "oq-skip-select").
   const item = reaskItem()!;
   expect(item.getAttribute('role')).toBe('menuitem');
@@ -384,11 +484,12 @@ test.skipIf(!hasDom)('arrow keys move through the rows; Escape closes the list a
   expect(b.getAttribute('aria-expanded')).toBe('false');
 });
 
-test.skipIf(!hasDom)('on a phone: "4 open" named in full, and the list is a bottom sheet with a scrim and a close', async () => {
+test.skipIf(!hasDom)('on a phone: the long form first, and the list is a bottom sheet with a scrim and a close', async () => {
   await render(thread(sample()), { phone: true });
   const b = button()!;
-  expect(b.textContent?.trim()).toBe('4 open');
-  expect(b.getAttribute('aria-label')).toBe('4 open questions');
+  // The owner's words on a phone too (no layout here, so nothing is shortened): "it should say both".
+  expect(b.textContent?.trim()).toBe('4 questions, 1 action item');
+  expect(b.getAttribute('data-label-form')).toBe('full');
   await openList();
   const positioner = list()!.closest('.ib-oq-pos')!;
   expect(positioner.hasAttribute('data-phone')).toBe(true);
@@ -412,13 +513,137 @@ test.skipIf(!hasDom)('no button when nothing is open', async () => {
   expect(button()).toBeNull();
 });
 
-test.skipIf(!hasDom)('only an action item open: the button counts it, and its list is Re-ask alone', async () => {
+test.skipIf(!hasDom)('only an action item open: the button counts it, and its list holds that item, then Re-ask', async () => {
   await render(thread(allSent(true)));
   expect(button()!.textContent?.trim()).toBe('1 open action item');
   await openList();
   expect(list()!.getAttribute('aria-label')).toBe('1 open action item in this thread');
   expect(rows()).toHaveLength(0);
+  expect(actionRows().map((r) => r.querySelector('.ib-oq-p')!.textContent)).toEqual(['Approve the 2FA prompt']);
   expect(reaskItem()!.textContent?.trim()).toBe('Re-ask in a new message');
+  // Skip is for questions: no "Skip…" with only an action item.
+  expect(list()!.querySelector('[data-open-questions-skip-mode]')).toBeNull();
+});
+
+/**
+ * Two action items in M2, folded behind the middle fold (six messages, all read), and one question in M6:
+ * the list's action row opens M2 and takes the person to that checklist row, as a question row does.
+ */
+function actionsSample(): InboxMessageWire[] {
+  return [
+    agent(1, 'Starting on the release.', 1),
+    actionMessage(2, ['Two things only you can do.', '', actionBlock('Approve the production deploy on Vercel'), '', actionBlock('Sign in to npm in your terminal', ['Holds up: the 0.29 publish'])].join('\n'), 2),
+    agent(3, 'Built.', 3),
+    agent(4, 'Tested.', 4),
+    agent(5, 'Tagged.', 5),
+    agent(6, `Last one.\n\n${block('Publish 0.29 as latest?')}`, 6),
+  ];
+}
+
+test.skipIf(!hasDom)("choosing an action item's row opens its folded message, scrolls to its checklist row, focuses and rings it", async () => {
+  const el = await render(thread(actionsSample()));
+  expect(button()!.textContent?.trim()).toBe('1 question, 2 action items');
+  const rowIn = (key: string) => el.querySelector<HTMLElement>(`[data-message-id="${M2}"] [data-action-card="${key}"]`);
+  const second = actionsSample()[1]!.actions![1]!.key;
+  // M2 is hidden behind the fold: its checklist is not drawn.
+  expect(rowIn(second)).toBeNull();
+  await openList();
+  expect(actionRows().map((r) => r.querySelector('.ib-oq-p')!.textContent)).toEqual(['Approve the production deploy on Vercel', 'Sign in to npm in your terminal']);
+  expect(actionRows()[1]!.querySelector('.ib-oq-when')!.textContent).toMatch(/· in a folded message$/);
+  expect(actionRows()[1]!.querySelector('.ib-b-hold')!.textContent).toBe('Holds up 1');
+  await act(async () => actionRows()[1]!.click());
+  await until(() => !list(), 'the list to close');
+  await until(() => !!rowIn(second), 'the folded message to open');
+  await until(() => rowIn(second)!.classList.contains('ib-q-target'), 'the ring on the checklist row');
+  // Focus went to that row, not back to the button.
+  expect(document.activeElement).toBe(rowIn(second));
+});
+
+test.skipIf(!hasDom)('Escape closing the list never runs the jump a row would: nothing unfolds or rings, focus goes back to the button', async () => {
+  const el = await render(thread(actionsSample()));
+  const b = button()!;
+  await act(async () => b.focus());
+  await act(async () => {
+    b.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  });
+  await until(() => !!list(), 'the list from the keyboard');
+  // A row is highlighted (Enter would choose it): Escape instead.
+  await until(() => [...rows(), ...actionRows()].some((r) => r.hasAttribute('data-highlighted')), 'a highlighted row');
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !list(), 'the list to close on Escape');
+  // Frames for a jump to have run, had one been scheduled.
+  for (let i = 0; i < 5; i += 1) await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await settle();
+  expect(el.querySelector(`[data-message-id="${M2}"] [data-action-card]`)).toBeNull();
+  expect(el.querySelector('.ib-q-target')).toBeNull();
+  expect(document.activeElement).toBe(b);
+});
+
+test.skipIf(!hasDom)('select mode chooses questions only: the action rows leave while it is on', async () => {
+  await render(thread(sample()));
+  await openList();
+  expect(actionRows()).toHaveLength(1);
+  await press(list()!.querySelector<HTMLElement>('[data-open-questions-skip-mode]')!);
+  await until(() => !!list()?.querySelector('[data-open-questions-select-head]'), 'select mode');
+  expect(actionRows()).toHaveLength(0);
+  expect(rows().length).toBe(4);
+});
+
+describe('the full-screen composer counts as the foot does', () => {
+  const composer = (threadId: string, openQuestions: number, openActions: number) => (
+    <FullScreenComposer
+      noun="image"
+      comment={null}
+      value={{
+        threadId,
+        phone: false,
+        reply: {
+          to: 'Claude Code',
+          value: '',
+          onChange: () => {},
+          onSend: () => {},
+          sending: false,
+          canSend: false,
+          picks: 0,
+          annotations: 0,
+          actions: 0,
+          files: [],
+          onFiles: () => {},
+          onDropFiles: () => {},
+          onPaste: () => {},
+          onRemoveFile: () => {},
+          openQuestions,
+          openActions,
+          conflict: false,
+          error: null,
+          sentAt: null,
+          onOpenThread: () => {},
+        },
+      }}
+    />
+  );
+  test.skipIf(!hasDom)('"1 open question", "2 open action items", "3 questions, 1 action item"; nothing with none', async () => {
+    host = document.createElement('div');
+    host.className = 'pn-inbox';
+    document.body.appendChild(host);
+    const count = () => host!.querySelector('[data-fcomp-questions]')?.textContent?.trim() ?? null;
+    const cases: [number, number, string | null][] = [
+      [1, 0, '1 open question'],
+      [0, 2, '2 open action items'],
+      [3, 1, '3 questions, 1 action item'],
+      [0, 0, null],
+    ];
+    act(() => {
+      root = createRoot(host!);
+    });
+    for (const [i, [q, a, words]] of cases.entries()) {
+      act(() => root!.render(composer(`${M1}-${i}`, q, a)));
+      await settle();
+      expect(count()).toBe(words);
+    }
+  });
 });
 
 test.skipIf(!hasDom)('one open question in a short, unfolded thread: the button shows, with Re-ask in the singular', async () => {
@@ -571,9 +796,11 @@ test.skipIf(!hasDom)('at rest: no Skip on any row; the last row is Re-ask and "S
   await renderLive({ initial: withM2Skipped(sample()) });
   await openList();
   expect(list()!.querySelector('[data-open-question-skip], .ib-oq-skip')).toBeNull();
-  // Every menu item: the four rows, then Re-ask and "Skip…" on one last row.
+  // Every menu item: the four question rows, the action item's row, then Re-ask and "Skip…" on one last row.
   const items = [...list()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-  expect(items.map((n) => (n.hasAttribute('data-reask') ? 'reask' : n.hasAttribute('data-open-questions-skip-mode') ? 'skip…' : 'row'))).toEqual(['row', 'row', 'row', 'row', 'reask', 'skip…']);
+  const kindOf = (n: HTMLElement) =>
+    n.hasAttribute('data-reask') ? 'reask' : n.hasAttribute('data-open-questions-skip-mode') ? 'skip…' : n.hasAttribute('data-open-action') ? 'action' : 'row';
+  expect(items.map(kindOf)).toEqual(['row', 'row', 'row', 'row', 'action', 'reask', 'skip…']);
   expect(skipMode()!.textContent).toBe('Skip…');
   expect(skipMode()!.closest('.ib-oq-last') === reaskItem()!.closest('.ib-oq-last')).toBe(true);
   expect(document.getElementById(skipMode()!.getAttribute('aria-describedby')!)?.textContent).toBe('Choose questions to skip. Skips ride your next Send.');
@@ -640,7 +867,7 @@ test.skipIf(!hasDom)('"Skip…" enters select mode; ticks save nothing; "Skip 2"
   // The card ends as its own Skip leaves it; nothing was sent.
   await until(() => cardState(el).skip === 'Unskip', 'the card skipped from the list');
   expect(cardState(el)).toEqual(byCard.card);
-  expect(button()!.textContent?.trim()).toBe('4 open questions');
+  expect(button()!.textContent?.trim()).toBe('4 questions, 1 action item');
 });
 
 test.skipIf(!hasDom)('Cancel and Escape drop the ticks; Escape leaves select mode before it closes the list', async () => {
@@ -796,7 +1023,7 @@ test.skipIf(!hasDom)('on a phone: Close leaves select mode; the list opens again
   expect(list()!.querySelector('[data-open-questions-select-head]')).toBeNull();
   expect(rows().some((r) => r.getAttribute('aria-checked') === 'true')).toBe(false);
   expect(skipMode()).not.toBeNull();
-  expect(list()!.getAttribute('aria-label')).toBe('4 open questions in this thread');
+  expect(list()!.getAttribute('aria-label')).toBe('4 questions, 1 action item in this thread');
   // Into select mode again: nothing is ticked.
   await press(skipMode()!);
   await until(selecting, 'select mode again');
@@ -839,7 +1066,7 @@ test.skipIf(!hasDom)('screen readers: the menu is named for select mode, and the
   await until(() => live()!.textContent === '2 selected', 'two selected, said');
   await press(cancelButton()!);
   await until(() => !selecting(), 'back at rest');
-  expect(list()!.getAttribute('aria-label')).toBe('4 open questions in this thread');
+  expect(list()!.getAttribute('aria-label')).toBe('4 questions, 1 action item in this thread');
   expect(live()!.textContent).toBe('');
 });
 

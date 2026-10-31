@@ -99,14 +99,23 @@ test.skipIf(!hasDom)('a cut project label in a wide row opens the component tool
   act(() => root?.unmount());
   host?.remove();
 
-  // Beside a thread the project is never cut (approval "list-rows-mail-icons": it wraps): plain text, so even a
-  // label measured wider than its box opens no tooltip.
+  // Beside a thread the project never wraps (approval "inbox-list-row-v2"): cut, it opens the tooltip with the whole
+  // name; one that fits opens none.
   const narrow = list(true);
+  const short = label(narrow, SHORT.thread_id);
+  sized(short, 30, 30);
+  expect(await tooltipOf(short)).toBeNull();
+  unhover(short);
   const long = label(narrow, LONG.thread_id);
   expect(long.textContent).toBe(LONG_PROJECT);
   sized(long, 260, 120);
-  expect(await tooltipOf(long)).toBeNull();
+  expect(await tooltipOf(long)).toBe(LONG_PROJECT);
+  expect(long.hasAttribute('title')).toBe(false);
   unhover(long);
+  // The agents' tiles before it say who in the tooltip.
+  const tiles = narrow.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-atiles`)!;
+  expect(await tooltipOf(tiles)).toBe('Claude Code');
+  unhover(tiles);
 });
 
 test.skipIf(!hasDom)('a preview cut by a fraction of a pixel counts as cut: three-line row, scrollWidth equal to clientWidth, the ellipsis painted', async () => {

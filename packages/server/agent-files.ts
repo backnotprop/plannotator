@@ -18,7 +18,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 /** Files larger than this are never edited. */
@@ -32,7 +32,8 @@ export type AgentFileRead =
    * lone LF), which new text takes.
    */
   | { kind: "file"; path: string; target: string; text: string; mode: number; crlf: boolean; bom: boolean; linked: boolean }
-  | { kind: "refused"; path: string; target: string; reason: string };
+  /** `tooBig`: refused only for its size. */
+  | { kind: "refused"; path: string; target: string; reason: string; tooBig?: true };
 
 /** Where `path` leads: its target when it is a symlink (followed as far as it exists), else itself. */
 export function resolveAgentFileTarget(path: string): string {
@@ -69,7 +70,7 @@ export function readAgentFile(path: string, maxBytes: number = AGENT_FILE_MAX_BY
     return { kind: "refused", path, target, reason: describeFsError(error) };
   }
   if (!stat.isFile()) return { kind: "refused", path, target, reason: "it is not a regular file" };
-  if (stat.size > maxBytes) return { kind: "refused", path, target, reason: `it is larger than ${Math.round(maxBytes / (1024 * 1024))} MiB` };
+  if (stat.size > maxBytes) return { kind: "refused", path, target, reason: `it is larger than ${Math.round(maxBytes / (1024 * 1024))} MiB`, tooBig: true };
   let bytes: Buffer;
   try {
     bytes = readFileSync(target);
@@ -86,6 +87,49 @@ export function readAgentFile(path: string, maxBytes: number = AGENT_FILE_MAX_BY
   const bom = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   return { kind: "file", path, target, text, mode: stat.mode & 0o777, crlf: dominantCrlf(text), bom, linked };
+}
+
+/**
+ * Whether a file over `above` bytes holds `needle` (ASCII) anywhere in its raw
+ * bytes, read a chunk at a time so a big file is never held whole. "small":
+ * not searched (missing, not a file, or not over `above`); `readAgentFile`
+ * decides it. Read-only.
+ */
+export function agentFileContains(path: string, needle: string, above: number): "small" | "absent" | "present" | { refused: string } {
+  const target = resolveAgentFileTarget(path);
+  let size: number;
+  try {
+    const stat = statSync(target);
+    if (!stat.isFile()) return "small";
+    size = stat.size;
+  } catch {
+    return "small";
+  }
+  if (size <= above) return "small";
+  const pattern = Buffer.from(needle, "utf8");
+  const chunk = Buffer.alloc(1024 * 1024 + pattern.length);
+  let fd: number;
+  try {
+    fd = openSync(target, "r");
+  } catch (error) {
+    return { refused: describeFsError(error) };
+  }
+  try {
+    let carried = 0;
+    for (;;) {
+      const read = readSync(fd, chunk, carried, chunk.length - carried, null);
+      if (read === 0) return "absent";
+      const filled = carried + read;
+      if (chunk.subarray(0, filled).includes(pattern)) return "present";
+      // Keep the tail, in case the needle spans two chunks.
+      carried = Math.min(pattern.length - 1, filled);
+      chunk.copy(chunk, 0, filled - carried, filled);
+    }
+  } catch (error) {
+    return { refused: describeFsError(error) };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** More CRLF than lone LF line endings. */

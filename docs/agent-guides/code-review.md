@@ -36,6 +36,31 @@ returned byte for byte. A new git/jj spawn that bypasses these runners must add
 the same options. `packages/server/review-git-color-config.test.ts` runs both
 servers against a sandboxed config that forces color on.
 
+### Agent jobs on Windows: `.cmd` shims (#2372)
+
+Both runtimes' `agent-jobs.ts` start a job's CLI (code review, Code Tour,
+Guided Review) and a marker engine's model listing through `planAgentJobSpawn`
+(`packages/ai/providers/command-path.ts`, vendored into Pi). On Windows, a CLI
+found on PATH as a `.cmd`/`.bat` (Pi's `~\.pi\agent\bin\pi.cmd`, npm's shims)
+is resolved as Ask AI resolves it (`resolveWindowsCommandShim`). It is then
+started as `cmd.exe /d /s /c ""<script>" "<arg>" …"` with
+`windowsVerbatimArguments`. Node cannot spawn it by its bare name: that failed
+with `spawn pi ENOENT`. A prompt cannot cross cmd.exe (line breaks, quotes,
+`%`), so the engine's `promptOnStdin` (Pi only: `pi … -p` reads the prompt from
+piped stdin) moves it to stdin. When an argument still holds a character that
+cmd.exe reads (`"`, `%`, `!`, `^`, control characters), both servers fail the
+job and name the script; nothing is started. Stop (and the model listing's 5 s
+limit) ends such a job's whole tree with `taskkill /t /f`
+(`killWindowsProcessTree`), not cmd.exe alone. A job's stdin pipe has an error
+listener, so a child that exits before reading its prompt cannot crash the
+host. An `.exe`, a program not on PATH, and other platforms keep the command
+as built. Tests: `planAgentJobSpawn` in `packages/ai/ai.test.ts`, and Pi's
+argv in `packages/server/marker-review.test.ts` (both simulate win32);
+`agent-jobs-windows-cmd-shim.test.ts` (in `packages/server/` and
+`apps/pi-extension/server/`) runs a stub `pi.cmd` (`tests/helpers/fake-pi-cmd.ts`)
+through each server's real spawn path, on Windows only: the Windows workflow's
+`pi-extension-ai-runtime-windows` job.
+
 ### Review directory targets
 
 `plannotator review [DIRECTORY | PR_URL]` (and `/plannotator-review` on OpenCode
