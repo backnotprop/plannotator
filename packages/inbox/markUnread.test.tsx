@@ -4,13 +4,17 @@
  * Inbox server in a temp data dir (its own process,
  * tests/helpers/inbox-dom-server.ts, seeded with plain agent news). What is
  * proved: on a thread read by opening it the header's disabled Mark read is
- * Mark unread (and `E` still does nothing there); the header's ⋯ More offers
- * Mark unread also while the list holds the row in New and with a Mark read
- * standing (whose pressed Read button stays); the row's hover action toggles
- * (Mark read on a row that waits, Mark unread on a read row, never opening
- * the thread); Mark unread from the open thread closes it
- * and puts the row back in New, bold, sends nothing to the agent, leaves set
- * aside questions closed; its toast's Undo reads the thread again.
+ * Mark unread (and `E` still does nothing there), and ⋯ More does not repeat
+ * it; ⋯ More offers Mark unread while the list holds the row in New and with
+ * a Mark read standing (whose pressed Read button stays); the row's hover
+ * action toggles (Mark read on a row that waits, Mark unread on a read row,
+ * never opening the thread); Mark unread from the open thread closes it and
+ * puts the row back in New, bold, sends nothing to the agent, leaves set
+ * aside questions closed. Its toast's Undo is a look capped at what Mark
+ * unread took back: a question that arrives during the toast stays open and
+ * new. A stale row, where the server wrote nothing, gets no toast. Mark read
+ * on a row whose Mark read stands only gives the look back, and its Undo is
+ * Mark unread again, never a Move back.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -32,9 +36,9 @@ const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-se
 let child: ReturnType<typeof Bun.spawn> | null = null;
 let port = 0;
 /** One seeded project per test: the window keeps the first server session it saw, so every test shares one server. */
-type World = { project: string; waiting: string; news: string[] };
+type World = { project: string; stopped: string; waiting: string; news: string[] };
 let worlds: World[] = [];
-let ids: World = { project: '', waiting: '', news: [] };
+let ids: World = { project: '', stopped: '', waiting: '', news: [] };
 let dir: string | null = null;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -64,7 +68,16 @@ async function serverSection(threadId: string): Promise<string | undefined> {
   return model.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id;
 }
 
-const TESTS = 4;
+const TESTS = 7;
+
+/** An agent writing while a test runs (inbox-dom-server.ts `send`). */
+function agentWrites(send: { project: string; session: string; body: string; reply_to: string }) {
+  const stdin = child!.stdin as { write(data: string): number; flush(): void };
+  stdin.write(`${JSON.stringify({ send })}\n`);
+  stdin.flush();
+}
+
+const QUESTION = [':::question', 'Which index should the blog use?', '', '- [ ] Pagefind', '- [ ] Orama', ':::'].join('\n');
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -75,6 +88,7 @@ beforeAll(async () => {
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
   child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), String(TESTS), 'news'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), HOME: dir, PATH: `${join(dir, 'bin')}:${process.env.PATH}` },
+    stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'inherit',
   });
@@ -157,6 +171,27 @@ async function renderApp(hash: string) {
   await until(() => posted.some((p) => p.path.endsWith('/seen')), 'the look');
 }
 
+/** The window on the project's list, no thread open. */
+async function renderList(firstRow: string) {
+  window.location.hash = `#project=${ids.project}`;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<InboxApp />);
+  });
+  await until(() => !!rowButton(firstRow), 'the list');
+}
+
+/** Quiet is folded: open it to reach the rows there. */
+async function openQuiet() {
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!.click();
+  });
+}
+
+const rowAction = (threadId: string, kind: 'read' | 'unread') => document.querySelector<HTMLButtonElement>(`.ib-lbody [data-row="${threadId}"] [data-row-mark-${kind}]`);
+
 /** Base UI opens on the pointer's press, as a person's click does. */
 async function press(el: HTMLElement) {
   await act(async () => {
@@ -192,7 +227,7 @@ async function expectBackInNew(threadId: string, messagesBefore: number) {
   expect((await threadOf(threadId)).thread.messages.length).toBe(messagesBefore);
 }
 
-test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mark unread, E stays idle, and Undo reads it again", async () => {
+test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mark unread, ⋯ More does not repeat it, E stays idle, and Undo reads it again", async () => {
   const id = ids.news[0]!;
   // Looked at before this window loads: it is drawn in Quiet, not held in New.
   await loopback(`/api/inbox/threads/${id}/seen`, 'POST', '{}');
@@ -201,9 +236,11 @@ test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mar
   await until(() => !!head()!.querySelector('[data-mark-unread]'), 'Mark unread in the header');
   expect(head()!.querySelector('[data-mark-read]')).toBeNull();
   const button = head()!.querySelector<HTMLButtonElement>('[data-mark-unread]')!;
-  expect(button.textContent).toContain('Mark unread');
   expect(button.disabled).toBe(false);
-  expect(button.hasAttribute('aria-pressed')).toBe(false);
+  // The header's button is already on screen: ⋯ More does not offer it twice.
+  expect(await moreUnreadItem()).toBeNull();
+  await press(head()!.querySelector<HTMLElement>('[data-thread-more]')!);
+  await until(() => !document.querySelector('[data-thread-menu]'), 'the ⋯ menu to close');
   // E is Mark read's key: it does nothing on a thread nothing waits in, as before.
   const writes = posted.length;
   await act(async () => {
@@ -219,6 +256,8 @@ test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mar
   });
   await until(async () => (await serverSection(id)) === 'quiet', 'the thread read again');
   expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${id}/seen`);
+  // Capped: the look covers what Mark unread took back and nothing later.
+  expect(typeof posted.at(-1)!.body.through_seq).toBe('number');
 });
 
 test.skipIf(!hasDom)('a plain update opened from New keeps Mark read in the header while the list holds it; ⋯ More offers Mark unread', async () => {
@@ -239,29 +278,15 @@ test.skipIf(!hasDom)('a plain update opened from New keeps Mark read in the head
 test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that waits, Mark unread on a read row, which puts it back in New, bold", async () => {
   const id = ids.news[0]!;
   await loopback(`/api/inbox/threads/${id}/seen`, 'POST', '{}');
-  window.location.hash = `#project=${ids.project}`;
-  host = document.createElement('div');
-  document.body.appendChild(host);
-  act(() => {
-    root = createRoot(host!);
-    root.render(<InboxApp />);
-  });
-  await until(() => !!rowButton(ids.waiting), 'the list');
-  const action = (threadId: string, kind: 'read' | 'unread') =>
-    document.querySelector<HTMLButtonElement>(`.ib-lbody [data-row="${threadId}"] [data-row-mark-${kind}]`);
+  await renderList(ids.waiting);
   // A row that waits on the person: Mark read, never Mark unread.
-  expect(action(ids.waiting, 'read')).not.toBeNull();
-  expect(action(ids.waiting, 'unread')).toBeNull();
-  // The read row, in Quiet (folded): Mark unread in Mark read's place, the menu item's envelope.
-  await act(async () => {
-    document.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!.click();
-  });
+  expect(rowAction(ids.waiting, 'read')).not.toBeNull();
+  expect(rowAction(ids.waiting, 'unread')).toBeNull();
+  // The read row, in Quiet (folded): Mark unread in Mark read's place.
+  await openQuiet();
   await until(() => sectionOfRow(id) === 'quiet', 'the read row in Quiet');
-  expect(action(id, 'read')).toBeNull();
-  const button = action(id, 'unread')!;
-  expect(button.textContent?.trim()).toBe('Mark unread');
-  expect(button.getAttribute('aria-label')).toContain('Mark unread');
-  expect(button.querySelector('svg')).not.toBeNull();
+  expect(rowAction(id, 'read')).toBeNull();
+  const button = rowAction(id, 'unread')!;
 
   const messages = (await threadOf(id)).thread.messages.length;
   await act(async () => button.click());
@@ -273,7 +298,7 @@ test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that wa
   expect(toast()?.querySelector('.ib-tlead')?.textContent).toBe('Marked unread');
   expect((await threadOf(id)).thread.messages.length).toBe(messages);
   // Back in New with news, the action is Mark read again.
-  await until(() => action(id, 'read') !== null && action(id, 'unread') === null, 'Mark read on the row again');
+  await until(() => rowAction(id, 'read') !== null && rowAction(id, 'unread') === null, 'Mark read on the row again');
 });
 
 test.skipIf(!hasDom)('a thread marked read keeps its pressed Read button; ⋯ More marks it unread, its question still set aside', async () => {
@@ -288,5 +313,66 @@ test.skipIf(!hasDom)('a thread marked read keeps its pressed Read button; ⋯ Mo
   await act(async () => item!.click());
   await expectBackInNew(id, messages);
   // Not Waiting: Mark unread reopens nothing (Move back does).
+  expect((await threadOf(id)).thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['closed']);
+});
+
+test.skipIf(!hasDom)("Undo after a question arrives during the toast: it never closes that question, and the new message stays new", async () => {
+  const id = ids.waiting;
+  await loopback(`/api/inbox/threads/${id}/read`, 'POST', '{}');
+  await renderList(ids.stopped);
+  await openQuiet();
+  await until(() => !!rowAction(id, 'unread'), 'Mark unread on the read row');
+  await act(async () => rowAction(id, 'unread')!.click());
+  await until(() => toast()?.querySelector('.ib-tlead')?.textContent === 'Marked unread', 'the toast');
+
+  // The agent asks while the toast is up.
+  agentWrites({ project: ids.project, session: 'ses_late', body: QUESTION, reply_to: id });
+  await until(async () => (await threadOf(id)).thread.messages.length === 2, 'the agent to write');
+
+  const reads = posted.filter((p) => p.path.endsWith(`/${id}/read`)).length;
+  await act(async () => {
+    toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
+  });
+  await until(() => posted.at(-1)!.path === `/api/inbox/threads/${id}/seen`, 'the Undo');
+  await until(() => !toast(), 'the toast to go');
+  // No fresh Mark read: the new question is open, and the thread waits on the person with its message still new.
+  expect(posted.filter((p) => p.path.endsWith(`/${id}/read`)).length).toBe(reads);
+  const states = (await threadOf(id)).thread.messages.map((m) => (m.questions ?? []).map((q) => q.state));
+  expect(states).toEqual([['closed'], ['open']]);
+  const list = JSON.parse((await loopback('/api/inbox/threads')).text) as { sections: InboxListSection[] };
+  expect(list.sections.flatMap((s) => s.threads).find((t) => t.thread_id === id)).toMatchObject({ section: 'waiting', unseen: 1, unread: true });
+});
+
+test.skipIf(!hasDom)('a stale row: when the thread is new already the server writes nothing, so no toast says "Marked unread"', async () => {
+  const id = ids.news[0]!;
+  await loopback(`/api/inbox/threads/${id}/seen`, 'POST', '{}');
+  await renderList(ids.waiting);
+  await openQuiet();
+  await until(() => !!rowAction(id, 'unread'), 'Mark unread on the read row');
+  // An agent writes before the click; the row on screen has not heard (no event stream here).
+  agentWrites({ project: ids.project, session: 'ses_late2', body: 'Update: one more page indexed.', reply_to: id });
+  await until(async () => (await serverSection(id)) === 'new', 'the agent to write');
+  await act(async () => rowAction(id, 'unread')!.click());
+  await until(() => posted.at(-1)!.path === `/api/inbox/threads/${id}/mark-unread`, 'the write');
+  // The list reads again and shows what is true; nothing offers an Undo.
+  await until(() => sectionOfRow(id) === 'new', 'the row refreshed in New');
+  expect(toast()).toBeNull();
+});
+
+test.skipIf(!hasDom)('Mark read on a row whose Mark read stands gives the look back; its Undo is Mark unread again, never a Move back', async () => {
+  const id = ids.waiting;
+  await loopback(`/api/inbox/threads/${id}/read`, 'POST', '{}');
+  await loopback(`/api/inbox/threads/${id}/mark-unread`, 'POST', '{}');
+  await renderList(id);
+  await until(() => !!rowAction(id, 'read'), 'Mark read on the row');
+  await act(async () => rowAction(id, 'read')!.click());
+  await until(async () => (await serverSection(id)) === 'quiet', 'the row back in Quiet');
+  await until(() => !!toast(), 'the toast');
+  await act(async () => {
+    toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
+  });
+  await until(async () => (await serverSection(id)) === 'new', 'the row back in New');
+  expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${id}/mark-unread`);
+  expect(posted.some((p) => p.path === `/api/inbox/threads/${id}/unread`)).toBe(false);
   expect((await threadOf(id)).thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['closed']);
 });

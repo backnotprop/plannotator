@@ -31,8 +31,8 @@ export function threadLink(threadId: string, base: { url?: string | null; via?: 
  * pinned row) first, in its own group, when the Inbox keeps pins (`pinned`
  * is null on an older one: no item); then Copy thread (its Markdown,
  * copyMarkdown.ts), Copy link and Copy thread ID always; then Mark read where the row's hover action offers it,
- * and Mark unread on a read row an agent wrote last in (`canMarkUnread`; on a row marked read it takes Move back's
- * place, and Move back stays where it does not apply); then Archive on a row not archived already (a
+ * and Mark unread on a read row an agent wrote last in (`canMarkUnread`), and Move back whenever a Mark read stands,
+ * next to Mark unread, since only Move back reopens what that Mark read closed; then Archive on a row not archived already (a
  * row shown archived in place, or one that came back from the archive,
  * which Mark read sends back there). `drawn`: the group the row sits in on
  * screen (a seen update the list still holds in New keeps Mark read).
@@ -42,11 +42,10 @@ export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: 
   if (pinned !== null) actions.push(pinned ? 'unpin' : 'pin');
   actions.push('copy-thread', 'copy-link', 'copy-id');
   if (canMarkRead) {
-    const read = (row.read_at ?? null) !== null;
-    if (!read && offersRowMarkRead(row, drawn)) actions.push('read');
+    if (offersRowMarkRead(row, drawn)) actions.push('read');
     // A seen update the list still holds in New takes both: Mark read moves it to Quiet, Mark unread bolds it again.
     if (canMarkUnread(row)) actions.push('mark-unread');
-    else if (read && canToggleRead(row)) actions.push('unread');
+    if ((row.read_at ?? null) !== null && canToggleRead(row)) actions.push('unread');
   }
   if (row.resolved_at === null) actions.push('archive');
   return actions;

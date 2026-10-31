@@ -3848,8 +3848,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // read by opening it, an agent having written last (markRead.ts `canMarkUnread`). A thread marked read keeps
   // the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!, drawn);
-  // The header's ⋯ More offers it on any read thread: also one the list still holds in New, or one marked read.
-  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!);
+  // The header's ⋯ More offers it where that button does not: a thread the list still holds in New, one marked read.
+  // A phone keeps it there too, since its header gives way when short of room (headFit.ts).
+  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;

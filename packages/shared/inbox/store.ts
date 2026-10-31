@@ -1741,10 +1741,10 @@ export class InboxStore {
         // An action item the person marked (in their reply draft, or its Undo window running) is theirs: Mark read leaves it.
         return state === "open" || (state === "picked" && r.kind !== "action");
       });
+      let latestAgent = 0;
+      for (const m of members) if (m.author.kind === "agent") latestAgent = Math.max(latestAgent, this.messageSeq.get(m.id) ?? 0);
       if (this.readAt(root, members) === null || waiting.length > 0) {
         const at = this.stamp();
-        let latestAgent = 0;
-        for (const m of members) if (m.author.kind === "agent") latestAgent = Math.max(latestAgent, this.messageSeq.get(m.id) ?? 0);
         // This Mark read's identity: the seq of its root line, kept on each
         // question it closes, so its Undo reopens exactly those.
         const readSeq = this.seq + 1;
@@ -1782,6 +1782,10 @@ export class InboxStore {
             at,
           );
         }
+      } else if ((root.person_seen_seq ?? 0) < latestAgent) {
+        // Mark unread took the look back and the Mark read still stands: give the look back. A new Mark read
+        // here would lose the questions the standing one closed, which Move back reopens by its seq.
+        this.appendMessage({ ...root, person_seen_seq: latestAgent }, this.stamp());
       }
     } else {
       // Undo reopens only what its own Mark read closed (owner ruling
@@ -1872,19 +1876,23 @@ export class InboxStore {
    * Mark unread (the owner's ask, 2026-10-31: "I need a way to mark a
    * message unread"): the thread's latest agent message counts as not looked
    * at again, so the row is New and bold, as if the person had not opened
-   * it. A Mark read that still stands is cleared, but the questions it set
-   * aside stay closed (the agent is told about them as before; Move back,
-   * `markRead(id, false)`, is what reopens them), and nothing is sent to any
-   * agent. No write when there is nothing to make unread: no agent message,
+   * it. Only the look moves, and nothing is sent to any agent. A Mark read
+   * that stands is left alone: the questions it set aside stay closed (the
+   * agent is told about them as before), Move back, `markRead(id, false)`,
+   * still reopens them, and the next look puts the row back as read.
+   *
+   * `wrote` is false when there was nothing to make unread: no agent message,
    * the person's own reply after the latest one (a reply is a look), or the
-   * latest one already new. An archived thread refuses, as Mark read does.
+   * latest one already new. `through_seq` is that latest agent message: a look
+   * capped there (`markSeen(id, through_seq)`) is the exact Undo, since it
+   * puts this look back and covers nothing that arrived since. Every archived
+   * thread refuses, one that came back too: its Mark read sends it to the
+   * archive, and the window offers Mark unread on none of them.
    */
-  markUnread(threadId: string): InboxListRow {
+  markUnread(threadId: string): { thread: InboxListRow; wrote: boolean; through_seq: number } {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) {
-      throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
-    }
+    if (root.resolved_at !== null) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     const members = this.threadMessages(threadId);
     let latestAgent = 0;
     let lastPerson = 0;
@@ -1893,22 +1901,12 @@ export class InboxStore {
       if (message.author.kind === "agent") latestAgent = Math.max(latestAgent, seq);
       else if (!isInboxNote(message) && !isInboxActionReport(message)) lastPerson = Math.max(lastPerson, seq);
     }
-    const readHolds = this.readAt(root, members) !== null;
-    const unseen = latestAgent > Math.max(root.person_seen_seq ?? 0, lastPerson);
-    if (latestAgent > 0 && lastPerson < latestAgent && (readHolds || !unseen)) {
-      this.appendMessage(
-        {
-          ...root,
-          // Every agent message but the latest stays looked at.
-          person_seen_seq: latestAgent - 1,
-          ...(readHolds ? { person_read_seq: null, person_read_at: null, person_seen_before_read: undefined } : {}),
-        },
-        this.stamp(),
-      );
-    }
+    const wrote = latestAgent > 0 && lastPerson < latestAgent && (root.person_seen_seq ?? 0) >= latestAgent;
+    // Every agent message but the latest stays looked at.
+    if (wrote) this.appendMessage({ ...root, person_seen_seq: latestAgent - 1 }, this.stamp());
     const row = this.listRow(threadId);
     if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    return row;
+    return { thread: row, wrote, through_seq: latestAgent };
   }
 
   /**

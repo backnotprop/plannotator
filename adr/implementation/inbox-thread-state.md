@@ -39,7 +39,7 @@ The six sections, shown in this fixed order: Stopped on you, Holding up work, Wa
 | # | Rule | Section |
 |---|---|---|
 | 1 | Archived: resolved and not came back | Quiet |
-| 2 | Mark read stands (made after the archive line when the thread is resolved) | Quiet ("Read"); New while unsent work waits and no Re-ask note waits |
+| 2 | Mark read stands (made after the archive line when the thread is resolved) | Quiet ("Read"); New while unsent work waits and no Re-ask note waits, or while Mark unread took the look back (`unseen` above 0) |
 | 2a | Every open question is listed in a Re-ask note that still waits (approval "inbox-reask"). A note waits until the session it went to (its `to`, else the asker) writes again, and only while a question it lists is still open | Sent |
 | 3 | An open question carries `Stopped:` | Stopped on you |
 | 4 | An open question carries `Holds up:` | Holding up work |
@@ -80,7 +80,7 @@ A came-back thread is in the sections in both views and is not in the archived l
 | The Send that skips | the same, `skip: [keys]` | Also every listed question still open, as a sent skip (`by_reply`). Only what the person chose with "Skip them"; a Send skips nothing else, and `skip_unanswered` is ignored (approval "inbox-explicit-skip") |
 | Mark read | `POST /api/inbox/threads/:id/read` | The read fields and the look on the root; `set_aside` on each waiting question |
 | Undo | `POST /api/inbox/threads/:id/unread` | The read fields cleared, the look put back while the read stood, the questions that Mark read closed restored; one reopened note per asking message for those of them the agent had been told about. Nothing when the root has no Mark read |
-| Mark unread | `POST /api/inbox/threads/:id/mark-unread` | The look on the root set to just before the latest agent message (it is unseen again: New); a standing Mark read's fields cleared, the questions it set aside left closed. Nothing when no agent wrote, the person's real reply came after the latest agent message, or it is unseen already |
+| Mark unread | `POST /api/inbox/threads/:id/mark-unread` | The look on the root set to just before the latest agent message (it is unseen again: New); nothing else, so a standing Mark read stays and Move back still reopens what it closed. A standing Mark read with unseen news is in New; the next look puts it back in Quiet, and Mark read gives the look back without a new Mark read. Nothing when no agent wrote, the person's real reply came after the latest agent message, or it is unseen already |
 | Set-aside note | the server, 10 s after a Mark read (and after an Unarchive) | One person note per asking message naming the questions a Mark read closed and no note named yet, whatever happened since. None for a message closed by the archive |
 | Archive | `POST /api/inbox/messages/:id/resolve` `{ resolved: true }` | `resolved_at`. No write when already resolved |
 | Unarchive | the same, `{ resolved: false }` | `resolved_at` cleared; a Mark read made after the archive line is cleared in the same root line |

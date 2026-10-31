@@ -121,7 +121,8 @@ test('Mark read, then the row menu’s Mark unread: the row is back in New and b
   await row(page, threads.nightly).click({ button: 'right' });
   const item = page.locator(`[data-row-menu="${threads.nightly}"] [data-row-action="mark-unread"]`);
   await expect(item).toHaveText('Mark unread');
-  await expect(page.locator(`[data-row-menu="${threads.nightly}"] [data-row-action="unread"]`)).toHaveCount(0);
+  // Move back stays beside it: only Move back reopens what the Mark read closed.
+  await expect(page.locator(`[data-row-menu="${threads.nightly}"] [data-row-action="unread"]`)).toHaveText('Move back');
   await item.click();
 
   await expect.poll(() => sectionOf(page, threads.nightly)).toBe('new');

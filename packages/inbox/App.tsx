@@ -2291,10 +2291,16 @@ function Inbox() {
     }
     if (!before) return;
     const { warn, ...copy } = markReadToast(before, place);
+    // A Mark read that stood (Mark unread took its look back) only got its look back: Undo takes it again, never a Move back.
+    const stood = (before.read_at ?? null) !== null;
     showToast({
       ...copy,
       icon: warn ? 'warn' : 'check',
-      onUndo: () => void markRead(threadId, false),
+      onUndo: () => {
+        if (!stood) return void markRead(threadId, false);
+        dismissToast();
+        void markUnread(threadId);
+      },
       ...(warn
         ? {
             onReply: () => {
@@ -2340,21 +2346,25 @@ function Inbox() {
    * Mark unread (the owner's ask, 2026-10-31; markRead.ts `canMarkUnread`):
    * the thread's latest agent message is new again, so its row is New and
    * bold, as if the person had not opened it. Nothing is sent to the agent,
-   * and questions a Mark read set aside stay closed. From the open thread the
-   * thread closes, as a mail app's Mark unread does: left open, its next look
-   * would read it again, and the list shows the row back in New. Undo looks
-   * again (on a thread that was marked read, marks it read again).
+   * and a Mark read stands, so Move back still reopens what it closed. From
+   * the open thread the thread closes, as a mail app's Mark unread does: left
+   * open, its next look would read it again, and the list shows the row back
+   * in New. Undo is a look capped at the message Mark unread took back, so it
+   * puts back exactly what was there and leaves anything that arrived since
+   * new. When the server wrote nothing (a stale row: the thread was new
+   * already) the row just shows what is true: no toast, nothing to undo.
    */
   const markUnread = async (threadId: string) => {
     const before = rowOf(threadId);
-    const wasRead = (before?.read_at ?? null) !== null;
+    let written: Awaited<ReturnType<typeof inboxApi.markUnread>>;
     try {
-      await inboxApi.markUnread(threadId);
+      written = await inboxApi.markUnread(threadId);
     } catch (cause) {
       showError(cause);
       return;
     }
     await afterWrite();
+    if (!written.wrote) return;
     if (routeRef.current.thread === threadId) {
       if (fromCard) backToCard();
       else close({ ...routeRef.current, thread: null, file: null });
@@ -2366,14 +2376,13 @@ function Inbox() {
         dismissToast();
         void (async () => {
           try {
-            if (wasRead) await inboxApi.markRead(threadId, true);
-            else await inboxApi.seen(threadId);
+            await inboxApi.seen(threadId, written.through_seq);
           } catch (cause) {
             showError(cause);
             return;
           }
           await afterWrite();
-          say(wasRead ? 'Marked read again.' : 'Read again.');
+          say('Read again.');
         })();
       },
     });
@@ -2608,9 +2617,10 @@ function Inbox() {
     try {
       if (action === 'read') {
         const answer = await inboxApi.markProjectRead(projectId, newBatchId());
-        taken = answer.batch.read;
+        const looked = answer.batch.looked ?? [];
+        taken = [...answer.batch.read, ...looked];
         incomplete = answer.error?.message ?? null;
-        undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read);
+        undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read, looked);
       } else {
         const answer = await inboxApi.archiveProject(projectId, newBatchId());
         taken = [...answer.batch.resolved, ...answer.batch.read];
