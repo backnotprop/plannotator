@@ -17,11 +17,11 @@ import {
 import { INBOX_SECTIONS, type InboxSectionId } from '@plannotator/core/inbox-types';
 import { threadChipName } from '../threadChip';
 
-export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string; noun: string }>> = {
-  threads: { heading: 'Threads', noun: 'threads' },
-  messages: { heading: 'Messages', noun: 'messages' },
-  files: { heading: 'Files', noun: 'files' },
-  projects: { heading: 'Projects', noun: 'projects' },
+export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string; noun: string; one: string }>> = {
+  threads: { heading: 'Threads', noun: 'threads', one: 'thread' },
+  messages: { heading: 'Messages', noun: 'messages', one: 'message' },
+  files: { heading: 'Files', noun: 'files', one: 'file' },
+  projects: { heading: 'Projects', noun: 'projects', one: 'project' },
 };
 
 /** One option of the listbox. */
@@ -151,10 +151,11 @@ export function projectNames(projects: readonly { id: string; name: string; root
   return out;
 }
 
-/** "Searched only plannotator, Archived": the scope a "No matches" names. */
-export function scopeWords(filters: SearchFilters, projectName: (id: string) => string): string[] {
+/** "Searched only plannotator, Archived", or with a picked type "Searched only files in plannotator": the scope a "No matches" names. */
+export function scopeWords(filters: SearchFilters, projectName: (id: string) => string, type: InboxSearchGroupId | null = null): string[] {
   const out: string[] = [];
-  if (filters.project) out.push(projectName(filters.project));
+  if (type) out.push(filters.project ? `${GROUP_LABELS[type].noun} in ${projectName(filters.project)}` : GROUP_LABELS[type].noun);
+  else if (filters.project) out.push(projectName(filters.project));
   if (filters.status) out.push(STATUS_OPTIONS.find((o) => o.value === filters.status)!.label);
   if (filters.from) out.push(filters.from === 'me' ? 'From me' : 'From agents');
   return out;
@@ -173,6 +174,18 @@ export function countWords(answer: { totals: Record<InboxSearchGroupId, number> 
   const n = groups.reduce((sum, id) => sum + totals[id], 0);
   if (n === 0) return q.trim() ? `No matches for ${q.trim()}` : filtered ? 'No threads match these filters' : '';
   return `${formatCount(n)} ${n === 1 ? 'result' : 'results'} in ${groups.length} ${groups.length === 1 ? 'group' : 'groups'}`;
+}
+
+/**
+ * What the live region says once an answer lands while the Type chip names one
+ * group (approval "inbox-search-type-filter"): that group's total, "10 files",
+ * from the answer's `totals`. With no words there is nothing to count.
+ */
+export function typeCountWords(answer: { totals: Record<InboxSearchGroupId, number> | null; indexing?: boolean } | null, q: string, type: InboxSearchGroupId): string {
+  if (!answer || answer.indexing || !answer.totals || !q.trim()) return '';
+  const n = answer.totals[type];
+  if (n === 0) return `No ${GROUP_LABELS[type].noun} match ${q.trim()}`;
+  return `${formatCount(n)} ${n === 1 ? GROUP_LABELS[type].one : GROUP_LABELS[type].noun}`;
 }
 
 const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });

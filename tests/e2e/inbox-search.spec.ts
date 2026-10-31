@@ -320,7 +320,8 @@ test('filters: a chip menu by keyboard, Escape closes the menu before the palett
   // The open thread of the same quality ranks above the archived one.
   const order = await palette(page).locator('[data-search-group="threads"] [data-result]').evaluateAll((r) => r.map((x) => x.getAttribute('data-result-id')));
   expect(order.indexOf(world.threads.cliPagination)).toBeLessThan(order.indexOf(world.threads.pagination));
-  // Tab reaches the chips; the Status menu opens; arrows and Enter pick Archived.
+  // Tab reaches the chips (Type, Project, then Status); the Status menu opens; arrows and Enter pick Archived.
+  await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await expect(palette(page).locator('[data-chip="status"]')).toBeFocused();
