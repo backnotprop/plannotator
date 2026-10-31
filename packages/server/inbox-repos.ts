@@ -44,6 +44,8 @@ export async function readInboxProjectRepo(root: string, timeoutMs = INBOX_REPO_
 export interface InboxRepoCache {
   /** The cached repo for a root (null when unknown or none); refreshes it in the background when missing or stale. */
   get(root: string): InboxProjectRepo | null;
+  /** What the cache holds for a root, however old; never runs git. For a read too frequent to refresh from. */
+  peek(root: string): InboxProjectRepo | null;
   /** Resolve a root now (deduplicated while one is running); resolves once the cache holds the answer. */
   refresh(root: string): Promise<InboxProjectRepo | null>;
 }
@@ -98,6 +100,7 @@ export function createInboxRepoCache(options: {
       if (!entry || now() - entry.at >= ttlMs) void refresh(root);
       return entry?.repo ?? null;
     },
+    peek: (root) => entries.get(root)?.repo ?? null,
     refresh,
   };
 }

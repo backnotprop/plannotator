@@ -76,6 +76,8 @@ export interface ProjectFolder extends InboxProject {
   archived?: number;
   /** The machine whose project it is (`ibx_…`), in the merged view only. */
   machine?: string;
+  /** The projects combined into this one, each named as it goes back to. Absent when there are none. */
+  combined?: { id: string; name: string; root: string; display_name?: string }[];
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -374,6 +376,10 @@ export interface SettingsModel {
       root: string;
       bytes: number;
       threads: { thread_id: string; subject: string | null; bytes: number }[];
+      /** The project this folder was combined into, by name. */
+      combined_into?: string;
+      /** The projects combined into this one, by name: deleting it leaves them. */
+      combined?: string[];
     }[];
   };
 }
@@ -1012,6 +1018,9 @@ export const inboxApi = {
   /** The project menu's Rename… (a name) and Reset name (null): the project's `display_name`. */
   renameProject: (projectId: string, name: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/name`), { name }),
+  /** Combine a project into another, or Separate it again (null): answers the project the person now sees. */
+  combineProject: (projectId: string, into: string | null) =>
+    post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean } = {}) =>
     post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {

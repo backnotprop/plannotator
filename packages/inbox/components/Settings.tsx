@@ -630,6 +630,9 @@ function StoreTable({
                 <button type="button" className="ib-fold" onClick={() => setOpen(isOpen ? null : project.id)} aria-expanded={isOpen}>
                   <Icon name={isOpen ? 'chevD' : 'chevR'} size={13} /> {project.name}
                 </button>
+                {/* Each folder keeps its own size and Delete: Delete project never reaches a combined project's threads. */}
+                {project.combined_into && <div className="ib-store-note">In {project.combined_into}</div>}
+                {project.combined && <div className="ib-store-note">Deleting it leaves {project.combined.join(', ')}, as {project.combined.length === 1 ? 'its own project' : 'their own projects'}</div>}
               </td>
               <td className="ib-n ib-n-threads">{plural(project.threads.length, 'thread')}</td>
               <td className="ib-n">{formatBytes(project.bytes)}</td>

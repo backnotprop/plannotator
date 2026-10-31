@@ -110,6 +110,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
@@ -843,7 +844,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // from disk, no git), else the agent is told to try again. A folder
       // project (`~`, a notes folder) never takes a guess: a new worktree or
       // repository under it would be filed there for good.
-      const repositories = store.listProjects().filter((project) => existsSync(join(project.root, ".git")));
+      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
       const holder = nearestProjectHolding(repositories, folder);
       if (holder) return holder;
       throw new InboxError(
@@ -874,7 +875,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const existing = store.projectByRoot(root);
     if (existing) projects.push(existing);
     else if (!settled) {
-      const repositories = store.listProjects().filter((project) => existsSync(join(project.root, ".git")));
+      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
       const holder = nearestProjectHolding(repositories, folder);
       if (holder) projects.push(holder);
     }
@@ -950,7 +951,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return store.listProjects().map((project) => {
       const mine = rows.filter((row) => row.project.id === project.id);
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
-      return { ...project, threads: mine.length, unread: mine.filter((row) => row.unread).length, listed: mine.length - archived, archived };
+      // The projects combined into this one, for Separate. Additive, and only when there are any.
+      const combined = store.combinedInto(project.id).map(({ id, name, root, display_name }) => ({ id, name, root, ...(display_name ? { display_name } : {}) }));
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread: mine.filter((row) => row.unread).length, listed: mine.length - archived, archived };
     });
   };
 
@@ -1000,7 +1003,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const own = store.listRows().map((row) => (pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     const rows: InboxListRow[] = merged ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id))] : own;
-    const scoped = projectFilter ? rows.filter((row) => row.project.id === projectFilter) : rows;
+    // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
+    const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
+    const scoped = shownProject ? rows.filter((row) => row.project.id === shownProject) : rows;
     const byId = new Map(rows.map((row) => [row.thread_id, row]));
     return {
       serverSession,
@@ -1143,7 +1148,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       entry.archived += 1;
       counts.set(row.project.id, entry);
     }
-    const scoped = projectFilter ? archived.filter((row) => row.project.id === projectFilter) : archived;
+    const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
+    const scoped = shownProject ? archived.filter((row) => row.project.id === shownProject) : archived;
     return {
       serverSession,
       cursor: store.cursor(),
@@ -2491,6 +2497,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     boardOn,
     readBody,
     json,
+    combineSuggestions: () => {
+      // Runs on every list read, so it costs nothing without a duplicate: the repo cache as it stands (no git), and threads counted only for a pair.
+      let threads: Map<string, number> | null = null;
+      const threadsOf = (id: string) => {
+        if (!threads) {
+          threads = new Map();
+          for (const row of store.listRows()) threads.set(row.project.id, (threads.get(row.project.id) ?? 0) + 1);
+        }
+        return threads.get(id) ?? 0;
+      };
+      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.peek(root), threads: threadsOf });
+    },
   });
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
@@ -2651,7 +2669,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // Each decision's project carries its repo (as a thread does), so refs on its card link there.
         const decisions = store.openDecisions({ projectId: projectFilterOf(url) }).map((decision) => {
-          const root = store.project(decision.thread.project.id)?.root;
+          // The thread's own folder: `thread.project` is the head of a combined project.
+          const root = store.thread(decision.thread.id)?.project.root;
           return { ...decision, thread: { ...decision.thread, project: { ...decision.thread.project, repo: root ? repos.get(root) : null } } };
         });
         return json({ serverSession, cursor: store.cursor(), decisions });
@@ -3150,6 +3169,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });
       }
 
+      // Combine a project into another, or separate it again (approval
+      // "project-combine"): `{ into: prj_… | null }`. One new project line
+      // (store.combineProject). The same guards as every window write. Answers
+      // the project the person now sees, the Undo the window keeps needs no more.
+      const projectCombineMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/combine$/.exec(path);
+      if (projectCombineMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const projectId = projectCombineMatch[1]!;
+        if (!isInboxId("prj", projectId)) throw new InboxError("validation_error", "A project id (prj_).", { field: "project" });
+        if (!("into" in body) || (body.into !== null && !isInboxId("prj", body.into))) {
+          throw new InboxError("validation_error", "into: the project to combine into, or null to separate.", { field: "into" });
+        }
+        store.combineProject(projectId, body.into as string | null);
+        const shown = store.canonicalProjectId(projectId);
+        return json({ project: projectFolders().find((p) => p.id === shown) ?? null });
+      }
+
       // The project menu (design record "inbox-project-menu"): Mark all as
       // read and Archive all on one project, and their Undo. Loops over the
       // single actions (packages/shared/inbox/project-batch.ts); the same
@@ -3172,7 +3210,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (seen) return json({ ...(seen.answer as object), replayed: true });
         }
         const rows = (ids: readonly string[]) => ids.map((id) => store.listRow(id)).filter((row): row is InboxListRow => row !== null);
-        const folder = () => projectFolders().find((p) => p.id === projectId) ?? null;
+        const folder = () => projectFolders().find((p) => p.id === store.canonicalProjectId(projectId)) ?? null;
         let answer: Record<string, unknown>;
         // A batch that stopped partway (a write failed): the threads it changed get their notes, and the
         // answer names them with `error`, so the window offers Undo for what did apply and says the rest
@@ -3551,7 +3589,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // runs at most a few gits at once and queues the rest.
   setTimeout(() => {
     if (stopped) return;
-    for (const project of store.listProjects()) void repos.refresh(project.root);
+    for (const project of store.allProjects()) void repos.refresh(project.root);
     // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
     for (const threadId of store.setAsideDue(setAsideDelayMs)) tellSetAside(threadId);
     for (const threadId of store.setAsideDue(0)) scheduleSetAside(threadId);

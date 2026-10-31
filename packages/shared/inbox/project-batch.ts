@@ -112,7 +112,7 @@ export function archiveProject(store: InboxStore, projectId: string): ProjectArc
 /** The thread, when it is one of this project's threads (its root). */
 function ownThread(store: InboxStore, projectId: string, threadId: string): boolean {
   const root = store.message(threadId);
-  return root !== null && root.thread_id === threadId && root.project_id === projectId;
+  return root !== null && root.thread_id === threadId && store.sameProject(root.project_id, projectId);
 }
 
 function each(store: InboxStore, projectId: string, threadIds: readonly string[], write: (threadId: string) => void, out: ProjectUndoResult): void {

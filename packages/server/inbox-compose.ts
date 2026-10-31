@@ -89,11 +89,14 @@ export function createInboxCompose(options: {
     for (const entry of live.allLive()) {
       const root = placeOf(entry.root, entry.session, lastThreads);
       if (root === null) continue;
-      let group = groups.get(root);
+      // The folders of a combined project are one group, under the project the person sees.
+      const known = store.projectByRoot(root);
+      const head = known ? store.project(store.canonicalProjectId(known.id)) : null;
+      const key = head?.id ?? root;
+      let group = groups.get(key);
       if (!group) {
-        const known = store.projectByRoot(root);
-        group = { project: known ? { id: known.id, name: known.name, root } : { id: null, name: basename(root) || root, root }, sessions: [] };
-        groups.set(root, group);
+        group = { project: head ? { id: head.id, name: head.name, root: head.root } : { id: null, name: basename(root) || root, root }, sessions: [] };
+        groups.set(key, group);
       }
       const last = lastThreads.get(entry.session);
       group.sessions.push({
@@ -104,6 +107,7 @@ export function createInboxCompose(options: {
         busy: entry.busy,
         idle_since: entry.idleSince === null ? null : iso(entry.idleSince),
         last_thread: last ? { id: last.id, subject: last.subject, at: last.at } : null,
+        ...(root !== group.project.root ? { root } : {}),
         activity: Math.max(entry.startedAt, last ? Date.parse(last.at) : 0),
       });
     }

@@ -85,6 +85,15 @@ export interface InboxTidyPlan {
   agents: InboxTidyAgent[];
   /** The last run (within INBOX_TIDY_RUN_SHOWN_MS), or null. */
   run: InboxTidyRun | null;
+  /** Projects that are one, each a suggestion the person ticks. Counted in `count`. Absent when there are none. */
+  combine?: InboxTidyCombine[];
+}
+
+/** One suggested combine: `from` goes into `into`. `why` is a few words ("same repository"). */
+export interface InboxTidyCombine {
+  into: { id: string; name: string; root: string; display_name?: string };
+  from: { id: string; name: string; root: string };
+  why: string;
 }
 
 /**

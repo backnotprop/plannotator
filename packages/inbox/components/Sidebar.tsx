@@ -12,6 +12,8 @@ import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
+import { memberNames } from '../projectCombine';
+import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
 import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
@@ -66,6 +68,8 @@ export interface SidebarProps {
    * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
    */
   onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** One step of combining: `from` into `into`, or back out (`into` null), with what Undo needs. Resolves true once the list shows it. */
+  onProjectCombine?: (pair: { from: string; fromName: string; into: string | null; intoName: string; undoInto: string | null }) => Promise<boolean>;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
@@ -176,6 +180,9 @@ export function Sidebar(props: SidebarProps) {
   const { setOpenMobile } = useSidebar();
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
   const phone = usePhone();
+  // Another machine's project keeps what that machine gives it: only this machine's are renamed, combined or separated.
+  const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
+  // A project combined into another reads as it did on its own, which is what Separate gives back.
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
@@ -243,7 +250,14 @@ export function Sidebar(props: SidebarProps) {
   const machinesClosed = sections.closed('machines');
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
+  /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
+  const combinedInto = useRef<{ from: string; into: string } | null>(null);
   useLayoutEffect(() => {
+    const combined = combinedInto.current;
+    if (combined && !shown.some((p) => p.id === combined.from)) {
+      combinedInto.current = null;
+      asideRef.current?.querySelector<HTMLElement>(`[data-pmore="${combined.into}"]`)?.focus({ preventScroll: true });
+    }
     const id = actedOn.current;
     if (!id || shown.some((p) => p.id === id)) return;
     actedOn.current = null;
@@ -518,6 +532,30 @@ export function Sidebar(props: SidebarProps) {
                       : undefined
                   }
                   announce={props.announce}
+                  // This machine's projects only: combining never crosses machines.
+                  others={local(project) ? props.projects.filter((p) => p.id !== project.id && local(p)).map((p) => ({ ...p, name: props.projectNames?.get(p.id) ?? p.name })) : []}
+                  onCombine={
+                    props.onProjectCombine && local(project)
+                      ? async (into) => {
+                          combinedInto.current = { from: project.id, into: into.id };
+                          setOpenMobile(false);
+                          // The name it will have: alone again, it loses a clash's parent.
+                          const intoName = shortProjectNames([into]).get(into.id) ?? into.name;
+                          const done = await props.onProjectCombine!({ from: project.id, fromName: project.name, into: into.id, intoName, undoInto: null });
+                          if (!done) combinedInto.current = null;
+                          return done;
+                        }
+                      : undefined
+                  }
+                  combined={local(project) && project.combined ? memberNames(project, project.combined) : []}
+                  onSeparate={
+                    props.onProjectCombine && local(project)
+                      ? (member) => {
+                          setOpenMobile(false);
+                          void props.onProjectCombine!({ from: member.id, fromName: member.name, into: null, intoName: project.name, undoInto: project.id });
+                        }
+                      : undefined
+                  }
                 />
               );
             })
