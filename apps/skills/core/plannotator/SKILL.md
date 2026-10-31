@@ -241,11 +241,11 @@ Ask what only the reviewer can decide as a question block. Answers come back at 
 :::question
 Where should we keep the edit that loses a sync conflict?
 
-When two devices edit one note offline, the later save wins and the other edit is lost. Local storage keeps it with no server work.
+When two devices edit one note offline, the later save wins and the other is lost. Local storage keeps it with no server work.
 
-- [ ] Local only, purged after 30 days — cheap, no server change
+- [ ] Nowhere — silent loss, as today
+- [ ] Local only, purged after 30 days — cheap
 - [ ] Server-side per user — survives reinstall, needs a retention policy
-- [ ] Nowhere — accept silent loss for v1
 
 Recommended: Local only, purged after 30 days
 :::
@@ -257,8 +257,8 @@ Recommended: Local only, purged after 30 days
   - Be terse: one to three short sentences, plain words, no jargon or internal names.
   - Add a screenshot (`![alt](path)`) for anything visual.
   - Link a file that shows it better (a plan, a mock): `[the mock](mock.html)`. In the Inbox, attach it too; the link opens it beside the thread.
-- Choices: `- [ ] label`, optionally `- [ ] label — why`. The reviewer can also answer "Other", add a note, or skip.
-- `Recommended: <label>` marks yours (`A, B and C` on `:::question-multi`); other text is one more answer, tagged Recommended. Keep A, B, C order.
+- Choices: `- [ ] label`, optionally `- [ ] label — why`, in natural order. The reviewer can also answer "Other", add a note, or skip.
+- `Recommended: <label>` marks yours (`A, B and C` on `:::question-multi`); other text is one more answer, tagged Recommended. Never move yours first.
 - Ask only what you cannot decide alone, about 8 a round. Do not ask rhetorical questions or questions the codebase answers.
 - `- [x]` marks a settled choice. On resubmit, check the chosen answer, or drop the block and state the decision in prose.
 - Leave blank lines between the parts so the block reads well on GitHub.
