@@ -1,10 +1,10 @@
 /**
  * The agents in a list row. A wide row (approval "list-rows-mail-icons",
- * 2026-10-30): one bare mark per agent host before the project (the owner,
- * 2026-10-31), first to join first, overlapping; at most three marks, past
- * three hosts two; then "+N" counting every session not drawn as a mark, so
+ * 2026-10-30): one tile per agent host before the project (the owner,
+ * 2026-10-31), first to join first, overlapping; at most three tiles, past
+ * three hosts two; then "+N" counting every session not drawn as a tile, so
  * more agents always come before more of the same; the project hugs its own
- * row's marks, 6px after them, no width reserved (pixels:
+ * row's tiles, 6px after them, no width reserved (pixels:
  * tests/e2e/inbox-row-badges.spec.ts, inbox.spec.ts). A three-line or
  * phone row (approval "inbox-list-row-v2", 2026-10-30): the agents' tiles
  * drawn before the project, one per agent, at most two, then a "+N" tile
@@ -26,9 +26,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { renderToStaticMarkup } from 'react-dom/server';
 import type { InboxListRow, InboxListSection, InboxParticipant } from '@plannotator/core/inbox-types';
-import { ClaudeIcon } from '@plannotator/ui/components/icons/AgentIcons';
 import { loadCascade } from './cssCascade.testing';
 
 const hasDom = typeof document !== 'undefined';
@@ -139,7 +137,7 @@ function marks(el: HTMLElement, id: string) {
   const agents = el.querySelector<HTMLElement>(`[data-thread-id="${id}"] .ib-ags`)!;
   expect(agents).not.toBeNull();
   return {
-    drawn: [...agents.querySelectorAll<HTMLElement>('.ib-ag')].map((g) => g.dataset.agentHost),
+    drawn: [...agents.querySelectorAll<HTMLElement>('.ib-atile')].map((g) => g.dataset.agentHost),
     more: agents.querySelector(':scope > .ib-agplus')?.textContent ?? null,
     name: agents.getAttribute('aria-label'),
     role: agents.getAttribute('role'),
@@ -221,11 +219,6 @@ describe.if(hasDom)("a wide row's agents", () => {
       expect(loadCascade(CSS).resolved(from.querySelector<HTMLElement>('.ib-ags')!, 'order')).toBe('-1');
     });
   }
-
-  test("the cut around Claude's star is the star: inbox.css carries ClaudeIcon's path, so a new logo cannot leave the old shape behind", () => {
-    const path = /<path d="([^"]+)"/.exec(renderToStaticMarkup(<ClaudeIcon />))![1]!;
-    expect(CSS).toContain(path);
-  });
 
   test("one project's wide list: the marks alone, no project", () => {
     const el = render('wide', true);

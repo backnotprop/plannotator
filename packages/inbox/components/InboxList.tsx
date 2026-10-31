@@ -137,8 +137,8 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
 
 /**
  * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
- * (Lines). The row itself draws its agents before the project: bare marks on a wide row (`RowAgents`), tiles on a
- * three-line or phone row (`RowAgentTiles`).
+ * (Lines). The row itself draws its agents before the project, on tiles: `RowAgents` on a wide row, `RowAgentTiles`
+ * on a three-line or phone row.
  */
 function RowMark({ row }: { row: InboxListRow }) {
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
