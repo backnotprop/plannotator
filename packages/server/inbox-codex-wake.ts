@@ -411,6 +411,8 @@ export function createInboxCodexWake(options: {
     const pendingKeys = new Set<string>();
     const work: { item: InboxMessage; session: string }[] = [];
     for (const [session, items] of pending) {
+      // Only a Codex thread id is ever handed to `codex queue`: never a launch's placeholder (`launch:<id>`) before its thread exists.
+      if (!isCodexThreadId(session)) continue;
       for (const item of items) {
         if (!wakesItem(item, session)) continue;
         const key = `${item.id}.${session}`;

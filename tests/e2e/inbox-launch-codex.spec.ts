@@ -24,7 +24,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
@@ -38,6 +38,7 @@ const WIDE = { width: 1440, height: 900 };
 interface World {
   root: string;
   home: string;
+  codexHome: string;
   bin: string;
   dataDir: string;
   url: string;
@@ -101,11 +102,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const bin = join(root, 'bin');
   const dataDir = join(root, 'data');
   for (const dir of [home, bin, dataDir]) mkdirSync(dir, { recursive: true });
+  // CODEX_HOME holds the daemon's socket, and macOS caps a socket's path at 104 bytes: a short folder of its own, removed after.
+  const codexHome = mkdtempSync('/tmp/pn-cx-');
   // A person who connected Codex: the Inbox's MCP entry in config.toml (how a launched thread answers), and their own lines.
   const fake = installFakeCodex({
     bin,
     state: join(root, 'fake-codex'),
     home,
+    codexHome,
     config: { workMs: 600 },
     inboxMcp: join(bin, 'plannotator'),
     configToml: `model = "gpt-5"\n# the person's own comment\n[projects."${join(home, 'elsewhere')}"]\ntrust_level = "untrusted"\n`,
@@ -115,13 +119,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // `$SHELL -ilc <command>`: the command, with the fakes first on PATH (the person's .zshrc would).
   const shell = join(bin, 'login-shell');
   writeFileSync(shell, `#!/bin/sh\nPATH=${q(bin)}:"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`, { mode: 0o755 });
-  world = { root, home, bin, dataDir, url: '', port: 0, fake, project: '', configBefore: fake.configToml()!, context: undefined as never, page: undefined as never, errors: [] };
+  world = { root, home, codexHome, bin, dataDir, url: '', port: 0, fake, project: '', configBefore: fake.configToml()!, context: undefined as never, page: undefined as never, errors: [] };
   markTourDecided(dataDir);
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true } }));
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,
+    CODEX_HOME: codexHome,
     SHELL: shell,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -156,6 +161,7 @@ test.afterAll(async () => {
     await world?.context?.close();
   } finally {
     await removeInboxScratch();
+    if (world?.codexHome?.startsWith('/tmp/pn-cx-')) rmSync(world.codexHome, { recursive: true, force: true });
   }
 });
 

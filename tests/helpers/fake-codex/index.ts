@@ -95,12 +95,14 @@ export interface FakeCodex {
 const q = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 /**
- * `home`: the test HOME (its `.codex` is CODEX_HOME). `inboxMcp`: write config.toml with the Inbox's MCP entry
+ * `home`: the test HOME (its `.codex` is CODEX_HOME unless `codexHome` names one). `inboxMcp`: write config.toml with the Inbox's MCP entry
  * (this path as the `plannotator` program), as a person who connected Codex has it; omitted, config.toml is left as it is.
  */
-export function installFakeCodex(input: { bin: string; state: string; home: string; config?: FakeCodexConfig; inboxMcp?: string; configToml?: string }): FakeCodex {
+export function installFakeCodex(input: { bin: string; state: string; home: string; codexHome?: string; config?: FakeCodexConfig; inboxMcp?: string; configToml?: string }): FakeCodex {
   const { bin, state } = input;
-  const home = join(input.home, ".codex");
+  // CODEX_HOME: HOME/.codex, or `codexHome` (the Inbox must then have CODEX_HOME set to it). macOS caps a socket's path
+  // at 104 bytes, and the daemon's socket is under it: a deep temp HOME needs a short one.
+  const home = input.codexHome ?? join(input.home, ".codex");
   mkdirSync(bin, { recursive: true });
   mkdirSync(state, { recursive: true });
   mkdirSync(home, { recursive: true });
