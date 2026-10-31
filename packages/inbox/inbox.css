@@ -5406,6 +5406,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* A card (variant C "Lean"): two lines, the time on the right, bold while unread. */
 .ib-bcard { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; color: var(--foreground); cursor: pointer; border-radius: var(--ib-lr-sm, 8px); background: var(--ib-bcard-bg); box-shadow: var(--ib-bcard-edge); transition: box-shadow 120ms ease-out; }
 .ib-bcard:hover { box-shadow: var(--ib-bcard-edge), 0 0 0 1px color-mix(in oklch, var(--foreground) 14%, transparent); }
+/* Its right-click menu is open (CardMenu): the hover look, and a muted fill (the rows' `.ib-rw[data-menu]`). */
+.ib-bcard[data-menu] { background: color-mix(in oklch, var(--ib-bcard-bg) 70%, var(--muted)); box-shadow: var(--ib-bcard-edge), 0 0 0 1px color-mix(in oklch, var(--foreground) 14%, transparent); }
 .ib-bcard[draggable="true"] { cursor: grab; }
 .ib-bcard[data-dragging] { opacity: 0.45; }
 /* The title is the button that opens the card; its focus ring is the card's. */
@@ -5475,7 +5477,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-refmark[data-ref-state="closed"][data-ref-kind="pr"] { color: var(--ib-ref-closed); }
 .ib-refmark[data-ref-state="unknown"] { color: var(--muted-foreground); opacity: 0.7; }
 @media (forced-colors: active) { .ib-refmark { color: CanvasText; } }
-.ib-pmi .ib-lane-dot { margin: 0 2px; }
+/* A lane dot in a menu: centred in the icons' 15 px, so a lane's words line up with Shipped's and Icebox's. */
+.ib-pmi .ib-lane-dot { margin: 0 3.5px; }
 
 /* The agents' drops the person has not seen. */
 .ib-bdrops { margin: 0 12px 10px; padding: 10px 14px; border-radius: var(--ib-lr-lg, 10px); background: color-mix(in oklab, var(--warning, oklch(0.75 0.15 85)) 10%, var(--card)); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--warning, oklch(0.75 0.15 85)) 30%, transparent); flex: none; }

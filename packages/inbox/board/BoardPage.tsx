@@ -11,6 +11,10 @@ import { pageInFront } from '../sound';
 import { useComposeSessions } from '../compose/useComposeSessions';
 import { findTarget, hostLabel } from '../compose/model';
 import { CardPanel } from './CardPanel';
+import { CardMenu } from './CardMenu';
+import type { InboxToastModel } from '../components/Toast';
+import { shortcutAria } from '../shortcuts/hint';
+import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { OnceButton } from './OnceButton';
 import { RefMark, markLabel } from './RefMark';
 import { useCardMarks } from './useCardMarks';
@@ -30,6 +34,7 @@ import {
   cardAge,
   cardLabel,
   cardLine,
+  cardMenuToast,
   cardMessageBody,
   messageKey,
   lanesThatFit,
@@ -42,11 +47,11 @@ import {
   youLinkLabel,
   youThread,
   unseenDrops,
+  type BoardMove,
   type BoardView,
 } from './model';
 
-/** A move the person makes on a card (the window's route `POST /api/inbox/cards/:id`). */
-export type BoardMove = { op: 'move'; column: InboxCardColumn } | { op: 'icebox' } | { op: 'drop'; reason?: string | null } | { op: 'restore' };
+export type { BoardMove } from './model';
 
 export interface BoardPageProps {
   view: BoardView;
@@ -91,6 +96,11 @@ export interface BoardPageProps {
    */
   project?: string | null;
   onProject?: (project: string | null) => void;
+  /**
+   * The window's one toast, with its Undo (`Z`), or null to take it down. Shown only when a card leaves
+   * the lanes from its right-click menu (`cardMenuToast`). Absent: no toast, the live region alone.
+   */
+  onToast?: (toast: Omit<InboxToastModel, 'id'> | null) => void;
 }
 
 /**
@@ -146,6 +156,8 @@ export function BoardPage(props: BoardPageProps) {
   useLayoutEffect(() => {
     const was = lastOpen.current;
     lastOpen.current = props.openCard;
+    // The menu's Drop… was for the card that just closed (or was replaced): opening it again later is a plain open.
+    if (was && was !== props.openCard) setDropAsk((ask) => (ask?.id === was ? null : ask));
     if (!was || props.openCard) return;
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
@@ -155,15 +167,41 @@ export function BoardPage(props: BoardPageProps) {
     (button ?? heading)?.focus();
   }, [props.openCard]);
 
-  const move = async (card: InboxCardWire, change: BoardMove) => {
+  /**
+   * Move a card. `fromMenu`: the right-click menu asked (or a Drop… it started): a card that leaves the
+   * lanes says so in the window's toast, with Undo (`cardMenuToast`); any other move only in the live region.
+   */
+  const move = async (card: InboxCardWire, change: BoardMove, fromMenu = false): Promise<InboxCardWire | null> => {
     setFailed(null);
     const moved = await props.onMove(card, change);
     if (!moved) {
       setFailed(`“${card.title}” did not move. Try again.`);
-      return;
+      return null;
     }
-    setSaid(moveSaid(card, moved));
+    const toast = fromMenu && props.onToast ? cardMenuToast(card, moved) : null;
+    if (toast) {
+      // The toast's live region says it, with how to undo it: the Board's own stays quiet.
+      props.onToast!({ icon: 'check', lead: toast.lead, detail: toast.detail, onUndo: () => void undoMove(moved, toast.undo) });
+    } else {
+      setSaid(moveSaid(card, moved));
+    }
+    return moved;
   };
+  /** The toast's Undo (or `Z`): the move back through the same route, then focus on the card where it is now. */
+  const undoMove = async (moved: InboxCardWire, change: BoardMove) => {
+    props.onToast?.(null);
+    const back = await move(moved, change);
+    if (!back) return;
+    // Two frames: the cards read again, then the lanes draw the card in its place.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => pageRef.current?.querySelector<HTMLElement>(`.ib-bcard[data-card-id="${CSS.escape(back.id)}"] [data-card-open]`)?.focus()),
+    );
+  };
+  /** The card whose right-click menu is open (its muted fill). */
+  const [menuId, setMenuId] = useState<string | null>(null);
+  /** Drop… from a card's right-click menu: the opened card's reason field opens, focused (a new number each time). */
+  const [dropAsk, setDropAsk] = useState<{ id: string; n: number } | null>(null);
+  const menuKeys = shortcutAria({ scope: inboxListShortcuts, action: 'rowMenu' });
 
   // A New card dialog makes one card, whatever its retries. Each try that makes it has its own key and
   // its own content; when a try's answer is lost, the next try first replays that try exactly (its key,
@@ -354,6 +392,8 @@ export function BoardPage(props: BoardPageProps) {
     now,
     phone,
     openId: props.openCard,
+    menuId,
+    menuKeys,
     rowOf: props.rowOf,
     markOf,
     onOpen: (card) => props.onOpenCard(card.id),
@@ -422,7 +462,8 @@ export function BoardPage(props: BoardPageProps) {
       now={now}
       rowOf={props.rowOf}
       onClose={() => props.onOpenCard(null)}
-      onMove={(change) => move(open, change)}
+      onMove={async (change, fromMenu) => void (await move(open, change, fromMenu))}
+      dropAsk={dropAsk?.id === open.id ? dropAsk.n : 0}
       onSend={() => openSend(open)}
       onChanged={props.onChanged}
       onOpenThread={(threadId) => props.onOpenThread(open, threadId)}
@@ -508,7 +549,19 @@ export function BoardPage(props: BoardPageProps) {
           {failed}
         </div>
       )}
-      <div className="ib-bmain">
+      <CardMenu
+        className="ib-bmain"
+        cardOf={(id) => allCards.find((c) => c.id === id) ?? null}
+        rowOf={props.rowOf}
+        onTarget={setMenuId}
+        onColumn={(card, column) => void move(card, column === 'icebox' ? { op: 'icebox' } : { op: 'move', column }, true)}
+        onRestore={(card) => void move(card, { op: 'restore' })}
+        onDrop={(card) => {
+          setDropAsk((ask) => ({ id: card.id, n: (ask?.n ?? 0) + 1 }));
+          props.onOpenCard(card.id);
+        }}
+        onOpenThread={props.onOpenThread}
+      >
         {body}
         {panel}
         {model && view === 'lanes' && !phone && liveCount === 0 && !open && project !== null && (
@@ -526,7 +579,7 @@ export function BoardPage(props: BoardPageProps) {
             </button>
           </div>
         )}
-      </div>
+      </CardMenu>
       <div className="ib-sr" aria-live="polite" data-board-live="">
         {said}
       </div>
@@ -587,6 +640,10 @@ interface CardCommon {
   now: number;
   phone: boolean;
   openId: string | null;
+  /** The card whose right-click menu is open: its hover look and a muted fill. */
+  menuId: string | null;
+  /** `aria-keyshortcuts` for the card's right-click menu (Shift+F10, the thread rows' key). */
+  menuKeys: string | undefined;
   rowOf: (threadId: string) => InboxListRow | null;
   /** The card's lane mark (its linked PR or issue), null when it links neither. */
   markOf: (card: InboxCardWire) => InboxCardMark | null;
@@ -742,6 +799,8 @@ function BoardCard({
   now,
   phone,
   openId,
+  menuId,
+  menuKeys,
   rowOf,
   markOf,
   onOpen,
@@ -785,6 +844,7 @@ function BoardCard({
       data-unread={unread ? '' : undefined}
       data-dragging={dragging ? '' : undefined}
       data-open={openId === card.id ? '' : undefined}
+      data-menu={menuId === card.id ? '' : undefined}
       data-sent={sent ? '' : undefined}
       draggable={draggable && !phone ? true : undefined}
       onClick={(event) => {
@@ -801,7 +861,7 @@ function BoardCard({
       onDragEnd={onDragEnd}
     >
       <span className="ib-bc-top">
-        <button type="button" className="ib-bc-main" aria-label={label} aria-current={openId === card.id || undefined} data-card-open="" onClick={() => onOpen(card)}>
+        <button type="button" className="ib-bc-main" aria-label={label} aria-current={openId === card.id || undefined} aria-keyshortcuts={menuKeys} data-card-open="" onClick={() => onOpen(card)}>
           {meta}
           {/* The clamp (three lines) is on the button, not on the inline title: measure the button. */}
           <Tip content={card.title} when={titleCut}>
@@ -1091,6 +1151,7 @@ function OpenedCard({
   rowOf,
   onClose,
   onMove,
+  dropAsk,
   onSend,
   onChanged,
   onOpenThread,
@@ -1105,7 +1166,10 @@ function OpenedCard({
   now: number;
   rowOf: (threadId: string) => InboxListRow | null;
   onClose: () => void;
-  onMove: (move: BoardMove) => Promise<void>;
+  /** `fromMenu`: a Drop… the card's right-click menu started (its toast). */
+  onMove: (move: BoardMove, fromMenu?: boolean) => Promise<void>;
+  /** Drop… from the card's right-click menu (a new number each time): the reason field opens, focused. */
+  dropAsk: number;
   onSend: () => void;
   onChanged: (card?: InboxCardWire) => void;
   onOpenThread: (threadId: string) => void;
@@ -1199,7 +1263,8 @@ function OpenedCard({
       onShip={() => onMove({ op: 'move', column: 'shipped' })}
       onIcebox={() => onMove({ op: 'icebox' })}
       onRestore={() => onMove({ op: 'restore' })}
-      onDrop={(reason) => onMove({ op: 'drop', reason })}
+      onDrop={(reason, fromMenu) => onMove({ op: 'drop', reason }, fromMenu)}
+      dropAsk={dropAsk}
       onSend={onSend}
       onStart={async () => {
         // Start: the card's agent (else a live session in its project) is told to begin, in the card's
