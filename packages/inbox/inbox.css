@@ -793,10 +793,9 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* One project's list: the first column holds the agents' marks alone (InboxList's WideRow), as wide as this row's
    marks and no wider (the owner, 2026-10-31: no blank before the title), so the title follows its own marks. The
    list keeps the wide row at any width, so the marks' track is bounded (`minmax(min-content, max-content)`) and the
-   title keeps at least 24px: short of room the run wraps between marks (below) before the title goes, and the
-   columns right of the title never move. With room, the run is one line and the title hugs it. 24px, not more: in a
-   780px window the row has about 102px for the marks and the title, and three "×N" hosts (34px each) need 73px to
-   take two lines; narrower (768px, or the pin's column) they take three, which the 50px row still holds. */
+   title keeps at least 24px: short of room "+N" drops under the marks (below) before the title goes, and the
+   columns right of the title never move. With room, the run is one line and the title hugs it. 24px, not more: at
+   768px with the pin's column, three marks leave the title little more than that. */
 .ib-noproj .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) 124px 52px 84px 76px; }
 .ib-noproj.ib-fullw .ib-row { grid-template-columns: minmax(min-content, max-content) minmax(24px, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
 /* The pin's column (the owner, 2026-10-31: the pin beside the counts, as on the three-line row), only in a list with a
@@ -836,12 +835,11 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row .ib-from > .ib-ags { order: -1; }
 .ib-row .ib-p { flex: 0 1 auto; min-width: 0; font-weight: 400; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* One project's list: the marks alone in a column as wide as they are, and the title 6px after them, the same gap:
-   the grid's 10px gap less 4px the marks reach into it (a negative margin takes 4px off their track). Short of room
-   (a narrow list, three hosts with "×N") the run wraps between marks inside its track rather than take the title's
-   last 24px or push the columns after it: two lines, or three at the narrowest, with no gap between lines, so three
-   16px lines (48px) still sit inside the 50px row. */
+   the grid's 10px gap less 4px the marks reach into it (a negative margin takes 4px off their track). The marks stay
+   together. Only "+N" can drop under them, and only short of room (three marks and "+N" at 768px with the pin's
+   column), rather than take the title's last 24px or push the columns after it. */
 .ib-noproj .ib-row .ib-from { margin-right: -4px; }
-.ib-noproj .ib-row .ib-ags { flex: 0 1 auto; flex-wrap: wrap; height: auto; min-height: 16px; row-gap: 0; max-width: 100%; }
+.ib-noproj .ib-row .ib-ags { flex: 0 1 auto; flex-wrap: wrap; height: auto; min-height: 16px; max-width: 100%; }
 .ib-row.ib-u .ib-title { font-weight: 600; }
 /* The thread chip: it can shrink to its border (flex), and its name keeps its
    own 166px cap and ellipsis (the inner span), so the chip is as wide as before
@@ -949,10 +947,23 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    outlined, and so is this one. */
 .ib-badge.ib-bicon.ib-b-act { padding: 0 7px 0 6px; background: var(--ib-badge-act-bg); color: var(--foreground); }
 .pn-inbox .ib-b-act svg.ib-ic { stroke-width: 2; }
-/* A wide row's agents' marks before the project (approval "list-rows-mail-icons", `RowAgents`): one bare 16 px mark
-   per host (the scale's row size, no tile), 5px apart; a host's "×N" 2px after its mark; past three hosts two
-   marks and a "+N" pill. The marks take the line's quiet colour (OpenCode's mark is `currentColor`). */
-.ib-ags { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 16px; white-space: nowrap; color: var(--muted-foreground); }
+/* A wide row's agents' marks before the project (approval "list-rows-mail-icons", `RowAgents`; overlapping since the
+   owner, 2026-10-31): one bare 16 px mark per host (the scale's row size, no tile), each 7px over the one before it,
+   an avatar stack's overlap, at most three, then "+N" as plain small text 3px after them. In place of a ring, the
+   mark underneath is cut about 1px around the mark on it (a mask, as the tiles), so the cut shows the row's own
+   ground: plain, hovered, selected, lit and in dark alike. The cut takes the shape of the mark on top, which is what
+   makes it read as on top: a circle for a round mark (Codex and the plain glyphs); a straight edge for a square one
+   (Pi, OpenCode, Cursor), set to Pi's left edge; and for Claude the star itself, its `ClaudeIcon` path grown by a 1px
+   stroke, so the mark underneath shows between the rays. The marks are positioned so they paint in order, each over
+   the one before it. They take the line's quiet colour (OpenCode's mark is `currentColor`). */
+.ib-ags { display: inline-flex; align-items: center; column-gap: 3px; flex: none; height: 16px; white-space: nowrap; color: var(--muted-foreground); }
+.ib-agmarks { display: inline-flex; align-items: center; flex: none; }
+.ib-ag { display: inline-flex; position: relative; flex: none; }
+.ib-ag + .ib-ag { margin-left: -7px; }
+.ib-ag:has(+ .ib-ag) { --ib-ag-cut: radial-gradient(circle at calc(100% + 1px) 50%, transparent 9px, #000 9.4px); -webkit-mask-image: var(--ib-ag-cut); mask-image: var(--ib-ag-cut); }
+.ib-ag:has(+ .ib-ag:is([data-agent-host="pi"], [data-agent-host="opencode"], [data-agent-host="cursor"])) { --ib-ag-cut: linear-gradient(to right, #000 calc(100% - 7.25px), transparent calc(100% - 7.25px)); }
+.ib-ag:has(+ .ib-ag[data-agent-host^="claude"]) { --ib-ag-star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='-6 -6 44 44'%3E%3Cpath stroke='%23000' stroke-width='4' stroke-linejoin='round' d='m6.283 21.28 6.293-3.531.106-.306-.106-.171h-.307l-1.051-.065-3.596-.097-3.118-.13-3.021-.162-.761-.161-.712-.94.073-.469.639-.429.916.08 2.023.138 3.037.209 2.203.13 3.263.339h.518l.073-.21-.177-.129-.138-.13-3.142-2.129-3.401-2.25-1.782-1.296-.963-.656-.486-.616-.21-1.343.875-.963 1.175.08.3.08 1.19.915 2.542 1.967 3.319 2.445.486.404.194-.138.024-.097-.218-.365-1.806-3.263-1.926-3.32-.857-1.375-.227-.825c-.08-.339-.138-.624-.138-.972L8.384.177 8.935 0l1.328.177.56.486.824 1.887 1.337 2.972 2.073 4.04.607 1.199.324 1.11.121.339h.21v-.194l.17-2.276.315-2.795.307-3.596.106-1.012.501-1.214.995-.657.778.372.639.916-.088.591-.381 2.471-.745 3.87-.485 2.591h.282l.324-.324 1.311-1.74 2.203-2.754.972-1.093 1.133-1.207.728-.574h1.376l1.013 1.505-.454 1.555-1.416 1.797-1.175 1.522-1.685 2.268-1.051 1.814.097.144.25-.023 3.805-.81 2.056-.372 2.454-.421 1.11.518.12.527-.436 1.078-2.624.648-3.077.615-4.582 1.084-.057.041.065.08 2.065.195.883.047h2.162l4.025.3 1.052.696.63.851-.106.647-1.619.825-2.186-.518-5.1-1.214-1.75-.436h-.242v.145l1.458 1.425 2.671 2.412 3.346 3.11.17.769-.43.607-.453-.065-2.939-2.211-1.134-.996-2.568-2.162h-.17v.227l.591.866 3.125 4.697.162 1.441-.226.468-.81.283-.89-.162-1.829-2.568-1.888-2.891-1.522-2.592-.186.106-.898 9.677-.421.495-.972.371-.81-.615-.43-.996.43-1.967.518-2.568.422-2.041.38-2.535.226-.842-.015-.056-.185.023-1.912 2.624-2.906 3.928-2.3 2.462-.551.218-.954-.494.088-.883.533-.787 3.184-4.049 1.919-2.509 1.24-1.449-.009-.21h-.073l-8.455 5.49-1.505.194-.648-.607.08-.995.307-.324 2.542-1.749-.009.008z'/%3E%3C/svg%3E"); -webkit-mask: linear-gradient(#000 0 0), var(--ib-ag-star) 6px -3px / 22px 22px no-repeat; -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0), var(--ib-ag-star) 6px -3px / 22px 22px no-repeat; mask-composite: exclude; }
+.ib-agplus { font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; line-height: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* A three-line or phone row's line 1 (approval "inbox-list-row-v2", 2026-10-30, `RowAgentTiles`): the agents, then
    the project, like a sidebar row. The tiles' run is bounded (at most two tiles, one per agent, and a "+N" tile for
    the other agents) and never shrinks; the project takes the rest of the line on one line, cut with "…". The
@@ -971,10 +982,6 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-atile + .ib-atile { margin-left: -5px; }
 .ib-atile > .ib-mk, .ib-atile > .ib-mk > svg, .ib-atile > .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
 .ib-atile.ib-atmore { font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; color: var(--muted-foreground); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; min-width: var(--ib-mark-20); width: auto; padding: 0 3px; }
-.ib-ag { display: inline-flex; align-items: center; gap: 2px; }
-.ib-agx { position: relative; top: 2px; font-size: var(--ib-fs-12, 12px); font-weight: 600; line-height: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-row .ib-agx { top: 1px; }
-.ib-agplus { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 999px; font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; color: var(--muted-foreground); background: var(--muted); font-variant-numeric: tabular-nums; }
 /* Hover and the selected row (design record "inbox-polish", item 1, variant A · Inset): a pill 3 px inside
    the row (its ::before, radius 8, no border), so the separators run on unbroken and never touch it, and the
    first row under a band keeps a gap, as the sidebar's active row sits inside its column. Keyboard focus is a

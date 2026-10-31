@@ -193,7 +193,7 @@ test('desktop: the triangles with their words, the marks before the project, the
         lefts: ['.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).left),
         cell: box('.ib-from').left,
         project: box('.ib-p').left,
-        markCount: r.querySelectorAll('.ib-ags > .ib-ag').length,
+        markCount: r.querySelectorAll('.ib-ags .ib-ag').length,
         marks: box('.ib-ags').toJSON() as DOMRect,
         subjRight: box('.ib-subj').right,
         subj: box('.ib-subj').left,

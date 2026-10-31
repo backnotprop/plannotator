@@ -634,7 +634,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
 });
 
 // Late, in a project of its own, so its threads change no count above (review of #2374, finding 1).
-test("one project's list: three agents with ×N or bare, on one line, and the title 6px after each row's own marks; at 780 and 768 every row keeps its title and its columns", async () => {
+test("one project's list: three overlapping marks with \"+N\" or bare, on one line, and the title 6px after each row's own marks; at 780 and 768 every row keeps its title and its columns", async () => {
   const { page } = world;
   const ops = scratchProject(join(world.root, 'src'), 'ops-console');
   // Hosts this spec has already seen: a host new to it brings the agent-note dialog, over the Update test below.
@@ -648,7 +648,7 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
     await agent('OpenCode', 'opencode'),
   ];
   const ask = (prompt: string) => [':::question', prompt, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
-  // Three hosts, each with "×N" (Claude Code ×2, Codex ×3, OpenCode ×2): the widest run of three marks.
+  // Three hosts, seven sessions (Claude Code twice, Codex three times, OpenCode twice): the widest run, three marks and "+4".
   const trio = await claudeA!.send({ project_path: ops, thread: 'three-agents', subject: 'Three agents, each twice or more', body: ask('Keep the icons in their column?') });
   for (const a of [claudeB, codexA, codexB, codexC, opencodeA, opencodeB]) await a!.send({ project_path: ops, reply_to: trio.thread_id, body: 'Here too.' });
   // Three hosts, one session each: the common run.
@@ -663,9 +663,35 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
   await expect(page.getByRole('heading', { level: 1, name: 'ops-console' })).toBeVisible();
   await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(3);
   await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-ags`)).toHaveAttribute('aria-label', '2 Claude Code sessions, 3 Codex sessions and 2 OpenCode sessions');
-  await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-agx`)).toHaveText(['×2', '×3', '×2']);
+  await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-ag`)).toHaveCount(3);
+  await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-agplus`)).toHaveText('+4');
+  await expect(page.locator(`.ib-row[data-thread-id="${plain.thread_id}"] .ib-agplus`)).toHaveCount(0);
+  // Each mark sits 6px or more on the one before it (the owner, 2026-10-31: "they should be overlapped"), every mark
+  // but the top one is cut around the mark on it, and "+N" follows the last one without touching it.
+  const overlaps = (id: string) =>
+    page.locator(`.ib-row[data-thread-id="${id}"] .ib-ags`).evaluate((run) => {
+      const marks = [...run.querySelectorAll('.ib-ag')];
+      const plus = run.querySelector(':scope > .ib-agplus')?.getBoundingClientRect() ?? null;
+      return {
+        marks: marks.map((m) => ({ left: m.getBoundingClientRect().left, right: m.getBoundingClientRect().right })),
+        cut: marks.map((m) => getComputedStyle(m).maskImage !== 'none'),
+        plusLeft: plus?.left ?? null,
+        last: run.lastElementChild!.classList.contains('ib-agplus'),
+      };
+    });
+  const expectOverlap = (run: Awaited<ReturnType<typeof overlaps>>, where: string, plus: boolean) => {
+    for (let i = 1; i < run.marks.length; i++) {
+      expect(run.marks[i - 1]!.right - run.marks[i]!.left, `${where}: mark ${i} over the one before it`).toBeGreaterThanOrEqual(6);
+      expect(run.marks[i]!.left, `${where}: mark ${i} after the one before it`).toBeGreaterThan(run.marks[i - 1]!.left);
+    }
+    expect(run.cut, `${where}: every mark under another is cut`).toEqual(run.marks.map((_, i) => i < run.marks.length - 1));
+    expect(run.last, `${where}: "+N" ends the run`).toBe(plus);
+    if (plus) expect(run.plusLeft!, `${where}: "+N" after the marks`).toBeGreaterThanOrEqual(run.marks.at(-1)!.right);
+  };
+  expectOverlap(await overlaps(trio.thread_id), 'three marks and "+4"', true);
+  expectOverlap(await overlaps(plain.thread_id), 'three bare marks', false);
   // At 1440 and 1000 alike: the marks' column is as wide as each row's run, on one line, and the title starts 6px
-  // after it, the bare marks' row and the "×N" row each after their own run (the owner, 2026-10-31: no blank column).
+  // after it, the bare marks' row and the "+N" row each after their own run (the owner, 2026-10-31: no blank column).
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(150);
@@ -677,8 +703,9 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
         const box = r.getBoundingClientRect();
         return {
           id: (r as HTMLElement).dataset.threadId,
-          drawn: marks.querySelectorAll(':scope > .ib-ag').length,
-          lines: new Set(parts.map((b) => Math.round(b.top))).size,
+          drawn: marks.querySelectorAll('.ib-ag').length,
+          // The run's parts share one centre line; a wrapped part would sit a whole line off it.
+          drift: Math.max(...parts.map((b) => (b.top + b.bottom) / 2)) - Math.min(...parts.map((b) => (b.top + b.bottom) / 2)),
           marksRight: Math.max(...parts.map((b) => b.right)),
           marksTop: Math.min(...parts.map((b) => b.top)),
           marksBottom: Math.max(...parts.map((b) => b.bottom)),
@@ -692,7 +719,7 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
     for (const r of rows.filter((row) => row.id !== solo.thread_id)) {
       const where = `row ${r.id} at ${width}`;
       expect(r.drawn, where).toBe(3);
-      expect(r.lines, `${where}: the run must not wrap with room for it`).toBe(1);
+      expect(r.drift, `${where}: the run must stay on one line`).toBeLessThanOrEqual(1);
       // Icon, small gap, title: the title 6px after this row's own marks, none spilling out of the row.
       expect(Math.abs(r.titleLeft - r.marksRight - 6), `${where}: the title 6px after the marks`).toBeLessThanOrEqual(0.5);
       expect(r.marksRight, `${where}: the marks leave their cell`).toBeLessThanOrEqual(r.fromRight + 0.5);
@@ -700,9 +727,9 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
       expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
     }
   }
-  // The narrowest desktop windows (780, 768: a list of about 530px), with and without the pin's column: the "×N" run
-  // wraps inside its track before the title goes, so every row keeps a title, its counts and time stay in line down
-  // the list, and nothing runs past the row.
+  // The narrowest desktop windows (780, 768: a list of about 530px), with and without the pin's column: the marks
+  // stay together ("+N" may drop under them), every row keeps a title, its counts and time stay in line down the
+  // list, and nothing runs past the row.
   const narrowRows = async (label: string) => {
     for (const width of [780, 768]) {
       await page.setViewportSize({ width, height: 900 });
@@ -717,6 +744,7 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
             inner: r.getBoundingClientRect().right - parseFloat(getComputedStyle(r).paddingRight),
             title: box('.ib-subj').width,
             spill: r.scrollWidth - r.clientWidth,
+            markLines: new Set([...r.querySelectorAll('.ib-ag')].map((m) => Math.round(m.getBoundingClientRect().top))).size,
             marksTop: Math.min(...[...r.querySelector('.ib-ags')!.children].map((c) => c.getBoundingClientRect().top)),
             marksBottom: Math.max(...[...r.querySelector('.ib-ags')!.children].map((c) => c.getBoundingClientRect().bottom)),
             rowTop: r.getBoundingClientRect().top,
@@ -732,6 +760,7 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
         expect(r.time, `${where}: the time runs past the row`).toBeLessThanOrEqual(r.inner + 0.5);
         expect(r.spill, `${where}: the row spills`).toBeLessThanOrEqual(0);
         expect(r.title, `${where}: the title is gone`).toBeGreaterThan(0);
+        expect(r.markLines, `${where}: the marks part`).toBe(1);
         expect(r.marksTop, where).toBeGreaterThanOrEqual(r.rowTop);
         expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
       }
@@ -768,6 +797,7 @@ test("one project's list: three agents with ×N or bare, on one line, and the ti
     const gap = await row.evaluate((r) => r.querySelector('.ib-p')!.getBoundingClientRect().left - r.querySelector('.ib-ags')!.getBoundingClientRect().right);
     expect(Math.abs(gap - 6), `row ${id}: the project 6px after three marks`).toBeLessThanOrEqual(0.5);
   }
+  expectOverlap(await overlaps(trio.thread_id), 'every project, three marks and "+4"', true);
 });
 
 // Before the restart, whose gap (the old Inbox gone, the new one not yet up)

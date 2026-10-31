@@ -836,7 +836,7 @@ export function InboxList(props: InboxListProps) {
   // open thread for every list (the column is 380px unless its edge was
   // dragged past the wide rows' width), and in the full list for every
   // project. One project's list keeps the wide row in a narrower list: its
-  // marks' track wraps the run between marks and the title keeps at least
+  // "+N" drops under its marks short of room and the title keeps at least
   // 24px, so its columns hold at the window's narrowest desktop widths.
   const twoLine = narrowList && (props.narrow || !props.filtered);
   // The full words on a wide row need a list of at least 1150px (FULL_WORDS_MIN_LIST_WIDTH); a narrower wide row
