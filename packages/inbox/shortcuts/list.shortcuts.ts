@@ -22,8 +22,8 @@ export const inboxListShortcuts = defineShortcutScope({
       displayOrder: 4,
     },
     rowMenu: {
-      // RowMenu.tsx takes it on a focused row (the context-menu key too).
-      description: 'Row menu',
+      // RowMenu.tsx takes it on a focused row, and the Board's CardMenu.tsx on a focused card (the context-menu key too).
+      description: 'Row or card menu',
       bindings: ['Shift+F10'],
       section: 'List',
       displayOrder: 7,

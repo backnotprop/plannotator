@@ -7,11 +7,14 @@
  * staying bold after the person opened it, a Start offered on a card already
  * sent, or a merged PR shown as open. The project filter: another project's
  * card leaking into the lanes or counts, the menu offering a project with no
- * card (or dropping the picked one), New card ignoring the filter.
+ * card (or dropping the picked one), New card ignoring the filter. The
+ * card's right-click menu: its words drifting from the Move menu's, a menu on
+ * a dropped card, a toast for a lane-to-lane move, or an Undo that sends a
+ * card somewhere other than where it was.
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
-import { boardCounts, boardLanes, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMessageBody, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread } from './model';
+import { boardCounts, boardLanes, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread, type CardMenuItem } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -114,6 +117,62 @@ test('the opened card’s foot: Send for a card nobody was asked about, Start fo
   expect(cardFoot(card('done', { column: 'shipped' })).primary).toBeNull();
   expect(columnChoices(card('x', { column: 'building' })).filter((c) => c.current).map((c) => c.column)).toEqual(['building']);
   expect(columnChoices(card('x')).map((c) => c.column)).toEqual(['backlog', 'designing', 'your_look', 'building', 'your_review', 'shipped', 'icebox']);
+});
+
+/** A card menu as its groups of labels, the card's own column marked with "*". */
+const menuWords = (groups: CardMenuItem[][]) => groups.map((group) => group.map((item) => (item.kind === 'column' && item.current ? `${item.label}*` : item.label)));
+
+test('a card’s right-click menu: Open thread when linked, the Move menu’s words in its order with the card’s column checked, then Drop…', () => {
+  // The words and order are the approved ones (approval "inbox-board-card-menu", layout A), pinned on purpose:
+  // the same as the opened card's Move menu, so a drift in either place fails here.
+  expect(menuWords(cardMenuItems(card('x', { column: 'building' }), 'msg_1'))).toEqual([
+    ['Open thread'],
+    ['Backlog', 'Designing', 'Your look', 'Building*', 'Your review'],
+    ['Shipped', 'Icebox'],
+    ['Drop…'],
+  ]);
+  expect(cardMenuItems(card('x', { column: 'building' }), 'msg_1')[0]).toEqual([{ kind: 'thread', threadId: 'msg_1', label: 'Open thread' }]);
+  // No linked thread: no Open thread (the click opens the card).
+  expect(menuWords(cardMenuItems(card('x'), null))[0]).toEqual(['Backlog*', 'Designing', 'Your look', 'Building', 'Your review']);
+  // A shipped card (the Shipped page): the same menu, Shipped checked.
+  expect(menuWords(cardMenuItems(card('x', { column: 'shipped' }), null))[1]).toEqual(['Shipped*', 'Icebox']);
+});
+
+test('an iced card’s menu restores to where it was (else Backlog), then Drop…; a dropped card has no menu', () => {
+  expect(menuWords(cardMenuItems(card('x', { column: 'icebox', aside_from: 'building' }), 'msg_1'))).toEqual([['Open thread'], ['Restore to Building'], ['Drop…']]);
+  expect(menuWords(cardMenuItems(card('x', { column: 'icebox' }), null))).toEqual([['Restore to Backlog'], ['Drop…']]);
+  expect(cardMenuItems(card('x', { column: 'dropped', aside_from: 'building' }), 'msg_1')).toEqual([]);
+});
+
+test('the toast after a menu move: only when the card leaves the lanes, and its Undo puts it back where it was', () => {
+  const building = card('x', { title: 'Slack bridge', column: 'building' });
+  expect(cardMenuToast(building, { ...building, column: 'icebox', aside_from: 'building' })).toEqual({ lead: 'Moved to Icebox', detail: '“Slack bridge”', undo: { op: 'restore' } });
+  // Shipped: Undo moves it back to the lane it came from (a restore is only for the Icebox and Dropped).
+  expect(cardMenuToast(building, { ...building, column: 'shipped' })).toEqual({ lead: 'Shipped', detail: '“Slack bridge”', undo: { op: 'move', column: 'building' } });
+  expect(cardMenuToast(building, { ...building, column: 'dropped', aside_from: 'building' })?.undo).toEqual({ op: 'restore' });
+  // Dropped from the Icebox: Undo puts it back on ice (a restore would skip the Icebox, to its old lane).
+  const iced = card('y', { column: 'icebox', aside_from: 'building' });
+  expect(cardMenuToast(iced, { ...iced, column: 'dropped' })?.undo).toEqual({ op: 'icebox' });
+  // A shipped card iced: Undo restores it to Shipped (the store kept it as where it was).
+  const shipped = card('z', { column: 'shipped' });
+  expect(cardMenuToast(shipped, { ...shipped, column: 'icebox', aside_from: 'shipped' })?.undo).toEqual({ op: 'restore' });
+  // The card is seen moving: lane to lane, back into a lane, or no move at all, no toast.
+  expect(cardMenuToast(building, { ...building, column: 'your_review' })).toBeNull();
+  expect(cardMenuToast(iced, { ...iced, column: 'building' })).toBeNull();
+  expect(cardMenuToast(shipped, { ...shipped, column: 'designing' })).toBeNull();
+  expect(cardMenuToast(building, building)).toBeNull();
+});
+
+test('a toast’s Undo runs only while the card is still where the menu put it', () => {
+  const shipped = card('x', { column: 'shipped', moved_at: '2026-10-20T12:00:00.000Z' });
+  // An agent only said something (no move): Undo still applies.
+  expect(cardUndoStillApplies(shipped, card('x', { column: 'shipped', moved_at: shipped.moved_at, heard_at: '2026-10-20T12:05:00.000Z' }))).toBe(true);
+  // An agent moved it on (Shipped to Your review): Undo must not pull it to its old lane.
+  expect(cardUndoStillApplies(shipped, { ...shipped, column: 'your_review', moved_at: '2026-10-20T12:01:00.000Z' })).toBe(false);
+  // Moved away and back to the same column since: a move happened, so the toast's move is not the last word.
+  expect(cardUndoStillApplies(shipped, { ...shipped, moved_at: '2026-10-20T12:02:00.000Z' })).toBe(false);
+  // Gone from the window's cards.
+  expect(cardUndoStillApplies(shipped, null)).toBe(false);
 });
 
 test('the age is short on the card and whole words for a screen reader', () => {

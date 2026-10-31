@@ -46,7 +46,13 @@ export interface CardPanelProps {
   onShip: () => void;
   onIcebox: () => void;
   onRestore: () => unknown;
-  onDrop: (reason: string | null) => void;
+  /** `fromMenu`: the reason field was opened by Drop… on the card's right-click menu (and not closed since). */
+  onDrop: (reason: string | null, fromMenu: boolean) => void;
+  /**
+   * Drop… from the card's right-click menu, a new number each time (0: never): the reason field opens and
+   * takes focus (over the title, when the card opens for it).
+   */
+  dropAsk?: number;
   onSend: () => void;
   /** Start: tell the card's agent (or a live session in its project) to begin; an error to say, or null. */
   onStart: () => Promise<string | null>;
@@ -75,12 +81,28 @@ export interface CardPanelProps {
 export function CardPanel(props: CardPanelProps) {
   const { card, phone } = props;
   const headingId = useId();
-  const [dropping, setDropping] = useState(false);
+  const [dropping, setDropping] = useState(!!props.dropAsk);
+  /** The reason field open now came from the right-click menu's Drop…. */
+  const dropFromMenu = useRef(!!props.dropAsk);
   const [reason, setReason] = useState('');
   const [said, setSaid] = useState('');
   const heading = useRef<HTMLHeadingElement>(null);
-  // Focus goes into the panel when a card opens (another card: the new one's title).
-  useEffect(() => heading.current?.focus(), [card.id]);
+  const reasonField = useRef<HTMLInputElement>(null);
+  // Focus goes into the panel when a card opens (another card: the new one's title), unless it opened for Drop….
+  useEffect(() => {
+    if (!dropFromMenu.current) heading.current?.focus();
+  }, [card.id]);
+  // Drop… from the right-click menu on the card already open: its reason field opens (or is already) and takes focus.
+  useEffect(() => {
+    if (!props.dropAsk) return;
+    dropFromMenu.current = true;
+    setDropping(true);
+    reasonField.current?.focus();
+  }, [props.dropAsk]);
+  const stopDropping = () => {
+    dropFromMenu.current = false;
+    setDropping(false);
+  };
   // The card's words (You, notes, what was said) render as a thread message's
   // do: refs and URLs link, with hover cards on issue and PR links.
   const body = useRef<HTMLDivElement>(null);
@@ -264,8 +286,9 @@ export function CardPanel(props: CardPanelProps) {
           className="ib-crdp-foot ib-crdp-drop"
           onSubmit={(event) => {
             event.preventDefault();
-            setDropping(false);
-            props.onDrop(reason.replace(/\s+/g, ' ').trim() || null);
+            const fromMenu = dropFromMenu.current;
+            stopDropping();
+            props.onDrop(reason.replace(/\s+/g, ' ').trim() || null, fromMenu);
           }}
         >
           <label htmlFor={`${headingId}-reason`} dir="auto">
@@ -278,19 +301,20 @@ export function CardPanel(props: CardPanelProps) {
             value={reason}
             maxLength={INBOX_CARD_REASON_MAX}
             onChange={(event) => setReason(event.target.value)}
+            ref={reasonField}
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault();
                 event.stopPropagation();
-                setDropping(false);
+                stopDropping();
               }
             }}
             data-drop-reason=""
           />
           <div className="ib-crdp-dropacts">
-            <button type="button" className="ib-btn ib-ghost" onClick={() => setDropping(false)}>
+            <button type="button" className="ib-btn ib-ghost" onClick={stopDropping}>
               Cancel
             </button>
             <button type="submit" className="ib-btn ib-danger" data-drop-confirm="">
@@ -336,7 +360,13 @@ export function CardPanel(props: CardPanelProps) {
             </button>
           )}
           {foot.drop && (
-            <button type="button" className="ib-btn ib-ghost" onClick={() => setDropping(true)} data-card-drop="">
+            <button type="button" className="ib-btn ib-ghost" onClick={() => {
+                // The foot's own Drop…: a move from the opened card, never the menu's (no toast).
+                dropFromMenu.current = false;
+                setDropping(true);
+              }}
+              data-card-drop=""
+            >
               <Icon name="xCircle" size={15} />
               Drop…
             </button>

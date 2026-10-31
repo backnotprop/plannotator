@@ -3997,6 +3997,8 @@ function Inbox() {
           go({ page: 'board', project, thread: null, board: route.board ?? 'lanes', card: open && (project === null || open.project_id === project) ? open.id : null });
         }}
         onMove={moveCard}
+        // A card that leaves the lanes from its right-click menu: the one toast, with Undo (`Z`).
+        onToast={(next) => (next ? showToast(next) : dismissToast())}
         onChanged={(card) => {
           if (card) {
             handleCard(card.id);
