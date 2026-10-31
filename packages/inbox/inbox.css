@@ -63,7 +63,8 @@
   --ib-soft-segmented: ;         /* Settings' Light / Dark / System control: a faint well, quiet options (today's: the muted well with a border) */
   --ib-soft-groups: ;            /* Settings' groups, What's new's skipped releases and a dialog's command box as raised cards (today's: outlined cards) */
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.pn-inbox.light {
   --ib-soft-nav: initial;
   --ib-soft-quiet: initial;
 }
@@ -303,7 +304,8 @@
     --ib-badge-hold-fg-soft: color-mix(in oklab, var(--warning) 45%, var(--ib-card-ink));
   }
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.pn-inbox.light {
   --ib-badge-act-bg-s: var(--ib-soft-badges) color-mix(in oklch, var(--foreground) 8%, transparent);
   --ib-shadow-ink: var(--inbox-shadow-ink, var(--foreground));
   --ib-ground-soft: var(--inbox-ground, color-mix(in oklch, var(--muted) 55%, var(--background)));
@@ -324,7 +326,8 @@
     --ib-ground-soft: var(--inbox-ground, color-mix(in oklch, color-mix(in oklch, var(--background) 82%, var(--ib-shadow-ink)) 35%, oklch(from var(--card) calc(l - 0.08) c h)));
     --ib-raise: var(--inbox-raise, color-mix(in oklch, color-mix(in oklch, var(--muted) 40%, var(--card)) 35%, oklch(from var(--card) calc(l - sign(l - 0.6) * 0.055) c h)));
   }
-  :root.light .pn-inbox {
+  :root.light .pn-inbox,
+  .pn-inbox.light {
     --ib-ground-soft: var(--inbox-ground, color-mix(in oklch, color-mix(in oklch, var(--muted) 55%, var(--background)) 35%, oklch(from var(--card) calc(l - 0.08) c h)));
   }
 }
@@ -332,7 +335,8 @@
    under 1.035:1, listed by softGround.test.ts): the muted surface mixed into the background, so the panes have
    a ground to float on. Still the palette's own tokens, no new hue. */
 :root:is(.theme-synthwave-84, .theme-terminal) .pn-inbox,
-:root.light:is(.theme-neutral, .theme-simple, .theme-caffeine) .pn-inbox {
+:root.light:is(.theme-neutral, .theme-simple, .theme-caffeine) .pn-inbox,
+.pn-inbox.light:is(.theme-neutral, .theme-simple, .theme-caffeine) {
   --ib-ground-panes: color-mix(in oklch, var(--muted) 55%, var(--background));
 }
 /* ui's drawing inside the window (message bodies, the question card, attached documents, panels) follows the
@@ -4662,7 +4666,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   --ib-wait-bg: color-mix(in oklab, var(--primary) 20%, transparent);
   --ib-wait-band: color-mix(in oklab, var(--primary) 11%, var(--card));
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.pn-inbox.light {
   --ib-wait-fg: color-mix(in oklab, var(--primary) 74%, var(--foreground));
   --ib-wait-bg: color-mix(in oklab, var(--primary) 12%, transparent);
   --ib-wait-band: color-mix(in oklab, var(--primary) 8%, var(--card));
@@ -5462,7 +5467,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   --ib-ref-closed: #f85149;
   --ib-ref-neutral: #9198a1;
 }
-:root.light .pn-inbox {
+:root.light .pn-inbox,
+.pn-inbox.light {
   --ib-ref-open: #1a7f37;
   --ib-ref-merged: #8250df;
   --ib-ref-closed: #cf222e;
@@ -6110,9 +6116,9 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
   .pn-inbox:has(.ib-fcomp) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
 }
 
-/* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): three checkboxes in the list's
+/* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): four checkboxes in the list's
    ⋮ menu, all off by default. Every rule here needs its option's class on the list column (.ib-lk-pill,
-   .ib-lk-compact, .ib-lk-noagents), so with all three off none applies. */
+   .ib-lk-compact, .ib-lk-noagents, .ib-lk-small), so with all four off none applies. */
 /* Highlight thread subject: the row's title in the thread chip's pill (.ib-key: the open thread's pill, its face,
    fill and radius), its text at the title's own size, one line, cut with "…". The text takes the pill's weight and
    colour (500, the chip's grey) only where the row sets none of its own, which is a read row; an unread row keeps its
@@ -6154,14 +6160,35 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 @media (max-width: 360px) {
   .ib-lk-compact { --ib-lk-floor: 72px; }
 }
+/* Smaller thread names (the owner, 2026-10-31): an unread row's name back at the read size, still bold (600), the
+   look before "inbox-row-unread-bigger": 13.5px beside a thread, 14px on a phone. A read row, a Sent row and the wide
+   one-line row are the same either way. In its pill too (the pill's text is the same .ib-title / .ib-m2). */
+.ib-lk-small .ib-nrow.ib-u:not(.ib-sent) .ib-title { font-size: var(--ib-fs-13-5, 13.5px); letter-spacing: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-lk-small .ib-mrow.ib-u:not(.ib-sent) .ib-m2 { font-size: var(--ib-fs-14, 14px); letter-spacing: 0; }
+}
 
 /* The one-time list options dialog (approval "inbox-list-options-intro"; components/ListLookIntro.tsx): the Board
    intro's width and well. The picture is the person's own rows in a column the list's width, centred, its bottom
-   fading out so no row is ever cut mid-line; the words, the three switches stacked, the actions. */
-dialog.ib-dlg.ib-lo { width: min(560px, calc(100vw - 32px)); }
+   fading out so no row is ever cut mid-line; the words, the four switches stacked, the actions.
+   Light for everyone (the owner, 2026-10-31: "contrast is really poor ... like light mode for all users"): the dialog
+   is its own light scope, `pn-inbox theme-<the person's light palette> light`, so the palette's light tokens and the
+   window's tokens derived from them (the .pn-inbox blocks, and the :root.light ones, which also match
+   .pn-inbox.light) are worked out again inside it. Only the dialog: the window behind keeps the person's mode. */
+dialog.ib-dlg.ib-lo { width: min(560px, calc(100vw - 32px)); color-scheme: light; }
 .ib-lo .ib-dlg-in { padding: 0; }
-.ib-lo { --lo-well: color-mix(in oklch, var(--background) 70%, var(--card)); }
-:root.light .ib-lo { --lo-well: color-mix(in oklch, var(--muted) 48%, var(--card)); }
+.ib-lo { --lo-well: color-mix(in oklch, var(--muted) 48%, var(--card)); }
+/* The window's rules for a list hidden under a thread (a phone, or a stacked window, with a thread open) reach the
+   picture's column too, which is a list column inside the window: it is always drawn. */
+dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: auto; visibility: visible; }
+/* A thread name in the picture stays on one line, cut with "…" (the owner: no long names in the examples); the
+   real list still wraps it. A name in its pill (Highlight) is one line already. */
+.ib-lo-frame :is(.ib-nrow .ib-l2 > .ib-title, .ib-mrow > .ib-m2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-lo-frame :is(.ib-nrow .ib-l2, .ib-mrow) > .ib-rowkey { max-width: 100%; }
+/* The switches, light: the off track's outline and its thumb in the muted text (3:1 and more against the dialog and
+   the track, WCAG 1.4.11), so an off switch reads as a switch and as off; on is the window's own. */
+.pn-inbox .ib-lo .ib-sw[aria-checked="false"] { border-color: color-mix(in oklch, var(--muted-foreground) 75%, var(--card)); }
+.ib-lo .ib-sw[aria-checked="false"]::after { background: color-mix(in oklch, var(--muted-foreground) 85%, var(--card)); box-shadow: none; }
 .ib-lo-art { background: var(--lo-well); padding: 20px 18px 0; }
 .ib-lo-frame { display: flex; width: 380px; max-width: 100%; height: 380px; margin: 0 auto; overflow: hidden; background: var(--card); border-radius: 10px 10px 0 0; box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 64px), transparent); }
 .ib-lo-frame .ib-lo-list { flex: 1; width: auto; height: 100%; border-right: 0; }

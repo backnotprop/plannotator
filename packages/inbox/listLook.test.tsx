@@ -1,12 +1,14 @@
 /**
- * The list's look options (approval "inbox-list-options", listLook.ts): three checkboxes in the list's ⋮ menu,
- * "Highlight thread subject", "Compact rows" and "Hide agent icons", off by default and remembered per browser.
+ * The list's look options (approval "inbox-list-options", listLook.ts): four checkboxes in the list's ⋮ menu,
+ * "Highlight thread subject", "Compact rows", "Hide agent icons" and "Smaller thread names", off by default and
+ * remembered per browser.
  * What this catches: an option on in a browser that never chose it (today's list must stay today's); a choice
  * forgotten on the next load, or one that leaves a cookie behind when turned off; a menu item a screen reader does
  * not hear as a checkbox (role and aria-checked) or that closes the menu; a compact row that keeps the title on its
  * own line, or loses the time; a highlighted title outside its pill on any row shape; the agents' words lost to a
- * screen reader when their icons are hidden; the onboarding tour drawing the person's saved look. Geometry (the project giving way first, the time never) is proved in
- * Chromium by tests/e2e/inbox-list-options.spec.ts.
+ * screen reader when their icons are hidden; smaller names that change the rows' markup; the onboarding tour drawing
+ * the person's saved look. Geometry (the project giving way first, the time never, an unread name's size with
+ * Smaller thread names) is proved in Chromium by tests/e2e/inbox-list-options.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -159,21 +161,24 @@ function part(c: Element): string {
 
 describe('the remembered choice', () => {
   test('a browser that never chose: every option off', () => {
-    expect(readListLook()).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(readListLook()).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
   });
 
   test('each option is its own cookie, "1" while on, removed when turned off', () => {
     writeListLookOption('compact', true);
     writeListLookOption('hideAgents', true);
-    expect(readListLook()).toEqual({ highlight: false, compact: true, hideAgents: true });
+    writeListLookOption('smallNames', true);
+    expect(readListLook()).toEqual({ highlight: false, compact: true, hideAgents: true, smallNames: true });
     expect([...stored.entries()]).toEqual([
       [LIST_LOOK_COOKIES.compact, '1'],
       [LIST_LOOK_COOKIES.hideAgents, '1'],
+      [LIST_LOOK_COOKIES.smallNames, '1'],
     ]);
     writeListLookOption('compact', false);
     writeListLookOption('hideAgents', false);
+    writeListLookOption('smallNames', false);
     expect(stored.size).toBe(0);
-    expect(readListLook()).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(readListLook()).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
   });
 
   test('a cookie with anything but "1" is off', () => {
@@ -183,7 +188,7 @@ describe('the remembered choice', () => {
 });
 
 describe.if(hasDom)('the ⋮ menu', () => {
-  test('three checkboxes after Refresh, unchecked by default, each a menuitemcheckbox', async () => {
+  test('four checkboxes after Refresh, unchecked by default, each a menuitemcheckbox', async () => {
     const el = render('narrow');
     await openMenu(el);
     const popup = document.querySelector<HTMLElement>('[data-tidy-menu-popup]')!;
@@ -195,6 +200,7 @@ describe.if(hasDom)('the ⋮ menu', () => {
       ['menuitemcheckbox', 'Highlight thread subject', 'false'],
       ['menuitemcheckbox', 'Compact rows', 'false'],
       ['menuitemcheckbox', 'Hide agent icons', 'false'],
+      ['menuitemcheckbox', 'Smaller thread names', 'false'],
     ]);
     expect(lookClasses(el)).toEqual([]);
   });
@@ -210,18 +216,20 @@ describe.if(hasDom)('the ⋮ menu', () => {
     expect(lookClasses(el)).toEqual(['ib-lk-compact']);
     act(() => item('highlight').click());
     act(() => item('hideAgents').click());
+    act(() => item('smallNames').click());
     await settle();
-    expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents']);
+    expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents', 'ib-lk-small']);
 
     const again = remount('narrow');
-    expect(lookClasses(again)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents']);
+    expect(lookClasses(again)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents', 'ib-lk-small']);
     await openMenu(again);
-    expect(['highlight', 'compact', 'hideAgents'].map((k) => item(k).getAttribute('aria-checked'))).toEqual(['true', 'true', 'true']);
+    expect(['highlight', 'compact', 'hideAgents', 'smallNames'].map((k) => item(k).getAttribute('aria-checked'))).toEqual(['true', 'true', 'true', 'true']);
 
     // Turned off again: the list is today's and no cookie is left.
     act(() => item('highlight').click());
     act(() => item('compact').click());
     act(() => item('hideAgents').click());
+    act(() => item('smallNames').click());
     await settle();
     expect(lookClasses(again)).toEqual([]);
     expect(stored.size).toBe(0);
@@ -280,11 +288,26 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect(el.querySelector('.ib-nrow[data-thread-id="msg_unread"] .ib-atiles')!.getAttribute('aria-label')).toBe('Claude Code');
     expect(narrowLines(el, 'msg_unread')).toEqual({ 'ib-l1': ['from', 'time'], 'ib-l2': ['title(Name of msg_unread)'], 'ib-l3': ['ib-pv', 'ib-c ib-qn'] });
   });
+
+  // The size itself is Chromium's layout: the e2e measures it. Here: only the column's class, the rows untouched.
+  test('smaller thread names: the column\'s class only, the rows\' markup as today on every shape', () => {
+    // React's generated ids differ per mount; everything else must match.
+    const markup = (el: HTMLElement) => el.innerHTML.replace(/_r_[a-z0-9]+_/g, 'id');
+    const today = { narrow: markup(render('narrow')), phone: markup(remount('phone')) };
+    stored.set(LIST_LOOK_COOKIES.smallNames, '1');
+    const el = remount('narrow');
+    expect(lookClasses(el)).toEqual(['ib-lk-small']);
+    column(el).classList.remove('ib-lk-small');
+    expect(markup(el)).toBe(today.narrow);
+    const phone = remount('phone');
+    column(phone).classList.remove('ib-lk-small');
+    expect(markup(phone)).toBe(today.phone);
+  });
 });
 
 describe.if(hasDom)('the onboarding tour', () => {
   test("ignores the saved options: its list is today's, and the person's choice stays", () => {
-    for (const key of ['highlight', 'compact', 'hideAgents'] as const) writeListLookOption(key, true);
+    for (const key of ['highlight', 'compact', 'hideAgents', 'smallNames'] as const) writeListLookOption(key, true);
     const fixture = parseTourFixture(JSON.parse(readFileSync(join(import.meta.dir, 'tour/content/fixture.json'), 'utf8')));
     const real = fixture.threads.find((t) => t.id === TOUR_THREAD)!.real_answer!;
     host = document.createElement('div');
@@ -311,6 +334,6 @@ describe.if(hasDom)('the onboarding tour', () => {
     expect(host.querySelector('.ib-listcol')).not.toBeNull();
     expect(lookClasses(host)).toEqual([]);
     expect(host.querySelector('.ib-rowkey')).toBeNull();
-    expect(readListLook()).toEqual({ highlight: true, compact: true, hideAgents: true });
+    expect(readListLook()).toEqual({ highlight: true, compact: true, hideAgents: true, smallNames: true });
   });
 });

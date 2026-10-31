@@ -3,7 +3,8 @@
  * opens at the list's look (the defaults when the ⋮ menu was never used); the preview turns the options on in turn
  * while the switches are inert (no pointer, no focus, not announced); any key ends the preview at once, back to where
  * it opened; none under reduced motion; Done hands over the switches as they stand; Escape and Keep as it is hand
- * over nothing; Tab stays inside the dialog and never lands on the picture's rows.
+ * over nothing; Tab stays inside the dialog and never lands on the picture's rows; the dialog is a light scope on the
+ * person's light palette whatever the window's mode (the owner, 2026-10-31), and only the dialog.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -15,7 +16,7 @@ import { LIST_LOOK_OFF, type ListLook } from './listLook';
 import type { ListIntroGroup } from './components/ListLookIntro';
 
 const hasDom = typeof document !== 'undefined';
-const { ListLookIntro } = (hasDom ? await import('./components/ListLookIntro') : {}) as typeof import('./components/ListLookIntro');
+const { ListLookIntro, lightScope } = (hasDom ? await import('./components/ListLookIntro') : {}) as typeof import('./components/ListLookIntro');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -93,33 +94,37 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
   test('the preview: options on in turn, switches inert meanwhile; a key ends it at once, back to the defaults', async () => {
     motion(false);
     const { dialog } = render();
-    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
     // The switches are out of reach and out of the accessibility tree while it plays.
     expect(group(dialog).hasAttribute('inert')).toBe(true);
     await wait(450);
-    expect(checked(dialog)).toEqual({ highlight: true, compact: false, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: true, compact: false, hideAgents: false, smallNames: false });
     expect(preview(dialog).classList.contains('ib-lk-pill')).toBe(true);
     await wait(450);
-    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: false, smallNames: false });
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
     });
-    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
     expect(group(dialog).hasAttribute('inert')).toBe(false);
     expect([...preview(dialog).classList].filter((c) => c.startsWith('ib-lk-'))).toEqual([]);
     // Nothing plays on after it: the rest of the steps were cancelled.
     await wait(1700);
-    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
   });
 
-  test('left alone, the preview ends with every option off and the switches usable', async () => {
+  test('left alone, the preview turns on all four, then ends with every option off and the switches usable', async () => {
     motion(false);
     const { dialog } = render();
     await wait(1450);
-    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: true });
+    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: true, smallNames: false });
     expect(preview(dialog).classList.contains('ib-lk-noagents')).toBe(true);
+    await wait(500);
+    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: true, smallNames: true });
+    expect(preview(dialog).classList.contains('ib-lk-small')).toBe(true);
+    expect(group(dialog).hasAttribute('inert')).toBe(true);
     await wait(700);
-    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
     expect(group(dialog).hasAttribute('inert')).toBe(false);
   });
 
@@ -128,11 +133,11 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
     const { dialog, seen } = render();
     expect(group(dialog).hasAttribute('inert')).toBe(false);
     await wait(450);
-    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
     act(() => (dialog.querySelector('[data-list-intro-option="compact"]') as HTMLElement).click());
     expect(preview(dialog).classList.contains('ib-lk-compact')).toBe(true);
     act(() => (dialog.querySelector('[data-list-intro-done]') as HTMLElement).click());
-    expect(seen).toEqual([{ highlight: false, compact: true, hideAgents: false }]);
+    expect(seen).toEqual([{ highlight: false, compact: true, hideAgents: false, smallNames: false }]);
   });
 
   test('Tab stays inside the dialog and skips the picture: Done to the first switch, and back with Shift+Tab', () => {
@@ -156,21 +161,34 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
     tab();
     expect(group(dialog).hasAttribute('inert')).toBe(false);
     expect(document.activeElement).toBe(sw(dialog, 'highlight'));
-    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
   });
 
   test('options already set from the ⋮ menu: it opens at them, the preview returns to them, Done keeps them', async () => {
     motion(false);
-    const { dialog, seen } = render({ highlight: false, compact: true, hideAgents: false });
-    expect(checked(dialog)).toEqual({ highlight: false, compact: true, hideAgents: false });
+    const { dialog, seen } = render({ highlight: false, compact: true, hideAgents: false, smallNames: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: true, hideAgents: false, smallNames: false });
     await wait(450);
-    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: false, smallNames: false });
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
     });
-    expect(checked(dialog)).toEqual({ highlight: false, compact: true, hideAgents: false });
+    expect(checked(dialog)).toEqual({ highlight: false, compact: true, hideAgents: false, smallNames: false });
     act(() => doneButton(dialog).click());
-    expect(seen).toEqual([{ highlight: false, compact: true, hideAgents: false }]);
+    expect(seen).toEqual([{ highlight: false, compact: true, hideAgents: false, smallNames: false }]);
+  });
+
+  test('light for everyone: the dialog is a light scope on the light palette, the window keeps its mode', () => {
+    motion(true);
+    document.documentElement.classList.remove('light');
+    const { dialog } = render();
+    // A scope of the window (its tokens worked out again), the palette's light half, `light`.
+    for (const cls of ['pn-inbox', 'theme-plannotator', 'light', 'ib-lo']) expect(dialog.classList.contains(cls)).toBe(true);
+    expect(document.documentElement.classList.contains('light')).toBe(false);
+    expect(host!.classList.contains('light')).toBe(false);
+    // A palette with no light half falls back to Plannotator's own; a light-only one is used.
+    expect(lightScope('kanagawa-lotus')).toBe('pn-inbox theme-kanagawa-lotus light');
+    expect(lightScope('andromeeda')).toBe('pn-inbox theme-plannotator light');
   });
 
   test('Escape and Keep as it is hand over nothing', () => {

@@ -1,10 +1,12 @@
 /**
- * The thread list's look options (approval "inbox-list-options", 2026-10-30): three checkboxes in the list's ⋮
+ * The thread list's look options (approval "inbox-list-options", 2026-10-30): four checkboxes in the list's ⋮
  * menu, under Tidy and Refresh. All are off by default, so the list is today's until someone turns one on.
  *
  * - Highlight thread subject: the row's title sits in the thread chip's grey pill (`.ib-key`), cut to one line.
  * - Compact rows: two lines instead of three (agents, project, title and time; then the preview).
  * - Hide agent icons: no agents' marks on any row (a screen reader still hears who).
+ * - Smaller thread names (the owner, 2026-10-31): an unread row's name at the read size (13.5 px beside a thread,
+ *   14 px on a phone), still bold, instead of the bigger unread size of "inbox-row-unread-bigger".
  *
  * Each choice is remembered per browser in a cookie, like the Inbox's other window-only layout choices (the
  * sidebar, the list width, the file view): a cookie ignores the port, so it holds when the Inbox comes back on
@@ -18,16 +20,18 @@ export interface ListLook {
   highlight: boolean;
   compact: boolean;
   hideAgents: boolean;
+  smallNames: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
 
-export const LIST_LOOK_OFF: ListLook = { highlight: false, compact: false, hideAgents: false };
+export const LIST_LOOK_OFF: ListLook = { highlight: false, compact: false, hideAgents: false, smallNames: false };
 
 export const LIST_LOOK_COOKIES: Readonly<Record<ListLookKey, string>> = {
   highlight: 'plannotator-inbox-list-highlight',
   compact: 'plannotator-inbox-list-compact',
   hideAgents: 'plannotator-inbox-list-hide-agents',
+  smallNames: 'plannotator-inbox-list-small-names',
 };
 
 /** The ⋮ menu's items, in order: the key, the label and the item's icon. */
@@ -35,6 +39,7 @@ export const LIST_LOOK_OPTIONS: ReadonlyArray<{ key: ListLookKey; label: string;
   { key: 'highlight', label: 'Highlight thread subject', icon: 'pen' },
   { key: 'compact', label: 'Compact rows', icon: 'contents' },
   { key: 'hideAgents', label: 'Hide agent icons', icon: 'eyeOff' },
+  { key: 'smallNames', label: 'Smaller thread names', icon: 'collapse' },
 ];
 
 /** The remembered look; anything but "1" (or no cookie) is off. */
@@ -43,6 +48,7 @@ export function readListLook(): ListLook {
     highlight: storage.getItem(LIST_LOOK_COOKIES.highlight) === '1',
     compact: storage.getItem(LIST_LOOK_COOKIES.compact) === '1',
     hideAgents: storage.getItem(LIST_LOOK_COOKIES.hideAgents) === '1',
+    smallNames: storage.getItem(LIST_LOOK_COOKIES.smallNames) === '1',
   };
 }
 
@@ -71,7 +77,7 @@ export function writeListLook(look: ListLook): void {
 
 /** The list column's classes for the look: none when every option is off. */
 export function listLookClasses(look: ListLook): string {
-  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}`;
+  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}`;
 }
 
 /**
@@ -85,7 +91,7 @@ export function useListLook(remember = true): [ListLook, (key: ListLookKey, on: 
     if (!remember) return;
     const reread = () => setLook((current) => {
       const next = readListLook();
-      return current.highlight === next.highlight && current.compact === next.compact && current.hideAgents === next.hideAgents ? current : next;
+      return LIST_LOOK_OPTIONS.every((option) => current[option.key] === next[option.key]) ? current : next;
     });
     lookListeners.add(reread);
     return () => {
