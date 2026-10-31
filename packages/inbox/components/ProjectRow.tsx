@@ -1,10 +1,12 @@
-import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactElement, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import { INBOX_PROJECT_NAME_MAX } from '@plannotator/core/inbox-types';
 import type { ProjectFolder } from '../api';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
+import { projectNameMatches } from '../projectCombine';
+import type { LabeledProject } from '../projectLabels';
 import type { ProjectAction } from '../projectMenu';
 import { ProjectTipText, Tip } from './Tip';
 
@@ -33,6 +35,10 @@ export interface ProjectRowProps {
   onRename?: (name: string | null) => Promise<boolean>;
   /** Says a line in the window's live region (the field's refusals: an empty or too long name). */
   announce?: (text: string) => void;
+  /** This machine's other projects: a typed name that is one of theirs asks to combine (`projectNameMatches`). */
+  others?: readonly LabeledProject[];
+  /** The warning's Combine: this project goes into `into`. Resolves true once the list shows it. Absent: no warning. */
+  onCombine?: (into: LabeledProject) => Promise<boolean>;
 }
 
 /**
@@ -118,6 +124,15 @@ export function ProjectRow(props: ProjectRowProps) {
         name={project.name}
         folder={folderName(project.root)}
         announce={props.announce}
+        others={props.others ?? []}
+        onCombine={
+          props.onCombine &&
+          (async (into) => {
+            const done = await props.onCombine!(into);
+            if (done) doneRenaming(true);
+            return done;
+          })
+        }
         onCancel={doneRenaming}
         onSave={async (name) => {
           const saved = await onRename(name);
@@ -232,17 +247,25 @@ function folderName(root: string): string {
  * went (the reply box, search); leaving the window (switching apps) keeps the field. While the save is on its
  * way the field stays, read only; a refused save leaves it open (the window's toast says why). The cap
  * counts characters (code points) as the server does, so an emoji name is not cut at half.
+ *
+ * A typed name that is another project's asks instead of making two projects with one name
+ * (approval "project-combine"): one line under the field, Cancel and Combine, no Keep both. Enter combines and
+ * Escape cancels. A name several projects answer to ("acme", two clones) offers one button for each, and
+ * Enter leaves the choice to the person.
  */
 function ProjectNameField(props: {
   name: string;
   folder: string;
   announce?: (text: string) => void;
+  others: readonly LabeledProject[];
+  onCombine?: (into: LabeledProject) => Promise<boolean>;
   onSave: (name: string) => Promise<boolean>;
   onCancel: (refocus: boolean) => void;
 }) {
   const [value, setValue] = useState(props.name);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   // Enter or Escape closed the field: a blur as it goes is not "leaving the field".
   const closing = useRef(false);
@@ -253,6 +276,17 @@ function ProjectNameField(props: {
     field.focus();
     field.select();
   }, []);
+  const typed = value.replace(/\s+/g, ' ').trim();
+  const matches = props.onCombine && typed !== '' && typed !== props.name ? projectNameMatches(typed, props.others) : [];
+  const warning =
+    matches.length === 0
+      ? null
+      : matches.length === 1
+        ? `${matches[0]!.name} already exists. Enter combines them, Escape cancels.`
+        : `${typed} matches ${formatCount(matches.length)} projects. Pick one to combine with, or press Escape to cancel.`;
+  useEffect(() => {
+    if (warning) props.announce?.(warning);
+  }, [warning]);
   const refuse = (why: string) => {
     setRefused(why);
     props.announce?.(why);
@@ -261,21 +295,49 @@ function ProjectNameField(props: {
     closing.current = true;
     props.onCancel(refocus);
   };
-  const save = async () => {
-    const name = value.replace(/\s+/g, ' ').trim();
-    if (name === '') return refuse('A name cannot be empty.');
-    if ([...name].length > INBOX_PROJECT_NAME_MAX) return refuse(`A name can be at most ${INBOX_PROJECT_NAME_MAX} characters.`);
-    if (name === props.name) return close(true);
+  const combine = async (into: LabeledProject) => {
     setBusy(true);
     closing.current = true;
-    if (!(await props.onSave(name))) {
+    if (!(await props.onCombine?.(into))) {
       closing.current = false;
       setBusy(false);
       input.current?.focus();
     }
   };
+  const save = async () => {
+    if (typed === '') return refuse('A name cannot be empty.');
+    if ([...typed].length > INBOX_PROJECT_NAME_MAX) return refuse(`A name can be at most ${INBOX_PROJECT_NAME_MAX} characters.`);
+    if (typed === props.name) return close(true);
+    if (matches.length === 1) return combine(matches[0]!);
+    if (warning) return props.announce?.(warning);
+    setBusy(true);
+    closing.current = true;
+    if (!(await props.onSave(typed))) {
+      closing.current = false;
+      setBusy(false);
+      input.current?.focus();
+    }
+  };
+  /** Keeps the field's focus: a press on Cancel or Combine is not "leaving the field". */
+  const stayFocused = (event: MouseEvent) => event.preventDefault();
   return (
-    <>
+    <div
+      ref={box}
+      onBlur={(event) => {
+        // Tab from the field to its buttons stays; anywhere else is leaving.
+        if (box.current?.contains(event.relatedTarget as Node | null)) return;
+        // The window lost focus (another app): the field is still here when the person comes back.
+        if (busy || closing.current || !document.hasFocus()) return;
+        close(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return;
+        // The field's own Escape: nothing above it (the phone's sheet, the list) takes this press.
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busy) close(true);
+      }}
+    >
       <input
         ref={input}
         type="text"
@@ -295,28 +357,50 @@ function ProjectNameField(props: {
           setRefused(null);
           setValue(event.target.value);
         }}
-        onBlur={() => {
-          // The window lost focus (another app): the field is still here when the person comes back.
-          if (busy || closing.current || !document.hasFocus()) return;
-          close(false);
-        }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
             event.preventDefault();
             if (!busy) void save();
-          } else if (event.key === 'Escape') {
-            // The field's own Escape: nothing above it (the phone's sheet, the list) takes this press.
-            event.preventDefault();
-            event.stopPropagation();
-            if (!busy) close(true);
           }
         }}
         data-project-name-field=""
       />
+      {matches.length > 0 && (
+        <div className="ib-proj-clash" data-project-clash={matches.map((match) => match.id).join(' ')}>
+          <span>
+            {matches.length === 1 ? (
+              <>
+                <b dir="auto">{matches[0]!.name}</b> already exists. Combine them?
+              </>
+            ) : (
+              <>
+                <b dir="auto">{typed}</b> matches {formatCount(matches.length)} projects. Combine with one?
+              </>
+            )}
+          </span>
+          <button type="button" className="ib-btn ib-sm" disabled={busy} onMouseDown={stayFocused} onClick={() => close(true)} data-project-combine-cancel="">
+            Cancel
+          </button>
+          {matches.length === 1 ? (
+            <button type="button" className="ib-btn ib-pri ib-sm" disabled={busy} onMouseDown={stayFocused} onClick={() => void combine(matches[0]!)} data-project-combine={matches[0]!.id}>
+              Combine
+            </button>
+          ) : (
+            matches.map((match) => (
+              <button key={match.id} type="button" className="ib-btn ib-sm" disabled={busy} onMouseDown={stayFocused} onClick={() => void combine(match)} data-project-combine={match.id}>
+                <span className="ib-name" dir="auto">
+                  {match.name}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
       <span id={hint} hidden>
-        {refused ? `${refused} ` : ''}Enter to save, Escape to cancel.
+        {refused ? `${refused} ` : ''}
+        {warning ?? 'Enter to save, Escape to cancel.'}
       </span>
-    </>
+    </div>
   );
 }
 

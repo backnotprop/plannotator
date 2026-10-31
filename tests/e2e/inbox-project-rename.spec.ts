@@ -71,6 +71,28 @@ async function lightContext(browser: Browser, url: string, scheme: 'light' | 'da
   return context;
 }
 
+/**
+ * The field's focus ring lies inside the clip of the sidebar's scroll area on every side. `overflow-y: auto`
+ * makes that area clip sideways too, and the field fills its width, so a ring reaching past the field is cut.
+ */
+async function expectWholeRing(page: Page): Promise<void> {
+  const room = await field(page).evaluate((el) => {
+    const style = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    const clip = el.closest('.ib-sidescroll')!.getBoundingClientRect();
+    const reach = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+    return {
+      drawn: style.outlineStyle === 'solid' && parseFloat(style.outlineWidth) >= 2,
+      left: box.left - reach - clip.left,
+      right: clip.right - (box.right + reach),
+      top: box.top - reach - clip.top,
+      bottom: clip.bottom - (box.bottom + reach),
+    };
+  });
+  expect(room.drawn).toBe(true);
+  for (const side of ['left', 'right', 'top', 'bottom'] as const) expect(room[side], `the ring's ${side} edge`).toBeGreaterThanOrEqual(0);
+}
+
 /** The row's project name for one thread in the list (wide rows name the project when the list is not filtered). */
 async function rowProject(page: Page, threadId: string): Promise<string> {
   return (await page.locator(`.ib-lbody [data-row="${threadId}"] .ib-p`).first().textContent())?.trim() ?? '';
@@ -272,6 +294,28 @@ test('keyboard only: ⋯, the arrows to Rename…, typing, Enter', async () => {
   await expect(page.locator('.ib-lhead-tt')).toHaveText('Acme Platform');
 });
 
+test('the focus ring is whole on every side: on the first and last rows, light and dark', async ({ browser }: { browser: Browser }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    const context = await lightContext(browser, world.url, scheme);
+    const page = await context.newPage();
+    await page.goto(world.url);
+    await expect(row(page, 'Acme Platform')).toBeVisible();
+    for (const [where, target] of [['first', page.locator('.ib-projs .ib-projrow').first()], ['last', page.locator('.ib-projs .ib-projrow').last()]] as const) {
+      await target.locator('.ib-proj').click({ button: 'right' });
+      await page.locator('[data-project-action="rename"]').click();
+      await expect(field(page)).toBeFocused();
+      await expectWholeRing(page);
+      // The pointer off the row, then the field and a little around it at 2x: what the owner's screenshot showed cut.
+      await page.mouse.move(900, 700);
+      const box = (await field(page).boundingBox())!;
+      await page.screenshot({ path: join(proofDir, `ring-${scheme}-${where}.png`), clip: { x: Math.max(0, box.x - 12), y: box.y - 12, width: box.width + 24, height: box.height + 24 } });
+      await page.keyboard.press('Escape');
+      await expect(field(page)).toHaveCount(0);
+    }
+    await context.close();
+  }
+});
+
 test('Reset name brings back "main", and the item goes until a name is set again', async () => {
   const { page, threads } = world;
   await row(page, 'Acme Platform').locator('.ib-proj').click({ button: 'right' });
@@ -309,6 +353,7 @@ test('a phone: Rename… in the menu sheet, the field in the navigation sheet', 
   await expect(field(page)).toBeVisible();
   await expect(field(page)).toBeFocused();
   expect((await field(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await expectWholeRing(page);
   await field(page).fill('acme');
   await page.screenshot({ path: join(proofDir, '06-phone-field.png') });
   await page.keyboard.press('Enter');
