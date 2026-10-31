@@ -122,6 +122,7 @@ packages/inbox/reloadHosts.test.tsx
 packages/inbox/pasteFiles.test.tsx
 packages/inbox/questionCardPhone.test.tsx
 packages/inbox/markRead.test.tsx
+packages/inbox/markUnread.test.tsx
 packages/inbox/ack.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/actionDraftSend.test.tsx

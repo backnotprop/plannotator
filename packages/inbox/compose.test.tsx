@@ -463,6 +463,25 @@ test.skipIf(!hasDom)('Send with no thread open: the new thread is in Sent at onc
   await until(() => (rowsOnScreen(el).sent ?? []).includes(id), 'the new row in Sent');
 });
 
+// The owner's note: after a New message the list gave no sign of where the new thread landed. The row lights as a
+// row Show brings in does (data-lit), once it is drawn, and only that row.
+test.skipIf(!hasDom)('Send lights the new thread\'s row once, and only it', async () => {
+  await poll('ses_sent_lit', 'claude-code', projects[0]!);
+  const el = await renderApp();
+  await until(() => el.querySelector('.ib-listcol .ib-lbody [data-thread-id]') !== null, 'the list');
+  const lit = () => [...el.querySelectorAll('.ib-listcol [data-thread-id][data-lit]')].map((r) => r.getAttribute('data-thread-id')!);
+  expect(lit()).toEqual([]);
+  await openCompose(el);
+  await pickTo('ses_sent_lit');
+  type('Check the lit row after a send.');
+  act(() => (dialog()!.querySelector('[data-compose-send]') as HTMLButtonElement).click());
+  await until(() => dialog() === null, 'sent');
+  const id = await threadIdOf('Check the lit row after a send');
+  await until(() => lit().length > 0, 'the new row lit');
+  expect(lit()).toEqual([id]);
+  await until(() => lit().length === 0, 'the light off');
+}, 20_000);
+
 test.skipIf(!hasDom)('git too slow to tell the project (project_unresolved): the dialog stays with the words and says to press Send again', async () => {
   await poll('ses_live_dom', 'claude-code', projects[0]!);
   const el = await renderApp();
