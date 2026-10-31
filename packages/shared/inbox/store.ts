@@ -79,6 +79,7 @@ import {
   type InboxListSection,
   type InboxThread,
   type InboxThreadSummary,
+  checkInboxProjectName,
   checkInboxSubject,
   checkInboxThreadName,
   displayInboxSubject,
@@ -2714,7 +2715,7 @@ export class InboxStore {
     const folder = this.projectFolder(project);
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     const line: InboxLine = { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "project", id: project.id, record: project };
-    // One line, written whole: temp file then rename.
+    // The first line, written whole: temp file then rename (a rename appends later lines through write()).
     const path = join(folder, PROJECT_FILE);
     const temp = `${path}.${process.pid}.tmp`;
     writeFileSync(temp, `${JSON.stringify(line)}\n`, { mode: 0o600 });
@@ -2728,6 +2729,37 @@ export class InboxStore {
       }
     }
     return this.labeled(project);
+  }
+
+  /**
+   * The person's name for a project (Rename… in the project menu), or null
+   * for Reset name (back to its folder's name). One new project line with the
+   * same id, key, slug and root; the last line wins on every read, so nothing
+   * else on disk changes and an older reader ignores the field. A name equal
+   * to the current one writes nothing. Refuses an empty or too long name
+   * (`checkInboxProjectName`) and an unknown project.
+   */
+  renameProject(projectId: string, name: string | null): InboxProject {
+    const project = this.projectsById.get(projectId);
+    if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
+    let displayName: string | null = null;
+    if (name !== null) {
+      const checked = checkInboxProjectName(name);
+      if (!checked.ok) throw new InboxError("validation_error", `name: ${checked.message}`, { field: "name" });
+      displayName = checked.name;
+    }
+    if ((project.display_name ?? null) === displayName) return this.labeled(project);
+    const { display_name: _previous, ...rest } = project;
+    const record: InboxProject = displayName === null ? rest : { ...rest, display_name: displayName };
+    this.write(join(this.projectFolder(project), PROJECT_FILE), {
+      v: INBOX_RECORD_VERSION,
+      seq: this.seq + 1,
+      at: this.stamp(),
+      kind: "project",
+      id: project.id,
+      record,
+    });
+    return this.labeled(record);
   }
 
   /**

@@ -13,6 +13,7 @@ import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
 import { shownProjects, type ProjectAction } from '../projectMenu';
+import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
 import { useInboxTheme } from '../theme';
@@ -60,6 +61,13 @@ export interface SidebarProps {
    */
   projectsReadable?: ReadonlySet<string>;
   onProjectAction?: (projectId: string, action: ProjectAction) => void;
+  /**
+   * The project menu's Rename… and Reset name: a name, or null for the folder's name. Offered on this
+   * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
+   */
+  onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** Says a line in the window's live region (the rename field's refusals). */
+  announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -503,6 +511,13 @@ export function Sidebar(props: SidebarProps) {
                     setOpenMobile(false);
                     props.onProjectAction?.(project.id, action);
                   }}
+                  // Another machine's project keeps the name that machine gives it. The sheet stays open on a phone: the field is in it.
+                  onRename={
+                    props.onProjectRename && (!project.machine || project.machine === selfMachineId())
+                      ? (name) => props.onProjectRename!(project.id, name)
+                      : undefined
+                  }
+                  announce={props.announce}
                 />
               );
             })
