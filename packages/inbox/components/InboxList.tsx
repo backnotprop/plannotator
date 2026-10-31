@@ -432,9 +432,9 @@ function GuideMark({ row }: { row: InboxListRow }) {
 }
 
 /**
- * The wide row's title cell (approval "list-rows-mail-icons"): the title, the grey preview, the pin and the guided
- * review mark. Short of room the preview gives way first, all the way, then the title; each cut ends in "…" with
- * its tooltip. The mark drops its label to its icon.
+ * The wide row's title cell (approval "list-rows-mail-icons"): the title, the grey preview, the guided review mark,
+ * and the pin on the cell's right edge. Short of room the preview gives way first, all the way, then the title;
+ * each cut ends in "…" with its tooltip. The mark drops its label to its icon.
  */
 function TitleCell({ row, pinned = false, pill = false }: { row: InboxListRow; pinned?: boolean; pill?: boolean }) {
   const preview = previewOf(row);
@@ -442,16 +442,17 @@ function TitleCell({ row, pinned = false, pill = false }: { row: InboxListRow; p
     <>
       <RowTitle row={row} className="ib-title" pill={pill} tip />
       {preview && <ClipText className="ib-pv" text={preview} />}
-      {pinned && <PinMark />}
       <GuideMark row={row} />
+      {pinned && <PinMark />}
     </>
   );
 }
 
 /**
- * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"):
- * after the preview (wide and three-line rows), before the time (a phone's row).
- * For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
+ * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"): always on the right, in the
+ * trailing slot before the badge and the counts (the owner, 2026-10-31: "just like the questions, just like the
+ * action items"), never right after a short preview. A three-line or phone row has it on line 3, a wide row at its
+ * title cell's right edge. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
  */
 function PinMark() {
   return (
@@ -656,12 +657,12 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
           <RowTitle row={row} className="ib-title" pill={pill} tip={pill} />
         </div>
       )}
-      {/* Line 3: the grey preview, cut first, then the pin, the guided review mark, and at the right end the badge
+      {/* Line 3: the grey preview, cut first, then the guided review mark, and at the right end the pin, the badge
           and the count (inbox-row-byline's line 2 without the marks). Nothing to show: no line. */}
       <div className="ib-l3">
         <Preview row={row} />
-        {pinned && <PinMark />}
         <GuideMark row={row} />
+        {pinned && <PinMark />}
         {badge}
         <LineCount row={row} tip />
       </div>
@@ -675,9 +676,9 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
 /**
  * A row on a phone, read like a mail app's, in the three-line row's order
  * (approval "inbox-list-row-v2", 2026-10-30): the agents' tiles and the
- * project, the pin and the time on line 1; the title on line 2, never cut; the
- * grey preview with the guided review book, the badge and the count at the
- * right end of line 3.
+ * project and the time on line 1; the title on line 2, never cut; the grey
+ * preview with the guided review book, then the pin, the badge and the count
+ * at the right end of line 3.
  */
 function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, onOpen }: { row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void }) {
   const wordsId = useId();
@@ -703,13 +704,12 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
       <span className="ib-m1">
         <LeadLine row={row} project={project} filtered={filtered} tip={false} />
         {compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
-        {pinned && <PinMark />}
         <span className="ib-t">
           <TimeWithTick delivery={row.delivery} time={shortTime(rowTimeIso(row))} />
         </span>
       </span>
       {/* Line 2: the title, never cut (in its pill, one line cut with "…"); compact rows have it on line 1. Line 3:
-          the preview (cut first), then the book, the badge and the count. */}
+          the preview (cut first), then the book, the pin, the badge and the count. */}
       {!compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
       <span className="ib-m3">
         {preview && (
@@ -722,6 +722,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             <Icon name="book" size={13} />
           </span>
         )}
+        {pinned && <PinMark />}
         {badge}
         <LineCount row={row} />
       </span>

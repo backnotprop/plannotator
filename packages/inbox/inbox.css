@@ -552,11 +552,12 @@ button.ib-mut { border-radius: 6px; }
 .ib-pinrow:hover .ib-pin, .ib-pinrow:has(:focus-visible) .ib-pin, .ib-pinrow[data-menu] .ib-pin { padding-right: 32px; }
 .ib-pinrow:hover .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow:has(:focus-visible) .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch), .ib-pinrow[data-menu] .ib-pin > :is(.ib-n, .ib-spill, .ib-pdot, .ib-parch) { visibility: hidden; position: absolute; }
 .ib-pinrow[data-menu] .ib-pmore { color: var(--foreground); }
-/* A pinned thread's row in the list: a small pin after the subject (wide, three-line), before the time (a phone's row). */
+/* A pinned thread's row in the list: a small pin always on the right (the owner, 2026-10-31), before the badge and
+   the counts on line 3 (three-line and phone rows), on the title cell's right edge (wide rows). Its auto margin
+   pushes it there whether the preview before it is short or cut. */
 .ib-pinmark { display: inline-flex; flex: none; color: var(--muted-foreground); }
 .pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; }
-.ib-m1 .ib-pinmark { margin-left: auto; }
-.ib-m1 .ib-pinmark + .ib-t { margin-left: 0; }
+:is(.ib-row .ib-subj, .ib-nrow .ib-l3, .ib-m3) > .ib-pinmark { margin-left: auto; }
 /* The thread header's pin: an icon toggle, pressed while pinned. */
 .pn-inbox .ib-pinbtn[aria-pressed="true"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 13%, transparent); }
 .pn-inbox .ib-pinbtn[aria-pressed="true"] svg.ib-ic { fill: color-mix(in oklch, currentColor 22%, transparent); }
@@ -812,8 +813,8 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    until the line runs short. */
 .ib-key { font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; white-space: nowrap; display: inline-flex; flex: 0 1 auto; min-width: 0; }
 .ib-key > .ib-keyt { min-width: 0; max-width: 166px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The title cell (approval "list-rows-mail-icons"): the title, then the grey preview, the pin and the guided review
-   mark, on one line that never spills. Short of room the preview gives way first, all the way, then the title; each
+/* The title cell (approval "list-rows-mail-icons"): the title, then the grey preview, the guided review mark and the
+   pin on the cell's right edge, on one line that never spills. Short of room the preview gives way first, all the way, then the title; each
    ends in "…" (its tooltip shows it whole). The preview's shrink factor is a million, not a thousand: flex shares a
    shortfall by factor times width, so at a thousand the title still lost a fraction of a pixel whenever the preview
    shrank, and Chrome drew an ellipsis on a title that fit (a 0.06 px cut). The guided review mark keeps only its
@@ -878,14 +879,14 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-nrow .ib-l2 { min-width: 0; }
 .ib-nrow .ib-title { display: block; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.35; letter-spacing: 0; font-weight: 400; color: var(--foreground); overflow-wrap: anywhere; }
 .ib-nrow.ib-u:not(.ib-sent) .ib-title { font-size: var(--ib-fs-15, 15px); font-weight: 600; letter-spacing: -0.006em; }
-/* Line 3: the grey preview, cut first, all the way if it must, then the pin and the guided review mark after it,
-   and at the right end the badge (when there is one) and the count (when there is one). The badge and the count
+/* Line 3: the grey preview, cut first, all the way if it must, then the guided review mark after it, and at the
+   right end the pin, the badge (when there is one) and the count (when there is one). The badge and the count
    never are cut. A row with none of these has no line 3. */
 .ib-nrow .ib-l3 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); overflow: hidden; }
 .ib-nrow .ib-l3:empty { display: none; }
 .ib-nrow .ib-l3 > .ib-pv { flex: 0 1 auto; min-width: 0; margin-right: auto; color: var(--muted-foreground); line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-nrow .ib-l3 > .ib-pv:has(~ :is(.ib-pinmark, .ib-att)) { margin-right: 0; }
-.ib-nrow .ib-l3 > :is(.ib-pinmark, .ib-att):not(:has(~ :is(.ib-pinmark, .ib-att))) { margin-right: auto; }
+.ib-nrow .ib-l3 > .ib-att:not(:has(~ .ib-pinmark)) { margin-right: auto; }
 .ib-nrow .ib-l3 > :is(.ib-badge, .ib-c, .ib-pinmark, .ib-att) { flex: none; }
 /* The count in words (`CountWords`; approval "inbox-row-byline", option A, 2026-10-29): the short form, "Draft",
    "Undelivered 14m", "Read", in a slot of at most 124px (a wide row's column) on every row, so it never takes the
@@ -2783,14 +2784,15 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-m1 .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; }
   .ib-m1 .ib-t { flex: none; margin-left: auto; font-size: var(--ib-fs-13, 13px); line-height: 17px; font-variant-numeric: tabular-nums; }
   /* Line 2: the title, never cut, at the row's text size and weight. Line 3: the preview, cut first, then the guided
-     review book, the badge and the count at the right end, never cut; a row with none of these has no line 3. */
+     review book, and the pin, the badge and the count at the right end, never cut; a row with none of these has no
+     line 3. */
   .ib-m2 { display: block; min-width: 0; font-size: var(--ib-fs-14, 14px); line-height: 1.35; letter-spacing: 0; font-weight: 400; color: var(--foreground); overflow-wrap: anywhere; }
   .ib-m3 { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; min-height: 22px; }
   .ib-m3:empty { display: none; }
   .ib-m3 > .ib-pv { flex: 0 1 auto; min-width: 0; margin-right: auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); line-height: 1.35; color: var(--muted-foreground); }
-  .ib-m3 > .ib-pv:has(+ .ib-att) { margin-right: 0; }
-  .ib-m3 > .ib-att { margin-right: auto; }
-  .ib-m3 > :is(.ib-badge, .ib-c, .ib-att) { flex: none; }
+  .ib-m3 > .ib-pv:has(+ :is(.ib-att, .ib-pinmark)) { margin-right: 0; }
+  .ib-m3 > .ib-att:not(:has(+ .ib-pinmark)) { margin-right: auto; }
+  .ib-m3 > :is(.ib-badge, .ib-c, .ib-att, .ib-pinmark) { flex: none; }
   .ib-m3 .ib-c { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
   .ib-mrow.ib-u .ib-m1 .ib-p { color: var(--foreground); font-weight: 550; }
   .ib-mrow.ib-u .ib-m1 .ib-t { color: var(--primary); font-weight: 550; }
