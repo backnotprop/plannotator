@@ -1,0 +1,712 @@
+/**
+ * Voice dictation (approval "inbox-voice", 2026-10-31) in a real Chromium, recording from Chromium's fake capture
+ * device through the real AudioWorklet (served from the Inbox's own origin, under the real CSP), against a real Inbox
+ * with a fake `codex` and a fake of both OpenAI endpoints (tests/e2e/voice-inbox.ts). No real Codex, no OpenAI.
+ *
+ *  - Off: no mic anywhere, no Codex started. Settings turns it on, and it lands between Machines and Capabilities.
+ *  - Hold and tap: words land at the cursor, in one piece, with the wash; Send is off meanwhile; nothing ever sends by
+ *    itself, not even Mod+Enter while it runs.
+ *  - Cancel, and Esc while running: nothing posted, the box stays open. Esc at rest still closes the box.
+ *  - Failures: a 403 and a challenge page post once and stop; Retry is a press, and resends the same clip; a network
+ *    failure keeps the clip; an expired login says so; not signed in dims the mic with a line and a link.
+ *  - Phones only uses the touch query: no mic on a narrow desktop window, a mic on a touch screen.
+ *  - A touch hold, and a slide off to cancel.
+ *  - Reply box, compose, and full screen's composer.
+ *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
+ *
+ * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
+ * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-voice.spec.ts`. PNGs land in
+ * PLANNOTATOR_E2E_SHOTS_DIR, or .local/proof/inbox-voice.
+ */
+import { chromium, expect, test, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from '@playwright/test';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
+import { NO_BROWSER } from '../helpers/no-browser';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+
+const repo = resolve(__dirname, '../..');
+const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/inbox-voice'));
+const html = join(repo, 'apps/hook/dist/inbox.html');
+const CHATGPT_LOGIN = { account: { type: 'chatgpt', email: 'someone@example.com', planType: 'pro' }, authMethod: 'chatgpt', token: 'fake-token', refreshedToken: 'fake-token-2' };
+
+interface World {
+  root: string;
+  dataDir: string;
+  url: string;
+  threads: string[];
+  filed: { thread: string; attachment: string | null };
+  send(command: Record<string, unknown>): void;
+  upstreamCalls(): { path: string; bytes: number; riff: string; rate: number; model: string | null; userAgent: string }[];
+  codexStarts(): number;
+  stop(): Promise<void>;
+}
+
+const worlds: World[] = [];
+let scratch = '';
+
+/** Bursts of a voiced tone at the level of speech: the gate's business, and Chromium's noise suppression leaves it. */
+function speechWav(path: string, seconds: number, loud: boolean) {
+  const rate = 48_000;
+  const samples = new Int16Array(rate * seconds);
+  for (let i = 0; i < samples.length; i++) {
+    const t = i / rate;
+    if (!loud) {
+      samples[i] = (Math.random() - 0.5) * 6;
+      continue;
+    }
+    const envelope = Math.max(0, Math.sin(2 * Math.PI * 2.5 * t)) ** 0.5;
+    const voice = Math.sin(2 * Math.PI * 170 * t) + 0.6 * Math.sin(2 * Math.PI * 340 * t) + 0.4 * Math.sin(2 * Math.PI * 720 * t) + 0.2 * Math.sin(2 * Math.PI * 1500 * t);
+    samples[i] = Math.max(-1, Math.min(1, envelope * voice * 0.35)) * 32767;
+  }
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + samples.byteLength, 4);
+  header.write('WAVEfmt ', 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(samples.byteLength, 40);
+  writeFileSync(path, Buffer.concat([header, Buffer.from(samples.buffer)]));
+}
+
+async function startWorld(options: { version?: string; config?: Record<string, unknown>; used?: boolean; fresh?: boolean; codex?: Record<string, unknown> | null } = {}): Promise<World> {
+  const root = join(scratch, `world-${worlds.length}`);
+  const dataDir = join(root, 'data');
+  mkdirSync(dataDir, { recursive: true });
+  if (options.used) writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: '0.29.0' }));
+  writeFileSync(
+    join(dataDir, 'config.json'),
+    JSON.stringify({
+      inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' },
+      // A notification setting means someone used an Inbox here (inboxUsedBefore).
+      ...(options.fresh ? {} : { inboxNotifications: { dismissed: true } }),
+      inboxAgentNotes: { offered: true },
+      inboxSound: { dialogShownFor: '0.29.0' },
+      inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
+      ...options.config,
+    }),
+  );
+  const child: ChildProcessWithoutNullStreams = spawn('bun', [join(repo, 'tests/e2e/voice-inbox.ts'), root, JSON.stringify({ html, version: options.version, codex: options.codex })], {
+    cwd: repo,
+    env: { PATH: process.env.PATH ?? '', TMPDIR: process.env.TMPDIR ?? '/tmp', HOME: join(root, 'home'), PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_PHONES: '0' },
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => (stderr += String(chunk)));
+  const first = await new Promise<string>((done, fail) => {
+    createInterface({ input: child.stdout }).once('line', done);
+    child.once('exit', () => fail(new Error(`voice-inbox.ts exited: ${stderr}`)));
+  });
+  const started = JSON.parse(first) as { url: string; threads: string[]; filed: World['filed'] };
+  const read = (name: string) => {
+    const path = join(root, name);
+    return existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
+  };
+  const world: World = {
+    root,
+    dataDir,
+    ...started,
+    send: (command) => child.stdin.write(`${JSON.stringify(command)}\n`),
+    upstreamCalls: () => read('upstream.jsonl'),
+    codexStarts: () => read('bin/calls.jsonl').filter((call: { event: string }) => call.event === 'start').length,
+    stop: () =>
+      new Promise((done) => {
+        child.once('exit', () => done());
+        child.stdin.write('{"stop":true}\n');
+      }),
+  };
+  worlds.push(world);
+  return world;
+}
+
+let main: World | null = null;
+/** The world most tests share, voice on. */
+async function mainWorld(): Promise<World> {
+  if (!main) {
+    main = await startWorld();
+    await turnOn(main);
+  }
+  return main;
+}
+
+const saved = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
+
+let speech: Browser;
+let silence: Browser;
+
+async function open(browser: Browser, w: World, options: { phone?: boolean; grant?: boolean; viewport?: { width: number; height: number } } = {}): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({
+    viewport: options.viewport ?? (options.phone ? { width: 390, height: 844 } : { width: 1440, height: 900 }),
+    ...(options.phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}),
+  });
+  if (options.grant !== false) await context.grantPermissions(['microphone'], { origin: new URL(w.url).origin });
+  return { context, page: await context.newPage() };
+}
+
+async function turnOn(w: World, change: Record<string, unknown> = {}) {
+  const settings = (await (await fetch(new URL('/api/inbox/settings', w.url))).json()) as { serverSession: string };
+  const answer = await fetch(new URL('/api/inbox/settings', w.url), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: new URL(w.url).origin },
+    body: JSON.stringify({ serverSession: settings.serverSession, voice: { on: true, ...change } }),
+  });
+  expect(answer.status).toBe(200);
+}
+
+const pane = (page: Page) => page.locator('section.ib-pane');
+const mic = (scope: Page | Locator) => scope.locator('[data-voice-mic]');
+const line = (scope: Page | Locator, state: string) => scope.locator(`[data-voice-line="${state}"]`);
+const note = (scope: Page | Locator, trouble: string) => scope.locator(`[data-voice-note="${trouble}"]`);
+const sendButton = (page: Page) => pane(page).locator('.ib-acts .ib-btn.ib-pri');
+
+async function openReply(page: Page, w: World, thread: string): Promise<Locator> {
+  await page.goto(`${w.url}#thread=${thread}`);
+  const box = pane(page).locator('.ib-rbox textarea');
+  const button = page.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  for (let attempt = 0; attempt < 20 && !(await box.isVisible()); attempt += 1) await button.click({ timeout: 1_000 }).catch(() => {});
+  await expect(box).toBeVisible();
+  await box.focus();
+  return box;
+}
+
+async function press(page: Page, target: Locator) {
+  const box = (await target.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+}
+
+/** Hold the button through some speech. */
+async function hold(page: Page, ms = 1500) {
+  await press(page, mic(pane(page)));
+  await expect(line(pane(page), 'hold')).toBeVisible();
+  await page.waitForTimeout(ms);
+}
+
+const consoleErrors = (page: Page) => {
+  const seen: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /Content Security Policy|worklet/i.test(message.text())) seen.push(message.text());
+  });
+  return seen;
+};
+
+const shot = async (page: Page, name: string) => {
+  mkdirSync(shotsDir, { recursive: true });
+  // Past the button's color fade, so a screen shows the state and not the way into it.
+  await page.waitForTimeout(250);
+  await page.screenshot({ path: join(shotsDir, `${name}.png`) });
+};
+
+test.beforeAll(async () => {
+  expect(existsSync(html), 'build the apps first').toBe(true);
+  scratch = inboxScratch('plannotator-inbox-voice-');
+  speechWav(join(scratch, 'speech.wav'), 40, true);
+  speechWav(join(scratch, 'silence.wav'), 40, false);
+  const launch = (file: string) =>
+    chromium.launch({ args: ['--use-mock-keychain', '--password-store=basic', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-audio-capture=${join(scratch, file)}`] });
+  speech = await launch('speech.wav');
+  silence = await launch('silence.wav');
+});
+
+test.afterAll(async () => {
+  try {
+    await speech?.close();
+    await silence?.close();
+    await Promise.all(worlds.map((w) => w.stop()));
+  } finally {
+    await removeInboxScratch();
+  }
+});
+
+test('off: no mic in any composer and no Codex started; Settings turns it on between Machines and Capabilities', async () => {
+  const w = await startWorld();
+  const { context, page } = await open(speech, w);
+  await openReply(page, w, w.threads[0]!);
+  await expect(page.locator('[data-voice-foot]')).toHaveCount(0);
+  await page.locator('.ib-side [data-open-compose]').click();
+  await expect(page.locator('dialog[data-compose] textarea')).toBeVisible();
+  await expect(page.locator('[data-voice-mic]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  await page.goto(`${w.url}#settings/voice`);
+  const section = page.locator('[data-settings-voice]');
+  await expect(section).toBeVisible();
+  await expect(section).toContainText('Nothing runs while this is off.');
+  expect(w.codexStarts()).toBe(0);
+  await shot(page, 'settings-off');
+
+  await section.getByRole('switch', { name: 'Voice' }).click();
+  await expect(page.locator('[data-voice-status="ready"]')).toContainText('Signed in with ChatGPT');
+  await expect(page.locator('[data-voice-status="ready"]')).toContainText('Pro plan');
+  await expect(page.locator('main.ib-main')).toContainText('OpenAI’s terms for your ChatGPT account apply.');
+  expect(saved(w).inboxVoice?.on).toBe(true);
+  await shot(page, 'settings');
+
+  // A reload keeps it, and the mic is there.
+  await openReply(page, w, w.threads[0]!);
+  await expect(mic(pane(page))).toBeVisible();
+  await context.close();
+});
+
+test('a hold: words land at the cursor, Send waits, nothing sends itself', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  const errors = consoleErrors(page);
+  const box = await openReply(page, w, w.threads[1]!);
+  await box.fill('Cards. and more');
+  await box.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(6, 6));
+  await expect(sendButton(page)).toBeEnabled();
+
+  w.send({ upstream: [{ text: 'Keep the totals.', hold: true }] });
+  await hold(page);
+  await expect(sendButton(page)).toBeDisabled();
+  await expect(line(pane(page), 'hold')).toContainText('Esc cancels');
+  await shot(page, 'listening');
+  // Mod+Enter is a send everywhere else.
+  await box.press('Meta+Enter');
+  await box.press('Control+Enter');
+  await page.mouse.up();
+
+  await expect(line(pane(page), 'sending')).toBeVisible();
+  await expect(sendButton(page)).toBeDisabled();
+  await expect(pane(page).locator('.ib-vcaret.ib-vstill')).toBeVisible();
+  await expect(box).toHaveValue('Cards. and more');
+  await shot(page, 'transcribing');
+  w.send({ release: true });
+
+  await expect(box).toHaveValue('Cards. Keep the totals. and more');
+  await expect(pane(page).locator('mark.ib-vmark')).toHaveText(/Keep the totals\./);
+  await expect(sendButton(page)).toBeEnabled();
+  await shot(page, 'landed');
+  await expect(pane(page).locator('mark.ib-vmark')).toHaveCount(0, { timeout: 5_000 });
+
+  // One undo step, as if typed.
+  await box.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  await expect(box).toHaveValue('Cards. and more');
+
+  const calls = w.upstreamCalls();
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ path: '/backend-api/transcribe', riff: 'RIFF', rate: 24_000 });
+  expect(calls[0]!.bytes).toBeGreaterThan(24_000);
+  expect(calls[0]!.userAgent).toMatch(/^Plannotator\//);
+  // Nothing went: the thread still has no reply from the person.
+  await expect(pane(page).locator('.ib-rbox')).toBeVisible();
+  const { thread } = (await (await fetch(new URL(`/api/inbox/threads/${w.threads[1]}`, w.url))).json()) as { thread: { messages: { author: { kind: string } }[] } };
+  expect(thread.messages.filter((message) => message.author.kind !== 'agent')).toEqual([]);
+  expect(errors).toEqual([]);
+  await context.close();
+});
+
+test('a tap: runs with no finger on it, Cancel is there, a second tap stops it', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  const box = await openReply(page, w, w.threads[2]!);
+  const before = w.upstreamCalls().length;
+  await box.fill('Start: ');
+  await mic(pane(page)).click();
+  await expect(line(pane(page), 'tap')).toBeVisible();
+  await expect(mic(pane(page))).toHaveAttribute('aria-label', 'Stop dictating');
+
+  await page.locator('[data-voice-cancel]').click();
+  await expect(line(pane(page), 'tap')).toHaveCount(0);
+  await expect(mic(pane(page))).toHaveAttribute('data-state', 'idle');
+  await expect(box).toHaveValue('Start: ');
+  expect(w.upstreamCalls()).toHaveLength(before);
+
+  w.send({ upstream: [{ text: 'Second take.' }] });
+  await mic(pane(page)).click();
+  await expect(line(pane(page), 'tap')).toBeVisible();
+  await page.waitForTimeout(1500);
+  await mic(pane(page)).click();
+  await expect(box).toHaveValue('Start: Second take.');
+  await context.close();
+});
+
+test('the keyboard: Space on the focused button toggles, with no new shortcut', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  const box = await openReply(page, w, w.threads[2]!);
+  await box.fill('');
+  await mic(pane(page)).focus();
+  await page.keyboard.press('Space');
+  await expect(line(pane(page), 'tap')).toBeVisible();
+  await expect(mic(pane(page))).toBeFocused();
+  await page.waitForTimeout(1200);
+  await page.keyboard.press('Space');
+  await expect(box).toHaveValue('Second take.');
+  await context.close();
+});
+
+test('Esc: cancels only what runs, in the reply box and in compose; at rest it is the box’s as ever', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  const box = await openReply(page, w, w.threads[3]!);
+  await box.fill('Kept words');
+  const before = w.upstreamCalls().length;
+
+  await hold(page, 600);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(box).toBeVisible();
+  await expect(box).toHaveValue('Kept words');
+  await expect(mic(pane(page))).toHaveAttribute('data-state', 'idle');
+  expect(w.upstreamCalls()).toHaveLength(before);
+
+  w.send({ upstream: [{ text: 'Never lands.', hold: true }] });
+  await hold(page, 800);
+  await page.mouse.up();
+  await expect(line(pane(page), 'sending')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(line(pane(page), 'sending')).toHaveCount(0);
+  w.send({ release: true });
+  await page.waitForTimeout(300);
+  await expect(box).toHaveValue('Kept words');
+  await expect(box).toBeVisible();
+
+  // Compose: the dialog stays, and it does not ask about a draft.
+  await page.locator('.ib-side [data-open-compose]').click();
+  const dialog = page.locator('dialog[data-compose]');
+  await expect(mic(dialog)).toBeVisible();
+  await mic(dialog).click();
+  await expect(line(dialog, 'tap')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(line(dialog, 'tap')).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-compose-keep]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await context.close();
+});
+
+test('compose: the words land, and Send waits', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  await page.goto(w.url);
+  await page.locator('.ib-side [data-open-compose]').click();
+  const dialog = page.locator('dialog[data-compose]');
+  w.send({ upstream: [{ text: 'A new idea.', hold: true }] });
+  await mic(dialog).click();
+  await expect(line(dialog, 'tap')).toBeVisible();
+  await expect(dialog.locator('[data-compose-send]')).toBeDisabled();
+  await page.waitForTimeout(1200);
+  await mic(dialog).click();
+  await expect(line(dialog, 'sending')).toBeVisible();
+  await shot(page, 'compose-transcribing');
+  w.send({ release: true });
+  await expect(dialog.locator('textarea')).toHaveValue('A new idea.');
+  // The real `disabled` is voice's. This world has no agent to send to, so the button stays aria-disabled for that.
+  await expect(dialog.locator('[data-compose-send]')).toHaveJSProperty('disabled', false);
+  await context.close();
+});
+
+test('full screen’s composer: the words land in the reply', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  await page.goto(`${w.url}#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`);
+  const card = page.locator('[data-fcomp]');
+  await expect(card).toBeVisible();
+  await card.getByRole('radio', { name: 'Reply to Claude Code' }).click();
+  const field = card.locator('[data-fcomp-field] textarea');
+  await expect(field).toBeFocused();
+  w.send({ upstream: [{ text: 'Looks right.' }] });
+  await mic(card).click();
+  await expect(line(card, 'tap')).toBeVisible();
+  await expect(card.locator('[data-fcomp-send]')).toBeDisabled();
+  // The card is narrow: the clock, the button and Open in thread each keep their own room.
+  const [clock, button, link] = await Promise.all(['.ib-dttime', '[data-voice-mic]', '[data-fcomp-open-thread]'].map((part) => card.locator(part).boundingBox()));
+  expect(clock!.x + clock!.width).toBeLessThanOrEqual(button!.x);
+  expect(button!.x + button!.width).toBeLessThanOrEqual(link!.x);
+  await page.waitForTimeout(1200);
+  await shot(page, 'fullscreen-listening');
+  await mic(card).click();
+  await expect(field).toHaveValue('Looks right.');
+  await context.close();
+});
+
+test('a 403 and a challenge page: posted once, the drawn line, and only a press retries the same clip', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  const box = await openReply(page, w, w.threads[4]!);
+  await box.fill('');
+  const before = w.upstreamCalls().length;
+  w.send({ upstream: [{ status: 403 }, { html: true }, { text: 'Third time.' }] });
+  await hold(page, 900);
+  await page.mouse.up();
+  const refused = note(pane(page), 'refused');
+  await expect(refused).toContainText('ChatGPT turned this clip down');
+  await shot(page, 'failure-refused');
+  await page.waitForTimeout(1200);
+  expect(w.upstreamCalls()).toHaveLength(before + 1);
+  await expect(sendButton(page)).toBeEnabled();
+
+  await refused.locator('[data-voice-retry]').click();
+  await expect(note(pane(page), 'refused')).toBeVisible();
+  await expect.poll(() => w.upstreamCalls().length).toBe(before + 2);
+  await note(pane(page), 'refused').locator('[data-voice-retry]').click();
+  await expect(box).toHaveValue('Third time.');
+  const calls = w.upstreamCalls();
+  expect(calls).toHaveLength(before + 3);
+  expect(new Set(calls.slice(before).map((call) => call.bytes)).size).toBe(1);
+  await context.close();
+});
+
+test('the network: the clip is kept, Discard drops it; an expired login says what to run', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  const box = await openReply(page, w, w.threads[4]!);
+  await box.fill('');
+  w.send({ upstream: [{ status: 503 }] });
+  await hold(page, 900);
+  await page.mouse.up();
+  const offline = note(pane(page), 'offline');
+  await expect(offline).toContainText('Your clip is kept until you close this box.');
+  await offline.locator('[data-voice-discard]').click();
+  await expect(note(pane(page), 'offline')).toHaveCount(0);
+
+  w.send({ upstream: [{ status: 401 }] });
+  await hold(page, 900);
+  await page.mouse.up();
+  await expect(note(pane(page), 'expired')).toContainText('codex login');
+  await context.close();
+});
+
+test('no voice heard: says so, then posts nothing', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(silence, w);
+  const box = await openReply(page, w, w.threads[5]!);
+  await box.fill('');
+  const before = w.upstreamCalls().length;
+  await press(page, mic(pane(page)));
+  await expect(line(pane(page), 'quiet')).toBeVisible();
+  await shot(page, 'no-voice-yet');
+  await page.mouse.up();
+  await expect(note(pane(page), 'notheard')).toBeVisible();
+  expect(w.upstreamCalls()).toHaveLength(before);
+  await context.close();
+});
+
+test('the browser’s prompt: says so, and the press becomes a tap; a block says how to allow it', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w, { grant: false });
+  await page.addInitScript(() => {
+    const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    (window as unknown as { answerPrompt: (allow: boolean) => void }).answerPrompt = () => {};
+    navigator.mediaDevices.getUserMedia = (constraints) =>
+      new Promise((resolve, reject) => {
+        (window as unknown as { answerPrompt: (allow: boolean) => void }).answerPrompt = (allow) => (allow ? resolve(real(constraints)) : reject(new DOMException('no', 'NotAllowedError')));
+      });
+    navigator.permissions.query = (async () => ({ state: 'prompt' })) as unknown as typeof navigator.permissions.query;
+  });
+  await openReply(page, w, w.threads[5]!);
+  await mic(pane(page)).click();
+  await expect(line(pane(page), 'asking')).toBeVisible();
+  await expect(line(pane(page), 'asking').locator('[data-voice-cancel]')).toBeVisible();
+  await shot(page, 'asking');
+  await page.evaluate(() => (window as unknown as { answerPrompt: (allow: boolean) => void }).answerPrompt(false));
+  await expect(note(pane(page), 'blocked')).toBeVisible();
+  await mic(pane(page)).click();
+  await page.evaluate(() => (window as unknown as { answerPrompt: (allow: boolean) => void }).answerPrompt(true));
+  await expect(line(pane(page), 'tap')).toBeVisible();
+  await page.locator('[data-voice-cancel]').click();
+  await context.close();
+});
+
+test('not signed in: the mic stays, dimmed, with a line and a way to Settings; Check again brings it back', async () => {
+  const w = await startWorld({ config: { inboxVoice: { on: true } }, codex: { account: null } });
+  const { context, page } = await open(speech, w);
+  await openReply(page, w, w.threads[0]!);
+  await expect(mic(pane(page))).toHaveAttribute('aria-disabled', 'true');
+  const line2 = note(pane(page), 'notready');
+  await expect(line2).toContainText('Voice needs Codex signed in with ChatGPT on this computer.');
+  await shot(page, 'not-ready');
+  const starts = w.codexStarts();
+  await mic(pane(page)).click({ force: true });
+  await expect(line(pane(page), 'tap')).toHaveCount(0);
+  expect(w.codexStarts()).toBe(starts);
+
+  await line2.locator('[data-voice-settings]').click();
+  const status = page.locator('[data-voice-status="signedout"]');
+  await expect(status).toContainText('Codex isn’t signed in');
+  w.send({ codex: CHATGPT_LOGIN });
+  await page.locator('[data-voice-check]').click();
+  await expect(page.locator('[data-voice-status="ready"]')).toBeVisible();
+  await context.close();
+});
+
+test('the API key: pasted once, last 4 after that, used in place of Codex', async () => {
+  const w = await startWorld({ config: { inboxVoice: { on: true, engine: 'api' } } });
+  const { context, page } = await open(speech, w);
+  await page.goto(`${w.url}#settings/voice`);
+  const input = page.locator('#ib-vkey');
+  await expect(input).toBeVisible();
+  await input.fill('sk-test-key-never-shown-4f2a');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('[data-voice-key="saved"]')).toContainText('Key saved, ending in 4f2a');
+  await shot(page, 'settings-key-saved');
+  await page.reload();
+  await expect(page.locator('[data-voice-key="saved"]')).toBeVisible();
+  expect(await page.content()).not.toContain('sk-test-key-never-shown');
+
+  w.send({ upstream: [{ text: 'By key.' }] });
+  const box = await openReply(page, w, w.threads[0]!);
+  await hold(page, 900);
+  await page.mouse.up();
+  await expect(box).toHaveValue('By key.');
+  expect(w.upstreamCalls().at(-1)).toMatchObject({ path: '/v1/audio/transcriptions', model: 'gpt-transcribe' });
+  expect(w.codexStarts()).toBe(0);
+  await context.close();
+});
+
+test('Phones only is the touch query: a narrow desktop window has no mic, a touch screen does', async () => {
+  const w = await startWorld();
+  await turnOn(w, { phones_only: true });
+  const desktop = await open(speech, w);
+  await openReply(desktop.page, w, w.threads[0]!);
+  await expect(desktop.page.locator('[data-settings-link], .ib-rbox').first()).toBeVisible();
+  await expect(desktop.page.locator('[data-voice-mic]')).toHaveCount(0);
+  await desktop.context.close();
+
+  const narrow = await open(speech, w, { viewport: { width: 390, height: 800 } });
+  await openReply(narrow.page, w, w.threads[0]!);
+  await expect(narrow.page.locator('[data-voice-mic]')).toHaveCount(0);
+  await narrow.context.close();
+
+  const phone = await open(speech, w, { phone: true });
+  await openReply(phone.page, w, w.threads[0]!);
+  await expect(mic(pane(phone.page))).toBeVisible();
+  await phone.context.close();
+});
+
+test('a phone: hold to talk, the keyboard stays down, slide off to cancel', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w, { phone: true });
+  const cdp: CDPSession = await context.newCDPSession(page);
+  const box = await openReply(page, w, w.threads[7]!);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  const target = (await mic(pane(page)).boundingBox())!;
+  const x = target.x + target.width / 2;
+  const y = target.y + target.height / 2;
+  expect(target.width).toBeGreaterThanOrEqual(36);
+  const touch = (type: string, at?: [number, number]) => cdp.send('Input.dispatchTouchEvent', { type: type as 'touchStart', touchPoints: at ? [{ x: at[0], y: at[1] }] : [] });
+
+  w.send({ upstream: [{ text: 'From the phone.', hold: true }] });
+  await touch('touchStart', [x, y]);
+  await expect(line(pane(page), 'hold')).toContainText('Slide to cancel');
+  await page.waitForTimeout(1000);
+  await shot(page, 'phone-listening');
+  expect(await box.evaluate((el) => el === document.activeElement)).toBe(false);
+  // Nothing runs past the box, and the row never wraps.
+  const row = await pane(page).locator('.ib-rfoot').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, height: el.clientHeight }));
+  expect(row.scroll).toBeLessThanOrEqual(row.client);
+  await touch('touchEnd');
+  await expect(line(pane(page), 'sending')).toBeVisible();
+  await shot(page, 'phone-transcribing');
+  w.send({ release: true });
+  await expect(box).toHaveValue('From the phone.');
+  await shot(page, 'phone-landed');
+
+  const before = w.upstreamCalls().length;
+  await touch('touchStart', [x, y]);
+  await expect(line(pane(page), 'hold')).toBeVisible();
+  await page.waitForTimeout(600);
+  await touch('touchMove', [x, y - 120]);
+  await expect(line(pane(page), 'armed')).toBeVisible();
+  await shot(page, 'phone-slide-to-cancel');
+  await touch('touchMove', [x, y]);
+  await expect(line(pane(page), 'hold')).toBeVisible();
+  await touch('touchMove', [x - 120, y - 120]);
+  await expect(line(pane(page), 'armed')).toBeVisible();
+  await touch('touchEnd');
+  await expect(line(pane(page), 'armed')).toHaveCount(0);
+  await expect(box).toHaveValue('From the phone.');
+  expect(w.upstreamCalls()).toHaveLength(before);
+  await context.close();
+});
+
+test.describe('the announcement', () => {
+  const dialog = (page: Page) => page.locator('[data-dialog="voice-intro"]');
+  const SETTLE = 6_000;
+
+  test('on a computer with a ChatGPT login: once; Phones only is saved by Turn on voice, which asks for no microphone', async () => {
+    const w = await startWorld({ version: '0.30.0', used: true });
+    const { context, page } = await open(speech, w, { grant: false });
+    await page.addInitScript(() => {
+      (window as unknown as { micAsked: number }).micAsked = 0;
+      const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = (constraints) => {
+        (window as unknown as { micAsked: number }).micAsked += 1;
+        return real(constraints);
+      };
+    });
+    await page.goto(w.url);
+    await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
+    await expect(dialog(page).getByRole('switch', { name: 'Phones only' })).toHaveAttribute('aria-checked', 'false');
+    await shot(page, 'dialog');
+    await dialog(page).getByRole('switch', { name: 'Phones only' }).click();
+    await shot(page, 'dialog-phones-only');
+    await dialog(page).locator('[data-voice-intro-on]').click();
+    await expect(dialog(page)).toHaveCount(0);
+    await expect.poll(() => saved(w).inboxVoice).toEqual({ on: true, phonesOnly: true });
+    expect(await page.evaluate(() => (window as unknown as { micAsked: number }).micAsked)).toBe(0);
+    await page.reload();
+    await page.waitForTimeout(SETTLE);
+    await expect(dialog(page)).toHaveCount(0);
+    await context.close();
+  });
+
+  test('Not now changes nothing and retires it, and over a reply being written it waits', async () => {
+    const w = await startWorld({ version: '0.30.0', used: true });
+    const { context, page } = await open(speech, w);
+    const box = await openReply(page, w, w.threads[0]!);
+    await box.fill('Words in the box');
+    await page.waitForTimeout(SETTLE);
+    await expect(dialog(page)).toHaveCount(0);
+    expect(saved(w).inboxVoiceIntro?.shownAt).toBeUndefined();
+    await box.fill('');
+    await pane(page).locator('.ib-acts .ib-btn.ib-ghost').click();
+    await expect(dialog(page)).toBeVisible({ timeout: 15_000 });
+    await dialog(page).locator('[data-voice-intro-keep]').click();
+    await expect(dialog(page)).toHaveCount(0);
+    expect(saved(w).inboxVoice).toBeUndefined();
+    expect(saved(w).inboxVoiceIntro?.shownAt).toBeTruthy();
+    await context.close();
+  });
+
+  test('no ChatGPT login: never shown, and not spent', async () => {
+    const w = await startWorld({ version: '0.30.0', used: true, codex: { account: { type: 'apiKey' } } });
+    const { context, page } = await open(speech, w);
+    await page.goto(w.url);
+    await page.waitForTimeout(SETTLE);
+    await expect(dialog(page)).toHaveCount(0);
+    expect(saved(w).inboxVoiceIntro?.shownAt).toBeUndefined();
+    await context.close();
+  });
+
+  test('a fresh install, and a load with the list options dialog due: not shown', async () => {
+    const fresh = await startWorld({ version: '0.30.0', fresh: true });
+    const first = await open(speech, fresh);
+    await first.page.goto(fresh.url);
+    await first.page.waitForTimeout(SETTLE);
+    await expect(dialog(first.page)).toHaveCount(0);
+    expect(saved(fresh).inboxVoiceIntro?.shownAt).toBeTruthy();
+    expect(fresh.codexStarts()).toBe(0);
+    await first.context.close();
+
+    const queued = await startWorld({ version: '0.30.0', used: true, config: { inboxListIntro: { dueAt: '2026-10-30T10:00:00.000Z' } } });
+    const second = await open(speech, queued);
+    await second.page.goto(queued.url);
+    await expect(second.page.locator('[data-dialog="list-look-intro"]')).toBeVisible({ timeout: 15_000 });
+    await second.page.keyboard.press('Escape');
+    await second.page.waitForTimeout(SETTLE);
+    await expect(dialog(second.page)).toHaveCount(0);
+    await second.page.reload();
+    await expect(dialog(second.page)).toBeVisible({ timeout: 15_000 });
+    await second.context.close();
+  });
+});

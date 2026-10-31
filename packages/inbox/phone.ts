@@ -47,6 +47,22 @@ function subscribeTouch(onChange: () => void): () => void {
   };
 }
 
+/** Whether the main pointer is a finger, whatever the window's width: a narrow desktop window is not this, a tablet is. */
+export function isTouchScreen(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(TOUCH_QUERY).matches;
+}
+
+function subscribeTouchScreen(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  const mql = window.matchMedia(TOUCH_QUERY);
+  mql.addEventListener('change', onChange);
+  return () => mql.removeEventListener('change', onChange);
+}
+
+export function useTouchScreen(): boolean {
+  return useSyncExternalStore(subscribeTouchScreen, isTouchScreen, () => false);
+}
+
 /** Whether the window is a real touch phone now, and again whenever that changes. */
 export function useTouchPhone(): boolean {
   return useSyncExternalStore(subscribeTouch, isTouchPhone, () => false);
