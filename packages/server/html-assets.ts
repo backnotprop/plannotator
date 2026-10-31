@@ -19,6 +19,10 @@ import {
   htmlAssetPathRefused,
   isWithinDirectory,
   MAX_HTML_ASSET_BYTES,
+  htmlAssetFileState,
+  OUTSIDE_ROOT_HTML_DOCUMENT_CSP,
+  outsideRootAssetAllowsCors,
+  refusesOutsideRootHtmlAsset,
 } from "@plannotator/shared/html-assets-node";
 
 export { inlineHtmlLocalAssets };
@@ -84,6 +88,20 @@ export interface HtmlAssetRegistryOptions {
    * (`folderSessionAssetAllowed`).
    */
   folderPath?: string;
+  /**
+   * Annotate: whether an HTML file sits inside the session's roots. One that
+   * does not (a tab on this machine opened it from anywhere, #2291) gets a
+   * root that serves only render types, never hidden paths or data files
+   * (`refusesOutsideRootHtmlAsset`), with CORS for fonts only. Absent: every
+   * root is treated as inside.
+   */
+  isInsideRoots?: (htmlFilePath: string) => boolean;
+  /**
+   * Whether a request is a page on this machine (`isThisMachineRequest`).
+   * Roots outside the session's roots are minted only for such a page, and
+   * answer only such a page: anyone else gets 404.
+   */
+  isThisMachine?: (req: Request) => boolean;
 }
 
 export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) {
@@ -95,16 +113,20 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
    * the route knows which page's directory a request comes from.
    */
   const docDirByToken = new Map<string, string>();
+  /** Tokens of roots outside the session's roots (`isInsideRoots`). */
+  const outsideTokens = new Set<string>();
+  const isOutside = (htmlFilePath: string) => options.isInsideRoots ? !options.isInsideRoots(htmlFilePath) : false;
 
-  function register(baseDir: string, docDir: string | null = null): string {
+  function register(baseDir: string, docDir: string | null = null, outside = false): string {
     const root = resolvePath(baseDir);
-    const scope = docDir ? `${root}\0${docDir}` : root;
+    const scope = `${outside ? "outside\0" : ""}${docDir ? `${root}\0${docDir}` : root}`;
     const existing = tokensByScope.get(scope);
     if (existing) return existing;
     const token = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
     tokensByScope.set(scope, token);
     rootsByToken.set(token, root);
     if (docDir) docDirByToken.set(token, docDir);
+    if (outside) outsideTokens.add(token);
     return token;
   }
 
@@ -112,7 +134,7 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
     if (/^https?:\/\//i.test(htmlFilePath)) return html;
     try {
       const { root, basePath, docDir } = htmlAssetContext(htmlFilePath, folderPath);
-      const token = register(root, docDir);
+      const token = register(root, docDir, isOutside(htmlFilePath));
       return rewriteHtmlAssetReferences(
         html,
         (assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
@@ -135,13 +157,13 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
   function documentUrl(htmlFilePath: string): string | null {
     if (/^https?:\/\//i.test(htmlFilePath)) return null;
     const { root, basePath, docDir } = htmlAssetContext(htmlFilePath, folderPath);
-    const token = register(root, docDir);
+    const token = register(root, docDir, isOutside(htmlFilePath));
     const name = htmlFilePath.split(/[\\/]/).pop() ?? "";
     return `${htmlAssetBaseHref(token)}${encodeHtmlAssetPath(basePath ? `${basePath}/${name}` : name)}`;
   }
 
   function inlineHtml(html: string, htmlFilePath: string): string {
-    return inlineHtmlLocalAssets(html, htmlFilePath, folderPath);
+    return inlineHtmlLocalAssets(html, htmlFilePath, folderPath, isOutside(htmlFilePath) ? refusesOutsideRootHtmlAsset : undefined);
   }
 
   async function handle(req: Request, url: URL): Promise<Response | null> {
@@ -164,30 +186,38 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
     // page's own directory as before, the rest of the folder minus hidden
     // paths).
     const docDir = docDirByToken.get(token);
+    const outside = outsideTokens.has(token);
     if (
+      (outside && !(options.isThisMachine?.(req) ?? false)) ||
       (options.refuseAssetPath && htmlAssetPathRefused(root, assetPath, options.refuseAssetPath)) ||
-      (docDir && !folderSessionAssetAllowed(root, docDir, assetPath))
+      (docDir && !folderSessionAssetAllowed(root, docDir, assetPath)) ||
+      (outside && htmlAssetPathRefused(root, assetPath, refusesOutsideRootHtmlAsset))
     ) {
       return assetError(404, "Not found", asDocument, assetPath);
     }
 
     try {
-      const file = Bun.file(resolved);
-      if (!(await file.exists())) {
+      const cap = Math.min(maxBytes, MAX_HTML_ASSET_BYTES);
+      // A regular file by its real path: a FIFO or device would block the read.
+      const state = htmlAssetFileState(resolved, cap);
+      if (state === "missing" || state === "not-file") {
         return assetError(404, "Not found", asDocument, assetPath);
       }
-      const cap = Math.min(maxBytes, MAX_HTML_ASSET_BYTES);
-      if (file.size > cap) {
+      if (state === "too-large") {
         return assetError(413, "Asset too large", asDocument, assetPath);
       }
+      const file = Bun.file(resolved);
+      // A root outside the session's roots: only fonts are readable by script.
+      const cors: Record<string, string> = !outside || outsideRootAssetAllowsCors(assetPath) ? { "Access-Control-Allow-Origin": "*" } : {};
       if (document) {
         return new Response(file, {
           headers: {
-            ...htmlAssetDocumentHeaders(options.documentCsp ?? HTML_ASSET_DOCUMENT_CSP),
+            // Outside the session's roots a page gets no network (connect-src 'none').
+            ...htmlAssetDocumentHeaders(outside ? OUTSIDE_ROOT_HTML_DOCUMENT_CSP : (options.documentCsp ?? HTML_ASSET_DOCUMENT_CSP)),
             // Kept for parity with the other assets: a nested document load is
             // not a CORS request, but a `fetch('./page.html')` from the
             // opaque-origin frame is.
-            "Access-Control-Allow-Origin": "*",
+            ...cors,
           },
         });
       }
@@ -195,7 +225,7 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
         headers: {
           // Sandboxed: an SVG or XML asset opened as a document never runs script on this origin.
           ...htmlAssetHeaders(contentType),
-          "Access-Control-Allow-Origin": "*",
+          ...cors,
         },
       });
     } catch {

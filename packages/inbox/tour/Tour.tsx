@@ -1056,6 +1056,8 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
       onOpen={(r) => dispatch({ type: 'open', thread: r.thread_id }, { focusCoach: true })}
       onCompose={state.step === 9 && state.compose !== 'sent' ? onCompose : undefined}
       phone={phone}
+      // The tour draws today's list whatever look this browser chose (as its sidebar ignores closed sections).
+      rememberLook={false}
     />
   );
 

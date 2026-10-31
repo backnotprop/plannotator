@@ -51,6 +51,8 @@ export interface InboxHtmlLinkContext {
   assetRoute: string | null;
   /** The window's own origin. */
   serverOrigin: string;
+  /** Markdown attachments follow sibling Markdown documents, not executable HTML. */
+  markdown?: boolean;
 }
 
 const trimSlash = (path: string) => path.replace(/\/+$/, '');
@@ -121,8 +123,12 @@ export function resolveInboxHtmlLink(href: string, context: InboxHtmlLinkContext
     return { kind: 'refused', name, note: `${name} is a hidden file or in a hidden folder, so it does not open here.` };
   }
   if (intent.kind === 'image') return { kind: 'image', url: intent.url, name };
-  if (intent.kind === 'document' && /\.html?$/i.test(path)) {
+  if (intent.kind === 'document' && (context.markdown ? /\.mdx?$/i : /\.html?$/i).test(path)) {
     return { kind: 'page', path, relative, name, hash: intent.hash };
+  }
+  // A Markdown file has no asset route: only other Markdown files in its folder open from a link.
+  if (context.markdown) {
+    return { kind: 'refused', name, note: `${name} is not attached to this thread. Only Markdown files in this file's folder open from a link.` };
   }
   if (intent.kind === 'unsupported' && intent.reason === 'no-asset-root') {
     return { kind: 'refused', name, note: `${name} is not attached, and this page's images are not available here.` };

@@ -1,13 +1,20 @@
 /**
- * The agents in a list row (approval "list-rows-mail-icons", 2026-10-30): one
- * bare mark per agent host after the project, first to join first; a host
- * with two or more sessions is one mark and "×N"; past three hosts, two marks
- * and "+N" counting the sessions not drawn; one accessible name that lists
- * every agent, the hidden ones too, and no agent name drawn as words. The
- * failures this catches: a repeated logo for two sessions of one host, a cap
- * that drops an agent from the row's name, an agent name in visible text, and
- * a narrow row's title cut instead of wrapped. Pixels (the 320 px phone, a long
- * project) are proved in tests/e2e/inbox-row-badges.spec.ts.
+ * The agents in a list row. A wide row (approval "list-rows-mail-icons",
+ * 2026-10-30): one bare mark per agent host after the project, first to join
+ * first; a host with two or more sessions is one mark and "×N"; past three
+ * hosts, two marks and "+N" counting the sessions not drawn. A three-line or
+ * phone row (approval "inbox-list-row-v2", 2026-10-30): the agents' tiles
+ * drawn before the project, one per agent, at most two, then a "+N" tile
+ * counting the other agents; the project on one line that never wraps, cut
+ * with "…". Every row: one accessible name that lists every agent, the hidden
+ * ones too, read after the project, and no agent name drawn as words. The
+ * failures this catches: a repeated logo for two sessions of one host (in a
+ * wide row, or a tile that hides a different agent behind "+N"), a cap that
+ * drops an agent from the row's name, more than two tiles pushing the project
+ * off its line, a project that wraps, a screen reader hearing every agent
+ * before the project, an agent name in visible text, and a narrow row's title
+ * cut instead of wrapped. Pixels (1440 beside a thread, a phone, a long project with five
+ * agents) are proved in tests/e2e/inbox-row-lead.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -69,10 +76,15 @@ const ALIAS = row('msg_alias', [session('claude', 1), session('claude-code', 2)]
 const ADDRESSED = row('msg_to', undefined, { author: { kind: 'person' }, addressee: { host: 'pi', session: 'ses_pi' } });
 const LONG_NAME = 'ledger-reconciliation-dry-run-before-the-quarterly-close-and-the-external-audit';
 const NAMED = row('msg_named', undefined, { thread_name: LONG_NAME });
-const SECTIONS: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [ONE, TWICE, THREE, FOUR, ALIAS, ADDRESSED, NAMED] }];
+/** Five hosts, one session each, on a very long project: two tiles, then "+3". */
+const LONG_PROJECT = 'acme-global-payments-ledger-reconciliation-and-settlement-platform-monorepo';
+const FIVE = row('msg_five', [session('claude-code', 1), session('codex', 1), session('opencode', 1), session('pi', 1), session('cursor', 1)], { project_id: 'prj_2', project: { id: 'prj_2', name: LONG_PROJECT } });
+/** Claude Code twice, then Codex: two agents, so one Claude tile and a Codex tile, never two Claude tiles and "+1". */
+const REPEAT = row('msg_repeat', [session('claude-code', 1), session('claude-code', 2), session('codex', 1)]);
+const SECTIONS: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [ONE, TWICE, THREE, FOUR, ALIAS, ADDRESSED, NAMED, FIVE, REPEAT] }];
 
 type Shape = 'wide' | 'narrow' | 'phone';
-const SHAPES: Shape[] = ['wide', 'narrow', 'phone'];
+const LEAD_SHAPES: Shape[] = ['narrow', 'phone'];
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -100,7 +112,19 @@ function render(shape: Shape, filtered = false): HTMLElement {
   return host;
 }
 
-/** A row's marks as drawn: each group's host and its "×N", then "+N" when present. */
+/** A three-line or phone row's tiles as drawn: each tile's host, then the "+N" tile when present. */
+function tiles(el: HTMLElement, id: string) {
+  const run = el.querySelector<HTMLElement>(`[data-thread-id="${id}"] .ib-atiles`)!;
+  expect(run).not.toBeNull();
+  return {
+    drawn: [...run.querySelectorAll<HTMLElement>(':scope > .ib-atile:not(.ib-atmore)')].map((t) => t.dataset.agentHost),
+    more: run.querySelector(':scope > .ib-atmore')?.textContent ?? null,
+    name: run.getAttribute('aria-label'),
+    role: run.getAttribute('role'),
+  };
+}
+
+/** A wide row's marks as drawn: each group's host and its "×N", then "+N" when present. */
 function marks(el: HTMLElement, id: string) {
   const agents = el.querySelector<HTMLElement>(`[data-thread-id="${id}"] .ib-ags`)!;
   expect(agents).not.toBeNull();
@@ -131,8 +155,9 @@ function visibleText(node: Element): string {
   return copy.textContent ?? '';
 }
 
-describe.if(hasDom)("a row's agents", () => {
-  for (const shape of SHAPES) {
+describe.if(hasDom)("a wide row's agents", () => {
+  {
+    const shape: Shape = 'wide';
     test(`${shape}: a host with two sessions is one mark and "×2"; two spellings of one host are one mark`, () => {
       const el = render(shape);
       expect(marks(el, TWICE.thread_id)).toEqual({ drawn: ['claude-code×2'], more: null, name: '2 Claude Code sessions', role: 'img' });
@@ -158,8 +183,8 @@ describe.if(hasDom)("a row's agents", () => {
       const agents = r.querySelector('.ib-ags')!;
       for (const part of agents.children) expect(part.getAttribute('aria-hidden')).toBe('true');
       expect(r.querySelectorAll('[role="img"][aria-label*="Codex"]').length).toBe(1);
-      // The row's name starts with where and who (then the time on line 1 beside a thread and on a phone), then the title.
-      expect(accessibleName(r)).toMatch(/^billing-svc Claude Code, 2 Codex sessions, OpenCode and Pi (Oct 10 )?Subject msg_four/);
+      // The row's name starts with where and who, then the title.
+      expect(accessibleName(r)).toMatch(/^billing-svc Claude Code, 2 Codex sessions, OpenCode and Pi Subject msg_four/);
       // No agent's name in the row's words (the marks say who), and no native title.
       for (const id of [FOUR.thread_id, ONE.thread_id, TWICE.thread_id]) {
         const text = visibleText(el.querySelector(`[data-thread-id="${id}"]`)!);
@@ -181,6 +206,82 @@ describe.if(hasDom)("a row's agents", () => {
     expect(cascade.resolved(marks, 'max-width')).toBe('100%');
     expect(cascade.resolved(marks, 'height')).toBe('auto');
   });
+});
+
+describe.if(hasDom)("a three-line or phone row's agents", () => {
+  for (const shape of LEAD_SHAPES) {
+    test(`${shape}: one tile per agent, at most two, then a "+N" tile counting the other agents`, () => {
+      const el = render(shape);
+      expect(tiles(el, ONE.thread_id)).toEqual({ drawn: ['codex'], more: null, name: 'Codex', role: 'img' });
+      expect(tiles(el, ADDRESSED.thread_id)).toEqual({ drawn: ['pi'], more: null, name: 'Pi', role: 'img' });
+      // Two sessions of one host are one tile, and no "×N"; two spellings of one host are one tile too.
+      expect(tiles(el, TWICE.thread_id)).toEqual({ drawn: ['claude-code'], more: null, name: '2 Claude Code sessions', role: 'img' });
+      expect(tiles(el, ALIAS.thread_id).drawn).toEqual(['claude']);
+      expect(tiles(el, THREE.thread_id)).toEqual({ drawn: ['claude-code', 'opencode'], more: '+1', name: 'Claude Code, OpenCode and Codex', role: 'img' });
+      // Codex's second session is no tile and no "+N": "+2" is OpenCode and Pi.
+      expect(tiles(el, FOUR.thread_id)).toEqual({ drawn: ['claude-code', 'codex'], more: '+2', name: 'Claude Code, 2 Codex sessions, OpenCode and Pi', role: 'img' });
+      expect(tiles(el, FIVE.thread_id)).toEqual({ drawn: ['claude-code', 'codex'], more: '+3', name: 'Claude Code, Codex, OpenCode, Pi and Cursor', role: 'img' });
+      for (const r of el.querySelectorAll('[data-thread-id]')) expect(r.querySelectorAll('.ib-atile:not(.ib-atmore)').length).toBeLessThanOrEqual(2);
+    });
+
+    test(`${shape}: a repeated host is one tile and never hides a different agent: Claude Code twice, then Codex, draws Claude and Codex, no "+N"`, () => {
+      const el = render(shape);
+      expect(tiles(el, REPEAT.thread_id)).toEqual({ drawn: ['claude-code', 'codex'], more: null, name: '2 Claude Code sessions and Codex', role: 'img' });
+    });
+
+    test(`${shape}: the row reads the project first, then its agents, as a wide row does; the tiles are drawn first`, () => {
+      const el = render(shape);
+      for (const [r, agents] of [
+        [FIVE, 'Claude Code, Codex, OpenCode, Pi and Cursor'],
+        [REPEAT, '2 Claude Code sessions and Codex'],
+        [ONE, 'Codex'],
+      ] as const) {
+        const node = el.querySelector<HTMLElement>(`[data-thread-id="${r.thread_id}"]`)!;
+        expect(accessibleName(node).startsWith(`${r.project.name} ${agents} `)).toBe(true);
+      }
+      // The project is first in the DOM; the tiles are drawn before it (the pixels: tests/e2e/inbox-row-lead.spec.ts).
+      const tilesRun = el.querySelector<HTMLElement>(`[data-thread-id="${FIVE.thread_id}"] .ib-from > .ib-atiles`)!;
+      expect(loadCascade(CSS).resolved(tilesRun, 'order')).toBe('-1');
+    });
+
+    test(`${shape}: the tiles come before the project; one name lists every agent, the hidden ones too, and no agent name is drawn as words`, () => {
+      const el = render(shape);
+      const r = el.querySelector<HTMLElement>(`[data-thread-id="${FIVE.thread_id}"]`)!;
+      const from = r.querySelector<HTMLElement>('.ib-from')!;
+      expect([...from.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-p', 'ib-atiles']);
+      expect(from.querySelector('.ib-p')!.textContent).toBe(LONG_PROJECT);
+      // The tiles and the "+N" are for the eye: the one name stands for them.
+      for (const part of r.querySelector('.ib-atiles')!.children) expect(part.getAttribute('aria-hidden')).toBe('true');
+      expect(r.querySelectorAll('[role="img"][aria-label*="Cursor"]').length).toBe(1);
+      expect(accessibleName(r)).toMatch(new RegExp(`^${LONG_PROJECT} Claude Code, Codex, OpenCode, Pi and Cursor (Oct 10 )?Subject msg_five`));
+      for (const id of [FIVE.thread_id, FOUR.thread_id, TWICE.thread_id]) {
+        const text = visibleText(el.querySelector(`[data-thread-id="${id}"]`)!);
+        for (const name of ['Claude Code', 'Codex', 'OpenCode', 'Pi', 'Cursor']) expect(text).not.toContain(name);
+      }
+      expect(r.querySelector('[title]')).toBeNull();
+      expect(r.querySelector('.ib-ags')).toBeNull();
+    });
+
+    test(`${shape}: the project never wraps: one line, cut with "…", the tiles never shrink`, () => {
+      const el = render(shape);
+      const cascade = loadCascade(CSS);
+      const project = el.querySelector<HTMLElement>(`[data-thread-id="${FIVE.thread_id}"] .ib-from > .ib-p`)!;
+      expect(cascade.resolved(project, 'white-space')).toBe('nowrap');
+      expect(cascade.resolved(project, 'overflow')).toBe('hidden');
+      expect(cascade.resolved(project, 'text-overflow')).toBe('ellipsis');
+      expect(cascade.resolved(project, 'min-width')).toBe('0');
+      const from = project.parentElement!;
+      expect(cascade.resolved(from, 'display')).toBe('flex');
+      expect(cascade.resolved(from, 'min-width')).toBe('0');
+      expect(cascade.resolved(from.querySelector<HTMLElement>('.ib-atiles')!, 'flex')).toBe('none');
+    });
+  }
+
+  test("one project's list: the tiles alone, no project", () => {
+    const el = render('narrow', true);
+    const from = el.querySelector<HTMLElement>(`.ib-nrow[data-thread-id="${FIVE.thread_id}"] .ib-from`)!;
+    expect([...from.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-atiles']);
+  });
 
   test('beside a thread the title is never cut: whole text, plain, and a line that wraps', () => {
     const el = render('narrow');
@@ -196,10 +297,5 @@ describe.if(hasDom)("a row's agents", () => {
       expect(cascade.resolved(node as HTMLElement, 'overflow')).toBeUndefined();
       expect(cascade.resolved(node as HTMLElement, 'white-space')).toBeUndefined();
     }
-    // The project on line 1 wraps too, and its marks follow it in the same run of text.
-    const project = el.querySelector<HTMLElement>(`.ib-nrow[data-thread-id="${NAMED.thread_id}"] .ib-l1 .ib-from > .ib-p`)!;
-    expect(cascade.resolved(project, 'white-space')).toBeUndefined();
-    expect(cascade.resolved(project, 'overflow-wrap')).toBe('anywhere');
-    expect(cascade.resolved(project.parentElement!, 'display')).toBeUndefined();
   });
 });

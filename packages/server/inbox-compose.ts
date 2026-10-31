@@ -69,6 +69,8 @@ export function createInboxCompose(options: {
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
+  /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
+  machine?: () => string;
 }) {
   const { store, serverSession, live, json } = options;
   const boardOn = options.boardOn ?? (() => false);
@@ -211,6 +213,7 @@ export function createInboxCompose(options: {
       const session = url.searchParams.get("session");
       return json({
         serverSession,
+        ...(options.machine ? { machine: options.machine() } : {}),
         home: homedir(),
         projects: sessionsModel(),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),

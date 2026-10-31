@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, SettingsModel } from '../api';
+import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, MachineView, SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -15,6 +15,7 @@ import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox
 import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
+import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
 import { PaletteRow } from './Palettes';
@@ -33,6 +34,7 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   agents: 'chip',
   prompts: 'prompt',
   devices: 'phone',
+  machines: 'system',
   archived: 'archive',
   storage: 'disk',
   about: 'info',
@@ -106,6 +108,13 @@ export interface SettingsPageProps {
   onAgents?: (next: InboxAgentsModel) => void;
   /** Settings → Prompts saved a change: the server's model of it. */
   onPrompts?: (next: InboxPromptsSettings) => void;
+  /**
+   * Settings → Machines (components/Machines.tsx): every machine the merged view knows, this one included. Absent or
+   * empty: an Inbox that cannot link machines, and the section is not listed.
+   */
+  machines?: MachineView[];
+  /** A link or an Unlink happened: read the machines again. */
+  onMachinesChanged?: () => void;
 }
 
 /**
@@ -664,6 +673,7 @@ const LEDE: Record<SettingsSection, string> = {
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
+  machines: 'Your other computers with Plannotator. Each keeps its own Inbox; this one shows their threads too.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
@@ -757,7 +767,12 @@ export function SettingsPage(props: SettingsPageProps) {
   // of them (an older Inbox has neither, and an empty page is worse than no row); its address still opens.
   const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
   const board = settings?.board && props.onToggleBoard ? settings.board : null;
-  const sections = SETTINGS_SECTIONS.filter((id) => id !== 'capabilities' || board !== null || experimental !== null);
+  // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
+  const machines = props.machines ?? [];
+  const linkedMachines = machines.filter((machine) => !machine.self);
+  const sections = SETTINGS_SECTIONS.filter(
+    (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0),
+  );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
     { label: 'Settings', ids: sections.filter((id) => SETTINGS_SECTIONS.indexOf(id) <= SETTINGS_SECTIONS.indexOf('capabilities')) },
@@ -778,6 +793,8 @@ export function SettingsPage(props: SettingsPageProps) {
     if (id === 'about' && aboutDot)
       return <span className="ib-dot" aria-label={aboutDot === 'check-failing' ? 'Checking for updates is failing' : 'A new version is available'} role="img" />;
     if (id === 'devices' && devicesDot) return <span className="ib-dot ib-warn" aria-label="Something here is not working" role="img" />;
+    if (id === 'machines' && linkedMachines.some((machine) => machine.state === 'needs_update' || machine.state === 'revoked'))
+      return <span className="ib-dot ib-warn" aria-label="A machine needs attention" role="img" data-machines-dot="" />;
     if (id === 'agents' && agentsNeedRestart(props.agents)) return <span className="ib-dot ib-warn" aria-label="Sessions need a reload" role="img" data-agents-dot="" />;
     return null;
   };
@@ -806,6 +823,8 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'devices':
         if (phonesOn && phones.devices && phones.devices.length > 0) return plural(phones.devices.length, 'phone');
         return settings.tailscale?.on ? 'Over your tailnet' : '';
+      case 'machines':
+        return linkedMachines.length > 0 ? plural(linkedMachines.length, 'machine') : '';
       case 'archived':
         return archivedTotal ? formatCount(archivedTotal) : '';
       case 'storage':
@@ -863,6 +882,9 @@ export function SettingsPage(props: SettingsPageProps) {
             onPairing={(open) => onPairing?.(open)}
           />
         );
+        break;
+      case 'machines':
+        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} />;
         break;
       case 'archived':
         body = archived ?? (

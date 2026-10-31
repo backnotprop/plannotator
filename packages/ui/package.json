@@ -29,7 +29,8 @@
     "./theme-modes": "./components/themeModes.tsx",
     "./types": "./types.ts",
     "./theme": "./theme.css",
-    "./styles.css": "./styles.css"
+    "./styles.css": "./styles.css",
+    "./contents-rail.css": "./contents-rail.css"
   },
   "files": [
     "components",
@@ -51,6 +52,7 @@
     "theme.css",
     "print.css",
     "styles.css",
+    "contents-rail.css",
     "plannotator.webp",
     "HANDOFF.md",
     "!**/*.test.ts",

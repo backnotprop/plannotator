@@ -16,6 +16,7 @@ const NAMED: Array<[RegExp, string]> = [
   [/night owl/i, "night-owl"],
   [/solarized/i, "solarized"],
   [/catppuccin/i, "catppuccin"],
+  [/tokyo ?night moon/i, "tokyo-night-moon"],
   [/tokyo ?night/i, "tokyo-night"],
   [/ros[eé] ?pine/i, "rose-pine"],
   [/gruvbox/i, "gruvbox"],

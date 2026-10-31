@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.28.39",
+  "version": "0.28.42",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -43,7 +43,7 @@
     "test": "bun test",
     "postinstall": "bun apps/guides-show/build/sync-manifest.ts --if-missing",
     "bench:plan-load": "bun scripts/bench-plan-load.mjs",
-    "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/acp-client/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/guide-viewer/tsconfig.json && tsc --noEmit -p apps/guides-show/tsconfig.json && tsc --noEmit -p apps/relay/tsconfig.json && tsc --noEmit -p apps/feedback-service/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.strict-consumer.json && tsc --noEmit -p apps/pi-extension/tsconfig.json && tsc --noEmit -p apps/hook/hooks/mod/tsconfig.json && tsc --noEmit -p apps/hook/tsconfig.server.json && tsc --noEmit -p packages/inbox/tsconfig.json && tsc --noEmit -p apps/inbox/tsconfig.json && tsc --noEmit -p packages/t3-code/tsconfig.json && tsc --noEmit -p apps/dsh-plugin/tsconfig.json",
+    "typecheck": "bash apps/pi-extension/vendor.sh && tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/references/tsconfig.json && tsc --noEmit -p packages/references/tsconfig.test.json && tsc --noEmit -p packages/acp-client/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/ai/tsconfig.json && tsc --noEmit -p packages/server/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/guide-viewer/tsconfig.json && tsc --noEmit -p apps/guides-show/tsconfig.json && tsc --noEmit -p apps/relay/tsconfig.json && tsc --noEmit -p apps/feedback-service/tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.strict-consumer.json && tsc --noEmit -p apps/pi-extension/tsconfig.json && tsc --noEmit -p apps/hook/hooks/mod/tsconfig.json && tsc --noEmit -p apps/hook/tsconfig.server.json && tsc --noEmit -p packages/inbox/tsconfig.json && tsc --noEmit -p apps/inbox/tsconfig.json && tsc --noEmit -p packages/t3-code/tsconfig.json && tsc --noEmit -p apps/dsh-plugin/tsconfig.json",
     "build:ui-css": "bun run --cwd packages/ui build:css",
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
@@ -75,6 +75,7 @@
     "katex": "^0.19.0"
   },
   "patchedDependencies": {
-    "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch"
+    "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch",
+    "@pierre/diffs@1.5.2": "patches/@pierre%2Fdiffs@1.5.2.patch"
   }
 }

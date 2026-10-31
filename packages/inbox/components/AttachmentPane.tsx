@@ -13,6 +13,7 @@ import {
 import { CodeFileView } from '@plannotator/ui/components/CodeFilePopout';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
+import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
@@ -55,6 +56,10 @@ import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, ty
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
+import { showsContents, useContentsShown } from '../contents';
+import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
+import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
+import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
 import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
@@ -78,6 +83,7 @@ import { escapeRung, type EscapeRung } from '../escapeLadder';
 import { storage } from '@plannotator/ui/utils/storage';
 import { Tip } from './Tip';
 import { CopyFileButton } from './CopyFileButton';
+import { LinkedMarkdown } from './LinkedMarkdown';
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -132,6 +138,9 @@ const TOOLS_CHORD = inboxFileViewerShortcuts.shortcuts.toggleTools.bindings[0]!;
  * line's inline comment).
  */
 const CLOSING_COMPOSERS = '[data-comment-popover], [data-diagram-composer], [data-annotation-id], [data-code-annotation-id]';
+
+/** How long the contents rail may take to load (its idle wait is 2 s at most) and measure before the Contents button stands in. */
+const RAIL_WAIT_MS = 2500;
 
 /** Drafts that close themselves on this same Escape (their own window listener): the selection toolbar, the quick-label picker. */
 const SELF_CLOSING_DRAFTS = '[data-pn-annotation-toolbar-row], [data-quick-label-picker]';
@@ -316,7 +325,8 @@ export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string
 /** The element that scrolls the open file (a document, code, or an image at its own size). */
 function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
   if (!pane) return null;
-  const doc = pane.querySelector<HTMLElement>('.ib-docscroll');
+  // The file's own, never a linked Markdown document drawn over it.
+  const doc = pane.querySelector<HTMLElement>('.ib-docscroll:not(.ib-linkeddoc)');
   if (doc) return doc;
   const code = pane.querySelector('.ib-codeview diffs-container')?.shadowRoot?.querySelector<HTMLElement>('[data-code]');
   if (code) return code;
@@ -368,6 +378,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
   const currentUnavailable = attachment.unavailable !== null;
   const effectiveVersion = currentUnavailable ? 'sent' : version;
+  const downloadName = `Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`;
   // Images in a Markdown file load relative to its folder, for the version on screen (#2228); one
   // that cannot load is drawn as its alt text, as in a message body (Thread.tsx).
   const imageBaseDir = inboxMarkdownImageBase(attachment.id, effectiveVersion);
@@ -1093,7 +1104,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     return true;
   }
 
-  // ── Links inside an attached HTML page (htmlLinks.ts) ─────────────────────
+  // ── Links inside an attached document (htmlLinks.ts) ─────────────────────
   /**
    * Pages the person followed from the attached page, not attached themselves:
    * shown read-only over it, newest last. The route holds the page on screen
@@ -1141,7 +1152,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     focusLinkedBack.current = false;
   }, [attachment.id, effectiveVersion]);
   // The page the route names: back to one already in the stack, or read and pushed.
-  const linkedRequest = isHtml ? (props.linked ?? null) : null;
+  const linkedRequest = isHtml || kind === 'markdown' ? (props.linked ?? null) : null;
   useEffect(() => {
     if (!linkedRequest) {
       setLinkedStack([]);
@@ -1188,6 +1199,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (isEditableTarget(document.activeElement)) return;
     back.focus({ preventScroll: true });
   }, [linkedTop, view]);
+  // A fragment a link named on an attached Markdown file (`notes.md#setup`): scrolled once the file is drawn.
+  useEffect(() => {
+    if (kind === 'markdown' && view && linkFragment?.id === attachment.id && !linkedTop) viewerRef.current?.scrollToAnchor?.(linkFragment.hash);
+  }, [kind, view, linkFragment, attachment.id, linkedTop]);
   // A fragment is replayed once: cleared after the page had time to take it, so a remount does not scroll again and the same #hash works twice.
   useEffect(() => {
     if (!linkFragment || linkFragment.id !== attachment.id || !view) return;
@@ -1233,6 +1248,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       attachments: linkables,
       assetRoute: pageAssetRoute,
       serverOrigin: window.location.origin,
+      markdown: kind === 'markdown',
     });
     switch (link.kind) {
       case 'ignored':
@@ -1270,6 +1286,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   const followLinkRef = useRef(followLink);
   followLinkRef.current = followLink;
+  // Stable across renders: ui's HtmlBlock redraws a raw HTML block whenever its link resolver changes.
+  const resolveFileLink = useCallback<LocalLinkResolver>(
+    (href) => ({ kind: 'open', open: () => followLinkRef.current(href, pageFolder) }),
+    [pageFolder],
+  );
+  const linkedPath = linkedTop?.path ?? null;
+  const openFromLinked = useCallback((href: string) => {
+    if (linkedPath) followLinkRef.current(href, folderOf(linkedPath));
+  }, [linkedPath]);
 
   const isText = kind === 'markdown' || kind === 'text';
   const isCode = kind === 'code';
@@ -1292,6 +1317,89 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
+  // A Markdown file with 4 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
+  // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
+  // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
+  const [contentsShown, setContentsShown] = useContentsShown();
+  const hasContents = view !== null && kind === 'markdown' && showsContents(documentBlocks);
+  const docKey = `${attachment.id}:${view?.version ?? ''}:${view?.attachment.current?.sha256 ?? ''}`;
+  // What the rail last said about this document (null: not measured yet).
+  const [railFit, setRailFit] = useState<{ key: string; fits: boolean } | null>(null);
+  const railFits = railFit?.key === docKey ? railFit.fits : null;
+  // Side by side on a laptop (owner's pick, 2026-10-30): the page's column keeps its left edge and gives up just
+  // enough on its right for the rail's 68 px gutter (inbox.css `data-contents-gutter`), so the rail shows beside
+  // it. Only for a file with a rail that is not hidden, and only where the rail can show at all (a page at least
+  // 480 px wide, its own rule, measured on the same box: the scroll element's border box); elsewhere the column
+  // is today's. So in Side by side the layout, not the rail's last measure, says whether the rail fits: a hidden
+  // rail measures a column without the gutter.
+  const [docWidth, setDocWidth] = useState(0);
+  useLayoutEffect(() => {
+    if (!scrollViewport) return;
+    const measure = () => setDocWidth(scrollViewport.getBoundingClientRect().width);
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(scrollViewport);
+    return () => observer?.disconnect();
+  }, [scrollViewport]);
+  const sideFits = !full && !phone && docWidth >= RAIL_MIN_PAGE_WIDTH;
+  const railGutter = hasContents && sideFits && contentsShown;
+  // The rail loads once the page is idle (2 s at most) and then measures. While it may still be on its way no
+  // stand-in shows (no button flashes before the rail); past that, a rail that never drew leaves the Contents
+  // button and sheet. The wait starts again for each file and each Hide or Show.
+  const railWaitKey = `${docKey}:${contentsShown}`;
+  const [railWaited, setRailWaited] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hasContents || phone) return;
+    const timer = setTimeout(() => setRailWaited(railWaitKey), RAIL_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [hasContents, phone, railWaitKey]);
+  const waited = railWaited === railWaitKey;
+  // The Contents button over the file (ContentsPanel.tsx): on a phone, the sheet; hidden, Show wherever the rail
+  // would fit (Side by side by its layout, Full screen by the rail's measure), else the sheet; shown, nothing while
+  // the rail is there or on its way, and the sheet where it does not fit or never drew.
+  const contentsButton: ContentsButtonMode | null = !hasContents
+    ? null
+    : phone
+      ? 'sheet'
+      : !contentsShown
+        ? sideFits || railFits === true
+          ? 'show'
+          : railFits === false || waited
+            ? 'sheet'
+            : null
+        : railFits === true
+          ? null
+          : (railFits === false && !sideFits) || waited
+            ? 'sheet'
+            : null;
+  // Hide and Show remove the control that has focus: focus moves to the one that takes its place (the Show
+  // button; the rail's current tick).
+  const contentsFocusRef = useRef<'show' | 'rail' | null>(null);
+  const hideContents = useCallback(() => {
+    contentsFocusRef.current = 'show';
+    setContentsShown(false);
+  }, [setContentsShown]);
+  const showContents = useCallback(() => {
+    contentsFocusRef.current = 'rail';
+    setContentsShown(true);
+  }, [setContentsShown]);
+  // The request waits until its target has drawn: Side by side, a shown rail measures again (the gutter is back)
+  // before its ticks draw. A new file drops it.
+  useEffect(() => {
+    contentsFocusRef.current = null;
+  }, [docKey]);
+  useEffect(() => {
+    const want = contentsFocusRef.current;
+    if (want === null) return;
+    const area = docAreaRef.current;
+    const target =
+      want === 'show'
+        ? area?.querySelector<HTMLElement>('[data-contents-show]')
+        : area?.querySelector<HTMLElement>('.pn-contents-rail [data-contents-index][tabindex="0"]');
+    if (!target) return;
+    contentsFocusRef.current = null;
+    target.focus({ preventScroll: true });
+  }, [contentsShown, railFits, contentsButton]);
   const refRepo = useRefRepo(props.repo);
   const wrapCode = useMemo(() => view !== null && isCode && hasLineLongerThan(view.text, CODE_WRAP_LINE_CHARS), [view, isCode]);
   // Code comments drawn under their lines; one whose lines no longer read as they did is unanchored, and so is a text
@@ -1634,15 +1742,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
           {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
           {source.writes && (
-            <Tip content={`Download ${attachment.name}${effectiveVersion === 'sent' ? ' (the version it sent)' : ''}`}>
-              <a
-                className="ib-btn ib-sm ib-ghost"
-                href={source.downloadUrl(attachment, effectiveVersion)}
-                download={attachment.name}
-                data-attachment-download=""
-              >
-                <Icon name="download" size={14} />
-                Download
+            // Icon only, as × is: the aria-label names it (Tip adds no name). The Download card, the video card and full screen's ⋯ keep the word.
+            <Tip content={downloadName}>
+              <a className="ib-iconbtn" href={source.downloadUrl(attachment, effectiveVersion)} download={attachment.name} aria-label={downloadName} data-attachment-download="">
+                <Icon name="download" size={16} />
               </a>
             </Tip>
           )}
@@ -1765,7 +1868,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             />
             </div>
           )}
-          {view && isHtml && linkedTop && (
+          {view && linkedTop && (
             // A page the attached page links to, not attached: read-only (comments belong to attachments).
             <div className="ib-linked" data-linked-page={linkedTop.name}>
               <div className="ib-linkband" ref={linkBandRef} role="group" aria-label={`${linkedTop.name}, linked from ${attachment.name}`}>
@@ -1783,7 +1886,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 )}
               </div>
               <div className="ib-linkedframe">
-                <HtmlViewer
+                {linkedTop.html === null ? (
+                  <LinkedMarkdown key={`${linkedStack.length}:${linkedTop.path}`} page={linkedTop} attachmentId={attachment.id} onOpenLink={openFromLinked} />
+                ) : <HtmlViewer
                   key={`${linkedStack.length}:${linkedTop.path}`}
                   rawHtml={linkedTop.html}
                   title={linkedTop.name}
@@ -1803,17 +1908,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   hideControls
                   maxAdditionalTargets={0}
                   readOnly
-                />
+                />}
               </div>
             </div>
           )}
-          {isHtml && (
+          {(isHtml || kind === 'markdown') && (
             <div className={`ib-linknote${linkNote ? ' ib-on' : ''}`} aria-hidden={linkNote ? undefined : true} data-link-note={linkNote ? 'shown' : 'hidden'}>
               <Icon name="info" size={13} />
               <span>{linkNote}</span>
             </div>
           )}
-          {view && isText && !props.readOnly && (
+          {view && isText && !linkedTop && !props.readOnly && (
             <div className="ib-toolstrip">
               <AnnotationToolstrip
                 inputMethod={inputMethod}
@@ -1825,6 +1930,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 compact
               />
             </div>
+          )}
+          {view && contentsButton && !linkedTop && (
+            <ContentsPanel
+              key={`contents:${docKey}`}
+              mode={contentsButton}
+              blocks={blocks}
+              annotations={annotations}
+              scrollViewport={scrollViewport}
+              onShow={showContents}
+              phone={phone}
+            />
           )}
           {isImage && (
             <ImageAttachmentView
@@ -1941,7 +2057,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             </div>
           )}
           {view && !isHtml && !isCode && (
-            <div className="ib-docscroll bg-card" data-look="clean" ref={setScrollViewport}>
+            <div
+              className={`ib-docscroll bg-card${linkedTop ? ' ib-covered' : ''}`}
+              inert={linkedTop ? true : undefined}
+              data-look="clean"
+              data-contents-gutter={railGutter ? '' : undefined}
+              ref={setScrollViewport}
+            >
               <ScrollViewportProvider viewport={scrollViewport}>
               <ImageResolverContext.Provider value={resolveImage}>
               <Viewer
@@ -1950,6 +2072,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 blocks={blocks}
                 markdown={view.text}
                 imageBaseDir={imageBaseDir}
+                resolveLocalLink={kind === 'markdown' ? resolveFileLink : undefined}
                 questionDecisionLines={false}
                 annotations={annotations}
                 mentionSource={props.mentionSource}
@@ -1960,7 +2083,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 inputMethod={isText ? inputMethod : 'drag'}
                 taterMode={false}
                 gridEnabled={false}
-                maxWidth={full ? 760 : 640}
+                // With the rail's gutter, inbox.css sizes the column (640 px at most, as here).
+                maxWidth={railGutter ? null : full ? 760 : 640}
                 stickyActions={false}
                 disableCodePathValidation
                 copyLabel="Copy file"
@@ -1973,6 +2097,21 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               </ImageResolverContext.Provider>
               </ScrollViewportProvider>
             </div>
+          )}
+          {view && hasContents && !phone && (
+            // ui's contents rail (Workspaces' rail, approved 2026-10-03): ticks in the page's right gutter, the panel
+            // opening left over the page. Loaded once the page is interactive; it measures itself and yields where the
+            // gutter is short, then says so and the Contents button takes over. Hidden by choice, it still measures.
+            <DeferredMarkdownContentsRail
+              key={`rail:${docKey}`}
+              blocks={documentBlocks}
+              scrollViewport={scrollViewport}
+              contentSelector="[data-doc-text-root]"
+              // A linked document over the file hides the file's Contents with it.
+              hidden={!contentsShown || linkedTop !== null}
+              onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
+              panelAction={<ContentsHide onHide={hideContents} />}
+            />
           )}
         </div>
         <div
