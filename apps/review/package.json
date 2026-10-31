@@ -12,7 +12,7 @@
     "@plannotator/review-editor": "workspace:*",
     "@plannotator/server": "workspace:*",
     "@plannotator/ui": "workspace:*",
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.1",
     "dompurify": "^3.4.17",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
