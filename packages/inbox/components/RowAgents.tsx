@@ -4,12 +4,14 @@ import { agentName } from '../tags';
 import { Tip } from './Tip';
 
 /**
- * The agents in a list row. A wide row draws them after its project (`RowAgents`, approval "list-rows-mail-icons",
- * 2026-10-30): one bare 16 px mark per agent host, in the order they joined the thread. A host with two or more
- * sessions is one mark and "×N". Past three hosts, two marks and "+N", N counting the sessions not drawn. A
- * three-line or phone row draws them before its project (`RowAgentTiles`, approval "inbox-list-row-v2",
- * 2026-10-30): the thread header's overlapping tiles, one per agent, at most two and a "+N" tile counting the other
- * agents. Either run is one image whose name lists every agent, the hidden ones too.
+ * The agents in a list row. A wide row draws them before its project (`RowAgents`, approval "list-rows-mail-icons",
+ * 2026-10-30; before the project since the owner's call of 2026-10-31): one bare 16 px mark per agent host, in the
+ * order they joined the thread. A host with two or more sessions is one mark and "×N". Past three hosts, two marks
+ * and "+N", N counting the sessions not drawn. The marks sit in a slot as wide as the list's widest marks
+ * (`rowAgentsSlot`), so the projects line up. A three-line or phone row draws them before its project too
+ * (`RowAgentTiles`, approval "inbox-list-row-v2", 2026-10-30): the thread header's overlapping tiles, one per agent,
+ * at most two and a "+N" tile counting the other agents. Either run is one image whose name lists every agent, the
+ * hidden ones too.
  */
 
 /** A row draws up to three hosts' marks; past that two and "+N". */
@@ -77,6 +79,61 @@ export function RowAgents({ participants, agent, tip = true }: { participants: r
     </span>
   );
   return tip ? <Tip content={words}>{marks}</Tip> : marks;
+}
+
+/**
+ * A wide row's marks' width, in three parts: px (the 16 px marks, the 5 px gaps between items, the 2 px before each
+ * "×N", the "+N" pill's 10 px of padding), and how many characters of "×N" text (12 px type) and of "+N" text
+ * (10.5 px type) the run draws. These numbers are `.ib-ags`' own in inbox.css: change one there, change it here.
+ */
+interface RowAgentsSize {
+  px: number;
+  x: number;
+  plus: number;
+}
+
+function rowAgentsSize(groups: readonly RowAgentGroup[]): RowAgentsSize {
+  const { shown, more } = shownAgentGroups(groups);
+  const counted = shown.filter((g) => g.sessions > 1);
+  const items = shown.length + (more > 0 ? 1 : 0);
+  return {
+    px: shown.length * 16 + (items - 1) * 5 + counted.length * 2 + (more > 0 ? 10 : 0),
+    x: counted.reduce((n, g) => n + 1 + String(g.sessions).length, 0),
+    plus: more > 0 ? 1 + String(more).length : 0,
+  };
+}
+
+/**
+ * How wide one character of "×N" or "+N" text is at most, in ems: the system UI fonts draw "×", "+" and a tabular
+ * digit at about 0.6em at weight 600, so 0.65em leaves a pixel or so to spare.
+ */
+const ROW_AGENT_CHAR_EM = 0.65;
+
+/**
+ * The wide rows' mark slot (the owner, 2026-10-31: the marks before the project): as wide as the list's widest run
+ * of marks, so every project starts on one left edge down the list. A CSS length that scales with the text size
+ * (`max()` over the runs no other run outgrows), or null for a list with no rows. It is worked out from the rows,
+ * never measured, so the list reads no layout; a run a wider font draws past it widens its own row only.
+ */
+export function rowAgentsSlot(rows: readonly { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null } }[]): string | null {
+  const sizes: RowAgentsSize[] = [];
+  for (const row of rows) {
+    const size = rowAgentsSize(rowAgentGroups(row.participants, row.agent));
+    if (sizes.some((s) => s.px >= size.px && s.x >= size.x && s.plus >= size.plus)) continue;
+    for (let i = sizes.length - 1; i >= 0; i--) {
+      const s = sizes[i]!;
+      if (size.px >= s.px && size.x >= s.x && size.plus >= s.plus) sizes.splice(i, 1);
+    }
+    sizes.push(size);
+  }
+  const lengths = sizes.map((s) => {
+    const parts = [`${s.px}px`];
+    if (s.x > 0) parts.push(`var(--ib-fs-12, 12px) * ${+(s.x * ROW_AGENT_CHAR_EM).toFixed(2)}`);
+    if (s.plus > 0) parts.push(`var(--ib-fs-10-5, 10.5px) * ${+(s.plus * ROW_AGENT_CHAR_EM).toFixed(2)}`);
+    return parts.length === 1 ? parts[0]! : `calc(${parts.join(' + ')})`;
+  });
+  if (lengths.length === 0) return null;
+  return lengths.length === 1 ? lengths[0]! : `max(${lengths.join(', ')})`;
 }
 
 /** A three-line or phone row draws at most two tiles; past that, a "+N" tile for the rest. */

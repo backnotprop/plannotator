@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
@@ -8,7 +8,7 @@ import { agentName, formatCount, shortTime, waitCount } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
-import { RowAgents, RowAgentTiles } from './RowAgents';
+import { RowAgents, rowAgentsSlot, RowAgentTiles } from './RowAgents';
 import { ProjectTipText, Tip } from './Tip';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
@@ -132,8 +132,8 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
 
 /**
  * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
- * (Lines). The row itself draws its agents beside the project: after it on a wide row (`RowAgents`), before it on
- * a three-line or phone row (`RowAgentTiles`).
+ * (Lines). The row itself draws its agents before the project: bare marks on a wide row (`RowAgents`), tiles on a
+ * three-line or phone row (`RowAgentTiles`).
  */
 function RowMark({ row }: { row: InboxListRow }) {
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
@@ -242,9 +242,13 @@ function previewOf(row: InboxListRow): string | null {
 }
 
 /**
- * A wide row's first cell (approval "list-rows-mail-icons"): the project, then the agents' marks right after it.
+ * A wide row's first cell (approval "list-rows-mail-icons"; the owner, 2026-10-31: the marks first): the agents'
+ * marks, then the project, in a slot as wide as the list's widest marks (`rowAgentsSlot`), so the projects line up.
  * The project is left out in one project's list, which leaves the marks alone. The cell is one line: the project
  * gives way with "…" (its tooltip shows it whole), the marks never do.
+ *
+ * The project comes first in the DOM, so a screen reader reads where, then who, as on a three-line row
+ * (`LeadLine`); CSS (the cell's grid) draws the marks first.
  */
 function FromLine({ row, project, filtered }: { row: InboxListRow; project: string; filtered: boolean }) {
   return (
@@ -484,7 +488,7 @@ export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
  * one-line row; its cells as approval "list-rows-mail-icons", 2026-10-30, lays
- * them out). Six columns: the project with the agents' marks after it, the
+ * them out). Six columns: the agents' marks and the project after them, the
  * title cell (the thread's name in bold when unread, then the grey subject),
  * then right-aligned the words, the badge, the open counts (the action pill,
  * `?N`) and the time, each in a column of its own so they line up down the
@@ -841,12 +845,19 @@ export function InboxList(props: InboxListProps) {
   const sendNow = useCallback((row: InboxListRow) => latest.current.onSendNow?.(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
+  // The wide rows' mark slot: as wide as the list's widest marks, so the projects after them line up. Quiet's folded
+  // rows count too, so opening Quiet moves no project.
+  const agentSlot = useMemo(
+    () => rowAgentsSlot(props.sections.flatMap((s) => s.threads.map((row) => ({ participants: row.participants, agent: rowAgent(row) })))),
+    [props.sections],
+  );
   return (
     <section
       ref={listEl}
       id={columnId}
       className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${listLookClasses(look)}`}
       aria-label={props.title}
+      style={agentSlot ? ({ '--ib-agslot': agentSlot } as CSSProperties) : undefined}
     >
       <div className="ib-lhead">
         <SidebarTrigger />

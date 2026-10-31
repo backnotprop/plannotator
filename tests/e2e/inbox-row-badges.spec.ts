@@ -8,10 +8,11 @@
  *  - Stopped is a red triangle alone, Holds up an amber triangle and its count;
  *    their accessible text stays "Stopped" and "Holds up 3".
  *  - The one-line row (approvals "inbox-row-byline" and "list-rows-mail-icons"):
- *    the project with the agents' marks right after it, the title cell, then
- *    the badge, the count and the time, each in its own column: every
- *    column's right edge lines up down the list, and every title cell starts
- *    on one left edge.
+ *    the agents' marks with the project after them (the owner, 2026-10-31),
+ *    every project on one left edge however many marks its row draws, the
+ *    title cell, then the badge, the count and the time, each in its own
+ *    column: every column's right edge lines up down the list, and every
+ *    title cell starts on one left edge.
  *  - Card A opens on the badge after the tooltip delay, and while the row has
  *    keyboard focus; a click's focus opens nothing.
  *  - Beside an open thread the three-line rows keep the card (approval
@@ -152,7 +153,7 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop: the triangles with their words, the marks after the project, the badge and count in their own columns', async () => {
+test('desktop: the triangles with their words, the marks before the project, the badge and count in their own columns', async () => {
   const { page } = world;
   await page.goto(world.url);
   const stop = page.locator(`.ib-row[data-thread-id="${world.stopped}"] [data-row-badge]`);
@@ -176,9 +177,10 @@ test('desktop: the triangles with their words, the marks after the project, the 
   expect(described).toBeTruthy();
   await expect(page.locator(`[id="${described}"]`)).toHaveText(/^Stopped: The retry worker cannot ship without this\. Also holds up: The retry worker; The admin retry view\.$/);
 
-  // Left to right: the project and its agents' marks, the title cell, then the words, the badge, the count and the
+  // Left to right: the agents' marks and the project, the title cell, then the words, the badge, the count and the
   // time, each column on one right edge down the list (approval "list-rows-mail-icons", the wide row); every title
-  // cell starts on one left edge; the marks sit right after the project, inside its column.
+  // cell starts on one left edge; the marks start the project's column and the project follows them (the owner,
+  // 2026-10-31), every project on one left edge though the rows draw one mark or two.
   const geometry = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('.ib-row')].map((r) => {
       const box = (sel: string) => r.querySelector(sel)!.getBoundingClientRect();
@@ -189,7 +191,9 @@ test('desktop: the triangles with their words, the marks after the project, the 
         from: [...r.querySelector('.ib-from')!.children].map((c) => c.className.split(' ')[0]),
         rights: ['.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => Math.round(box(sel).right)),
         lefts: ['.ib-cw', '.ib-bcol', '.ib-cq', '.ib-t'].map((sel) => box(sel).left),
-        projectRight: box('.ib-p').right,
+        cell: box('.ib-from').left,
+        project: box('.ib-p').left,
+        markCount: r.querySelectorAll('.ib-ags > .ib-ag').length,
         marks: box('.ib-ags').toJSON() as DOMRect,
         subjRight: box('.ib-subj').right,
         subj: box('.ib-subj').left,
@@ -202,10 +206,17 @@ test('desktop: the triangles with their words, the marks after the project, the 
   expect(geometry.length).toBeGreaterThanOrEqual(4);
   for (let i = 0; i < 4; i++) expect(new Set(geometry.map((g) => g.rights[i])).size, `column ${i}`).toBe(1);
   expect(new Set(geometry.map((g) => Math.round(g.subj))).size).toBe(1);
+  // The list mixes one- and two-mark rows, and still every project starts on one left edge.
+  expect(new Set(geometry.map((g) => g.markCount))).toEqual(new Set([1, 2]));
+  expect(Math.max(...geometry.map((g) => g.project)) - Math.min(...geometry.map((g) => g.project)), 'the projects line up').toBeLessThanOrEqual(0.5);
+  // The slot is the widest marks' own width: their project sits the cell's 8px after them, no farther.
+  expect(Math.min(...geometry.map((g) => g.project - g.marks.right))).toBeCloseTo(8, 0);
   for (const g of geometry) {
     expect(g.cells.slice(-6), `row ${g.id}`).toEqual(['ib-from', 'ib-subj', 'ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
+    // The project first in the DOM (a screen reader reads where, then who); drawn after the marks.
     expect(g.from, `row ${g.id}`).toEqual(['ib-p', 'ib-ags']);
-    expect(g.marks.left, `row ${g.id}: the marks follow the project`).toBeGreaterThanOrEqual(g.projectRight);
+    expect(Math.abs(g.marks.left - g.cell), `row ${g.id}: the marks start the project's column`).toBeLessThanOrEqual(0.5);
+    expect(g.marks.right, `row ${g.id}: the marks end before the project`).toBeLessThan(g.project);
     expect(g.marks.right, `row ${g.id}: the marks stay in the project's column`).toBeLessThanOrEqual(g.subj);
     expect(g.inSubject).toBe(false);
     expect(g.lefts[0]).toBeGreaterThanOrEqual(g.subjRight - 0.5);

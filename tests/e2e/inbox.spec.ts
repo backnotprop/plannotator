@@ -330,14 +330,14 @@ async function leftOf(page: Page, selector: string): Promise<number> {
 
 test('a project folder filters the list and the sections still apply', async () => {
   const { page } = world;
-  // Every project: the row starts with the project label, the agents' marks right after it, in the same column.
+  // Every project: the row starts with the agents' marks, the project label after them, in the same column.
   const named = `.ib-row[data-thread-id="${world.threads.named}"]`;
   const stoppedRow = `.ib-row[data-thread-id="${world.threads.stopped}"]`;
-  const labelLeft = await leftOf(page, `${named} .ib-p`);
+  const labelLeft = await leftOf(page, `${named} .ib-ags`);
   expect(await leftOf(page, '.ib-band')).toBe(labelLeft - 12);
-  const labelRight = await page.locator(`${named} .ib-p`).evaluate((el) => el.getBoundingClientRect().right);
-  expect(await leftOf(page, `${named} .ib-ags`)).toBeGreaterThan(labelRight);
-  expect(await leftOf(page, `${named} .ib-ags`)).toBeLessThan(await leftOf(page, `${named} .ib-subj`));
+  const marksRight = await page.locator(`${named} .ib-ags`).evaluate((el) => el.getBoundingClientRect().right);
+  expect(await leftOf(page, `${named} .ib-p`)).toBeGreaterThan(marksRight);
+  expect(await leftOf(page, `${named} .ib-p`)).toBeLessThan(await leftOf(page, `${named} .ib-subj`));
 
   await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'docs-site' })).toBeVisible();
@@ -353,8 +353,8 @@ test('a project folder filters the list and the sections still apply', async () 
   await side(page).getByRole('button', { name: /^billing-svc(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
-  // One project: no project label. The agents' marks start the row where the
-  // label did (approval "list-rows-mail-icons"), and the title cell starts on one
+  // One project: no project label. The agents' marks start the row as they do
+  // in every project's list (approval "list-rows-mail-icons"), and the title cell starts on one
   // left edge for every row, badge or not. The badge and the count have their own
   // columns before the time, each on one right edge for every row.
   await expect(page.locator('.ib-row .ib-p')).toHaveCount(0);
