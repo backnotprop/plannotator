@@ -266,3 +266,70 @@ describe("wait_for_reply on a reply that answers several messages (approval inbo
     expect(text).toContain("Skipped by the person");
   });
 });
+
+describe("POST /api/inbox/threads/:id/mark-unread", () => {
+  test("a thread marked read goes back to New, bold; its question stays closed and the agent gets only the set-aside note", async () => {
+    const { server, client, threadId, messageId } = await setup();
+    await post(server, `/api/inbox/threads/${threadId}/read`, { serverSession: server.serverSession });
+    const res = await post(server, `/api/inbox/threads/${threadId}/mark-unread`, { serverSession: server.serverSession });
+    expect(res.status).toBe(200);
+    const answer = (await res.json()) as { thread: InboxListRow; wrote: boolean; through_seq: number };
+    expect(answer.thread).toMatchObject({ section: "new", unread: true, unseen: 1 });
+    expect(answer.wrote).toBe(true);
+    expect(answer.through_seq).toBe(server.store.messageCursor(messageId));
+    expect((await rowOf(server, threadId)).section).toBe("new");
+    expect((await questionsOf(server, threadId)).map((q) => q.state)).toEqual(["closed"]);
+    // Mark unread writes nothing to the thread; the Mark read's own note still goes, once.
+    expect(server.store.thread(threadId)!.messages).toHaveLength(1);
+    await Bun.sleep(DELAY + 400);
+    const messages = server.store.thread(threadId)!.messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[1]!.body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
+    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: "ses_mr", timeout_seconds: 1 } })) as {
+      structuredContent: { status: string; reply?: { body: string } };
+    };
+    expect(waited.structuredContent.reply?.body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
+    // The agent reading the thread does not make it read for the person.
+    expect((await rowOf(server, threadId)).unread).toBe(true);
+  });
+
+  test("a second click writes nothing and says so; /unread still moves the Mark read back and reopens the question", async () => {
+    const { server, threadId } = await setup();
+    await post(server, `/api/inbox/threads/${threadId}/read`, { serverSession: server.serverSession });
+    await post(server, `/api/inbox/threads/${threadId}/mark-unread`, { serverSession: server.serverSession });
+    const again = await post(server, `/api/inbox/threads/${threadId}/mark-unread`, { serverSession: server.serverSession });
+    expect(((await again.json()) as { wrote: boolean }).wrote).toBe(false);
+    await post(server, `/api/inbox/threads/${threadId}/unread`, { serverSession: server.serverSession });
+    expect((await questionsOf(server, threadId)).map((q) => q.state)).toEqual(["open"]);
+    expect((await rowOf(server, threadId)).read_at).toBeNull();
+  });
+
+  test("Mark all as read names the row in `looked`, and its Undo makes it unread again without reopening the question", async () => {
+    const { server, threadId } = await setup();
+    await post(server, `/api/inbox/threads/${threadId}/read`, { serverSession: server.serverSession });
+    await post(server, `/api/inbox/threads/${threadId}/mark-unread`, { serverSession: server.serverSession });
+    const projectId = (await rowOf(server, threadId)).project.id;
+    const batch = (await (await post(server, `/api/inbox/projects/${projectId}/read`, { serverSession: server.serverSession })).json()) as { batch: { read: string[]; looked: string[] } };
+    expect(batch.batch).toEqual({ read: [], looked: [threadId] });
+    expect((await rowOf(server, threadId)).section).toBe("quiet");
+    await post(server, `/api/inbox/projects/${projectId}/unread`, { serverSession: server.serverSession, threads: batch.batch.read, looked: batch.batch.looked });
+    expect((await rowOf(server, threadId)).section).toBe("new");
+    expect((await questionsOf(server, threadId)).map((q) => q.state)).toEqual(["closed"]);
+  });
+
+  test("the same guards as /read: a cross-site page, another session's tab, a GET, an unknown thread, an archived one", async () => {
+    const { server, threadId, messageId } = await setup();
+    await post(server, `/api/inbox/threads/${threadId}/seen`, {});
+    const cross = await post(server, `/api/inbox/threads/${threadId}/mark-unread`, {}, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
+    expect(cross.status).toBe(403);
+    expect((await post(server, `/api/inbox/threads/${threadId}/mark-unread`, { serverSession: "an-older-inbox" })).status).toBe(409);
+    expect((await fetch(url(server, `/api/inbox/threads/${threadId}/mark-unread`))).status).toBe(405);
+    expect((await post(server, "/api/inbox/threads/msg_00000000000000000000000000/mark-unread", {})).status).toBe(404);
+    // Nothing above changed the look.
+    expect((await rowOf(server, threadId)).unseen).toBe(0);
+    await post(server, `/api/inbox/messages/${messageId}/resolve`, { resolved: true });
+    const archived = await post(server, `/api/inbox/threads/${threadId}/mark-unread`, {});
+    expect(archived.status).toBe(409);
+    expect(((await archived.json()) as { code: string }).code).toBe("thread_resolved");
+  });
+});
