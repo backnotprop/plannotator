@@ -384,6 +384,18 @@ test('the plan is always the Clean look: the document edge to edge on the card c
   await expect(scroll).toBeVisible();
 });
 
+test('selecting text in a Markdown attachment offers Comment and Looks good, never a quick label', async () => {
+  const page = world.page;
+  await selectText(page, 'retries them one by one');
+  const toolbar = page.locator('.annotation-toolbar');
+  await expect(toolbar.locator('button[aria-label="Comment"]')).toBeVisible();
+  await expect(toolbar.locator('button[aria-label="Looks good"]')).toBeVisible();
+  await expect(toolbar.locator('button[aria-label="Quick label"]')).toHaveCount(0);
+  await shot('2.1c-attachment-toolbar-no-quick-label');
+  await page.keyboard.press('Escape');
+  await expect(toolbar).toHaveCount(0);
+});
+
 test('a selection comment on the plan is saved and listed in the reply box chip', async () => {
   const page = world.page;
   const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
