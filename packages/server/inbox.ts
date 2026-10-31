@@ -3132,6 +3132,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ questions });
       }
 
+      // The project menu's Rename… and Reset name: `{ name: string | null }`
+      // sets or clears the project's `display_name` (store.renameProject). The
+      // same guards as every window write. Window only: not on the phone's
+      // door, and never an agent's (no MCP action).
+      const projectNameMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/name$/.exec(path);
+      if (projectNameMatch) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const projectId = projectNameMatch[1]!;
+        if (!isInboxId("prj", projectId)) throw new InboxError("validation_error", "A project id (prj_).", { field: "project" });
+        if (!("name" in body) || (body.name !== null && typeof body.name !== "string")) {
+          throw new InboxError("validation_error", "name: the project's new name, or null to go back to its folder's name.", { field: "name" });
+        }
+        store.renameProject(projectId, body.name as string | null);
+        return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });
+      }
+
       // The project menu (design record "inbox-project-menu"): Mark all as
       // read and Archive all on one project, and their Undo. Loops over the
       // single actions (packages/shared/inbox/project-batch.ts); the same
