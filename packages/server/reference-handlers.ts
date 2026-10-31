@@ -507,7 +507,7 @@ function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange
 }
 
 /** List markdown files in a directory as a nested tree. */
-export async function handleFileBrowserFiles(req: Request): Promise<Response> {
+export async function handleFileBrowserFiles(req: Request, onDirectoryListed?: (path: string) => void): Promise<Response> {
 	const url = new URL(req.url);
 	const dirPath = url.searchParams.get("dirPath");
 	if (!dirPath) {
@@ -522,6 +522,12 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 		return Response.json({ error: "Invalid directory path" }, { status: 400 });
 	}
 
+	// Startup authorizes saved directories before draft recovery, without a file walk.
+	if (req.method === "POST" && url.searchParams.get("registerOnly") === "1") {
+		onDirectoryListed?.(resolvedDir);
+		return Response.json({ ok: true });
+	}
+
 	try {
 		// The user's own modified/untracked files are seeded before the walk, so
 		// they are never the ones the cap leaves out.
@@ -532,6 +538,7 @@ export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 		const sortedFiles = listing.files;
 
 		const tree = buildFileTree(sortedFiles);
+		if (req.method === "POST") onDirectoryListed?.(resolvedDir);
 		return Response.json({
 			tree,
 			workspaceStatus,

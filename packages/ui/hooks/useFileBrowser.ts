@@ -110,7 +110,7 @@ export interface FileTreeBackend {
 
 const defaultFileTreeBackend: FileTreeBackend = {
   loadTree(dirPath) {
-    return fetch(`/api/reference/files?dirPath=${encodeURIComponent(dirPath)}`);
+    return fetch(`/api/reference/files?dirPath=${encodeURIComponent(dirPath)}`, { method: "POST" });
   },
   loadVaultTree(vaultPath) {
     return fetch(`/api/reference/obsidian/files?vaultPath=${encodeURIComponent(vaultPath)}`);

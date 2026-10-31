@@ -161,6 +161,9 @@ export async function startPlanReviewServer(options: {
 	 */
 	approvalNotesSupported?: boolean;
 }): Promise<PlanServerResult> {
+	// Only successful, same-origin POST listings add document roots for this session.
+	const fileBrowserRoots = new Set<string>();
+	const getReferenceRootPaths = () => [process.cwd(), ...fileBrowserRoots];
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());
@@ -301,10 +304,10 @@ export async function startPlanReviewServer(options: {
 	// Per-document draft copies of the plan's linked documents, plus the index
 	// that lets a reload offer them all: mirror of packages/server/index.ts
 	// (#1545, annotate-draft.ts). A document may be saved exactly when this
-	// server's /api/doc serves it: inside the project.
+	// server's /api/doc serves it: inside the project or an added Files directory.
 	const planDocumentDrafts = options.mode !== "archive"
 		? createDocumentDraftStore({
-				isAllowed: (path) => isPathAllowed(path, getAllowedRootPaths()),
+				isAllowed: (path) => isPathAllowed(path, getAllowedRootPaths({ rootPaths: getReferenceRootPaths() })),
 				indexKey: documentDraftIndexKey(draftKey),
 			})
 		: null;
@@ -545,9 +548,9 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/ai/") && await handlePiAIRequest(req, res, url, aiRuntime)) {
 			return;
 		} else if (url.pathname === "/api/doc" && req.method === "GET") {
-			await handleDocRequest(res, url);
+			await handleDocRequest(res, url, { rootPaths: getReferenceRootPaths() });
 		} else if (url.pathname === "/api/doc/exists" && req.method === "POST") {
-			await handleDocExistsRequest(res, req);
+			await handleDocExistsRequest(res, req, { rootPaths: getReferenceRootPaths() });
 		} else if (url.pathname === "/api/obsidian/vaults") {
 			handleObsidianVaultsRequest(res);
 		} else if (url.pathname === "/api/skills" && req.method === "GET") {
@@ -558,8 +561,8 @@ export async function startPlanReviewServer(options: {
 			handleObsidianFilesRequest(res, url);
 		} else if (url.pathname === "/api/reference/obsidian/doc" && req.method === "GET") {
 			handleObsidianDocRequest(res, url);
-		} else if (url.pathname === "/api/reference/files" && req.method === "GET") {
-			await handleFileBrowserRequest(res, url);
+		} else if (url.pathname === "/api/reference/files" && (req.method === "GET" || req.method === "POST")) {
+			await handleFileBrowserRequest(res, url, req.method === "POST" ? (path) => fileBrowserRoots.add(path) : undefined);
 		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
 			handleFileBrowserStreamRequest(req, res, url);
 			return;

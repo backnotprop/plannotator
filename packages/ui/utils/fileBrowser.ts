@@ -29,6 +29,15 @@ export function getFileBrowserSettings(): FileBrowserSettings {
   };
 }
 
+/** Authorize saved directories before loading indexed drafts, even with Files closed. */
+export async function registerFileBrowserDirectories(): Promise<void> {
+  const settings = getFileBrowserSettings();
+  if (!settings.enabled) return;
+  await Promise.allSettled(settings.directories.map((dirPath) =>
+    fetch(`/api/reference/files?dirPath=${encodeURIComponent(dirPath)}&registerOnly=1`, { method: "POST" })
+  ));
+}
+
 export function saveFileBrowserSettings(settings: FileBrowserSettings): void {
   storage.setItem(STORAGE_KEY_ENABLED, String(settings.enabled));
   storage.setItem(STORAGE_KEY_DIRS, JSON.stringify(settings.directories));
