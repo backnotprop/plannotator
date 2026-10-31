@@ -396,7 +396,7 @@ test('the toast closes early: the × (focus back, Z no longer undoes), a mouse s
     // [lead, detail, the actions before the ×]: the real copy of the widest one-line toasts.
     const copies: [string, string, ('reply' | 'undo' | 'drafts')[]][] = [
       ['Looks good', 'Goes to Claude Code in 10 s · Moves to Quiet', ['undo']],
-      ['Draft saved', 'It waits under Drafts and never sends itself.', ['drafts']],
+      ['Draft saved', 'It never sends itself', ['drafts']],
       ['Marked read', 'Claude Code was stopped', ['reply', 'undo']],
       ['Back in your Inbox', '“Retry worker: Stripe 409”', ['undo']],
     ];

@@ -48,7 +48,7 @@ export function attachedAnnouncement(names: readonly string[]): string {
  * The files of one compose session (or reply box), and its uploads.
  * `onPasted`: the names a paste attached, for the host's polite live region.
  */
-export function useComposeFiles(initial: readonly InboxUpload[], options: { onPasted?: (names: string[]) => void } = {}) {
+export function useComposeFiles(initial: readonly InboxUpload[], options: { onPasted?: (names: string[]) => void; machine?: string | null } = {}) {
   const [files, setFiles] = useState<ComposeFile[]>(() => initial.map(fromUpload));
   const aborts = useRef(new Map<string, AbortController>());
   /** Each local preview's object URL by its file's key, freed when the file goes. */
@@ -57,6 +57,9 @@ export function useComposeFiles(initial: readonly InboxUpload[], options: { onPa
   filesRef.current = files;
   const onPasted = useRef(options.onPasted);
   onPasted.current = options.onPasted;
+  // Linked machines: a reply to another machine's thread uploads its files to that machine.
+  const machine = useRef(options.machine ?? null);
+  machine.current = options.machine ?? null;
   const release = (key: string) => {
     aborts.current.get(key)?.abort();
     aborts.current.delete(key);
@@ -74,7 +77,7 @@ export function useComposeFiles(initial: readonly InboxUpload[], options: { onPa
       setFiles((current) => [...current, { key, name: file.name, size: file.size, state: 'uploading', progress: 0, upload: null, error: null, preview }]);
       const controller = new AbortController();
       aborts.current.set(key, controller);
-      uploadFile(file, { signal: controller.signal, onProgress: (loaded, total) => patch(key, { progress: total > 0 ? loaded / total : 0 }) })
+      uploadFile(file, { machine: machine.current, signal: controller.signal, onProgress: (loaded, total) => patch(key, { progress: total > 0 ? loaded / total : 0 }) })
         .then((upload) => patch(key, { state: 'done', progress: 1, upload }))
         .catch((cause) => {
           if (cause instanceof DOMException && cause.name === 'AbortError') return;

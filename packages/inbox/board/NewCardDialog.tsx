@@ -5,7 +5,7 @@ import type { ComposeSessionsModel, ProjectFolder } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
-import { ToPicker } from '../compose/ToPicker';
+import { SessionDetail, ToPicker } from '../compose/ToPicker';
 import { composeGroups, findTarget, hostLabel, type ComposeTarget } from '../compose/model';
 
 /** Where a New card goes (owner's amendment 2026-10-26): Backlog by default, straight to an agent, or the Icebox. */
@@ -216,9 +216,7 @@ export function NewCardDialog({
                     <>
                       <HostMark host={target.host} />
                       <b>{hostLabel(target.host)}</b>
-                      <span className="ib-cp-tod">
-                        <bdi>{target.project.name}</bdi> {tildePath(target.project.root, home)}
-                      </span>
+                      <SessionDetail name={target.project.name} root={target.project.root} />
                     </>
                   ) : (
                     <span className="ib-cp-tod">{sessions ? 'Choose an agent' : 'Looking for live agents…'}</span>
@@ -292,7 +290,9 @@ function ProjectPicker({ projects, project, home, onPick }: { projects: readonly
   const label = (
     <>
       <Icon name="folder" size={15} />
-      <b dir="auto">{project.name}</b>
+      <b dir="auto" className="ib-ncd-pname">
+        {project.name}
+      </b>
       <span className="ib-cp-tod">{tildePath(project.root, home)}</span>
     </>
   );

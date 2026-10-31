@@ -175,7 +175,7 @@ for (const phone of [
         // The list's read can be held for a moment, so the spin while it is in flight is seen.
         let holdRead = false;
         let reads = 0;
-        await page.route('**/api/inbox/threads?archived=exclude', async (route) => {
+        await page.route('**/api/inbox/threads?archived=exclude*', async (route) => {
           reads += 1;
           if (holdRead) {
             holdRead = false;

@@ -190,6 +190,16 @@ test("an image in an attached Markdown file loads from the file's own folder, on
   expect((await image(markdown!.id, "shots/before.png", "sent")).status).toBe(200);
   expect((await image(markdown!.id, "shots/after.png", "sent")).status).toBe(403);
 
+  // A linked sibling has its own directory and referenced-image allowlist.
+  mkdirSync(join(project, "docs", "sub"));
+  writeFileSync(join(project, "docs", "sub", "peer.md"), "# Peer\n\n![shown](../shots/after.png)\n");
+  const siblingImage = (document: string, path: string, headers: Record<string, string> = {}) =>
+    fetch(`http://127.0.0.1:${server.port}/api/inbox/attachments/${markdown!.id}/markdown-image?document=${encodeURIComponent(document)}&path=${encodeURIComponent(path)}`, { headers });
+  expect((await siblingImage("sub/peer.md", "../shots/after.png")).status).toBe(200);
+  expect((await siblingImage("sub/peer.md", "../shots/unshown.png")).status).toBe(403);
+  expect((await siblingImage("../outside.md", "../shots/after.png")).status).toBe(403);
+  expect((await siblingImage("sub/peer.md", "../shots/after.png", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+
   // Only a Markdown attachment shows images this way.
   expect(text!.kind).not.toBe("markdown");
   expect((await image(text!.id, "shots/before.png", "current")).status).toBe(422);

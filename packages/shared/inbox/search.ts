@@ -1105,7 +1105,7 @@ export class InboxSearchIndex {
           id: message.id,
           thread_id: message.thread_id,
           ...where,
-          author: message.author.kind === "agent" ? { kind: "agent", name: inboxAgentName(message.author) } : { kind: "me", name: "You" },
+          author: message.author.kind === "agent" ? { kind: "agent", name: inboxAgentName(message.author), host: message.author.host ?? null } : { kind: "me", name: "You", host: null },
           title: facts.subject || "(no subject)",
           thread_name: facts.threadName,
           snippet: inboxSearchSnippet(best.text, inboxSearchRanges(best.text, terms)),

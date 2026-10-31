@@ -30,7 +30,7 @@ import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, typ
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
-import { ToPicker, startKey } from './ToPicker';
+import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { FolderMenu } from './FolderMenu';
 import { ThreadNameChip } from './ThreadNameChip';
 import { useComposeSessions } from './useComposeSessions';
@@ -530,23 +530,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <>
               <HostMark host={target.host} />
               <b>{hostLabel(target.host)}</b>
-              <span className="ib-cp-tod">
-                · <bdi>{target.project.name}</bdi>
-              </span>
+              <SessionDetail name={target.project.name} root={target.project.root} />
             </>
           ) : endedNote ? (
             <>
               <HostMark host={endedNote.host} />
               <s>{hostLabel(endedNote.host)}</s>
-              <span className="ib-cp-tod">
-                ·{' '}
-                {endedNote.project_name ? (
-                  <>
-                    <bdi>{endedNote.project_name}</bdi> ·{' '}
-                  </>
-                ) : null}
-                ended
-              </span>
+              {endedNote.project_name ? (
+                <SessionDetail name={endedNote.project_name} root={endedNote.project_root} suffix="ended" />
+              ) : (
+                <span className="ib-cp-tod">· ended</span>
+              )}
             </>
           ) : (
             <span className="ib-cp-tod">{model ? 'Choose an agent' : 'Looking for live agents…'}</span>

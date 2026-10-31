@@ -3,9 +3,11 @@ import { Icon, type IconName } from '../icons';
 import { hintText, ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { shortcutPrefs } from '../shortcuts/prefs';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { useTouchPhone } from '../phone';
+import { Tip } from './Tip';
 
 /** `thumb`: 👍 Looks good (the emoji itself, as plan review's button draws it). */
-export type InboxToastIcon = 'check' | 'warn' | 'archive' | 'mute' | 'thumb' | 'unpin';
+export type InboxToastIcon = 'check' | 'warn' | 'archive' | 'mute' | 'thumb' | 'unpin' | 'clock';
 
 export interface InboxToastModel {
   /** Bumped per toast, so a new one replays its entrance. */
@@ -16,12 +18,17 @@ export interface InboxToastModel {
   lead: string;
   /** What a phone says instead ("Read"). */
   phoneLead?: string;
-  /** The muted rest of the line; shown whole, wrapping to a second line when it does not fit. */
+  /** The muted rest of the line; it may wrap to a second line, and is cut with "…" past it (a phone: its own line). */
   detail?: string;
-  /** An error: its message stays whole and may wrap. */
+  /**
+   * What a phone's detail says instead: the same news, what happened first and a name last ("Stopped · Claude Code"),
+   * so where the line is cut with "…" it only ever cuts the name. The live region still says `speech` or the detail.
+   */
+  phoneDetail?: string;
+  /** An error: its message may wrap (three lines, four on a phone); past that, its last sentence (what to do) stays whole. */
   wrap?: boolean;
   onUndo?: () => void;
-  /** Desktop only (a phone's thread foot has Reply). */
+  /** Not on a touch phone (its thread foot has Reply). */
   onReply?: () => void;
   /** One more action (compose: Open the thread just sent, or Drafts). */
   action?: { label: string; onPress: () => void };
@@ -33,7 +40,7 @@ export interface InboxToastModel {
   speech?: string;
 }
 
-const ICONS: Record<Exclude<InboxToastIcon, 'thumb'>, IconName> = { check: 'checkCircle', warn: 'warn', archive: 'archive', mute: 'mute', unpin: 'pinOff' };
+const ICONS: Record<Exclude<InboxToastIcon, 'thumb'>, IconName> = { check: 'checkCircle', warn: 'warn', archive: 'archive', mute: 'mute', unpin: 'pinOff', clock: 'clock' };
 
 /**
  * What the window's live region says for a toast, as sentences, and how to
@@ -54,8 +61,9 @@ export function toastSpeech(toast: Pick<InboxToastModel, 'lead' | 'detail' | 'on
  * "inbox-toast", approved 2026-10-14): an icon, a bold lead, a muted detail,
  * Undo (`Z` while it is up), and a × at its end (owner, 2026-10-20: a toast
  * can be closed or swiped away; it still leaves by itself after 7 s).
- * It never takes focus; the window's live region says it. Its words always
- * show whole: a detail that does not fit one line wraps to a second.
+ * It never takes focus; the window's live region says it, whole. Its words
+ * take at most two lines (an error three, four on a phone), cut with "…"
+ * past that (useFit, design record "inbox-toasts-break-fixes").
  *
  * `onDismiss` closes it early (the ×, a swipe): the window drops it and its
  * Undo with it, never performing the undo. `onHold(true)` while a swipe is
@@ -83,9 +91,32 @@ function toastClass(toast: InboxToastModel, phone: boolean, closable: boolean): 
     .join(' ');
 }
 
+/**
+ * An error's message, cut before its last sentence: what happened, then what
+ * to do. A long error keeps the second whole and cuts the first (design
+ * record "inbox-toasts-break-fixes": an error keeps its actionable part).
+ * `head + action` is always the message, character for character; `action`
+ * is empty for a message of one sentence.
+ */
+export function splitErrorAction(message: string): { head: string; action: string } {
+  const starts = [...message.matchAll(/[.!?]\s+(?=\S)/g)].map((m) => m.index! + m[0].length);
+  const cut = starts.at(-1);
+  return cut === undefined ? { head: message, action: '' } : { head: message.slice(0, cut), action: message.slice(cut) };
+}
+
+/** Whether `el` or anything in it is cut (an ellipsis, a line clamp). */
+function cutWithin(el: Element): boolean {
+  return [el, ...el.querySelectorAll('*')].some((node) => node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1);
+}
+
 function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone: boolean; onDismiss?: () => void }) {
-  const reply = !phone && toast.onReply;
+  // Reply is a phone's foot's on a touch phone; a narrow desktop window (the phone layout, a mouse and keys) keeps it.
+  const touchPhone = useTouchPhone();
+  const reply = !(phone && touchPhone) && toast.onReply;
   const undoKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'undo' });
+  const lead = phone ? (toast.phoneLead ?? toast.lead) : toast.lead;
+  const detail = phone ? (toast.phoneDetail ?? toast.detail) : toast.detail;
+  const error = toast.wrap && !detail ? splitErrorAction(lead) : null;
   return (
     <>
       {toast.icon === 'thumb' ? (
@@ -95,16 +126,30 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
       ) : (
         <Icon name={ICONS[toast.icon]} size={16} />
       )}
-      <span className="ib-tsay">
-        <span className="ib-tlead">{phone ? (toast.phoneLead ?? toast.lead) : toast.lead}</span>
-        {toast.detail && <span className="ib-tdetail">{toast.detail}</span>}
-      </span>
+      {/* Words cut with "…" show whole in a tooltip (a pointer that hovers); the live region said them whole. */}
+      <Tip content={toast.speech ?? [lead, toast.detail].filter(Boolean).join(' · ')} when={(trigger) => cutWithin(trigger)}>
+        <span className="ib-tsay">
+          <span className="ib-tlead">
+            {error?.action ? (
+              <>
+                <span className="ib-thead">{error.head}</span>
+                <span className="ib-taction">{error.action}</span>
+              </>
+            ) : (
+              lead
+            )}
+          </span>
+          {detail && <span className="ib-tdetail">{detail}</span>}
+        </span>
+      </Tip>
       {(reply || toast.onUndo || toast.action || onDismiss) && (
         <span className="ib-tacts">
           {toast.action && (
-            <button type="button" className="ib-tghost" onClick={toast.action.onPress} data-toast-action="">
-              {toast.action.label}
-            </button>
+            <Tip content={toast.action.label} when={(trigger) => cutWithin(trigger)}>
+              <button type="button" className="ib-tghost" onClick={toast.action.onPress} data-toast-action="">
+                <span className="ib-tlabel">{toast.action.label}</span>
+              </button>
+            </Tip>
           )}
           {reply && (
             <button type="button" className="ib-tghost" onClick={toast.onReply} data-toast-reply="">
@@ -112,9 +157,10 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
             </button>
           )}
           {toast.onUndo && (
-            <button type="button" className="ib-tundo" onClick={toast.onUndo} data-toast-undo="" aria-keyshortcuts={phone ? undefined : undoKeys}>
+            <button type="button" className="ib-tundo" onClick={toast.onUndo} data-toast-undo="" aria-keyshortcuts={phone && touchPhone ? undefined : undoKeys}>
               Undo
-              {!phone && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" />}
+              {/* A narrow desktop window (the phone layout, a mouse and keys) keeps Z, as it keeps Reply. */}
+              {!(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}
             </button>
           )}
           {onDismiss && (
@@ -132,12 +178,13 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
  * A desktop toast: centered on the window, 16 px from its bottom edge, at
  * most 520 px wide and 16 px from each side (inbox.css), whatever is open
  * (owner, 2026-10-18: a toast is brief, so it may cover Reply or a file's
- * strip for a moment rather than move around them).
+ * strip for a moment rather than move around them; kept with the two-line
+ * cap below, design record "inbox-toasts-break-fixes").
  */
 function DesktopToast({ toast, onDismiss, onHold }: { toast: InboxToastModel; onDismiss?: () => void; onHold?: (held: boolean) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const swipe = useSwipeAway(ref, onDismiss, onHold);
-  useRoomForClose(ref, !!onDismiss && !!toast.onUndo);
+  useFit(ref, toast, false, !!onDismiss && !!toast.onUndo);
   return (
     <div ref={ref} className={toastClass(toast, false, !!onDismiss)} data-inbox-toast="" {...swipe}>
       <ToastBody toast={toast} phone={false} onDismiss={onDismiss} />
@@ -145,70 +192,138 @@ function DesktopToast({ toast, onDismiss, onHold }: { toast: InboxToastModel; on
   );
 }
 
+/** The most lines a toast's words take (design record "inbox-toasts-break-fixes"): an error, then any other toast. */
+const MOST_LINES = { desktop: { error: 3, other: 2 }, phone: { error: 4, other: 1 } } as const;
+
 /**
- * The × must never make a toast's words wrap (a toast's copy is kept to one
- * line at 520 px). When the line would wrap with Undo's `Z` hint beside the
- * ×, the toast is marked `data-tight` and the hint is not drawn (`Z` still
- * undoes, and Undo still says its key). Decided before paint, again on each
- * window resize: the mark is taken off, the words measured, and put back only
- * when they would take a second line.
+ * How a toast's words fit, decided before paint and again on each window
+ * resize (the marks are taken off, the words measured, and put back only when
+ * needed):
+ *
+ * - `data-tight` (desktop, Undo and the ×): the words would wrap with Undo's
+ *   `Z` hint beside the ×, so the hint is not drawn (`Z` still undoes, and
+ *   Undo still says its key).
+ * - `data-wrapped` (desktop): the words take more than one line, so the icon
+ *   keeps beside the first (inbox.css).
+ * - `data-stack`: the words would take more lines than MOST_LINES. A phone's
+ *   toast then shows its lead on one line and its detail on a second, each
+ *   cut with "…"; an error keeps its last sentence (what to do) whole and
+ *   cuts what came before it (inbox.css). A desktop toast's words are always
+ *   held to two lines by inbox.css.
+ *
+ * Nothing cut is lost: the live region has said the whole sentence
+ * (`toastSpeech`), and with a pointer that hovers the words' tooltip shows
+ * them whole (ToastBody, a component tooltip, never a native title).
  */
-function useRoomForClose(ref: RefObject<HTMLDivElement | null>, applies: boolean) {
+function useFit(ref: RefObject<HTMLDivElement | null>, toast: InboxToastModel, phone: boolean, closableUndo: boolean) {
+  const wrap = !!toast.wrap;
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || !applies) return;
+    if (!el) return;
     const fit = () => {
       el.removeAttribute('data-tight');
+      el.removeAttribute('data-stack');
+      el.removeAttribute('data-wrapped');
       const say = el.querySelector<HTMLElement>('.ib-tsay');
       if (!say) return;
-      const line = parseFloat(getComputedStyle(say).lineHeight) || 20;
-      if (say.getBoundingClientRect().height > line * 1.5) el.setAttribute('data-tight', '');
+      const style = getComputedStyle(say);
+      const line = parseFloat(style.lineHeight) || 20;
+      const lines = () => (say.getBoundingClientRect().height - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0)) / line;
+      if (!phone && !wrap && closableUndo && lines() > 1.5) el.setAttribute('data-tight', '');
+      if (!phone && lines() > 1.5) el.setAttribute('data-wrapped', '');
+      const most = MOST_LINES[phone ? 'phone' : 'desktop'][wrap ? 'error' : 'other'];
+      if (lines() > most + 0.5) el.setAttribute('data-stack', '');
     };
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [ref, applies]);
+  }, [ref, phone, wrap, closableUndo, toast.lead, toast.phoneLead, toast.detail, toast.phoneDetail]);
 }
 
 /**
- * The open thread's foot, measured while the toast is up: the toast sits above
- * it whatever its height (the reply box open, a wrapped row, the safe area).
- * Null when no thread's foot is on screen (the list, an open file).
+ * What a phone's toast keeps clear of, at the window's bottom: the open
+ * thread's foot (Reply, the reply box) and a full-screen file's bar, its name
+ * chip and its captions. The image and video composers have their own place
+ * for it (inbox.css), so their windows are left to the stylesheet.
  */
-function useFootHeight(): number | null {
-  const [height, setHeight] = useState<number | null>(null);
+const PHONE_FLOOR = [
+  'section.ib-pane .ib-pfoot',
+  '.ib-fvdock-phone .ib-fvbar',
+  '.ib-fvdock-phone .ib-fvhandle',
+  '.ib-view.ib-phone .ib-fvchip',
+  '.ib-view.ib-phone .ib-optcap',
+  '.ib-view.ib-phone .ib-linknote',
+].join(', ');
+const PHONE_FLOOR_OWN = '.ib-imgcompose, .ib-fcomp';
+
+/**
+ * How far above the window's bottom a phone's toast sits: 8 px over the
+ * highest of PHONE_FLOOR that is on screen, measured while the toast is up
+ * and again whenever one appears, goes or changes size (a thread opened under
+ * a toast raised on the list, the reply box opened, a file opened full
+ * screen). Null when none is there (the list): inbox.css places it.
+ */
+function usePhoneFloor(ref: RefObject<HTMLDivElement | null>): number | null {
+  const [floor, setFloor] = useState<number | null>(null);
   useLayoutEffect(() => {
-    const foot = document.querySelector<HTMLElement>('section.ib-pane .ib-pfoot');
-    if (!foot) return;
-    const read = () => {
-      const box = foot.getBoundingClientRect();
-      setHeight(box.height > 0 ? box.height : null);
+    const el = ref.current;
+    if (!el) return;
+    let watched: HTMLElement[] = [];
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+    const measure = () => {
+      if (document.querySelector(PHONE_FLOOR_OWN)) {
+        setFloor(null);
+        return;
+      }
+      const found = [...document.querySelectorAll<HTMLElement>(PHONE_FLOOR)].filter((node) => !el.contains(node));
+      const container = el.offsetParent instanceof HTMLElement ? el.offsetParent.getBoundingClientRect().bottom : window.innerHeight;
+      let top = Infinity;
+      for (const node of found) {
+        const box = node.getBoundingClientRect();
+        if (box.width > 0 && box.height > 0) top = Math.min(top, box.top);
+      }
+      setFloor(top === Infinity ? null : Math.max(0, Math.round(container - top)) + 8);
+      if (resize) {
+        for (const node of watched) if (!found.includes(node)) resize.unobserve(node);
+        for (const node of found) if (!watched.includes(node)) resize.observe(node);
+      }
+      watched = found;
     };
-    read();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(read);
-    observer.observe(foot);
-    return () => observer.disconnect();
-  }, []);
-  return height;
+    measure();
+    // Many mutations come at once (a thread rendering): measured once, at the next frame.
+    let frame = 0;
+    const soon = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
+    const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(soon);
+    mutations?.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', measure);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      mutations?.disconnect();
+      resize?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [ref]);
+  return floor;
 }
 
 /**
- * A phone's toast: across the window above the thread's foot, its words and
- * Undo (a 44 px target), never Reply (the foot has it) or the Z hint.
+ * A phone's toast: across the window above the thread's foot or a file's bar,
+ * its words and Undo (a 44 px target). On a touch phone never Reply (the foot
+ * has it) or the Z hint.
  */
 function PhoneToast({ toast, onDismiss, onHold }: { toast: InboxToastModel; onDismiss?: () => void; onHold?: (held: boolean) => void }) {
-  const foot = useFootHeight();
   const ref = useRef<HTMLDivElement>(null);
+  const floor = usePhoneFloor(ref);
   const swipe = useSwipeAway(ref, onDismiss, onHold);
+  useFit(ref, toast, true, !!onDismiss && !!toast.onUndo);
   return (
-    <div
-      ref={ref}
-      className={toastClass(toast, true, !!onDismiss)}
-      data-inbox-toast=""
-      style={foot !== null ? { bottom: `${Math.round(foot) + 8}px` } : undefined}
-      {...swipe}
-    >
+    <div ref={ref} className={toastClass(toast, true, !!onDismiss)} data-inbox-toast="" style={floor !== null ? { bottom: `${floor}px` } : undefined} {...swipe}>
       <ToastBody toast={toast} phone onDismiss={onDismiss} />
     </div>
   );
