@@ -179,8 +179,8 @@ test('desktop: the triangles with their words, the marks before the project, the
 
   // Left to right: the agents' marks and the project, the title cell, then the words, the badge, the count and the
   // time, each column on one right edge down the list (approval "list-rows-mail-icons", the wide row); every title
-  // cell starts on one left edge; the marks start the project's column and the project follows them (the owner,
-  // 2026-10-31), every project on one left edge though the rows draw one mark or two.
+  // cell starts on one left edge; the marks start the project's column and the project hugs them, 6px after its own
+  // row's marks, whether the row draws one mark or two (the owner, 2026-10-31: no width reserved for the marks).
   const geometry = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('.ib-row')].map((r) => {
       const box = (sel: string) => r.querySelector(sel)!.getBoundingClientRect();
@@ -206,12 +206,11 @@ test('desktop: the triangles with their words, the marks before the project, the
   expect(geometry.length).toBeGreaterThanOrEqual(4);
   for (let i = 0; i < 4; i++) expect(new Set(geometry.map((g) => g.rights[i])).size, `column ${i}`).toBe(1);
   expect(new Set(geometry.map((g) => Math.round(g.subj))).size).toBe(1);
-  // The list mixes one- and two-mark rows, and still every project starts on one left edge.
+  // The list mixes one- and two-mark rows.
   expect(new Set(geometry.map((g) => g.markCount))).toEqual(new Set([1, 2]));
-  expect(Math.max(...geometry.map((g) => g.project)) - Math.min(...geometry.map((g) => g.project)), 'the projects line up').toBeLessThanOrEqual(0.5);
-  // The slot is the widest marks' own width: their project sits the cell's 8px after them, no farther.
-  expect(Math.min(...geometry.map((g) => g.project - g.marks.right))).toBeCloseTo(8, 0);
   for (const g of geometry) {
+    // Icon, small gap, project: the three-line row's 6px, on every row, however many marks it draws.
+    expect(Math.abs(g.project - g.marks.right - 6), `row ${g.id}: the project 6px after its own marks`).toBeLessThanOrEqual(0.5);
     expect(g.cells.slice(-6), `row ${g.id}`).toEqual(['ib-from', 'ib-subj', 'ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
     // The project first in the DOM (a screen reader reads where, then who); drawn after the marks.
     expect(g.from, `row ${g.id}`).toEqual(['ib-p', 'ib-ags']);

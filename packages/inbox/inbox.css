@@ -779,9 +779,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
    (no `.ib-fullw`) keeps option A: the short words in 124px and the bare triangle in 52px. */
 .ib-row { display: grid; grid-template-columns: 220px minmax(0, 1fr) 124px 52px 84px 76px; align-items: center; gap: 0 10px; height: 50px; padding: 0 12px; border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-14, 14px); width: 100%; text-align: left; }
 .ib-fullw .ib-row { grid-template-columns: 260px minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
-/* One project's list: the first column holds the agents' marks alone (InboxList's WideRow). */
-.ib-noproj .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) 124px 52px 84px 76px; }
-.ib-noproj.ib-fullw .ib-row { grid-template-columns: clamp(80px, 10%, 112px) minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
+/* One project's list: the first column holds the agents' marks alone (InboxList's WideRow), as wide as this row's
+   marks and no wider (the owner, 2026-10-31: no blank before the title), so the title follows its own marks. */
+.ib-noproj .ib-row { grid-template-columns: max-content minmax(0, 1fr) 124px 52px 84px 76px; }
+.ib-noproj.ib-fullw .ib-row { grid-template-columns: max-content minmax(0, 1fr) clamp(148px, 14%, 160px) 110px 84px 76px; }
 /* The words, the badge and the open counts, each right-aligned in its column, so every title starts on one left
    edge. Open counts wider than their column (two-digit pairs and up, "[□ 99+] ?99+" is 108px at 14px text) run out
    to the left, never into the time; past the gap they slide under the badge, which paints above them on an opaque
@@ -798,23 +799,16 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row .ib-bcol .ib-badge.ib-b-stop { background: linear-gradient(var(--ib-badge-stop-bg), var(--ib-badge-stop-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
 .ib-row .ib-bcol .ib-badge.ib-b-hold { background: linear-gradient(var(--ib-badge-hold-bg), var(--ib-badge-hold-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
 .ib-row .ib-c.ib-qn { justify-content: flex-end; }
-/* The project cell: the agents' marks, never cut, then the project, cut with "…" (the owner, 2026-10-31: the marks
-   before the project, as on a three-line row). In one project's list the
-   marks alone, in a column of 10% of the row, from 80px to 112px (a fixed 112px squeezes the title out of a narrow
-   one-project list). At 112px (a list of about 1120px or more) three hosts with "×N" each fit on one line; narrower,
-   the run wraps between marks inside the column, never over the title: at 80px or more two "×N" marks share a
-   line, so the widest run (three marks) takes two lines, which the 50px row holds. */
-.ib-row .ib-from { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.ib-noproj .ib-row .ib-ags { flex: 0 1 auto; flex-wrap: wrap; height: auto; min-height: 16px; row-gap: 2px; max-width: 100%; }
+/* The project cell (the owner, 2026-10-31): the agents' marks, never cut, then 6px (the three-line row's gap,
+   approval "inbox-list-row-v2", v2-r3), then the project hugging them, cut with "…". No slot reserves width: each
+   row's project starts right after its own marks. The project is first in the DOM, so a screen reader reads where,
+   then who; `order` draws the marks first. With Hide agent icons the marks leave and the project starts the cell. */
+.ib-row .ib-from { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-row .ib-from > .ib-ags { order: -1; }
 .ib-row .ib-p { flex: 0 1 auto; min-width: 0; font-weight: 400; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Every project's list: the marks start the cell in a slot as wide as the list's widest marks (`--ib-agslot`, from
-   the rows by `rowAgentsSlot`), so every project starts on one left edge down the list, 8px after the slot. A run a
-   wider font draws past the slot widens its own row's slot, never runs over the project. The project is first in the
-   DOM, so a screen reader reads where, then who; the grid draws the marks first. With Hide agent icons the marks
-   leave and the project starts the cell, as before. */
-.ib-listcol:not(.ib-noproj):not(.ib-lk-noagents) .ib-row .ib-from { display: grid; grid-template-columns: minmax(var(--ib-agslot, auto), max-content) minmax(0, 1fr); column-gap: 8px; }
-.ib-listcol:not(.ib-noproj):not(.ib-lk-noagents) .ib-row .ib-from > .ib-ags { grid-area: 1 / 1; justify-self: start; }
-.ib-listcol:not(.ib-noproj):not(.ib-lk-noagents) .ib-row .ib-from > .ib-p { grid-area: 1 / 2; justify-self: start; max-width: 100%; }
+/* One project's list: the marks alone in a column as wide as they are, and the title 6px after them, the same gap:
+   the grid's 10px gap less 4px the marks reach into it (a negative margin takes 4px off their track). */
+.ib-noproj .ib-row .ib-from { margin-right: -4px; }
 .ib-row.ib-u .ib-title { font-weight: 600; }
 /* The thread chip: it can shrink to its border (flex), and its name keeps its
    own 166px cap and ellipsis (the inner span), so the chip is as wide as before
@@ -924,8 +918,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-b-act svg.ib-ic { stroke-width: 2; }
 /* A wide row's agents' marks before the project (approval "list-rows-mail-icons", `RowAgents`): one bare 16 px mark
    per host (the scale's row size, no tile), 5px apart; a host's "×N" 2px after its mark; past three hosts two
-   marks and a "+N" pill. The marks take the line's quiet colour (OpenCode's mark is `currentColor`). These sizes
-   are in `rowAgentsSlot`'s sum too (RowAgents.tsx): change one here, change it there. */
+   marks and a "+N" pill. The marks take the line's quiet colour (OpenCode's mark is `currentColor`). */
 .ib-ags { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 16px; white-space: nowrap; color: var(--muted-foreground); }
 /* A three-line or phone row's line 1 (approval "inbox-list-row-v2", 2026-10-30, `RowAgentTiles`): the agents, then
    the project, like a sidebar row. The tiles' run is bounded (at most two tiles, one per agent, and a "+N" tile for

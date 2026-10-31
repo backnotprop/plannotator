@@ -3,8 +3,8 @@
  * 2026-10-30): one bare mark per agent host before the project (the owner,
  * 2026-10-31), first to join first; a host with two or more sessions is one
  * mark and "×N"; past three hosts, two marks and "+N" counting the sessions
- * not drawn; the marks in a slot as wide as the list's widest marks, so the
- * projects line up (pixels: tests/e2e/inbox-row-badges.spec.ts). A three-line or
+ * not drawn; the project hugs its own row's marks, 6px after them, no width
+ * reserved (pixels: tests/e2e/inbox-row-badges.spec.ts). A three-line or
  * phone row (approval "inbox-list-row-v2", 2026-10-30): the agents' tiles
  * drawn before the project, one per agent, at most two, then a "+N" tile
  * counting the other agents; the project on one line that never wraps, cut
@@ -31,8 +31,6 @@ import { loadCascade } from './cssCascade.testing';
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { rowAgentsSlot } = (hasDom ? await import('./components/RowAgents') : {}) as typeof import('./components/RowAgents');
-
 const CSS = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
 
 const session = (host: string | null, n: number): InboxParticipant => ({ host, session: `ses_${host ?? 'none'}_${n}` });
@@ -195,61 +193,40 @@ describe.if(hasDom)("a wide row's agents", () => {
       }
       expect(r.querySelector('[title]')).toBeNull();
       // The marks share the project's cell, never a column of their own; the project is first in the DOM (read
-      // first), the cell's grid draws the marks first.
+      // first), `order` draws the marks first.
       expect(r.querySelector('.ib-from > .ib-p + .ib-ags')).not.toBeNull();
       expect(r.querySelectorAll('.ib-ags').length).toBe(1);
     });
 
-    test(`${shape}: the marks are drawn before the project, in a slot as wide as the list's widest marks`, () => {
+    test(`${shape}: the marks are drawn first and the project hugs them, 6px after, cut with "…", never pushed out`, () => {
       const el = render(shape);
       const from = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from`)!;
+      const marks = from.querySelector<HTMLElement>('.ib-ags')!;
+      const project = from.querySelector<HTMLElement>('.ib-p')!;
       const cascade = loadCascade(CSS);
-      expect(cascade.resolved(from, 'display')).toBe('grid');
-      // The marks' track: at least the slot, wider only for a run that outgrows it; then the project's.
-      expect(cascade.winner(from, 'grid-template-columns')?.value).toBe('minmax(var(--ib-agslot, auto), max-content) minmax(0, 1fr)');
-      expect(cascade.resolved(from.querySelector<HTMLElement>('.ib-ags')!, 'grid-area')).toBe('1 / 1');
-      // The marks keep their own width (their tooltip is theirs alone), never stretched across the slot.
-      expect(cascade.resolved(from.querySelector<HTMLElement>('.ib-ags')!, 'justify-self')).toBe('start');
-      expect(cascade.resolved(from.querySelector<HTMLElement>('.ib-p')!, 'grid-area')).toBe('1 / 2');
-      // The slot is the widest run's: three bare marks (58px) against two marks, "×2" and "+2" (54px and four
-      // characters of text); neither outgrows the other at every text size, so both are in the max().
-      const slot = el.querySelector<HTMLElement>('.ib-listcol')!.style.getPropertyValue('--ib-agslot');
-      expect(slot).toContain('58px');
-      expect(slot).toContain('calc(54px + var(--ib-fs-12, 12px) * 1.3 + var(--ib-fs-10-5, 10.5px) * 1.3)');
-      expect(slot.startsWith('max(')).toBe(true);
+      expect(cascade.resolved(from, 'display')).toBe('flex');
+      expect(cascade.resolved(from, 'gap')).toBe('6px');
+      expect(cascade.resolved(marks, 'order')).toBe('-1');
+      expect(cascade.resolved(marks, 'flex')).toBe('none');
+      // No width reserved for the marks: the project follows this row's own run.
+      expect(cascade.resolved(marks, 'min-width')).toBeUndefined();
+      expect(cascade.resolved(marks, 'width')).toBeUndefined();
+      expect(cascade.resolved(project, 'min-width')).toBe('0');
+      expect(cascade.resolved(project, 'white-space')).toBe('nowrap');
+      expect(cascade.resolved(project, 'text-overflow')).toBe('ellipsis');
     });
   }
 
-  test('the slot: one mark is 16px; a run another outgrows drops out; a list with no rows has none', () => {
-    const one = (participants?: InboxParticipant[]) => ({ participants, agent: { kind: 'agent', host: 'codex' } });
-    expect(rowAgentsSlot([one(), one(), one([session('pi', 1)])])).toBe('16px');
-    // Two Claude Code sessions outgrow one mark; three hosts outgrow two; "×12" outgrows "×2".
-    expect(rowAgentsSlot([one(), one(TWICE.participants)])).toBe('calc(18px + var(--ib-fs-12, 12px) * 1.3)');
-    expect(rowAgentsSlot([one(THREE.participants), one([session('pi', 1), session('codex', 1)])])).toBe('58px');
-    const twelve = Array.from({ length: 12 }, (_, i) => session('claude-code', i));
-    expect(rowAgentsSlot([one(TWICE.participants), one(twelve)])).toBe('calc(18px + var(--ib-fs-12, 12px) * 1.95)');
-    expect(rowAgentsSlot([])).toBeNull();
-  });
-
-  test('Hide agent icons and one project\'s list keep the flex cell: the project starts it, or the marks are alone', () => {
-    const cascade = loadCascade(CSS);
-    const el = render('wide');
-    el.querySelector('.ib-listcol')!.classList.add('ib-lk-noagents');
-    expect(cascade.resolved(el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from`)!, 'display')).toBe('flex');
-    act(() => root?.unmount());
-    host?.remove();
-    const one = render('wide', true);
-    expect(loadCascade(CSS).resolved(one.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from`)!, 'display')).toBe('flex');
-  });
-
-  test("one project's wide list: the marks alone, a run that can wrap inside its column, never one line forced over the title", () => {
+  test("one project's wide list: the marks alone in a column as wide as they are, the title 6px after them", () => {
     const el = render('wide', true);
-    const marks = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"] .ib-from > .ib-ags`)!;
-    expect(marks.parentElement!.querySelector('.ib-p')).toBeNull();
+    const r = el.querySelector<HTMLElement>(`.ib-row[data-thread-id="${FOUR.thread_id}"]`)!;
+    const from = r.querySelector<HTMLElement>('.ib-from')!;
+    expect(from.querySelector('.ib-p')).toBeNull();
     const cascade = loadCascade(CSS);
-    expect(cascade.resolved(marks, 'flex-wrap')).toBe('wrap');
-    expect(cascade.resolved(marks, 'max-width')).toBe('100%');
-    expect(cascade.resolved(marks, 'height')).toBe('auto');
+    // The column takes this row's marks, nothing more; the grid's 10px gap less 4px leaves the title 6px after them.
+    expect(cascade.resolved(r, 'grid-template-columns')!.startsWith('max-content ')).toBe(true);
+    expect(cascade.resolved(r, 'gap')).toBe('0 10px');
+    expect(cascade.resolved(from, 'margin-right')).toBe('-4px');
   });
 });
 

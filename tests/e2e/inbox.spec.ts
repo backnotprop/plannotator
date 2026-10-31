@@ -336,7 +336,9 @@ test('a project folder filters the list and the sections still apply', async () 
   const labelLeft = await leftOf(page, `${named} .ib-ags`);
   expect(await leftOf(page, '.ib-band')).toBe(labelLeft - 12);
   const marksRight = await page.locator(`${named} .ib-ags`).evaluate((el) => el.getBoundingClientRect().right);
-  expect(await leftOf(page, `${named} .ib-p`)).toBeGreaterThan(marksRight);
+  // The project hugs the marks: the three-line row's 6px, no width reserved (the owner, 2026-10-31).
+  const projectLeft = await page.locator(`${named} .ib-p`).evaluate((el) => el.getBoundingClientRect().left);
+  expect(Math.abs(projectLeft - marksRight - 6)).toBeLessThanOrEqual(0.5);
   expect(await leftOf(page, `${named} .ib-p`)).toBeLessThan(await leftOf(page, `${named} .ib-subj`));
 
   await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
@@ -354,13 +356,17 @@ test('a project folder filters the list and the sections still apply', async () 
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
   // One project: no project label. The agents' marks start the row as they do
-  // in every project's list (approval "list-rows-mail-icons"), and the title cell starts on one
-  // left edge for every row, badge or not. The badge and the count have their own
-  // columns before the time, each on one right edge for every row.
+  // in every project's list (approval "list-rows-mail-icons"), and the title follows each
+  // row's own marks 6px later, the Inbox rows' gap, no blank column before it (the owner,
+  // 2026-10-31). The badge and the count have their own columns before the time, each on
+  // one right edge for every row.
   await expect(page.locator('.ib-row .ib-p')).toHaveCount(0);
   expect(await leftOf(page, `${named} .ib-ags`)).toBe(labelLeft);
   expect(await leftOf(page, `${stoppedRow} .ib-ags`)).toBe(labelLeft);
-  expect(await leftOf(page, `${stoppedRow} .ib-subj`)).toBe(await leftOf(page, `${named} .ib-subj`));
+  for (const row of [named, stoppedRow]) {
+    const gap = await page.locator(row).evaluate((r) => r.querySelector('.ib-subj')!.getBoundingClientRect().left - r.querySelector('.ib-ags')!.getBoundingClientRect().right);
+    expect(Math.abs(gap - 6), `${row}: the title 6px after the marks`).toBeLessThanOrEqual(0.5);
+  }
   await expect(page.locator('.ib-row .ib-subj :is(.ib-mk, .ib-badge)')).toHaveCount(0);
   const rightOf = async (sel: string) => Math.round((await page.locator(sel).boundingBox())!.x + (await page.locator(sel).boundingBox())!.width);
   for (const cell of ['.ib-cw', '.ib-bcol', '.ib-cq']) expect(await rightOf(`${named} ${cell}`)).toBe(await rightOf(`${stoppedRow} ${cell}`));
@@ -628,7 +634,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
 });
 
 // Late, in a project of its own, so its threads change no count above (review of #2374, finding 1).
-test("one project's list: three agents with ×N stay in the marks' column and end before the title, at its widest and narrowest", async () => {
+test("one project's list: three agents with ×N or bare, on one line, and the title 6px after each row's own marks", async () => {
   const { page } = world;
   const ops = scratchProject(join(world.root, 'src'), 'ops-console');
   // Hosts this spec has already seen: a host new to it brings the agent-note dialog, over the Update test below.
@@ -656,7 +662,8 @@ test("one project's list: three agents with ×N stay in the marks' column and en
   await expect(page.locator('.ib-lbody .ib-row')).toHaveCount(2);
   await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-ags`)).toHaveAttribute('aria-label', '2 Claude Code sessions, 3 Codex sessions and 2 OpenCode sessions');
   await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-agx`)).toHaveText(['×2', '×3', '×2']);
-  // 1440: the column's widest (112 px), the runs on one line. 1000: its narrowest (80 px), the runs wrap inside it.
+  // At 1440 and 1000 alike: the marks' column is as wide as each row's run, on one line, and the title starts 6px
+  // after it, the bare marks' row and the "×N" row each after their own run (the owner, 2026-10-31: no blank column).
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(150);
@@ -683,11 +690,10 @@ test("one project's list: three agents with ×N stay in the marks' column and en
     for (const r of rows) {
       const where = `row ${r.id} at ${width}`;
       expect(r.drawn, where).toBe(3);
-      if (width === 1440) expect(r.lines, `${where}: the run wraps at the column's widest`).toBe(1);
-      // Every mark and "×N" ends inside the marks' column (wrapping there when the run is wider), before the
-      // title starts; none spills out of the row.
-      expect(r.marksRight, `${where}: the marks run into the title`).toBeLessThanOrEqual(r.titleLeft);
-      expect(r.marksRight, `${where}: the marks leave their column`).toBeLessThanOrEqual(r.fromRight + 0.5);
+      expect(r.lines, `${where}: the run wraps`).toBe(1);
+      // Icon, small gap, title: the title 6px after this row's own marks, none spilling out of the row.
+      expect(Math.abs(r.titleLeft - r.marksRight - 6), `${where}: the title 6px after the marks`).toBeLessThanOrEqual(0.5);
+      expect(r.marksRight, `${where}: the marks leave their cell`).toBeLessThanOrEqual(r.fromRight + 0.5);
       expect(r.marksTop, where).toBeGreaterThanOrEqual(r.rowTop);
       expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
     }
@@ -705,6 +711,13 @@ test("one project's list: three agents with ×N stay in the marks' column and en
   }
   await shot('1.3-project-filter-agents');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
+  // Every project's list: the same three-mark rows draw their project 6px after their own marks, never further.
+  for (const id of [trio.thread_id, plain.thread_id]) {
+    const row = page.locator(`.ib-row[data-thread-id="${id}"]`);
+    await expect(row.locator('.ib-p')).toHaveText('ops-console');
+    const gap = await row.evaluate((r) => r.querySelector('.ib-p')!.getBoundingClientRect().left - r.querySelector('.ib-ags')!.getBoundingClientRect().right);
+    expect(Math.abs(gap - 6), `row ${id}: the project 6px after three marks`).toBeLessThanOrEqual(0.5);
+  }
 });
 
 // Before the restart, whose gap (the old Inbox gone, the new one not yet up)
