@@ -54,6 +54,11 @@ export interface LaunchHostContext {
   environment: () => Promise<AgentEnvironment>;
   /** The last login-shell read, only the names hosts keep (`shellNames`); null before the first read. */
   shell: () => Readonly<LaunchEnv> | null;
+  /**
+   * A fresh login-shell read (shared with one under way), for a host that starts its own process again on a
+   * reply (`resume`), as `start` gets it. Never held: use it for that start only.
+   */
+  loginEnv: () => Promise<LaunchEnv>;
   /** config.json's `inboxLaunch`. */
   config: () => ReturnType<typeof resolveInboxLaunch>;
   /** `<dataDir>/inbox/launch/<id>`: the launch's own files. */
@@ -139,4 +144,11 @@ export interface LaunchHost {
   terminal(launch: InboxLaunchRecord, untrusted: boolean): string;
   /** Its permission transport, made once. */
   permissions(context: LaunchPermissionContext): LaunchHostPermissions;
+  /**
+   * The words after "<name> stopped." on a launch's line when its session stopped without the person's Stop
+   * (why, and what a reply does). Null, or no `stoppedNote`: "Your reply starts it again." (Claude Code).
+   */
+  stoppedNote?(launch: InboxLaunchRecord): string | null;
+  /** The Inbox stops: let go of what this host holds (a connection, the processes it owns). No `close`: it holds nothing. */
+  close?(): void;
 }

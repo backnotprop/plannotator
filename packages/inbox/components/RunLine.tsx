@@ -129,7 +129,13 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       break;
     case 'stopped':
       icon = 'stop';
-      text = run.stopped_by_person && run.since ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.` : `${name} stopped. Your reply starts it again.`;
+      // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`).
+      text =
+        run.stopped_by_person && run.since
+          ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
+          : run.cause
+            ? `${name} stopped. ${run.cause}`
+            : `${name} stopped. Your reply starts it again.`;
       break;
     case 'failed':
       icon = 'warn';

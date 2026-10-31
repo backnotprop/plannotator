@@ -332,6 +332,7 @@ export function createInboxLaunch(options: {
     ownEnv: options.ownEnv,
     environment,
     shell: () => shell?.kept ?? null,
+    loginEnv: () => readLogin(),
     config,
     launchDir,
     startLog,
@@ -340,8 +341,12 @@ export function createInboxLaunch(options: {
     log,
   };
   const claude = createClaudeLaunchHost(context);
+  /** The agents the Inbox can start, one per line. */
+  const ownHosts: LaunchHost[] = [
+    claude,
+  ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
-  const hosts: Record<string, LaunchHost> = Object.fromEntries([claude, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
+  const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
   const hostList = Object.values(hosts);
   /** The host of a launch's agent; null for an agent with no host here. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
@@ -490,6 +495,7 @@ export function createInboxLaunch(options: {
       respawnFailed: respawnFailedOf(memo),
       respawnUntrusted: respawnUntrustedOf(memo),
       stoppedByPersonAt: memo.stoppedAt,
+      stoppedNote: host.stoppedNote?.(launch) ?? null,
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
     });
@@ -619,6 +625,8 @@ export function createInboxLaunch(options: {
     options.onChange();
     void host
       .resume(launch)
+      // A host whose resume throws is a failed restart, never an unhandled rejection (it would end the Inbox).
+      .catch((error: unknown) => ({ exitCode: 1, text: `error: ${error instanceof Error ? error.message : String(error)}`, failure: { code: "failed" as const, text: "It did not start again." } }))
       .then(async (result) => {
         startLog(launch.id, `respawn ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
         if (!result.failure) return;
@@ -817,7 +825,10 @@ export function createInboxLaunch(options: {
     },
     route,
     sweep,
-    stop: () => unsubscribe(),
+    stop: () => {
+      unsubscribe();
+      for (const host of hostList) host.close?.();
+    },
 
     /**
      * A launched session's permission hook (`POST /api/inbox/launch/:id/permission`), after the
