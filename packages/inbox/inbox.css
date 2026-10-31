@@ -3466,6 +3466,8 @@ dialog.ib-sp::backdrop { background: oklch(0.1 0.012 260 / 0.72); }
 .ib-sp-menu { position: absolute; top: calc(100% - 2px); z-index: 5; min-width: 200px; max-width: 300px; max-height: 300px; overflow-y: auto; padding: 4px; border-radius: 8px; background: var(--popover); box-shadow: 0 0 0 1px var(--border), 0 12px 30px -12px oklch(0 0 0 / 0.5); }
 .ib-sp-mi { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: var(--ib-fs-13, 13px); cursor: default; white-space: nowrap; }
 .ib-sp-mi .ib-sp-ml { overflow: hidden; text-overflow: ellipsis; }
+/* The Type menu's counts (approval "inbox-search-type-filter"): at the item's end, quiet, digits aligned. */
+.ib-sp-mi .ib-sp-mn { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-sp-mi .ib-sp-mck { width: 14px; flex: none; color: var(--primary); display: inline-flex; }
 .ib-sp-mi .ib-sp-mck svg.ib-ic { width: 14px; height: 14px; }
 .ib-sp-mi[data-hl] { background: color-mix(in oklch, var(--muted) 80%, transparent); }
