@@ -182,13 +182,28 @@ async function finish(title: string) {
   try {
     expect(consoleErrors, 'no console errors').toEqual([]);
   } finally {
-    const video = page.video();
-    await context.close();
-    if (video && shots) renameSync(await video.path(), join(shots, `${title.replace(/[^a-z0-9]+/gi, '-')}.webm`));
-    await Promise.all([world.agent, world.codex].map((a) => a.close().catch(() => {})));
-    await removeInboxScratch();
+    // Every step runs even when the one before it throws (a test that timed out leaves a closed page and context): the
+    // scratch Inbox must be stopped whatever happened, or its server outlives the run.
+    try {
+      const video = page.video();
+      await context.close();
+      if (video && shots) renameSync(await video.path(), join(shots, `${title.replace(/[^a-z0-9]+/gi, '-')}.webm`));
+    } catch {
+      // The browser side is gone already; nothing of it is left to save.
+    } finally {
+      try {
+        await Promise.all([world.agent, world.codex].map((a) => a.close().catch(() => {})));
+      } finally {
+        await removeInboxScratch();
+      }
+    }
   }
 }
+
+// A test that timed out never reaches `finish` in its body: the hook still stops its Inbox.
+test.afterEach(async () => {
+  await removeInboxScratch();
+});
 
 // ── helpers ──
 
