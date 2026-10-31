@@ -72,6 +72,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchLive, LaunchSessions } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
@@ -332,6 +333,7 @@ export function createInboxLaunch(options: {
     ownEnv: options.ownEnv,
     environment,
     shell: () => shell?.kept ?? null,
+    loginEnv: () => readLogin(),
     config,
     launchDir,
     startLog,
@@ -340,8 +342,9 @@ export function createInboxLaunch(options: {
     log,
   };
   const claude = createClaudeLaunchHost(context);
+  const opencode = createOpenCodeLaunchHost(context);
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
-  const hosts: Record<string, LaunchHost> = Object.fromEntries([claude, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
+  const hosts: Record<string, LaunchHost> = Object.fromEntries([claude, opencode, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
   const hostList = Object.values(hosts);
   /** The host of a launch's agent; null for an agent with no host here. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);

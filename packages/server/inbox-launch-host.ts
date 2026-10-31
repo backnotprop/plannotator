@@ -4,10 +4,12 @@
  * reply, the caches and the run line; everything that knows how one agent
  * works sits behind this interface, in that agent's own file:
  *
- *   inbox-launch-claude.ts             Claude Code (`claude --bg`, its settings file, trust)
- *   inbox-launch-claude-permission.ts  Claude Code's permission hook, key and leases
+ *   inbox-launch-claude.ts               Claude Code (`claude --bg`, its settings file, trust)
+ *   inbox-launch-claude-permission.ts    Claude Code's permission hook, key and leases
+ *   inbox-launch-opencode.ts             OpenCode 1 (one `opencode serve` per launch, the wake, its events)
+ *   inbox-launch-opencode-permission.ts  OpenCode's `permission.asked` as the card's question, its replies
  *
- * The engine holds `{ "claude-code": claude }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, opencode }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
@@ -54,6 +56,11 @@ export interface LaunchHostContext {
   environment: () => Promise<AgentEnvironment>;
   /** The last login-shell read, only the names hosts keep (`shellNames`); null before the first read. */
   shell: () => Readonly<LaunchEnv> | null;
+  /**
+   * A fresh login-shell read (shared with one under way), for a host that starts its own process again on a
+   * reply (`resume`), as `start` gets it. Never held: use it for that start only.
+   */
+  loginEnv: () => Promise<LaunchEnv>;
   /** config.json's `inboxLaunch`. */
   config: () => ReturnType<typeof resolveInboxLaunch>;
   /** `<dataDir>/inbox/launch/<id>`: the launch's own files. */

@@ -33,7 +33,7 @@ import {
   readInboxPermissionBody,
   type InboxPermissionBody,
 } from '@plannotator/core/inbox-permission';
-import type { InboxMessageWire, InboxQuestion, InboxRun } from '@plannotator/core/inbox-types';
+import { inboxAgentName, type InboxMessageWire, type InboxQuestion, type InboxRun } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, inboxApi } from '../api';
 import { AuthorMark, Icon } from '../icons';
@@ -53,6 +53,13 @@ function Ticks({ text }: { text: string }) {
 }
 
 const upFirst = (text: string) => (text.startsWith('`') ? text : text.charAt(0).toUpperCase() + text.slice(1));
+/** The agent that asks (the question's author: "Claude Code", "OpenCode"); Claude Code for a question with no name. */
+const appOf = (message: InboxMessageWire) => {
+  const name = inboxAgentName(message.author);
+  return name === 'An agent' ? 'Claude Code' : name;
+};
+/** The agent as the deny field addresses it: "Claude" for Claude Code, else its name. */
+const whoOf = (message: InboxMessageWire) => (appOf(message) === 'Claude Code' ? 'Claude' : appOf(message));
 /** "Claude Code wants to write a file" → "write a file". */
 const wantsOf = (prompt: string) => prompt.replace(/^.*? wants to /, '');
 function kindOf(prompt: string): Kind {
@@ -238,7 +245,7 @@ function RequestBody({ read, kind, phone }: { read: InboxPermissionBody; kind: K
 }
 
 /** Deny with a reason: a field in place; Enter or "Deny and send" sends it, Escape goes back. */
-function Reason({ busy, onDeny, onCancel }: { busy: boolean; onDeny: (reason: string) => void; onCancel: () => void }) {
+function Reason({ who, busy, onDeny, onCancel }: { who: string; busy: boolean; onDeny: (reason: string) => void; onCancel: () => void }) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => ref.current?.focus(), []);
@@ -248,8 +255,8 @@ function Reason({ busy, onDeny, onCancel }: { busy: boolean; onDeny: (reason: st
         ref={ref}
         rows={2}
         value={text}
-        placeholder="Tell Claude what to do instead"
-        aria-label="Why you deny this, for Claude"
+        placeholder={`Tell ${who} what to do instead`}
+        aria-label={`Why you deny this, for ${who}`}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey && text.trim()) {
@@ -291,7 +298,7 @@ function Record({ message, q, outcome, read, title, time, kind, followUp, run, t
   const reason = outcome === 'deny' ? (q.answer?.other?.trim() || q.answer?.note?.trim() || null) : null;
   const allowed = outcome === 'once' || outcome === 'session' || outcome === 'auto' || outcome === 'full';
   return (
-    <section className="pc-card pc-rec" data-perm-record={outcome} aria-label={`Claude Code: ${title}`}>
+    <section className="pc-card pc-rec" data-perm-record={outcome} aria-label={`${appOf(message)}: ${title}`}>
       <button type="button" className="pc-rec-line" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <AuthorMark author={message.author} />
         <span className="pc-rec-icon" data-kind={allowed ? 'allow' : 'other'}>
@@ -447,7 +454,7 @@ export function PermissionCard({
       data-permission=""
       data-perm-kind={kind}
       data-perm-armed={armed ? '' : undefined}
-      aria-label={`Claude Code asks permission to ${wantsOf(prompt)}`}
+      aria-label={`${appOf(message)} asks permission to ${wantsOf(prompt)}`}
       onPointerDownCapture={() => {
         pointerAt.current = Date.now();
       }}
@@ -459,7 +466,7 @@ export function PermissionCard({
     >
       <header className="pc-head" data-run={live ? 'waiting_answer' : undefined}>
         <AuthorMark author={message.author} />
-        <span className="pc-app">Claude Code</span>{' '}
+        <span className="pc-app">{appOf(message)}</span>{' '}
         <span className="pc-sub">
           {phone ? 'waiting' : terminalOnly ? 'is waiting on a safety check' : 'is waiting for your permission'}
           {minutes && minutes >= 1 ? ` · ${minutes} min` : ''}
@@ -492,7 +499,7 @@ export function PermissionCard({
       </div>
       <footer className="pc-foot">
         {mode === 'reason' ? (
-          <Reason busy={busy} onDeny={(text) => void answer(null, text)} onCancel={() => setMode('answers')} />
+          <Reason who={whoOf(message)} busy={busy} onDeny={(text) => void answer(null, text)} onCancel={() => setMode('answers')} />
         ) : mode === 'confirmFull' ? (
           <div className="pc-confirm" role="group" aria-label="Switch to Full permissions" data-perm-confirm-full="">
             <p>

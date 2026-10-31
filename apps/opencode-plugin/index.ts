@@ -51,7 +51,7 @@ import { shouldFallbackAfterEmbeddedError } from "./prompt-delivery-error";
 import { executeSubmitPlan } from "./submit-plan-executor";
 import { getPlanningPrompt } from "./planning-prompt";
 import { announceSessionUrl } from "./session-url";
-import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox } from "./inbox";
+import { addInboxReminderOpenCode1, findInboxConnection, inboxToolArgs, openCode1AgentHasInbox, openCode1LaunchWakes } from "./inbox";
 import { inboxAgentTool } from "@plannotator/shared/inbox/connection";
 import {
   appendCommandFeedback,
@@ -739,10 +739,13 @@ Do NOT proceed with implementation until your plan is approved.`;
   // where the inbox tool switch allows it for OpenCode and an Inbox was found.
   // OpenCode 1 gets the tool only: it has no way to wake an idle session, so
   // replies are read with wait_for_reply or read_thread, and the description
-  // says nothing about them arriving by themselves.
+  // says nothing about them arriving by themselves. Except in a server the
+  // Inbox started for a launch (`PLANNOTATOR_LAUNCH`, packages/server/
+  // inbox-launch-opencode.ts): the Inbox delivers its replies as turns there.
   try {
     const inbox = await findInboxConnection();
-    const spec = inbox ? inboxAgentTool(inbox.tools, { wakes: false }) : null;
+    const launchWakes = openCode1LaunchWakes(process.env);
+    const spec = inbox ? inboxAgentTool(inbox.tools, { wakes: launchWakes }) : null;
     if (inbox && spec) {
       plugin.tool = {
         ...(plugin.tool ?? {}),
@@ -750,7 +753,7 @@ Do NOT proceed with implementation until your plan is approved.`;
           description: spec.description,
           args: inboxToolArgs(spec.inputSchema, tool.schema),
           async execute(args, context) {
-            const result = await inbox.callTool(args, { sessionId: context.sessionID, cwd: context.directory });
+            const result = await inbox.callTool(args, { sessionId: context.sessionID, cwd: context.directory, wakes: launchWakes });
             if (result.isError) throw new Error(result.text);
             return result.text;
           },
@@ -767,7 +770,7 @@ Do NOT proceed with implementation until your plan is approved.`;
       const inboxConfig = loadConfig();
       if (resolveInboxReminder(inboxConfig, process.env, "opencode")) {
         // The person's own line (config.json prompts.inbox) or the no-wake default, decided once here.
-        const reminderText = resolveInboxReminderText(inboxConfig, "opencode", { wakes: false });
+        const reminderText = resolveInboxReminderText(inboxConfig, "opencode", { wakes: launchWakes });
         const planTransform = plugin["experimental.chat.system.transform"];
         const lastAnswer = new Map<string, boolean>();
         plugin["experimental.chat.system.transform"] = async (input, output) => {
