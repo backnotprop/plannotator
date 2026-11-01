@@ -1,20 +1,24 @@
 /**
- * The window's side of the Inbox's debug log (packages/core/inbox-debug-log.ts). Off, nothing here runs: fetch is
+ * The window's side of the Inbox's debug log (packages/shared/inbox/debug-log.ts). Off, nothing here runs: fetch is
  * untouched and nothing is stored. An Inbox with debug on marks its answers (`INBOX_DEBUG_ON_HEADER`), and from then
- * on this window wraps `fetch`, which covers every request in one place, and notes the page's own events.
+ * on this window wraps `fetch` in this one place and notes the page's own events. What is not `fetch` is not seen
+ * here: uploads (`XMLHttpRequest`), `sendBeacon` and the event stream (`EventSource`).
+ *
+ * The wrapper must not change a request: the caller gets the same response or the same error, from one call made in
+ * the same tick, and any failure of the recording falls back to the plain `fetch`.
  *
  * During a stall the window cannot reach the server, so every record goes to a capped local buffer first and is
  * sent when it can be, including right after a refresh: that is what shows what the old page was waiting on. A
  * request id is on both sides of the log. Only ids, routes, statuses and timings are recorded.
  */
-import { debugRoute, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH } from '@plannotator/core/inbox-debug-log';
+// A relative path: the module is private to the Inbox, and core's exports are published.
+import { debugPageId, debugRoute, INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH } from '../shared/inbox/debug-log';
 import { inboxUrl } from './inboxUrl';
 
 const ON_KEY = 'plannotator-inbox-debug';
 const BUFFER_KEY = 'plannotator-inbox-debug-buffer';
 /** The oldest records go first past this, with a `buffer_dropped` saying how many. */
 export const DEBUG_BUFFER_RECORDS = 2000;
-const BATCH_RECORDS = 500;
 const SAVE_MS = 300;
 const FLUSH_MS = 5000;
 const FLUSH_LIMIT_MS = 8000;
@@ -31,7 +35,7 @@ export interface DebugRecorderEnv {
 
 export function createDebugRecorder(env: DebugRecorderEnv) {
   const now = env.now ?? Date.now;
-  const page = `p${now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const page = debugPageId(now());
   let seq = 0;
   let unsaved: DebugRecord[] = [];
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -97,7 +101,7 @@ export function createDebugRecorder(env: DebugRecorderEnv) {
   const flush = async (): Promise<void> => {
     if (flushing || stopped) return;
     save();
-    const batch = stored().slice(0, BATCH_RECORDS);
+    const batch = stored().slice(0, INBOX_DEBUG_BATCH_RECORDS);
     if (batch.length === 0) return;
     flushing = true;
     const controller = new AbortController();
@@ -122,28 +126,32 @@ export function createDebugRecorder(env: DebugRecorderEnv) {
     }
   };
 
+  /**
+   * The timed flush. It waits while a request is out: a flush could take one of the last connections, or keep a dying
+   * one alive and hide the stall this log is for. The buffer holds the records, and the flush after a refresh sends them.
+   */
+  const flushWhenIdle = (): Promise<void> => (open.size === 0 ? flush() : Promise.resolve());
+
   let serial = 0;
-  /** `fetch`, with each `/api/inbox/` request noted from start to end, and the id both sides log. */
-  const tracked = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const path = apiPath(url);
-    if (stopped || !path || path === INBOX_DEBUG_PATH) return env.fetch(input, init);
-    serial += 1;
-    const id = `${page}-${serial}`;
-    const started = now();
-    const base = { id, method: (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase(), route: debugRoute(path) };
-    const elapsed = () => ({ ...base, ms: now() - started });
-    const failed = (cause: unknown) => {
-      open.delete(id);
-      const error = cause instanceof Error ? cause.name : 'Error';
-      note(error === 'AbortError' ? 'req_abort' : 'req_fail', { ...elapsed(), error });
-    };
-    note('req_start', base);
-    open.add(id);
-    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-    headers.set(INBOX_DEBUG_ID_HEADER, id);
-    return env.fetch(input, { ...init, headers }).then(
-      (response) => {
+  /** One request's notes: null when it is not recorded, or when the recording failed before it was sent. */
+  const track = (input: RequestInfo | URL, init?: RequestInit) => {
+    try {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const path = apiPath(url);
+      if (stopped || !path || path === INBOX_DEBUG_PATH) return null;
+      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+      serial += 1;
+      const id = `${page}-${serial}`;
+      headers.set(INBOX_DEBUG_ID_HEADER, id);
+      const started = now();
+      const base = { id, method: (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase(), route: debugRoute(path) };
+      const elapsed = () => ({ ...base, ms: now() - started });
+      const failed = (cause: unknown) => {
+        open.delete(id);
+        const error = cause instanceof Error ? cause.name : 'Error';
+        note(error === 'AbortError' ? 'req_abort' : 'req_fail', { ...elapsed(), error });
+      };
+      const answered = (response: Response) => {
         note('req_head', { ...elapsed(), status: response.status });
         // A body that stalls is a stall too: the end is when the whole answer is in. Debug mode pays for the copy.
         void response
@@ -153,16 +161,41 @@ export function createDebugRecorder(env: DebugRecorderEnv) {
             open.delete(id);
             note('req_end', { ...elapsed(), status: response.status });
           }, failed);
+      };
+      note('req_start', base);
+      open.add(id);
+      return { sent: { ...init, headers }, answered, failed, id };
+    } catch {
+      return null;
+    }
+  };
+
+  /** `fetch`, with each `/api/inbox/` request noted from start to end, and the id both sides log. */
+  const tracked = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const request = track(input, init);
+    if (!request) return env.fetch(input, init);
+    return env.fetch(input, request.sent).then(
+      (response) => {
+        try {
+          request.answered(response);
+        } catch {
+          // The caller's answer stands; the log has what it has.
+          open.delete(request.id);
+        }
         return response;
       },
       (cause) => {
-        failed(cause);
+        try {
+          request.failed(cause);
+        } catch {
+          // The caller's error stands.
+        }
         throw cause;
       },
     );
   };
 
-  return { note, save, flush, stop, tracked, openRequests: () => open.size, page };
+  return { note, save, flush, flushWhenIdle, stop, tracked, openRequests: () => open.size, page };
 }
 
 /** The path of a same-origin `/api/inbox/` url, else null. */
@@ -197,7 +230,7 @@ function listen(active: ReturnType<typeof createDebugRecorder>): void {
     void active.flush();
   });
   window.addEventListener('offline', () => active.note('offline'));
-  setInterval(() => void active.flush(), FLUSH_MS);
+  setInterval(() => void active.flushWhenIdle(), FLUSH_MS);
   void active.flush();
 }
 

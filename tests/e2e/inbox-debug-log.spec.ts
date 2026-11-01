@@ -34,6 +34,8 @@ class Link {
   private sockets = new Set<net.Socket>();
   private cut: { marker: string; arrives: boolean } | null = null;
   port = 0;
+  /** The window's sends of its buffer that came through. */
+  flushes = 0;
 
   constructor(target: number) {
     this.server = net.createServer((client) => {
@@ -41,6 +43,7 @@ class Link {
       const state = { silentUp: false, silentDown: false };
       this.sockets.add(client).add(up);
       client.on('data', (chunk: Buffer) => {
+        if (chunk.includes('POST /api/inbox/debug/log')) this.flushes += 1;
         if (this.cut && chunk.includes(this.cut.marker)) {
           state.silentDown = true;
           state.silentUp = !this.cut.arrives;
@@ -205,7 +208,11 @@ test('the reply never arrived: after a refresh the file shows the window started
     link.cutAt('/reply HTTP/', false);
     await footSend(page).click();
     await expect(footSend(page)).toBeDisabled();
-    await page.waitForTimeout(1_500);
+    // The timed send (every 5 s) waits while a request is out: a stalled page sends nothing until the refresh.
+    await page.waitForTimeout(500);
+    const flushed = link.flushes;
+    await page.waitForTimeout(6_000);
+    expect(link.flushes).toBe(flushed);
     await expect(footSend(page)).toBeDisabled();
 
     await page.reload();

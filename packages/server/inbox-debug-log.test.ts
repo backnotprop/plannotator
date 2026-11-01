@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { INBOX_DEBUG_BODY_BYTES, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH } from "@plannotator/core/inbox-debug-log";
+import { INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_BODY_BYTES, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH } from "@plannotator/shared/inbox/debug-log";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxDebugLog } from "./inbox-debug-log";
@@ -14,6 +14,9 @@ import { createInboxDebugLog } from "./inbox-debug-log";
 type Line = Record<string, unknown>;
 
 const WORDS = "the-owners-private-words";
+const MSG = "msg_01J9Z3V5K8Q2W4E6R7T8Y9M0NP";
+const PAGE = "p1793536686632-48213";
+const REQUEST = `${PAGE}-1`;
 const roots: string[] = [];
 const servers: InboxServer[] = [];
 const restoreEnv: (() => void)[] = [];
@@ -73,10 +76,10 @@ describe("on", () => {
     const dataDir = world();
     setEnv("PLANNOTATOR_INBOX_DEBUG", "1");
     const server = await start(dataDir);
-    const read = await fetch(url(server, "/api/inbox/threads?archived=exclude"), { headers: { [INBOX_DEBUG_ID_HEADER]: "p1-abc-1" } });
+    const read = await fetch(url(server, "/api/inbox/threads?archived=exclude"), { headers: { [INBOX_DEBUG_ID_HEADER]: REQUEST } });
     expect(read.status).toBe(200);
     expect(read.headers.get(INBOX_DEBUG_ON_HEADER)).toBe("1");
-    const mine = lines(logPath(dataDir)).filter((line) => line.id === "p1-abc-1");
+    const mine = lines(logPath(dataDir)).filter((line) => line.id === REQUEST);
     expect(mine.map((line) => line.ev)).toEqual(["req_start", "req_end"]);
     expect(mine[0]).toMatchObject({ side: "server", method: "GET", route: "/api/inbox/threads", via: "local" });
     expect(mine[1]).toMatchObject({ status: 200 });
@@ -94,12 +97,23 @@ describe("on", () => {
   test("the window's records go in, with only the fields the log allows, and its own sends are not logged", async () => {
     const dataDir = world();
     const server = await start(dataDir, { debug: true });
-    const answer = await post(server, { records: [{ t: 5, ev: "req_start", page: "p1", id: "p1-1", method: "POST", route: "/api/inbox/messages/msg_abc123XYZ/reply", words: WORDS }, { t: 6, ev: WORDS }] });
+    const answer = await post(server, { records: [{ t: 5, ev: "req_start", page: PAGE, id: REQUEST, method: "POST", route: `/api/inbox/messages/${MSG}/reply`, words: WORDS }, { t: 6, ev: WORDS }] });
     expect(await answer.json()).toEqual({ ok: true, written: 1 });
     const all = lines(logPath(dataDir));
     expect(all).toHaveLength(1);
-    expect(all[0]).toMatchObject({ t: 5, side: "window", ev: "req_start", id: "p1-1", route: "/api/inbox/messages/msg_abc123XYZ/reply" });
+    expect(all[0]).toMatchObject({ t: 5, side: "window", ev: "req_start", page: PAGE, id: REQUEST, route: `/api/inbox/messages/${MSG}/reply` });
     expect(typeof all[0]!.at).toBe("number");
+  });
+
+  test("a body may hold a full batch of records, and no more", async () => {
+    const dataDir = world();
+    const server = await start(dataDir, { debug: true });
+    const batch = (size: number) => ({ records: Array.from({ length: size }, (_, i) => ({ t: i + 1, ev: "visibility" })) });
+    const refused = await post(server, batch(INBOX_DEBUG_BATCH_RECORDS + 1));
+    expect(refused.status).toBe(413);
+    expect(existsSync(logPath(dataDir))).toBe(false);
+    expect(await (await post(server, batch(INBOX_DEBUG_BATCH_RECORDS))).json()).toEqual({ ok: true, written: INBOX_DEBUG_BATCH_RECORDS });
+    expect(lines(logPath(dataDir))).toHaveLength(INBOX_DEBUG_BATCH_RECORDS);
   });
 
   test("another site is refused, and so is a body past the cap", async () => {
@@ -118,14 +132,61 @@ describe("on", () => {
     const server = await start(dataDir, { debug: true });
     const json = { "Content-Type": "application/json" };
     await fetch(url(server, `/api/inbox/search?q=${WORDS}`));
-    await fetch(url(server, `/api/inbox/threads/msg_doesnotexist/draft`), { method: "POST", headers: json, body: JSON.stringify({ body: WORDS, base: null }) });
-    await fetch(url(server, `/api/inbox/messages/msg_doesnotexist/reply`), { method: "POST", headers: json, body: JSON.stringify({ idempotency_key: "k", words: WORDS }) });
+    await fetch(url(server, `/api/inbox/threads/${MSG}/draft`), { method: "POST", headers: json, body: JSON.stringify({ body: WORDS, base: null }) });
+    await fetch(url(server, `/api/inbox/messages/${MSG}/reply`), { method: "POST", headers: json, body: JSON.stringify({ idempotency_key: "k", words: WORDS }) });
     await fetch(url(server, `/api/inbox/embeds/${WORDS}.png`));
     await post(server, { records: [{ t: 1, ev: "req_fail", error: WORDS, route: `/api/inbox/embeds/${WORDS}` }] });
     const text = readFileSync(logPath(dataDir), "utf8");
     expect(text).not.toContain(WORDS);
     expect(text).toContain("/api/inbox/search");
-    expect(text).toContain("/api/inbox/messages/msg_doesnotexist/reply");
+    expect(text).toContain(`/api/inbox/messages/${MSG}/reply`);
+  });
+
+  test("no words in the log: words dressed as an id, on real requests and in every field a page fills", async () => {
+    const dataDir = world();
+    const server = await start(dataDir, { debug: true });
+    const dressed = [`/api/inbox/outbox/msg_${WORDS}`, `/api/inbox/drafts/drf_${WORDS}`, `/api/inbox/attachments/att_${WORDS}/download`];
+    for (const path of dressed) await fetch(url(server, path), { headers: { [INBOX_DEBUG_ID_HEADER]: WORDS } });
+    await post(server, { records: [{ t: 1, ev: "req_fail", id: `p-${WORDS}`, page: `p-${WORDS}`, error: "Zebraquartz", protocol: "zebra/1", thread: `msg_${WORDS}`, route: dressed[0] }] });
+    const text = readFileSync(logPath(dataDir), "utf8");
+    expect(text).not.toContain(WORDS);
+    expect(text).not.toContain("ebraquartz");
+    expect(text).not.toContain("zebra/1");
+    expect(lines(logPath(dataDir)).filter((line) => line.route === "/api/inbox/outbox/*").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the window's route on its own", () => {
+  const log = () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+    roots.push(dir);
+    return dir;
+  };
+
+  test("a chunked body has no Content-Length, and reading stops at the cap instead of taking it all in", async () => {
+    let produced = 0;
+    const chunk = new Uint8Array(64 * 1024);
+    const large = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (produced >= 32 * 1024 * 1024) return controller.close();
+        produced += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+    });
+    const req = new Request("http://127.0.0.1/api/inbox/debug/log", { method: "POST", body: large, duplex: "half" } as RequestInit);
+    expect(req.headers.has("content-length")).toBe(false);
+    const answer = await createInboxDebugLog(log()).accept(req);
+    expect(answer.status).toBe(413);
+    expect(produced).toBeLessThan(INBOX_DEBUG_BODY_BYTES * 2);
+  });
+
+  test("a batch is written whole: rotation never splits it across the two files", async () => {
+    const debug = createInboxDebugLog(log(), 1_000);
+    const batch = (from: number) => new Request("http://127.0.0.1/api/inbox/debug/log", { method: "POST", body: JSON.stringify({ records: Array.from({ length: 8 }, (_, i) => ({ t: from + i, ev: "visibility" })) }) });
+    await debug.accept(batch(100));
+    await debug.accept(batch(200));
+    expect(lines(`${debug.path}.1`).map((line) => line.t)).toEqual([100, 101, 102, 103, 104, 105, 106, 107]);
+    expect(lines(debug.path).map((line) => line.t)).toEqual([200, 201, 202, 203, 204, 205, 206, 207]);
   });
 });
 
@@ -135,18 +196,52 @@ describe("the log itself", () => {
     roots.push(dir);
     const log = createInboxDebugLog(dir);
     const served = log.wrap(() => new Promise<Response>(() => {}), () => true);
-    void served(new Request("http://127.0.0.1/api/inbox/messages/msg_abc123XYZ/reply", { method: "POST", headers: { [INBOX_DEBUG_ID_HEADER]: "p1-9" } }), "local");
-    expect(lines(log.path).map((line) => [line.id, line.ev])).toEqual([["p1-9", "req_start"]]);
+    void served(new Request(`http://127.0.0.1/api/inbox/messages/${MSG}/reply`, { method: "POST", headers: { [INBOX_DEBUG_ID_HEADER]: REQUEST } }), "local");
+    expect(lines(log.path).map((line) => [line.id, line.ev])).toEqual([[REQUEST, "req_start"]]);
   });
 
-  test("a request that fails shows it failed, and the failure still reaches the caller", async () => {
+  test("a request that fails shows it failed, and the same failure reaches the caller", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
     roots.push(dir);
     const log = createInboxDebugLog(dir);
-    const served = log.wrap(() => Promise.reject(new Error(WORDS)), () => true);
-    await expect(served(new Request("http://127.0.0.1/api/inbox/threads"), "local")).rejects.toThrow(WORDS);
+    const failure = new Error(WORDS);
+    const served = log.wrap(() => Promise.reject(failure), () => true);
+    expect(await served(new Request("http://127.0.0.1/api/inbox/threads"), "local").catch((cause: unknown) => cause)).toBe(failure);
     expect(lines(log.path).map((line) => line.ev)).toEqual(["req_start", "req_error"]);
     expect(readFileSync(log.path, "utf8")).not.toContain(WORDS);
+  });
+
+  test("the handler's own response comes back, and only one call reaches it", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+    roots.push(dir);
+    const answer = new Response("ok", { status: 201 });
+    const calls: Request[] = [];
+    const served = createInboxDebugLog(dir).wrap(async (req) => {
+      calls.push(req);
+      return answer;
+    }, () => true);
+    const req = new Request("http://127.0.0.1/api/inbox/threads");
+    expect(await served(req, "local")).toBe(answer);
+    expect(calls).toEqual([req]);
+  });
+
+  test("logging cannot fail a request: headers that cannot change, or an owner check that throws, still answer", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+    roots.push(dir);
+    const log = createInboxDebugLog(dir);
+    const frozen = new Response("ok");
+    frozen.headers.set = () => {
+      throw new TypeError("immutable");
+    };
+    expect(await log.wrap(async () => frozen, () => true)(new Request("http://127.0.0.1/api/inbox/threads"), "local")).toBe(frozen);
+
+    const plain = new Response("ok");
+    const refused = log.wrap(async () => plain, () => {
+      throw new Error("no identity");
+    });
+    expect(await refused(new Request("http://127.0.0.1/api/inbox/threads", { headers: { [INBOX_DEBUG_ID_HEADER]: REQUEST } }), "local")).toBe(plain);
+    expect(plain.headers.has(INBOX_DEBUG_ON_HEADER)).toBe(false);
+    expect(lines(log.path).at(-1)!.id).not.toBe(REQUEST);
   });
 
   test("the cap holds: it rotates once, so there are never more than two files, each under the cap", async () => {
@@ -165,6 +260,7 @@ describe("the log itself", () => {
 describe("over the tailnet", () => {
   const MAGIC = "macbook-pro.tail0000.ts.net";
   const OWNER = "ramos@example.com";
+  const GUEST = "guest@example.com";
   const fakeTailscale = () => {
     const serve = new Map<number, string>();
     const run: TailscaleRunner = (args) => {
@@ -187,8 +283,8 @@ describe("over the tailnet", () => {
     return run;
   };
 
-  test("the owner's window is told and may write; another tailnet person is not told and is refused", async () => {
-    const dataDir = world({ inboxTailscale: true });
+  test("the owner's window is told and may write; an allow-listed guest gets in, is not told, cannot write and cannot name an id", async () => {
+    const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
     const run = fakeTailscale();
     const server = await start(dataDir, { debug: true, tailscale: run });
     const listener = server.tailscale.listenerPort();
@@ -197,14 +293,27 @@ describe("over the tailnet", () => {
       fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, ...(init.headers ?? {}) } });
     const records = { method: "POST", body: JSON.stringify({ records: [{ t: 1, ev: "page_load" }] }), headers: { "Content-Type": "application/json" } };
 
-    const owner = await through("/api/inbox/threads", OWNER);
+    const owner = await through("/api/inbox/threads", OWNER, { headers: { [INBOX_DEBUG_ID_HEADER]: REQUEST } });
     expect(owner.headers.get(INBOX_DEBUG_ON_HEADER)).toBe("1");
     expect((await through(INBOX_DEBUG_PATH, OWNER, records)).status).toBe(200);
 
-    const guest = await through("/api/inbox/threads", "someone@example.com");
+    // A guest on inboxTailscaleAllow: past the listener, so these reach the Inbox's own owner check.
+    const guestId = `${PAGE}-2`;
+    const guest = await through("/api/inbox/threads", GUEST, { headers: { [INBOX_DEBUG_ID_HEADER]: guestId } });
+    expect(guest.status).toBe(200);
     expect(guest.headers.has(INBOX_DEBUG_ON_HEADER)).toBe(false);
-    expect((await through(INBOX_DEBUG_PATH, "someone@example.com", records)).status).toBe(403);
-    expect(lines(logPath(dataDir)).filter((line) => line.side === "window")).toHaveLength(1);
-    expect(lines(logPath(dataDir)).some((line) => line.via === "tailnet")).toBe(true);
+    const refused = await through(INBOX_DEBUG_PATH, GUEST, records);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { code: string }).code).toBe("owner_only");
+
+    // Someone not on the list stops at the listener.
+    const stranger = await through(INBOX_DEBUG_PATH, "someone@example.com", records);
+    expect(stranger.status).toBe(403);
+
+    const all = lines(logPath(dataDir));
+    expect(all.filter((line) => line.side === "window")).toHaveLength(1);
+    expect(all.filter((line) => line.id === REQUEST).map((line) => line.via)).toEqual(["tailnet", "tailnet"]);
+    expect(all.some((line) => line.id === guestId)).toBe(false);
+    expect(all.filter((line) => /^s\d+$/.test(String(line.id)) && line.route === "/api/inbox/threads")).toHaveLength(2);
   });
 });

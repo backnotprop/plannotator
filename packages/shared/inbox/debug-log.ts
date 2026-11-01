@@ -2,12 +2,17 @@
  * The Inbox's optional debug log (`<data dir>/inbox/debug.log`, JSON lines): what the server and the window both
  * saw of each request, so a stall says which step hung and whether the server got it. Off by default.
  *
- * This file is what both sides must agree on, and the one place that decides what may enter the log: routes and
- * ids only. A route keeps only the words the Inbox's own routes use and ids of the Inbox's own forms; anything else
- * becomes `*`. Query strings and bodies never enter. A window's record is rebuilt field by field from an allow list,
- * so nothing a page sends can put words in the file.
+ * This file is what both sides must agree on, and the one place that decides what may enter the log. The owner may
+ * paste the file publicly, so every value is one of these: a number, a word from a fixed list here, an id in the exact
+ * shape the Inbox makes (a ULID with its prefix), or a window id made of digits. A path segment that is none of those
+ * becomes `*`. Query strings and bodies never enter. A window's record is rebuilt field by field, so a value that
+ * fails its check is dropped, whoever sent it.
  *
- * The window imports this too, so it stays free of node imports.
+ * The one thing a shape cannot rule out: a crafted 26-character string in the ULID alphabet passes as an id. The Inbox
+ * makes no such string from a person's words.
+ *
+ * The window imports this by relative path, so it stays free of imports. It is private: `@plannotator/core` is
+ * published, and a new core export would need a release of core before the UI's.
  */
 
 /** Where the window sends its buffered records. Answers only while debug is on. */
@@ -18,6 +23,8 @@ export const INBOX_DEBUG_ON_HEADER = "X-Plannotator-Inbox-Debug";
 export const INBOX_DEBUG_ID_HEADER = "X-Plannotator-Debug-Id";
 /** The largest body the window's route reads. */
 export const INBOX_DEBUG_BODY_BYTES = 256 * 1024;
+/** The most records in one body: the window's batch, and past it a refusal, so one request cannot hold up the Inbox. */
+export const INBOX_DEBUG_BATCH_RECORDS = 500;
 
 /** On with `PLANNOTATOR_INBOX_DEBUG=1`, or the config-only `inboxDebug: true`. Read at start. */
 export function resolveInboxDebug(config: { inboxDebug?: unknown }, env: Record<string, string | undefined>): boolean {
@@ -35,7 +42,9 @@ const ROUTE_WORDS = new Set(
     "undo unlink unread update uploads video view voice whats-new window worklet.js"
   ).split(" "),
 );
-const ID_SEGMENT = /^(?:(?:msg|drf|upl|prj|dev|tdy|ibx|crd|att|ses)_[A-Za-z0-9_-]{6,}|a-[0-9a-f]{8}(?:-\d{1,3})?)$/;
+const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
+const ID_SEGMENT = new RegExp(`^(?:(?:msg|prj|ses|dec|dev|upl|drf|crd|tdy|ibx|att)_${ULID}|a-[0-9a-f]{8}(?:-\\d{1,3})?)$`);
+const THREAD_ID = new RegExp(`^msg_${ULID}$`);
 
 /** A path as the log may hold it: no query, and `*` for any segment that is neither a route word nor an id. */
 export function debugRoute(path: string): string {
@@ -46,11 +55,15 @@ export function debugRoute(path: string): string {
     .join("/");
 }
 
-/** Ids a window gives its requests and pages. */
-const RECORD_ID = /^[a-z0-9-]{1,40}$/;
+/** A window's page id and its requests' ids: digits only, so no words fit. */
+export function debugPageId(now: number): string {
+  return `p${Math.floor(now)}-${Math.floor(Math.random() * 1e6)}`;
+}
+const PAGE_ID = /^p\d{1,16}-\d{1,6}$/;
+const REQUEST_ID = /^p\d{1,16}-\d{1,6}-\d{1,9}$/;
 
-export function isDebugId(value: unknown): value is string {
-  return typeof value === "string" && RECORD_ID.test(value);
+export function isDebugRequestId(value: unknown): value is string {
+  return typeof value === "string" && REQUEST_ID.test(value);
 }
 
 const WINDOW_EVENTS = new Set([
@@ -70,8 +83,13 @@ const WINDOW_EVENTS = new Set([
   "buffer_dropped",
 ]);
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+/** The names a failed fetch or body read can carry. Another name is dropped: the line still says it failed. */
+const ERRORS = new Set(["AbortError", "TimeoutError", "TypeError", "NetworkError", "SecurityError", "NotAllowedError", "NotSupportedError", "InvalidStateError", "SyntaxError", "Error"]);
+/** `nextHopProtocol` as browsers report it. */
+const PROTOCOLS = new Set(["http/0.9", "http/1.0", "http/1.1", "h2", "h2c", "h3"]);
 const count = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined);
-const matching = (value: unknown, pattern: RegExp): string | undefined => (typeof value === "string" && pattern.test(value) ? value : undefined);
+const listed = (value: unknown, list: Set<string>): string | undefined => (typeof value === "string" && list.has(value) ? value : undefined);
+const shaped = (value: unknown, shape: RegExp): string | undefined => (typeof value === "string" && shape.test(value) ? value : undefined);
 
 /** A window's record, rebuilt from the fields the log allows; null when it is not a record. */
 export function cleanWindowRecord(raw: unknown): Record<string, unknown> | null {
@@ -83,16 +101,16 @@ export function cleanWindowRecord(raw: unknown): Record<string, unknown> | null 
     t,
     side: "window",
     ev: record.ev,
-    page: isDebugId(record.page) ? record.page : undefined,
+    page: shaped(record.page, PAGE_ID),
     seq: count(record.seq),
-    id: isDebugId(record.id) ? record.id : undefined,
-    method: typeof record.method === "string" && METHODS.has(record.method) ? record.method : undefined,
+    id: shaped(record.id, REQUEST_ID),
+    method: listed(record.method, METHODS),
     route: typeof record.route === "string" && record.route.startsWith("/api/inbox/") ? debugRoute(record.route) : undefined,
     status: count(record.status),
     ms: count(record.ms),
-    error: matching(record.error, /^[A-Za-z]{1,32}$/),
-    thread: typeof record.thread === "string" && ID_SEGMENT.test(record.thread) ? record.thread : undefined,
-    protocol: matching(record.protocol, /^[a-z0-9./-]{1,16}$/),
+    error: listed(record.error, ERRORS),
+    thread: shaped(record.thread, THREAD_ID),
+    protocol: listed(record.protocol, PROTOCOLS),
     state: record.state === "visible" || record.state === "hidden" ? record.state : undefined,
     online: typeof record.online === "boolean" ? record.online : undefined,
     persisted: typeof record.persisted === "boolean" ? record.persisted : undefined,
