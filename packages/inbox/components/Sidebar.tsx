@@ -67,7 +67,7 @@ export interface SidebarProps {
    * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
    */
   onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
-  /** One step of combining: `from` into `into`, or back out (`into` null), with what Undo needs. Resolves true once the list shows it. */
+  /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
   onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;

@@ -952,7 +952,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const mine = rows.filter((row) => row.project.id === project.id);
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
       // The projects combined into this one: a link to one opens this project. Additive, and only when there are any.
-      const combined = store.combinedInto(project.id).map(({ id, name, root, display_name }) => ({ id, name, root, ...(display_name ? { display_name } : {}) }));
+      const combined = store.combinedInto(project.id).map(({ id, name, root }) => ({ id, name, root }));
       return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread: mine.filter((row) => row.unread).length, listed: mine.length - archived, archived };
     });
   };

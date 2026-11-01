@@ -796,7 +796,7 @@ export class InboxStore {
   /**
    * The roots a name routes to (agents' names: a name, once there, never
    * changes), oldest first, across a combined project: one name, one thread,
-   * from either folder. The keys stay per folder, so a Separate leaves each as it was.
+   * from either folder. The keys stay per folder, so an undo leaves each as it was.
    */
   private rootsNamed(projectId: string, name: string): string[] {
     const key = inboxThreadNameKey(name);
@@ -5475,7 +5475,7 @@ export class InboxStore {
     const target = sending ? this.cardSendTarget(project.id, input.send_thread_id) : null;
     const threads = this.cardThreads(input.threads ?? [], project.id);
     if (target && !threads.includes(target.thread)) threads.push(target.thread);
-    // Made for a thread of a combined project: filed in that thread's folder, so a Separate takes the card along.
+    // Made for a thread of a combined project: filed in that thread's folder, so an undo takes the card along.
     const owner = threads.length > 0 ? this.messages.get(threads[0]!)!.project_id : project.id;
     let titleValue = input.title;
     if ((titleValue === undefined || titleValue === null || titleValue === "") && threads.length > 0) {
@@ -5729,7 +5729,7 @@ export class InboxStore {
    * Where a card goes when the person sends it: `threadId` is the person's
    * message for it (a thread they started, or a New message in the card's
    * thread), in `projectId` or already on the card (`linked`: a thread linked
-   * while two projects were combined stays linked after a Separate), addressed
+   * while two projects were combined stays linked after an undo), addressed
    * to one agent session. Checked before anything is written, so a refused
    * send leaves no card and no line.
    */
