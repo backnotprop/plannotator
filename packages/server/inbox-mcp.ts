@@ -470,7 +470,8 @@ function replyResult(store: InboxStore, reply: InboxMessage, base: string, calle
   // it sent answers or skips on), each named by its message.
   const answered = replyAnsweredMessages(store, reply);
   const questions = answered.flatMap((id) => replyQuestions(store, id).map((q) => ({ message_id: id, ...q })));
-  const subject = store.threadSubject(reply.thread_id);
+  // The wake's title, for a client no connection wakes: with none (a plain reply in an unnamed thread) the lead reads whole.
+  const subject = store.agentTitle(reply, caller);
   // The files the person attached are named with their paths, as the wake names them.
   const body = inboxBodyForAgent(reply);
   const naming = namingHint(store, reply.thread_id, caller);
