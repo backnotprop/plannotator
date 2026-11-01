@@ -77,7 +77,7 @@ export interface ProjectFolder extends InboxProject {
   /** The machine whose project it is (`ibx_…`), in the merged view only. */
   machine?: string;
   /** The projects combined into this one: a link to one opens this project. Absent when there are none. */
-  combined?: { id: string; name: string; root: string; display_name?: string }[];
+  combined?: { id: string; name: string; root: string }[];
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
