@@ -42,6 +42,11 @@ let savedMatchMedia: typeof window.matchMedia;
 let phone = false;
 /** Set by a test: what the window's accounts read gets instead of the server. */
 let accountsRoute: (() => Promise<Response>) | null = null;
+/** Set by a test: runs before the window's settings read reaches the server. */
+let settingsRoute: (() => Promise<void>) | null = null;
+/** Every accounts read the window asked for, by URL. */
+let accountReads: string[] = [];
+let readsAnswered = 0;
 
 function call(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -91,13 +96,21 @@ beforeEach(async () => {
   if (!hasDom) return;
   phone = false;
   accountsRoute = null;
+  settingsRoute = null;
+  accountReads = [];
   // A window leaves a read behind when it closes, and the server's next caller would join that run: see it out first.
   await call('/api/inbox/accounts');
+  readsAnswered = 0;
   rmSync(bin, { recursive: true, force: true });
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (accountsRoute && String(input) === '/api/inbox/accounts') return accountsRoute();
+    if (String(input).startsWith('/api/inbox/accounts')) {
+      accountReads.push(String(input));
+      if (accountsRoute) return accountsRoute();
+    }
+    if (settingsRoute && String(input) === '/api/inbox/settings') await settingsRoute();
     const answer = await call(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    if (String(input).startsWith('/api/inbox/accounts')) readsAnswered += 1;
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -142,6 +155,14 @@ async function until(check: () => boolean, what: string) {
 
 function answer(fake: FakeCswapAnswer) {
   writeFakeCswap(bin, fake);
+}
+
+/** The window has the first read's answer on screen: the row alone no longer says so, since it comes from settings. */
+async function firstReadShown() {
+  await until(() => readsAnswered > 0, 'the first read');
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 20));
+  });
 }
 
 /** A `list --json` of these rows. */
@@ -500,7 +521,7 @@ test.skipIf(!hasDom)('the read that takes seconds: a clear wait first; Refresh k
   expect(fakeCswapCalls(bin).length).toBe(before + 1);
 });
 
-test.skipIf(!hasDom)('a read happens when the window opens, when this page opens and on Refresh: other sections run nothing, and nothing runs by itself', async () => {
+test.skipIf(!hasDom)('a read happens when the window opens and when this page opens: other sections run nothing, and nothing runs by itself', async () => {
   answer({ stdout: LIST });
   window.location.hash = '#settings/general';
   host = document.createElement('div');
@@ -509,7 +530,7 @@ test.skipIf(!hasDom)('a read happens when the window opens, when this page opens
     root = createRoot(host!);
     root.render(<InboxApp />);
   });
-  await until(() => host!.querySelector('[data-usage-nav]') !== null, 'the first read');
+  await firstReadShown();
   await act(async () => {
     await new Promise((r) => setTimeout(r, 300));
   });
@@ -580,13 +601,13 @@ async function openInbox() {
 async function openPeek(el: ParentNode) {
   await until(() => usageRow(el) !== null, 'the Usage row');
   await act(async () => usageRow(el)!.click());
-  await until(() => peek() !== null, 'the peek');
+  await until(() => peek() !== null && !peek()!.textContent!.includes('Reading accounts…'), 'the peek');
 }
 
 test.skipIf(!hasDom)('without cswap the sidebar is what it was: no Usage, no figure, on a desktop and on a phone', async () => {
   answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(92) } }) });
   const withUsage = await openInbox();
-  await until(() => usageRow(withUsage) !== null, 'the Usage row');
+  await until(() => figure(withUsage) !== null, 'the figure');
   const before = foot(withUsage);
   act(() => root?.unmount());
   host?.remove();
@@ -596,6 +617,7 @@ test.skipIf(!hasDom)('without cswap the sidebar is what it was: no Usage, no fig
     removeFakeCswap(bin);
     window.location.hash = '#settings/accounts';
     const el = await open('not_installed');
+    await until(() => !el.querySelector('.ib-side-foot')?.hasAttribute('data-held'), 'the foot');
     expect(usageRow(el)).toBeNull();
     expect(el.querySelector('[data-usage-figure]')).toBeNull();
     expect(peek()).toBeNull();
@@ -605,10 +627,81 @@ test.skipIf(!hasDom)('without cswap the sidebar is what it was: no Usage, no fig
   }
 });
 
+test.skipIf(!hasDom)('the foot stays hidden until settings answer, then draws with the row in it, whatever the read is doing', async () => {
+  answer({ stdout: LIST });
+  accountsRoute = () => new Promise(() => {});
+  let answerSettings = () => {};
+  const held = new Promise<void>((go) => {
+    answerSettings = go;
+  });
+  settingsRoute = () => held;
+  const el = await openInbox();
+  const footer = el.querySelector('.ib-side-foot')!;
+  expect(footer.hasAttribute('data-held')).toBe(true);
+  expect(usageRow(el)).toBeNull();
+  await act(async () => answerSettings());
+  await until(() => !footer.hasAttribute('data-held'), 'the foot');
+  expect(foot(el).filter(Boolean).slice(-2)).toEqual(['Usage', 'Settings']);
+  expect(accountReads).toHaveLength(1);
+});
+
+test.skipIf(!hasDom)('settings that fail never leave the foot hidden', async () => {
+  answer({ stdout: LIST });
+  settingsRoute = async () => {
+    throw new TypeError('Failed to fetch');
+  };
+  const el = await openInbox();
+  await until(() => !el.querySelector('.ib-side-foot')!.hasAttribute('data-held'), 'the foot');
+  expect(foot(el).filter(Boolean).at(-1)).toBe('Settings');
+});
+
+test.skipIf(!hasDom)('a peek opened before the first read answers says so, then shows the answer', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(41) } }) });
+  let answerRead = () => {};
+  const reading = new Promise<void>((go) => {
+    answerRead = go;
+  });
+  accountsRoute = async () => {
+    await reading;
+    const { text } = await call('/api/inbox/accounts');
+    return new Response(text, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const el = await openInbox();
+  await until(() => usageRow(el) !== null, 'the Usage row');
+  await act(async () => usageRow(el)!.click());
+  await until(() => peek() !== null, 'the peek');
+  expect(peek()!.textContent).toContain('Reading accounts…');
+  await act(async () => answerRead());
+  await until(() => peek()?.querySelector('.ib-usage-nm')?.textContent === 'work', 'the answer');
+  expect(peekLines()).toEqual(['5h']);
+});
+
+test.skipIf(!hasDom)('a read that finds cswap gone closes the peek instead of leaving it empty, and the row goes', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(92) } }) });
+  const el = await openInbox();
+  await until(() => figure(el) !== null, 'the first read');
+  removeFakeCswap(bin);
+  await act(async () => usageRow(el)!.click());
+  await until(() => usageRow(el) === null, 'the row to go');
+  await until(() => peek() === null, 'the peek to close');
+});
+
+test.skipIf(!hasDom)('Escape closes the peek when focus is on the row', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(41) } }) });
+  const el = await openInbox();
+  await openPeek(el);
+  const rowEl = usageRow(el)!;
+  await act(async () => {
+    rowEl.focus();
+    rowEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await until(() => peek() === null, 'the peek to close');
+});
+
 test.skipIf(!hasDom)('the row is plain until the account in use reaches 90%, then shows its highest limit; other accounts never move it', async () => {
   answer({ stdout: listOf({ alias: 'quiet', active: true, usage: { fiveHour: limit(89.4), sevenDay: limit(40) } }, { alias: 'near', usage: { fiveHour: limit(99) } }) });
   const el = await openInbox();
-  await until(() => usageRow(el) !== null, 'the Usage row');
+  await firstReadShown();
   expect(figure(el)).toBeNull();
   expect(usageRow(el)?.textContent).toBe('Usage');
   act(() => root?.unmount());
@@ -635,6 +728,7 @@ test.skipIf(!hasDom)('an old reading or an expired login is no warning: the row 
   const expired = await openInbox();
   await openPeek(expired);
   expect(figure(expired)).toBeNull();
+  // Pinned on purpose: the approval names these words ("Login expired" stays in the peek).
   expect(peek()!.querySelector('.ib-usage-note')?.textContent).toBe('Login expired');
 });
 
@@ -663,6 +757,7 @@ test.skipIf(!hasDom)('what the peek says with nothing to draw: an API key, no re
   };
   answer({ stdout: listOf({ alias: 'build key', active: true, usageStatus: 'api_key' }) });
   await openPeek(await openInbox());
+  // Pinned on purpose: each state's few words are the owner's rule for this page, and agents must not grow them into sentences.
   expect(note()).toBe('API key');
   await reopen(listOf({ alias: 'new', active: true }));
   expect(note()).toBe('No reading yet');
@@ -686,7 +781,7 @@ test.skipIf(!hasDom)('the block opens Settings → Accounts and closes the peek'
 test.skipIf(!hasDom)('the row and the page show one read: opening the peek reads again, and Settings moves the row without a read of its own', async () => {
   answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(41) } }) });
   const el = await openInbox();
-  await until(() => usageRow(el) !== null, 'the Usage row');
+  await firstReadShown();
   expect(fakeCswapCalls(bin).length).toBe(1);
   answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(96) } }) });
   await openPeek(el);
@@ -698,11 +793,14 @@ test.skipIf(!hasDom)('the row and the page show one read: opening the peek reads
   act(() => refresh(el).click());
   await until(() => figure(el) === null && bars(row(el, 1))[0] === '5h 12%', 'Refresh to reach the row');
   expect(fakeCswapCalls(bin).length).toBe(4);
+  // Only Refresh skips the answer the Inbox keeps.
+  expect(accountReads).toEqual(['/api/inbox/accounts', '/api/inbox/accounts', '/api/inbox/accounts', '/api/inbox/accounts?fresh=1']);
 });
 
-test.skipIf(!hasDom)('a tailnet guest gets no Usage: the read refuses them, and the row stays away', async () => {
+test.skipIf(!hasDom)('a read that refuses takes the row away, even over a settings answer that said cswap is here', async () => {
+  answer({ stdout: LIST });
   accountsRoute = async () => new Response(JSON.stringify({ error: 'refused', code: 'owner_only' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
   const el = await open('owner_only');
+  await until(() => !el.querySelector('.ib-side-foot')?.hasAttribute('data-held'), 'the foot');
   expect(usageRow(el)).toBeNull();
-  expect(fakeCswapCalls(bin)).toEqual([]);
 });

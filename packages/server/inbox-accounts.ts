@@ -12,9 +12,15 @@
  *  - A run is never killed for being slow, and the Inbox stopping leaves it to
  *    finish. A person waits `INBOX_ACCOUNTS_TIMEOUT_MS`; only a run still going
  *    at `INBOX_ACCOUNTS_HARD_LIMIT_MS` is killed, as truly stuck.
- *  - One run at a time, until it has really ended. Whoever asks while it runs
- *    joins it, even after an earlier caller was told it timed out. Nothing
- *    polls: a run starts when the page opens or on Refresh.
+ *  - One run at a time in this Inbox, until it has really ended. Whoever asks
+ *    while it runs joins it, even after an earlier caller was told it timed
+ *    out. A run a stopped Inbox left behind can overlap the next Inbox's:
+ *    `cswap` holds its own locks for that. Nothing polls: a run starts when a
+ *    window, the page or the Usage peek opens, or on Refresh.
+ *  - A good answer serves for `INBOX_ACCOUNTS_CACHE_MS`, so a reloading window
+ *    starts no process per load. `cswap` refreshes a login at most once per
+ *    its own 3 minutes however often it runs: this saves processes, not logins.
+ *    Refresh skips it: someone may have just run `cswap add`.
  *
  * Its output sits next to secrets:
  *
@@ -33,6 +39,8 @@ const CSWAP_SCHEMA_VERSION = 1;
 export const INBOX_ACCOUNTS_TIMEOUT_MS = 20_000;
 /** Last resort for a run that is truly stuck; a slow login refresh ends long before this. */
 export const INBOX_ACCOUNTS_HARD_LIMIT_MS = 120_000;
+/** How long a good answer serves. A failure or "not installed" never does, and drops the one kept, so a change shows at once. */
+export const INBOX_ACCOUNTS_CACHE_MS = 30_000;
 /** The address `cswap` gives an API-key account (`api-key-3@token.local`). */
 const PLACEHOLDER_EMAIL = /@token\.local$/i;
 
@@ -109,9 +117,11 @@ export interface InboxAccountsOptions {
   timeoutMs?: number;
   /** Default `INBOX_ACCOUNTS_HARD_LIMIT_MS`; tests give a short one. */
   hardLimitMs?: number;
+  /** Default `INBOX_ACCOUNTS_CACHE_MS`; 0 for a test that changes the answer between reads. */
+  cacheMs?: number;
 }
 
-export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TIMEOUT_MS, hardLimitMs = INBOX_ACCOUNTS_HARD_LIMIT_MS }: InboxAccountsOptions) {
+export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TIMEOUT_MS, hardLimitMs = INBOX_ACCOUNTS_HARD_LIMIT_MS, cacheMs = INBOX_ACCOUNTS_CACHE_MS }: InboxAccountsOptions) {
   const runOnce = async (): Promise<InboxAccountsRead> => {
     const cswap = environment.which("cswap");
     if (!cswap) return { state: "not_installed" };
@@ -124,11 +134,20 @@ export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TI
   };
   /** The run going now, until it has really ended. */
   let running: Promise<InboxAccountsRead> | null = null;
+  let last: { at: number; answer: InboxAccountsRead } | null = null;
   return {
-    read(): Promise<InboxAccountsRead> {
-      running ??= runOnce().finally(() => {
-        running = null;
-      });
+    /** Whether `cswap` is on this PATH. Looks only: runs nothing. */
+    installed: (): boolean => environment.which("cswap") !== null,
+    read({ fresh = false }: { fresh?: boolean } = {}): Promise<InboxAccountsRead> {
+      if (!fresh && last && Date.now() - last.at < cacheMs) return Promise.resolve(last.answer);
+      running ??= runOnce()
+        .then((answer) => {
+          last = answer.state === "accounts" ? { at: Date.now(), answer } : null;
+          return answer;
+        })
+        .finally(() => {
+          running = null;
+        });
       // Each caller waits its own limit, so a Refresh during a slow run can still get that run's answer.
       let limit: ReturnType<typeof setTimeout>;
       const tooLong = new Promise<InboxAccountsRead>((done) => {

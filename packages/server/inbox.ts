@@ -403,8 +403,8 @@ export interface InboxServerOptions {
   codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
-  /** Tests: where a read of `cswap list --json` looks, how long it waits, and when a stuck run is killed (packages/server/inbox-accounts.ts). */
-  accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number };
+  /** Tests: where a read of `cswap list --json` looks, how long it waits, when a stuck run is killed, and how long an answer serves (packages/server/inbox-accounts.ts). */
+  accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number; cacheMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
 }
@@ -1826,6 +1826,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
+    /** Whether `cswap` is on this computer, so the sidebar's Usage row is there before the first read. Looks on PATH, runs nothing. Never for a tailnet guest. */
+    cswap: !guest && accounts.installed(),
   });
 
   /** Save the knob for the hosts named, keeping the others as they are. `validateOnly`: check the input and write nothing. */
@@ -2945,7 +2947,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (tailnetGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
-        return json(await accounts.read());
+        return json(await accounts.read({ fresh: url.searchParams.get("fresh") === "1" }));
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.

@@ -275,7 +275,7 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
             Claude Code
           </h2>
           {view?.state !== 'owner_only' && (
-            <button type="button" className="ib-btn ib-ghost ib-sm" disabled={reading} onClick={() => void read()} data-accounts-refresh="">
+            <button type="button" className="ib-btn ib-ghost ib-sm" disabled={reading} onClick={() => void read({ fresh: true })} data-accounts-refresh="">
               {reading ? <span className="ib-spin" aria-hidden="true" /> : <Icon name="refresh" size={13} />}
               Refresh
             </button>

@@ -318,7 +318,8 @@ const server = await startInboxServer({
   ...(openInMode ? { openInLauncher, tailscale, publishTailnet: true } : {}),
   ...(whatsNewMode ? { version: "0.28.19", binaryPath: null } : {}),
   // Every window reads usage when it opens: only `accounts` finds a `cswap`, and never on this process's own PATH, which can hold a real one.
-  accounts: { environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: scratchHome, env: { HOME: scratchHome, PATH: extra === "accounts" ? join(dataDir, "cswap-bin") : "" } }) },
+  // No kept answer: the tests change the fake between reads.
+  accounts: { environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: scratchHome, env: { HOME: scratchHome, PATH: extra === "accounts" ? join(dataDir, "cswap-bin") : "" } }), cacheMs: 0 },
   ...(restartMode
     ? {
         version: "0.28.25",

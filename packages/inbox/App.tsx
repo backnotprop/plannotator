@@ -4696,6 +4696,8 @@ function Inbox() {
               if (!usageRow) void readAccounts();
             }}
             usageOpen={usageRow !== null}
+            usageInstalled={settings?.cswap === true}
+            footHeld={settings === null && !settingsReadFailed && !settingsLate}
           />
           )
         }

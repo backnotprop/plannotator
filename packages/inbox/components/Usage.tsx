@@ -1,12 +1,15 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, type CSSProperties } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import type { InboxAccount } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
-import { accountsFailure, useAccounts } from '../useAccounts';
+import { accountsFailure, useAccounts, type AccountsView } from '../useAccounts';
 import { FAILURE_TEXT, accountMeters, isHigh, isStale, rowName, shownPct, type Meter } from './Accounts';
 
-/** The sidebar shows Usage only where the read found `cswap`. */
-const hasUsage = (state: string | undefined) => state === 'accounts' || state === 'failed';
+/** Usage shows where `cswap` is: the read says so once it answers, and `installed` (the settings' look at PATH) until then. */
+function hasUsage(view: AccountsView | null, installed: boolean): boolean {
+  if (view === null || view.state === 'unreachable') return installed;
+  return view.state === 'accounts' || view.state === 'failed';
+}
 
 const loginExpired = (account: InboxAccount) => account.usageStatus === 'relogin_required';
 
@@ -18,9 +21,9 @@ function nearLimit(account: InboxAccount | undefined): number | null {
 }
 
 /** The sidebar's row: plain, until the account in use nears a limit. No `cswap`, no row. */
-export function UsageRow({ open, onOpen }: { open: boolean; onOpen: (row: HTMLElement) => void }) {
+export function UsageRow({ installed, open, onOpen }: { installed: boolean; open: boolean; onOpen: (row: HTMLElement) => void }) {
   const { view } = useAccounts();
-  if (!hasUsage(view?.state)) return null;
+  if (!hasUsage(view, installed)) return null;
   const figure = view?.state === 'accounts' ? nearLimit(view.accounts.find((account) => account.active)) : null;
   return (
     <button
@@ -91,8 +94,9 @@ function UsageBlock({ name, note, meters, muted, onOpen }: { name: string; note?
 
 function UsageBody({ onOpen }: { onOpen: () => void }) {
   const { view } = useAccounts();
-  if (view?.state === 'failed') return <UsageBlock name={FAILURE_TEXT[accountsFailure(view)!]} onOpen={onOpen} />;
-  if (view?.state !== 'accounts') return null;
+  const failure = view && accountsFailure(view);
+  if (failure) return <UsageBlock name={FAILURE_TEXT[failure]} onOpen={onOpen} />;
+  if (view?.state !== 'accounts') return <UsageBlock name="Reading accounts…" onOpen={onOpen} />;
   if (view.accounts.length === 0) return <UsageBlock name="No accounts yet" onOpen={onOpen} />;
   const active = view.accounts.find((account) => account.active);
   if (!active) return <UsageBlock name="No account in use" onOpen={onOpen} />;
@@ -115,14 +119,23 @@ function UsageBody({ onOpen }: { onOpen: () => void }) {
  * `anchor` is the row; null is closed.
  */
 export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTMLElement | null; phone: boolean; onClose: () => void; onSettings: () => void }) {
+  const { view } = useAccounts();
   const row = useMemo(() => ({ current: anchor }), [anchor]);
+  const open = anchor !== null && hasUsage(view, true);
+  // The read took `cswap` away while it was open, and the row with it.
+  useEffect(() => {
+    if (anchor !== null && !open) onClose();
+  }, [anchor, open, onClose]);
   return (
     <Popover.Root
-      open={anchor !== null}
+      // Placed at its size: it stays put once open, so a desktop peek opened on "Reading…" is placed again for what it grew to.
+      key={!phone && view === null ? 'reading' : 'read'}
+      open={open}
       modal={phone}
       onOpenChange={(next, details) => {
         // The row closes it itself: left to this, the press would close it and the click open it again.
-        if (!next && !(details.event.target instanceof Node && anchor?.contains(details.event.target))) onClose();
+        const rowPress = details.reason === 'outside-press' && details.event.target instanceof Node && anchor?.contains(details.event.target);
+        if (!next && !rowPress) onClose();
       }}
     >
       <Popover.Portal container={document.querySelector<HTMLElement>('.pn-inbox') ?? undefined}>

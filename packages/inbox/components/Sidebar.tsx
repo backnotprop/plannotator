@@ -141,6 +141,10 @@ export interface SidebarProps {
   /** Opens or closes the Usage peek from its row (components/Usage.tsx), which shows only where `cswap` is. Absent: no row. */
   onUsage?: (row: HTMLElement) => void;
   usageOpen?: boolean;
+  /** `cswap` is on this computer: the row is there before the first read answers. */
+  usageInstalled?: boolean;
+  /** The foot stays hidden until it knows every row it will hold, so none arrives late and moves the others. */
+  footHeld?: boolean;
   /**
    * Pinned and Projects open and close as this browser last left them (the
    * cookie in sidebarSections.ts; default true). The onboarding tour's
@@ -555,7 +559,7 @@ export function Sidebar(props: SidebarProps) {
           )}
         </div>
       </div>
-      <div className="ib-side-foot">
+      <div className="ib-side-foot" data-held={props.footHeld ? '' : undefined}>
         {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
         {props.connectPrompt !== false && !phone && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
         <UpdateButton
@@ -575,7 +579,7 @@ export function Sidebar(props: SidebarProps) {
             Feedback
           </button>
         )}
-        {props.onUsage && <UsageRow open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />}
+        {props.onUsage && <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />}
         {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
         <div className="ib-setrow">
           <button

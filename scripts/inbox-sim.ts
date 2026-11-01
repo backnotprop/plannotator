@@ -203,7 +203,8 @@ async function main(): Promise<void> {
   const src = join(dirname(dataDir), 'src');
   const billing = scratchProject(src, 'billing-svc');
   const docs = scratchProject(src, 'docs-site');
-  const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? dataDir, PLANNOTATOR_DATA_DIR: dataDir };
+  // The sandbox gives the Inbox these agents start an empty agent PATH: a window opened on it must not run the person's real `cswap`.
+  const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? dataDir, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir };
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const opencode = await SimAgent.connect({ binary, env, name: 'OpenCode', host: 'opencode' });
   const claude2 = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });

@@ -5,9 +5,10 @@
  * folder (tests/helpers/fake-cswap.ts), so no real claude-swap can be reached:
  * that one goes to the Keychain.
  *
- * What only a browser can show: where the row sits, the amber at 90% and nowhere
- * else, the peek beside the row and the sheet along a phone's bottom edge,
- * inside the window. The rules behind them are packages/inbox/accountsSection.test.tsx.
+ * What only a browser can show: nothing in the sidebar's foot moving when a
+ * slow read answers, where the row sits, the amber at 90% and nowhere else, the
+ * peek beside the row and the sheet along a phone's bottom edge, inside the
+ * window. The rules behind them are packages/inbox/accountsSection.test.tsx.
  *
  * PNGs, light and dark, land in .local/proof/inbox-accounts-step2/.
  */
@@ -88,10 +89,17 @@ async function shot(page: Page, name: string) {
   }
 }
 
-/** A fresh window over this answer, past its first read. */
-async function open(page: Page, stdout: string | null) {
+/** The Inbox keeps a good answer 30 s: this read replaces the last one, so the next window gets `stdout`. */
+async function replaceAnswer(page: Page, stdout: string | null) {
   if (stdout === null) removeFakeCswap(bin);
   else writeFakeCswap(bin, { stdout });
+  const answer = await page.request.get(new URL('api/inbox/accounts?fresh=1', url).href);
+  expect((await answer.json()).state).toBe(stdout === null ? 'not_installed' : 'accounts');
+}
+
+/** A fresh window over this answer, past its first read. */
+async function open(page: Page, stdout: string | null) {
+  await replaceAnswer(page, stdout);
   // By way of a blank page, so this load is the only one that can answer the wait.
   await page.goto('about:blank');
   const read = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/accounts');
@@ -107,6 +115,94 @@ async function expectInsideWindow(page: Page) {
   expect(box.x + box.width).toBeLessThanOrEqual(view.width);
   expect(box.y + box.height).toBeLessThanOrEqual(view.height);
 }
+
+/** A fresh window whose first read stays out, as a slow `cswap`'s does, until the returned call lets it answer 92%. */
+async function openWithReadHeld(page: Page) {
+  await replaceAnswer(page, HIGH);
+  await page.goto('about:blank');
+  let letGo = () => {};
+  const held = new Promise<void>((go) => {
+    letGo = go;
+  });
+  await page.route('**/api/inbox/accounts', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.addInitScript(() => {
+    const shifts: string[] = [];
+    (window as unknown as { footShifts: string[] }).footShifts = shifts;
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as unknown as { sources: { node?: Element | null }[] }[]) {
+        for (const source of entry.sources) if (source.node?.closest?.('.ib-side-foot')) shifts.push(source.node.className);
+      }
+    }).observe({ type: 'layout-shift', buffered: true });
+  });
+  await page.goto(url);
+  return letGo;
+}
+
+const top =async (target: ReturnType<Page['locator']>) => (await target.boundingBox())!.y;
+
+test('the foot does not move when a slow read answers: the row is there first, and the figure lands inside it', async ({ browser }: { browser: Browser }) => {
+  test.setTimeout(60_000);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1040 } });
+  const page = await context.newPage();
+  const answer = await openWithReadHeld(page);
+  const feedback = page.locator('[data-feedback-nav]');
+  await expect(row(page)).toBeVisible();
+  await expect(page.locator('[data-usage-figure]')).toHaveCount(0);
+  const before = { feedback: await top(feedback), usage: await top(row(page)), foot: await top(page.locator('.ib-side-foot')) };
+  answer();
+  await expect(page.locator('[data-usage-figure]')).toHaveText('92%');
+  expect({ feedback: await top(feedback), usage: await top(row(page)), foot: await top(page.locator('.ib-side-foot')) }).toEqual(before);
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as unknown as { footShifts: string[] }).footShifts)).toEqual([]);
+  await context.close();
+});
+
+test('a peek opened during a slow read fills in beside the row, inside the window, and focus stays in it', async ({ browser }: { browser: Browser }) => {
+  test.setTimeout(60_000);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1040 } });
+  const page = await context.newPage();
+  const answer = await openWithReadHeld(page);
+  await row(page).click();
+  await expect(peek(page)).toContainText('Reading accounts…');
+  await shot(page, 'desktop-reading-peek');
+  answer();
+  await expect(peek(page).locator('.ib-usage-nm')).toHaveText('work');
+  await expect(peek(page).locator('.ib-usage-k')).toHaveText(['5h', 'Fable', 'week']);
+  await expectInsideWindow(page);
+  const rowBox = (await row(page).boundingBox())!;
+  const box = (await peek(page).boundingBox())!;
+  expect(Math.abs(box.y + box.height - (rowBox.y + rowBox.height))).toBeLessThanOrEqual(12);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-settings-accounts]')).toHaveAttribute('data-settings-accounts', 'accounts');
+  await context.close();
+});
+
+test('phone: the row is in the sheet during a slow read, nothing moves when it answers, and a tap opens the sheet at once', async ({ browser }: { browser: Browser }) => {
+  test.setTimeout(60_000);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  // The sheet slides up as it opens: without this the check below can catch it on its way.
+  await scheme(page, 'light');
+  const answer = await openWithReadHeld(page);
+  await page.locator('.ib-lhead .ib-sb-trigger').click();
+  await expect(row(page)).toBeVisible();
+  const feedback = page.locator('[data-feedback-nav]');
+  const before = await top(feedback);
+  answer();
+  await expect(page.locator('[data-usage-figure]')).toHaveText('92%');
+  expect(await top(feedback)).toBe(before);
+  const answerAgain = await openWithReadHeld(page);
+  await page.locator('.ib-lhead .ib-sb-trigger').click();
+  await row(page).click();
+  await expect(peek(page)).toContainText('Reading accounts…');
+  answerAgain();
+  await expect(peek(page).locator('.ib-usage-k')).toHaveText(['5h', 'Fable', 'week']);
+  await expectInsideWindow(page);
+  await context.close();
+});
 
 test('desktop: the row sits above Settings, plain until 90%, and its peek opens Settings', async ({ browser }: { browser: Browser }) => {
   test.setTimeout(120_000);

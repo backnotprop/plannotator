@@ -606,6 +606,7 @@ button.ib-mut { border-radius: 6px; }
 .ib-empty-list a { color: var(--primary); text-decoration: none; }
 .ib-empty-list a:hover { text-decoration: underline; }
 .ib-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.ib-side-foot[data-held] { visibility: hidden; }
 /* The update control (.product/approved/plannotator-updates): one full-width filled primary button above
    Settings, 32 px, no motion, never a percentage, never the error colour. */
 .ib-upd { position: relative; margin: 0 2px 2px; }

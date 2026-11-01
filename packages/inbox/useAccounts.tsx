@@ -18,8 +18,8 @@ export interface Accounts {
   /** A read that failed over a good list, which stays up. */
   refreshFailed: AccountsFailure | null;
   reading: boolean;
-  /** Reads now, or joins the read already going. */
-  read: () => Promise<void>;
+  /** Reads now, or joins the read already going. `fresh` (Refresh) skips the answer the Inbox keeps. */
+  read: (options?: { fresh?: boolean }) => Promise<void>;
 }
 
 function useAccountsRead(): Accounts {
@@ -29,12 +29,12 @@ function useAccountsRead(): Accounts {
   const latest = useRef<AccountsView | null>(null);
   const running = useRef<Promise<void> | null>(null);
 
-  const read = useCallback(() => {
+  const read = useCallback(({ fresh = false }: { fresh?: boolean } = {}) => {
     const run = async () => {
       setReading(true);
       let next: AccountsView;
       try {
-        next = await inboxApi.accounts();
+        next = await inboxApi.accounts(fresh);
       } catch (cause) {
         next = { state: cause instanceof InboxApiError && cause.code === 'owner_only' ? 'owner_only' : 'unreachable' };
       }
@@ -53,7 +53,7 @@ function useAccountsRead(): Accounts {
     return running.current;
   }, []);
 
-  // The one read nobody asked for: the sidebar has to know whether `cswap` is here, and whether a limit is near. It never repeats by itself.
+  // The one read nobody asked for: the sidebar has to know whether a limit is near. It never repeats by itself.
   useEffect(() => {
     void read();
   }, [read]);
