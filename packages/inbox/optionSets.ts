@@ -135,9 +135,8 @@ export const FIRST_OPTION_NOTE = 'First option';
 
 /**
  * "Option B of 4: Quiet hover menu, recommended": what a step inside a set
- * says to a screen reader. Given `otherFiles` (a phone, where the caption shows
- * the end note only for a moment), the step onto the last option says the note
- * too: "Option D of 4: Header menu only. Last option. 2 other files under the
+ * says to a screen reader. Given `otherFiles`, the step onto the last option
+ * says the end note too (the card no longer shows it): "Option D of 4: Header menu only. Last option. 2 other files under the
  * 4/4 button".
  */
 export function optionAnnouncement(set: OptionSet, index: number, otherFiles?: number): string {
@@ -147,17 +146,4 @@ export function optionAnnouncement(set: OptionSet, index: number, otherFiles?: n
   if (otherFiles === undefined || index !== set.steps.length - 1) return said;
   if (otherFiles === 0) return `${said}. ${LAST_OPTION_NOTE}`;
   return `${said}. ${LAST_OPTION_NOTE}. ${otherFiles} other ${otherFiles === 1 ? 'file' : 'files'} under the ${index + 1}/${set.steps.length} button`;
-}
-
-/**
- * The caption's last line at an end of the set: the end note, and at the
- * last option where the thread's other files are ("Last option · the
- * thread's 7 other files are under 4/4 ⌄"). Null in between, or at the first
- * option until a swipe past it says so.
- */
-export function optionEndLine(set: OptionSet, index: number, otherFiles: number, note: string | null): { note: string; others: number } | null {
-  const last = index === set.steps.length - 1;
-  if (last) return { note: LAST_OPTION_NOTE, others: otherFiles };
-  if (index === 0 && note === FIRST_OPTION_NOTE) return { note: FIRST_OPTION_NOTE, others: 0 };
-  return null;
 }

@@ -4,8 +4,12 @@
  * the picture sits wholly above the card, the pan stops exactly at the card,
  * a zoomed picture may still slide under it, stepping between choices never
  * moves the card (it holds the end note's row on every choice), and Hide takes
- * the card with the rest so the picture refits to the whole pane. Zooming in
- * and out and panning to all four edges keep working. A plain picture (no
+ * the card with the rest so the picture refits to the whole pane, and so does
+ * minimizing the comment box (restoring it brings the card back). The card is
+ * one row (approval "inbox-option-card-lean"): ‹ Previous and Next › that step
+ * like [ and ], marked disabled at the ends, the letter, the name (a long one
+ * cut with its full name on hover), "Recommended" when there is one. Zooming
+ * in and out and panning to all four edges keep working. A plain picture (no
  * card) keeps today's Fit.
  *
  * Boxes are measured, never fitted to text, so fonts of any runner do. Build
@@ -32,10 +36,10 @@ const QUESTION = [
   '',
   '- [ ] A tall page — ![Option A](shots/a.png) a tall picture',
   '- [ ] B wide — ![Option B](shots/b.png) a wide picture',
-  '- [ ] C panorama — ![Option C](shots/c.png) a very wide picture',
+  '- [ ] C A panorama with a very long name that goes on and on about where the quiet link should sit on a waiting thread — ![Option C](shots/c.png) a very wide picture',
   '- [ ] D photo — ![Option D](shots/d.png) a photo',
   '',
-  'Recommended: B',
+  'Recommended: B wide',
   ':::',
 ].join('\n');
 
@@ -51,6 +55,7 @@ async function world() {
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_NOTES: '0',
+    CLAUDE_CONFIG_DIR: join(root, 'claude-config'),
   };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -140,6 +145,12 @@ async function step(page: Page, key: ']' | '[', letter: string) {
 const same = (a: Box, b: Box) => {
   for (const side of ['top', 'bottom', 'left', 'right'] as const) expect(Math.abs(a[side] - b[side]), side).toBeLessThan(1.5);
 };
+/** The card keeps its row and its middle; its width follows the name. */
+const sameRow = (a: Box, b: Box) => {
+  expect(Math.abs(a.top - b.top), 'top').toBeLessThan(1.5);
+  expect(Math.abs(a.bottom - b.bottom), 'bottom').toBeLessThan(1.5);
+  expect(Math.abs((a.left + a.right) / 2 - (b.left + b.right) / 2), 'middle').toBeLessThan(1.5);
+};
 const clearOfCard = (l: Layout) => expect(l.image.bottom).toBeLessThanOrEqual(l.card!.top + 0.5);
 
 /** Drags the picture the same way until it stops moving. */
@@ -189,6 +200,10 @@ for (const { width, height } of [
       const fit = await layout(page);
       clearOfCard(fit);
       const card = fit.card!;
+      expect(card.bottom - card.top, 'one row').toBeLessThan(60);
+      await expect(page.locator('[data-option-caption] .ib-optcap-letter')).toHaveText('B');
+      await expect(page.locator('[data-option-recommended]')).toHaveText('Recommended');
+      for (const gone of ['.ib-optcap-q', '.ib-optcap-dots', '[data-option-end]', '.ib-optcap-hold']) await expect(page.locator(gone)).toHaveCount(0);
       await shot(page, `${width}x${height}-B-fit`);
 
       // Zoom in (Actual size is bigger than the clear space), pan to all four edges; out again to the same Fit.
@@ -229,7 +244,7 @@ for (const { width, height } of [
       for (const letter of ['C', 'D']) {
         await step(page, ']', letter);
         const l = await layout(page);
-        same(l.card!, card);
+        sameRow(l.card!, card);
         if (letter === 'D') clearOfCard(l);
         // A panorama is as wide as it likes: its height is above the card.
         expect(l.image.bottom).toBeLessThanOrEqual(card.top + 0.5);
@@ -238,7 +253,7 @@ for (const { width, height } of [
       await step(page, '[', 'B');
       await step(page, '[', 'A');
       const tall = await layout(page);
-      same(tall.card!, card);
+      sameRow(tall.card!, card);
       // A tall picture reads from the top, so its lower part starts under the card; a pan brings every part clear.
       expect(tall.image.top).toBeGreaterThanOrEqual(tall.stage.top - 0.5);
       const tallBottom = await panTo(page, 'bottom');
@@ -286,3 +301,91 @@ test('a plain picture on a desktop keeps its Fit on the whole pane', async () =>
     await removeInboxScratch(root);
   }
 });
+
+for (const { width, height } of [
+  { width: 1440, height: 900 },
+  { width: 1000, height: 700 },
+])
+  test(`desktop ${width} × ${height}: the arrows step like [ and ] and rest disabled at the ends, a long name is cut with its full name on hover, minimizing the comment box takes the card`, async () => {
+    test.setTimeout(240_000);
+    const { root, url, agent, thread } = await world();
+    const browser: Browser = await chromium.launch();
+    try {
+      const context = await browser.newContext({ viewport: { width, height } });
+      const page = await context.newPage();
+      const next = page.locator('[data-option-step="next"]');
+      const prev = page.locator('[data-option-step="prev"]');
+      const heights = new Set<number>();
+      const note = async (tall = false) => {
+        const l = await layout(page);
+        heights.add(Math.round(l.card!.bottom - l.card!.top));
+        // A tall picture reads from the top: its lower part starts under the card until panned.
+        if (!tall) clearOfCard(l);
+        return l;
+      };
+
+      // The first option: Previous is disabled and does nothing; Next steps.
+      await open(page, url, thread, 'A');
+      await note(true);
+      await expect(prev).toHaveAttribute('aria-disabled', 'true');
+      await expect(next).not.toHaveAttribute('aria-disabled', 'true');
+      // aria-disabled, not disabled: focus can stay on it, and a click is let through to do nothing (force: Playwright treats it as disabled).
+      await prev.click({ force: true });
+      await atRest(page);
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'A');
+      await next.click();
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'B');
+      await atRest(page);
+      await note();
+      // Focus stays on the arrow that was used.
+      await expect(next).toBeFocused();
+
+      // The long name (C) is cut, whole on hover, and the card is still one row and clear.
+      await next.click();
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
+      await atRest(page);
+      await note();
+      const label = page.locator('.ib-optcap-label');
+      expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth), 'cut').toBe(true);
+      await label.hover();
+      await expect(label).toHaveAttribute('title', /A panorama with a very long name/);
+      await shot(page, `${width}x${height}-C-long-name`);
+
+      // The last option: Next is disabled and does nothing; Previous steps back.
+      await next.click();
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'D');
+      await atRest(page);
+      const last = await note();
+      await expect(next).toHaveAttribute('aria-disabled', 'true');
+      await next.click({ force: true });
+      await atRest(page);
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'D');
+      await shot(page, `${width}x${height}-D-last`);
+      await prev.click();
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
+      await atRest(page);
+      expect([...heights], 'one height on every option').toHaveLength(1);
+
+      // Minimize the comment box: the card goes and the picture refits to the room it gets; restoring brings both back.
+      await step(page, ']', 'D');
+      const before = await layout(page);
+      await page.locator('[data-fcomp-minimize]').click();
+      await expect(page.locator('[data-fcomp-pill]')).toBeVisible();
+      await expect(caption(page)).toBeHidden();
+      await atRest(page);
+      const minimized = await layout(page);
+      expect(minimized.card).toBeNull();
+      expect(minimized.image.bottom).toBeGreaterThan(last.card!.top);
+      await shot(page, `${width}x${height}-D-minimized`);
+      await page.locator('[data-fcomp-pill]').click();
+      await expect(caption(page)).toBeVisible();
+      await atRest(page);
+      const restored = await layout(page);
+      same(restored.image, before.image);
+      sameRow(restored.card!, last.card!);
+    } finally {
+      await browser.close().catch(() => {});
+      await agent.close().catch(() => {});
+      await removeInboxScratch(root);
+    }
+  });

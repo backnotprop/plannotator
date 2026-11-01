@@ -115,7 +115,7 @@ for (const phone of [
       await expect(pill(page)).toHaveAttribute('aria-label', '2/4: option 2 of 4, opt-b.png. Show every file');
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'B');
       await expect(caption(page)).toContainText('Quiet hover menu');
-      await expect(caption(page)).toContainText('Which copy-message design should ship?');
+      await expect(caption(page).locator('.ib-optcap-prompt')).toHaveCount(0);
       await shot(page, `${tag}-option-B`);
 
       // Mid-swipe: the image moves with the finger and C comes in beside it; the size bar and the comment box stay put
@@ -152,7 +152,7 @@ for (const phone of [
       await touch.up();
       // D, the last: it stays there and says where the other files are.
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'D');
-      await expect(caption(page).locator('[data-option-end]')).toHaveText('Last option · 4 files under 4/4');
+      await expect(page.locator('[data-step-live]')).toContainText('Last option. 4 other files under the 4/4 button');
       await touch.down(mid.x, mid.y, -area.width * 0.5, 0);
       await touch.up();
       await page.waitForTimeout(400);

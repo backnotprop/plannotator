@@ -684,7 +684,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!source) return;
     const at = stepIndexOf(stepsRef.current, attachment.id);
     const set = optionSetRef.current;
-    if (at >= 0) announce(set ? optionAnnouncement(set, at, phone ? outsideSet : undefined) : stepAnnouncement(stepsRef.current, at));
+    if (at >= 0) announce(set ? optionAnnouncement(set, at, outsideSet) : stepAnnouncement(stepsRef.current, at));
     // Full screen keeps on through a step; with no bar under the file, a chip names the file for a moment (a set's caption names the choice).
     if (fullRef.current && !set) showChipRef.current(null);
     // A key pressed in the document (or the HTML page) leaves focus on the pane; a bar button keeps it.
@@ -2318,7 +2318,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       )}
       {full && optionSet && (
         // A question's picture choices: the caption names the choice on screen for as long as the set is open (in place of the chip).
-        <OptionCaption set={optionSet} index={index} otherFiles={outsideSet} note={endNote} phone={phone} />
+        <OptionCaption set={optionSet} index={index} phone={phone} onStep={(dir) => step(dir, 'button')} />
       )}
       {full && !optionSet && (
         // The step chip (full screen only): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
