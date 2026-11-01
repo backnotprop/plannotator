@@ -98,7 +98,7 @@
   - An honest `User-Agent` and no browser headers, ever. A 403 or a challenge page is an answer: show the failure and stop.
   - The only automatic retry is one token refresh on a 401. Everything else waits for a person's press.
   - A token, key or clip is never logged, returned or written down (the key's own 0600 file aside). Audio stays in memory for the length of the request. Failures are fixed codes (`InboxVoiceFailure`), never upstream text.
-  - The key is set only on the computer itself (`403 local_only` through the tailnet) and a page sees its last 4 at most.
+  - The key is set on the computer or by the owner through the tailnet's HTTPS, never on a plain-http path (`403 https_required`), and a page sees its last 4 at most.
 - `account/read` gives the sign-in type and plan and no token. It is what Settings, the dimmed mic and the announcement's audience read. `getAuthStatus` runs only to transcribe.
 - The announcement: `inboxVoiceIntro` decides as `inboxListIntro` does, then the claim (`POST /api/inbox/voice/intro`) refuses when another one-time dialog is due, and checks `account/read` once per Inbox start, only with a `codex` on this computer. Turning voice on anywhere marks it shown.
 - **The window.** `voice.ts` holds what every composer shares (the saved settings and the Inbox's read of this computer, a store, so a mic needs no props) and `useVoiceSession`. A host calls the hook, passes the result to `InboxComposerField` (`voice`) and `VoiceFoot`, keeps Send off while `busy`, and guards its own Mod+Enter. `voiceSession.ts` is one composer's run with no React and no audio, driven through `VoiceDeps`; `voiceRecorder.ts` is the microphone; `voiceLine.ts` says what the status reads at a moment; `voicePress.ts` is the gesture.

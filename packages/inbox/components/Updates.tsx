@@ -836,7 +836,7 @@ export function checksOffWords(details: UpdateDetails | null): ReactNode {
  * button to also show up in the general part of settings"): the version this
  * Inbox runs and the same action the sidebar's Update button offers, plus
  * Check now; the failing-check line with the install command when checking
- * fails. The page never renders it when opened over the tailnet.
+ * fails. The page never renders it for a tailnet guest.
  */
 export function GeneralUpdateRow({
   version,
