@@ -113,6 +113,7 @@ import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
+import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/core/inbox-debug-log";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -178,6 +179,7 @@ import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardMarks } from "./inbox-card-marks";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
+import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
@@ -322,6 +324,8 @@ export interface InboxServerOptions {
    * `PLANNOTATOR_FEEDBACK_URL`, else the feedback Worker's constant URL.
    */
   feedbackUrl?: string;
+  /** Tests: the debug log on or off. Default: `PLANNOTATOR_INBOX_DEBUG=1` or the config's `inboxDebug`. */
+  debug?: boolean;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
   /** Tests: the clock (epoch ms) send_message's "not read since" line reads (packages/server/inbox-session-reads.ts). Default: the wall clock. */
@@ -2575,6 +2579,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     combineLoading: () => !repoReadsBegun || repos.reading(),
   });
 
+  /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
+  const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
+  const debugOwner = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers);
+
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
     // and the owner's Tailscale login before handing the request here.
@@ -2700,6 +2708,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
       }
     }
+    // The window's debug records (inbox-debug-log.ts): off, this falls through to the unknown-route 404.
+    if (debugLog && path === INBOX_DEBUG_PATH) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (!debugOwner(req, via)) return json({ error: "Only this computer's owner can write the debug log.", code: "owner_only" }, 403);
+      return debugLog.accept(req);
+    }
+
     // The tailnet never widens the Inbox's exposure: pairing a phone and
     // Phones' tailnet and Wi-Fi switches answer only on this computer (the
     // window's own switch refuses `on` below).
@@ -3534,6 +3549,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
+  const served = debugLog ? debugLog.wrap(handle, debugOwner) : handle;
+
   /**
    * The window's own port: everything here came from this computer. A
    * request carrying what `tailscale serve` always adds (and a local client
@@ -3557,7 +3574,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       tailscale.noteServedRequest();
       return Promise.resolve(localOnly());
     }
-    return handle(req, "local");
+    return served(req, "local");
   };
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody, streamIdleMs: options.streamIdleMs, scheduleImageCapture: imageCapture.schedule });
@@ -3586,7 +3603,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     port: () => port,
     registry: () => registry,
-    dispatch: async (req) => markPlannotatorResponse(await handle(req, "tailnet")),
+    dispatch: async (req) => markPlannotatorResponse(await served(req, "tailnet")),
     // Compress the page for the tailnet before the first phone asks (#2032).
     onListen: () => prewarmAppHtml(options.htmlContent ?? NOT_BUILT_PAGE, "br"),
     tailscale: options.tailscale,
