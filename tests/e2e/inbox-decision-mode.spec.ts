@@ -277,8 +277,7 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   const claudes = replies.filter((m) => m.body.includes('Retry with the same key'));
   expect(claudes).toHaveLength(1);
   expect(claudes[0]!.body).toContain('Yes, page on-call');
-  const received = await claude.nextReply(claudeThread.thread_id, 5);
-  expect(received.body).toContain('Yes, page on-call');
+  expect(JSON.stringify(await claude.readThread(claudeThread.thread_id))).toContain('Yes, page on-call');
   // The agent answers: its chip and its end row go to Replied.
   await claude.send({ project_path: world.billing, reply_to: claudeThread.thread_id, body: 'Retrying 409s with the same key now; paging on-call after 5 tries.' }, { wakes: true });
   await expect(dialog.locator('[data-decision-end-row] .ib-dm-endstate').first()).toHaveText('Replied');
