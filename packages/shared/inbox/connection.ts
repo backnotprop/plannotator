@@ -115,10 +115,11 @@ export const INBOX_WORKING_FOLDER_META_KEY = 'ai.plannotator/working-folder'
  */
 export function inboxToolCallParams(
   call: { name: string; arguments: Record<string, unknown> },
-  options: { wakes: boolean; workingFolder?: string },
+  options: { wakes: boolean; workingFolder?: string; peek?: boolean },
 ): Record<string, unknown> {
   const meta: Record<string, unknown> = {
     ...(options.wakes ? { [INBOX_WAKES_META_KEY]: true } : {}),
+    ...(options.peek ? { [INBOX_PEEK_META_KEY]: true } : {}),
     ...(options.workingFolder ? { [INBOX_WORKING_FOLDER_META_KEY]: options.workingFolder } : {}),
   }
   return { name: call.name, arguments: call.arguments, ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}) }

@@ -259,6 +259,12 @@ export interface InboxMcpContext {
    */
   sessionWakes?: (host: unknown, session: unknown, meta: unknown) => Promise<boolean>;
   /**
+   * Whether the Inbox's own wake of this item is not getting through to this
+   * session (a Codex or Qwen Code wake that failed, may not have gone, or was
+   * held), so its next tool result must carry a Tidy instead. Absent: never.
+   */
+  wakeStuck?: (session: string, itemId: string) => boolean;
+  /**
    * Whether the Board is on (config.json `inboxBoard`, read on every
    * request). Off: `card` is not in tools/list, and a call (from a session
    * that listed it while it was on) gets `board_off` with nothing written.
@@ -282,7 +288,8 @@ export function callerWakes(ctx: unknown): boolean {
 /**
  * A connection's own read_thread list for the session's thread list (not a
  * call the agent made, INBOX_PEEK_META_KEY): it makes no project and does not
- * count as the session having looked at the threads it lists.
+ * count as the session having looked at the threads it lists. Also a read by
+ * `plannotator inbox call` with no session: nobody read it, so it settles nothing.
  */
 export function callerPeeks(ctx: unknown): boolean {
   const meta = (ctx as { mcpReq?: { _meta?: Record<string, unknown> } } | undefined)?.mcpReq?._meta;
@@ -317,7 +324,8 @@ export async function senderWakes(context: Pick<InboxMcpContext, "sessionWakes">
 /**
  * Tidy for a session no connection wakes (MCP only): its wake note, once, at
  * the end of its next Inbox tool result (delivered then). A session that is
- * woken gets it from its connection when its turn ends instead.
+ * woken gets it from its connection when its turn ends instead, unless that
+ * wake is stuck (`wakeStuck`): then this is the only way the Tidy reaches it.
  */
 async function withTidy(context: InboxMcpContext, result: ToolResult, input: Record<string, unknown>, ctx: unknown): Promise<ToolResult> {
   const session = typeof input?.agent_session === "string" ? input.agent_session.trim() : "";
@@ -326,7 +334,7 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
   if (!note) return result;
   // The note names its host: read_thread carries none, and a script's read must not take the wake of a session its connection wakes.
   const host = note.to?.host ?? (typeof input.agent_host === "string" ? input.agent_host : undefined);
-  if (await senderWakes(context, ctx, { agent_host: host, agent_session: session })) return result;
+  if ((await senderWakes(context, ctx, { agent_host: host, agent_session: session })) && !context.wakeStuck?.(session, note.id)) return result;
   try {
     context.store.recordDelivery(note.id, { host: host ?? "agent", session });
   } catch {
@@ -1161,7 +1169,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const url = threadUrl(context.baseUrl(), threadId);
           const reader = input.agent_session?.trim() || null;
           // A session the person only tagged here reads as a guest: what the owner still waits for stays queued.
-          const guest = store.isTaggedGuest(threadId, reader);
+          // So does a script that names no session (a raw MCP client's read still settles, as it always has).
+          const guest = store.isTaggedGuest(threadId, reader) || (reader === null && callerPeeks(ctx));
           if (input.format === "full") {
             if (!guest) store.markAgentChecked(threadId);
             // The person's 👍 (settled acks) are read now too: the window says the agent saw it.

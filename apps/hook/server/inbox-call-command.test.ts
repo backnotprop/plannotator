@@ -21,7 +21,7 @@ import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
-import { INBOX_CALL_ACTIONS } from "./cli";
+import { INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
 import { type CallCommandDeps, inboxCallerOf, parseCallCommand, runInboxCallCommand } from "./inbox-call-command";
 
 const entry = resolve(import.meta.dir, "index.ts");
@@ -68,6 +68,7 @@ function sandbox() {
     PLANNOTATOR_UPDATE_CHECK: "0",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
+    ...(process.env.PLANNOTATOR_TEST_SANDBOX ? { PLANNOTATOR_TEST_SANDBOX: process.env.PLANNOTATOR_TEST_SANDBOX } : {}),
   };
   return { root, dataDir, project, env };
 }
@@ -303,6 +304,10 @@ describe("who is calling", () => {
       { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", CODEX_THREAD_ID: CODEX_THREAD },
       { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", OPENCODE: "1" },
       { PI_SESSION_ID: "ses-pi", QWEN_CODE_SESSION_ID: QWEN_SESSION },
+      { CODEX_THREAD_ID: CODEX_THREAD, CLAUDECODE: "1" },
+      { CODEX_THREAD_ID: CODEX_THREAD, OMPCODE: "1" },
+      { PI_SESSION_ID: "ses-pi", CLAUDECODE: "1" },
+      { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", QWEN_CODE: "1" },
     ]) {
       const refused = await cli(box, ["send_message", send], { env });
       expect(refused).toMatchObject({ code: 1, stdout: "" });
@@ -329,6 +334,11 @@ describe("who is calling", () => {
     };
     expect(caller(null, {})).toBeNull();
     expect(caller(null, { OPENCODE: "1", GEMINI_CLI: "1" })).toBeNull();
+    // A host's marker beside its own session is its own shell, not a nested agent.
+    expect(caller(null, { PLANNOTATOR_SESSION_TAG: "claude-code:s", CLAUDECODE: "1" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
+    expect(caller(null, { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" })).toEqual({ host: "qwen", session: QWEN_SESSION, name: "Qwen Code" });
+    expect(caller(null, { PI_SESSION_ID: "s", OMPCODE: "1" })).toEqual({ host: "pi", session: "s", name: "Pi" });
+    expect(caller(null, { CLAUDECODE: "1" })).toBeNull();
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.
@@ -348,6 +358,35 @@ describe("who is calling", () => {
     expect(parseCallCommand(["--session", "a", "--session", "b", "card"])).toMatchObject({ ok: false, code: "invalid_session" });
     expect(parseCallCommand(["card", "{}", "{}"])).toMatchObject({ ok: false, code: "usage" });
     expect(parseCallCommand(["card", "--json"])).toMatchObject({ ok: false, code: "usage" });
+    // zsh does not split `cmd $S`: the one word says what to do about it.
+    expect(parseCallCommand(["--session ses_x", "card"])).toMatchObject({ ok: false, code: "usage", error: expect.stringContaining("separate words") });
+  });
+
+  test("a read with no session settles nothing for the thread's owner; one that names a session, or a raw MCP client's, still does", async () => {
+    const box = await world();
+    const { client, server, project } = box;
+    await poll(server, "ses-a", project);
+    const replied = async (subject: string) => {
+      const asked = await tool(client, "send_message", { body: `${subject}?`, subject, thread: subject, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
+      const words = (await (await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { words: `${subject} yes.`, idempotency_key: subject })).json()) as { reply: { id: string } };
+      return { thread: asked.thread_id as string, reply: words.reply.id };
+    };
+    const scripted = await replied("Scripted");
+    const raw = await replied("Raw");
+    const named = await replied("Named");
+
+    for (const json of [{ thread_id: scripted.thread }, { thread_id: scripted.thread, format: "full" }]) {
+      const read = await cli(box, ["read_thread", JSON.stringify(json)]);
+      expect(read.code).toBe(0);
+      expect(read.stdout).toContain("Scripted yes.");
+    }
+    await tool(client, "read_thread", { thread_id: raw.thread });
+    expect((await cli(box, ["--session", "claude-code:ses-a", "read_thread", JSON.stringify({ thread_id: named.thread })])).code).toBe(0);
+
+    const handedOut = (await poll(server, "ses-a", project)).map((command) => command.id);
+    expect(handedOut).toContain(scripted.reply);
+    expect(handedOut).not.toContain(raw.reply);
+    expect(handedOut).not.toContain(named.reply);
   });
 });
 
@@ -453,6 +492,57 @@ describe("a Tidy run from one script", () => {
     expect(await counts()).toEqual(before);
     expect((await run()).find((a) => a.session === "ses-a")!.updated).toBe(3);
   }, 120_000);
+
+  for (const [name, stale] of [
+    ["Claude Code", { PLANNOTATOR_SESSION_TAG: "claude-code:ses-old" }],
+    ["Qwen Code", { QWEN_CODE_SESSION_ID: QWEN_SESSION }],
+  ] as const) {
+    test(`a ${name} shell older than its session: refused with no route into the old session, and the way out counts for the Tidy`, async () => {
+      const box = await world();
+      const { server, project } = box;
+      const { words } = await seed(box);
+      expect((await post(server, "/api/inbox/tidy", { sessions: ["ses-a"], idempotency_key: "t1" })).status).toBe(200);
+      const wake = await wakeOf(server, "ses-a", project);
+      await Bun.sleep(5);
+      const value = sessionValueIn(wake.body)!;
+      const send = (key: string) => JSON.stringify({ reply_to: words.message_id, body: "Screenshots are on the card.", idempotency_key: key });
+      const authors = async () => (await threadOf(server, words.thread_id)).messages.filter((m) => m.author.kind === "agent").map((m) => m.author.session);
+      const before = await authors();
+
+      const refused = await cli(box, ["--session", value, "send_message", send("k1")], { env: stale });
+      expect(refused).toMatchObject({ code: 1, stdout: "" });
+      expect(refused.stderr).toStartWith("session_mismatch: ");
+      // It names the variable to clear, the way out that writes as the Tidy's session.
+      expect(refused.stderr).toContain(Object.keys(stale)[0]!);
+      expect(refused.stderr).not.toContain("Leave --session out");
+      expect(await authors()).toEqual(before);
+      expect((await runOf(server)).agents[0]).toMatchObject({ state: "delivered" });
+
+      // A new shell, or that variable unset: the same call is the session the Tidy asked, and it counts.
+      const unset = await cli(box, ["--session", value, "send_message", send("k2")]);
+      expect(unset.code).toBe(0);
+      expect((await authors()).at(-1)).toBe("ses-a");
+      expect((await runOf(server)).agents[0]).toMatchObject({ state: "tidied", updated: 1 });
+    });
+  }
+
+  test("the worked examples in --help run as written", async () => {
+    const box = await world();
+    const { client, server, project } = box;
+    const asker = { project_path: project, agent_session: "ses-a", agent_host: "claude-code" };
+    const question = await tool(client, "send_message", { ...asker, body: block("Ship the ledger?"), subject: "Ledger", thread: "Ledger" });
+    const item = await tool(client, "send_message", { ...asker, body: action("Approve the deploy"), reply_to: question.message_id });
+    const made = await tool(client, "card", { ...asker, op: "create", title: "Ledger lane", column: "building" });
+    const real = (json: string) => json.replaceAll("msg_1", question.message_id).replaceAll("msg_2", item.message_id).replaceAll("crd_1", made.card.id);
+    const examples = [...INBOX_CALL_USAGE.matchAll(/plannotator inbox call (\w+) '(.+)'$/gm)].map(([, name, json]) => [name!, real(json!)] as const);
+    expect(examples.map(([name]) => name)).toEqual(["card", "card", "send_message"]);
+    for (const [name, json] of examples) expect(await cli(box, [name, json], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses-a" } })).toMatchObject({ code: 0, stderr: "" });
+    const [withdrawn, done] = (await threadOf(server, question.thread_id)).messages;
+    expect(withdrawn!.questions![0]!.state).toBe("superseded");
+    expect(done!.questions![0]!.action_result).toMatchObject({ by: "agent" });
+    const cards = JSON.parse((await cli(box, ["card", '{"op":"list","asked_by":"anyone","include_resolved":true}'])).stdout).cards as { column: string }[];
+    expect(cards.map((c) => c.column)).toEqual(["shipped"]);
+  });
 
   test("the Board's Tidy: a script that only moves cards counts as tidied, for that session", async () => {
     const box = await world();

@@ -22,7 +22,13 @@
  * by accident, and an agent started from another agent's shell inherits that
  * agent's session: so a shell that names two sessions (or a session and a host
  * that names none) is refused until `--session` says which, and a `--session`
- * this shell contradicts is refused.
+ * this shell contradicts is refused. That refusal never points at leaving the
+ * flag out, which would write as the session the shell names: a shell older
+ * than its agent's session names an id that agent no longer is, and its Tidy
+ * would not count. A new shell, or one with that variable unset, writes rightly.
+ *
+ * A read with no session settles nothing (the peek mark): nobody read it, so
+ * what the thread's owner still waits for stays queued.
  *
  * stdout: the result as one JSON value, and nothing else, so anything on it is
  * a success (empty on failure: `jq` then finds nothing, where a JSON error
@@ -46,8 +52,16 @@ const IDENTITY_FIELDS = ["agent_session", "agent_host", "agent_name"] as const;
 /** Each variable that names a host session, read on its own by the shim's own rule. */
 const SESSION_VARIABLES = ["PLANNOTATOR_SESSION_TAG", "PI_SESSION_ID", "CODEX_THREAD_ID", INBOX_QWEN_SESSION_ENV] as const;
 
-/** The hosts that mark the shells they start and name no session there (`detectOrigin`), with their host id when they have one. */
+/**
+ * The hosts that mark the shells they start (`detectOrigin`), each here for a
+ * shell where it names no session, with its host id when it has one. A marker
+ * beside that same host's session is that host's own shell. Oh My Pi's sessions
+ * are Pi's (the Pi extension), so its marker beside PI_SESSION_ID is one host too.
+ */
 const SESSIONLESS_HOSTS: readonly { variable: string; name: string; host?: string }[] = [
+  { variable: "CLAUDECODE", name: "Claude Code", host: "claude-code" },
+  { variable: "OMPCODE", name: "Oh My Pi", host: "pi" },
+  { variable: "QWEN_CODE", name: "Qwen Code", host: "qwen" },
   { variable: "OPENCODE", name: "OpenCode", host: "opencode" },
   { variable: "GEMINI_CLI", name: "Gemini CLI" },
   { variable: "COPILOT_CLI", name: "Copilot CLI" },
@@ -75,9 +89,12 @@ function callerOfFlag(value: string): InboxCaller | null {
 /** Who this call is: see the file comment. */
 export function inboxCallerOf(flag: string | null, env: Record<string, string | undefined>): InboxCallerAnswer {
   const named: InboxHostSession[] = [];
+  const variables: string[] = [];
   for (const variable of SESSION_VARIABLES) {
     const found = inboxHostSessionFromEnv({ [variable]: env[variable] });
-    if (found && !named.some((other) => other.host === found.host && other.session === found.session)) named.push(found);
+    if (!found) continue;
+    variables.push(variable);
+    if (!named.some((other) => other.host === found.host && other.session === found.session)) named.push(found);
   }
   const sessionless = SESSIONLESS_HOSTS.filter(({ variable, host }) => env[variable] && !named.some((other) => other.host === host));
   if (flag !== null) {
@@ -86,7 +103,12 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
     // A host that names no session, in this shell's line, may be who holds the flag; otherwise the shell knows better.
     if (named.length === 0 || sessionless.length > 0 || named.some((other) => other.host === caller.host && other.session === caller.session)) return { ok: true, caller };
     const shell = named.map(refOf).join(", ");
-    return { ok: false, code: "session_mismatch", message: `--session ${flag} is not the session this shell runs in (${shell}). Nothing was sent. Leave --session out to write as ${named.length === 1 ? "it" : "one of those"}.` };
+    const names = variables.join(" and ");
+    return {
+      ok: false,
+      code: "session_mismatch",
+      message: `--session ${flag} is not the session this shell names (${shell}, from ${names}). Nothing was sent. Do not drop --session to get past this: that writes as ${shell}. If the value is from your own Tidy, this shell is older than your session: run the script in a new shell, or unset ${names} for it. If it is not, it is not yours to use.`,
+    };
   }
   if (named.length + sessionless.length > 1 && named.length > 0) {
     const seen = [...named.map(refOf), ...sessionless.map(({ name }) => `${name}, which names no session`)].join("; ");
@@ -109,7 +131,7 @@ export function parseCallCommand(argv: readonly string[]): ParsedCallCommand {
       if (value === undefined) return { ok: false, code: "invalid_session", error: "--session takes a value." };
       if (session !== null) return { ok: false, code: "invalid_session", error: "--session given twice." };
       session = value;
-    } else if (arg.startsWith("--")) return { ok: false, code: "usage", error: `Unknown inbox call option: ${arg}` };
+    } else if (arg.startsWith("--")) return { ok: false, code: "usage", error: `Unknown inbox call option: ${arg}. A flag and its value are separate words: --session <id>.` };
     else positional.push(arg);
   }
   const [action, json, ...more] = positional;
@@ -181,7 +203,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
     id: 1,
     method: "tools/call",
     // Where the script runs is where its relative attachments and images are, wherever its project is.
-    params: inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd }),
+    params: inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd, peek: caller.caller === null }),
   });
   const bytes = Buffer.byteLength(body);
   if (bytes > INBOX_MAX_REQUEST_BYTES) return refused("request_too_large", inboxRequestTooLargeMessage(bytes));

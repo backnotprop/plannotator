@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { INBOX_CODEX_MESSAGE_MAX_BYTES, codexQueueMessage, codexWakeText } from "./inbox-codex-wake";
-import { codexCallWakes, codexCliQueues, codexThreadOfCall, codexTurnStartedAt, codexTurnTrigger, isCodexThreadId, parseCodexCliVersion, type InboxThread, type InboxTidyPlan } from "@plannotator/core/inbox-types";
+import { INBOX_TIDY_INSTRUCTION, codexCallWakes, codexCliQueues, codexThreadOfCall, codexTurnStartedAt, codexTurnTrigger, isCodexThreadId, parseCodexCliVersion, type InboxThread, type InboxTidyPlan } from "@plannotator/core/inbox-types";
 import {
   INBOX_BRIDGE_POLL_PATH,
   INBOX_MESSAGE_INSTRUCTION,
@@ -47,16 +47,22 @@ interface World {
   start: () => Promise<InboxServer>;
 }
 
-async function world(options: { codex?: boolean; env?: Record<string, string>; storeNow?: () => Date } = {}): Promise<World> {
+async function world(options: { codex?: boolean; env?: Record<string, string> | ((root: string) => Record<string, string>); storeNow?: () => Date; queueTimeoutMs?: number } = {}): Promise<World> {
   const fake = createFakeAgents("plannotator-codex-wake-");
   fakes.push(fake);
   if (options.codex !== false) fake.install("codex");
   const dataDir = join(fake.root, "data");
   const project = join(fake.root, "ledger");
   mkdirSync(project, { recursive: true });
-  const environment = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, ...options.env } });
+  const extraEnv = typeof options.env === "function" ? options.env(fake.root) : options.env;
+  const environment = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, ...extraEnv } });
   const start = async () => {
-    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] }, ...(options.storeNow ? { storeNow: options.storeNow } : {}) });
+    const server = await startInboxServer({
+      dataDir,
+      agentEnvironment: environment,
+      codexWake: { extraClis: [], ...(options.queueTimeoutMs ? { queueTimeoutMs: options.queueTimeoutMs } : {}) },
+      ...(options.storeNow ? { storeNow: options.storeNow } : {}),
+    });
     servers.push(server);
     return server;
   };
@@ -523,6 +529,92 @@ describe("a reply to a Codex thread", () => {
     clock += 10 * 60_000;
     await server.codexWake.sweep();
     expect(queues(w.fake)).toHaveLength(3);
+  });
+});
+
+describe("a Tidy through the Codex wake", () => {
+  const QUESTION = ":::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::";
+  const fromShell = (client: Client, project: string, args: Record<string, unknown>) =>
+    client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: THREAD, agent_host: "codex", agent_name: "Codex", ...args } }) as Promise<{ content: { text: string }[]; structuredContent: { message_id: string } }>;
+
+  /** A question old enough to Tidy, then the Tidy; `file` holds what the fake `codex` reads from its `flag` file. */
+  async function tidied(options: { env?: (root: string) => Record<string, string>; file?: string; queueTimeoutMs?: number; trigger?: string } = {}) {
+    const clock = { behind: 3 * 60 * 60_000 };
+    const w = await world({ ...options, storeNow: () => new Date(Date.now() - clock.behind) });
+    if (options.file) writeFileSync(join(w.fake.root, "flag"), options.file);
+    const asked = await codexSends(w.client, w.project, QUESTION, THREAD, options.trigger);
+    clock.behind = 0;
+    const started = await fetch(`${base(w.server)}/api/inbox/tidy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, sessions: [THREAD], idempotency_key: "t1" }) });
+    expect(started.status).toBe(200);
+    await w.server.codexWake.sweep();
+    const note = (await thread(w.server, asked.thread_id)).messages.find((m) => m.tidy)!;
+    const read = async (turnStartedAt = Date.now() + 5) => {
+      const result = (await w.client.callTool({ name: "read_thread", arguments: { agent_session: THREAD, thread_id: asked.thread_id }, _meta: codexMeta(THREAD, turnStartedAt) })) as { content: { text: string }[]; structuredContent: { tidy?: { id: string } } };
+      return { text: result.content.map((part) => part.text).join("\n"), tidy: result.structuredContent.tidy };
+    };
+    const state = async () => ((await (await fetch(`${base(w.server)}/api/inbox/tidy`)).json()) as InboxTidyPlan).run!.agents[0]!.state;
+    return { ...w, asked, note, read, state };
+  }
+
+  const STUCK: [string, Parameters<typeof tidied>[0]][] = [
+    ["codex queue ran out of time", { env: () => ({ FAKE_CODEX_QUEUE_DELAY_MS: "20000" }), queueTimeoutMs: 400 }],
+    ["codex queue keeps failing", { env: (root) => ({ FAKE_CODEX_QUEUE_FAIL_FILE: join(root, "flag") }), file: "1" }],
+    ["Codex does not know the thread", { env: (root) => ({ FAKE_CODEX_UNKNOWN_FILE: join(root, "flag") }), file: THREAD }],
+  ];
+  for (const [name, options] of STUCK) {
+    test(`${name}: the thread's next read hands the Tidy over, once`, async () => {
+      const t = await tidied(options);
+      // The hung call was killed (fake.remove() fails the test if it still runs).
+      for (let waited = 0; waited < 2000 && t.fake.live().length > 0; waited += 50) await Bun.sleep(50);
+      expect(t.server.codexWake.stuck(THREAD, t.note.id)).toBe(true);
+      expect(await t.state()).toBe("waiting");
+      const first = await t.read();
+      expect(first.text).toContain(INBOX_TIDY_INSTRUCTION);
+      expect(first.tidy?.id).toBe(t.note.id);
+      expect(await t.state()).toBe("delivered");
+      expect((await t.read()).tidy).toBeUndefined();
+      await t.server.codexWake.sweep();
+    });
+  }
+
+  test("a healthy wake: a read in the turn already running leaves it to the wake, and the next turn is the delivery", async () => {
+    const t = await tidied();
+    expect(queues(t.fake)).toHaveLength(1);
+    expect(t.server.codexWake.stuck(THREAD, t.note.id)).toBe(false);
+    expect((await t.read(Date.now() - 60_000)).tidy).toBeUndefined();
+    expect(await t.state()).toBe("waiting");
+    const next = await t.read();
+    expect(next.tidy).toBeUndefined();
+    expect(next.text).not.toContain(INBOX_TIDY_INSTRUCTION);
+    expect(await t.state()).toBe("delivered");
+  });
+
+  test("a codex exec thread a Tidy named is still not a thread that wakes: its shell's message says to wait", async () => {
+    const t = await tidied({ trigger: "exec" });
+    const sent = await fromShell(t.client, t.project, { reply_to: t.asked.message_id, body: "From a script." });
+    expect(sent.content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await thread(t.server, t.asked.thread_id)).messages.find((m) => m.id === sent.structuredContent.message_id)!.wakes).toBeUndefined();
+  });
+
+  test("a thread Codex disowned does not wake from its shell, until a turn of its own says it is back", async () => {
+    const w = await world({ env: (root) => ({ FAKE_CODEX_UNKNOWN_FILE: join(root, "flag") }) });
+    writeFileSync(join(w.fake.root, "flag"), THREAD);
+    const sent = await codexSends(w.client, w.project, "Ship it?");
+    await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Yes." });
+    await w.server.codexWake.sweep();
+    expect(w.server.codexWake.status(THREAD)).toBe("dead");
+    const wakesOf = async (result: { structuredContent: { message_id: string } }) => (await thread(w.server, sent.thread_id)).messages.find((m) => m.id === result.structuredContent.message_id)!.wakes;
+
+    const script = await fromShell(w.client, w.project, { body: "From a script." });
+    expect(script.content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect(await wakesOf(script)).toBeUndefined();
+    await w.server.codexWake.sweep();
+
+    writeFileSync(join(w.fake.root, "flag"), "");
+    await w.client.callTool({ name: "read_thread", arguments: { agent_session: THREAD, thread_id: sent.thread_id }, _meta: codexMeta(THREAD) });
+    const back = await fromShell(w.client, w.project, { body: "Back." });
+    expect(back.content[0]!.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect(await wakesOf(back)).toBe(true);
   });
 });
 
