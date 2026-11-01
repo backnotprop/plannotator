@@ -13,6 +13,7 @@
     "./components/inbox-thread/reask": "./components/inbox-thread/reask.ts",
     "./components/ImageAnnotator": "./components/ImageAnnotator/index.tsx",
     "./components/html-viewer": "./components/html-viewer/index.ts",
+    "./components/chat": "./components/chat/index.ts",
     "./components/diagram": "./components/diagram/index.ts",
     "./components/diagramLanguages": "./components/diagramLanguages.ts",
     "./components/diagram/*": "./components/diagram/*.tsx",
