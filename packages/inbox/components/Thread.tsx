@@ -49,6 +49,7 @@ import { useReplyDraft } from '../replyDraft';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
+import { debugNote } from '../debugLog';
 import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
 import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
@@ -1326,6 +1327,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    */
   const [skipArmed, setSkipArmed] = useState<ReadonlySet<string> | null>(null);
   const [sending, setSending] = useState(false);
+  // The debug log's two moments of a Send (debugLog.ts): a press with no clear after it is a Send that never ended.
+  useEffect(() => {
+    if (!sending) return;
+    const id = threadRef.current.thread_id;
+    debugNote('send_press', { thread: id });
+    return () => debugNote('send_clear', { thread: id });
+  }, [sending]);
   const [error, setError] = useState<string | null>(null);
   const voice = useVoiceSession();
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */

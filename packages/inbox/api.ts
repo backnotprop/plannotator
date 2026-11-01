@@ -39,6 +39,7 @@ import type {
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
+import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
@@ -627,7 +628,9 @@ async function localInstead(response: Response): Promise<boolean> {
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
+  resumeDebugLog();
   const response = await fetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store', signal });
+  learnDebugLog(response);
   if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal);
   const answer = await readJson<T>(response);
   // Local ids come only from this Inbox's own records (list rows, the archived list, thread reads, its own
