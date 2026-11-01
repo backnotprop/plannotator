@@ -1830,8 +1830,6 @@ function Inbox() {
       if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
       // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
       if (event.defaultPrevented) return;
-      // A diagram's full-screen popout closed on this Escape (it left the page before the key got here).
-      if (keyTarget(event)?.closest('[data-popout]')) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
       // Words selected in a message (approval "inbox-message-comments"): its selection toolbar or label picker owns this Escape.

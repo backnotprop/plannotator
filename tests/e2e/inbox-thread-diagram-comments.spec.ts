@@ -204,14 +204,13 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   await shot(page, '02-desktop-popout-composing');
   await saveComment(page, 'Add a canary first.');
   await expect(badges(popout)).toHaveCount(2);
-  // The save left focus on the page, under the popout: the thread's keys stand down (E would archive it).
-  await page.keyboard.press('e');
+  // The thread's keys stand down under the popout (R would open the reply box behind it).
+  await page.keyboard.press('r');
   await page.keyboard.press('Escape');
   await expect(popout).toHaveCount(0);
   await expect(body).toBeVisible();
   await expect(badges(mermaid)).toHaveCount(2);
-  const thread = await page.evaluate(async (threadId) => (await (await fetch(`/api/inbox/threads/${threadId}`)).json()) as { thread: { resolved_at: string | null } }, sent.thread_id);
-  expect(thread.thread.resolved_at).toBeNull();
+  await expect(page.locator('.ib-rbox')).toHaveCount(0);
 
   // The reply box's list names the part, and points back at it.
   await openReply(page);
