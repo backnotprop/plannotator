@@ -122,6 +122,7 @@ import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, type SendTarget, type SentContents } from '../sendTargets';
+import { InboxArtLayer } from '../art';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
@@ -4115,6 +4116,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       data-thread-id={thread.thread_id}
       {...paneDrop.handlers}
     >
+      <InboxArtLayer ground="frame" />
       {paneDrop.over && (
         <div className="ib-panedrop" aria-hidden="true" data-pane-drop="">
           <span className="ib-panedrop-card">

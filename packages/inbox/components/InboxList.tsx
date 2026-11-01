@@ -30,6 +30,7 @@ import { listLookClasses, useListLook } from '../listLook';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listMoveIndex, listStops, LIST_STOPS, type ListMove } from '../listKeys';
+import { InboxArtLayer } from '../art';
 
 export interface InboxListProps {
   title: string;
@@ -951,6 +952,7 @@ export function InboxList(props: InboxListProps) {
       className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${pinColumn ? ' ib-pincol' : ''}${listLookClasses(look)}`}
       aria-label={props.title}
     >
+      <InboxArtLayer ground="frame" />
       <div className="ib-lhead">
         <SidebarTrigger />
         {props.onRefresh ? (

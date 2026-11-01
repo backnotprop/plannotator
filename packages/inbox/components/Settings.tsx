@@ -19,6 +19,8 @@ import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
 import { PaletteRow } from './Palettes';
+import { BackgroundRows } from './BackgroundRows';
+import { InboxArtLayer } from '../art';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
@@ -344,6 +346,7 @@ function GeneralSection({
             </span>
           </div>
           <PaletteRow />
+          <BackgroundRows />
         </div>
       </section>
       <KeyboardSettings />
@@ -1027,6 +1030,7 @@ export function SettingsPage(props: SettingsPageProps) {
 
   return (
     <div className="ib-spage ib-sframe" aria-label="Settings">
+      <InboxArtLayer ground="scroll" />
       <div className="ib-sframe-in">
         {!phone && (
           <button type="button" className="ib-sback" onClick={onBack} data-settings-back="">
