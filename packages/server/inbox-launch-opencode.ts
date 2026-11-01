@@ -27,8 +27,9 @@
  * reply continues it.
  *
  *  - start: the server, then `POST /session` in the folder (`permission`: an
- *    allow-all ruleset for a launch with full permissions, else none, so the
- *    person's own OpenCode permission config decides). No first turn.
+ *    allow-all ruleset for a launch with full permissions, else only access
+ *    to the Inbox's uploads folder, so the person's own OpenCode permission
+ *    config decides the rest). No first turn.
  *  - the channel: OpenCode 1 has no Plannotator wake, so the host runs the
  *    shared `InboxWake` (packages/shared/inbox/agent-link.ts, the one Pi and
  *    OpenCode 2's plugin run) for the session, inside the Inbox: it polls the
@@ -66,7 +67,7 @@ import { InboxAgentConnection, InboxWake, type InboxWakeTarget } from "@plannota
 import { agentVersionRun, openCodePluginInstalled, type AgentRunResult } from "./inbox-agents";
 import { versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchPermissionContext } from "./inbox-launch-host";
+import { launchNoteText, launchUploadsDir, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostPermissions, type LaunchHostResult, type LaunchPermissionContext } from "./inbox-launch-host";
 import { createLaunchQuestions } from "./inbox-launch-permission";
 import { openCodePermissionEvent, openCodePermissionTerms, openCodeReply, readOpenCodePermission, type OpenCodePermissionRequest } from "./inbox-launch-opencode-permission";
 
@@ -107,16 +108,12 @@ export const openCodeIdleNote = (minutes: number) => `It was idle for ${minutes}
  * characters at most.
  */
 export function openCodeTurnErrorNote(message: string): string {
-  const flat = message
-    // The zero-width joiner stays (it holds an emoji together).
-    .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const short = [...flat].length > 300 ? `${[...flat].slice(0, 299).join("").trimEnd()}…` : flat;
-  // Only marks the Inbox's inline Markdown both formats and unescapes.
-  const shown = short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+  const shown = launchNoteText(message, 300);
   return shown ? `${OPENCODE_NAME}'s turn ended with an error: ${shown}` : `${OPENCODE_NAME}'s turn ended with an error.`;
 }
+
+/** A session's one rule beyond the person's own config: a file they attached sits outside its folder, which OpenCode would ask about. */
+export const openCodeUploadsRule = (folder: string) => ({ permission: "external_directory", pattern: `${folder}/*`, action: "allow" });
 
 /** `1.18.23` (OpenCode prints the bare version) → `1.18.23`. */
 export function parseOpenCodeVersion(stdout: string): string | null {
@@ -576,19 +573,8 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
     ctx.log(`Inbox launch ${conn.launchId}: an OpenCode turn ended with an error: ${text.slice(0, 200)}`);
     const root = rootOfLaunch(conn.launchId);
     if (!root || !perm) return;
-    try {
-      const latest = perm.store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
-      perm.store.sendMessage({
-        project_id: root.project_id,
-        author: { kind: "agent", host: OPENCODE, session: conn.session, name: OPENCODE_NAME },
-        body: openCodeTurnErrorNote(text),
-        reply_to: latest,
-        idempotency_key: `opencode-error-${conn.launchId}-${Date.now()}-${++errorNotes}`,
-      });
-      perm.onChange();
-    } catch (failure) {
-      ctx.log(`Inbox launch ${conn.launchId}: the turn's error note was not written: ${failure instanceof Error ? failure.message : String(failure)}`);
-    }
+    const author = { host: OPENCODE, session: conn.session, name: OPENCODE_NAME };
+    writeLaunchNote(perm, root, { author, body: openCodeTurnErrorNote(text), key: `opencode-error-${conn.launchId}-${Date.now()}-${++errorNotes}` }, ctx.log);
   };
 
   /** Whether the server still answers, asked a few times a second apart (one slow answer is not a gone server). */
@@ -991,8 +977,9 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
           return null;
         }
         const { server } = opened;
-        const permission = inboxLaunchFullPermissions(launch) ? [{ permission: "*", pattern: "*", action: "allow" }] : undefined;
-        const answered = await call(server, "POST", "/session", launch.folder, { title: input.name, ...(permission ? { permission } : {}) });
+        const full = inboxLaunchFullPermissions(launch);
+        const permission = full ? [{ permission: "*", pattern: "*", action: "allow" }] : [openCodeUploadsRule(launchUploadsDir(ctx.dataDir))];
+        const answered = await call(server, "POST", "/session", launch.folder, { title: input.name, permission });
         const session = answered?.status === 200 && answered.body && typeof answered.body === "object" ? (answered.body as { id?: unknown }).id : null;
         if (typeof session !== "string" || !/^ses[A-Za-z0-9_-]+$/.test(session) || token.cancelled) {
           await endServer(server, "no session");
@@ -1001,7 +988,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { idle
           failure = { code: "failed", text: token.cancelled ? "Stopped while it started." : "OpenCode started but made no session." };
           return null;
         }
-        ctx.startLog(launch.id, `session ${session}${permission ? " (full permissions)" : ""}`);
+        ctx.startLog(launch.id, `session ${session}${full ? " (full permissions)" : ""}`);
         made = { session };
         return connect({ ...launch, session_ref: session }, session, server);
       });

@@ -142,8 +142,9 @@ describe("a launch's server", () => {
     // The process as recorded: its start time, so a reused pid is never taken for it.
     expect(server.started).toBe(openCodeProcessOf(server.pid)!.started);
     expect(server.password).not.toBe("the-person-s-other-server");
-    // The session: its title, no ruleset (the person's own permissions decide).
-    expect(w.fake.sessions()).toEqual([{ id: started.session, directory: w.folder, title: "Tidy the readme", permission: null }]);
+    // The session: its title, and one rule: an attached file is read without a prompt; the person's own permissions decide the rest.
+    const uploads = { permission: "external_directory", pattern: `${join(w.dataDir, "inbox", "uploads")}/*`, action: "allow" };
+    expect(w.fake.sessions()).toEqual([{ id: started.session, directory: w.folder, title: "Tidy the readme", permission: [uploads] }]);
 
     // The password is nowhere else: argv, the start log, the server log, the Inbox log, the attach command.
     const launched = { ...w.launch, session_ref: started.session };

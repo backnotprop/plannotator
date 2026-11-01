@@ -313,8 +313,8 @@ test('the journey: the To row; Send starts one server with the password only in 
   expect(session.directory).toBe(world.projects.plannotator);
   expect(fake.prompts()[0]).toMatchObject({ session: session.id, server: serve.pid });
   expect(fake.prompts()[0]!.text).toContain('Make the Settings search fuzzy');
-  // The person's own OpenCode permissions: no ruleset of the Inbox's.
-  expect(session.permission).toBeNull();
+  // The person's own OpenCode permissions, beside the one rule that reads their attachments.
+  expect(session.permission).toEqual([{ permission: 'external_directory', pattern: `${join(world.dataDir, 'inbox', 'uploads')}/*`, action: 'allow' }]);
 
   // ⋯: Open in Terminal runs `opencode attach` on this server and session; the password is read from the file there, never written out.
   await p.locator('[data-thread-more]').click();
