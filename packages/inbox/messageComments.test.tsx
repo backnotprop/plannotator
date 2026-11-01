@@ -448,7 +448,7 @@ test.skipIf(!hasDom)('a click on a diagram part in a message: the composer, the 
   const el = await renderApp(`#thread=${message.id}`);
   await until(() => messageBody(message.id)?.querySelector(`[data-diagram-badge="${record!.id}"]`) != null, 'the badge after a reload');
   openReply(el);
-  await until(() => el.querySelector('[data-annotations-chip]')?.textContent === '1 annotation', 'the chip');
+  await until(() => el.querySelector('[data-annotations-chip]')?.textContent === '1 comment', 'the chip');
   act(() => (el.querySelector('[data-annotations-chip]') as HTMLButtonElement).click());
   const row = el.querySelector(`[data-annotation-row="${record!.id}"]`) as HTMLElement;
   expect(row.textContent).toContain('node D');
