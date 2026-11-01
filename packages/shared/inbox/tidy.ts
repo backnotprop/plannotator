@@ -16,6 +16,8 @@ import {
   INBOX_TIDY_PERSON_LAST_MS,
   INBOX_TIDY_RUN_SHOWN_MS,
   inboxAgentName,
+  inboxSessionRef,
+  inboxTidySessionLine,
   isInboxNote,
   type InboxCard,
   type InboxCardColumn,
@@ -298,7 +300,8 @@ export function inboxTidyBody(agent: InboxTidyPlanAgent): string {
         : `${i + 1}. ${oneLine(item.subject, 100)} · ${item.project.name}`;
     return [head, ...item.lines.map((line) => `   ${line.startsWith("  ") ? `  ${line.trim()}` : `- ${line}`}`)].join("\n");
   });
-  return [INBOX_TIDY_INSTRUCTION, INBOX_TIDY_HOW, ...items].join("\n\n");
+  const ref = inboxSessionRef(agent.host, agent.session);
+  return [INBOX_TIDY_INSTRUCTION, ref ? `${INBOX_TIDY_HOW} ${inboxTidySessionLine(ref)}` : INBOX_TIDY_HOW, ...items].join("\n\n");
 }
 
 /**
