@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxUsageWindow } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi } from '../api';
+import type { InboxAccount, InboxUsageWindow } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
+import { accountsFailure, useAccounts, type AccountsFailure } from '../useAccounts';
 import { CodeBox } from './ConnectPicker';
 
 /** The first way claude-swap's README gives. */
@@ -10,23 +10,13 @@ const CSWAP_INSTALL_COMMAND = 'uv tool install claude-swap';
 const CSWAP_ADD_COMMAND = 'cswap add';
 const CSWAP_URL = 'https://github.com/realiti4/claude-swap';
 
-/** The read's answer, or why there is none: a tailnet guest, or an Inbox that did not answer. */
-type View = InboxAccountsRead | { state: 'owner_only' } | { state: 'unreachable' };
-
-type FailureCode = InboxAccountsFailure | 'unreachable';
-
-const FAILURE_TEXT: Record<FailureCode, string> = {
+export const FAILURE_TEXT: Record<AccountsFailure, string> = {
   timed_out: 'claude-swap timed out.',
   run_failed: 'claude-swap failed.',
   bad_output: 'claude-swap gave an unreadable answer.',
   unknown_schema: 'Update Plannotator and claude-swap.',
   unreachable: 'The Inbox did not answer.',
 };
-
-function failureOf(view: View): FailureCode | null {
-  if (view.state === 'failed') return view.reason;
-  return view.state === 'unreachable' ? view.state : null;
-}
 
 /** What an account is called: its alias, else the start of its address (the whole address waits in the open row), else it has neither and is an API key. */
 function accountLabel(account: InboxAccount): string {
@@ -48,7 +38,7 @@ interface RowName {
   number: number | null;
 }
 
-function rowName(accounts: InboxAccount[], account: InboxAccount): RowName {
+export function rowName(accounts: InboxAccount[], account: InboxAccount): RowName {
   const label = accountLabel(account);
   const organization = accountOrganization(account);
   const namesakes = accounts.filter((other) => accountLabel(other) === label);
@@ -58,7 +48,12 @@ function rowName(accounts: InboxAccount[], account: InboxAccount): RowName {
 
 /** Past this, `cswap` could not refresh the reading: its normal serve age is 3 minutes. */
 const STALE_AFTER_SECONDS = 600;
-const isStale = (account: InboxAccount) => (account.usageAgeSeconds ?? 0) > STALE_AFTER_SECONDS;
+export const isStale = (account: InboxAccount) => (account.usageAgeSeconds ?? 0) > STALE_AFTER_SECONDS;
+
+/** Used limits go amber here. */
+const HIGH_PCT = 90;
+export const shownPct = (window: InboxUsageWindow) => Math.round(window.pct);
+export const isHigh = (window: InboxUsageWindow) => shownPct(window) >= HIGH_PCT;
 
 function ageText(seconds: number): string {
   if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`;
@@ -67,14 +62,14 @@ function ageText(seconds: number): string {
 }
 
 /** A limit as a row shows it. `week` holds the right-hand column. */
-interface Meter {
+export interface Meter {
   label: string;
   window: InboxUsageWindow;
   week?: boolean;
 }
 
 /** Only the limits reported: 5h, the scoped ones, and week last, so week holds the right-hand column. */
-function accountMeters(account: InboxAccount): Meter[] {
+export function accountMeters(account: InboxAccount): Meter[] {
   const { usage } = account;
   if (!usage) return [];
   return [
@@ -129,9 +124,9 @@ function noReadingReason(account: InboxAccount): string {
 }
 
 function UsageBar({ meter, lone, stale }: { meter: Meter; lone: boolean; stale: boolean }) {
-  const shown = Math.round(meter.window.pct);
+  const shown = shownPct(meter.window);
   return (
-    <span className="ib-acct-bar" data-usage={meter.label} data-high={shown >= 90 && !stale ? '' : undefined} data-week={meter.week ? '' : undefined} data-lone={lone ? '' : undefined}>
+    <span className="ib-acct-bar" data-usage={meter.label} data-high={isHigh(meter.window) && !stale ? '' : undefined} data-week={meter.week ? '' : undefined} data-lone={lone ? '' : undefined}>
       <span className="ib-acct-bar-l">
         <span className="ib-acct-bar-n">{meter.label}</span>
         <b>{shown}%</b>
@@ -259,35 +254,17 @@ function MachineGroup({ machine, active, accounts }: { machine: string; active: 
 /**
  * Settings → Accounts (approval "accounts-page", step 1): this computer's
  * Claude accounts and their usage, read-only. A read goes through `cswap` to
- * the Keychain and to Anthropic, so it takes seconds and happens only when
- * this page opens or on Refresh.
+ * the Keychain and to Anthropic, so it takes seconds. This page reads when it
+ * opens and on Refresh, through the window's one read (useAccounts).
  */
 export function AccountsSection({ machine }: { /** This machine's name, when this Inbox knows it. */ machine?: string }) {
-  const [view, setView] = useState<View | null>(null);
-  /** A Refresh that failed over a good list, which stays up. */
-  const [refreshFailed, setRefreshFailed] = useState<FailureCode | null>(null);
-  const [reading, setReading] = useState(true);
-
-  const read = async () => {
-    setReading(true);
-    let next: View;
-    try {
-      next = await inboxApi.accounts();
-    } catch (cause) {
-      next = { state: cause instanceof InboxApiError && cause.code === 'owner_only' ? 'owner_only' : 'unreachable' };
-    }
-    const failure = failureOf(next);
-    const keepList = failure !== null && view?.state === 'accounts';
-    setRefreshFailed(keepList ? failure : null);
-    if (!keepList) setView(next);
-    setReading(false);
-  };
+  const { view, refreshFailed, reading, read } = useAccounts();
   useEffect(() => {
     void read();
-  }, []);
+  }, [read]);
 
   const active = view?.state === 'accounts' ? view.accounts.find((account) => account.active) : undefined;
-  const failure = refreshFailed ?? (view ? failureOf(view) : null);
+  const failure = refreshFailed ?? (view ? accountsFailure(view) : null);
   return (
     <>
       {active && view?.state === 'accounts' && <MachineGroup machine={machine ?? 'This machine'} active={active} accounts={view.accounts} />}

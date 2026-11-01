@@ -117,6 +117,8 @@ export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TI
     if (!cswap) return { state: "not_installed" };
     const run = await runUntilExit([cswap, "list", "--json"], environment.env, hardLimitMs);
     if (run.timedOut) return failed("timed_out");
+    // The shell's "command not found": a shim whose tool is gone, which is not installed. The e2e stubs exit this way too.
+    if (run.exitCode === 127) return { state: "not_installed" };
     if (run.exitCode !== 0) return failed("run_failed");
     return parseCswapList(run.stdout);
   };

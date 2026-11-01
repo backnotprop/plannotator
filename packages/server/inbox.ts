@@ -403,8 +403,8 @@ export interface InboxServerOptions {
   codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
-  /** Tests: how long a read of `cswap list --json` waits, and when a stuck run is killed (packages/server/inbox-accounts.ts). */
-  accounts?: { timeoutMs?: number; hardLimitMs?: number };
+  /** Tests: where a read of `cswap list --json` looks, how long it waits, and when a stuck run is killed (packages/server/inbox-accounts.ts). */
+  accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
 }

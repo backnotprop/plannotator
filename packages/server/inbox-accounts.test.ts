@@ -222,6 +222,11 @@ describe.skipIf(process.platform === "win32")("a failed read answers a fixed rea
     expect(text).not.toContain("words-of-cswap");
   });
 
+  test("exit 127 is the shell's command not found: a shim whose tool is gone reads as not installed", async () => {
+    const w = await world({ cswap: { stderr: "bad interpreter", exit: 127 } });
+    expect(await w.read()).toEqual({ state: "not_installed" });
+  });
+
   test.each([
     ["not JSON", "Traceback (most recent call last):"],
     ["cut off", LIST.slice(0, 80)],

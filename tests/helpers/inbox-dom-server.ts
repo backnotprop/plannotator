@@ -123,8 +123,9 @@
  * subject check kept it (tests/helpers/inbox-leaked-subject.ts); the world
  * adds `leaked` (that thread's id).
  *
- * With `accounts`, the Inbox's agent PATH is `<data dir>/cswap-bin` and nothing
- * else: a test writes a fake `cswap` there (tests/helpers/fake-cswap.ts), and no
+ * With `accounts`, the PATH the Inbox reads usage on is `<data dir>/cswap-bin`
+ * and nothing else: a test writes a fake `cswap` there
+ * (tests/helpers/fake-cswap.ts). Without it that PATH is empty. Either way no
  * real claude-swap can be reached.
  */
 import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -316,9 +317,8 @@ const server = await startInboxServer({
   ...(phonesMode ? { tailscale, pairingProbes } : {}),
   ...(openInMode ? { openInLauncher, tailscale, publishTailnet: true } : {}),
   ...(whatsNewMode ? { version: "0.28.19", binaryPath: null } : {}),
-  ...(extra === "accounts"
-    ? { agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: scratchHome, env: { HOME: scratchHome, PATH: join(dataDir, "cswap-bin") } }) }
-    : {}),
+  // Every window reads usage when it opens: only `accounts` finds a `cswap`, and never on this process's own PATH, which can hold a real one.
+  accounts: { environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: scratchHome, env: { HOME: scratchHome, PATH: extra === "accounts" ? join(dataDir, "cswap-bin") : "" } }) },
   ...(restartMode
     ? {
         version: "0.28.25",

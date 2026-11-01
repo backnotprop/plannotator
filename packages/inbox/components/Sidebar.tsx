@@ -22,6 +22,7 @@ import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { CheckFailingRow, UpdateButton } from './Updates';
+import { UsageRow } from './Usage';
 import type { UpdateCheckFailing } from '../api';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -137,6 +138,9 @@ export interface SidebarProps {
   connectPrompt?: boolean;
   /** Opens the Feedback dialog (components/FeedbackDialog.tsx): the row above Settings. Absent: no row. */
   onFeedback?: () => void;
+  /** Opens or closes the Usage peek from its row (components/Usage.tsx), which shows only where `cswap` is. Absent: no row. */
+  onUsage?: (row: HTMLElement) => void;
+  usageOpen?: boolean;
   /**
    * Pinned and Projects open and close as this browser last left them (the
    * cookie in sidebarSections.ts; default true). The onboarding tour's
@@ -571,6 +575,7 @@ export function Sidebar(props: SidebarProps) {
             Feedback
           </button>
         )}
+        {props.onUsage && <UsageRow open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />}
         {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
         <div className="ib-setrow">
           <button

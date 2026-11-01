@@ -1,8 +1,9 @@
 /**
- * Settings → Accounts (approval "accounts-page", step 1): the whole window
- * (InboxApp) over a REAL Inbox in a temp data dir (tests/helpers/inbox-dom-server.ts,
- * `accounts` mode), whose whole agent PATH is a fake `cswap`'s folder
- * (tests/helpers/fake-cswap.ts). No test here can reach a real claude-swap.
+ * Settings → Accounts and the sidebar's Usage row (approval "accounts-page"):
+ * the whole window (InboxApp) over a REAL Inbox in a temp data dir
+ * (tests/helpers/inbox-dom-server.ts, `accounts` mode), which reads usage on a
+ * PATH of only a fake `cswap`'s folder (tests/helpers/fake-cswap.ts). No test
+ * here can reach a real claude-swap.
  *
  * The layout (week's column, the wrap, nothing overflowing) is the browser's:
  * tests/e2e/inbox-accounts.spec.ts. The server's refusals are
@@ -86,10 +87,12 @@ afterAll(async () => {
   dir = null;
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   if (!hasDom) return;
   phone = false;
   accountsRoute = null;
+  // A window leaves a read behind when it closes, and the server's next caller would join that run: see it out first.
+  await call('/api/inbox/accounts');
   rmSync(bin, { recursive: true, force: true });
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -497,7 +500,7 @@ test.skipIf(!hasDom)('the read that takes seconds: a clear wait first; Refresh k
   expect(fakeCswapCalls(bin).length).toBe(before + 1);
 });
 
-test.skipIf(!hasDom)('a read happens only when the page opens: other sections run nothing, and nothing runs by itself', async () => {
+test.skipIf(!hasDom)('a read happens when the window opens, when this page opens and on Refresh: other sections run nothing, and nothing runs by itself', async () => {
   answer({ stdout: LIST });
   window.location.hash = '#settings/general';
   host = document.createElement('div');
@@ -506,14 +509,17 @@ test.skipIf(!hasDom)('a read happens only when the page opens: other sections ru
     root = createRoot(host!);
     root.render(<InboxApp />);
   });
-  await until(() => host!.querySelector('.ib-spg > h1')?.textContent === 'General', 'General');
-  expect(fakeCswapCalls(bin)).toEqual([]);
-  act(() => (host!.querySelector('[data-settings-link="accounts"]') as HTMLAnchorElement).click());
-  await until(() => stateOf(host!) === 'accounts', 'the accounts');
+  await until(() => host!.querySelector('[data-usage-nav]') !== null, 'the first read');
   await act(async () => {
     await new Promise((r) => setTimeout(r, 300));
   });
   expect(fakeCswapCalls(bin)).toEqual(['list --json']);
+  act(() => (host!.querySelector('[data-settings-link="accounts"]') as HTMLAnchorElement).click());
+  await until(() => fakeCswapCalls(bin).length === 2 && !refresh(host!)?.disabled, 'the page read');
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 300));
+  });
+  expect(fakeCswapCalls(bin)).toEqual(['list --json', 'list --json']);
 });
 
 test.skipIf(!hasDom)('a tailnet guest is told so and offered no Refresh; an Inbox that does not answer says that, and Refresh recovers', async () => {
@@ -546,9 +552,157 @@ test.skipIf(!hasDom)('on a phone it is a row in Settings\' list of sections, and
     root.render(<InboxApp />);
   });
   await until(() => host!.querySelector('[data-settings-list] [data-settings-link="accounts"]') !== null, 'the Accounts row');
-  expect(fakeCswapCalls(bin)).toEqual([]);
   act(() => (host!.querySelector('[data-settings-link="accounts"]') as HTMLAnchorElement).click());
   await until(() => stateOf(host!) === 'accounts', 'the accounts on a phone');
   expect(window.location.hash).toBe('#settings/accounts');
   expect(host.querySelector('.ib-pback')?.textContent).toContain('Settings');
+});
+
+/** The sidebar's Usage row and its peek (components/Usage.tsx), over the same read as the page. */
+const limit = (pct: number, clock = '3:40 PM') => ({ pct, resetsAt: '2099-11-05T12:00:00+00:00', countdown: '1h 02m', clock });
+const usageRow = (el: ParentNode) => el.querySelector('[data-usage-nav]') as HTMLButtonElement | null;
+const figure = (el: ParentNode) => usageRow(el)?.querySelector('[data-usage-figure]')?.textContent ?? null;
+const peek = () => document.querySelector('[data-usage-peek]') as HTMLElement | null;
+const peekLines = () => [...peek()!.querySelectorAll('.ib-usage-k')].map((label) => label.textContent);
+const foot = (el: ParentNode) => [...el.querySelector('.ib-side-foot')!.querySelectorAll('button')].map((button) => button.textContent);
+
+async function openInbox() {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<InboxApp />);
+  });
+  await until(() => host!.querySelector('.ib-side-foot') !== null, 'the sidebar');
+  return host;
+}
+
+async function openPeek(el: ParentNode) {
+  await until(() => usageRow(el) !== null, 'the Usage row');
+  await act(async () => usageRow(el)!.click());
+  await until(() => peek() !== null, 'the peek');
+}
+
+test.skipIf(!hasDom)('without cswap the sidebar is what it was: no Usage, no figure, on a desktop and on a phone', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(92) } }) });
+  const withUsage = await openInbox();
+  await until(() => usageRow(withUsage) !== null, 'the Usage row');
+  const before = foot(withUsage);
+  act(() => root?.unmount());
+  host?.remove();
+
+  for (const asPhone of [false, true]) {
+    phone = asPhone;
+    removeFakeCswap(bin);
+    window.location.hash = '#settings/accounts';
+    const el = await open('not_installed');
+    expect(usageRow(el)).toBeNull();
+    expect(el.querySelector('[data-usage-figure]')).toBeNull();
+    expect(peek()).toBeNull();
+    if (!asPhone) expect(foot(el)).toEqual(before.filter((label) => !label?.startsWith('Usage')));
+    act(() => root?.unmount());
+    host?.remove();
+  }
+});
+
+test.skipIf(!hasDom)('the row is plain until the account in use reaches 90%, then shows its highest limit; other accounts never move it', async () => {
+  answer({ stdout: listOf({ alias: 'quiet', active: true, usage: { fiveHour: limit(89.4), sevenDay: limit(40) } }, { alias: 'near', usage: { fiveHour: limit(99) } }) });
+  const el = await openInbox();
+  await until(() => usageRow(el) !== null, 'the Usage row');
+  expect(figure(el)).toBeNull();
+  expect(usageRow(el)?.textContent).toBe('Usage');
+  act(() => root?.unmount());
+  host?.remove();
+
+  answer({ stdout: listOf({ alias: 'near', active: true, usage: { fiveHour: limit(90), sevenDay: limit(94), scoped: [{ ...limit(91), name: 'Fable' }] } }) });
+  const high = await openInbox();
+  await until(() => figure(high) !== null, 'the figure');
+  expect(figure(high)).toBe('94%');
+  expect(usageRow(high)?.getAttribute('aria-label')).toBe('Usage: 94 percent used');
+});
+
+test.skipIf(!hasDom)('an old reading or an expired login is no warning: the row stays plain, and the peek mutes what it has', async () => {
+  answer({ stdout: listOf({ alias: 'old', active: true, usageAgeSeconds: 7_200, usage: { fiveHour: limit(95) } }) });
+  const el = await openInbox();
+  await openPeek(el);
+  expect(figure(el)).toBeNull();
+  expect(peek()!.querySelector('[data-high]')).toBeNull();
+  expect(peek()!.querySelector('.ib-usage-lines')?.hasAttribute('data-muted')).toBe(true);
+  act(() => root?.unmount());
+  host?.remove();
+
+  answer({ stdout: listOf({ alias: 'gone', active: true, usageStatus: 'relogin_required', usage: { fiveHour: limit(95) } }) });
+  const expired = await openInbox();
+  await openPeek(expired);
+  expect(figure(expired)).toBeNull();
+  expect(peek()!.querySelector('.ib-usage-note')?.textContent).toBe('Login expired');
+});
+
+test.skipIf(!hasDom)('the peek: the account in use and its limits, week last, a reset time only beside a limit at 90%, and no address', async () => {
+  answer({ stdout: listOf({ alias: 'work', email: 'mira@northwind.io', organizationName: 'Northwind', active: true, usage: { fiveHour: limit(92), sevenDay: limit(67, 'Nov 5 12:00'), scoped: [{ ...limit(41), name: 'Fable' }] } }, { alias: 'other' }) });
+  const el = await openInbox();
+  await openPeek(el);
+  expect(peek()!.querySelector('.ib-usage-nm')?.textContent).toBe('work');
+  expect(peekLines()).toEqual(['5h', 'Fable', 'week']);
+  expect([...peek()!.querySelectorAll('.ib-usage-t')].map((time) => time.textContent)).toEqual(['3:40 PM', '', '']);
+  expect([...peek()!.querySelectorAll('.ib-usage-v[data-high]')].map((value) => value.textContent)).toEqual(['92%']);
+  expect(peek()!.textContent).not.toContain('@');
+  expect(peek()!.textContent).not.toContain('other');
+  expect(peek()!.querySelector('input, select, [role="menu"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('what the peek says with nothing to draw: an API key, no reading, no accounts, a failed read', async () => {
+  const note = () => peek()!.querySelector('.ib-usage-note')?.textContent;
+  const name = () => peek()!.querySelector('.ib-usage-nm')?.textContent;
+  const reopen = async (stdout: string, exit = 0) => {
+    act(() => root?.unmount());
+    host?.remove();
+    answer({ stdout, exit });
+    const el = await openInbox();
+    await openPeek(el);
+  };
+  answer({ stdout: listOf({ alias: 'build key', active: true, usageStatus: 'api_key' }) });
+  await openPeek(await openInbox());
+  expect(note()).toBe('API key');
+  await reopen(listOf({ alias: 'new', active: true }));
+  expect(note()).toBe('No reading yet');
+  await reopen(listOf());
+  expect(name()).toBe('No accounts yet');
+  await reopen(listOf({ alias: 'saved' }));
+  expect(name()).toBe('No account in use');
+  await reopen('Traceback');
+  expect(name()).toBe('claude-swap gave an unreadable answer.');
+});
+
+test.skipIf(!hasDom)('the block opens Settings → Accounts and closes the peek', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(41) } }) });
+  const el = await openInbox();
+  await openPeek(el);
+  await act(async () => (peek()!.querySelector('[data-usage-block]') as HTMLButtonElement).click());
+  await until(() => stateOf(el) === 'accounts' && peek() === null, 'Settings → Accounts');
+  expect(window.location.hash).toBe('#settings/accounts');
+});
+
+test.skipIf(!hasDom)('the row and the page show one read: opening the peek reads again, and Settings moves the row without a read of its own', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(41) } }) });
+  const el = await openInbox();
+  await until(() => usageRow(el) !== null, 'the Usage row');
+  expect(fakeCswapCalls(bin).length).toBe(1);
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(96) } }) });
+  await openPeek(el);
+  await until(() => figure(el) === '96%', 'the peek to read');
+  expect(fakeCswapCalls(bin).length).toBe(2);
+  await act(async () => (peek()!.querySelector('[data-usage-block]') as HTMLButtonElement).click());
+  await until(() => stateOf(el) === 'accounts' && fakeCswapCalls(bin).length === 3 && !refresh(el).disabled, 'the page read');
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(12) } }) });
+  act(() => refresh(el).click());
+  await until(() => figure(el) === null && bars(row(el, 1))[0] === '5h 12%', 'Refresh to reach the row');
+  expect(fakeCswapCalls(bin).length).toBe(4);
+});
+
+test.skipIf(!hasDom)('a tailnet guest gets no Usage: the read refuses them, and the row stays away', async () => {
+  accountsRoute = async () => new Response(JSON.stringify({ error: 'refused', code: 'owner_only' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+  const el = await open('owner_only');
+  expect(usageRow(el)).toBeNull();
+  expect(fakeCswapCalls(bin)).toEqual([]);
 });
