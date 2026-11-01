@@ -251,17 +251,17 @@ describe("linked machines, on three real Inboxes", () => {
     const agent = await agentOn(B);
     try {
       // A's merged stream (opened first, as a window holds it) raises B's question as a live record of B's.
-      let sent!: { thread_id: string; message_id: string };
+      // The stream may outrun the send, so stop on B's first live message (a project record comes before it), not on `sent`.
       let listening!: () => void;
       const subscribed = new Promise<void>((resolve) => (listening = resolve));
       const watching = streamUntil(
         A,
-        (event, data) => event === "machine" && data.machine === B.id && data.live === true && data.record?.message?.id === sent?.message_id,
+        (event, data) => event === "machine" && data.machine === B.id && data.live === true && data.record?.message?.id !== undefined,
         15_000,
         listening,
       );
       await subscribed;
-      sent = await agent.send(QUESTION(1), { thread: "case-1" });
+      const sent = await agent.send(QUESTION(1), { thread: "case-1" });
       const waiting = agent.wait(sent.thread_id, 30);
       const frames = await watching;
       expect(frames.find((f) => f.event === "machines")).toBeDefined();
