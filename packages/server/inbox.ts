@@ -469,6 +469,10 @@ const ERROR_STATUS: Record<string, number> = {
   window_only: 403,
   // Ask AI: no agent owns the thread, so nobody can answer.
   ask_no_owner: 409,
+  // Ask AI: the conversation's file. Refused so nothing replaces it (shared/inbox/ask.ts).
+  ask_unreadable: 503,
+  ask_damaged: 409,
+  ask_full: 409,
   message_not_found: 404,
   thread_not_found: 404,
   project_not_found: 404,

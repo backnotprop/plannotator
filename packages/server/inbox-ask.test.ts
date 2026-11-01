@@ -6,12 +6,12 @@
  * thread, and that only the owner's own window can ask or read.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { resolveInboxAskAi } from "@plannotator/shared/config";
-import { INBOX_ASK_TEXT_MAX, type InboxAskConversation } from "@plannotator/shared/inbox/ask";
+import { INBOX_ASK_FILE_MAX, INBOX_ASK_TEXT_MAX, writeInboxAsk, type InboxAskConversation } from "@plannotator/shared/inbox/ask";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -82,6 +82,20 @@ async function conversation(server: InboxServer, threadId: string): Promise<Inbo
 
 function askFile(dataDir: string, threadId: string): string {
   return join(inboxDir(dataDir), "ask", `${threadId}.json`);
+}
+
+/** Everything in the ask folder that belongs to one thread. */
+function filesOf(dataDir: string, threadId: string): string[] {
+  return readdirSync(join(inboxDir(dataDir), "ask")).filter((name) => name.startsWith(`${threadId}.`));
+}
+
+/** A saved question, answered at `answered_at`: what step 2's agent will leave in the file. */
+function answeredTurn(id: string, answered_at: string, answer = "Because.") {
+  return { id, at: "2026-10-31T09:00:00.000Z", session: "session-a", host: "claude-code", question: "Why?", answer, answered_at };
+}
+
+async function code(response: Response): Promise<string> {
+  return ((await response.json()) as { code: string }).code;
 }
 
 /** Collects a stream's named frames as they arrive. */
@@ -226,6 +240,22 @@ describe("the conversation file", () => {
     expect((await ask(server, thread_id, "turn-0001", "Still there?")).status).toBe(200);
   });
 
+  test("a retry of a saved turn gets that turn even after the thread is archived, so it is never asked twice", async () => {
+    const { server, client, project } = await setup();
+    const { thread_id, message_id } = await agentSends(client, project, "session-a", "Ship it?");
+    expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
+    expect((await fromWindow(server, `/api/inbox/messages/${message_id}/resolve`, { resolved: true })).status).toBe(200);
+
+    const retry = await ask(server, thread_id, "turn-0001", "Why?");
+    expect(retry.status).toBe(200);
+    expect(((await retry.json()) as { turn: { id: string } }).turn.id).toBe("turn-0001");
+    // A new question still waits for the thread to come back.
+    const fresh = await ask(server, thread_id, "turn-0002", "And now?");
+    expect(fresh.status).toBe(409);
+    expect(await code(fresh)).toBe("thread_resolved");
+    expect((await conversation(server, thread_id))?.turns.map((turn) => turn.id)).toEqual(["turn-0001"]);
+  });
+
   test("bad input is refused before anything is written, and no path escapes the folder", async () => {
     const { server, client, project, dataDir } = await setup();
     const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
@@ -242,12 +272,84 @@ describe("the conversation file", () => {
     expect((await ask(server, "msg_nothing_here", "turn-0001", "Why?")).status).toBe(404);
   });
 
-  test("a damaged file reads as no conversation instead of failing the window", async () => {
+  // Skipped where mode 000 does not stop a read: Windows, and root.
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("a file that cannot be read is refused and kept: two saved turns survive a third question", async () => {
     const { server, client, project, dataDir } = await setup();
     const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
-    expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
-    writeFileSync(askFile(dataDir, thread_id), "{ not json");
-    expect(await conversation(server, thread_id)).toBeNull();
+    expect((await ask(server, thread_id, "turn-0001", "One?")).status).toBe(200);
+    expect((await ask(server, thread_id, "turn-0002", "Two?")).status).toBe(200);
+    const file = askFile(dataDir, thread_id);
+    const saved = readFileSync(file);
+
+    chmodSync(file, 0o000);
+    for (const response of [
+      await fromWindow(server, askPath(thread_id)),
+      await ask(server, thread_id, "turn-0003", "Three?"),
+      await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "2026-11-01T10:00:00.000Z" }),
+    ]) {
+      expect(response.status).toBe(503);
+      expect(await code(response)).toBe("ask_unreadable");
+    }
+    chmodSync(file, 0o600);
+
+    expect(readFileSync(file).equals(saved)).toBe(true);
+    expect(filesOf(dataDir, thread_id)).toEqual([`${thread_id}.json`]);
+    expect((await ask(server, thread_id, "turn-0003", "Three?")).status).toBe(200);
+    expect((await conversation(server, thread_id))?.turns.map((turn) => turn.id)).toEqual(["turn-0001", "turn-0002", "turn-0003"]);
+  });
+
+  test("a damaged file is shown as damaged, then kept whole by the next question, which is refused so the person hears", async () => {
+    const { server, client, project, dataDir } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    expect((await ask(server, thread_id, "turn-0001", "One?")).status).toBe(200);
+    expect((await ask(server, thread_id, "turn-0002", "Two?")).status).toBe(200);
+    const file = askFile(dataDir, thread_id);
+    const whole = readFileSync(file, "utf8");
+    const truncated = whole.slice(0, whole.length - 20);
+    writeFileSync(file, truncated);
+
+    // Reading and marking seen report it and move nothing.
+    for (const response of [await fromWindow(server, askPath(thread_id)), await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "2026-11-01T10:00:00.000Z" })]) {
+      expect(response.status).toBe(409);
+      expect(await code(response)).toBe("ask_damaged");
+    }
+    expect(readFileSync(file, "utf8")).toBe(truncated);
+
+    const refused = await ask(server, thread_id, "turn-0003", "Three?");
+    expect(refused.status).toBe(409);
+    expect(await code(refused)).toBe("ask_damaged");
+    const aside = filesOf(dataDir, thread_id);
+    expect(aside).toHaveLength(1);
+    expect(aside[0]).toMatch(/\.json\.\d+\.bad$/);
+    expect(readFileSync(join(file, "..", aside[0]!), "utf8")).toBe(truncated);
+
+    // The window kept the words and asks again: a new conversation, beside the old bytes.
+    expect((await ask(server, thread_id, "turn-0003", "Three?")).status).toBe(200);
+    expect((await conversation(server, thread_id))?.turns.map((turn) => turn.id)).toEqual(["turn-0003"]);
+    expect(readFileSync(join(file, "..", aside[0]!), "utf8")).toBe(truncated);
+  });
+
+  test("a full file refuses a new question and keeps every word, a retry still gets its turn, and End frees it", async () => {
+    const { server, client, project, dataDir } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const planted: InboxAskConversation = { v: 1, thread_id, seen_at: null, turns: [answeredTurn("turn-0001", "2026-11-01T10:00:00.000Z", "")] };
+    const skeleton = JSON.stringify(planted).length + 1;
+    planted.turns[0]!.answer = "x".repeat(INBOX_ASK_FILE_MAX - skeleton - 500);
+    writeInboxAsk(inboxDir(dataDir), planted);
+
+    // A short question still fits under the limit, right to the edge.
+    expect((await ask(server, thread_id, "turn-0002", "Why?")).status).toBe(200);
+    const file = askFile(dataDir, thread_id);
+    const saved = readFileSync(file);
+
+    const refused = await ask(server, thread_id, "turn-0003", "y".repeat(500));
+    expect(refused.status).toBe(409);
+    expect(await code(refused)).toBe("ask_full");
+    expect(readFileSync(file).equals(saved)).toBe(true);
+
+    expect((await ask(server, thread_id, "turn-0002", "Why?")).status).toBe(200);
+    expect((await fromWindow(server, askPath(thread_id, "/end"), {})).status).toBe(200);
+    expect((await ask(server, thread_id, "turn-0003", "y".repeat(500))).status).toBe(200);
   });
 });
 
@@ -265,6 +367,23 @@ describe("ending and deleting", () => {
     expect(await conversation(server, one.thread_id)).toBeNull();
     expect((await conversation(server, two.thread_id))?.turns).toHaveLength(1);
     expect(await (await fromWindow(server, askPath(one.thread_id, "/end"), {})).json()).toEqual({ ok: true, ended: false });
+  });
+
+  test("End and thread delete leave nothing behind: not a crash's temp file, not a damaged file set aside", async () => {
+    const { server, client, project, dataDir } = await setup();
+    const ended = await agentSends(client, project, "session-a", "One?");
+    const deleted = await agentSends(client, project, "session-b", "Two?");
+    const kept = await agentSends(client, project, "session-c", "Three?");
+    for (const [thread, turn] of [[ended, "turn-0001"], [deleted, "turn-0002"], [kept, "turn-0003"]] as const) {
+      expect((await ask(server, thread.thread_id, turn, "Private words")).status).toBe(200);
+      for (const leftover of [".json.99999.tmp", ".json.1762000000000.bad"]) writeFileSync(join(askFile(dataDir, thread.thread_id), "..", `${thread.thread_id}${leftover}`), "Private words");
+    }
+
+    expect(await (await fromWindow(server, askPath(ended.thread_id, "/end"), {})).json()).toEqual({ ok: true, ended: true });
+    expect(filesOf(dataDir, ended.thread_id)).toEqual([]);
+    expect((await fromWindow(server, `/api/inbox/threads/${deleted.thread_id}/delete`, {})).status).toBe(200);
+    expect(filesOf(dataDir, deleted.thread_id)).toEqual([]);
+    expect(filesOf(dataDir, kept.thread_id)).toHaveLength(3);
   });
 
   test("a tab left open on an older Inbox ends nothing and asks nothing", async () => {
@@ -301,9 +420,9 @@ describe("ending and deleting", () => {
 
 describe("seen", () => {
   test("the mark only moves forward, so a late device cannot bring a dot back", async () => {
-    const { server, client, project } = await setup();
+    const { server, client, project, dataDir } = await setup();
     const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
-    expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
+    writeInboxAsk(inboxDir(dataDir), { v: 1, thread_id, seen_at: null, turns: [answeredTurn("turn-0001", "2026-11-01T10:00:00.000Z"), answeredTurn("turn-0002", "2026-11-01T11:00:00.000Z")] });
     const seen = (at: string) => fromWindow(server, askPath(thread_id, "/seen"), { seen_at: at });
 
     expect((await seen("2026-11-01T10:00:00.000Z")).status).toBe(200);
@@ -312,6 +431,31 @@ describe("seen", () => {
     expect((await seen("2026-11-01T11:00:00.000Z")).status).toBe(200);
     expect((await conversation(server, thread_id))?.seen_at).toBe("2026-11-01T11:00:00.000Z");
     expect((await seen("not a time")).status).toBe(422);
+  });
+
+  test("a time past the newest answer cannot hide the dot of the next answer", async () => {
+    const { server, client, project, dataDir } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const turns = [answeredTurn("turn-0001", "2026-11-01T10:00:00.000Z")];
+    writeInboxAsk(inboxDir(dataDir), { v: 1, thread_id, seen_at: null, turns });
+
+    // Parses, is far in the future, and is not ISO: stored as the newest answer's time.
+    expect((await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "Nov 1 3000" })).status).toBe(200);
+    const stored = await conversation(server, thread_id);
+    expect(stored?.seen_at).toBe("2026-11-01T10:00:00.000Z");
+
+    const next = answeredTurn("turn-0002", "2026-11-01T10:00:01.000Z");
+    writeInboxAsk(inboxDir(dataDir), { ...stored!, turns: [...turns, next] });
+    const read = await conversation(server, thread_id);
+    expect(Date.parse(read!.turns[1]!.answered_at!)).toBeGreaterThan(Date.parse(read!.seen_at!));
+  });
+
+  test("with no answer yet there is nothing to mark", async () => {
+    const { server, client, project } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
+    expect((await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "2026-11-01T10:00:00.000Z" })).status).toBe(200);
+    expect((await conversation(server, thread_id))?.seen_at).toBeNull();
   });
 });
 

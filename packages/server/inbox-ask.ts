@@ -15,10 +15,14 @@
  * reads included. `Sec-Fetch-Site: same-origin` is the browser's own mark,
  * which page script cannot set. Nothing here is on the phone's door. A change
  * tells the window (`event: ask`), which reads the conversation again.
+ *
+ * A file that can't be read answers `503 ask_unreadable`, and one that doesn't
+ * parse `409 ask_damaged`, on every route but End: never "no conversation".
+ * A question refused for that saves nothing and overwrites nothing.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { addInboxAskTurn, checkInboxAskInput, markInboxAskSeen, readInboxAsk, removeInboxAsk } from "@plannotator/shared/inbox/ask";
+import { addInboxAskTurn, checkInboxAskInput, findInboxAskTurn, markInboxAskSeen, readInboxAsk, removeInboxAsk } from "@plannotator/shared/inbox/ask";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -79,6 +83,9 @@ export function createInboxAsk(options: {
     }
 
     const input = checkInboxAskInput(body);
+    // Before the gates: a retry of a saved turn gets that turn, even if the thread was archived since.
+    const known = findInboxAskTurn(store.dir, threadId, input.id);
+    if (known) return json(known);
     const last = thread.messages.at(-1);
     if (last && !store.messageAnswerable(last.id)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to ask.");
     // Re-read at each ask: a thread handed off since the last question has a new owner.

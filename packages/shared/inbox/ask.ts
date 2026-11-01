@@ -9,10 +9,18 @@
  * wait_for_reply's cursor, the phone relay and search read. So agents, the
  * MCP, the list and search never see it, and End deletes it for good.
  *
+ * This file is the only copy of the person's words, so only "no such file"
+ * means "no conversation". A file that cannot be read now is left as it is and
+ * refused. One that does not parse is set aside whole
+ * (`<id>.json.<time>.bad`) by the next question, which is refused so the person
+ * hears of it, and the question after that starts a new conversation. End and
+ * thread delete remove everything of a conversation: the file, a file set
+ * aside, and a temp file a crash left.
+ *
  * A turn's id comes from the window, so a phone retrying a dropped POST finds
  * the turn it already wrote and cannot write a second one. `seen_at` only
- * moves forward: the dot on the round button means an `answered_at` later
- * than it.
+ * moves forward and never past the newest answer: the dot on the round button
+ * means an `answered_at` later than it.
  */
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -24,6 +32,11 @@ import { InboxError } from "./schema";
 export const INBOX_ASK_DIR = "ask";
 /** The most a question, or the passage it is about, may hold: what a reply draft may. */
 export const INBOX_ASK_TEXT_MAX = INBOX_DRAFT_BODY_MAX;
+/**
+ * The most bytes a file may reach by adding a question: every write rewrites it
+ * whole on the server's one thread. It has room for many of the largest turns.
+ */
+export const INBOX_ASK_FILE_MAX = 32 * 1024 * 1024;
 /** A turn id: what a window's id generator makes, and nothing a path could misread. */
 const TURN_ID = /^[A-Za-z0-9_-]{8,80}$/;
 
@@ -70,51 +83,94 @@ function parse(text: string): InboxAskConversation | null {
   }
 }
 
-/** One thread's conversation, or null when it has none (a file that does not parse reads as none). */
+/**
+ * One thread's conversation, or null only when it has no file. A file that
+ * cannot be read, or does not parse, throws: taking it for "none" would let the
+ * next write replace it.
+ */
 export function readInboxAsk(inboxDirPath: string, threadId: string): InboxAskConversation | null {
   if (!isInboxId("msg", threadId)) return null;
+  let text: string;
   try {
-    const conversation = parse(readFileSync(fileOf(inboxDirPath, threadId), "utf8"));
-    return conversation?.thread_id === threadId ? conversation : null;
-  } catch {
-    return null;
+    text = readFileSync(fileOf(inboxDirPath, threadId), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new InboxError("ask_unreadable", "This thread's conversation can't be read right now. Nothing was changed.");
+  }
+  const conversation = parse(text);
+  if (conversation?.thread_id !== threadId) throw new InboxError("ask_damaged", "This thread's conversation is damaged and can't be shown. Nothing was changed.");
+  return conversation;
+}
+
+/** The read before a question is added: a damaged file is set aside whole, and the person is told. */
+function readForAsk(inboxDirPath: string, threadId: string): InboxAskConversation | null {
+  try {
+    return readInboxAsk(inboxDirPath, threadId);
+  } catch (error) {
+    if (!(error instanceof InboxError) || error.code !== "ask_damaged") throw error;
+    const file = fileOf(inboxDirPath, threadId);
+    const aside = `${file}.${Date.now()}.bad`;
+    renameSync(file, aside);
+    throw new InboxError("ask_damaged", `This thread's conversation was damaged, so it was set aside at ${aside}. Your question was not saved. Ask again to start a new conversation.`);
   }
 }
 
-/** Write one conversation whole (owner-only folder and file). */
-export function writeInboxAsk(inboxDirPath: string, conversation: InboxAskConversation): void {
+function writeWhole(inboxDirPath: string, threadId: string, text: string): void {
   mkdirSync(dirOf(inboxDirPath), { recursive: true, mode: 0o700 });
-  const file = fileOf(inboxDirPath, conversation.thread_id);
+  const file = fileOf(inboxDirPath, threadId);
   const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, `${JSON.stringify(conversation)}\n`, { mode: 0o600 });
+  writeFileSync(temp, text, { mode: 0o600 });
   chmodSync(temp, 0o600); // `mode` applies only on create: a left-over temp file keeps its old mode.
   renameSync(temp, file);
 }
 
-/** Remove one conversation's file; true when there was one. */
-export function removeInboxAsk(inboxDirPath: string, threadId: string): boolean {
-  if (!isInboxId("msg", threadId)) return false;
+const serialize = (conversation: InboxAskConversation): string => `${JSON.stringify(conversation)}\n`;
+
+/** Write one conversation whole (owner-only folder and file). */
+export function writeInboxAsk(inboxDirPath: string, conversation: InboxAskConversation): void {
+  writeWhole(inboxDirPath, conversation.thread_id, serialize(conversation));
+}
+
+/** The folder's file names, none when there is no folder. */
+function namesIn(inboxDirPath: string): string[] {
   try {
-    unlinkSync(fileOf(inboxDirPath, threadId));
-    return true;
+    return readdirSync(dirOf(inboxDirPath));
   } catch {
-    return false;
+    return [];
   }
 }
 
-/** Remove every conversation whose thread is gone (after a deletion). */
-export function pruneInboxAsks(inboxDirPath: string, threadExists: (threadId: string) => boolean): void {
-  let names: string[];
-  try {
-    names = readdirSync(dirOf(inboxDirPath));
-  } catch {
-    return;
-  }
+/** The thread a file belongs to: `<id>.json`, a crash's `<id>.json.<pid>.tmp`, a set-aside `<id>.json.<time>.bad`. */
+const threadOfFile = (name: string): string => name.split(".", 1)[0]!;
+
+function removeFiles(inboxDirPath: string, names: string[]): boolean {
+  let removed = false;
   for (const name of names) {
-    if (!name.endsWith(".json")) continue;
-    const threadId = name.slice(0, -".json".length);
-    if (!threadExists(threadId)) removeInboxAsk(inboxDirPath, threadId);
+    try {
+      unlinkSync(join(dirOf(inboxDirPath), name));
+      removed = true;
+    } catch {
+      // Already gone.
+    }
   }
+  return removed;
+}
+
+/** Remove everything of one conversation; true when there was anything. */
+export function removeInboxAsk(inboxDirPath: string, threadId: string): boolean {
+  if (!isInboxId("msg", threadId)) return false;
+  return removeFiles(inboxDirPath, namesIn(inboxDirPath).filter((name) => threadOfFile(name) === threadId));
+}
+
+/** Remove everything of each conversation whose thread is gone (after a deletion). */
+export function pruneInboxAsks(inboxDirPath: string, threadExists: (threadId: string) => boolean): void {
+  removeFiles(
+    inboxDirPath,
+    namesIn(inboxDirPath).filter((name) => {
+      const threadId = threadOfFile(name);
+      return isInboxId("msg", threadId) && !threadExists(threadId);
+    }),
+  );
 }
 
 /** The checks on an ask's input, before anything is written. */
@@ -132,22 +188,41 @@ export function checkInboxAskInput(input: { turn_id?: unknown; question?: unknow
   return { id, question, ...(passage ? { passage } : {}) };
 }
 
+/** The saved turn with this id, when there is one: what a retried POST answers. */
+export function findInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
+  const conversation = readForAsk(inboxDirPath, threadId);
+  const turn = conversation?.turns.find((candidate) => candidate.id === turnId);
+  return conversation && turn ? { conversation, turn } : null;
+}
+
 /** Add a turn; a turn with that id already there is the one answered, and nothing is written. */
 export function addInboxAskTurn(inboxDirPath: string, threadId: string, turn: InboxAskTurn): { conversation: InboxAskConversation; turn: InboxAskTurn; added: boolean } {
-  const conversation = readInboxAsk(inboxDirPath, threadId) ?? { v: 1 as const, thread_id: threadId, seen_at: null, turns: [] };
+  const conversation = readForAsk(inboxDirPath, threadId) ?? { v: 1 as const, thread_id: threadId, seen_at: null, turns: [] };
   const known = conversation.turns.find((candidate) => candidate.id === turn.id);
   if (known) return { conversation, turn: known, added: false };
   conversation.turns.push(turn);
-  writeInboxAsk(inboxDirPath, conversation);
+  const text = serialize(conversation);
+  if (Buffer.byteLength(text) > INBOX_ASK_FILE_MAX) throw new InboxError("ask_full", "This conversation is full. End it to ask again. Your question was not saved.");
+  writeWhole(inboxDirPath, threadId, text);
   return { conversation, turn, added: true };
 }
 
-/** The person saw the answers up to `seenAt`. An earlier time changes nothing. */
+/**
+ * The person saw the answers up to `seenAt`. The mark only moves forward and
+ * stops at the newest answer, so a wrong time cannot hide a later answer's dot.
+ * With no answer there is nothing to see, and nothing changes.
+ */
 export function markInboxAskSeen(inboxDirPath: string, threadId: string, seenAt: string): { conversation: InboxAskConversation | null; changed: boolean } {
   const conversation = readInboxAsk(inboxDirPath, threadId);
   if (!conversation) return { conversation: null, changed: false };
-  if (conversation.seen_at !== null && Date.parse(conversation.seen_at) >= Date.parse(seenAt)) return { conversation, changed: false };
-  conversation.seen_at = seenAt;
+  const newest = conversation.turns.reduce((latest, turn) => {
+    const answeredAt = Date.parse(turn.answered_at ?? "");
+    return Number.isFinite(answeredAt) && answeredAt > latest ? answeredAt : latest;
+  }, Number.NEGATIVE_INFINITY);
+  const mark = Math.min(Date.parse(seenAt), newest);
+  if (!Number.isFinite(mark)) return { conversation, changed: false };
+  if (conversation.seen_at !== null && Date.parse(conversation.seen_at) >= mark) return { conversation, changed: false };
+  conversation.seen_at = new Date(mark).toISOString();
   writeInboxAsk(inboxDirPath, conversation);
   return { conversation, changed: true };
 }
