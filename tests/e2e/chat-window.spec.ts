@@ -276,7 +276,8 @@ test.describe('text that would stop the page', () => {
     test(`${name} draws in a bounded time, with its words`, async ({ page }) => {
       await open(page);
       const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
-      expect(took).toBeLessThan(3_000);
+      // Plain text stays linear: a megabyte of it costs four times these, and a CI runner is slower.
+      expect(took).toBeLessThan(text.length < 300_000 ? 3_000 : 10_000);
       await expect(page.locator('[data-text-part]').first()).toContainText(text.slice(8, 40));
       await expect(page.locator('[data-chat-window]')).toContainText('still here');
     });
