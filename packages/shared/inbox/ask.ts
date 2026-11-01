@@ -54,6 +54,8 @@ export interface InboxAskTurn {
   answered_at?: string;
   /** The person stopped the answer. */
   stopped?: boolean;
+  /** Why `answer` is only part of one: the session went away, another message took the turn, or it failed. */
+  failure?: "gone" | "taken_over" | "failed";
 }
 
 export interface InboxAskConversation {
@@ -205,6 +207,20 @@ export function addInboxAskTurn(inboxDirPath: string, threadId: string, turn: In
   if (Buffer.byteLength(text) > INBOX_ASK_FILE_MAX) throw new InboxError("ask_full", "This conversation is full. End it to ask again. Your question was not saved.");
   writeWhole(inboxDirPath, threadId, text);
   return { conversation, turn, added: true };
+}
+
+/**
+ * Change a saved turn, only if it is still there: an answer that ends after
+ * End or a thread delete writes nothing, so the file cannot come back. A file
+ * that cannot be read throws, as every read here does.
+ */
+export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string, patch: Partial<Omit<InboxAskTurn, "id" | "question" | "passage">>): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
+  const conversation = readInboxAsk(inboxDirPath, threadId);
+  const turn = conversation?.turns.find((candidate) => candidate.id === turnId);
+  if (!conversation || !turn) return null;
+  Object.assign(turn, patch);
+  writeInboxAsk(inboxDirPath, conversation);
+  return { conversation, turn };
 }
 
 /**

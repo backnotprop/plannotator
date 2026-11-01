@@ -139,6 +139,16 @@ function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(
 }
 
 describe("pull session bridge", () => {
+  test("once `connected`, status is what the host reported, not a new bridge's ready", async () => {
+    const host = fakeHost("busy");
+    const { pull, startHost } = setup({}, host);
+    expect(pull.connected).toBe(false);
+    expect(pull.bridge.status()).toBe("ready");
+    void startHost();
+    await waitFor(() => pull.connected);
+    expect(pull.bridge.status()).toBe("busy");
+  });
+
   test("a host that never interrupts says so on its polls; every other host's advert is unchanged", async () => {
     // What regresses: the capability leaking onto other hosts' adverts (absent = interruptible).
     const ordinary = setup();

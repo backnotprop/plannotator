@@ -118,6 +118,8 @@ export interface PullSessionBridgeOptions extends PullSessionBridgeConfig {
 
 export interface PullSessionBridge {
 	readonly bridge: SessionBridge;
+	/** The host has made a request, so `status()` is what it reported, not a new bridge's `ready`. */
+	readonly connected: boolean;
 	/** Handle a request to one of the two bridge paths. `null` for any other path. */
 	handle(req: Request): Promise<Response> | null;
 	/** Server shutdown: answer open polls with `closing`, fail anything still waiting. */
@@ -542,6 +544,9 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 
 	return {
 		bridge,
+		get connected() {
+			return connected;
+		},
 		handle(req) {
 			const path = new URL(req.url).pathname;
 			if (path !== SESSION_BRIDGE_POLL_PATH && path !== SESSION_BRIDGE_EVENT_PATH) return null;

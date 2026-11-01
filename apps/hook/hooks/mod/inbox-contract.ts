@@ -957,6 +957,36 @@ function wakeName(value: unknown): string {
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
 
 /**
+ * The poll field (`true`) by which a connection says it can answer Ask AI
+ * live. An older connection never sends it, so a question never waits for it.
+ */
+export const INBOX_ASK_POLL_FIELD = 'ask'
+
+/**
+ * Set (`true`) on every poll answer while a question waits for this session
+ * and its Ask AI client has not connected, and a held poll ends at once. The
+ * connection then runs the client against `inboxAskBridgeBase(session)`, with
+ * the Inbox's token, until the Inbox says `closing`. It is a state, not an
+ * event: a poll answer that does not read it loses nothing.
+ */
+export const INBOX_ASK_WAITS_FIELD = 'ask_waits'
+
+export const INBOX_ASK_BRIDGE_PREFIX = '/api/inbox/ask/'
+
+/** Where a session's Ask AI client talks to the Inbox: the pull bridge's two paths go after it. */
+export function inboxAskBridgeBase(session: string): string {
+  return `${INBOX_ASK_BRIDGE_PREFIX}${encodeURIComponent(session)}`
+}
+
+export function parseInboxAskWaits(text: string): boolean {
+  try {
+    return (JSON.parse(text) as Record<string, unknown>)[INBOX_ASK_WAITS_FIELD] === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * The turn a connection submits when a reply it put into a running turn
  * arrived as that turn ended, so the model never read it: the reply is in
  * the conversation already, so this only points at it.
