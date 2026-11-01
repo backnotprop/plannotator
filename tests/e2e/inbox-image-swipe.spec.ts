@@ -152,7 +152,7 @@ for (const phone of [
       await touch.up();
       // D, the last: it stays there and says where the other files are.
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'D');
-      await expect(caption(page).locator('[data-option-end]')).toHaveText("Last option · the thread's 4 other files are under 4/4");
+      await expect(caption(page).locator('[data-option-end]')).toHaveText('Last option · 4 files under 4/4');
       await touch.down(mid.x, mid.y, -area.width * 0.5, 0);
       await touch.up();
       await page.waitForTimeout(400);

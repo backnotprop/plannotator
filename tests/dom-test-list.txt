@@ -53,6 +53,7 @@ packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.textComments.test.tsx
 packages/ui/components/ImageLightbox.test.tsx
 packages/ui/components/ImageZoomStage.wheelHint.test.tsx
+packages/ui/components/ImageZoomStage.clear.test.tsx
 packages/ui/components/Viewer.imageRegions.test.tsx
 packages/ui/components/HostTitle.dom.test.tsx
 packages/ui/components/RefHoverCard.dom.test.tsx
