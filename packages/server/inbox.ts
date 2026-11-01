@@ -942,7 +942,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           (typeof host === "string" && typeof session === "string" && BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session)) ||
           (await codexWake.wakes(host, session, meta)) ||
           qwenWake.wakes(host, session, meta),
-        wakeStuck: (session, itemId) => codexWake.stuck(session, itemId) || qwenWake.stuck(session, itemId),
+        bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
         ...(options.mcpNow ? { now: options.mcpNow } : {}),

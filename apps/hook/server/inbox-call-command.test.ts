@@ -12,7 +12,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxMessage, InboxThread, InboxTidyPlan, InboxTidyRun } from "@plannotator/core/inbox-types";
 import { INBOX_TIDY_INSTRUCTION } from "@plannotator/core/inbox-types";
@@ -387,6 +387,19 @@ describe("who is calling", () => {
     expect(handedOut).toContain(scripted.reply);
     expect(handedOut).not.toContain(raw.reply);
     expect(handedOut).not.toContain(named.reply);
+  });
+
+  test("a list with no session is what a raw MCP client gets, and is never an empty one that hides the project", async () => {
+    const box = await world();
+    const { client, project } = box;
+    await tool(client, "send_message", { body: "Still there?", subject: "Listed", thread: "Listed", project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
+    const above = dirname(project);
+
+    const listed = await cli(box, ["read_thread", "{}"], { cwd: above });
+    expect(listed.code).toBe(0);
+    const raw = await tool(client, "read_thread", { project_path: above });
+    expect(raw.projects_inside).toEqual([expect.objectContaining({ root: project })]);
+    expect(JSON.parse(listed.stdout).projects_inside).toEqual(raw.projects_inside);
   });
 });
 

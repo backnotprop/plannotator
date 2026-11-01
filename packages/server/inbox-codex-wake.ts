@@ -126,8 +126,6 @@ export interface InboxCodexWake {
   uncertain(session: string, itemId: string): boolean;
   /** The items of `session` that are uncertain (see `uncertain`). */
   uncertainItems(session: string): string[];
-  /** Whether this item's wake is not getting through (uncertain, or `codex queue` last refused or failed it): a read must hand it over. */
-  stuck(session: string, itemId: string): boolean;
   /** Look for items to queue now (the Inbox runs it on every store line, a retry coming due, a wait ending). */
   sweep(): Promise<void>;
   stop(): void;
@@ -309,8 +307,6 @@ export function createInboxCodexWake(options: {
   };
 
   const retryAt = new Map<string, { at: number; wait: number }>();
-  /** Items whose last `codex queue` refused or failed them (`stuck`), a retry due or not. */
-  const failed = new Set<string>();
   const failuresSaid = new Set<string>();
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** A sweep when the earliest retry comes due (never a timer that runs while nothing waits). */
@@ -363,7 +359,6 @@ export function createInboxCodexWake(options: {
     }
     if (run.exitCode === 0) {
       retryAt.delete(key);
-      failed.delete(key);
       unproven.delete(session);
       if (!claimed.has(key)) return;
       if (flight.taken) {
@@ -375,7 +370,6 @@ export function createInboxCodexWake(options: {
       return;
     }
     dropClaim(item.id, session);
-    failed.add(key);
     const said = `${run.stderr}${run.stdout}`.trim().split("\n")[0]?.slice(0, 300) ?? "";
     if (run.exitCode === 1 && UNKNOWN_THREAD.test(`${run.stderr}\n${run.stdout}`)) {
       dead.add(session);
@@ -424,7 +418,6 @@ export function createInboxCodexWake(options: {
       dropClaim(key.slice(0, dot), key.slice(dot + 1));
     }
     for (const key of [...retryAt.keys()]) if (!pendingKeys.has(key)) retryAt.delete(key);
-    for (const key of [...failed]) if (!pendingKeys.has(key)) failed.delete(key);
     if (work.length > 0) {
       const found = await cli();
       if (found) {
@@ -511,7 +504,6 @@ export function createInboxCodexWake(options: {
     status: (session) => (!knownSessions().has(session) ? null : dead.has(session) ? "dead" : "alive"),
     uncertain: (session, itemId) => uncertain.has(`${itemId}.${session}`),
     uncertainItems: (session) => [...uncertain].filter((key) => key.endsWith(`.${session}`)).map((key) => key.slice(0, key.indexOf("."))),
-    stuck: (session, itemId) => uncertain.has(`${itemId}.${session}`) || failed.has(`${itemId}.${session}`),
     noteToolCall,
     sweep,
     stop: () => {

@@ -501,24 +501,28 @@ describe("a reply to a running Qwen Code session", () => {
 });
 
 describe("a Tidy through the Qwen wake", () => {
-  /** A question old enough to Tidy, then the Tidy, with Qwen answering its frame with `answer` (null: no receipt). */
-  async function tidied(answer: string | null) {
+  /**
+   * A question old enough to Tidy, then the Tidy `tidyAgo` ms ago, with Qwen
+   * answering its frame with `answer` (null: no receipt). No frame is awaited
+   * when the receipts socket cannot be made (`knobs`).
+   */
+  async function tidied(answer: string | null, options: { knobs?: Record<string, unknown>; tidyAgo?: number } = {}) {
     const clock = { behind: 3 * 60 * 60_000 };
-    const w = await world({ storeNow: () => new Date(Date.now() - clock.behind) });
+    const w = await world({ knobs: options.knobs, storeNow: () => new Date(Date.now() - clock.behind) });
     const asked = await qwenSends(w.client, w.project, ":::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::");
-    clock.behind = 0;
+    clock.behind = options.tidyAgo ?? 0;
     w.session.answer = answer;
-    const started = await fetch(`${base(w.server)}/api/inbox/tidy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, sessions: [SESSION], idempotency_key: "t1" }) });
-    expect(started.status).toBe(200);
+    const startTidy = (key: string) => fetch(`${base(w.server)}/api/inbox/tidy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, sessions: [SESSION], idempotency_key: key }) });
+    expect((await startTidy("t1")).status).toBe(200);
     await w.server.qwenWake.sweep();
-    await until(() => w.session.received.length > 0);
+    if (!options.knobs) await until(() => w.session.received.length > 0);
     const note = (await thread(w.server, asked.thread_id)).messages.find((m) => m.tidy)!;
     const read = async () => {
       const result = (await w.client.callTool({ name: "read_thread", arguments: { agent_session: SESSION, thread_id: asked.thread_id } })) as { content: { text: string }[]; structuredContent: { tidy?: { id: string } } };
       return { text: result.content.map((part) => part.text).join("\n"), tidy: result.structuredContent.tidy };
     };
     const state = async () => ((await (await fetch(`${base(w.server)}/api/inbox/tidy`)).json()) as InboxTidyPlan).run!.agents[0]!.state;
-    return { ...w, asked, note, read, state };
+    return { ...w, asked, note, read, state, startTidy };
   }
 
   for (const [name, answer] of [
@@ -528,7 +532,6 @@ describe("a Tidy through the Qwen wake", () => {
   ] as const) {
     test(`${name}: the session's next read hands the Tidy over, once`, async () => {
       const t = await tidied(answer);
-      await until(() => t.server.qwenWake.stuck(SESSION, t.note.id));
       expect(await t.state()).toBe("waiting");
       const first = await t.read();
       expect(first.text).toContain(INBOX_TIDY_INSTRUCTION);
@@ -538,22 +541,22 @@ describe("a Tidy through the Qwen wake", () => {
     });
   }
 
-  test("a healthy wake: a read never carries the Tidy as well, and its first frame is the only one", async () => {
-    const t = await tidied("delivered");
-    await Bun.sleep(150);
-    expect(t.server.qwenWake.stuck(SESSION, t.note.id)).toBe(false);
-    const read = await t.read();
-    expect(read.tidy).toBeUndefined();
-    expect(read.text).not.toContain(INBOX_TIDY_INSTRUCTION);
-    // Its next call that names the host says it reached the session.
-    await qwenSends(t.client, t.project, "Working through it.");
-    expect(await t.state()).not.toBe("waiting");
-    expect(t.session.received).toHaveLength(1);
+  test("the receipts socket cannot be made: no frame goes, and the session's next read hands the Tidy over", async () => {
+    const t = await tidied(null, { knobs: { socketParent: "/nonexistent/plannotator" } });
+    expect(t.session.received).toHaveLength(0);
+    expect((await t.read()).tidy?.id).toBe(t.note.id);
+    expect(await t.state()).toBe("delivered");
   });
 
-  test("a frame still waiting for its receipt is not stuck: the read leaves it to the wake", async () => {
-    const t = await tidied(null);
+  test("a healthy wake with nothing to change: reads alone record the Tidy, and a later Tidy is not held back", async () => {
+    // Past the cool-down, so only a Tidy still not delivered can refuse the next one.
+    const t = await tidied("delivered", { tidyAgo: 31 * 60_000 });
+    await Bun.sleep(150);
+    expect((await t.read()).tidy?.id).toBe(t.note.id);
+    expect(await t.state()).toBe("delivered");
     expect((await t.read()).tidy).toBeUndefined();
+    expect(t.session.received).toHaveLength(1);
+    expect((await t.startTidy("t2")).status).toBe(200);
   });
 });
 

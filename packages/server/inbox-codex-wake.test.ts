@@ -47,7 +47,7 @@ interface World {
   start: () => Promise<InboxServer>;
 }
 
-async function world(options: { codex?: boolean; env?: Record<string, string> | ((root: string) => Record<string, string>); storeNow?: () => Date; queueTimeoutMs?: number } = {}): Promise<World> {
+async function world(options: { codex?: boolean; env?: Record<string, string> | ((root: string) => Record<string, string>); storeNow?: () => Date; queueTimeoutMs?: number; now?: () => number } = {}): Promise<World> {
   const fake = createFakeAgents("plannotator-codex-wake-");
   fakes.push(fake);
   if (options.codex !== false) fake.install("codex");
@@ -60,7 +60,7 @@ async function world(options: { codex?: boolean; env?: Record<string, string> | 
     const server = await startInboxServer({
       dataDir,
       agentEnvironment: environment,
-      codexWake: { extraClis: [], ...(options.queueTimeoutMs ? { queueTimeoutMs: options.queueTimeoutMs } : {}) },
+      codexWake: { extraClis: [], ...(options.queueTimeoutMs ? { queueTimeoutMs: options.queueTimeoutMs } : {}), ...(options.now ? { now: options.now } : {}) },
       ...(options.storeNow ? { storeNow: options.storeNow } : {}),
     });
     servers.push(server);
@@ -538,7 +538,7 @@ describe("a Tidy through the Codex wake", () => {
     client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: THREAD, agent_host: "codex", agent_name: "Codex", ...args } }) as Promise<{ content: { text: string }[]; structuredContent: { message_id: string } }>;
 
   /** A question old enough to Tidy, then the Tidy; `file` holds what the fake `codex` reads from its `flag` file. */
-  async function tidied(options: { env?: (root: string) => Record<string, string>; file?: string; queueTimeoutMs?: number; trigger?: string } = {}) {
+  async function tidied(options: { codex?: boolean; env?: (root: string) => Record<string, string>; file?: string; now?: () => number; queueTimeoutMs?: number; trigger?: string } = {}) {
     const clock = { behind: 3 * 60 * 60_000 };
     const w = await world({ ...options, storeNow: () => new Date(Date.now() - clock.behind) });
     if (options.file) writeFileSync(join(w.fake.root, "flag"), options.file);
@@ -566,7 +566,6 @@ describe("a Tidy through the Codex wake", () => {
       const t = await tidied(options);
       // The hung call was killed (fake.remove() fails the test if it still runs).
       for (let waited = 0; waited < 2000 && t.fake.live().length > 0; waited += 50) await Bun.sleep(50);
-      expect(t.server.codexWake.stuck(THREAD, t.note.id)).toBe(true);
       expect(await t.state()).toBe("waiting");
       const first = await t.read();
       expect(first.text).toContain(INBOX_TIDY_INSTRUCTION);
@@ -577,16 +576,37 @@ describe("a Tidy through the Codex wake", () => {
     });
   }
 
-  test("a healthy wake: a read in the turn already running leaves it to the wake, and the next turn is the delivery", async () => {
+  test("a queued wake: a read in the turn already running still hands the Tidy over, since a queue may never become a turn", async () => {
     const t = await tidied();
     expect(queues(t.fake)).toHaveLength(1);
-    expect(t.server.codexWake.stuck(THREAD, t.note.id)).toBe(false);
-    expect((await t.read(Date.now() - 60_000)).tidy).toBeUndefined();
-    expect(await t.state()).toBe("waiting");
-    const next = await t.read();
-    expect(next.tidy).toBeUndefined();
-    expect(next.text).not.toContain(INBOX_TIDY_INSTRUCTION);
+    expect((await t.read(Date.now() - 60_000)).tidy?.id).toBe(t.note.id);
     expect(await t.state()).toBe("delivered");
+    expect((await t.read()).tidy).toBeUndefined();
+  });
+
+  test("no Codex CLI when the Tidy landed, one found later: a read hands it over", async () => {
+    const clock = { ahead: 0 };
+    const t = await tidied({ codex: false, now: () => Date.now() + clock.ahead });
+    expect(queues(t.fake)).toHaveLength(0);
+    t.fake.install("codex");
+    // Past the 60 s the empty answer is kept, so this call's own wake check finds the CLI.
+    clock.ahead = 61_000;
+    expect(await t.server.codexWake.cli()).not.toBeNull();
+    expect((await t.read()).tidy?.id).toBe(t.note.id);
+    expect(await t.state()).toBe("delivered");
+    await t.server.codexWake.sweep();
+  });
+
+  test("a disowned thread back in a real turn: its first write stays clean, and the wake queues the Tidy once", async () => {
+    const t = await tidied({ env: (root) => ({ FAKE_CODEX_UNKNOWN_FILE: join(root, "flag") }), file: THREAD });
+    expect(t.server.codexWake.status(THREAD)).toBe("dead");
+    const before = queues(t.fake).length;
+    writeFileSync(join(t.fake.root, "flag"), "");
+    const write = await codexSends(t.client, t.project, "Back on it.");
+    expect(write.text).not.toContain(INBOX_TIDY_INSTRUCTION);
+    await t.server.codexWake.sweep();
+    expect(queues(t.fake)).toHaveLength(before + 1);
+    expect(queues(t.fake).at(-1)!.args.find((arg) => arg.includes(INBOX_TIDY_INSTRUCTION))).toBeDefined();
   });
 
   test("a codex exec thread a Tidy named is still not a thread that wakes: its shell's message says to wait", async () => {

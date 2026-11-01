@@ -5,7 +5,7 @@
  * the store's clock set back (`storeNow`) while a test writes, so it reads as
  * hours or days old.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -350,6 +350,24 @@ describe("Tidy: asking", () => {
     expect(read.structuredContent.tidy).toBeUndefined();
     const commands = await deliver(server, "ses-a", billing);
     expect(commands.map((c) => inboxWakeText(c).split("\n")[1])).toEqual([INBOX_TIDY_INSTRUCTION]);
+  });
+
+  test("a bridge that stopped polling cannot keep a Tidy: the session's next read carries it", async () => {
+    const { server, client, billing, clock } = await setup();
+    clock.behind = 3 * HOUR;
+    await poll(server, "ses-a", billing);
+    const asked = await send(client, billing, "ses-a", { subject: "Ledger", thread: "Ledger", body: block("Ledger first?") });
+    clock.behind = 0;
+    await poll(server, "ses-a", billing, { busy: true });
+    expect((await tidy(server, { sessions: ["ses-a"], idempotency_key: "t1" })).status).toBe(200);
+    setSystemTime(new Date(Date.now() + 31_000));
+    try {
+      const read = await call(client, "read_thread", { thread_id: asked.thread_id, agent_session: "ses-a", project_path: billing });
+      expect(read.content.map((c) => c.text).join("\n")).toContain(INBOX_TIDY_INSTRUCTION);
+      expect(await stateOf(server, "ses-a")).toBe("delivered");
+    } finally {
+      setSystemTime();
+    }
   });
 
   test("the wake gives each session the value that makes its script that session, for every host and none", () => {

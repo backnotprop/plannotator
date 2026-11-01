@@ -27,8 +27,8 @@
  * than its agent's session names an id that agent no longer is, and its Tidy
  * would not count. A new shell, or one with that variable unset, writes rightly.
  *
- * A read with no session settles nothing (the peek mark): nobody read it, so
- * what the thread's owner still waits for stays queued.
+ * A read of a thread or message with no session settles nothing (the peek
+ * mark): nobody read it, so what the thread's owner still waits for stays queued.
  *
  * stdout: the result as one JSON value, and nothing else, so anything on it is
  * a success (empty on failure: `jq` then finds nothing, where a JSON error
@@ -200,7 +200,8 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller);
   // Where the script runs is where its relative attachments and images are, wherever its project is.
   const params = inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd });
-  if (caller.caller === null) params._meta = { ...(params._meta as Record<string, unknown>), [INBOX_PEEK_META_KEY]: true };
+  // Only on a read of one thread or message: a list has nothing to settle, and the peek would empty it.
+  if (caller.caller === null && (input.args.thread_id || input.args.message_id)) params._meta = { ...(params._meta as Record<string, unknown>), [INBOX_PEEK_META_KEY]: true };
   const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params });
   const bytes = Buffer.byteLength(body);
   if (bytes > INBOX_MAX_REQUEST_BYTES) return refused("request_too_large", inboxRequestTooLargeMessage(bytes));

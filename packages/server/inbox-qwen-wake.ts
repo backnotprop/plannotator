@@ -125,8 +125,6 @@ export interface InboxQwenWake {
   /** Whether an item may not have reached this session (held, refused, no receipt): saved for its next read. */
   uncertain(session: string, itemId: string): boolean;
   uncertainItems(session: string): string[];
-  /** Whether this item's wake is not getting through (`uncertain`, or waiting to be sent again): a read must hand it over. */
-  stuck(session: string, itemId: string): boolean;
   /** Look for items to send now. */
   sweep(): Promise<void>;
   stop(): void;
@@ -845,11 +843,6 @@ export function createInboxQwenWake(options: {
     return reachable(record) ? "alive" : null;
   };
 
-  const uncertainClaim = (session: string, itemId: string): boolean => {
-    const claim = claims.get(keyOf(itemId, session));
-    return claim ? isUncertain(claim) : false;
-  };
-
   return {
     canWake: () => token() !== null,
     wakes: async (host, session, meta) => {
@@ -859,8 +852,10 @@ export function createInboxQwenWake(options: {
       return record !== null && reachable(record);
     },
     status,
-    uncertain: uncertainClaim,
-    stuck: (session, itemId) => uncertainClaim(session, itemId) || retryAt.has(keyOf(itemId, session)),
+    uncertain: (session, itemId) => {
+      const claim = claims.get(keyOf(itemId, session));
+      return claim ? isUncertain(claim) : false;
+    },
     uncertainItems: (session) => [...claims.values()].filter((claim) => claim.session === session && isUncertain(claim)).map((claim) => claim.itemId),
     noteToolCall: (session) => {
       if (!isQwenSessionId(session)) return;
