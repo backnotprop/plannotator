@@ -32,6 +32,16 @@ export interface ZoomInset {
   readonly y: number;
 }
 
+/**
+ * Rows of a stage that things float over: Fit and the pan's limits work in the
+ * stage between them, while a zoomed image still slides under them and every
+ * row of the stage still takes the fingers.
+ */
+export interface ZoomClear {
+  readonly top: number;
+  readonly bottom: number;
+}
+
 /** 800%: an image pixel is then 8 screen pixels, enough to read any screenshot. */
 export const LIGHTBOX_ZOOM_MAX = 8;
 /** Wheel zoom: factor = exp(-deltaY * sensitivity), with deltaY capped so a
