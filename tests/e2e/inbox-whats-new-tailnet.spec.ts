@@ -1,6 +1,9 @@
 /**
  * What's new on a phone-width page that came through the tailnet, in a real
- * browser against the compiled binary under a temp PLANNOTATOR_DATA_DIR and
+ * browser against the CLI from source, run as a release-numbered Inbox (bun
+ * --define __CLI_VERSION__, the way inbox-update-notice.spec.ts does: the
+ * shared 0.0.0-dev binary has no "just updated" notice to link to), under a
+ * temp PLANNOTATOR_DATA_DIR and
  * HOME. `tailscale` is a script on PATH that keeps its serve config in a file
  * (the real CLI never runs); the browser reaches the Inbox's tailnet-only
  * listener through a small proxy in this spec that adds what `tailscale serve`
@@ -12,14 +15,14 @@
  * scroll, show their saved image, fit the width, and close back to the
  * Inbox. No update control shows anywhere.
  *
- * Build the binary first (see inbox.spec.ts), then
+ * Needs the built apps (apps/hook/dist), as the other specs do; then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-whats-new-tailnet.spec.ts`.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { spawnSync } from 'node:child_process';
+import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { deflateSync, crc32 } from 'node:zlib';
@@ -27,13 +30,14 @@ import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scrat
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
-const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
+const entry = join(repo, 'apps/hook/server/index.ts');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'whats-new-tailnet');
 
 const MAGIC = 'studio.tail0000.ts.net';
 const OWNER = 'owner@example.com';
-/** The compiled binary's version (--define __CLI_VERSION__): a release build, so What's new names it. */
-const VERSION = process.env.PLANNOTATOR_E2E_VERSION ?? '0.28.43';
+/** The Inbox's version (--define __CLI_VERSION__ below): a release build, so What's new names it. */
+const VERSION = '0.28.10';
+let inbox: ChildProcess | undefined;
 const IMAGE_SRC = 'https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555';
 
 const FAKE = `
@@ -88,7 +92,7 @@ let world: World;
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
-  expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
+  expect(existsSync(join(repo, 'apps/hook/dist/inbox.html')), 'build the apps first: apps/hook/dist').toBe(true);
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-whatsnew-tailnet-e2e-');
   const dataDir = join(root, 'data');
@@ -113,21 +117,30 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(dataDir, 'update-notes', VERSION, `${sha}.png`), bytes);
   writeFileSync(join(dataDir, 'update-notes', VERSION, 'images.json'), JSON.stringify({ images: { [IMAGE_SRC]: { file: `${sha}.png`, content_type: 'image/png', bytes: bytes.length, width: 900, height: 300 } } }) + '\n');
 
+  const bun = realpathSync(process.env.BUN_BINARY ?? execSync('command -v bun').toString().trim());
   const env = {
-    PATH: `${bin}:${dirname(process.execPath)}`,
+    // The fake tailscale first; no system directory, so no real tailscale is ever reachable.
+    PATH: `${bin}:${dirname(bun)}:${dirname(process.execPath)}`,
     PLANNOTATOR_TEST_SANDBOX: root,
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
+    NO_BROWSER,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
   };
-  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  inbox = spawn(bun, ['--define', `__CLI_VERSION__="${VERSION}"`, entry, 'inbox', '--no-open'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let err = '';
+  inbox.stderr!.on('data', (c) => (err += c));
+  const deadline = Date.now() + 60_000;
+  while (!/Plannotator Inbox: (\S+)/.test(err) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+  expect(err, 'the Inbox did not start').toMatch(/Plannotator Inbox: (\S+)/);
   rememberInboxOf(dataDir);
-  expect(started.status, started.stderr).toBe(0);
-
-  const registry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8'));
+  // The tailnet mapping is recorded once the listener is up.
+  const registryFile = join(dataDir, 'inbox', 'inbox.json');
+  while (Date.now() < deadline && !(existsSync(registryFile) && JSON.parse(readFileSync(registryFile, 'utf8')).tailscale?.proxy_port)) await new Promise((r) => setTimeout(r, 100));
+  const registry = JSON.parse(readFileSync(registryFile, 'utf8'));
   const listener: number = registry.tailscale.proxy_port;
   const httpsPort: number = registry.tailscale.https_port;
   // What `tailscale serve` hands the listener: the MagicDNS Host with the HTTPS port and the peer's login.
