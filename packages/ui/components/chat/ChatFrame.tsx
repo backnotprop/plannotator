@@ -11,10 +11,11 @@
  */
 
 import { ChevronDown, Maximize2, Minimize2, X } from 'lucide-react';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type * as React from 'react';
 
 import { cn } from '../../lib/utils';
+import { isImeCompositionKey } from '../../utils/commentSubmitKey';
 import { isMac } from '../../utils/platform';
 import { Button } from '../ui/button';
 import { CHAT_ICON_BUTTON, floatingDialogChrome } from './chatRecipes';
@@ -22,6 +23,8 @@ import {
   CHAT_WINDOW_DEFAULT,
   CHAT_WINDOW_FRAME_MARGIN,
   CHAT_WINDOW_MIN,
+  fitChatWindow,
+  type ChatWindowGeometry,
   type ChatWindowStore,
 } from './chatWindowStore';
 
@@ -36,9 +39,10 @@ export interface ChatFrameState {
   readonly width: number;
 }
 
-/** The host's extras on the window's root (a drop target). */
+/** The host's extras on the window's root: a drop target, and any `data-*`
+ * attribute of its own. */
 export interface ChatFrameRootProps {
-  readonly 'data-drop-active'?: string | undefined;
+  readonly [attribute: `data-${string}`]: string | undefined;
   readonly onDragOver?: React.DragEventHandler<HTMLElement>;
   readonly onDragLeave?: React.DragEventHandler<HTMLElement>;
   readonly onDrop?: React.DragEventHandler<HTMLElement>;
@@ -91,6 +95,43 @@ export interface ChatFrameProps {
   labels?: Partial<ChatFrameLabels>;
 }
 
+/** A press that can start a gesture: the primary button of the first pointer.
+ * Ctrl+press is the context menu on a Mac, and that menu can eat the release. */
+function startsGesture(event: React.PointerEvent): boolean {
+  return event.button === 0 && event.isPrimary && !event.ctrlKey;
+}
+
+/** Follow one pointer on an element until it lifts. A second finger is ignored. */
+function followPointer(
+  element: HTMLElement,
+  pointerId: number,
+  onMove: (move: PointerEvent) => void,
+): void {
+  element.setPointerCapture(pointerId);
+  const move = (event: PointerEvent): void => {
+    if (event.pointerId === pointerId) onMove(event);
+  };
+  const end = (event: PointerEvent): void => {
+    if (event.pointerId !== pointerId) return;
+    element.removeEventListener('pointermove', move);
+    element.removeEventListener('pointerup', end);
+    element.removeEventListener('pointercancel', end);
+  };
+  element.addEventListener('pointermove', move);
+  element.addEventListener('pointerup', end);
+  element.addEventListener('pointercancel', end);
+}
+
+/** Did this event start on the title row itself? A menu opened from the header
+ * is a React portal: its rows sit under <body> in the DOM but inside this row in
+ * the React tree, so their events still bubble here, and acting on one would
+ * swallow its click. Buttons and links in the row keep their own presses. */
+function isOnTitleRow(event: React.SyntheticEvent<HTMLElement>): boolean {
+  const target = event.target as HTMLElement | null;
+  if (target === null || !event.currentTarget.contains(target)) return false;
+  return target.closest('button, a') === null;
+}
+
 export function ChatFrame({
   store,
   label,
@@ -125,62 +166,77 @@ export function ChatFrame({
     };
   };
 
-  /** The largest size the frame allows from where the window is anchored. */
-  const maxSize = (): { width: number; height: number } => {
-    const frame = frameBox();
-    return {
-      width: Math.min(frame.width - CHAT_WINDOW_FRAME_MARGIN * 2, frame.width - store.winRight),
-      height: Math.min(frame.height - CHAT_WINDOW_FRAME_MARGIN * 2, frame.height - store.winBottom),
-    };
-  };
-
   // A floating window cannot fit where the free width is under the minimum, so
-  // a narrow frame forces fullscreen, and a frame that shrinks re-clamps the
-  // geometry so the window never strands off screen.
-  const [frameWidth, setFrameWidth] = useState<number | null>(null);
-  useEffect(() => {
+  // a narrow frame forces fullscreen. Any other frame draws the person's
+  // geometry fitted to it. Before paint, so a saved window never flashes off screen.
+  const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
+  useLayoutEffect(() => {
     const frame = rootRef.current?.parentElement;
-    if (frame == null || typeof ResizeObserver !== 'function') return;
+    if (frame == null) return;
     const measure = (): void => {
+      const { clientWidth: width } = frame;
       // A display: none frame measures 0: unknown, not a reason to force fullscreen.
-      setFrameWidth(frame.clientWidth > 0 ? frame.clientWidth : null);
-      store.clampToFrame(frame.clientWidth, frame.clientHeight);
+      // A height of 0 alone is a parent with no size of its own: the width still counts.
+      const height = frame.clientHeight > 0 ? frame.clientHeight : Number.POSITIVE_INFINITY;
+      setFrameSize((last) => {
+        if (width <= 0) return null;
+        return last?.width === width && last.height === height ? last : { width, height };
+      });
     };
     measure();
+    if (typeof ResizeObserver !== 'function') return;
     const observer = new ResizeObserver(measure);
     observer.observe(frame);
     return () => observer.disconnect();
   }, [store, store.minimized, shown, rootRef]);
   const forcedFullscreen =
-    frameWidth !== null && frameWidth - CHAT_WINDOW_FRAME_MARGIN * 2 < CHAT_WINDOW_MIN.width;
+    frameSize !== null && frameSize.width - CHAT_WINDOW_FRAME_MARGIN * 2 < CHAT_WINDOW_MIN.width;
   const fullscreen = (allowFullscreen && store.fullscreen) || forcedFullscreen;
+
+  // What is on screen. Gestures start from this and write the person's choice
+  // to the store; a value the gesture left alone keeps the store's own, so a
+  // window drawn smaller than it was chosen does not get saved smaller.
+  const chosen = store.geometry();
+  const drawn: ChatWindowGeometry = frameSize === null ? chosen : fitChatWindow(chosen, frameSize);
+
+  const resizeFrom = (from: ChatWindowGeometry, width: number, height: number): void => {
+    store.setWindowSize(
+      width === from.w ? store.winW : width,
+      height === from.h ? store.winH : height,
+    );
+  };
+  const moveFrom = (from: ChatWindowGeometry, right: number, bottom: number): void => {
+    store.setWindowOffsets(
+      right === from.right ? store.winRight : right,
+      bottom === from.bottom ? store.winBottom : bottom,
+    );
+  };
+
+  /** The largest size the frame allows from where the window is anchored. */
+  const maxSize = (): { width: number; height: number } => {
+    const frame = frameBox();
+    return {
+      width: Math.min(frame.width - CHAT_WINDOW_FRAME_MARGIN * 2, frame.width - drawn.right),
+      height: Math.min(frame.height - CHAT_WINDOW_FRAME_MARGIN * 2, frame.height - drawn.bottom),
+    };
+  };
 
   // Drag-resize from the top-left grip: the window stays anchored by its
   // bottom-right offsets, so growing pulls the free corner.
   const onResizePointerDown = (event: React.PointerEvent<HTMLButtonElement>): void => {
-    if (fullscreen) return;
+    if (fullscreen || !startsGesture(event)) return;
     event.preventDefault();
-    const grip = event.currentTarget;
-    grip.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startY = event.clientY;
-    const startW = store.winW;
-    const startH = store.winH;
+    const from = drawn;
     const max = maxSize();
-    const onMove = (move: PointerEvent): void => {
-      store.setWindowSize(
-        Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, startW + (startX - move.clientX))),
-        Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, startH + (startY - move.clientY))),
+    followPointer(event.currentTarget, event.pointerId, (move) => {
+      resizeFrom(
+        from,
+        Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, from.w + (startX - move.clientX))),
+        Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, from.h + (startY - move.clientY))),
       );
-    };
-    const onUp = (): void => {
-      grip.removeEventListener('pointermove', onMove);
-      grip.removeEventListener('pointerup', onUp);
-      grip.removeEventListener('pointercancel', onUp);
-    };
-    grip.addEventListener('pointermove', onMove);
-    grip.addEventListener('pointerup', onUp);
-    grip.addEventListener('pointercancel', onUp);
+    });
   };
 
   // Keyboard resize on the focused grip: arrows resize, Shift for big steps,
@@ -203,49 +259,33 @@ export function ChatFrame({
     else return;
     event.preventDefault();
     const max = maxSize();
-    store.setWindowSize(
-      Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, store.winW + deltaW)),
-      Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, store.winH + deltaH)),
+    resizeFrom(
+      drawn,
+      Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, drawn.w + deltaW)),
+      Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, drawn.h + deltaH)),
     );
   };
 
-  // Drag-move by the header, anywhere in the title row that is not a button.
+  // Drag-move by the header, anywhere in the title row that is not a control.
   const dragEnabled = allowDrag && !fullscreen;
   const onHeaderPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
-    if (!dragEnabled) return;
-    // A menu opened from the header is a React portal: its rows sit under
-    // <body> in the DOM but inside this row in the React tree, so their
-    // pointerdown still bubbles here. Taking the drag on one would swallow its
-    // click, so a drag starts only from this row's own DOM subtree.
-    const target = event.target as Node | null;
-    if (target === null || !event.currentTarget.contains(target)) return;
-    if ((event.target as HTMLElement).closest('button') !== null) return;
+    if (!dragEnabled || !startsGesture(event) || !isOnTitleRow(event)) return;
     event.preventDefault();
-    const row = event.currentTarget;
-    row.setPointerCapture(event.pointerId);
     const startX = event.clientX;
     const startY = event.clientY;
-    const startRight = store.winRight;
-    const startBottom = store.winBottom;
+    const from = drawn;
     const frame = frameBox();
-    const onMove = (move: PointerEvent): void => {
-      store.setWindowOffsets(
-        Math.max(0, Math.min(frame.width - store.winW, startRight - (move.clientX - startX))),
-        Math.max(0, Math.min(frame.height - store.winH, startBottom - (move.clientY - startY))),
+    followPointer(event.currentTarget, event.pointerId, (move) => {
+      moveFrom(
+        from,
+        Math.max(0, Math.min(frame.width - from.w, from.right - (move.clientX - startX))),
+        Math.max(0, Math.min(frame.height - from.h, from.bottom - (move.clientY - startY))),
       );
-    };
-    const onUp = (): void => {
-      row.removeEventListener('pointermove', onMove);
-      row.removeEventListener('pointerup', onUp);
-      row.removeEventListener('pointercancel', onUp);
-    };
-    row.addEventListener('pointermove', onMove);
-    row.addEventListener('pointerup', onUp);
-    row.addEventListener('pointercancel', onUp);
+    });
   };
 
   if (!shown) return null;
-  const frame: ChatFrameState = { fullscreen, width: store.winW };
+  const frame: ChatFrameState = { fullscreen, width: drawn.w };
 
   return (
     <aside
@@ -264,10 +304,10 @@ export function ChatFrame({
         fullscreen
           ? undefined
           : {
-              width: store.winW,
-              height: store.winH,
-              right: store.winRight,
-              bottom: store.winBottom,
+              width: drawn.w,
+              height: drawn.h,
+              right: drawn.right,
+              bottom: drawn.bottom,
             }
       }
     >
@@ -302,9 +342,7 @@ export function ChatFrame({
           data-chat-drag-handle={dragEnabled ? '' : undefined}
           onPointerDown={onHeaderPointerDown}
           onDoubleClick={(event) => {
-            if (!dragEnabled) return;
-            if ((event.target as HTMLElement).closest('button') !== null) return;
-            store.resetWindowDock();
+            if (dragEnabled && isOnTitleRow(event)) store.resetWindowDock();
           }}
           title={dragEnabled ? words.dragHint : undefined}
         >
@@ -399,7 +437,9 @@ export function useChatFrameKeys(
 ): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented) return;
+      // A key inside an IME composition is the input method's: Escape there
+      // cancels the composition, not the window.
+      if (event.defaultPrevented || isImeCompositionKey(event)) return;
       const mod = isMac ? event.metaKey : event.ctrlKey;
       if (mod && event.key.toLowerCase() === 'j') {
         if (!summon) return;
@@ -424,9 +464,11 @@ export function useChatFrameKeys(
   }, [store, summon, onKey, onMinimize]);
 }
 
-/** Minimizing returns focus to the launcher, whatever gesture did it. With no
- * element wearing `data-chat-launcher` there is nothing to focus and nothing
- * happens. Opening lands in the host's composer, which the host does itself. */
+/** Minimizing returns focus to the launcher, whatever gesture did it, when focus
+ * was in the window: the window is gone, so focus has fallen to the body. Focus
+ * elsewhere on the page stays where the person put it. With no element wearing
+ * `data-chat-launcher` there is nothing to focus and nothing happens. Opening
+ * lands in the host's composer, which the host does itself. */
 export function useChatFrameFocusReturn(store: ChatWindowStore): void {
   const minimized = useSyncExternalStore(
     store.subscribe,
@@ -441,6 +483,8 @@ export function useChatFrameFocusReturn(store: ChatWindowStore): void {
     // Next frame: the launcher renders in the window's place first. Canceled on
     // unmount, so an orphaned callback never focuses into a dead tree.
     const frame = requestAnimationFrame(() => {
+      const focused = document.activeElement;
+      if (focused !== null && focused !== document.body) return;
       document.querySelector<HTMLElement>(CHAT_LAUNCHER_SELECTOR)?.focus();
     });
     return () => cancelAnimationFrame(frame);

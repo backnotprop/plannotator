@@ -5,10 +5,10 @@ import {
   CHAT_WINDOW_FRAME_MARGIN,
   CHAT_WINDOW_MIN,
   ChatWindowStore,
+  fitChatWindow,
   type ChatWindowGeometry,
 } from './chatWindowStore';
 
-const realWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const realLocal = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 const realSession = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
 
@@ -18,46 +18,28 @@ function restoreGlobal(name: string, descriptor: PropertyDescriptor | undefined)
 }
 
 afterEach(() => {
-  restoreGlobal('window', realWindow);
   restoreGlobal('localStorage', realLocal);
   restoreGlobal('sessionStorage', realSession);
 });
 
-function viewport(innerWidth: number, innerHeight: number) {
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    writable: true,
-    value: { innerWidth, innerHeight },
-  });
-}
-
 describe('saved geometry coming in', () => {
-  test('a saved geometry that fits is taken as it is', () => {
-    viewport(1600, 1000);
+  test('a saved geometry is taken as it is', () => {
     const store = new ChatWindowStore({ initialGeometry: { w: 500, h: 600, right: 40, bottom: 50 } });
     expect(store.geometry()).toEqual({ w: 500, h: 600, right: 40, bottom: 50 });
   });
 
-  test('a window saved on a bigger screen is held to this viewport', () => {
-    viewport(1000, 700);
-    const store = new ChatWindowStore({ initialGeometry: { w: 3000, h: 2000, right: 2000, bottom: 2000 } });
-    expect(store.geometry()).toEqual({
-      w: 1000 - CHAT_WINDOW_FRAME_MARGIN * 2,
-      h: 700 - CHAT_WINDOW_FRAME_MARGIN * 2,
-      right: CHAT_WINDOW_FRAME_MARGIN * 2,
-      bottom: CHAT_WINDOW_FRAME_MARGIN * 2,
-    });
+  test('a window saved on a bigger screen keeps the size the person chose', () => {
+    const saved = { w: 3000, h: 2000, right: 2000, bottom: 2000 };
+    expect(new ChatWindowStore({ initialGeometry: saved }).geometry()).toEqual(saved);
   });
 
   test('a size under the minimum is raised to it', () => {
-    viewport(1600, 1000);
     const store = new ChatWindowStore({ initialGeometry: { w: 10, h: 10, right: 0, bottom: 0 } });
     expect(store.winW).toBe(CHAT_WINDOW_MIN.width);
     expect(store.winH).toBe(CHAT_WINDOW_MIN.height);
   });
 
   test('a corrupted value falls back to the default dock, field by field', () => {
-    viewport(1600, 1000);
     for (const saved of [null, 'oops', 7, { w: 'wide', h: Number.NaN, right: null, bottom: Infinity }]) {
       const store = new ChatWindowStore({ initialGeometry: saved });
       expect(store.geometry()).toEqual({
@@ -70,12 +52,11 @@ describe('saved geometry coming in', () => {
   });
 });
 
-describe('clamp to the measured frame', () => {
-  test('a frame that shrinks pulls the window back inside it', () => {
-    viewport(1600, 1000);
-    const store = new ChatWindowStore({ initialGeometry: { w: 900, h: 800, right: 300, bottom: 150 } });
-    store.clampToFrame(800, 600);
-    expect(store.geometry()).toEqual({
+describe('fitting a chosen window to the measured frame', () => {
+  const chosen = { w: 900, h: 800, right: 300, bottom: 150 };
+
+  test('a window too big for the frame draws inside it', () => {
+    expect(fitChatWindow(chosen, { width: 800, height: 600 })).toEqual({
       w: 800 - CHAT_WINDOW_FRAME_MARGIN * 2,
       h: 600 - CHAT_WINDOW_FRAME_MARGIN * 2,
       right: CHAT_WINDOW_FRAME_MARGIN * 2,
@@ -83,30 +64,17 @@ describe('clamp to the measured frame', () => {
     });
   });
 
-  test('the minimum holds even in a frame smaller than it', () => {
-    const store = new ChatWindowStore();
-    store.clampToFrame(300, 300);
-    expect(store.winW).toBe(CHAT_WINDOW_MIN.width);
-    expect(store.winH).toBe(CHAT_WINDOW_MIN.height);
-    expect(store.winRight).toBe(0);
-    expect(store.winBottom).toBe(0);
+  test('a window that fits draws as chosen', () => {
+    expect(fitChatWindow(chosen, { width: 2000, height: 1200 })).toEqual(chosen);
   });
 
-  test('an unmeasurable frame changes nothing', () => {
-    const store = new ChatWindowStore();
-    const before = store.getVersion();
-    store.clampToFrame(0, 0);
-    expect(store.getVersion()).toBe(before);
-  });
-
-  test('a window that already fits does not notify listeners', () => {
-    const store = new ChatWindowStore();
-    let heard = 0;
-    store.subscribe(() => {
-      heard += 1;
+  test('the minimum holds even in a frame smaller than it, with the offsets at zero', () => {
+    expect(fitChatWindow(chosen, { width: 300, height: 300 })).toEqual({
+      w: CHAT_WINDOW_MIN.width,
+      h: CHAT_WINDOW_MIN.height,
+      right: 0,
+      bottom: 0,
     });
-    store.clampToFrame(1200, 900);
-    expect(heard).toBe(0);
   });
 });
 
@@ -132,17 +100,14 @@ describe('the host owns saved geometry', () => {
     store.setWindowSize(500.4, 600.6);
     store.setWindowOffsets(30, 40);
     store.resetWindowDock();
-    store.clampToFrame(450, 500);
     expect(reports).toEqual([
       { w: 500, h: 601, right: 16, bottom: 16 },
       { w: 500, h: 601, right: 30, bottom: 40 },
       { w: 500, h: 601, right: 16, bottom: 16 },
-      { w: 418, h: 468, right: 16, bottom: 16 },
     ]);
   });
 
   test('what it reports comes back as the same window', () => {
-    viewport(1600, 1000);
     let saved: ChatWindowGeometry | undefined;
     const first = new ChatWindowStore({ onGeometryChange: (geometry) => (saved = geometry) });
     first.setWindowSize(512, 640);
@@ -151,7 +116,6 @@ describe('the host owns saved geometry', () => {
   });
 
   test('taking a saved value and non-geometry changes report nothing', () => {
-    viewport(1600, 1000);
     const reports: ChatWindowGeometry[] = [];
     const store = new ChatWindowStore({
       initialGeometry: { w: 500, h: 600, right: 40, bottom: 50 },
@@ -164,8 +128,17 @@ describe('the host owns saved geometry', () => {
     expect(reports).toEqual([]);
   });
 
+  test('a saved value taken while open tells listeners, so the window redraws', () => {
+    const store = new ChatWindowStore();
+    let heard = 0;
+    store.subscribe(() => {
+      heard += 1;
+    });
+    store.restore({ w: 510, h: 610, right: 41, bottom: 51 });
+    expect(heard).toBe(1);
+  });
+
   test('the store never touches storage', () => {
-    viewport(1600, 1000);
     let touched = 0;
     const trap = () =>
       new Proxy(
@@ -190,7 +163,6 @@ describe('the host owns saved geometry', () => {
     store.setWindowSize(520, 620);
     store.setWindowOffsets(60, 70);
     store.resetWindowDock();
-    store.clampToFrame(500, 500);
     store.setMinimized(true);
 
     expect(touched).toBe(0);
@@ -210,10 +182,33 @@ describe('open and minimized', () => {
     expect(order).toEqual(['open', 'listener']);
   });
 
-  test('fullscreen from minimized opens the window', () => {
-    const store = new ChatWindowStore();
+  test('fullscreen from minimized is an open like any other', () => {
+    const order: string[] = [];
+    const store = new ChatWindowStore({ onOpen: () => order.push('open') });
+    store.subscribe(() => order.push('listener'));
     store.toggleFullscreen();
     expect(store.fullscreen).toBe(true);
     expect(store.minimized).toBe(false);
+    expect(store.openedOnce).toBe(true);
+    expect(order).toEqual(['open', 'listener']);
+  });
+
+  test('summoned while it was left fullscreen, it stays fullscreen', () => {
+    const store = new ChatWindowStore();
+    store.toggleFullscreen();
+    store.setMinimized(true);
+    store.toggleFullscreen();
+    expect(store.fullscreen).toBe(true);
+    expect(store.minimized).toBe(false);
+  });
+
+  test('on an open window it toggles, and opens nothing', () => {
+    let opened = 0;
+    const store = new ChatWindowStore({ onOpen: () => (opened += 1) });
+    store.setMinimized(false);
+    store.toggleFullscreen();
+    store.toggleFullscreen();
+    expect(store.fullscreen).toBe(false);
+    expect(opened).toBe(1);
   });
 });

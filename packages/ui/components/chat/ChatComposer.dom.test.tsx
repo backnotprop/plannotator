@@ -1,6 +1,6 @@
 /**
- * The message box: controlled, sends on Enter, and keeps its Enter to itself,
- * so a page's own Mod+Enter cannot fire from inside it.
+ * The message box: controlled, sends on Enter, and keeps its Enter from bubbling
+ * to a page's own window or document listeners.
  * Requires DOM (DOM_TESTS=1).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -38,8 +38,9 @@ function composer(props: Partial<ChatComposerProps> = {}) {
 const field = () => document.querySelector('textarea')!;
 const button = (name: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 
-function keyDown(init: KeyboardEventInit) {
+function keyDown(init: KeyboardEventInit & { keyCode?: number }) {
   const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  if (init.keyCode !== undefined) Object.defineProperty(event, 'keyCode', { value: init.keyCode });
   act(() => {
     field().dispatchEvent(event);
   });
@@ -112,11 +113,33 @@ describe.if(hasDom)('the submit key stays in the box', () => {
     expect(heard).toEqual([]);
   });
 
+  test('Safari\'s Enter after a composition (keyCode 229, not composing) does not send', () => {
+    let sent = 0;
+    composer({ onSend: () => (sent += 1) });
+    const heard = listenAbove();
+    const event = keyDown({ key: 'Enter', keyCode: 229 });
+    expect(sent).toBe(0);
+    expect(event.defaultPrevented).toBe(false);
+    expect(heard).toEqual([]);
+  });
+
   test('other keys are the page\'s, so Escape can still reach it', () => {
     composer();
     const heard = listenAbove();
     keyDown({ key: 'Escape' });
     expect(heard).toEqual(['document', 'window']);
+  });
+
+  test('with sendOnEnter false, Enter is a new line and Mod+Enter still sends', () => {
+    let sent = 0;
+    composer({ onSend: () => (sent += 1), sendOnEnter: false });
+    const heard = listenAbove();
+    const plain = keyDown({ key: 'Enter' });
+    expect(sent).toBe(0);
+    expect(plain.defaultPrevented).toBe(false);
+    keyDown({ key: 'Enter', metaKey: true });
+    expect(sent).toBe(1);
+    expect(heard).toEqual([]);
   });
 
   test('a host that prevents Enter keeps it from sending', () => {

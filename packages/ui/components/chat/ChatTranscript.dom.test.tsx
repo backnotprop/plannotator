@@ -143,6 +143,34 @@ describe.if(hasDom)('a person\'s words', () => {
   });
 });
 
+describe.if(hasDom)('a DOM whose sanitizer does nothing', () => {
+  // happy-dom reports DOMPurify supported and lets scripts through, which is the
+  // case the sanitizer's own proof is there for.
+  test('agent text reaches the page as text, not as markup', () => {
+    const view = render({
+      messages: [say('1', 'assistant', '<img src=x onerror="alert(1)"><script>alert(2)</script>\n\n[x](javascript:alert(3))')],
+    });
+    expect(view.querySelector('img')).toBeNull();
+    expect(view.querySelector('script')).toBeNull();
+    expect(view.querySelector('a')).toBeNull();
+    expect(view.textContent).toContain('<script>alert(2)</script>');
+  });
+});
+
+describe.if(hasDom)('text that overflows the markdown step', () => {
+  test.each([
+    ['an agent', 'assistant'],
+    ['a person', 'user'],
+  ] as const)('from %s leaves the host\'s tree standing', (_who, role) => {
+    const view = render({
+      messages: [say('1', role, '> '.repeat(100_000)), say('2', 'user', 'still here')],
+      overlay: <div data-host-tree />,
+    });
+    expect(view.querySelector('[data-host-tree]')).not.toBeNull();
+    expect(view.textContent).toContain('still here');
+  });
+});
+
 describe.if(hasDom)('reduced motion', () => {
   const reduced = () => {
     window.matchMedia = ((query: string) => ({
@@ -228,6 +256,51 @@ describe.if(hasDom)('what a host can add', () => {
     expect(view.querySelector('[data-tool]')).not.toBeNull();
     expect(view.textContent).toContain('Words');
     expect(view.textContent).not.toContain('mystery');
+  });
+
+  test('renderPart is told which message and which part it is drawing', () => {
+    const seen: [string, number][] = [];
+    render({
+      messages: [{ id: 'm1', role: 'assistant', parts: [{ type: 'tool-read' }, { type: 'tool-write' }] }],
+      renderPart: (part, { message, index }) => {
+        seen.push([message.id, index]);
+        return <span>{part.type}</span>;
+      },
+    });
+    expect(seen).toEqual([
+      ['m1', 0],
+      ['m1', 1],
+    ]);
+  });
+
+  test('a host can redraw a text part as its own ChatMarkdown and paint into its root', () => {
+    const { ChatMarkdown } = transcriptModule!;
+    const ref = React.createRef<HTMLDivElement>();
+    const view = render({
+      messages: [say('m1', 'assistant', 'Words')],
+      renderPart: (part, { message, index }) => (
+        <ChatMarkdown
+          text={(part as unknown as { text: string }).text}
+          messageId={message.id}
+          role={message.role}
+          partIndex={index}
+          annotatable
+          rootRef={ref}
+        />
+      ),
+    });
+    const root = view.querySelector<HTMLElement>('[data-annotatable]')!;
+    expect(root.dataset.annotatable).toBe('true');
+    expect(ref.current).toBe(root as HTMLDivElement);
+    expect(root.dataset.messageId).toBe('m1');
+  });
+
+  test('a part says it is not annotatable when told so, and says nothing unasked', () => {
+    const { ChatMarkdown } = transcriptModule!;
+    const view = render({ empty: <ChatMarkdown text="Words" annotatable={false} /> });
+    expect(view.querySelector('[data-annotatable]')?.getAttribute('data-annotatable')).toBe('false');
+    render({ empty: <ChatMarkdown text="Words" /> });
+    expect(view.querySelector('[data-annotatable]')).toBeNull();
   });
 
   test('renderMessage draws a whole row between messages; null draws nothing', () => {

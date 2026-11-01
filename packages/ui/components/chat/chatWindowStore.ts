@@ -7,10 +7,15 @@
  * margins, anchored by its bottom-right offsets so the top-left resize grip
  * grows the window without moving its anchor.
  *
+ * The store holds what the person chose. What is drawn is `fitChatWindow` of
+ * that against the measured frame, worked out at render, so a frame that
+ * narrows for a moment changes the picture and never the choice.
+ *
  * Saved geometry belongs to the host. A saved value comes in through
- * `initialGeometry` (or `restore`), every change goes out through
- * `onGeometryChange`, and this module never reads or writes storage itself.
- * Minimized and fullscreen are runtime state: a page load starts minimized.
+ * `initialGeometry` (or `restore`), every change the person makes goes out
+ * through `onGeometryChange`, and this module never reads or writes storage
+ * itself. Minimized and fullscreen are runtime state: a page load starts
+ * minimized.
  */
 
 export const CHAT_WINDOW_DEFAULT = { width: 420, height: 560, right: 16, bottom: 16 } as const;
@@ -32,40 +37,51 @@ function clampDimension(value: unknown, min: number, max: number, fallback: numb
   return Math.min(max, Math.max(min, Math.round(value)));
 }
 
-function viewportLength(length: number | undefined, fallback: number): number {
-  return length !== undefined && Number.isFinite(length) && length > 0 ? length : fallback;
+/**
+ * A saved geometry made usable, with no regard to this screen: a corrupted
+ * value falls back and a size under the minimum is raised. A window sized on a
+ * big monitor keeps that size here, and `fitChatWindow` draws it to fit a
+ * laptop. Takes `unknown` because a saved value can be corrupted.
+ */
+function parseSavedGeometry(saved: unknown): ChatWindowGeometry {
+  const raw = (typeof saved === 'object' && saved !== null ? saved : {}) as Record<string, unknown>;
+  const limit = Number.POSITIVE_INFINITY;
+  return {
+    w: clampDimension(raw.w, CHAT_WINDOW_MIN.width, limit, CHAT_WINDOW_DEFAULT.width),
+    h: clampDimension(raw.h, CHAT_WINDOW_MIN.height, limit, CHAT_WINDOW_DEFAULT.height),
+    right: clampDimension(raw.right, 0, limit, CHAT_WINDOW_DEFAULT.right),
+    bottom: clampDimension(raw.bottom, 0, limit, CHAT_WINDOW_DEFAULT.bottom),
+  };
 }
 
 /**
- * A saved geometry, clamped to the current viewport: a window sized or parked
- * on a big monitor reopens sane on a laptop. The frame re-clamps against its
- * measured box once it mounts, so this only has to keep the value on screen.
- * Takes `unknown` because a saved value can be corrupted.
+ * What a chosen geometry draws as in a measured frame: as large as the frame
+ * minus its margins, never under the minimum, and never off the frame. This is
+ * for the picture only: its result is not a choice, so it is neither stored
+ * nor reported.
  */
-function clampSavedGeometry(saved: unknown): ChatWindowGeometry {
-  const raw = (typeof saved === 'object' && saved !== null ? saved : {}) as Record<string, unknown>;
-  const view = typeof window === 'undefined' ? undefined : window;
-  const viewportW = viewportLength(view?.innerWidth, CHAT_WINDOW_DEFAULT.width + CHAT_WINDOW_FRAME_MARGIN * 2);
-  const viewportH = viewportLength(view?.innerHeight, CHAT_WINDOW_DEFAULT.height + CHAT_WINDOW_FRAME_MARGIN * 2);
-  const maxW = Math.max(CHAT_WINDOW_MIN.width, viewportW - CHAT_WINDOW_FRAME_MARGIN * 2);
-  const maxH = Math.max(CHAT_WINDOW_MIN.height, viewportH - CHAT_WINDOW_FRAME_MARGIN * 2);
-  const w = clampDimension(raw.w, CHAT_WINDOW_MIN.width, maxW, CHAT_WINDOW_DEFAULT.width);
-  const h = clampDimension(raw.h, CHAT_WINDOW_MIN.height, maxH, CHAT_WINDOW_DEFAULT.height);
+export function fitChatWindow(
+  wanted: ChatWindowGeometry,
+  frame: { readonly width: number; readonly height: number },
+): ChatWindowGeometry {
+  const w = Math.min(wanted.w, Math.max(CHAT_WINDOW_MIN.width, frame.width - CHAT_WINDOW_FRAME_MARGIN * 2));
+  const h = Math.min(wanted.h, Math.max(CHAT_WINDOW_MIN.height, frame.height - CHAT_WINDOW_FRAME_MARGIN * 2));
   return {
     w,
     h,
-    right: clampDimension(raw.right, 0, Math.max(0, viewportW - w), CHAT_WINDOW_DEFAULT.right),
-    bottom: clampDimension(raw.bottom, 0, Math.max(0, viewportH - h), CHAT_WINDOW_DEFAULT.bottom),
+    right: Math.max(0, Math.min(wanted.right, frame.width - w)),
+    bottom: Math.max(0, Math.min(wanted.bottom, frame.height - h)),
   };
 }
 
 export interface ChatWindowStoreOptions {
-  /** The host's saved geometry, clamped on the way in. Absent: the default dock. */
+  /** The host's saved geometry. Absent: the default dock. */
   readonly initialGeometry?: unknown;
-  /** Runs on every geometry change, drag and resize steps included, so a host
-   * that saves it should debounce. Not called for `initialGeometry` or `restore`. */
+  /** Runs on every change the person makes, drag and resize steps included, so
+   * a host that saves it should debounce and flush on unload. Not called for
+   * `initialGeometry`, for `restore`, or when the frame changes size. */
   readonly onGeometryChange?: (geometry: ChatWindowGeometry) => void;
-  /** Runs on every `setMinimized(false)`, before listeners hear of it. */
+  /** Runs whenever a minimized window opens, before listeners hear of it. */
   readonly onOpen?: () => void;
 }
 
@@ -119,32 +135,43 @@ export class ChatWindowStore {
     this.onGeometryChange?.(next);
   }
 
-  /** Take a saved geometry, clamped. No emit and no report: the value is the host's own. */
+  /** Take a saved geometry. An open window redraws; no report, because the
+   * value is the host's own. */
   restore(saved: unknown): void {
-    const restored = clampSavedGeometry(saved);
+    const restored = parseSavedGeometry(saved);
     this.winW = restored.w;
     this.winH = restored.h;
     this.winRight = restored.right;
     this.winBottom = restored.bottom;
+    this.emit();
   }
 
-  /** The current geometry, in the shape `initialGeometry` takes back. */
+  /** The chosen geometry, in the shape `initialGeometry` takes back. */
   geometry(): ChatWindowGeometry {
     return { w: this.winW, h: this.winH, right: this.winRight, bottom: this.winBottom };
   }
 
+  private open(): void {
+    this.minimized = false;
+    this.openedOnce = true;
+    this.onOpen?.();
+  }
+
   setMinimized(minimized: boolean): void {
-    this.minimized = minimized;
-    if (!minimized) {
-      this.openedOnce = true;
-      this.onOpen?.();
-    }
+    if (minimized) this.minimized = true;
+    else this.open();
     this.emit();
   }
 
+  /** The toggle, on an open window. On a minimized one this is the summon into
+   * fullscreen, so it always lands fullscreen. */
   toggleFullscreen(): void {
-    this.fullscreen = !this.fullscreen;
-    if (this.minimized) this.minimized = false;
+    if (this.minimized) {
+      this.fullscreen = true;
+      this.open();
+    } else {
+      this.fullscreen = !this.fullscreen;
+    }
     this.emit();
   }
 
@@ -164,26 +191,6 @@ export class ChatWindowStore {
       ...this.geometry(),
       right: CHAT_WINDOW_DEFAULT.right,
       bottom: CHAT_WINDOW_DEFAULT.bottom,
-    });
-  }
-
-  /** Re-clamp against the measured frame, on mount and whenever the frame
-   * shrinks, so the floating window never strands off the visible frame. */
-  clampToFrame(frameWidth: number, frameHeight: number): void {
-    if (frameWidth <= 0 || frameHeight <= 0) return;
-    const w = Math.min(
-      this.winW,
-      Math.max(CHAT_WINDOW_MIN.width, frameWidth - CHAT_WINDOW_FRAME_MARGIN * 2),
-    );
-    const h = Math.min(
-      this.winH,
-      Math.max(CHAT_WINDOW_MIN.height, frameHeight - CHAT_WINDOW_FRAME_MARGIN * 2),
-    );
-    this.commitGeometry({
-      w,
-      h,
-      right: Math.max(0, Math.min(this.winRight, frameWidth - w)),
-      bottom: Math.max(0, Math.min(this.winBottom, frameHeight - h)),
     });
   }
 }

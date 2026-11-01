@@ -41,6 +41,7 @@
     "components/AnnotationPanel.tsx",
     "components/HtmlSurfaceControls.tsx",
     "components/html-viewer/index.ts",
+    "components/chat/index.ts",
     "hooks/useHtmlRefresh.ts",
     "shortcuts/index.ts",
     "utils/inputMethod.ts",

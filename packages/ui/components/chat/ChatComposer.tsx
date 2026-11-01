@@ -2,6 +2,7 @@ import { Send, Square } from 'lucide-react';
 import type * as React from 'react';
 
 import { cn } from '../../lib/utils';
+import { isImeCompositionKey } from '../../utils/commentSubmitKey';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { CHAT_SEND_BUTTON, CHAT_STOP_BUTTON, FOCUS_RING } from './chatRecipes';
@@ -16,11 +17,16 @@ export const CHAT_COMPOSER_FIELD_BOX =
   'rounded-md border px-3 py-2 text-base md:text-sm [scrollbar-gutter:stable]';
 
 export interface ChatComposerProps {
-  /** The field's text. The composer is controlled: it holds none itself. */
+  /** The field's text. The composer is controlled: it holds none itself, so
+   * `onChange` must set this in the same tick or typing and IME input are lost. */
   readonly value: string;
   readonly onChange: (value: string) => void;
-  /** Enter in the field, Mod+Enter included, and the Send button. */
+  /** Enter in the field, Mod+Enter included, and the Send button. It runs even
+   * while `busy` or with an empty box, so a host decides what those mean. */
   readonly onSend: () => void;
+  /** False: plain Enter is a new line and Mod+Enter or the button sends. For a
+   * touch keyboard, which has no Shift to make a new line with. */
+  readonly sendOnEnter?: boolean;
   /** Stop, while `busy`. */
   readonly onStop?: () => void;
   /** A reply is running: the Send button becomes Stop. */
@@ -67,6 +73,7 @@ export function ChatComposer({
   value,
   onChange,
   onSend,
+  sendOnEnter = true,
   onStop,
   busy = false,
   disabled,
@@ -134,15 +141,19 @@ export function ChatComposer({
             if (text !== '' && onPasteText?.(text) === true) event.preventDefault();
           }}
           onKeyDown={(event) => {
-            // Enter never leaves the box, whatever chord it is in, so a page's
-            // own Mod+Enter (a Send elsewhere on the page) cannot fire from here.
+            // Enter, in any chord, does not bubble past the React root, so a
+            // bubble listener on window or document (a Send elsewhere on the
+            // page) does not hear it. Capture listeners and native listeners on
+            // the box's ancestors still do, and keyup is not stopped.
             const enter = event.key === 'Enter';
             if (enter) event.stopPropagation();
-            if (event.nativeEvent.isComposing) return;
+            // Safari's Enter that commits a composition has isComposing false
+            // and keyCode 229; this checks both.
+            if (isImeCompositionKey(event)) return;
             onKeyDown?.(event);
             if (!enter || event.defaultPrevented) return;
             const mod = event.metaKey || event.ctrlKey;
-            if (event.shiftKey && !mod) return; // a new line
+            if (!mod && (event.shiftKey || !sendOnEnter)) return; // a new line
             event.preventDefault();
             if (!event.shiftKey) onSend();
           }}

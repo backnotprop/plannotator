@@ -79,6 +79,8 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   messageId,
   role,
   partIndex,
+  annotatable,
+  rootRef,
 }: {
   text: string;
   /** Still receiving deltas: under reduced motion the paint holds at the last
@@ -91,6 +93,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   messageId?: string;
   role?: ChatMessageRole;
   partIndex?: number;
+  /** Written as `data-annotatable="true"` or `"false"`, for a host's selection
+   * work. Message text cannot write this attribute itself. */
+  annotatable?: boolean;
+  /** The part's root, for a host painting into its DOM. Keep it stable. The
+   * text repaints when it changes, so repaint after that. */
+  rootRef?: React.Ref<HTMLDivElement>;
 }) {
   const reducedMotion = usePrefersReducedMotion();
   const shown = streaming && reducedMotion ? clipAtSentenceBoundary(text) : text;
@@ -103,11 +111,13 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   const inner = useMemo(() => ({ __html: html }), [html]);
   return (
     <div
+      ref={rootRef}
       className={BODY_PROSE}
       data-text-part={messageId === undefined ? undefined : ''}
       data-message-id={messageId}
       data-message-role={role}
       data-part-index={partIndex}
+      data-annotatable={annotatable === undefined ? undefined : String(annotatable)}
       dangerouslySetInnerHTML={inner}
     />
   );
@@ -142,6 +152,12 @@ export function ChatPendingTurn({
   );
 }
 
+/** Where a part sits, for a host drawing it: which message, and which part of it. */
+export interface ChatPartContext<Part extends ChatMessagePart = ChatMessagePart> {
+  readonly message: ChatMessage<Part>;
+  readonly index: number;
+}
+
 /** One message: its name row, then its parts. */
 export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>({
   message,
@@ -166,7 +182,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   /** Indent the parts under the name, past a mark. */
   indentContent?: boolean;
   /** Draw a part. `undefined` falls through: text as markdown, anything else as nothing. */
-  renderPart?: (part: Part) => React.ReactNode | undefined;
+  renderPart?: (part: Part, context: ChatPartContext<Part>) => React.ReactNode | undefined;
   /** Under the parts. */
   footer?: React.ReactNode;
 }) {
@@ -184,7 +200,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
       </div>
       <div className={cn('flex min-w-0 flex-col gap-2', indentContent && 'pl-7')}>
         {message.parts.map((part, index) => {
-          const custom = renderPart?.(part);
+          const custom = renderPart?.(part, { message, index });
           if (custom !== undefined) return <div key={index}>{custom}</div>;
           if (!isTextPart(part)) return null;
           return (
@@ -232,8 +248,9 @@ export interface ChatTranscriptProps<Part extends ChatMessagePart = ChatMessageP
   /** The line held while the reply has no parts yet. `false` hides it, for a
    * host that says so in `statusLine`. */
   readonly pending?: React.ReactNode | false;
-  /** Draw a part. `undefined` falls through to the transcript's own drawing. */
-  readonly renderPart?: (part: Part) => React.ReactNode | undefined;
+  /** Draw a part. `undefined` falls through to the transcript's own drawing. To
+   * paint into a text part, return a `ChatMarkdown` of your own. */
+  readonly renderPart?: (part: Part, context: ChatPartContext<Part>) => React.ReactNode | undefined;
   /** Draw a whole row. `undefined` falls through; `null` draws nothing. */
   readonly renderMessage?: (message: ChatMessage<Part>, index: number) => React.ReactNode | undefined;
   /** Under a message's parts. */

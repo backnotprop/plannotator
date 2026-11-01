@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import type { ChatFrameProps } from './ChatFrame';
 import type { ChatWindowStore as Store } from './chatWindowStore';
@@ -66,9 +67,16 @@ function press(el: Element, init: KeyboardEventInit) {
   });
 }
 
-function pointer(el: Element, type: string, clientX: number, clientY: number) {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
-  Object.defineProperty(event, 'pointerId', { value: 1 });
+function pointer(
+  el: Element,
+  type: string,
+  clientX: number,
+  clientY: number,
+  { button = 0, pointerId = 1, isPrimary = true, ctrlKey = false } = {},
+) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY, button, ctrlKey });
+  Object.defineProperty(event, 'pointerId', { value: pointerId });
+  Object.defineProperty(event, 'isPrimary', { value: isPrimary });
   act(() => {
     el.dispatchEvent(event);
   });
@@ -125,6 +133,49 @@ describe.if(hasDom)('window limits', () => {
     expect([store.winRight, store.winBottom]).toEqual([16, 16]);
   });
 
+  test.each([
+    ['the right button', { button: 2 }],
+    ['the middle button', { button: 1 }],
+    ['a Ctrl+press, the context menu on a Mac', { ctrlKey: true }],
+    ['a second finger', { isPrimary: false }],
+  ])('%s moves and resizes nothing', (_name, press) => {
+    const store = openStore();
+    mount(store);
+    for (const target of [handle()!, grip()!]) {
+      capturable(target);
+      pointer(target, 'pointerdown', 500, 500, press);
+      pointer(target, 'pointermove', 400, 400, press);
+      pointer(target, 'pointerup', 400, 400, press);
+    }
+    expect(store.geometry()).toEqual({ w: 420, h: 560, right: 16, bottom: 16 });
+  });
+
+  test('a drag follows the pointer that started it, not a second one', () => {
+    const store = openStore();
+    mount(store);
+    const row = handle()!;
+    capturable(row);
+    pointer(row, 'pointerdown', 500, 500);
+    pointer(row, 'pointermove', 100, 100, { pointerId: 2 });
+    expect([store.winRight, store.winBottom]).toEqual([16, 16]);
+    pointer(row, 'pointerup', 100, 100, { pointerId: 2 });
+    pointer(row, 'pointermove', 490, 490);
+    expect([store.winRight, store.winBottom]).toEqual([26, 26]);
+    pointer(row, 'pointerup', 490, 490);
+    pointer(row, 'pointermove', 400, 400);
+    expect([store.winRight, store.winBottom]).toEqual([26, 26]);
+  });
+
+  test('a link in the header keeps its own press', () => {
+    const store = openStore();
+    mount(store, { header: () => <a href="#tab" data-link>Tab</a> });
+    const link = document.querySelector<HTMLElement>('[data-link]')!;
+    capturable(handle()!);
+    pointer(link, 'pointerdown', 500, 500);
+    pointer(handle()!, 'pointermove', 400, 400);
+    expect([store.winRight, store.winBottom]).toEqual([16, 16]);
+  });
+
   test('the grip resizes from the keyboard, clamped like the drag', () => {
     const store = openStore();
     mount(store);
@@ -151,15 +202,133 @@ describe.if(hasDom)('window limits', () => {
     expect([store.winRight, store.winBottom]).toEqual([16, 16]);
   });
 
-  test('a frame that measures smaller on mount clamps the saved geometry', () => {
+  test('Home from a corner keeps the window, its grip and its handle on the frame', () => {
+    const store = openStore({ initialGeometry: { w: 360, h: 420, right: 640, bottom: 280 } });
+    mount(store, {}, sizedFrame(1000, 700));
+    press(grip()!, { key: 'Home' });
+    const { width, height, right, bottom } = win()!.style;
+    expect([width, height]).toEqual(['420px', '560px']);
+    expect(parseInt(right, 10) + parseInt(width, 10)).toBeLessThanOrEqual(1000);
+    expect(parseInt(bottom, 10) + parseInt(height, 10)).toBeLessThanOrEqual(700);
+  });
+
+  test('a re-dock on a frame shorter than the window keeps the handle on it', () => {
+    const store = openStore({ initialGeometry: { w: 420, h: 420, right: 100, bottom: 0 } });
+    mount(store, {}, sizedFrame(1000, 400));
+    act(() => {
+      handle()!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    expect(win()!.style.bottom).toBe('0px');
+  });
+});
+
+describe.if(hasDom)('a frame that changes size changes the picture, not the choice', () => {
+  /** A frame the test can resize, telling the window as a real one would. */
+  function resizableFrame(width: number, height: number) {
+    const frame = sizedFrame(width, height);
+    let tell = () => {};
     globalThis.ResizeObserver = class {
+      constructor(callback: () => void) {
+        tell = callback;
+      }
       observe() {}
       unobserve() {}
       disconnect() {}
     } as unknown as typeof ResizeObserver;
-    const store = openStore({ initialGeometry: { w: 900, h: 700, right: 300, bottom: 200 } });
-    mount(store, {}, sizedFrame(800, 600));
-    expect(store.geometry()).toEqual({ w: 768, h: 568, right: 32, bottom: 32 });
+    const resize = (nextWidth: number, nextHeight: number) => {
+      Object.defineProperty(frame, 'clientWidth', { configurable: true, value: nextWidth });
+      Object.defineProperty(frame, 'clientHeight', { configurable: true, value: nextHeight });
+      act(() => tell());
+    };
+    return { frame, resize };
+  }
+
+  const big = { w: 800, h: 700, right: 500, bottom: 100 };
+
+  function floating(reports: unknown[]) {
+    return openStore({ initialGeometry: big, onGeometryChange: (geometry) => reports.push(geometry) });
+  }
+
+  test('a saved window opening in a smaller frame draws fitted and stays as saved', () => {
+    const reports: unknown[] = [];
+    const store = floating(reports);
+    mount(store, {}, resizableFrame(700, 500).frame);
+    expect(win()!.style.width).toBe('668px');
+    expect(win()!.style.height).toBe('468px');
+    expect(win()!.style.right).toBe('32px');
+    expect(store.geometry()).toEqual(big);
+    expect(reports).toEqual([]);
+  });
+
+  test('a brief narrow frame leaves the size the person chose, and tells nobody', () => {
+    const reports: unknown[] = [];
+    const store = floating(reports);
+    const { frame, resize } = resizableFrame(1400, 900);
+    mount(store, {}, frame);
+    expect(win()!.style.width).toBe('800px');
+
+    resize(340, 900);
+    expect(win()!.className).toContain('inset-0');
+    expect(store.geometry()).toEqual(big);
+
+    resize(1400, 900);
+    expect(win()!.className).not.toContain('inset-0');
+    expect(win()!.style.width).toBe('800px');
+    expect(win()!.style.right).toBe('500px');
+    expect(reports).toEqual([]);
+  });
+
+  test('a frame that shrinks and grows back draws the same window again', () => {
+    const reports: unknown[] = [];
+    const store = floating(reports);
+    const { frame, resize } = resizableFrame(1400, 900);
+    mount(store, {}, frame);
+    resize(700, 500);
+    expect(win()!.style.width).toBe('668px');
+    resize(1400, 900);
+    expect(win()!.style.width).toBe('800px');
+    expect(win()!.style.height).toBe('700px');
+    expect(reports).toEqual([]);
+  });
+
+  test('a frame that cannot be measured keeps the last choice as drawn', () => {
+    const store = floating([]);
+    const { frame, resize } = resizableFrame(1400, 900);
+    mount(store, {}, frame);
+    resize(0, 0);
+    expect(win()!.className).not.toContain('inset-0');
+    expect(win()!.style.width).toBe('800px');
+  });
+
+  test('moving a fitted window saves the move and leaves the chosen size', () => {
+    const reports: unknown[] = [];
+    const store = floating(reports);
+    mount(store, {}, resizableFrame(700, 500).frame);
+    drag(handle()!, [300, 300], [310, 320]);
+    expect(reports.at(-1)).toEqual({ w: 800, h: 700, right: 22, bottom: 12 });
+  });
+
+  test('a move along one axis leaves the other where the person chose', () => {
+    const reports: unknown[] = [];
+    const store = floating(reports);
+    mount(store, {}, resizableFrame(700, 500).frame);
+    drag(handle()!, [300, 300], [300, 310]);
+    expect(reports.at(-1)).toEqual({ w: 800, h: 700, right: 500, bottom: 22 });
+  });
+
+  test('resizing a fitted window along one axis leaves the other as chosen', () => {
+    const reports: unknown[] = [];
+    const store = floating(reports);
+    mount(store, {}, resizableFrame(700, 500).frame);
+    press(grip()!, { key: 'ArrowRight' });
+    expect(reports).toEqual([{ w: 652, h: 700, right: 500, bottom: 100 }]);
+  });
+
+  test('a saved value taken while open redraws at once', () => {
+    const store = openStore();
+    mount(store);
+    act(() => store.restore({ w: 500, h: 500, right: 40, bottom: 40 }));
+    expect(win()!.style.width).toBe('500px');
   });
 });
 
@@ -192,6 +361,13 @@ describe.if(hasDom)('forced fullscreen on a narrow frame', () => {
     mount(store, {}, sizedFrame(360 + 16 * 2, 800));
     expect(win()!.className).not.toContain('inset-0');
     expect(button('Fullscreen')).not.toBeNull();
+  });
+
+  test('a narrow parent with no height of its own still forces it', () => {
+    observing();
+    const store = openStore();
+    mount(store, {}, sizedFrame(390, 0));
+    expect(win()!.className).toContain('inset-0');
   });
 
   test('allowFullscreen false still forces it, because floating cannot work there', () => {
@@ -259,6 +435,26 @@ describe.if(hasDom)('minimize and close are the host\'s to hear', () => {
     act(() => button('Close')!.click());
     expect(closed).toBe(1);
     expect(store.minimized).toBe(false);
+  });
+
+  test('a double-click in a menu portaled out of the header does not re-dock', () => {
+    const store = openStore();
+    act(() => store.setWindowOffsets(200, 100));
+    mount(store, {
+      header: () => createPortal(<div role="menuitem" data-portaled />, document.body),
+    });
+    const row = document.querySelector('[data-portaled]')!;
+    act(() => {
+      row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    expect([store.winRight, store.winBottom]).toEqual([200, 100]);
+  });
+
+  test('a host\'s data attributes reach the root', () => {
+    const store = openStore();
+    mount(store, { rootProps: { 'data-host-window': '', 'data-drop-active': 'true' } });
+    expect(win()!.hasAttribute('data-host-window')).toBe(true);
+    expect(win()!.getAttribute('data-drop-active')).toBe('true');
   });
 
   test('the slots receive what the frame knows', () => {
@@ -358,6 +554,23 @@ describe.if(hasDom)('focus return', () => {
     expect(document.activeElement).toBe(document.querySelector('[data-chat-launcher]'));
   });
 
+  test('focus in a field outside the window stays there', async () => {
+    const store = openStore();
+    host = sizedFrame(1200, 800);
+    root = createRoot(host);
+    act(() => root!.render(<HostWithLauncher store={store} />));
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+    field.focus();
+
+    act(() => store.setMinimized(true));
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    expect(document.activeElement).toBe(field);
+    field.remove();
+  });
+
   test('opening does not pull focus to the launcher; an unmount cancels the return', async () => {
     const store = openStore();
     host = sizedFrame(1200, 800);
@@ -442,16 +655,28 @@ describe.if(hasDom)('the keyboard map is the host\'s to opt into', () => {
     });
     expect(store.minimized).toBe(false);
   });
-});
 
-describe.if(hasDom)('neutral attributes', () => {
-  test('the window carries data-chat-* names and no assistant wording', () => {
+  test('Shift+Mod+J from minimized opens through onOpen', () => {
+    let opened = 0;
+    const store = new storeModule!.ChatWindowStore({ onOpen: () => (opened += 1) });
+    mountKeys({ store });
+    press(document.body, { key: 'J', shiftKey: true, ...mod });
+    expect(store.minimized).toBe(false);
+    expect(store.fullscreen).toBe(true);
+    expect(opened).toBe(1);
+  });
+
+  test.each([
+    ['a composing Escape', { isComposing: true }],
+    ['Safari\'s keyCode 229', { keyCode: 229 }],
+  ])('%s belongs to the input method and leaves the window open', (_name, init) => {
     const store = openStore();
-    mount(store);
-    const html = win()!.outerHTML;
-    expect(html).toContain('data-chat-window');
-    expect(html).toContain('data-chat-resize-grip');
-    expect(html).toContain('data-chat-drag-handle');
-    expect(html.toLowerCase()).not.toContain('assistant');
+    mountKeys({ store });
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });
+    if ('keyCode' in init) Object.defineProperty(event, 'keyCode', { value: init.keyCode });
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+    expect(store.minimized).toBe(false);
   });
 });

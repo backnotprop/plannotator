@@ -63,6 +63,7 @@ export {
   type ChatMessage,
   type ChatMessagePart,
   type ChatMessageRole,
+  type ChatPartContext,
   type ChatStatus,
   type ChatTextPart,
   type ChatTranscriptProps,
