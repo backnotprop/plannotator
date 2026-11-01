@@ -5387,6 +5387,15 @@ export class InboxStore {
     return out;
   }
 
+  /** The sessions of `host` with a message of their own that wakes. A person's message or tag only names a session, however it runs. */
+  sessionsThatWoke(host: string): Set<string> {
+    const out = new Set<string>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "agent" && message.wakes === true && message.author.host === host && message.author.session) out.add(message.author.session);
+    }
+    return out;
+  }
+
   /** The thread each agent session last wrote in (any project): compose's "Last: <subject>". */
   lastThreadsBySession(): Map<string, { id: string; subject: string | null; at: string; project_id: string }> {
     const latest = new Map<string, { message: InboxMessage; seq: number }>();
