@@ -276,6 +276,14 @@ async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   }
 }
 
+/** The debug log is decided at start, so the variable cannot reach an Inbox that is already up: say so, on stderr. */
+async function reportDebugNeedsStart(dataDir: string): Promise<void> {
+  if (process.env.PLANNOTATOR_INBOX_DEBUG !== "1") return;
+  const status = await inboxStatus(dataDir);
+  if (status.state !== "running" && status.state !== "busy") return;
+  process.stderr.write("PLANNOTATOR_INBOX_DEBUG is read at start, so it does nothing for the Inbox already running. Run plannotator inbox stop first, or set inboxDebug: true in config.json and Restart.\n");
+}
+
 /** Run the Inbox server in this process until a signal or the stop route ends it. */
 async function serveInbox(dataDir: string, open: boolean, htmlContent: string | undefined, tailscale: boolean, connect: boolean): Promise<never> {
   // A detached Inbox runs under its starter's lock; anyone else takes it, so
@@ -684,6 +692,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   if (open && (background || noOpen)) {
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
   }
+
+  await reportDebugNeedsStart(dataDir);
 
   if (background || open) {
     try {
