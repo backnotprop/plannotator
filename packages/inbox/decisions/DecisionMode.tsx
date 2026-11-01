@@ -19,7 +19,7 @@ import { createPortal } from 'react-dom';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import type { InboxDecision, InboxListRow, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import { InboxApiError, inboxApi } from '../api';
+import { InboxApiError, READ_TIMEOUT_MS, SEND_STEP_TIMEOUT_MS, inboxApi, within, writeFailureText } from '../api';
 import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTargets';
 import { agentName, formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -480,13 +480,13 @@ export function DecisionMode(props: DecisionModeProps) {
     const before = sendsRef.current.get(key) ?? { kind: 'waiting' as const };
     setSend(key, { kind: 'sending' });
     try {
-      await pickChain.current;
+      await within(pickChain.current, SEND_STEP_TIMEOUT_MS);
       // A thread whose reply goes from the thread (a reply draft, comments waiting): never from here. Both are
       // read fresh (the draft, and the thread's own row for its comments); a read that fails sends nothing.
       let draft: { draft: unknown };
       let model: Awaited<ReturnType<typeof inboxApi.thread>>;
       try {
-        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id), inboxApi.thread(first.thread.id)]);
+        [draft, model] = await Promise.all([inboxApi.replyDraft(first.thread.id, READ_TIMEOUT_MS), inboxApi.thread(first.thread.id, READ_TIMEOUT_MS)]);
       } catch {
         setSend(key, { kind: 'failed', error: "Couldn't check the thread for a draft reply, so nothing was sent." });
         return 'failed';
@@ -536,7 +536,7 @@ export function DecisionMode(props: DecisionModeProps) {
       props.refresh();
       return 'sent';
     } catch (cause) {
-      setSend(key, { kind: 'failed', error: cause instanceof InboxApiError ? cause.message : 'The reply was not sent.' });
+      setSend(key, { kind: 'failed', error: writeFailureText(cause, 'The reply was not sent.', 'The reply may not have gone. Send again: it is not sent twice.') });
       props.refresh();
       return 'failed';
     }
