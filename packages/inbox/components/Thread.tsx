@@ -374,6 +374,8 @@ export function MessageBody({
     onPainted?: () => void;
     /** Words the comment box opens with for this selection (the tour's suggested comment); absent: an empty box. */
     suggest?: (selectedText: string) => string | undefined;
+    /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
+    revealed?: string | null;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -802,7 +804,7 @@ export function MessageBody({
         annotations={commentList}
         onAddAnnotation={comments ? addComment : noop}
         onSelectAnnotation={comments ? selectComment : noop}
-        selectedAnnotationId={comments ? selectedComment : null}
+        selectedAnnotationId={comments ? (comments.revealed ?? selectedComment) : null}
         textComments={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
@@ -1798,6 +1800,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, [records]);
   /** Comments whose words were not found in their message (the reply box's list marks them). */
   const [unanchoredComments, setUnanchoredComments] = useState<ReadonlySet<string>>(NO_IDS);
+  const [revealedComment, setRevealedComment] = useState<string | null>(null);
   const noteUnanchored = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => {
     setUnanchoredComments((current) => {
       const next = new Set(current);
@@ -1968,17 +1971,21 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       stopHold();
       const show = () => {
         stopHold();
-        const mark = bodyRef.current?.querySelector<HTMLElement>(
-          `[data-message-id="${CSS.escape(record.message_id)}"] [data-bind-id="${CSS.escape(record.id)}"], [data-message-id="${CSS.escape(record.message_id)}"] [data-highlight-id="${CSS.escape(record.id)}"]`,
-        );
-        const target = mark ?? articleOf(record.message_id);
+        const inMessage = `[data-message-id="${CSS.escape(record.message_id)}"]`;
+        const id = CSS.escape(record.id);
+        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"]`);
+        // A comment on a diagram part: the diagram is rung, and its own selection brings the part into view.
+        const onDiagram = annotationOf(record).diagramAnchor != null;
+        const target = mark?.closest<HTMLElement>('[data-diagram-block]') ?? mark ?? articleOf(record.message_id);
         if (!target) return;
         target.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
         target.classList.remove('ib-q-target-out');
         target.classList.add('ib-q-target');
+        if (onDiagram) setRevealedComment(record.id);
         setTimeout(() => {
           target.classList.add('ib-q-target-out');
           target.classList.remove('ib-q-target');
+          if (onDiagram) setRevealedComment((current) => (current === record.id ? null : current));
           setTimeout(() => target.classList.remove('ib-q-target-out'), 700);
         }, 1400);
       };
@@ -4681,6 +4688,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                           onSave: (annotation) => saveMessageComment(message.id, annotation),
                           onUnanchored: noteUnanchored,
                           onPainted: () => repaintHits(message.id),
+                          revealed: revealedComment,
                         }
                       : undefined
                   }

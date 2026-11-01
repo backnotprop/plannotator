@@ -58,12 +58,13 @@ export function hasCommandModifier(event: KeyboardEvent): boolean {
 
 /**
  * A modal over the window keeps its keys: the Inbox's dialogs (update, sound,
- * agent note, search, compose: `<dialog open>`) and the image annotator's
- * stage (Mark up).
+ * agent note, search, compose: `<dialog open>`), the image annotator's stage
+ * (Mark up), and a diagram's or table's full-screen popout (`[data-popout]`):
+ * a comment saved in one leaves focus on the page, under the popout.
  */
 export function modalOpen(doc: Document | null = typeof document === 'undefined' ? null : document): boolean {
   if (!doc) return false;
-  return doc.querySelector('dialog[open], [data-pn-image-annotator-stage]') !== null;
+  return doc.querySelector('dialog[open], [data-pn-image-annotator-stage], [data-popout]') !== null;
 }
 
 /** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. */

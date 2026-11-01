@@ -108,6 +108,7 @@ import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { sanitizeTag } from "@plannotator/core/project";
+import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
   INBOX_ANNOTATION_CURRENT,
   INBOX_MESSAGE_COMMENT_QUOTE_MAX,
@@ -4313,8 +4314,10 @@ export class InboxStore {
    * Save a comment on the text of an agent's message (a new one, or an edit
    * of one still waiting; approval "inbox-message-comments", 2026-10-19):
    * Plannotator's text-selection annotation, `originalText` the exact words
-   * the person selected. Only an agent's message takes one, and only while it
-   * can be answered (an archive closes the messages before its line). The
+   * the person selected, or a comment on a rendered diagram part, with
+   * `diagramAnchor` and the part's label as `originalText`. Only an agent's
+   * message takes one, and only while it can be answered (an archive closes
+   * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
    * `message` names it. Sent with the reply like an attachment's annotation.
    */
@@ -4346,6 +4349,10 @@ export class InboxStore {
       const value = fields[field];
       if (value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)) throw new InboxError("validation_error", `annotation.${field}: a comment on a message's text takes none.`, { field: `annotation.${field}` });
     }
+    // A comment on a part of a diagram in the message: the part's label is its "words", and the anchor names the part.
+    // The same fail-closed parser as the external-annotations route: what the window and the export read is what is stored.
+    const diagramAnchor = fields.diagramAnchor === undefined ? undefined : parseDiagramAnchor(fields.diagramAnchor);
+    if (diagramAnchor === null) throw new InboxError("validation_error", "annotation.diagramAnchor: { v: 1, family, kind, id | from + to, label, sourceLine }.", { field: "annotation.diagramAnchor" });
     if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const existing = this.annotations.get(id);
     if (existing && (!existing.message || existing.message_id !== message.id)) {
@@ -4364,7 +4371,7 @@ export class InboxStore {
       path: message.id,
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
-      annotation: withoutExportLocation(fields),
+      annotation: { ...withoutExportLocation(fields), ...(diagramAnchor ? { diagramAnchor } : {}) },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
