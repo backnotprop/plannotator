@@ -298,6 +298,16 @@ export function inboxSessionDirOf(dataDir: string, sessionId: string): string {
   return `${dataDir}/claude-code-mod/${sessionId}/inbox`
 }
 
+/**
+ * What a classic SessionStart or UserPromptSubmit input says about the session's
+ * title (`session_title`, which `session.start` and `prompt.submit` do not
+ * carry): the title, '' for an empty one, or null when it says nothing (an
+ * engine older than the field, no title yet, a subagent's event).
+ */
+export function inboxSessionTitleOf(input: { session_title?: unknown; agent_id?: unknown }): string | null {
+  return typeof input.session_title === 'string' && !input.agent_id ? input.session_title : null
+}
+
 /** Exit codes of `INBOX_CLAIM_SCRIPT`. */
 export const INBOX_CLAIM_EXIT = { won: 0, lost: 3, failed: 4 } as const
 
@@ -451,6 +461,12 @@ export interface InboxLinkOptions {
    * INBOX_PROJECT_FOLLOWS_SLASH_CD.
    */
   root?: () => Promise<string>
+  /**
+   * The session's title as the engine last told a hook (`inboxSessionTitleOf`),
+   * read for every poll, so a later hook call updates what the Inbox shows.
+   * Set by the host, never by the model: it is no tool argument. Absent: no `label`.
+   */
+  label?: () => string
   /** Names this process in the lease and the claims. */
   instanceId: string
 }
@@ -849,6 +865,8 @@ export class InboxLink {
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       ...(project ? { project_path: project } : {}),
+      // The session's title (additive): the To picker's name for it; empty clears it.
+      ...(this.options.label ? { label: this.options.label() } : {}),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).

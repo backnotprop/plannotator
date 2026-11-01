@@ -83,6 +83,7 @@ import {
   inboxRegistryPathOf,
   inboxReminderEnvValue,
   inboxReminderWithThreads,
+  inboxSessionTitleOf,
   pluginVersionOf,
   readReminderSessions,
   readSessionThreads,
@@ -424,6 +425,25 @@ async function inboxProjectFolderOf($: Engine, fallback?: string): Promise<strin
 }
 
 /**
+ * The session's title for the Inbox's To picker, as the engine last told a
+ * hook. Only the classic SessionStart and UserPromptSubmit inputs carry it, and
+ * they can come before the instance exists (the engine raises a session's first
+ * events before session.start finishes, and session.start does not fire at all
+ * for `/clear` or an in-process resume), so it is kept here with its session's id.
+ */
+let sessionTitle: { session: string; title: string } | null = null
+
+function noteSessionTitle(e: { session_id?: unknown; session_title?: unknown; agent_id?: unknown }): void {
+  const title = inboxSessionTitleOf(e)
+  if (title !== null && typeof e.session_id === 'string') sessionTitle = { session: e.session_id, title }
+}
+
+/** The title last told for `sessionId`; '' when none was (what a poll sends for no title). */
+export function sessionTitleOf(sessionId: string): string {
+  return sessionTitle?.session === sessionId ? sessionTitle.title : ''
+}
+
+/**
  * The instance for the session the process is in NOW. `session.start` does
  * not fire for `/clear` or an in-process resume (the process goes on under
  * another session id), so the id is checked here and a new instance is made
@@ -449,6 +469,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       // `claude --resume` folder, its Inbox project folder (InboxLink.projectFolder),
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
+      label: () => sessionTitleOf(sessionId),
       ...(inboxTools
         ? {
             inboxTools,
@@ -597,6 +618,16 @@ export function register(on: On) {
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
     return result
+  })
+
+  // Whatever the switches say: with the mod off nothing polls, so nothing reads it.
+  on('classic.SessionStart', ($: Engine, e: any, next: Next) => {
+    noteSessionTitle(e)
+    return next(e)
+  })
+  on('classic.UserPromptSubmit', ($: Engine, e: any, next: Next) => {
+    noteSessionTitle(e)
+    return next(e)
   })
 
   on('session.end', async ($: Engine, e: any, next: Next) => {

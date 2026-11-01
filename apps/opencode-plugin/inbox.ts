@@ -367,6 +367,15 @@ interface SessionState {
   lastEventAt: number;
 }
 
+/**
+ * A session's title as the Inbox's To picker shows it: the title, or '' for
+ * none or for the default one OpenCode gives a session until it has a real title.
+ */
+export function openCodeSessionLabel(title: unknown): string {
+  if (typeof title !== "string") return "";
+  return /^(New|Child) session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(title.trim()) ? "" : title;
+}
+
 /** A steer row Send now sent, waiting to be seen delivered. */
 interface SteerEntry {
   sessionID: string;
@@ -551,6 +560,13 @@ class OpenCode2Wakes {
         // A steer row of this session not delivered yet: OpenCode may still promote it; past the grace, it is sent queued.
         for (const entry of this.steering.values()) if (entry.sessionID === sessionID) this.startGrace(entry);
         return;
+      case "session.renamed":
+        this.noteTitle(sessionID, data?.title);
+        return;
+      case "session.updated":
+        // The older event: the whole session, so a title that is gone is gone.
+        this.noteTitle(sessionID, (data?.info as { title?: unknown } | undefined)?.title);
+        return;
       case "session.inbox.enqueued":
         // A prompt is entering the session (the person, another plugin, or
         // the wake itself, which no longer waits): any reply still waiting
@@ -565,8 +581,14 @@ class OpenCode2Wakes {
         for (const entry of [...this.steering.values()]) if (entry.sessionID === sessionID) entry.settle("abandoned");
         this.wakes.get(sessionID)?.dispose();
         this.wakes.delete(sessionID);
+        this.titles.delete(sessionID);
         return;
     }
+  }
+
+  /** The events' word on a watched session's title (a child session's has no poll to go on). */
+  private noteTitle(sessionID: string, title: unknown): void {
+    if (this.wakes.has(sessionID)) this.titles.set(sessionID, openCodeSessionLabel(title));
   }
 
   /** A session ran here that this process has not seen: watch its root. */
@@ -649,9 +671,27 @@ class OpenCode2Wakes {
       },
       // The session's folder (its `location.directory`, looked up once), so the Inbox lists it under its project.
       projectPath: () => this.directory(sessionID),
+      // The session's own title, nothing for a default one.
+      label: () => this.title(sessionID),
       // What this service loaded and what is on disk now: the Inbox says `opencode2 reload` when it is behind.
       plugin: () => this.pluginReport(),
     };
+  }
+
+  private readonly titles = new Map<string, string>();
+
+  /** The title `session.get` answers once; after that the events keep it current, and without them each poll asks. */
+  private async title(sessionID: string): Promise<string> {
+    const known = this.titles.get(sessionID);
+    if (known !== undefined && this.eventsAvailable) return known;
+    try {
+      const asked = openCodeSessionLabel((await this.v2.session?.get?.({ sessionID }))?.title);
+      // An event that landed while this was out is newer.
+      if (!this.titles.has(sessionID) || !this.eventsAvailable) this.titles.set(sessionID, asked);
+    } catch {
+      // Not answered: the last word stands.
+    }
+    return this.titles.get(sessionID) ?? "";
   }
 
   private readonly directories = new Map<string, Promise<string | null>>();

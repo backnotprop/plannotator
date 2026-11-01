@@ -474,6 +474,14 @@ export interface InboxWakeTarget {
    */
   projectPath?(): string | null | undefined | Promise<string | null | undefined>;
   /**
+   * The session's title as its host keeps it (OpenCode 2: `Session.title`; Pi:
+   * the name someone gave the session), read for every poll, so a later title
+   * replaces it and none clears it (`label`, always a string where this
+   * exists). Nothing for a default title. Set by the host, never by the model:
+   * it is no tool argument. Optional: a host without it sends no `label`.
+   */
+  label?(): string | null | undefined | Promise<string | null | undefined>;
+  /**
    * The version of Plannotator's plugin or extension this process loaded
    * (Pi: the extension's package.json). Each poll carries it as `plugin:
    * { version }`, so the Inbox can say when the session runs an older one.
@@ -679,6 +687,12 @@ export class InboxWake {
     } catch {
       projectPath = null;
     }
+    let label: string | null | undefined = null;
+    try {
+      label = await this.target.label?.();
+    } catch {
+      label = null;
+    }
     let plugin: InboxLoadedPluginReport | { version: string } | null = null;
     try {
       plugin = this.target.plugin?.() ?? null;
@@ -695,6 +709,8 @@ export class InboxWake {
       {
         waitMs,
         ...(typeof projectPath === "string" && projectPath ? { project_path: projectPath } : {}),
+        // The host's title for the session (additive): the To picker's name for it; empty clears it.
+        ...(this.target.label ? { label: label ?? "" } : {}),
         started_at: this.startedAt,
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),

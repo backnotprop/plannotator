@@ -131,6 +131,8 @@ interface SeenSession {
   sendNow: boolean;
   /** Its poll said it understands a reply it was tagged in (`tags`): only then can it be tagged. */
   tags: boolean;
+  /** The title its latest poll sent (`label`, cleaned). Display only: nothing routes on it, and no MCP call reaches it. */
+  label?: string | null;
   /** The working folder its poll named (`project_path`), as sent; null when it sent none. */
   cwd: string | null;
   /**
@@ -187,6 +189,22 @@ export const INBOX_ASKER_GRACE_MS = 60_000;
  * the list.
  */
 export const INBOX_WAKE_ONLY_LIVE_MS = 60 * 60_000;
+
+/** The longest session label kept, in characters (code points, so a pair is never split). */
+export const INBOX_SESSION_LABEL_MAX = 60;
+
+/**
+ * A poll's `label` as the window may draw it: control characters, line
+ * separators and bidi controls stripped (the same characters a thread name
+ * refuses), trimmed, at most INBOX_SESSION_LABEL_MAX characters. Null for
+ * anything that is not a string, or that leaves nothing visible.
+ */
+export function cleanInboxSessionLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
+  const label = Array.from(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
+  return label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim() ? label : null;
+}
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const finiteMs = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
@@ -388,6 +406,8 @@ export function createInboxLiveSessions(options: {
     entry.host = host;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
+    // Sent on every poll, so the latest stands: empty clears it, and an older connection never has one.
+    entry.label = cleanInboxSessionLabel(body.label);
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
     entry.engine = parseEngine(body.engine);
@@ -566,6 +586,7 @@ export function createInboxLiveSessions(options: {
     /** Its connection understands a reply it was tagged in (`tags`). */
     tags: boolean;
     sendNow: boolean;
+    label: string | null;
   }[] => {
     const out = [];
     for (const [session, entry] of sessions) {
@@ -580,6 +601,7 @@ export function createInboxLiveSessions(options: {
         idleSince: entry.busy === false ? entry.idleSince : null,
         tags: entry.tags,
         sendNow: entry.sendNow,
+        label: entry.label ?? null,
       });
     }
     return out;

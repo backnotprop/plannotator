@@ -319,6 +319,8 @@ export interface SessionInfo {
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
   root?: () => Promise<string>
+  /** The session's title as the engine last told a hook, read for each Inbox poll (`InboxLinkOptions.label`). */
+  label?: () => string
 }
 
 export class PlannotatorMod {
@@ -380,6 +382,7 @@ export class PlannotatorMod {
           },
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
+          ...(session.label ? { label: session.label } : {}),
           instanceId: this.instanceId,
         })
       : null

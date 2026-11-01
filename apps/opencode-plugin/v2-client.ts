@@ -11,7 +11,7 @@ import type { OpenCodeBridgeAgent } from "./cli-bridge";
 
 /** The subset of the V2 session domain this plugin touches. */
 export interface V2SessionDomain {
-  get?: (input: { sessionID: string }) => Promise<{ location?: { directory?: string } }>;
+  get?: (input: { sessionID: string }) => Promise<{ location?: { directory?: string }; title?: string }>;
   prompt?: (input: {
     sessionID: string;
     text: string;
