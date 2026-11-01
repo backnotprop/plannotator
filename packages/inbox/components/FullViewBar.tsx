@@ -220,7 +220,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     if (state !== 'revealed') return;
     const onDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list]')) return;
+      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list], [data-fcomp], [data-fcomp-pillwrap]')) return;
       setRef.current('tucked');
     };
     document.addEventListener('pointerdown', onDown, true);

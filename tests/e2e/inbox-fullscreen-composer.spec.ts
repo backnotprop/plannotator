@@ -400,3 +400,42 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await context.close();
   }
 });
+
+test('a phone: Hide, then Show tools, brings the reply back working (the card, and the pill when minimized), without pressing the pin', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
+  try {
+    const page = await context.newPage();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(fileUrl('checkout.png'));
+    await expect(pane(page)).toHaveAttribute('data-full-view', '');
+    const dock = page.locator('[data-full-view-dock]');
+    for (const minimized of [false, true]) {
+      if (minimized) await card(page).locator('[data-fcomp-minimize]').tap();
+      else await expect(card(page)).toBeVisible();
+      await page.locator('[data-full-view-hide]').tap();
+      await expect(dock).toHaveAttribute('data-bar', 'tucked');
+      // Hidden: the reply goes with the tools.
+      await expect(page.locator(minimized ? '[data-fcomp-pillwrap]' : '[data-fcomp]')).toHaveJSProperty('inert', true);
+      await page.locator('[data-full-view-handle]').tap();
+      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      if (minimized) {
+        await expect(page.locator('[data-fcomp-pillwrap]')).toHaveJSProperty('inert', false);
+        await pill(page).tap();
+      }
+      // The reply works as it is: not inert, and a tap in it types.
+      await expect(card(page)).toHaveJSProperty('inert', false);
+      await replyField(page).tap();
+      await expect(replyField(page)).toBeFocused();
+      await page.keyboard.type(' x');
+      expect(await replyField(page).inputValue()).toMatch(/ x$/);
+      // The press in the reply did not tuck the tools again.
+      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      // Pin the tools back (the revealed toolbar's last button) for the next round.
+      await page.locator('[data-full-view-hide]').tap();
+      await expect(dock).toHaveAttribute('data-bar', 'pinned');
+    }
+  } finally {
+    await context.close();
+  }
+});
