@@ -53,7 +53,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
+import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, codexThreadOfCall, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
 import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -469,7 +469,11 @@ export function createInboxCodexWake(options: {
       rmSync(join(deadDir, session), { force: true });
       void sweep();
     }
-    if (turnStartedAt === null) return;
+    // A command its shell runs names no turn, so a reply stays queued; a Tidy wake counts, or a script's writes would never count as tidied.
+    if (turnStartedAt === null) {
+      for (const itemId of [...(queued.get(session)?.keys() ?? [])]) if (store.message(itemId)?.tidy) delivered(itemId, session);
+      return;
+    }
     for (const flight of inFlight.values()) if (flight.session === session && flight.at < turnStartedAt) flight.taken = true;
     const items = queued.get(session);
     if (!items) return;
@@ -479,7 +483,9 @@ export function createInboxCodexWake(options: {
   return {
     cli,
     knownCli: () => cliAnswer?.cli ?? null,
-    wakes: async (host, session, meta) => host === INBOX_CODEX_HOST && isCodexThreadId(session) && codexCallWakes(meta, session) && (await cli()) !== null,
+    // A command its shell runs carries no turn metadata: a thread already woken stays woken (`codex exec` never was).
+    wakes: async (host, session, meta) =>
+      host === INBOX_CODEX_HOST && isCodexThreadId(session) && (codexCallWakes(meta, session) || (codexThreadOfCall(meta) === null && knownSessions().has(session) && !dead.has(session))) && (await cli()) !== null,
     status: (session) => (!knownSessions().has(session) ? null : dead.has(session) ? "dead" : "alive"),
     uncertain: (session, itemId) => uncertain.has(`${itemId}.${session}`),
     uncertainItems: (session) => [...uncertain].filter((key) => key.endsWith(`.${session}`)).map((key) => key.slice(0, key.indexOf("."))),

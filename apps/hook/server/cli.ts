@@ -1,7 +1,7 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
-import { INBOX_REF_LINK_RULE } from "@plannotator/shared/inbox/connection";
+import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
 
@@ -173,6 +173,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator inbox mcp",
     "  plannotator inbox status [--json] | stop | restart",
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
+    "  plannotator inbox call [--session <id>] <action> [<json> | -]",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
@@ -288,6 +289,30 @@ export const INBOX_PROJECTS_USAGE = [
   "Run 'plannotator inbox --help' for when to use it.",
 ].join("\n");
 
+/** What `plannotator inbox call` runs: the Inbox tool's actions, without the wait a script has no use for. */
+export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS.filter((action: string) => action !== "wait_for_reply");
+
+/** `plannotator inbox call …` (inbox-call-command.ts): the Inbox tool from a script. */
+export const INBOX_CALL_USAGE = [
+  "Usage:",
+  "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "",
+  "Runs one Inbox action from a shell, so a script can make many fixes in one go.",
+  `Actions: ${INBOX_CALL_ACTIONS.join(", ")}. The JSON holds the action's fields, as in`,
+  "'plannotator inbox --help'; - reads it from stdin (for PowerShell and for loops, where",
+  "quoting JSON is painful). A stopped Inbox starts in the background.",
+  "",
+  "  plannotator inbox call card '{\"op\":\"list\"}'",
+  "  plannotator inbox call send_message - < reply.json",
+  "",
+  "--session <id>  Who is calling, when your Tidy gave you the value. Otherwise the session",
+  "                this shell names, else nobody in particular (as a raw MCP client).",
+  "",
+  "stdout is the result as one JSON value, and nothing on failure. Pass an idempotency_key",
+  "on each send_message and card create, so a rerun cannot post twice.",
+  "Exit 0 ok, 1 refused or no Inbox (<code>: <message> on stderr), 2 bad usage.",
+].join("\n");
+
 /**
  * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
  * the full agent guide (inbox-help.ts), which carries this block as its
@@ -305,6 +330,7 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects [--json]",
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
+  "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
@@ -337,6 +363,8 @@ export const INBOX_COMMAND_USAGE = [
   "                                  --tailscale is published again.",
   "  plannotator inbox projects      List the projects, combine one into another, undo a",
   "                                  combine: when the person asks to clean them up.",
+  "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
+  "                                  result on stdout. See 'Scripting the Inbox'.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",

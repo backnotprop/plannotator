@@ -324,10 +324,11 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
   if (!session || result.isError) return result;
   const note = context.store.pendingReplies(session).find((m) => m.tidy?.wake);
   if (!note) return result;
-  const host = typeof input.agent_host === "string" ? input.agent_host : undefined;
+  // The note names its host: read_thread carries none, and a script's read must not take the wake of a session its connection wakes.
+  const host = note.to?.host ?? (typeof input.agent_host === "string" ? input.agent_host : undefined);
   if (await senderWakes(context, ctx, { agent_host: host, agent_session: session })) return result;
   try {
-    context.store.recordDelivery(note.id, { host: note.to?.host ?? host ?? "agent", session });
+    context.store.recordDelivery(note.id, { host: host ?? "agent", session });
   } catch {
     return result;
   }

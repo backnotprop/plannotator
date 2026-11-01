@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { INBOX_CODEX_MESSAGE_MAX_BYTES, codexQueueMessage, codexWakeText } from "./inbox-codex-wake";
-import { codexCallWakes, codexCliQueues, codexThreadOfCall, codexTurnStartedAt, codexTurnTrigger, isCodexThreadId, parseCodexCliVersion, type InboxThread } from "@plannotator/core/inbox-types";
+import { codexCallWakes, codexCliQueues, codexThreadOfCall, codexTurnStartedAt, codexTurnTrigger, isCodexThreadId, parseCodexCliVersion, type InboxThread, type InboxTidyPlan } from "@plannotator/core/inbox-types";
 import {
   INBOX_BRIDGE_POLL_PATH,
   INBOX_MESSAGE_INSTRUCTION,
@@ -47,7 +47,7 @@ interface World {
   start: () => Promise<InboxServer>;
 }
 
-async function world(options: { codex?: boolean; env?: Record<string, string> } = {}): Promise<World> {
+async function world(options: { codex?: boolean; env?: Record<string, string>; storeNow?: () => Date } = {}): Promise<World> {
   const fake = createFakeAgents("plannotator-codex-wake-");
   fakes.push(fake);
   if (options.codex !== false) fake.install("codex");
@@ -56,7 +56,7 @@ async function world(options: { codex?: boolean; env?: Record<string, string> } 
   mkdirSync(project, { recursive: true });
   const environment = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, ...options.env } });
   const start = async () => {
-    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] } });
+    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] }, ...(options.storeNow ? { storeNow: options.storeNow } : {}) });
     servers.push(server);
     return server;
   };
@@ -367,6 +367,53 @@ describe("a reply to a Codex thread", () => {
     await w.server.codexWake.sweep();
     expect(queues(w.fake)).toEqual([]);
     expect(w.server.codexWake.status(THREAD)).toBeNull();
+  });
+
+  /** What a command the thread's shell runs sends (`plannotator inbox call`): its session, no Codex `_meta`. */
+  const fromShell = (client: Client, project: string, args: Record<string, unknown>, session = THREAD) =>
+    client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: session, agent_host: "codex", agent_name: "Codex", ...args } }) as Promise<{ content: { text: string }[]; structuredContent: { message_id: string; thread_id: string } }>;
+
+  test("a command a woken thread's shell runs is that thread: its message wakes, and the person's reply to it goes in", async () => {
+    const w = await world();
+    await codexSends(w.client, w.project, "Starting.");
+    const sent = await fromShell(w.client, w.project, { body: "From a script." });
+    expect(sent.content[0]!.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect((await thread(w.server, sent.structuredContent.thread_id)).messages.at(-1)!.wakes).toBe(true);
+    await reply(w.server, sent.structuredContent.message_id, { idempotency_key: "k1", words: "Thanks." });
+    await w.server.codexWake.sweep();
+    expect(argOf(queues(w.fake)[0]!.args, "message")).toContain("Thanks.");
+    // A reply stays queued until a turn says it reached the thread: a command names no turn.
+    await fromShell(w.client, w.project, { body: "Still working." });
+    await Bun.sleep(50);
+    const reachedIt = (await thread(w.server, sent.structuredContent.thread_id)).messages.find((m) => m.author.kind === "person");
+    expect(reachedIt!.delivery ?? null).toBeNull();
+  });
+
+  test("a shell's command never makes a thread wake that was not woken: one the Inbox never woke, a codex exec run", async () => {
+    const w = await world();
+    const unknown = await fromShell(w.client, w.project, { body: "Who is this?" });
+    expect(unknown.content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    await codexSends(w.client, w.project, "One turn only.", OTHER_THREAD, "exec");
+    expect((await fromShell(w.client, w.project, { body: "Still one turn." }, OTHER_THREAD)).content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+  });
+
+  test("a Tidy a woken thread answers from a script counts: the command says the wake arrived, and its writes are tidied", async () => {
+    const clock = { behind: 3 * 60 * 60_000 };
+    const w = await world({ storeNow: () => new Date(Date.now() - clock.behind) });
+    const asked = await codexSends(w.client, w.project, ":::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::");
+    clock.behind = 0;
+    const tidy = await fetch(`${base(w.server)}/api/inbox/tidy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, sessions: [THREAD], idempotency_key: "t1" }) });
+    expect(tidy.status).toBe(200);
+    await w.server.codexWake.sweep();
+    expect(argOf(queues(w.fake)[0]!.args, "message")).toContain(`--session codex:${THREAD}`);
+    const stateOf = async () => ((await (await fetch(`${base(w.server)}/api/inbox/tidy`)).json()) as InboxTidyPlan).run!.agents[0]!;
+    expect((await stateOf()).state).toBe("waiting");
+    // The agent read the wake as a turn: a script's result never carries it a second time.
+    const first = await fromShell(w.client, w.project, { reply_to: asked.message_id, body: "That one no longer applies.", idempotency_key: "s1" });
+    expect(first.content[0]!.text).not.toContain("Tidy");
+    await Bun.sleep(5);
+    await fromShell(w.client, w.project, { reply_to: asked.message_id, body: "Nothing else to do here.", idempotency_key: "s2" });
+    expect(await stateOf()).toMatchObject({ state: "tidied", updated: 1 });
   });
 
   test("an open wait on one thread holds back only that thread's reply; another thread's reply to the same session is queued", async () => {
