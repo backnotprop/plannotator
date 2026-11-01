@@ -46,9 +46,9 @@ import {
   type AgentRunResult,
 } from "./inbox-agents";
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
-import { acceptClaudeTrust, claudeTrustKey, claudeTrustWarning } from "./inbox-launch-claude-trust";
+import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchTrustOffer } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchTrustOffer, LaunchTrustTarget } from "./inbox-launch-host";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
 export const CLAUDE_LAUNCH_MIN_VERSION = "2.1.314";
@@ -461,23 +461,25 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     trusts: cli.trusts,
 
     /**
-     * The run line's Trust folder, for what the launch's start was refused for. Home: Claude never saves trust there.
-     * The file-system root, or a folder above home: that trust would cover home too.
+     * Compose's Trust and start and the run line's Trust folder. Home: Claude never saves trust there. The
+     * file-system root, or a folder above home: that trust would cover home too.
      */
-    trustOffer(launch: InboxLaunchRecord): LaunchTrustOffer | null {
-      const folder = trustFolderOf(launch);
+    trustOffer(target: LaunchTrustTarget): LaunchTrustOffer | null {
+      const folder = trustFolderOf(target);
       const key = claudeTrustKey(folder);
       const home = placeKey(ctx.homeDir).normalize("NFC");
       if (key === home || home.startsWith(`${key}/`) || dirname(key) === key) return null;
-      const config = claudeGlobalConfigPath(claudeFiles());
       return {
+        folder: key,
         // Where Claude starts, its repository's root, the folder trusted and the key: Claude reads a worktree's local
         // settings from its main checkout, and a `.git` file can name a folder other than the one shown.
-        warning: claudeTrustWarning(
-          [launch.folder, claudeRepositoryAbove(launch.folder), folder, key].filter((f) => f !== null),
-          key === placeKey(folder).normalize("NFC") ? null : ctx.displayFolder(key),
-        ),
+        read: () =>
+          claudeTrustReading(
+            [target.folder, claudeRepositoryAbove(target.folder), folder, key].filter((f) => f !== null),
+            key === placeKey(folder).normalize("NFC") ? null : { shown: ctx.displayFolder(key), folder: basename(folder) },
+          ),
         accept: async () => {
+          const config = claudeGlobalConfigPath(claudeFiles());
           try {
             await acceptClaudeTrust(config, key);
           } catch (error) {

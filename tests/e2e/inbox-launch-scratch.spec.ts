@@ -17,9 +17,9 @@
  *     a folder made there later is never purged or removed. A Send the Inbox
  *     refuses leaves no folder and no project behind.
  *  3. A moved root (Settings → Agents) is used for the next launch. It is not
- *     trusted yet, so the row reads "trust it once"; the start fails as
- *     untrusted, Open in Terminal runs `claude` in the root, and once the person
- *     trusted it, Try again starts it and the row reads plain again.
+ *     trusted yet: a launch that stopped on it has Open in Terminal, which runs
+ *     `claude` in the root; New message's Trust and start trusts the root once
+ *     and starts, and Try again then starts the one that stopped.
  *  4. Scratch folders are plain folders, never repositories, so the root's trust
  *     covers them. One the agent made a repository needs its own trust (Claude keys
  *     trust on a repository's root, and checks it before a restart): the reply's
@@ -324,7 +324,7 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   await page.keyboard.press('Escape');
 });
 
-test('a moved root is used for the next launch; untrusted, the row reads "trust it once" and Open in Terminal trusts the root', async () => {
+test('a moved root is used for the next launch: untrusted, a launch that stopped on it has Open in Terminal, and Trust and start trusts the root once', async () => {
   const { page, fake } = world;
   const moved = join(world.home, 'Plannotator', 'scratch');
   // Settings → Agents: Scratch folders → Change → ~/Plannotator/scratch → Save.
@@ -340,38 +340,47 @@ test('a moved root is used for the next launch; untrusted, the row reads "trust 
   await settingsRow.scrollIntoViewIfNeeded();
   await shot(page, 'settings-scratch-folders');
 
-  // Not trusted yet (only the data dir is): the row says so.
-  await openFolderMenu(page, 'Sketch the onboarding checklist as a small prototype.', 'Onboarding checklist');
-  const row = dialog(page).locator('[data-compose-folder-option="scratch"]');
-  await expect(row).toHaveAttribute('data-untrusted', '');
-  await expect(row).toContainText('New scratch folder · trust it once');
-  // It names the root (the folder to trust), and says under it what the first start asks.
-  await expect(row).toContainText('~/Plannotator/scratch');
-  await expect(row).not.toContainText('onboarding-checklist');
-  await expect(dialog(page).locator('[data-compose-scratch-hint]')).toHaveText(
-    "Claude Code doesn't trust ~/Plannotator/scratch yet. Your first Send asks you to trust it once; after that every scratch folder there starts.",
-  );
-  await row.hover();
-  await shot(page, 'trust-once-row');
-  const sent = await sendToScratch(page);
-  const folder = join(moved, 'onboarding-checklist');
-  expect(sent.project.root).toBe(folder);
-  expect(existsSync(join(world.dataDir, 'scratch', 'onboarding-checklist'))).toBe(false);
-
-  // The start fails as untrusted, naming the root; Open in Terminal runs claude there, so one trust covers every scratch folder.
-  await openThread(page, sent.thread_id);
+  // Not trusted yet (only the data dir is), and a Send with no press of the button: the start fails as untrusted,
+  // naming the root; Open in Terminal runs claude there, so one trust covers every scratch folder.
+  const stopped = (await (
+    await fetch(`http://127.0.0.1:${world.port}/api/inbox/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: { launch: { agent: 'claude-code', scratch: true } }, body: 'Rough out a changelog page.', thread_name: 'Changelog page', idempotency_key: crypto.randomUUID() }),
+    })
+  ).json()) as { thread_id: string; project: { root: string } };
+  await openThread(page, stopped.thread_id);
   const line = pane(page).locator('[data-run="failed"]');
   await expect(line).toContainText("~/Plannotator/scratch isn't a trusted folder yet.");
   const opened = fake.osascript().length;
   await line.locator('[data-run-open]').click();
   const ran = await waitFor('osascript', () => fake.osascript()[opened]);
   expect(ran.at(-1)).toBe(`cd '${moved}' && claude`);
-  // The person accepts the trust prompt in Terminal; Try again starts it in the scratch folder.
-  trust([world.dataDir, moved]);
-  await line.locator('[data-run-retry]').click();
+
+  // New message: the row stays plain (the button says it), and one press trusts the root and starts in its new folder.
+  await openFolderMenu(page, 'Sketch the onboarding checklist as a small prototype.', 'Onboarding checklist');
+  const row = dialog(page).locator('[data-compose-folder-option="scratch"]');
+  await expect(row).not.toHaveAttribute('data-untrusted', '');
+  await expect(dialog(page).locator('[data-compose-scratch-hint]')).toHaveCount(0);
+  await row.click();
+  await expect(dialog(page).locator('[data-compose-send]')).toContainText('Trust and start');
+  await expect(dialog(page).locator('[data-compose-trust-circle]')).toHaveCount(0);
+  await dialog(page).locator('[data-compose-folder]').click();
+  const sent = await sendToScratch(page);
+  const folder = join(moved, 'onboarding-checklist');
+  expect(sent.project.root).toBe(folder);
+  expect(existsSync(join(world.dataDir, 'scratch', 'onboarding-checklist'))).toBe(false);
+  expect((JSON.parse(readFileSync(join(world.home, '.claude.json'), 'utf8')) as { projects: Record<string, unknown> }).projects[moved]).toEqual({ hasTrustDialogAccepted: true });
+  await openThread(page, sent.thread_id);
   await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
   expect(fake.starts().at(-1)!.cwd).toBe(folder);
   world.launched.moved = { threadId: sent.thread_id, launchId: sent.launch.id, folder };
+
+  // The root's trust reaches the launch that stopped on it: Try again starts it in its own folder.
+  await openThread(page, stopped.thread_id);
+  await pane(page).locator('[data-run="failed"] [data-run-retry]').click();
+  await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+  expect(fake.starts().at(-1)!.cwd).toBe(stopped.project.root);
 
   // Trusted now: the row reads plain (screen 03 with scratch).
   await openFolderMenu(page, 'Make the Settings search fuzzy, like the command palette.', 'Settings search');

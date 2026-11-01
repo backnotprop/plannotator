@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, rmdirSync, statSync } from "node:f
 import { basename, dirname, join, resolve } from "node:path";
 import { describeFsError, placeKey, readAgentFile, withBom, writeAgentFileAtomic } from "./agent-files";
 import { CLAUDE_JSON_MAX_BYTES } from "./inbox-agents";
+import type { LaunchTrustReading } from "./inbox-launch-host";
 import { setJsonMember } from "./json-edit";
 
 /** A repository's main checkout for a linked worktree at `root`, as Claude resolves it; any other `root` stays. */
@@ -138,14 +139,16 @@ function spoken(parts: readonly string[]): string {
 }
 
 /**
- * The one line beside Trust folder: what `folders` would turn on once trusted, as Claude's own trust prompt counts it
- * (2.1.316), and any file that could not be read. `.mcp.json` counts from each folder up to the file system's root,
- * as Claude reads it, by server name; a server in `disabledMcpjsonServers` never starts and does not count.
- * `repository`: where the trust lands when that is not the folder shown. Null when there is nothing to say. Never
- * shows what a file holds.
+ * What `folders` would turn on once trusted, as Claude's own trust prompt counts it (2.1.316), and any file that could
+ * not be read, said two ways from one read: the run line's one `warning` beside Trust folder (null when there is
+ * nothing to say) and compose's short `facts`. `.mcp.json` counts from each folder up to the file system's root, as
+ * Claude reads it, by server name; a server in `disabledMcpjsonServers` never starts and does not count. `repository`:
+ * where the trust lands when that is not the folder shown (`shown`), and that folder's own name (`folder`). `warns`:
+ * anything but that (the question circle's warning colour). Never shows what a file holds.
  */
-export function claudeTrustWarning(folders: readonly string[], repository: string | null = null): string | null {
-  const unread = new Set<string>();
+export function claudeTrustReading(folders: readonly string[], repository: { shown: string; folder: string } | null = null): LaunchTrustReading {
+  /** Each file that could not be read, by path, with its name. */
+  const unread = new Map<string, string>();
   const read = (folder: string, name: string): Record<string, unknown> => {
     const file = readAgentFile(join(folder, name));
     if (file.kind === "missing") return {};
@@ -154,7 +157,7 @@ export function claudeTrustWarning(folders: readonly string[], repository: strin
     } catch {
       // Named below.
     }
-    unread.add(name);
+    unread.set(join(folder, name), name);
     return {};
   };
   const places = new Set(folders.map((f) => placeKey(f)));
@@ -192,11 +195,19 @@ export function claudeTrustWarning(folders: readonly string[], repository: strin
 
   const runs = [counted(hooks, "hook"), counted(servers.size, "MCP server"), counted(helpers, "helper command"), env ? "env settings" : null].filter((part) => part !== null);
   const grants = [tools ? "use some tools without asking" : null, outside ? "reach folders outside it" : null].filter((part) => part !== null);
-  const files = spoken([...unread]);
+  const files = spoken([...new Set(unread.values())]);
   const lines: string[] = [];
   if (runs.length) lines.push(`This folder has ${spoken(runs)} that will run once you trust it.`);
   if (grants.length) lines.push(`${runs.length ? "Its settings also let" : "Once you trust it, this folder's settings let"} Claude Code ${spoken(grants)}.`);
   if (files) lines.push(lines.length ? `Its ${files} couldn't be read, so there may be more.` : `This folder's ${files} couldn't be read, so it may run something once you trust it.`);
-  if (repository) lines.push(`This folder is part of the repository at ${repository}; trusting it trusts that whole repository.`);
-  return lines.length ? lines.join(" ") : null;
+  if (repository) lines.push(`This folder is part of the repository at ${repository.shown}; trusting it trusts that whole repository.`);
+
+  const reaches = [tools ? "Uses tools without asking" : null, outside ? (tools ? "reaches outside folders" : "Reaches outside folders") : null].filter((part) => part !== null);
+  const facts = [
+    repository ? `Whole repository, not just ${repository.folder}` : null,
+    runs.length ? `Runs ${runs.join(", ")}` : null,
+    reaches.length ? reaches.join(", ") : null,
+    unread.size ? `${counted(unread.size, "file")} couldn't be read` : null,
+  ].filter((fact) => fact !== null);
+  return { warning: lines.length ? lines.join(" ") : null, facts, warns: runs.length + grants.length + unread.size > 0 };
 }

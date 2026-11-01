@@ -2263,6 +2263,25 @@ export interface InboxComposeProject {
   sessions: InboxComposeSession[];
 }
 
+/** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
+export interface InboxLaunchTrust {
+  /** The folder the trust lands on. */
+  folder: string;
+  /** Its reading as the window had it: `[]` when none was read yet, so a folder with any fact answers `trust_warning_changed`. */
+  facts: string[];
+}
+
+/**
+ * A folder compose would Trust and start. Every entry has `folder`, the one the trust lands on (a repository's root, a
+ * scratch root), which can differ from the folder picked. Only the folder picked in To has `facts`, the short lines the
+ * details show (none: a clean folder, no circle), and `warns`: a fact beyond "the whole repository" (the warning colour).
+ */
+export interface InboxLaunchUntrusted {
+  folder: string;
+  facts?: string[];
+  warns?: boolean;
+}
+
 /**
  * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
  * `inboxLaunch.enabled`): the agents To offers to start (only those
@@ -2270,8 +2289,12 @@ export interface InboxComposeProject {
  * recently active first, each with whether its folder is still there.
  */
 export interface InboxComposeLaunch {
-  /** `scratch_trusted: false`: the agent does not trust the scratch root yet (the folder menu's row reads "trust it once"). */
-  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean }[];
+  /**
+   * `scratch_trusted: false`: the agent does not trust the scratch root yet. `untrusted`: only for the owner's window,
+   * the folders the agent does not trust and the owner can trust from here, by project id, the scratch root under
+   * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
+   */
+  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
   projects: { id: string; name: string; root: string; exists: boolean }[];
   /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
   scratch?: { root: string };

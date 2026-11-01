@@ -5,6 +5,9 @@
  * browser-safe: the folder menu shows the same name the server makes.
  */
 
+/** "New scratch folder" where compose names a folder by its project id: never a project id (`prj_…`). */
+export const INBOX_SCRATCH_PICK = "scratch";
+
 /** The longest slug, before any `-N`. */
 const SLUG_MAX = 48;
 

@@ -304,12 +304,12 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
 
-  // 02: To reads as one sentence; the status line names the folder; Send is on, no Save draft.
+  // 02: To reads as one sentence; no status line; the button is on, no Save draft.
   await expect(d.locator('[data-compose-to="start"]')).toHaveText(/New Claude Code session/);
   await expect(d.locator(`[data-compose-folder="${plannotatorId}"]`)).toHaveText('plannotator');
   const words = 'The Settings search should match fuzzy, not prefix. Look at how the command palette does it and use the same scorer.';
   await d.getByRole('textbox', { name: 'Message' }).fill(words);
-  await expect(d.locator('[data-compose-status]')).toHaveText('Claude Code starts in ~/plannotator/plannotator when you send.');
+  await expect(d.locator('[data-compose-status]')).toHaveCount(0);
   await expect(d.locator('[data-compose-send]')).not.toHaveAttribute('aria-disabled', 'true');
   await expect(d.locator('[data-compose-save]')).toHaveCount(0);
   await shot(page, '02-new-session-ready');
@@ -688,7 +688,7 @@ test('phone: the To picker, the To sentence, the working line, the permission pr
     await shot(page, '02-new-session-ready-phone');
     fake.configure({ hold: true, startDelayMs: 0 });
     const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
-    await d.locator('.ib-cp-bar [data-compose-send]').click();
+    await d.locator('[data-compose-send]').click();
     const { thread_id } = (await (await answer).json()) as { thread_id: string };
     await page.goto(`${world.url}#thread=${thread_id}`);
     await expect(page.locator('[data-run="working"]')).toBeVisible({ timeout: 20_000 });

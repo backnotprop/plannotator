@@ -167,7 +167,9 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
+import { isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
+import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxPins } from "./inbox-pins";
@@ -332,6 +334,8 @@ export interface InboxServerOptions {
   unlinkedRefusalKeptMs?: number;
   /** How "Reach from my tailnet" runs the `tailscale` CLI. Default: the CLI on PATH. */
   tailscale?: TailscaleRunner;
+  /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
+  launchHosts?: (context: LaunchHostContext) => LaunchHost[];
   /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
   pairingProbes?: Partial<PairingProbes>;
   /**
@@ -2453,6 +2457,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
     selfCommand,
+    hosts: options.launchHosts,
   });
   // The login shell read ahead, off any request's path (launch on only).
   launch.warm();
@@ -2974,7 +2979,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const launched = await launch.route(req, path, via, isOwner(req, via));
       if (launched) return launched;
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
-      const composed = await compose.route(req, url);
+      // The device door is never the owner here: it may not trust a folder, so it is offered none.
+      const composed = await compose.route(req, url, isOwner(req, via) && !fromDeviceDoor.has(req));
       if (composed) return composed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
@@ -3277,15 +3283,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        */
       const answeredFromWindow = (request: Request, body: Record<string, unknown>, target: InboxMessage | null | undefined): boolean => {
         if (target?.author.kind !== "agent" || !isInboxPermissionSession(target.author.session)) return true;
-        if (fromDeviceDoor.has(request)) return true;
-        const from = request.headers.get("origin");
-        let fromHost: string | null = null;
-        try {
-          fromHost = from ? new URL(from).host : null;
-        } catch {
-          fromHost = null;
-        }
-        return fromHost !== null && fromHost === (request.headers.get("host") ?? "") && body.serverSession === serverSession;
+        return fromDeviceDoor.has(request) || isWindowRequest(request, body, serverSession);
       };
 
       const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|reask|resolve)$/.exec(path);

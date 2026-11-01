@@ -31,11 +31,29 @@ export interface LaunchHostResult {
 /** Why a start or a restart did not take, in words for the run line. */
 export type LaunchStartFailure = { code: InboxLaunchError["code"]; text: string };
 
-/** What the run line offers for a folder the agent refused: the owner's one click, with what trusting turns on. */
-export interface LaunchTrustOffer {
-  /** One plain line on what would run once trusted, or null when there is nothing to say. */
+/** What trusting a folder turns on, read from its files now. */
+export interface LaunchTrustReading {
+  /** The run line's one plain line on what would run once trusted, or null when there is nothing to say. */
   warning: string | null;
-  /** Saves the trust; throws with words for the run line, nothing changed. */
+  /** Compose's short lines: none for a clean folder. */
+  facts: string[];
+  /** A fact beyond "the whole repository": something would run or reach out, or could not be read. */
+  warns: boolean;
+}
+
+/** The folder a trust is asked for: a launch's, or compose's pick before there is a launch (`scratch: false`). */
+export type LaunchTrustTarget = Pick<InboxLaunchRecord, "folder" | "scratch">;
+
+/**
+ * The owner's one press on a folder the agent does not trust: compose's Trust and start, and the run line's Trust
+ * folder. Making one reads no warning, so compose can ask for every project on its 5 s refresh.
+ */
+export interface LaunchTrustOffer {
+  /** The folder the trust lands on, which may not be the one picked (a repository's root, a scratch root). */
+  folder: string;
+  /** Reads the folder's files now. */
+  read(): LaunchTrustReading;
+  /** Saves the trust; throws with words for the person, nothing changed. */
   accept(): Promise<void>;
 }
 
@@ -130,8 +148,8 @@ export interface LaunchHost {
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */
   trusts(folder: string): boolean;
-  /** Trust this launch's folder from the Inbox, when the host can: null, or no member, leaves Open in Terminal alone. */
-  trustOffer?(launch: InboxLaunchRecord): LaunchTrustOffer | null;
+  /** Trust this folder from the Inbox, when the host can: null, or no member, leaves Open in Terminal alone. */
+  trustOffer?(target: LaunchTrustTarget): LaunchTrustOffer | null;
   /**
    * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
    * session (`settleLaunch`) and its own channel delivers it. It writes its own start.log entries.

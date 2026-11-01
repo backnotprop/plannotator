@@ -14,10 +14,11 @@ import { filterLaunchProjects, scratchMatches, SCRATCH_PICK, type LaunchProject 
  *
  * Last, under a line: "New scratch folder" and the folder a Send would make
  * (`<root>/<thread-name slug>`). While the agent does not trust the root yet
- * it reads "New scratch folder · trust it once", shows the root, and says
- * under it that the first start asks to trust the root once: that start fails
- * as untrusted, and its run line trusts the root (Trust folder, or Open in
- * Terminal), so one trust covers every scratch folder after it.
+ * and no press of Trust and start can (a guest, a root at home) it reads "New
+ * scratch folder · trust it once", shows the root, and says under it that the
+ * first start asks to trust the root once: that start fails as untrusted, and
+ * its run line trusts the root (Trust folder, or Open in Terminal), so one
+ * trust covers every scratch folder after it.
  */
 export function FolderMenu({
   projects,

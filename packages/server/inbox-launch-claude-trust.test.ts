@@ -17,14 +17,16 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { basename, join } from "node:path";
 import { accountHome, refuseRealClaudeConfig } from "../../tests/helpers/real-data-dir";
+import { scriptedTailscale, TAILNET_MAGIC as MAGIC, TAILNET_OWNER as OWNER } from "../../tests/helpers/scripted-tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { claudeGlobalConfigPath, createAgentEnvironmentFor } from "./inbox-agents";
 import { claudeTrustsFolder, createClaudeLaunchHost } from "./inbox-launch-claude";
-import { acceptClaudeTrust, claudeTrustKey, claudeTrustWarning } from "./inbox-launch-claude-trust";
+import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading } from "./inbox-launch-claude-trust";
 import type { LaunchHostContext } from "./inbox-launch-host";
+
+const claudeTrustWarning = (folders: readonly string[]) => claudeTrustReading(folders).warning;
 
 /** Only ever handed to the guard below, never opened. */
 const CLAUDE_DIR = ".claude";
@@ -430,9 +432,56 @@ describe("the Claude host's offer", () => {
     writeFileSync(join(scratchRoot, ".claude/settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{}] }] } }));
     writeFileSync(join(folder, ".mcp.json"), JSON.stringify({ mcpServers: { one: {} } }));
     const offer = host(home, configDir).trustOffer(launch(folder, true))!;
-    expect(offer.warning).toBe("This folder has 1 hook and 1 MCP server that will run once you trust it.");
+    expect(offer.read().warning).toBe("This folder has 1 hook and 1 MCP server that will run once you trust it.");
+    expect(offer.folder).toBe(scratchRoot);
     await offer.accept();
     expect(Object.keys(JSON.parse(readFileSync(config, "utf8")).projects)).toEqual([scratchRoot]);
+  });
+
+  test("compose's pick, before any launch: a folder's facts are the warning's, short; a clean folder has none and nothing warns", () => {
+    const { root, home, configDir } = sandbox();
+    const dir = join(root, "billing");
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    const offerFor = () => host(home, configDir).trustOffer(launch(dir))!;
+    expect(offerFor().read()).toEqual({ warning: null, facts: [], warns: false });
+    expect(offerFor().folder).toBe(dir);
+
+    const hook = { hooks: [{}] };
+    writeFileSync(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { one: {}, two: {} } }));
+    writeFileSync(
+      join(dir, ".claude/settings.json"),
+      JSON.stringify({ hooks: { Stop: [hook, hook] }, apiKeyHelper: "./key.sh", env: { A: "1" }, permissions: { allow: ["Bash(ls)"], additionalDirectories: ["/elsewhere"] } }),
+    );
+    writeFileSync(join(dir, ".claude/settings.local.json"), "not json");
+    const read = offerFor().read();
+    expect(read.facts).toEqual(["Runs 2 hooks, 2 MCP servers, 1 helper command, env settings", "Uses tools without asking, reaches outside folders", "1 file couldn't be read"]);
+    expect(read.warns).toBe(true);
+    // The warning comes from the same read: the run line and compose can never disagree on what was counted.
+    expect(read.warning).toContain("2 hooks, 2 MCP servers, 1 helper command and env settings");
+  });
+
+  test("only one of the two reaches, on its own line, with a capital", () => {
+    const { root, home, configDir } = sandbox();
+    const dir = join(root, "reach");
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    writeFileSync(join(dir, ".claude/settings.json"), JSON.stringify({ autoMemoryDirectory: "/elsewhere" }));
+    expect(host(home, configDir).trustOffer(launch(dir))!.read().facts).toEqual(["Reaches outside folders"]);
+  });
+
+  test("a linked worktree that brings nothing: one fact, the whole repository, which alone is no warning; the folder named is the one trusted", () => {
+    const { root, home, configDir } = sandbox();
+    const { repo, worktree } = repoWithWorktree(root);
+    const offer = host(home, configDir).trustOffer(launch(worktree))!;
+    expect(offer.folder).toBe(repo);
+    const read = offer.read();
+    expect(read.facts).toEqual([`Whole repository, not just ${basename(worktree)}`]);
+    expect(read.warns).toBe(false);
+
+    mkdirSync(join(worktree, ".claude"));
+    writeFileSync(join(worktree, ".claude/settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{}] }] } }));
+    const warned = offer.read();
+    expect(warned.facts).toEqual([`Whole repository, not just ${basename(worktree)}`, "Runs 1 hook"]);
+    expect(warned.warns).toBe(true);
   });
 
   test("the home folder gets no offer: Claude never saves trust there; nor does the root, or a folder above home, which would cover it", () => {
@@ -452,7 +501,7 @@ describe("the Claude host's offer", () => {
     writeFileSync(join(worktree, ".claude/settings.json"), JSON.stringify(stop(1)));
     writeFileSync(join(repo, ".claude/settings.local.json"), JSON.stringify(stop(2)));
     const offer = host(home, configDir).trustOffer(launch(join(worktree, "sub")))!;
-    expect(offer.warning).toBe(`This folder has 3 hooks that will run once you trust it. This folder is part of the repository at ${repo}; trusting it trusts that whole repository.`);
+    expect(offer.read().warning).toBe(`This folder has 3 hooks that will run once you trust it. This folder is part of the repository at ${repo}; trusting it trusts that whole repository.`);
     await offer.accept();
     expect(Object.keys(JSON.parse(readFileSync(config, "utf8")).projects)).toEqual([repo]);
   });
@@ -469,7 +518,7 @@ describe("the Claude host's offer", () => {
     writeFileSync(join(shown, ".git"), `gitdir: ${gitDir}\n`);
     writeFileSync(join(gitDir, "commondir"), "../..\n");
     writeFileSync(join(gitDir, "gitdir"), `${join(shown, ".git")}\n`);
-    expect(host(home, configDir).trustOffer(launch(shown))!.warning).toBe(`This folder has 1 hook that will run once you trust it. This folder is part of the repository at ${other}; trusting it trusts that whole repository.`);
+    expect(host(home, configDir).trustOffer(launch(shown))!.read().warning).toBe(`This folder has 1 hook that will run once you trust it. This folder is part of the repository at ${other}; trusting it trusts that whole repository.`);
   });
 
   test("a custom OAuth URL in the login shell is followed to the file Claude uses", async () => {
@@ -492,29 +541,7 @@ describe("the Claude host's offer", () => {
 });
 
 describe("through a real server", () => {
-  const MAGIC = "macbook-pro.tail0000.ts.net";
-  const OWNER = "owner@example.com";
   const GUEST = "guest@example.com";
-  /** `tailscale` as a script: the owner, serve status, serve on and off. */
-  function scriptedTailscale(): TailscaleRunner {
-    const serve = new Map<number, string>();
-    return (args) => {
-      const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
-      if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: OWNER, DisplayName: "Owner" } } }));
-      if (args[1] === "status") {
-        const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
-        const Web = Object.fromEntries([...serve].map(([p, proxy]) => [`${MAGIC}:${p}`, { Handlers: { "/": { Proxy: proxy } } }]));
-        return ok(serve.size === 0 ? "{}" : JSON.stringify({ TCP, Web }));
-      }
-      const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
-      if (args.includes("off")) {
-        serve.delete(httpsPort);
-        return ok();
-      }
-      serve.set(httpsPort, args.at(-1)!);
-      return ok(`https://${MAGIC}:${httpsPort}/\n|-- proxy ${args.at(-1)}\n`);
-    };
-  }
 
   test("a guest on the allow list gets no offer and a refused route; the owner over the tailnet writes, into the sandbox, and starts it", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-trust-route-")));

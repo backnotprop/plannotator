@@ -62,11 +62,11 @@
 
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
-import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
-import { inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
+import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
 import { loadConfig, resolveInboxLaunch, saveConfig } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -74,15 +74,30 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
-import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 
 const AVAILABLE_TTL_MS = 30_000;
 const HOST_TTL_MS = 10_000;
 
-/** Compose's `to.launch`: a project's folder, or a new scratch folder. */
-export type InboxLaunchTarget = { agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true };
+/**
+ * Compose's `to.launch`: a project's folder, or a new scratch folder. `trust`: the person pressed Trust and start on
+ * this reading of it; the press is the consent, so the Send saves the trust ("Trusting a folder").
+ */
+export type InboxLaunchTarget = ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust };
+
+/** The reading a press was made on, or nothing when the press came without one. */
+function trustOfTarget(value: Record<string, unknown>): { trust?: InboxLaunchTrust } {
+  const trust = value.trust as { folder?: unknown; facts?: unknown } | null | undefined;
+  if (trust === undefined) return {};
+  const folder = trust?.folder;
+  const facts = trust?.facts;
+  if (typeof folder !== "string" || !Array.isArray(facts) || !facts.every((fact) => typeof fact === "string")) {
+    throw new InboxError("validation_error", "to.launch.trust: { folder, facts }, the reading the person pressed on.", { field: "to.launch.trust" });
+  }
+  return { trust: { folder, facts } };
+}
 
 /** How many `-N` names a scratch folder tries before it gives up. */
 const SCRATCH_TRIES = 999;
@@ -814,6 +829,7 @@ export function createInboxLaunch(options: {
       }
       case "trust": {
         if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
+        if (!isWindowRequest(req, body, options.serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
         // A click under way (a double click): the same answer, once it is done.
         const under = trusting.get(launch.id);
         if (under) return json(await under);
@@ -822,15 +838,11 @@ export function createInboxLaunch(options: {
           // Nothing refused now (a second click, a stale window): the line as it stands, never a second start.
           if (!refusedForTrust(root)) return runNow();
           if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
-          const offer = host.trustOffer?.(launch);
-          if (!offer) throw new InboxError("trust_failed", `${host.name} can't trust this folder from here.`);
+          const offer = trustOfferOf(host, launch);
           // The person agreed to the line they read: a folder that changed since gets a new read, and a new click.
-          if ((body.warning ?? null) !== offer.warning) throw new InboxError("trust_warning_changed", `This folder changed, so nothing was saved. ${offer.warning ?? "It no longer has anything to warn about."} Click Trust folder again if that's fine.`);
-          try {
-            await offer.accept();
-          } catch (error) {
-            throw new InboxError("trust_failed", error instanceof Error ? error.message : String(error));
-          }
+          const { warning } = offer.read();
+          if ((body.warning ?? null) !== warning) throw new InboxError("trust_warning_changed", `This folder changed, so nothing was saved. ${warning ?? "It no longer has anything to warn about."} Click Trust folder again if that's fine.`);
+          await saveTrust(offer);
           // The write can wait on the agent's own lock: a Delete may have come through meanwhile.
           const current = store.message(root.id)!;
           if (refusedForTrust(current)) tryAgain(current, host);
@@ -845,6 +857,34 @@ export function createInboxLaunch(options: {
       }
     }
     return null;
+  };
+
+  /** A press that needs an offer, on a folder that has none now: nothing is saved. */
+  const trustOfferOf = (host: LaunchHost, target: { folder: string; scratch: boolean }): LaunchTrustOffer => {
+    const offer = host.trustOffer?.(target);
+    if (!offer) throw new InboxError("trust_failed", `${host.name} can't trust this folder from here.`);
+    return offer;
+  };
+  const saveTrust = async (offer: LaunchTrustOffer): Promise<void> => {
+    try {
+      await offer.accept();
+    } catch (error) {
+      throw new InboxError("trust_failed", error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  /**
+   * Whether a Send has a trust to save, from the reading it was pressed on. A folder that changed since the reading
+   * saves and sends nothing (`trust_warning_changed`: the window reads it again and opens the details). A folder
+   * trusted since has nothing to save. Reads the folder's files now, so a scratch root is read before anything is made.
+   */
+  const pressedTrust = (host: LaunchHost, folder: string, reading: InboxLaunchTrust | undefined): boolean => {
+    if (!reading || host.trusts(folder)) return false;
+    const offer = trustOfferOf(host, { folder, scratch: false });
+    const { facts } = offer.read();
+    const same = offer.folder === reading.folder && facts.length === reading.facts.length && facts.every((fact, i) => fact === reading.facts[i]);
+    if (!same) throw new InboxError("trust_warning_changed", "This folder changed. Nothing was trusted or sent.");
+    return true;
   };
 
   /** The start or restart waiting on Try again was refused for trust, and nothing is under way. */
@@ -919,23 +959,25 @@ export function createInboxLaunch(options: {
       if (!enabled()) throw new InboxError("launch_off", "Starting agents from the Inbox is off.");
       const value = (to as { launch: unknown }).launch as Record<string, unknown> | null;
       const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
-      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true };
+      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!) };
       if (!host || typeof value!.project_id !== "string") {
         const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
         throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
       }
-      return { agent: host.agent, project_id: value!.project_id };
+      return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!) };
     },
 
     /**
-     * Check before anything is written: the folder is there and the agent can start. A scratch launch makes
-     * its folder last (after those checks), named from the thread's name (`name`, else the subject of `body`),
-     * and `resolveProject` makes it a project as usual; `abandon` removes it when the thread is then not written.
+     * Check before anything is written: the folder is there, the agent can start, and a press of Trust and start was
+     * made on the folder as it is now (`trust`: the Send has a trust to save, with `acceptTrust`, once every check
+     * passed). A scratch launch makes its folder last (after those checks), named from the thread's name (`name`,
+     * else the subject of `body`), and `resolveProject` makes it a project as usual; `abandon` removes it when the
+     * thread is then not written.
      */
     async prepare(
       target: InboxLaunchTarget,
       input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject> },
-    ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord }> {
+    ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: boolean }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
       const chosen = "project_id" in target ? store.project(target.project_id) : null;
@@ -953,6 +995,8 @@ export function createInboxLaunch(options: {
       // composer's read ahead, or another launch's start), or when no read ever finished (`warm` reads one at
       // Inbox start).
       if (reading || shell === null) await readLogin();
+      // After the shell read (it says where the agent's own files are), and before a scratch folder is made.
+      const trust = pressedTrust(host, chosen ? chosen.root : scratchRoot(), target.trust);
       const made = chosen ? null : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));
       const folder = made ? made.folder : chosen!.root;
       let project: InboxProject;
@@ -975,7 +1019,17 @@ export function createInboxLaunch(options: {
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
       };
-      return { project, to: { host: host.agent, session: `launch:${id}` }, launch };
+      return { project, to: { host: host.agent, session: `launch:${id}` }, launch, trust };
+    },
+
+    /**
+     * Trust and start: saves the trust a Send was pressed for, after every check and before the thread is written,
+     * so `trust_failed` sends nothing. A scratch launch's folder is made by now: it trusts the root's real path.
+     */
+    async acceptTrust(launch: InboxLaunchRecord): Promise<void> {
+      const host = hostOf(launch);
+      if (!host) throw new InboxError("trust_failed", `${launch.agent} can't be started here.`);
+      await saveTrust(trustOfferOf(host, launch));
     },
 
     /**
@@ -994,20 +1048,14 @@ export function createInboxLaunch(options: {
       if (host) void run(root, host, false);
     },
 
-    /** `GET /api/inbox/sessions`'s `launch` block: the agents To offers, the projects the folder menu lists. */
-    async composeBlock(): Promise<InboxComposeLaunch | undefined> {
+    /**
+     * `GET /api/inbox/sessions`'s `launch` block: the agents To offers, the projects the folder menu lists.
+     * `owner`: the owner's window asks, so each agent says which folders it would Trust and start. That read is
+     * cheap (the host's cached `trusts`); only `owner.pick`, the folder picked in To, has its files read.
+     */
+    async composeBlock(owner: { pick: { agent: string; project: string } | null } | null = null): Promise<InboxComposeLaunch | undefined> {
       if (!enabled()) return undefined;
       const root = scratchRoot();
-      const offered = await Promise.all(
-        hostList.map(async (host) => {
-          const state = stateOf(host);
-          // Not available last time: look again (the person may have just installed or updated it).
-          const ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
-          state.lastAvailable = ok;
-          // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
-          return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root) }] : [];
-        }),
-      );
       const recency = new Map<string, string>();
       for (const row of store.listRows()) if ((recency.get(row.project.id) ?? "") < row.last_at) recency.set(row.project.id, row.last_at);
       // A scratch folder Delete removed is not offered again (it would only be listed struck through).
@@ -1017,6 +1065,33 @@ export function createInboxLaunch(options: {
         .map((p) => ({ id: p.id, name: p.name, root: p.root, exists: isFolder(p.root) }))
         .filter((p) => p.exists || !removed.has(p.root))
         .sort((a, b) => (recency.get(b.id) ?? "").localeCompare(recency.get(a.id) ?? "") || a.name.localeCompare(b.name));
+      /** The folders `host` does not trust and could from here, by project id (`INBOX_SCRATCH_PICK`: the scratch root). */
+      const untrustedOf = (host: LaunchHost, pick: { agent: string; project: string } | null) => {
+        const untrusted: Record<string, InboxLaunchUntrusted> = {};
+        const look = (id: string, folder: string) => {
+          if (host.trusts(folder)) return;
+          const offer = host.trustOffer?.({ folder, scratch: false });
+          if (!offer) return;
+          if (pick?.agent !== host.agent || pick.project !== id) untrusted[id] = { folder: offer.folder };
+          else {
+            const { facts, warns } = offer.read();
+            untrusted[id] = { folder: offer.folder, facts, warns };
+          }
+        };
+        for (const project of projects) if (project.exists) look(project.id, project.root);
+        look(INBOX_SCRATCH_PICK, root);
+        return untrusted;
+      };
+      const offered = await Promise.all(
+        hostList.map(async (host) => {
+          const state = stateOf(host);
+          // Not available last time: look again (the person may have just installed or updated it).
+          const ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
+          state.lastAvailable = ok;
+          // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
+          return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}) }] : [];
+        }),
+      );
       return { agents: offered.flat(), projects, scratch: { root } };
     },
 
@@ -1035,7 +1110,7 @@ export function createInboxLaunch(options: {
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       const line = runOfRoot(store.message(threadId)!);
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
-      return offer ? { ...line!, trust: { warning: offer.warning } } : line;
+      return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */

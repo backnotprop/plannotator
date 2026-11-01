@@ -25,6 +25,7 @@ import type {
   InboxComposeProject,
   InboxComposeLaunch,
   InboxLaunchAgent,
+  InboxLaunchTrust,
   InboxRun,
   InboxDraft,
   InboxReplyDraft,
@@ -875,10 +876,16 @@ export interface ComposeSessionsModel {
 /** A draft as the Drafts page lists it, with its chip. */
 export type DraftView = InboxDraft & { status: InboxDraftStatus };
 
+/** The folder To names, whose files a sessions read looks at: a project's id, or `SCRATCH_PICK`. */
+export interface ComposeTrustPick {
+  agent: string;
+  project: string;
+}
+
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
-  /** A live session, or (launch on) a new session of `agent` started in the project. */
-  to: { host: string; session: string } | { launch: { agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } };
+  /** A live session, or (launch on) a new session of `agent` started in the project; `trust`: Trust and start, on this reading. */
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1210,8 +1217,10 @@ export const inboxApi = {
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
-  composeSessions: (session?: string | null) =>
-    get<ComposeSessionsModel>(inboxUrl('/sessions', session ? `session=${encodeURIComponent(session)}` : undefined)),
+  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null) => {
+    const query = new URLSearchParams({ ...(session ? { session } : {}), ...(trust ? { trust_agent: trust.agent, trust_project: trust.project } : {}) }).toString();
+    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined));
+  },
   startThread: (input: StartThreadInput) =>
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages'), { ...input }),
   // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.

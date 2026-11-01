@@ -6,7 +6,7 @@
 
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import { checkInboxThreadName, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
-import { inboxScratchSlug } from '@plannotator/core/inbox-scratch';
+import { INBOX_SCRATCH_PICK, inboxScratchSlug } from '@plannotator/core/inbox-scratch';
 import { whenTime } from '../format';
 
 /** One live session with the project it works in: what To names. */
@@ -359,7 +359,7 @@ export interface ComposeStart {
 }
 
 /** The folder menu's "New scratch folder" as the pick (`ComposeStart.project.id`): never a project id (`prj_…`). */
-export const SCRATCH_PICK = 'scratch';
+export const SCRATCH_PICK = INBOX_SCRATCH_PICK;
 
 /** A scratch start's stand-in project: the root it is made in (the folder itself is named when the person sends). */
 export function scratchProject(root: string): LaunchProject {
@@ -414,7 +414,7 @@ export function filterLaunchProjects(projects: readonly LaunchProject[], query: 
   return projects.filter((p) => all.every((w) => `${p.name} ${p.root}`.toLowerCase().includes(w)));
 }
 
-/** The status line beside Send for a start: where it runs, or that the folder is gone (screens 02 and 13). */
-export function startStatusLine(start: ComposeStart, folder: string): string {
-  return start.project.exists ? `${start.name} starts in ${folder} when you send.` : 'Pick a folder to start in.';
+/** The status line beside Send for a start: none, as for a message to a live session, unless the folder is gone (screen 13). */
+export function startStatusLine(start: ComposeStart): string {
+  return start.project.exists ? '' : 'Pick a folder to start in.';
 }

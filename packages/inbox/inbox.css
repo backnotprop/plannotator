@@ -3685,6 +3685,19 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
+/* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
+   its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
+.ib-cp-foot { position: relative; }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle { flex: none; }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning]:hover { color: var(--warning, oklch(0.75 0.15 85)); }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"]:hover { background: var(--muted); color: var(--foreground); }
+.ib-cp-barspace { visibility: hidden; }
+.ib-cp-trustask { display: flex; flex-direction: column; overflow-wrap: anywhere; }
+dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12px; width: 440px; }
+.ib-cp-trustask p span { display: block; }
+.ib-state.ib-cp-trustask p { line-height: 1.45; margin-bottom: 0; }
+.ib-state.ib-cp-trustask p.ib-cp-trustsaid { margin-top: 6px; color: var(--destructive); }
+.ib-cp-error[data-in-details] { visibility: hidden; }
 /* The folder menu: under "in <project>", the picker's look; folder icon, name, path, check. */
 .ib-cp-picker.ib-cp-folders { left: 200px; width: min(480px, calc(100% - 210px)); }
 .ib-cp-folders .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }

@@ -13,7 +13,9 @@
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
  *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request? }`:
- *                                            a new thread (409 `session_not_live`, nothing written)
+ *                                            a new thread (409 `session_not_live`, nothing written). With
+ *                                            `to.launch.trust` (Trust and start) only the owner's window: the
+ *                                            Send saves the folder's trust, so this form alone is never a plain write
  *   POST /api/inbox/messages/:id/to          `{ to }`: "Send to another session" for a message
  *                                            no session took yet (a live session of its project)
  *   GET  /api/inbox/drafts                   the drafts, each with its chip (`status`), and `replies`:
@@ -31,6 +33,7 @@
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import { inboxHasUnsent, inboxRowArchived } from "@plannotator/shared/inbox/list";
+import { INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import type { InboxReplyDraftRow } from "@plannotator/core/inbox-types";
 import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxProject } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -56,6 +59,12 @@ export const INBOX_UPLOAD_SWEEP_MS = 60 * 60 * 1000;
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
+/** A Send that would trust a folder: `to.launch` naming `trust` at all, whatever it holds. */
+function inboxPressesTrust(to: unknown): boolean {
+  const launch = to && typeof to === "object" && "launch" in to ? (to as { launch: unknown }).launch : null;
+  return !!launch && typeof launch === "object" && "trust" in launch;
+}
+
 export function createInboxCompose(options: {
   store: InboxStore;
   serverSession: string;
@@ -65,7 +74,7 @@ export function createInboxCompose(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
-  launch?: Pick<InboxLaunch, "target" | "prepare" | "abandon" | "begin" | "composeBlock">;
+  launch?: Pick<InboxLaunch, "enabled" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
@@ -155,6 +164,12 @@ export function createInboxCompose(options: {
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
       attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
+      // Trust and start: every check first, the trust next, and only then the thread. A name the thread would be
+      // refused must not leave the folder trusted, and `trust_failed` sends nothing.
+      if (prepared?.trust) {
+        store.checkPersonThreadName({ project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
+        await options.launch!.acceptTrust(prepared.launch);
+      }
       result = store.startPersonThread({
         project_id: project.id,
         body: body.body,
@@ -206,7 +221,27 @@ export function createInboxCompose(options: {
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
 
-  const route = async (req: Request, url: URL): Promise<Response | null> => {
+  /** The folder To names (`?trust_agent=&trust_project=`, a project id or the scratch pick): the one whose files are read. */
+  const trustPick = (url: URL) => {
+    const agent = url.searchParams.get("trust_agent");
+    const project = url.searchParams.get("trust_project");
+    return agent && project ? { agent, project } : null;
+  };
+
+  /**
+   * Trust and start writes the person's Claude config, so it is theirs alone: never an agent's or MCP client's bare
+   * call, the device door or a guest (another site's page is refused for every POST before it gets here). Null: it may
+   * go on. Launch off: the route's own 404.
+   */
+  const trustRefused = (req: Request, body: Record<string, unknown>, owner: boolean): Response | null => {
+    if (!options.launch?.enabled() || !inboxPressesTrust(body.to)) return null;
+    if (!isWindowRequest(req, body, serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
+    if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
+    return null;
+  };
+
+  /** `owner`: this computer's window or the owner's own login over the tailnet; never a guest, or the device door. */
+  const route = async (req: Request, url: URL, owner: boolean = false): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/sessions") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -218,13 +253,13 @@ export function createInboxCompose(options: {
         projects: sessionsModel(),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
         // Launch (only while `inboxLaunch.enabled`): the agents To offers to start and the folder menu's projects.
-        ...(options.launch ? { launch: await options.launch.composeBlock() } : {}),
+        ...(options.launch ? { launch: await options.launch.composeBlock(owner && !isCrossSiteRequest(req) ? { pick: trustPick(url) } : null) } : {}),
       });
     }
     if (path === "/api/inbox/messages") {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await options.readBody(req);
-      return staleTab(body) ?? (await startThread(body));
+      return staleTab(body) ?? trustRefused(req, body, owner) ?? (await startThread(body));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {

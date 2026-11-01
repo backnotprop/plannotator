@@ -4995,12 +4995,7 @@ export class InboxStore {
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const body = typeof input.body === "string" ? input.body.trim() : "";
     const auto = input.thread_name_auto === true;
-    let threadName: string | null = null;
-    if (input.thread_name !== undefined && input.thread_name !== null && !(typeof input.thread_name === "string" && input.thread_name.trim() === "")) {
-      const checked = checkInboxThreadName(input.thread_name);
-      if (checked.ok) threadName = checked.name;
-      else if (!auto) throw new InboxError("validation_error", `thread_name: ${checked.message}`, { field: "thread_name" });
-    }
+    let threadName = this.sentThreadName(input.thread_name, auto);
     for (const message of this.messages.values()) {
       if (!message.started_by_person || message.idempotency_key !== key) continue;
       // A retry is the same Send: the same body and the same name the person typed (compose's suggestion is the body's own).
@@ -5014,14 +5009,7 @@ export class InboxStore {
     }
     if (!body) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     if (!this.projectsById.has(input.project_id)) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
-    if (threadName && auto && this.threadNameTaken(input.project_id, threadName, null)) threadName = null;
-    if (threadName && this.threadNameTaken(input.project_id, threadName, null)) {
-      throw new InboxError(
-        "thread_name_taken",
-        `Another open thread in this project is already named "${threadName}". Pick another name, or leave it empty.`,
-        { field: "thread_name" },
-      );
-    }
+    threadName = this.freeThreadName(input.project_id, threadName, auto);
     const at = this.stamp();
     const id = inboxId("msg");
     const message: InboxMessage = {
@@ -5045,6 +5033,28 @@ export class InboxStore {
     };
     this.appendMessage(message, at);
     return { message, replayed: false };
+  }
+
+  /** A Send's thread name, or null for none. A suggestion (`auto`) that is not a valid name is dropped; a typed one is refused. */
+  private sentThreadName(name: unknown, auto: boolean): string | null {
+    if (name === undefined || name === null || (typeof name === "string" && name.trim() === "")) return null;
+    const checked = checkInboxThreadName(name);
+    if (checked.ok) return checked.name;
+    if (!auto) throw new InboxError("validation_error", `thread_name: ${checked.message}`, { field: "thread_name" });
+    return null;
+  }
+
+  /** The name a thread would get in this project: a suggestion another open thread has is dropped; a typed one is refused. */
+  private freeThreadName(projectId: string, name: string | null, auto: boolean): string | null {
+    if (!name || !this.threadNameTaken(projectId, name, null)) return name;
+    if (auto) return null;
+    throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, { field: "thread_name" });
+  }
+
+  /** What `startPersonThread` would refuse about a thread's name, with nothing written: for a Send with work to do before the write. */
+  checkPersonThreadName(input: { project_id: string; thread_name?: unknown; thread_name_auto?: unknown }): void {
+    const auto = input.thread_name_auto === true;
+    this.freeThreadName(input.project_id, this.sentThreadName(input.thread_name, auto), auto);
   }
 
   /** The thread the person started with this idempotency key, for a replayed Send. */

@@ -1,7 +1,8 @@
 /**
- * Trust folder (docs/agent-guides/inbox-launch.md, "Trusting a folder"), clicked through in a real browser against
- * the compiled binary. The only fake is the program launch runs: tests/helpers/fake-claude/ with Claude's folder trust
- * on, so `--bg` refuses until the key is in `$CLAUDE_CONFIG_DIR/.claude.json` and nothing passes by accident. Temp
+ * The thread's Trust folder button (docs/agent-guides/inbox-launch.md, "Trusting a folder"): the fallback for a launch
+ * that still stops on trust, clicked through in a real browser against the compiled binary. New message's own button
+ * is inbox-launch-trust-compose.spec.ts. The only fake is the program launch runs: tests/helpers/fake-claude/ with
+ * Claude's folder trust on, so `--bg` refuses until the key is in `$CLAUDE_CONFIG_DIR/.claude.json` and nothing passes by accident. Temp
  * HOME, CLAUDE_CONFIG_DIR and PLANNOTATOR_DATA_DIR, PLANNOTATOR_INBOX_CONNECT=0, NO_BROWSER; the real Claude Code, the
  * real `~/.claude.json` and the person's Inbox are never touched.
  *
@@ -66,7 +67,6 @@ async function agentWrites(folder: string, session: string, body: string): Promi
   await response.text();
 }
 
-const dialog = (page: Page) => page.locator('dialog[data-compose]');
 const pane = (page: Page) => page.locator('section.ib-pane');
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -77,21 +77,21 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** New message to a new Claude Code session in `name`; the thread, open on its refused start. */
+/**
+ * A launch that stops on trust, for the thread's own button: a Send with no press of Trust and start (New message's
+ * own button trusts first: inbox-launch-trust-compose.spec.ts). The thread, open on its refused start.
+ */
 async function sendTo(page: Page, name: string, words: string, threadName: string): Promise<{ threadId: string; folder: string }> {
-  await page.goto(world.url);
-  await page.locator('.ib-side [data-open-compose]').click();
-  const d = dialog(page);
-  await d.getByRole('textbox', { name: 'Message' }).fill(words);
-  await d.getByRole('textbox', { name: 'Thread name' }).fill(threadName);
-  await d.locator('[data-compose-to]').click();
-  await d.locator('[data-compose-start="claude-code"]').click();
-  await d.locator('[data-compose-folder]').click();
-  await d.locator('[data-compose-folders] [role="option"]').filter({ hasText: name }).first().click({ timeout: 10_000 });
-  const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
-  await d.locator('[data-compose-send]').click();
-  const body = (await (await answer).json()) as { thread_id: string; project: { root: string } };
-  await expect(d).toHaveCount(0);
+  const inbox = `http://127.0.0.1:${world.port}/api/inbox`;
+  const { launch } = (await (await fetch(`${inbox}/sessions`)).json()) as { launch: { projects: { id: string; name: string }[] } };
+  const to = { launch: { agent: 'claude-code', project_id: launch.projects.find((p) => p.name === name)!.id } };
+  const sent = await fetch(`${inbox}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to, body: words, thread_name: threadName, idempotency_key: crypto.randomUUID() }),
+  });
+  expect(sent.status).toBe(200);
+  const body = (await sent.json()) as { thread_id: string; project: { root: string } };
   await page.goto(`${world.url}#thread=${body.thread_id}`);
   await page.reload();
   await expect(pane(page).locator('[data-run="failed"]')).toBeVisible({ timeout: 30_000 });
