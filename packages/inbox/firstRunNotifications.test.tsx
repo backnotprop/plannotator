@@ -356,9 +356,10 @@ test.skipIf(!hasDom)('over the tailnet: the first-run screen asks nothing (anoth
   tailnetPage = true;
   settingsOver = (settings) => {
     settings.via = 'tailnet';
+    settings.guest = true;
   };
   const el = await renderApp();
-  // The note dialog is never decided for a tailnet page's sake (its agents are local only), so give the window time.
+  // The note dialog is never decided for a tailnet page's sake (a guest's agents are local only), so give the window time.
   await wait(3500);
   expect(el.querySelector('[data-inbox-empty]')).not.toBeNull();
   expect(firstRunAsk(el)).toBeNull();
