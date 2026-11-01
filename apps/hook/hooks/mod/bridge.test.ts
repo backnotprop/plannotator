@@ -313,7 +313,7 @@ describe('how a bridge loop ends', () => {
     expect(await client(host).run()).toMatchObject({ reason: 'refused', status: 404 })
   })
 
-  test('superseded: the next poll waits 10-15 s instead of taking the server back at once', async () => {
+  test('superseded: the next poll waits 10-14 s instead of taking the server back at once', async () => {
     const host = fakeHost()
     const pollTimes: number[] = []
     host.onFetch = (url) => {
@@ -328,7 +328,7 @@ describe('how a bridge loop ends', () => {
     for (const [index, time] of pollTimes.slice(1).entries()) {
       const gap = time - (pollTimes[index] as number)
       expect(gap).toBeGreaterThanOrEqual(10_000)
-      expect(gap).toBeLessThanOrEqual(15_000)
+      expect(gap).toBeLessThanOrEqual(14_000)
     }
   })
 

@@ -32,10 +32,14 @@ export const BRIDGE_POLL_WAIT_MS = 15_000
 /**
  * How long to stay away after the server answered `superseded` (another
  * client, e.g. a second Claude Code process on the same session, polled
- * after us): 10 s plus up to 5 s of jitter. Polling again at once made the
- * two clients supersede each other in a busy loop.
+ * after us): 10 s plus up to 4 s of jitter. Polling again at once made the
+ * two clients supersede each other in a busy loop. It stays under
+ * BRIDGE_POLL_WAIT_MS: a stay-away as long as the other client's poll comes
+ * back just after that poll ends, so a client with no question keeps the
+ * server at `ready` for two polls. That is 30 s, and the Inbox counts a
+ * question as lost after 20 s of `ready` (packages/server/inbox-ask-live.ts).
  */
-export const BRIDGE_SUPERSEDED_WAIT_MS = { min: 10_000, jitter: 5_000 } as const
+export const BRIDGE_SUPERSEDED_WAIT_MS = { min: 10_000, jitter: 4_000 } as const
 /** Statuses that mean the server will never take this client: stop for good. */
 export const BRIDGE_REFUSED_STATUSES: readonly number[] = [401, 403, 404, 405, 503]
 /**
@@ -123,6 +127,8 @@ export interface BridgeEnd {
   status?: number
   /** At least one poll was answered with 200 during this loop. */
   connected: boolean
+  /** The last poll was answered `superseded`: another client polls this server now. */
+  superseded?: true
 }
 
 export interface BridgeHandle {
@@ -130,6 +136,8 @@ export interface BridgeHandle {
   run(): Promise<BridgeEnd>
   /** Push a busy/ready change now (from `turn.start` / `turn.complete`), not at the next poll. */
   pushStatus(): void
+  /** Tell the server this client will not poll again, so it does not wait out the silence to find that. */
+  leave(): Promise<void>
 }
 
 export function createBridge(options: BridgeOptions): BridgeHandle {
@@ -160,7 +168,8 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
         }
       }
     } catch {
-      // Best effort; the server re-sends what it needs.
+      // Best effort, and nothing sends an event twice: a lost end is settled
+      // by Stop, by this client going silent, or on the Inbox by its `ready` check.
     }
   }
 
@@ -274,6 +283,7 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
   const loop = async (): Promise<BridgeEnd> => {
     let failures = 0
     let connected = false
+    let replaced = false
     while (options.isLive()) {
       // Deltas are batched per poll round.
       if (outbox.length > 0) await flush()
@@ -308,6 +318,7 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
         handle(command)
       }
       if (closing) return { reason: 'closing', connected }
+      replaced = superseded
       if (superseded) {
         // Someone else polls this server now. Stay away a while instead of
         // taking it back at once, which only starts a ping-pong.
@@ -316,7 +327,7 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
         await host.sleep(wait)
       }
     }
-    return { reason: 'ended', connected }
+    return { reason: 'ended', connected, ...(replaced ? { superseded: true as const } : {}) }
   }
 
   const run = async (): Promise<BridgeEnd> => {
@@ -329,7 +340,12 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
     }
   }
 
-  return { run, pushStatus }
+  const leave = (): Promise<void> => {
+    emit({ type: 'status', status: 'gone' }, false)
+    return flush()
+  }
+
+  return { run, pushStatus, leave }
 }
 
 /**
