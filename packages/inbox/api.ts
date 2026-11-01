@@ -658,7 +658,21 @@ export function heldWords(machine: Pick<MachineView, 'name' | 'state'> | null): 
     : `Sending to ${name}: this applies once ${name} confirms.`;
 }
 
-/** A read that gives no answer in `timeoutMs` (a held connection, a stalled server) fails with this. */
+/** How long a small read waits (a thread, a draft, a skill): the longest a Send stands still on one. */
+export const READ_TIMEOUT_MS = 8000;
+/**
+ * How long a write the person waits on waits for its answer. Past a forward to another machine (4 s) and a
+ * loaded link, and short enough that the button comes back while they still care. A write this long may yet land.
+ */
+export const WRITE_TIMEOUT_MS = 20_000;
+/** How long a wait inside a Send lasts when it spans several writes (the pick chain, the draft's saves). */
+export const SEND_STEP_TIMEOUT_MS = WRITE_TIMEOUT_MS;
+/** The list is the largest read, and a later one replaces it: it waits longer, but never for good (readLimiter.ts). */
+const LIST_TIMEOUT_MS = 30_000;
+/** The page's first list has nothing on screen to fall back on. */
+export const FIRST_LIST_TIMEOUT_MS = 120_000;
+
+/** A read, or a wait inside a Send, that gives no answer in `timeoutMs` (a held connection, a stalled server) fails with this. */
 export class InboxReadTimeout extends Error {
   constructor(readonly timeoutMs: number) {
     super(`no answer in ${Math.round(timeoutMs / 1000)} s`);
@@ -666,8 +680,22 @@ export class InboxReadTimeout extends Error {
   }
 }
 
-/** `get`, given up after `timeoutMs`: the fetch is aborted and the read fails with InboxReadTimeout. */
-async function getWithin<T>(path: string, timeoutMs: number): Promise<T> {
+/** A write with no answer in time. Unlike a refusal, it may have landed: only its key makes trying again safe. */
+export class InboxWriteTimeout extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`no answer in ${Math.round(timeoutMs / 1000)} s`);
+    this.name = 'InboxWriteTimeout';
+  }
+}
+
+/** A failed write's line: the server's own words, or that it may have gone (`keyed`: the retry is safe), or `fallback`. */
+export function writeFailureText(cause: unknown, fallback: string, keyed: string): string {
+  if (cause instanceof InboxApiError) return cause.message;
+  return cause instanceof InboxWriteTimeout ? keyed : fallback;
+}
+
+/** `run` with a signal that aborts after `timeoutMs`; it then fails with `timeout()`. */
+async function abortAfter<T>(timeoutMs: number, timeout: () => Error, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -675,12 +703,32 @@ async function getWithin<T>(path: string, timeoutMs: number): Promise<T> {
     controller.abort();
   }, timeoutMs);
   try {
-    return await get<T>(path, controller.signal);
+    const answer = await run(controller.signal);
+    // A body cut off part way reads as no body (readJson), not as an error: that is the timeout too.
+    if (timedOut) throw timeout();
+    return answer;
   } catch (cause) {
-    throw timedOut ? new InboxReadTimeout(timeoutMs) : cause;
+    throw timedOut ? timeout() : cause;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** `get`, given up after `timeoutMs`: the fetch is aborted and the read fails with InboxReadTimeout. */
+function getWithin<T>(path: string, timeoutMs: number): Promise<T> {
+  return abortAfter(timeoutMs, () => new InboxReadTimeout(timeoutMs), (signal) => get<T>(path, signal));
+}
+
+/**
+ * Waits for `work` no longer than `timeoutMs`, then fails with InboxReadTimeout. `work` goes on: use it only for a
+ * wait the caller may walk away from.
+ */
+export function within<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new InboxReadTimeout(timeoutMs)), timeoutMs);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
 /** An action item mark as the window sends it; `quiet`: a note typed under the marked row. */
@@ -712,7 +760,7 @@ export function pageServerSession(): string | null {
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
 
-async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+async function post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
@@ -721,8 +769,9 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(machine ? threadHeader(path) : {}) },
     body: JSON.stringify(pageSession ? { ...sent, serverSession: pageSession } : sent),
+    signal,
   });
-  if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
+  if (machine && (await localInstead(response))) return post<T>(localRoute(path), body, signal);
   if (machine && response.status === 202) {
     const held = (await response.json().catch(() => ({}))) as { outbox?: OutboxView; machine?: MachineView | null };
     if (held.outbox) {
@@ -742,6 +791,11 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   // events): any other answer can echo another machine's id (a kept draft names its project).
   if (machine) rememberMachine(idsIn(answer), machine);
   return answer;
+}
+
+/** A write a button waits on: `post`, given up after WRITE_TIMEOUT_MS with InboxWriteTimeout (the fetch is aborted). */
+function postWithin<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  return abortAfter(WRITE_TIMEOUT_MS, () => new InboxWriteTimeout(WRITE_TIMEOUT_MS), (signal) => post<T>(path, body, signal));
 }
 
 /** The thread a message belongs to, for another machine's messages (learned from its thread reads). */
@@ -943,8 +997,8 @@ export const inboxApi = {
   // window and the phone, which ask without this, still get them in Quiet.
   // `machines=1`: the merged view (linked machines). An Inbox with nothing linked answers its own list, each row and
   // project naming this Inbox; an older Inbox ignores the parameter.
-  list: () =>
-    get<ListModel>(inboxUrl('/threads?archived=exclude&machines=1')).then((model) => {
+  list: (timeoutMs = LIST_TIMEOUT_MS) =>
+    getWithin<ListModel>(inboxUrl('/threads?archived=exclude&machines=1'), timeoutMs).then((model) => {
       learnMachines(model);
       return model;
     }),
@@ -1030,7 +1084,7 @@ export const inboxApi = {
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean } = {}) =>
-    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
+    postWithin<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
       questions: [{ key, revision, answer }],
       ...(options.unsentOnly ? { unsent_only: true } : {}),
     }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
@@ -1044,7 +1098,7 @@ export const inboxApi = {
    * Answers the message's action items.
    */
   markAction: (messageId: string, key: string, mark: ActionMarkBody | null, staged = false) =>
-    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/actions/${encodeURIComponent(key)}`), actionMarkBody(mark, staged)).then(
+    postWithin<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/actions/${encodeURIComponent(key)}`), actionMarkBody(mark, staged)).then(
       (result) => ({ actions: result.questions.filter(isActionRecord) }),
     ),
   /**
@@ -1092,7 +1146,7 @@ export const inboxApi = {
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
     // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread.
-    post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
+    postWithin<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
       (result) => ({ ...result, questions: questionsOnly(result.questions) }),
       heldReply,
     ),
@@ -1102,7 +1156,7 @@ export const inboxApi = {
    * session, because the one that asked has ended.
    */
   reask: (messageId: string, input: { idempotency_key: string; to?: { host: string; session: string } }) =>
-    post<ReplyResult>(messageUrl(messageId, `/reask`), input).then((result) => ({
+    postWithin<ReplyResult>(messageUrl(messageId, `/reask`), input).then((result) => ({
       ...result,
       questions: questionsOnly(result.questions),
     }), heldReply),
@@ -1203,16 +1257,17 @@ export const inboxApi = {
   composeSessions: (session?: string | null) =>
     get<ComposeSessionsModel>(inboxUrl('/sessions', session ? `session=${encodeURIComponent(session)}` : undefined)),
   startThread: (input: StartThreadInput) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean }>(inboxUrl('/messages'), { ...input }),
+    postWithin<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean }>(inboxUrl('/messages'), { ...input }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
-    post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),
+    postWithin<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
-  replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
+  replyDraft: (threadId: string, timeoutMs?: number) =>
+    timeoutMs === undefined ? get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)) : getWithin<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), timeoutMs),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), {
+    postWithin<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), {
       body,
       base,
       ...(baseBody !== null ? { base_body: baseBody } : {}),
@@ -1276,7 +1331,7 @@ export const inboxApi = {
   /** Unpin's Undo: pin this one thread again at its old index, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
-  discardReplyDraft: (threadId: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft/delete`), {}),
+  discardReplyDraft: (threadId: string) => postWithin<{ ok: true; deleted: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft/delete`), {}),
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: string[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
@@ -1294,9 +1349,9 @@ export const inboxApi = {
    * `session`: one tagged session's own line (absent: the session the reply goes to).
    */
   sendNow: (messageId: string, session?: string | null) =>
-    post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
+    postWithin<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
-    post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
+    postWithin<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.
       if (cause instanceof InboxHeldError) return { message: null, replayed: false, held: cause.outbox };
       throw cause;

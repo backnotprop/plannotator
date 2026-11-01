@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_HOST_NAMES, type InboxThread } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi, type LiveSession, type LiveSessionsModel } from '../api';
+import { inboxApi, writeFailureText, type LiveSession, type LiveSessionsModel } from '../api';
 import { whenTime, tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
@@ -215,7 +215,7 @@ export function NewMessageComposer({
       await inboxApi.newMessage(thread.thread_id, { session: target.session, body: withSkillsBlock(body, skills), idempotency_key: key.current });
       await onSent();
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
+      setError(writeFailureText(cause, 'The message was not sent. Send again to retry.', 'The message may not have gone. Send again: it is not sent twice.'));
     } finally {
       setSending(false);
     }

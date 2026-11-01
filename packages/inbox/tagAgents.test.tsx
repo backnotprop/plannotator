@@ -113,6 +113,8 @@ beforeEach(() => {
   };
   posted = [];
   window.location.hash = '';
+  // Each test starts from a closed box: words the test before left unsaved would come back here (unsavedWords.ts).
+  window.localStorage.removeItem('plannotator-inbox-unsaved-words');
 });
 
 afterEach(() => {

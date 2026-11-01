@@ -16,7 +16,7 @@ import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestion
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, useRefRepo } from '../links';
-import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode } from '../api';
+import { InboxApiError, InboxHeldError, InboxWriteTimeout, READ_TIMEOUT_MS, SEND_STEP_TIMEOUT_MS, inboxApi, within, type AttachmentsModel, type MachineView, type OutboxView, type TagMode } from '../api';
 import { awayLine, outboxLine } from '../machines';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
@@ -121,6 +121,7 @@ import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/gu
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { forgetSendKeys, keepSendKeys, keptSendKeys } from '../sendKeys';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
@@ -1210,7 +1211,7 @@ const UNCONFIRMED_MS = 10 * 60_000;
  */
 async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' | 'unknown' | 'gone'> {
   try {
-    const read = await inboxApi.thread(threadId);
+    const read = await inboxApi.thread(threadId, READ_TIMEOUT_MS);
     return read.thread.messages.some((m) => m.author.kind === 'person' && m.idempotency_key === key) ? 'yes' : 'no';
   } catch (cause) {
     return cause instanceof InboxApiError && cause.status === 404 ? 'gone' : 'unknown';
@@ -1272,6 +1273,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // Picks saved at once; shown before the server answers, then from the server.
   const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
   const pickChain = useRef<Promise<void>>(Promise.resolve());
+  /** Raised by each pick that was not saved: a Send waiting on the chain does not go without that answer. */
+  const pickFailures = useRef(0);
   const revisions = useRef(new Map<string, number>());
   const threadRef = useRef(thread);
   threadRef.current = thread;
@@ -1324,6 +1327,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    */
   const [skipArmed, setSkipArmed] = useState<ReadonlySet<string> | null>(null);
   const [sending, setSending] = useState(false);
+  /** A Send is confirmed and the thread is being read again: what it carried is not offered for another Send meanwhile. */
+  const [settling, setSettling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const voice = useVoiceSession();
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
@@ -2038,7 +2043,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       const kind = readInboxAttachmentKind(attachment.kind);
       if (!isInboxTextKind(kind) || kind === 'code') continue;
       try {
-        texts.set(key, (await inboxApi.view(attachment.id, record.version === 'current' ? 'current' : 'sent')).text);
+        texts.set(key, (await within(inboxApi.view(attachment.id, record.version === 'current' ? 'current' : 'sent'), READ_TIMEOUT_MS)).text);
       } catch {
         texts.set(key, '');
       }
@@ -2061,6 +2066,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     setGuard(false);
     setRoute(CLOSED_ROUTE);
     setSkipArmed(null);
+    setSettling(false);
     sendKeys.current = null;
     sendContents.current = null;
     revisions.current.clear();
@@ -2778,7 +2784,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           return;
         }
         // The agent replaced the question meanwhile: reading the thread again redraws it as Replaced.
-        if (!isSuperseded(cause)) setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
+        if (!isSuperseded(cause)) {
+          pickFailures.current += 1;
+          setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
+        }
         await onChanged();
       } finally {
         setPending((current) => {
@@ -2870,7 +2879,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   );
   const draftCant = draftActions.filter((a) => a.outcome === 'cant' && !a.seen).length;
   /** Picks, annotations or action items wait for a Send. */
-  const waiting = picksCount > 0 || records.length > 0 || draftActions.length > 0;
+  const waiting = !settling && (picksCount > 0 || records.length > 0 || draftActions.length > 0);
   /** The box is closed and its words are kept as a draft (Cancel or Escape kept them): Edit draft brings them back. */
   const draftKept = !box.open && (replyDraft.draft !== null || replyDraft.conflict !== null);
 
@@ -3045,7 +3054,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const finishLanded = (earlier: UnconfirmedSend) => {
     unconfirmed.delete(threadRef.current.thread_id);
     const leftover = leftoverText(earlier);
-    finishSent(earlier.uploads, true);
+    finishSent(earlier.uploads, earlier.words !== '');
     setError(leftover);
     announce(leftover ?? 'Your reply went.');
   };
@@ -3111,6 +3120,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const finishSent = (carriedUploads: readonly string[], carriedWords: boolean) => {
     sendKeys.current = null;
     sendContents.current = null;
+    forgetSendKeys(threadRef.current.thread_id);
     unconfirmed.delete(threadRef.current.thread_id);
     setRoute(CLOSED_ROUTE);
     setSkipArmed(null);
@@ -3176,8 +3186,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     /** The Send claimed the thread's draft, and whether it went (else the claim is given back). */
     let claimed = false;
     let done = false;
-    /** The reply that carries the box's words, once its POST went out (its idempotency key), and why the Send stopped. */
-    let wordsKey: string | null = null;
+    /** The reply whose POST went out last and has no answer yet (its idempotency key), and why the Send stopped. */
+    let postedKey: string | null = null;
     let failure: unknown = null;
     /** This Send's words, the requests it posts, and the uploads they carry. */
     let sendWords = '';
@@ -3185,8 +3195,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     let sentUploads: string[] = [];
     try {
       // A Done or a note under an action item still on its way (a note saves on leaving its field): answered first.
-      await actionSavesSettled();
-      await pickChain.current;
+      // Each wait of a Send has a limit: what never answers ends it with a line near Send, the draft and the key kept.
+      const failedPicks = pickFailures.current;
+      await within(actionSavesSettled(), SEND_STEP_TIMEOUT_MS);
+      await within(pickChain.current, SEND_STEP_TIMEOUT_MS);
+      // A pick it waited for was not saved: that pick's line is up, and nothing goes without the answer.
+      if (pickFailures.current !== failedPicks) return;
       const current = threadRef.current;
       // The box's words, or (the box closed) the words kept as its draft: the foot's Send carries them too.
       // Before anything goes, the draft's saves are answered (a save landing after the Send would bring the
@@ -3198,7 +3212,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // first. There, that Send is finished and nothing goes again; not there, this is an ordinary new Send.
       const earlier = unconfirmed.get(current.thread_id);
       unconfirmed.delete(current.thread_id);
-      if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && box.open && earlier.words === boxWords) {
+      if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && earlier.words === boxWords) {
         const landed = await replyLanded(current.thread_id, earlier.key);
         if (landed === 'unknown') {
           unconfirmed.set(current.thread_id, earlier);
@@ -3212,8 +3226,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         if (landed === 'yes') {
           // It went. Anything added since stays, named, for an ordinary Send.
           finishLanded(earlier);
-          await onChanged();
-          await reloadFiles();
+          void onChanged();
+          void reloadFiles();
           return;
         }
       }
@@ -3261,7 +3275,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         tagOpts,
         sendMode,
       );
-      if (!sendKeys.current) sendKeys.current = new Map();
+      // After a reload or a return to the thread: the keys of a Send that never heard back, so trying again replays it.
+      if (!sendKeys.current) {
+        const kept = keptSendKeys(current.thread_id);
+        sendKeys.current = kept?.keys ?? new Map();
+        sendContents.current = kept?.contents ?? null;
+      }
       // One key per session's reply, kept for a retry.
       for (const t of targets) if (!sendKeys.current.has(replyKeyOf(t.message))) sendKeys.current.set(replyKeyOf(t.message), crypto.randomUUID());
       // A retry whose words, files or annotations changed, or that carries a pick or skip the last try did
@@ -3318,8 +3337,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       total = requests.length;
       /** The reply that handed the thread over (approval "inbox-tag-handoff"), for the toast's Undo. */
       let handedReply: InboxMessageWire | null = null;
+      keepSendKeys(current.thread_id, sendKeys.current, contents);
       for (const request of requests) {
-        if (request.input.words) wordsKey = request.input.idempotency_key;
+        postedKey = request.input.idempotency_key;
         const answer = await inboxApi.reply(request.messageId, request.input);
         const written = answer.reply as InboxMessageWire | null;
         if (written?.handoff && !answer.replayed) handedReply = written;
@@ -3347,36 +3367,40 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         });
       }
       if (!options.stayFull) setFull(false);
-      await onChanged();
-      await reloadFiles();
-      // The reply and where it is now sit at the foot of the thread.
-      requestAnimationFrame(() => {
-        bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
-        if (!focusSent.current) return;
-        focusSent.current = false;
-        const active = document.activeElement;
-        if (active && active !== document.body && active.isConnected) return;
-        const heads = bodyRef.current?.querySelectorAll<HTMLElement>('[data-message-article] [data-fold-head]');
-        const head = heads?.[heads.length - 1];
-        if (head) {
-          // Focus is kept (it holds the person's place). After ⌘Enter the browser counts it :focus-visible, which a
-          // click on Send never does, so that Send alone draws no ring (a Send by Tab and Enter keeps it: the person
-          // is steering by keys). The mark ends with the next key or blur, so Shift+J / Shift+K onto this head draws
-          // the ring as it does on any head, even with focus already there.
-          if (byChord) {
-            head.setAttribute('data-sent-focus', '');
-            const clear = () => {
-              head.removeAttribute('data-sent-focus');
-              head.removeEventListener('blur', clear);
-              head.removeEventListener('keydown', clear);
-            };
-            head.addEventListener('blur', clear);
-            head.addEventListener('keydown', clear);
+      // Confirmed: Send is finished here. The reads that draw the reply follow, and hold nothing.
+      setSettling(true);
+      void onChanged().finally(() => {
+        setSettling(false);
+        void reloadFiles();
+        // The reply and where it is now sit at the foot of the thread.
+        requestAnimationFrame(() => {
+          bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
+          if (!focusSent.current) return;
+          focusSent.current = false;
+          const active = document.activeElement;
+          if (active && active !== document.body && active.isConnected) return;
+          const heads = bodyRef.current?.querySelectorAll<HTMLElement>('[data-message-article] [data-fold-head]');
+          const head = heads?.[heads.length - 1];
+          if (head) {
+            // Focus is kept (it holds the person's place). After ⌘Enter the browser counts it :focus-visible, which a
+            // click on Send never does, so that Send alone draws no ring (a Send by Tab and Enter keeps it: the person
+            // is steering by keys). The mark ends with the next key or blur, so Shift+J / Shift+K onto this head draws
+            // the ring as it does on any head, even with focus already there.
+            if (byChord) {
+              head.setAttribute('data-sent-focus', '');
+              const clear = () => {
+                head.removeAttribute('data-sent-focus');
+                head.removeEventListener('blur', clear);
+                head.removeEventListener('keydown', clear);
+              };
+              head.addEventListener('blur', clear);
+              head.addEventListener('keydown', clear);
+            }
+            head.focus({ preventScroll: true });
+            return;
           }
-          head.focus({ preventScroll: true });
-          return;
-        }
-        sectionRef.current?.querySelector<HTMLElement>('[data-reply-button]')?.focus({ preventScroll: true });
+          sectionRef.current?.querySelector<HTMLElement>('[data-reply-button]')?.focus({ preventScroll: true });
+        });
       });
     } catch (cause) {
       failure = cause;
@@ -3404,8 +3428,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       if (claimed && !done) {
         const refused = failure instanceof InboxApiError && failure.status >= 400 && failure.status < 500;
         let wentAnyway: 'yes' | 'unknown' | 'no' | 'gone' = 'no';
-        if (wordsKey !== null && !refused) {
-          wentAnyway = await replyLanded(threadRef.current.thread_id, wordsKey);
+        if (postedKey !== null && !refused) {
+          wentAnyway = await replyLanded(threadRef.current.thread_id, postedKey);
+        }
+        // A write given up on may still land: not known yet, however the read answered.
+        if (wentAnyway === 'no' && failure instanceof InboxWriteTimeout) wentAnyway = 'unknown';
+        // Stopped before its last reply, which carries the words: they stay, and a retry replays what went by its key.
+        const partly = postedKey !== null && went + 1 < total && wentAnyway !== 'gone';
+        if (partly) {
+          wentAnyway = 'no';
+          setError('Part of this reply may have gone. Send again: what went is not sent twice.');
         }
         if (wentAnyway === 'yes') {
           // It went (and its clear_draft with it): the Send is finished as if its answer had come.
@@ -3422,7 +3454,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           // words, and the next Send of them first looks for this reply (unconfirmed).
           replyDraft.release();
           unconfirmed.set(threadRef.current.thread_id, {
-            key: wordsKey!,
+            key: postedKey!,
             words: sendWords,
             uploads: sentUploads,
             comments: requests.flatMap((r) => r.input.annotation_ids ?? []),
@@ -3672,7 +3704,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // from the thread as saved (threadRef), not as drawn when Re-ask was
       // pressed: a note just saved has a newer revision, a question just
       // picked is no longer open.
-      await pickChain.current;
+      await within(pickChain.current, SEND_STEP_TIMEOUT_MS);
       const targets = resolved && !cameBack ? [] : reaskTargets(threadRef.current.messages, liveMessage);
       const freshNotes = targets.filter((t) => t.kind === 'reask');
       // The routed note follows the session the person chose for, wherever its latest message is now.
@@ -3707,7 +3739,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         return;
       }
       const why = cause instanceof InboxApiError ? cause.message : 'Try again.';
-      setError(went > 0 ? `${went} of ${total} went; the rest did not. ${why}` : `Nothing was asked again. ${why}`);
+      // A note given up on may have gone: its key is kept, so trying again does not ask twice.
+      if (cause instanceof InboxWriteTimeout) setError('The Inbox did not answer. Try again: it is not asked twice.');
+      else setError(went > 0 ? `${went} of ${total} went; the rest did not. ${why}` : `Nothing was asked again. ${why}`);
       if (went > 0) await onChanged();
     } finally {
       setReasking(false);
@@ -4897,7 +4931,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           <>
             <DraftHead
               label={replyName ? `Reply to ${replyName}` : `Reply to ${asker} in ${thread.project.name}`}
-              savedAt={box.text.trim() ? (replyDraft.draft?.updated_at ?? null) : null}
+              savedAt={box.text.trim() ? replyDraft.draft?.updated_at || null : null}
               conflict={
                 replyDraft.conflict !== null
                   ? {

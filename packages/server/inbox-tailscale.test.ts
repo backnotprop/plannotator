@@ -149,6 +149,34 @@ describe("Inbox over your tailnet", () => {
     expect((await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/threads`, { headers: { Host: `${MAGIC}:${inbox.port}` } })).status).toBe(403);
   });
 
+  test("the thread list: gzipped through the tailnet for a client that takes it, plain otherwise and on loopback", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const inbox = await start(dataDir, fakeTailscale().run);
+    const listener = inbox.tailscale.listenerPort()!;
+    // Bun's fetch decodes bodies by itself; read the bytes as sent.
+    const raw = (encoding: string, port = listener) =>
+      fetch(`http://127.0.0.1:${port}/api/inbox/threads`, {
+        headers: { "Accept-Encoding": encoding, ...(port === listener ? { Host: `${MAGIC}:${inbox.port}`, "Tailscale-User-Login": OWNER } : {}) },
+        decompress: false,
+      } as RequestInit);
+
+    const zipped = await raw("gzip, deflate, br");
+    expect(zipped.status).toBe(200);
+    expect(zipped.headers.get("content-encoding")).toBe("gzip");
+    expect(zipped.headers.get("vary")).toBe("Accept-Encoding");
+    expect(zipped.headers.get("content-type")).toContain("application/json");
+    const model = JSON.parse(gunzipSync(Buffer.from(await zipped.arrayBuffer())).toString("utf8"));
+    expect(Array.isArray(model.sections)).toBe(true);
+
+    const plain = await raw("identity");
+    expect(plain.headers.get("content-encoding")).toBeNull();
+    expect(Array.isArray(((await plain.json()) as Json).sections)).toBe(true);
+
+    const local = await raw("gzip", inbox.port);
+    expect(local.headers.get("content-encoding")).toBeNull();
+    expect(Array.isArray(((await local.json()) as Json).sections)).toBe(true);
+  });
+
   test("the window page (#2032): compressed through the tailnet (br and gzip, Vary, a weak ETag and 304, private no-cache), unchanged on loopback, and the listener's checks still run first", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();

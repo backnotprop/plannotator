@@ -389,7 +389,7 @@ test.skipIf(!hasDom)('the project the list shows offers the refresh as Inbox doe
   expect(projectRow(el).hasAttribute('data-refreshes')).toBe(false);
 }, 30_000);
 
-test.skipIf(!hasDom)('a list read that lands after a newer one never takes its place (a slow catch-up on a bad network)', async () => {
+test.skipIf(!hasDom)('a list read waits for the one on its way, and what changed meanwhile still lands after it (a slow catch-up on a bad network)', async () => {
   const el = await renderApp(`#project=${world.project}`);
   await wait(300);
   // A read whose answer is taken now but reaches the window late.
@@ -399,12 +399,14 @@ test.skipIf(!hasDom)('a list read that lands after a newer one never takes its p
   });
   act(() => pokeStream!());
   await until(() => holdListRead === null, 'the held read');
-  // Meanwhile an agent writes, and the next read lands at once: "1 new · Show".
+  // Meanwhile an agent writes: its read waits behind the first (readLimiter.ts), so nothing shows yet.
   await agentSends('Written while the first read was on its way.');
   act(() => pokeStream!());
-  await until(() => notice(el)?.textContent?.includes('1 new') === true, 'the "1 new" notice');
-  // The older read lands now: the newer list stays, and so does its notice.
+  await wait(300);
+  expect(notice(el)?.textContent ?? '').not.toContain('1 new');
+  // The older read lands, then the one that waited: "1 new · Show", and it stays.
   release();
-  await wait(400);
+  await until(() => notice(el)?.textContent?.includes('1 new') === true, 'the "1 new" notice');
+  await wait(300);
   expect(notice(el)?.textContent ?? '').toContain('1 new');
 }, 30_000);

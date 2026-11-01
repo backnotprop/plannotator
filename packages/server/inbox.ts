@@ -454,6 +454,15 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 }
 
+/**
+ * The thread list: the largest answer, read after every record. Gzipped through the tailnet listener, where a phone
+ * on cellular reads it (about a tenth of the size, a few ms here). Loopback keeps it plain: the transfer is free.
+ */
+function listJson(body: unknown, req: Request, via: RequestVia): Response {
+  if (via !== "tailnet" || !/\bgzip\b/.test(req.headers.get("accept-encoding") ?? "")) return json(body);
+  return new Response(Bun.gzipSync(JSON.stringify(body)), { headers: { ...JSON_HEADERS, "Content-Encoding": "gzip", Vary: "Accept-Encoding" } });
+}
+
 const ERROR_STATUS: Record<string, number> = {
   validation_error: 422,
   project_unresolved: 503,
@@ -2680,7 +2689,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
     try {
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1"));
+      if (path === "/api/inbox/threads" && req.method === "GET") return listJson(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1"), req, via);
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);

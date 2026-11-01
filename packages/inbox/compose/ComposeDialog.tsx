@@ -22,7 +22,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
+import { InboxApiError, inboxApi, writeFailureText, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
@@ -330,7 +330,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       } else if (cause instanceof InboxApiError && cause.code === 'project_unresolved') {
         // git did not answer in time (#1919): the server's words are for an agent; the person presses Send again.
         setError('Could not tell which project that session works in: git did not answer in time. Nothing was sent; press Send again.');
-      } else setError(cause instanceof InboxApiError ? cause.message : 'The message was not sent. Send again to retry.');
+      } else setError(writeFailureText(cause, 'The message was not sent. Send again to retry.', 'The message may not have gone. Send again: it is not sent twice.'));
     } finally {
       setBusy(null);
     }

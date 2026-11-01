@@ -33,7 +33,7 @@ import {
   type SkillCatalogEntry,
   type SkillExportContent,
 } from '@plannotator/ui/utils/skillReferences';
-import { inboxApi } from './api';
+import { READ_TIMEOUT_MS, inboxApi, within } from './api';
 import { annotationOf } from './attachments';
 
 export { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE };
@@ -111,7 +111,7 @@ export async function inboxSkillsBlock(
   if (written.length === 0) return '';
   let catalog: SkillCatalogEntry[];
   try {
-    catalog = await sources.catalog();
+    catalog = await within(sources.catalog(), READ_TIMEOUT_MS);
   } catch {
     return '';
   }
@@ -122,7 +122,7 @@ export async function inboxSkillsBlock(
     refs
       .filter((ref) => ref.humanOnly)
       .map(async (ref) => {
-        const content = await sources.content(ref.name).catch(() => undefined);
+        const content = await within(sources.content(ref.name), READ_TIMEOUT_MS).catch(() => undefined);
         if (content) contents.set(ref.name, content);
       }),
   );

@@ -28,7 +28,9 @@ import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
 import {
+  FIRST_LIST_TIMEOUT_MS,
   InboxApiError,
+  READ_TIMEOUT_MS,
   inboxApi,
   setPageSession,
   subscribeInboxEvents,
@@ -131,6 +133,7 @@ import { boardViewOf, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
 import type { CardsModel, DraftView, UpdateCheckFailing } from './api';
+import { oneAtATime } from './readLimiter';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
@@ -218,7 +221,7 @@ export const THREAD_READ_RETRY_MS = [250, 1000, 2000, 4000, 5000] as const;
  * the browser's six per host, a stalled server) fails and is read again, as
  * a dropped one is; before this it waited for good.
  */
-export const THREAD_READ_TIMEOUT_MS = 8000;
+export const THREAD_READ_TIMEOUT_MS = READ_TIMEOUT_MS;
 /** How long a fresh load's 404 waits for the first merged list before it says the thread is not here. */
 const FIRST_LIST_WAIT_MS = 10_000;
 /** How long "Not sent to MacBook: it is no longer linked." stays: long enough to read and go to Settings. */
@@ -1019,13 +1022,16 @@ function Inbox() {
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
+  /** The list, one read at a time (readLimiter.ts): every record, pick and draft save asks for it. */
+  const [readList] = useState(() => oneAtATime(() => inboxApi.list(firstList.current!.done ? undefined : FIRST_LIST_TIMEOUT_MS)));
+
   /**
    * Read the list; `adopt` puts it on screen (an action, Show, or nothing on
    * screen yet), sliding the rows to their places when `slide` says so.
    */
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
-      const next = await inboxApi.list();
+      const next = await readList();
       // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
       // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
       const held = latestRef.current;
@@ -1069,7 +1075,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, [armSlide]);
+  }, [armSlide, readList]);
 
   /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
@@ -2195,10 +2201,11 @@ function Inbox() {
     void refreshList(!routeRef.current.thread, true);
   };
 
+  // The open thread (a read with a time limit), then the list, which nothing waits for: on a slow link it takes seconds.
   const afterWrite = async () => {
     const open = routeRef.current.thread;
     if (open) await refreshThread(open);
-    await refreshList(!open, true);
+    void refreshList(!open, true);
   };
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
