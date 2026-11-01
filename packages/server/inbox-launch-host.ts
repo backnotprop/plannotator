@@ -14,10 +14,13 @@
  * outside a host names its CLI.
  */
 
+import { join } from "node:path";
 import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
+import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { INBOX_UPLOADS_DIR } from "@plannotator/shared/inbox/uploads";
 import type { AgentEnvironment } from "./inbox-agents";
 import type { LaunchEnv } from "./inbox-launch-env";
 
@@ -28,6 +31,47 @@ export type LaunchAvailability = { ok: true; version: string } | { ok: false; mi
 export interface LaunchHostResult {
   exitCode: number;
   text: string;
+}
+
+/**
+ * The folder the person's files sent to an agent sit in (a message's `attachments`). A launched session reads them
+ * outside its own folder, so each host gives it read access here: a prompt for its own message's file serves no one.
+ */
+export const launchUploadsDir = (dataDir: string) => join(inboxDir(dataDir), INBOX_UPLOADS_DIR);
+
+/**
+ * Text from an agent as a thread note quotes it: one line, controls and invisible characters dropped, Markdown's
+ * marks escaped, `max` characters at most. What a note quotes comes from the agent or its provider, never the person.
+ */
+export function launchNoteText(text: unknown, max: number): string {
+  const flat = String(typeof text === "string" ? text : "")
+    // Controls, bidi and other invisible format characters go; the zero-width joiner stays (it holds an emoji together).
+    .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const short = [...flat].length > max ? `${[...flat].slice(0, max - 1).join("").trimEnd()}…` : flat;
+  // Only marks the Inbox's inline Markdown both formats and unescapes (InlineMarkdown's
+  // backslash rule): an escaped `:` or `<` would show its backslash; React keeps `<` text.
+  return short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+}
+
+/**
+ * One note from a launched session in its thread (a turn that failed, a dialog answered Cancel), under the thread's
+ * latest message. A note that can't be written is logged and goes no further: it never ends what it reports on.
+ */
+export function writeLaunchNote(
+  context: Pick<LaunchPermissionContext, "store" | "onChange">,
+  root: InboxMessage,
+  note: { author: { host: string; session: string; name: string }; body: string; key: string },
+  log: (line: string) => void,
+): void {
+  try {
+    const latest = context.store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
+    context.store.sendMessage({ project_id: root.project_id, author: { kind: "agent", ...note.author }, body: note.body, reply_to: latest, idempotency_key: note.key });
+    context.onChange();
+  } catch (error) {
+    log(`Inbox launch ${root.launch?.id ?? root.id}: a note was not written: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /** Why a start or a restart did not take, in words for the run line. */

@@ -336,6 +336,9 @@ test('a phone width: the sidebar is a sheet the toggle opens, a pick and Escape 
   const sheet = page.getByRole('dialog');
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('complementary', { name: 'Inbox navigation' })).toBeVisible();
+  // A phone's sheet has no Copy prompt pill (the desktop sidebar keeps it); Settings still ends the foot.
+  await expect(sheet.getByRole('button', { name: 'Settings' })).toBeVisible();
+  await expect(sheet.locator('button[data-connect-prompt]')).toHaveCount(0);
   await page.waitForTimeout(700);
   await shot('narrow-sheet');
   await sheet.getByRole('button', { name: 'Settings' }).click();

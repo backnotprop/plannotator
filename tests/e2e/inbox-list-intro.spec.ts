@@ -83,6 +83,8 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
         inboxTour: { version: 2, seen_at: '2026-10-01T10:00:00.000Z', skipped_at: '2026-10-01T10:00:00.000Z' },
         inboxNotifications: { dismissed: true },
         inboxAgentNotes: { offered: true },
+        // Due on a used Inbox, and its check would run the `codex` on this PATH.
+        inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
         ...(options.soundDue ? {} : { inboxSound: { dialogShownFor: '0.29.0' } }),
       }),
     );

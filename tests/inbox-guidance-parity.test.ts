@@ -198,7 +198,9 @@ describe("Inbox guidance parity across harnesses", () => {
   test("in the reminder, the follow-through rule follows the send, before anything about the chat", () => {
     for (const surface of reminders) {
       const text = SURFACES[surface]!;
-      expect(text).toContain(`send_message and keep going. ${INBOX_FOLLOW_THROUGH_RULE}`);
+      expect(text).toContain(`and keep going. ${INBOX_FOLLOW_THROUGH_RULE}`);
+      // Decisions reach the Inbox as question blocks, so every surface's reminder names the block.
+      expect(text.slice(0, text.indexOf("and keep going."))).toContain("`:::question` block");
       expect(text.indexOf(INBOX_FOLLOW_THROUGH_RULE)).toBeLessThan(text.indexOf("when the person writes here"));
     }
   });

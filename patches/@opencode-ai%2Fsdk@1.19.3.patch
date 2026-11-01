@@ -13,6 +13,19 @@ index 51b0e275621e9140e0307ca80de29fdf23c925b1..3e7a6fbf20c8773e47f2fe2fa4f24ccd
                      }
                      catch {
                          // noop
+diff --git a/dist/server.js b/dist/server.js
+index 7d97c3e0ec8979cdbbc8ee8a62d1a072a60a007f..cc6aeee2d61ace47f4c6e1cd736c52735ec4b3f7 100644
+--- a/dist/server.js
++++ b/dist/server.js
+@@ -30,7 +30,7 @@ export async function createOpencodeServer(options) {
+             output += chunk.toString();
+             const lines = output.split("\n");
+             for (const line of lines) {
+-                if (line.startsWith("opencode server listening")) {
++                if (line.startsWith("opencode server listening") || line.startsWith("server listening")) {
+                     const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+                     if (!match) {
+                         clear();
 diff --git a/dist/v2/gen/core/serverSentEvents.gen.js b/dist/v2/gen/core/serverSentEvents.gen.js
 index 9684cb4f19593266b94f78e933f5039dc362c5a9..47302c680ab8cccf10dd292e3460c0dfc708ae58 100644
 --- a/dist/v2/gen/core/serverSentEvents.gen.js
@@ -28,3 +41,16 @@ index 9684cb4f19593266b94f78e933f5039dc362c5a9..47302c680ab8cccf10dd292e3460c0df
                      }
                      catch {
                          // noop
+diff --git a/dist/v2/server.js b/dist/v2/server.js
+index 252797f8a782f33d9770e3c5334d679fbc638ed9..b70bcaf2fca81f4c2b226a994f4c2ec5ce3bc35b 100644
+--- a/dist/v2/server.js
++++ b/dist/v2/server.js
+@@ -30,7 +30,7 @@ export async function createOpencodeServer(options) {
+             output += chunk.toString();
+             const lines = output.split("\n");
+             for (const line of lines) {
+-                if (line.startsWith("opencode server listening")) {
++                if (line.startsWith("opencode server listening") || line.startsWith("server listening")) {
+                     const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+                     if (!match) {
+                         clear();
