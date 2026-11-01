@@ -92,6 +92,7 @@ import {
   parseUpdateCheckEnv,
   resolveAutoUpdate,
   resolveUpdateCheck,
+  resolveInboxAskAi,
   resolveInboxPhones,
   resolveInboxTool,
   saveConfig,
@@ -169,6 +170,7 @@ import {
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
+import { createInboxAsk } from "./inbox-ask";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -349,6 +351,11 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
+  /**
+   * Ask AI (inbox-ask.ts). Default: `resolveInboxAskAi` (PLANNOTATOR_INBOX_ASK_AI,
+   * else off). Off, its routes answer the unknown-route 404.
+   */
+  askAi?: boolean;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
   machineLinkTimings?: Partial<PeerLinkTimings>;
   /** Tests: how often a window's event stream sends `event: heartbeat` (default `INBOX_WINDOW_HEARTBEAT_MS`). */
@@ -458,6 +465,14 @@ const ERROR_STATUS: Record<string, number> = {
   validation_error: 422,
   project_unresolved: 503,
   owner_only: 403,
+  // Ask AI: only the person's own window asks or reads (inbox-ask.ts).
+  window_only: 403,
+  // Ask AI: no agent owns the thread, so nobody can answer.
+  ask_no_owner: 409,
+  // Ask AI: the conversation's file. Refused so nothing replaces it (shared/inbox/ask.ts).
+  ask_unreadable: 503,
+  ask_damaged: 409,
+  ask_full: 409,
   message_not_found: 404,
   thread_not_found: 404,
   project_not_found: 404,
@@ -788,6 +803,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
+  // Read once per start: Ask AI stays hidden until the owner has used it.
+  const askOn = options.askAi ?? resolveInboxAskAi();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   let port = 0;
@@ -796,6 +813,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const statusListeners = new Set<() => void>();
   /** A reply draft was saved or deleted (inbox-reply-drafts.ts): the windows' streams say `event: drafts`. */
   const draftListeners = new Set<(threadId: string) => void>();
+  /** An Ask AI conversation changed (inbox-ask.ts): the owner's windows' streams say `event: ask`. */
+  const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
   const pinListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1943,6 +1962,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
         const onDraft = (threadId: string) => send(`event: drafts\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId) draftListeners.add(onDraft);
+        // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
+        const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
+        if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
         // The sidebar's pins changed (any window's, or a deletion): the list reads `pins` again. Windows only.
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
         if (windowId) pinListeners.add(onPins);
@@ -1971,6 +1993,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           statusListeners.delete(onStatus);
           stopReach();
           draftListeners.delete(onDraft);
+          askListeners.delete(onAsk);
           pinListeners.delete(onPins);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
@@ -2448,6 +2471,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     onChange: (threadId) => {
       for (const listener of draftListeners) listener(threadId);
+    },
+  });
+  // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
+  const ask = createInboxAsk({
+    on: askOn,
+    store,
+    serverSession,
+    readBody: (req) => readBody(req),
+    json,
+    isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
+    onChange: (threadId) => {
+      for (const listener of askListeners) listener(threadId);
     },
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
@@ -2978,6 +3013,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;
+      // Ask AI: off, this answers nothing and the path is an unknown route.
+      const asked = await ask.route(req, url, via);
+      if (asked) return asked;
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;

@@ -1488,6 +1488,17 @@ export function resolveInboxPhones(
 }
 
 /**
+ * Whether the Plannotator Inbox offers Ask AI: an environment switch, off by
+ * default, until the owner has used it. Off, the ask routes answer 404, no
+ * question can wait and no agent connects for one. Same words as
+ * PLANNOTATOR_INBOX_PHONES; anything else counts as off.
+ */
+export function resolveInboxAskAi(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.PLANNOTATOR_INBOX_ASK_AI?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+
+/**
  * The experimental features this build knows: the name PLANNOTATOR_EXPERIMENTAL
  * lists (kebab case) and the key it is saved under in config.json
  * `experimental` (camel case). Small on purpose: a fuller flag registry is a
