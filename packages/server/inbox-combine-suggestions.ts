@@ -28,11 +28,6 @@ function isLeftoverWorktree(inner: string, outer: string): boolean {
   return CHECKOUTS.has(between[between.length - 1]!.toLowerCase()) && between.slice(0, -1).every((part) => part.startsWith("."));
 }
 
-/** The person already said no: a combine of these two was undone. */
-function separated(a: InboxProject, b: InboxProject): boolean {
-  return a.separated_from === b.id || b.separated_from === a.id;
-}
-
 /** Into the project with the most threads, the oldest on a tie. */
 function intoFirst(threads: (id: string) => number) {
   return (a: InboxProject, b: InboxProject) => threads(b.id) - threads(a.id) || a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id);
@@ -43,11 +38,16 @@ export interface CombineSuggestionInput {
   projects: readonly InboxProject[];
   repoOf: (root: string) => InboxProjectRepo | null;
   threads: (projectId: string) => number;
+  /** Whether two ids read as one project (`InboxStore.sameProject`). Without it, only the same id. */
+  sameProject?: (a: string, b: string) => boolean;
 }
 
-export function combineSuggestions({ projects, repoOf, threads }: CombineSuggestionInput): InboxTidyCombine[] {
+export function combineSuggestions({ projects, repoOf, threads, sameProject = (a, b) => a === b }: CombineSuggestionInput): InboxTidyCombine[] {
   const out: InboxTidyCombine[] = [];
   const taken = new Set<string>();
+  /** The person already said no: one left the other, or left a project that has since gone into it. */
+  const left = (a: InboxProject, b: InboxProject) => a.separated_from !== undefined && sameProject(a.separated_from, b.id);
+  const separated = (a: InboxProject, b: InboxProject) => left(a, b) || left(b, a);
   const pair = (into: InboxProject, from: InboxProject) => {
     taken.add(from.id);
     out.push({

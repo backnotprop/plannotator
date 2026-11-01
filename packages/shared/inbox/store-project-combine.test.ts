@@ -365,6 +365,27 @@ describe("a project can reappear, never vanish", () => {
     expect(store.project(web.id)!.merged_into).toBe(docs.id);
   });
 
+  test("a project already combined is not moved: nothing is written, and the undo comes first", () => {
+    const { store, docs, site, web } = open();
+    store.combineProject(site.id, docs.id);
+    const count = lines(store, site.key).length;
+    expect(() => store.combineProject(site.id, web.id)).toThrow("docs-site is in docs. Undo it first.");
+    expect(code(() => store.combineProject(site.id, web.id))).toBe("already_combined");
+    expect(store.project(site.id)!.merged_into).toBe(docs.id);
+    expect(lines(store, site.key)).toHaveLength(count);
+    store.combineProject(site.id, null);
+    store.combineProject(site.id, web.id);
+    expect(store.project(site.id)!.merged_into).toBe(web.id);
+  });
+
+  test("a project whose target is gone stands alone, so it can go into another", () => {
+    const { store, docs, site, web } = open();
+    store.combineProject(site.id, docs.id);
+    store.deleteProject(docs.id);
+    store.combineProject(site.id, web.id);
+    expect(store.project(site.id)!.merged_into).toBe(web.id);
+  });
+
   test("the race of two windows: A into B and B into A cannot make a loop", () => {
     const { store, docs, site } = open();
     store.combineProject(site.id, docs.id);

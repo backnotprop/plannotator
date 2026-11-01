@@ -461,6 +461,7 @@ const ERROR_STATUS: Record<string, number> = {
   message_not_found: 404,
   thread_not_found: 404,
   project_not_found: 404,
+  already_combined: 409,
   question_not_found: 404,
   question_revision_conflict: 409,
   question_already_sent: 409,
@@ -819,6 +820,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // resolved for every known project once the server listens (below) and
   // when a project is first seen, never while a request waits (inbox-repos.ts).
   const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
+  // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
+  let repoReadsBegun = false;
 
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
@@ -2532,8 +2535,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return threads.get(id) ?? 0;
       };
-      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.peek(root), threads: threadsOf });
+      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.peek(root), threads: threadsOf, sameProject: (a, b) => store.sameProject(a, b) });
     },
+    combineLoading: () => !repoReadsBegun || repos.reading(),
   });
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
@@ -3629,6 +3633,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   setTimeout(() => {
     if (stopped) return;
     for (const project of store.allProjects()) void repos.refresh(project.root);
+    repoReadsBegun = true;
     // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
     for (const threadId of store.setAsideDue(setAsideDelayMs)) tellSetAside(threadId);
     for (const threadId of store.setAsideDue(0)) scheduleSetAside(threadId);

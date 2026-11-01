@@ -48,6 +48,8 @@ export interface InboxRepoCache {
   peek(root: string): InboxProjectRepo | null;
   /** Resolve a root now (deduplicated while one is running); resolves once the cache holds the answer. */
   refresh(root: string): Promise<InboxProjectRepo | null>;
+  /** Whether a read is running or queued, so a `peek` may not hold the answer yet. Never runs git. */
+  reading(): boolean;
 }
 
 export function createInboxRepoCache(options: {
@@ -102,5 +104,6 @@ export function createInboxRepoCache(options: {
     },
     peek: (root) => entries.get(root)?.repo ?? null,
     refresh,
+    reading: () => pending.size > 0,
   };
 }

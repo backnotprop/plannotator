@@ -35,6 +35,8 @@ export interface InboxTidyDeps {
   now?: () => number;
   /** Projects that are one (inbox-combine-suggestions.ts). */
   combineSuggestions?: () => InboxTidyCombine[];
+  /** Whether repositories are still being read, so `combineSuggestions` may be short of a pair. */
+  combineLoading?: () => boolean;
 }
 
 export function createInboxTidy(deps: InboxTidyDeps) {
@@ -77,6 +79,7 @@ export function createInboxTidy(deps: InboxTidyDeps) {
     return {
       serverSession: deps.serverSession,
       ...(combine.length > 0 ? { combine } : {}),
+      ...(surface === "list" && deps.combineLoading?.() ? { combine_loading: true as const } : {}),
       count: agents.reduce((n, a) => n + a.items.length, 0) + combine.length,
       agents: agents.map((agent) => ({
         session: agent.session,

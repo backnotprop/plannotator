@@ -135,6 +135,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const web = scratchProject(code, 'web-app');
   const notes = scratchProject(code, 'field-notes');
   writeFileSync(join(site, 'landing.md'), '# Landing\n\nThe new landing page copy.\n');
+  // The Board is something the person turns on: on here, for the cards a combine must give back.
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxBoard: true }));
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
@@ -466,6 +469,12 @@ test('an older binary on a combined store: the two projects it always showed, no
   // It writes to the folder's project, as it always did.
   const sent = await older.send({ project_path: folders.site, subject: 'From an older binary', thread: 'older', body: 'Written by an older Inbox.' });
   expect(sent.project.id).toBe(ids.site);
+  // The agent command, new, on the Inbox that is running, old: it says so instead of a bare 404, for an undo too.
+  for (const args of [['combine', ids.site, '--into', ids.docs], ['undo', ids.site]]) {
+    const refused = spawnSync(binary, ['inbox', 'projects', ...args], { env: world.env, encoding: 'utf8', timeout: 60_000 });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/^not_supported:/);
+  }
   await stopScratchInbox(dataDir);
 
   await startInbox(binary);
@@ -586,6 +595,51 @@ test('Settings: each folder keeps its size and says what Delete does', async () 
   await page.screenshot({ path: join(proofDir, '08-settings-storage-light.png') });
   expect((await combine(ids.site, null)).status).toBe(200);
   expect(world.errors).toEqual([]);
+});
+
+test('the agent command: a combine shows in an open window, and an undo from another session, after a restart, brings back the threads, the card and the name', async () => {
+  const { page, ids, threads, folders, dataDir } = world;
+  const projects = (args: string[], session: string, cwd: string) =>
+    spawnSync(binary, ['inbox', 'projects', ...args], { cwd, env: { ...world.env, PLANNOTATOR_SESSION_TAG: `claude-code:${session}` }, encoding: 'utf8', timeout: 60_000 });
+  await page.goto(world.url);
+  const renamed = await fetch(`${world.url}/api/inbox/projects/${ids.site}/name`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: await session(), name: 'Marketing site' }) });
+  expect(renamed.status).toBe(200);
+  await expect(row(page, 'Marketing site')).toBeVisible();
+
+  const combined = projects(['combine', ids.site, '--into', ids.docs], 'ses-combiner-0001', folders.site);
+  expect(combined.stderr).toBe('');
+  expect(combined.status).toBe(0);
+  expect(combined.stdout).toContain('Combined Marketing site into docs. To undo: ');
+  expect(combined.stdout).toContain(` inbox projects undo ${ids.site}`);
+  // The window that was open follows, with nothing to reload.
+  await expect(row(page, 'Marketing site')).toHaveCount(0);
+  await expect.poll(() => rowProject(page, threads.site)).toBe('docs');
+  const sent = await world.agent.send({ project_path: folders.site, subject: 'While combined', thread: 'while-combined', body: 'A note from the combined folder.' });
+  const card = await world.agent.card({ op: 'create', title: 'Landing page', project_path: folders.site, thread_id: sent.message_id });
+  expect(await listedIn(sent.thread_id)).toBe('docs');
+
+  // Later: another Inbox process, another session, a folder that is neither project.
+  await stopScratchInbox(dataDir);
+  const undone = projects(['undo', ids.site], 'ses-undoer-0002', dirname(dataDir));
+  expect(undone.stderr).toBe('');
+  expect(undone.status).toBe(0);
+  expect(undone.stdout).toBe('Marketing site is its own project again.\n');
+  rememberInboxOf(dataDir);
+  world.url = (JSON.parse(spawnSync(binary, ['inbox', 'status', '--json'], { env: world.env, encoding: 'utf8' }).stdout) as { url: string }).url.replace(/\/$/, '');
+  await world.agent.close().catch(() => {});
+  world.agent = await SimAgent.connect({ binary, env: world.env, name: 'Claude Code', host: 'claude-code' });
+
+  await page.goto(world.url);
+  await expect(row(page, 'Marketing site')).toBeVisible();
+  await expect.poll(() => rowProject(page, threads.site)).toBe('Marketing site');
+  expect(await listedIn(sent.thread_id)).toBe('Marketing site');
+  expect(await threadBodies(sent.thread_id)).toContain('A note from the combined folder.');
+  const listed = await world.agent.card({ op: 'list', project_path: folders.site, asked_by: 'anyone' });
+  expect(listed.cards.map((found: { id: string }) => found.id)).toContain(card.card.id);
+
+  const reset = await fetch(`${world.url}/api/inbox/projects/${ids.site}/name`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: await session(), name: null }) });
+  expect(reset.status).toBe(200);
+  await expect(row(page, 'docs-site')).toBeVisible();
 });
 
 test('dark: the warning and the toast', async ({ browser }: { browser: Browser }) => {

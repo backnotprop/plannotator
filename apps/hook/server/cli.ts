@@ -172,6 +172,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
     "  plannotator inbox mcp",
     "  plannotator inbox status [--json] | stop | restart",
+    "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
@@ -275,6 +276,18 @@ export const FEEDBACK_COMMAND_USAGE = [
   "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
 ].join("\n");
 
+/** `plannotator inbox projects …` (inbox-projects-command.ts): list, combine and undo, on the person's request. */
+export const INBOX_PROJECTS_USAGE = [
+  "Usage:",
+  "  plannotator inbox projects [--json]",
+  "  plannotator inbox projects combine <project id> --into <project id> [--json]",
+  "  plannotator inbox projects undo <project id> [--json]",
+  "",
+  "Lists the Inbox's projects, combines one into another, and undoes a combine.",
+  "A combine applies right away, and an undo works at any time, from any session.",
+  "Run 'plannotator inbox --help' for when to use it.",
+].join("\n");
+
 /**
  * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
  * the full agent guide (inbox-help.ts), which carries this block as its
@@ -289,6 +302,9 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
   "  plannotator inbox restart [--tailscale]",
+  "  plannotator inbox projects [--json]",
+  "  plannotator inbox projects combine <project id> --into <project id> [--json]",
+  "  plannotator inbox projects undo <project id> [--json]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
@@ -319,6 +335,8 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox restart       Stop it, then start it in the background (no",
   "                                  browser tab) and print its URL. A run published by",
   "                                  --tailscale is published again.",
+  "  plannotator inbox projects      List the projects, combine one into another, undo a",
+  "                                  combine: when the person asks to clean them up.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
@@ -574,6 +592,8 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   if (!sub) return null;
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
+  // `inbox projects --help` is that command's own usage, not the whole guide.
+  if (canonical === "inbox" && args[1] === "projects") return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

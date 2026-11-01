@@ -361,6 +361,66 @@ describe("Tidy's Combine projects", () => {
     expect((await tidyPlan(w.server)).combine).toBeUndefined();
   });
 
+  test("through a chain: a project undone out of a group is not offered back to the project that heads it now", async () => {
+    const w = await combined();
+    // A third clone goes into the one that went in, so `from` heads nothing and the group's head is two steps away.
+    const third = repository(join(w.root, "scratch", "ledger-3"), ORIGIN);
+    const fix = (await send(w.client, { project_path: third, body: "Third.", agent_session: "ses_third" })).project.id as string;
+    // Its repository is read: from here on, only the undo can keep it from being offered.
+    await until(() => tidyPlan(w.server), (plan) => plan.combine?.some((pair) => pair.from.id === fix) === true);
+    expect((await combine(w.server, w.from, null)).status).toBe(200);
+    expect((await combine(w.server, fix, w.from)).status).toBe(200);
+    expect((await combine(w.server, w.from, w.into)).status).toBe(200);
+    expect(w.server.store.project(fix)?.merged_into).toBe(w.from);
+    expect((await combine(w.server, fix, null)).status).toBe(200);
+    await until(() => tidyPlan(w.server), (plan) => plan.combine_loading === undefined);
+    expect((await tidyPlan(w.server)).combine).toBeUndefined();
+  });
+
+  test("says while repositories are still being read, and a read of the plan runs no git for it", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-combine-")));
+    scratch.push(root);
+    const dataDir = join(root, "data");
+    // Two clones already in the store when the Inbox starts: what a stopped Inbox holds.
+    const first = await startInboxServer({ dataDir, phones: false, board: true, readProjectRepo: async () => null });
+    first.store.ensureProject({ name: "ledger", root: join(root, "a") });
+    first.store.ensureProject({ name: "ledger", root: join(root, "b") });
+    first.stop();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const server = await startInboxServer({
+      dataDir,
+      phones: false,
+      board: true,
+      readProjectRepo: async () => {
+        await held;
+        return { display: "acme/ledger", host: "github.com" };
+      },
+    });
+    servers.push(server);
+
+    // A thin plan with the reads still out says so, right after the start and while they run.
+    const early = await tidyPlan(server);
+    expect(early.combine_loading).toBe(true);
+    expect(early.combine).toBeUndefined();
+    await Bun.sleep(100);
+    expect((await tidyPlan(server)).combine_loading).toBe(true);
+
+    release();
+    const done = await until(() => tidyPlan(server), (plan) => plan.combine_loading === undefined);
+    expect(done.combine).toHaveLength(1);
+  });
+
+  test("a project the reads never reach does not leave the plan loading for good", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-combine-")));
+    scratch.push(root);
+    const server = await startInboxServer({ dataDir: join(root, "data"), phones: false, board: true, readProjectRepo: async () => null });
+    servers.push(server);
+    await until(() => tidyPlan(server), (plan) => plan.combine_loading === undefined);
+    server.store.ensureProject({ name: "ledger", root: join(root, "ledger") });
+    expect((await tidyPlan(server)).combine_loading).toBeUndefined();
+  });
+
   test("offers a project left in another's worktrees folder, read from the store, without touching either", async () => {
     const w = await world();
     const main = (await send(w.client, { project_path: w.ledger, body: "Main.", agent_session: "ses_ledger" })).project.id as string;
