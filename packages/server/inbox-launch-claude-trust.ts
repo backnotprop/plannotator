@@ -1,7 +1,8 @@
 /**
  * Claude Code's workspace trust, as the Inbox reads and accepts it: the run line's Trust folder button
- * (docs/agent-guides/inbox-launch.md, "Trusting a folder"). Claude-only; everything here was read from Claude Code
- * 2.1.316 and proved against a real `claude --bg` (.ops/research/claude-trust/).
+ * (docs/agent-guides/inbox-launch.md, "Trusting a folder"). Claude-only. The key, the lock and what the warning covers
+ * were read from the Claude Code 2.1.316 binary; the key was proved against a real `claude --bg`, in a plain repository
+ * (.ops/research/claude-trust/). A linked worktree and a race with Claude's own write were not run.
  *
  * The key: `projects["<path>"].hasTrustDialogAccepted` in Claude's global config. The path is physical and NFC, of
  * the git root (a linked worktree's main checkout), else of the folder.
@@ -65,6 +66,7 @@ async function withClaudeConfigLock(config: string, waitMs: number, work: () => 
   mkdirSync(dirname(config), { recursive: true });
   const lock = `${config}.lock`;
   const deadline = Date.now() + waitMs;
+  let stuck = false;
   for (;;) {
     try {
       mkdirSync(lock);
@@ -76,23 +78,30 @@ async function withClaudeConfigLock(config: string, waitMs: number, work: () => 
       try {
         rmdirSync(lock);
         continue;
-      } catch {
-        // Another writer got there first, or it is not a lock: wait as for a live one.
+      } catch (error) {
+        // Gone: another writer got there first. Anything else is a file or a full folder, not a lock.
+        stuck = (error as NodeJS.ErrnoException).code !== "ENOENT";
       }
     }
-    if (Date.now() >= deadline) throw new Error("Claude Code is holding it");
+    if (Date.now() >= deadline) throw new Error(stuck ? `${basename(lock)} is in the way and can't be removed` : "Claude Code is holding it");
     await new Promise((done) => setTimeout(done, 40 + Math.random() * 80));
   }
   try {
     work();
   } finally {
-    rmdirSync(lock);
+    try {
+      rmdirSync(lock);
+    } catch {
+      // Never hides what `work` did: a lock left here is cleared as dead in 10 s.
+    }
   }
 }
 
 /**
  * Save `key` as trusted in the global config at `config`: that one value, every other byte as it was, in an atomic
- * write that keeps the file's mode. Throws with a short reason, the file untouched, when it can't be read as JSON.
+ * write that keeps the file's mode, flushed to disk before the rename as Claude's own save is. Throws with a short
+ * reason, the file untouched, when it can't be read as JSON. An empty file counts: Claude treats one as corrupted and
+ * repairs it from its cache, which a file holding only this key would stop.
  */
 export async function acceptClaudeTrust(config: string, key: string, waitMs: number = CLAUDE_LOCK_WAIT_MS): Promise<void> {
   try {
@@ -100,9 +109,10 @@ export async function acceptClaudeTrust(config: string, key: string, waitMs: num
       const read = readAgentFile(config, CLAUDE_JSON_MAX_BYTES);
       if (read.kind === "refused") throw new Error(read.reason);
       const file = read.kind === "file" ? read : null;
+      if (file && !file.text.trim()) throw new Error("it is empty");
       const edit = setJsonMember(file?.text ?? "", ["projects", key], "hasTrustDialogAccepted", true);
       if (!edit.ok) throw new Error(edit.reason);
-      if (edit.changed) writeAgentFileAtomic(read.target, withBom(edit.text, file?.bom === true), file?.mode ?? 0o600);
+      if (edit.changed) writeAgentFileAtomic(read.target, withBom(edit.text, file?.bom === true), file?.mode ?? 0o600, true, true);
     });
   } catch (error) {
     throw new Error(describeFsError(error));
@@ -112,8 +122,10 @@ export async function acceptClaudeTrust(config: string, key: string, waitMs: num
 /** The project files whose hooks and helpers run once a folder is trusted. */
 const CLAUDE_SETTINGS_FILES = [".claude/settings.json", ".claude/settings.local.json"] as const;
 const CLAUDE_MCP_FILE = ".mcp.json";
-/** The settings that name a command Claude runs (the docs' "helper commands such as `apiKeyHelper`"). */
-const CLAUDE_HELPER_SETTINGS = ["apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh", "otelHeadersHelper"] as const;
+/** The settings that name a command Claude runs for its credentials or headers, as its own trust prompt lists them. */
+const CLAUDE_HELPER_SETTINGS = ["apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh", "otelHeadersHelper", "proxyAuthHelper"] as const;
+/** The settings that hold a command of their own, run like a hook. */
+const CLAUDE_COMMAND_SETTINGS = ["statusLine", "subagentStatusLine", "fileSuggestion"] as const;
 
 const recordOf = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
 const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
@@ -126,10 +138,13 @@ function spoken(parts: readonly string[]): string {
 }
 
 /**
- * The one line beside Trust folder: what these folders would turn on once trusted, by count, and any file that could
- * not be read. Null when there is nothing to say. Never shows what a file holds.
+ * The one line beside Trust folder: what `folders` would turn on once trusted, as Claude's own trust prompt counts it
+ * (2.1.316), and any file that could not be read. `.mcp.json` counts from each folder up to the file system's root,
+ * as Claude reads it, by server name; a server in `disabledMcpjsonServers` never starts and does not count.
+ * `repository`: where the trust lands when that is not the folder shown. Null when there is nothing to say. Never
+ * shows what a file holds.
  */
-export function claudeTrustWarning(folders: readonly string[]): string | null {
+export function claudeTrustWarning(folders: readonly string[], repository: string | null = null): string | null {
   const unread = new Set<string>();
   const read = (folder: string, name: string): Record<string, unknown> => {
     const file = readAgentFile(join(folder, name));
@@ -142,25 +157,46 @@ export function claudeTrustWarning(folders: readonly string[]): string | null {
     unread.add(name);
     return {};
   };
+  const places = new Set(folders.map((f) => placeKey(f)));
+  const disabled = new Set<unknown>();
   let hooks = 0;
-  let servers = 0;
   let helpers = 0;
-  for (const folder of new Set(folders.map((f) => placeKey(f)))) {
+  let env = false;
+  let tools = false;
+  let outside = false;
+  for (const folder of places) {
     for (const name of CLAUDE_SETTINGS_FILES) {
       const settings = read(folder, name);
       for (const groups of Object.values(recordOf(settings.hooks))) {
         for (const group of listOf(groups)) hooks += listOf(recordOf(group).hooks).length;
       }
+      hooks += CLAUDE_COMMAND_SETTINGS.filter((key) => typeof recordOf(settings[key]).command === "string").length;
       helpers += CLAUDE_HELPER_SETTINGS.filter((key) => typeof settings[key] === "string").length;
-    }
-    for (const server of Object.values(recordOf(read(folder, CLAUDE_MCP_FILE).mcpServers))) {
-      servers += 1;
-      if (typeof recordOf(server).headersHelper === "string") helpers += 1;
+      helpers += Object.values(recordOf(settings.extraKnownMarketplaces)).filter((m) => typeof recordOf(recordOf(m).source).headersHelper === "string").length;
+      env ||= Object.keys(recordOf(settings.env)).length > 0;
+      const permissions = recordOf(settings.permissions);
+      tools ||= listOf(permissions.allow).length > 0;
+      outside ||= listOf(permissions.additionalDirectories).length > 0 || typeof settings.autoMemoryDirectory === "string";
+      for (const name of listOf(settings.disabledMcpjsonServers)) disabled.add(name);
     }
   }
-  const found = [counted(hooks, "hook"), counted(servers, "MCP server"), counted(helpers, "helper command")].filter((part) => part !== null);
+  const servers = new Map<string, unknown>();
+  const walked = new Set<string>();
+  for (const folder of places) {
+    for (let dir = folder; !walked.has(dir); dir = dirname(dir)) {
+      walked.add(dir);
+      for (const [name, server] of Object.entries(recordOf(read(dir, CLAUDE_MCP_FILE).mcpServers))) if (!disabled.has(name) && !servers.has(name)) servers.set(name, server);
+    }
+  }
+  helpers += [...servers.values()].filter((server) => typeof recordOf(server).headersHelper === "string").length;
+
+  const runs = [counted(hooks, "hook"), counted(servers.size, "MCP server"), counted(helpers, "helper command"), env ? "env settings" : null].filter((part) => part !== null);
+  const grants = [tools ? "use some tools without asking" : null, outside ? "reach folders outside it" : null].filter((part) => part !== null);
   const files = spoken([...unread]);
-  if (found.length === 0) return files ? `This folder's ${files} couldn't be read, so it may run something once you trust it.` : null;
-  const line = `This folder has ${spoken(found)} that will run once you trust it.`;
-  return files ? `${line} Its ${files} couldn't be read, so there may be more.` : line;
+  const lines: string[] = [];
+  if (runs.length) lines.push(`This folder has ${spoken(runs)} that will run once you trust it.`);
+  if (grants.length) lines.push(`${runs.length ? "Its settings also let" : "Once you trust it, this folder's settings let"} Claude Code ${spoken(grants)}.`);
+  if (files) lines.push(lines.length ? `Its ${files} couldn't be read, so there may be more.` : `This folder's ${files} couldn't be read, so it may run something once you trust it.`);
+  if (repository) lines.push(`This folder is part of the repository at ${repository}; trusting it trusts that whole repository.`);
+  return lines.length ? lines.join(" ") : null;
 }

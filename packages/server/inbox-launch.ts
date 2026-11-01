@@ -824,6 +824,8 @@ export function createInboxLaunch(options: {
           if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
           const offer = host.trustOffer?.(launch);
           if (!offer) throw new InboxError("trust_failed", `${host.name} can't trust this folder from here.`);
+          // The person agreed to the line they read: a folder that changed since gets a new read, and a new click.
+          if ((body.warning ?? null) !== offer.warning) throw new InboxError("trust_warning_changed", `This folder changed, so nothing was saved. ${offer.warning ?? "It no longer has anything to warn about."} Click Trust folder again if that's fine.`);
           try {
             await offer.accept();
           } catch (error) {
@@ -849,7 +851,7 @@ export function createInboxLaunch(options: {
   const refusedForTrust = (root: InboxMessage): boolean => {
     const launch = root.launch!;
     if (launch.deleted_at || starting.has(launch.id) || respawning.has(launch.id)) return false;
-    return launch.error ? launch.error.code === "untrusted" : respawnUntrustedOf(memoOf(launch));
+    return runOfRoot(root)?.untrusted === true;
   };
 
   /** Try again, for a launch that failed. */

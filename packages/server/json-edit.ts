@@ -285,6 +285,12 @@ function notValid(comments: boolean): string {
   return comments ? "it is not valid JSON" : "it is not plain JSON";
 }
 
+/** Why walking a text failed, in words for a person. */
+function scanFailure(error: unknown, comments: boolean): string {
+  if (error instanceof ScanError) return notValid(comments);
+  return error instanceof RangeError ? "it is nested too deeply" : String(error);
+}
+
 /** Where a member's cut starts: back over the spaces before it, and the line break before them when the key starts its line. */
 function cutStart(t: string, start: number): number {
   let i = start;
@@ -330,7 +336,7 @@ export function addJsonMember(text: string, path: readonly string[], key: string
       out = insertMember(lf, scanned.chain[scanned.missingAt]!, path[scanned.missingAt]!, nested, unit);
     }
   } catch (error) {
-    return { ok: false, reason: error instanceof ScanError ? notValid(comments) : String(error) };
+    return { ok: false, reason: scanFailure(error, comments) };
   }
   // The edit must be exactly the one member: anything else is refused.
   const before = parseText(prep.body, comments) as Record<string, unknown>;
@@ -409,7 +415,7 @@ export function removeJsonMember(text: string, path: readonly string[], key: str
       }
     }
   } catch (error) {
-    return { ok: false, reason: error instanceof ScanError ? notValid(comments) : String(error) };
+    return { ok: false, reason: scanFailure(error, comments) };
   }
   const before = parseText(prep.body, comments) as Record<string, unknown>;
   let parent: Record<string, unknown> = before;

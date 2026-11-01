@@ -3933,7 +3933,8 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
 .ib-run-main > svg { flex: none; margin-top: 2px; color: var(--warning); }
 .ib-run[data-run="waiting_terminal"], .ib-run[data-run="failed"], .ib-run[data-run="missing"] { color: var(--foreground); flex-direction: column; align-items: flex-start; }
 .ib-run b { font-weight: 600; color: var(--foreground); }
-.ib-run-text { min-width: 0; line-height: 1.5; }
+.ib-run-text { min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.ib-run .ib-error { overflow-wrap: anywhere; }
 .ib-run-sub { display: block; color: var(--muted-foreground); }
 .ib-run-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ib-run[data-run="waiting_terminal"] .ib-run-acts, .ib-run[data-run="failed"] .ib-run-acts { padding-left: 21px; }

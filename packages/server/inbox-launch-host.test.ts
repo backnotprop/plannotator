@@ -156,8 +156,9 @@ function setup() {
     now: () => clock.now,
   });
   restore.push(() => launch.stop());
-  const post = (id: string, action: string, via = "local", owner?: boolean) =>
-    launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", body: JSON.stringify({ serverSession: "srv" }) }), `/api/inbox/launch/${id}/${action}`, via, owner);
+  /** `warning`: what a Trust folder click says the person read; by default the offer's line, as the window sends it. */
+  const post = (id: string, action: string, via = "local", owner?: boolean, warning: string | null | undefined = fake.faults.offer?.warning) =>
+    launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", body: JSON.stringify({ serverSession: "srv", warning }) }), `/api/inbox/launch/${id}/${action}`, via, owner);
   return { store, clock, project, fake, launch, post, logins, context: () => context! };
 }
 
@@ -434,6 +435,24 @@ describe("Trust folder (`trustOffer`)", () => {
     await Bun.sleep(20);
     expect(accepts.count).toBe(1);
     expect(startsOf(fake.calls)).toBe(2);
+  });
+
+  test("a folder that changed after the line was read: nothing is saved or started, the answer has the new line, and a click on it goes through", async () => {
+    const { store, fake, post, root, id, accepts } = await refused();
+    const read = fake.faults.offer!.warning;
+    const fresh = "This folder has 2 hooks that will run once you trust it.";
+    fake.faults.offer = { ...fake.faults.offer!, warning: fresh };
+    const refused1 = await refusal(post(id, "trust", "local", undefined, read));
+    expect(refused1).toMatchObject({ code: "trust_warning_changed" });
+    expect(refused1!.message).toContain(fresh);
+    // A window that sent no line read none.
+    fake.faults.offer = { ...fake.faults.offer!, warning: fresh };
+    expect(await refusal(post(id, "trust", "local", undefined, null))).toMatchObject({ code: "trust_warning_changed" });
+    expect(accepts.count).toBe(0);
+    expect(startsOf(fake.calls)).toBe(1);
+    expect((await post(id, "trust", "local", undefined, fresh))!.status).toBe(200);
+    expect(accepts.count).toBe(1);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
   });
 
   test("a failed write says why; the message stays kept, nothing starts, and the button can be pressed again", async () => {

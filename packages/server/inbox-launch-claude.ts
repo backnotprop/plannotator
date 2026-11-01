@@ -53,6 +53,9 @@ import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResul
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
 export const CLAUDE_LAUNCH_MIN_VERSION = "2.1.314";
 
+/** What decides where Claude's own files are (`claudeConfigDir`, `claudeGlobalConfigPath`). */
+const CLAUDE_FILES_ENV = ["CLAUDE_CONFIG_DIR", "CLAUDE_CODE_CUSTOM_OAUTH_URL"] as const;
+
 const START_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 15_000;
 
@@ -380,10 +383,14 @@ const resultOf = (result: AgentRunResult): LaunchHostResult => ({ exitCode: resu
  * words (the full-permissions switch), until another agent needs a Settings row of its own.
  */
 export function createClaudeLaunchHost(ctx: LaunchHostContext) {
-  /** Where the person's own Claude files are: their HOME and CLAUDE_CONFIG_DIR (the last shell read's, else the Inbox's). */
+  /** Where the person's own Claude files are: their HOME and `CLAUDE_FILES_ENV` (the last shell read's, else the Inbox's). */
   const claudeFiles = () => {
-    const configDir = ctx.shell()?.CLAUDE_CONFIG_DIR ?? ctx.ownEnv().CLAUDE_CONFIG_DIR;
-    return createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: configDir ? { CLAUDE_CONFIG_DIR: configDir } : {} });
+    const env: Record<string, string> = {};
+    for (const name of CLAUDE_FILES_ENV) {
+      const value = ctx.shell()?.[name] ?? ctx.ownEnv()[name];
+      if (value) env[name] = value;
+    }
+    return createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env });
   };
   const cli = createClaudeHost({ environment: ctx.environment, files: claudeFiles });
   /** The person's own Claude setup (bypass consent, a bypass disable, their default mode), read from their files now; `folder` adds that project's settings. */
@@ -401,6 +408,9 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
    * asks (bypass mode's safety checks; every prompt when Claude declined bypass) comes to a card, never to a
    * Terminal dialog no one sees. An auto launch pins `defaultMode: "default"`: when Claude drops auto mode
    * (its killswitch, a CLI without it) the session lands in default mode, never in the person's own bypass.
+   * `enableAllProjectMcpServers`: Claude's "New MCP server found" prompt would wait in the hidden session, with the
+   * folder's hooks held behind it. A server in the person's `disabledMcpjsonServers` still stays off (2.1.316: that
+   * list is checked first), and it is here, not `enabledMcpjsonServers`, which Claude moves into the project's files.
    */
   const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv, model: string | null): string => {
     const fullPermissions = inboxLaunchFullPermissions(launch);
@@ -417,6 +427,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
         fullPermissions,
         bypassAvailable: launch.bypass_available === true,
       }),
+      enableAllProjectMcpServers: true,
       permissions: { allow: [INBOX_TOOL_PERMISSION], ...(modeOf(launch) === "auto" ? { defaultMode: "default" } : {}) },
       // Permission prompts come to the launch thread as questions (inbox-launch-claude-permission.ts).
       hooks: launchPermissionHooks(ctx.selfCommand),
@@ -429,8 +440,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
   return {
     agent: CLAUDE,
     name: CLAUDE_NAME,
-    // Of a login-shell read: its CLAUDE_CONFIG_DIR (where the person's Claude files are) and the skip-permissions export.
-    shellNames: ["CLAUDE_CONFIG_DIR", CLAUDE_SKIP_PERMISSIONS_ENV],
+    // Of a login-shell read: where the person's Claude files are, and the skip-permissions export.
+    shellNames: [...CLAUDE_FILES_ENV, CLAUDE_SKIP_PERMISSIONS_ENV],
 
     /** `claude` on the plain env's PATH (the Inbox's, the last login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on. */
     async available(): Promise<LaunchAvailability> {
@@ -449,15 +460,23 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     /** Claude Code trusts the folder (or one above it), so every scratch folder in it starts without a trust prompt. */
     trusts: cli.trusts,
 
-    /** The run line's Trust folder, for what the launch's start was refused for. Home: Claude never saves trust there. */
+    /**
+     * The run line's Trust folder, for what the launch's start was refused for. Home: Claude never saves trust there.
+     * The file-system root, or a folder above home: that trust would cover home too.
+     */
     trustOffer(launch: InboxLaunchRecord): LaunchTrustOffer | null {
       const folder = trustFolderOf(launch);
       const key = claudeTrustKey(folder);
-      if (key === placeKey(ctx.homeDir).normalize("NFC") || dirname(key) === key) return null;
+      const home = placeKey(ctx.homeDir).normalize("NFC");
+      if (key === home || home.startsWith(`${key}/`) || dirname(key) === key) return null;
       const config = claudeGlobalConfigPath(claudeFiles());
       return {
-        // Where Claude starts, its repository's root and the folder trusted; the main checkout is another folder's files.
-        warning: claudeTrustWarning([launch.folder, claudeRepositoryAbove(launch.folder), folder].filter((f) => f !== null)),
+        // Where Claude starts, its repository's root, the folder trusted and the key: Claude reads a worktree's local
+        // settings from its main checkout, and a `.git` file can name a folder other than the one shown.
+        warning: claudeTrustWarning(
+          [launch.folder, claudeRepositoryAbove(launch.folder), folder, key].filter((f) => f !== null),
+          key === placeKey(folder).normalize("NFC") ? null : ctx.displayFolder(key),
+        ),
         accept: async () => {
           try {
             await acceptClaudeTrust(config, key);

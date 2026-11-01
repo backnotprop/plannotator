@@ -6,10 +6,13 @@
  * real `~/.claude.json` and the person's Inbox are never touched.
  *
  *  1. A folder with hooks and an MCP server: the start is refused, the line says what would run, one click saves the
- *     key (nothing else in the file changes) and starts it once, and the kept message reaches the session.
+ *     key (nothing else in the file changes) and starts it once, and the kept message reaches the session. The fake
+ *     blocks on Claude's MCP approval prompt as the real one does, so the launch's own setting is what gets it through;
+ *     the server the folder turned off stays off.
  *  2. A folder with none of these shows no warning line.
  *  3. A config that isn't JSON: the click says why, the file and the message stay, and it works once it is fixed.
  *  4. A phone, where Open in Terminal is hidden, still gets Trust folder.
+ *  5. A folder that changes after the line was read: the click saves nothing and shows the new line; the next one works.
  *
  * Pictures: LAUNCH_TRUST_SHOTS_DIR (default .local/proof/launch-trust), wide light at 2x.
  * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-trust.spec.ts`.
@@ -140,10 +143,19 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   world.port = registry.port;
   await fetch(`http://127.0.0.1:${world.port}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notifications: { dismissed: true } }) });
   const hook = { hooks: [{ type: 'command', command: 'echo hi' }] };
-  await agentWrites(project('storefront', { '.claude/settings.json': { hooks: { PreToolUse: [hook], Stop: [hook] } }, '.mcp.json': { mcpServers: { billing: { command: 'node' } } } }), 'ses-a', 'The checkout totals are in.');
+  await agentWrites(
+    project('storefront', {
+      '.claude/settings.json': { hooks: { PreToolUse: [hook], Stop: [hook] } },
+      '.claude/settings.local.json': { disabledMcpjsonServers: ['retired'] },
+      '.mcp.json': { mcpServers: { billing: { command: 'node' }, retired: { command: 'node' } } },
+    }),
+    'ses-a',
+    'The checkout totals are in.',
+  );
   await agentWrites(project('notes'), 'ses-b', 'The notes are sorted.');
   await agentWrites(project('recipes'), 'ses-c', 'The recipes are in order.');
   await agentWrites(project('garden'), 'ses-d', 'The garden plan is ready.');
+  await agentWrites(project('orchard'), 'ses-e', 'The orchard map is drawn.');
 
   const context = await browser.newContext({ viewport: WIDE, deviceScaleFactor: 2, colorScheme: 'light' });
   const page = await context.newPage();
@@ -178,6 +190,7 @@ test('a folder with hooks and an MCP server: the line says so, one click saves t
   await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
   expect(fake.starts()).toHaveLength(before + 1);
   expect(fake.starts().at(-1)!.cwd).toBe(folder);
+  expect(fake.starts().at(-1)!.mcp).toEqual({ running: ['billing'], rejected: ['retired'], pending: [] });
   expect(fake.agents().filter((a) => a.cwd === folder)).toHaveLength(1);
 
   // That one value: the rest of the file is byte for byte what it was.
@@ -242,4 +255,23 @@ test('a phone gets Trust folder, where Open in Terminal is hidden', async ({ bro
   } finally {
     await phone.close();
   }
+});
+
+test('a folder that changes after the line was read: the click saves nothing and shows the new line, and the next click works', async () => {
+  const { page } = world;
+  const { folder } = await sendTo(page, 'orchard', 'Map the apple rows.', 'Apple rows');
+  const line = pane(page).locator('[data-run="failed"]');
+  await expect(line.locator('[data-run-trust]')).toBeVisible();
+  await expect(line.locator('[data-run-trust-warning]')).toHaveCount(0);
+
+  writeFileSync(join(folder, '.claude/settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo pulled' }] }] } }));
+  await line.locator('[data-run-trust]').click();
+  await expect(line.locator('[data-run-error]')).toContainText('This folder changed, so nothing was saved.');
+  await expect(line.locator('[data-run-trust-warning]')).toHaveText('This folder has 1 hook that will run once you trust it.');
+  expect(projects()[folder]).toBeUndefined();
+
+  await line.locator('[data-run-trust]').click();
+  await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
+  expect(projects()[folder]).toEqual({ hasTrustDialogAccepted: true });
+  expect(world.errors).toEqual([]);
 });

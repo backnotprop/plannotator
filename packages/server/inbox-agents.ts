@@ -288,9 +288,21 @@ export function codexHome(e: AgentEnvironment): string {
 export function claudeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "CLAUDE_CONFIG_DIR") ?? join(e.homeDir, ".claude");
 }
-/** Claude Code's global config: `$CLAUDE_CONFIG_DIR/.claude.json` when that is set, else `~/.claude.json`. */
+/**
+ * Claude Code's global config, the file it picks itself (2.1.316): `$CLAUDE_CONFIG_DIR/.claude.json` when that is set,
+ * else `~/.claude.json` (`.claude-custom-oauth.json` with `CLAUDE_CODE_CUSTOM_OAUTH_URL` set). A legacy `.config.json`
+ * in its config folder wins when it has anything in it, or is empty and writable with the usual file absent.
+ */
 export function claudeGlobalConfigPath(e: AgentEnvironment): string {
-  return join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json");
+  const usual = join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, e.env.CLAUDE_CODE_CUSTOM_OAUTH_URL ? ".claude-custom-oauth.json" : ".claude.json");
+  const legacy = join(claudeConfigDir(e), ".config.json");
+  try {
+    const stat = statSync(legacy);
+    if (stat.isFile() && (stat.size > 0 || ((stat.mode & 0o222) !== 0 && !existsSync(usual)))) return legacy;
+  } catch {
+    // No legacy file: the usual one.
+  }
+  return usual;
 }
 
 /** The most `.claude.json` a read-only lookup reads (it holds per-project history and often passes 1 MiB). */

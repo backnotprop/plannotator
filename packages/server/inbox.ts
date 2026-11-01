@@ -525,6 +525,8 @@ const ERROR_STATUS: Record<string, number> = {
   open_unavailable: 409,
   // Trust folder: the agent's own config could not be changed; nothing was, and the message stays kept.
   trust_failed: 409,
+  // Trust folder: the folder's warning is no longer the one the person read; nothing was saved.
+  trust_warning_changed: 409,
   // Send now: the session's connection does not poll now, or cannot deliver into a running turn.
   send_now_unavailable: 409,
   // Tags: a live session whose Plannotator is too old to word a tag truthfully.

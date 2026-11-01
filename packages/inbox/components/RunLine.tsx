@@ -46,11 +46,13 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
     try {
       if (what === 'stop') await inboxApi.launchStop(run.launch_id);
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id);
-      else if (what === 'trust') await inboxApi.launchTrust(run.launch_id);
+      else if (what === 'trust') await inboxApi.launchTrust(run.launch_id, run.trust?.warning ?? null);
       else await inboxApi.launchOpen(run.launch_id);
       if (what !== 'open') onChanged();
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
+      // The folder changed since this line was read: draw the new warning for the next click.
+      if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') onChanged();
     } finally {
       setBusy(null);
     }
@@ -148,6 +150,11 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
           {run.trust?.warning ? (
             <span className="ib-run-sub" data-run-trust-warning="">
               {run.trust.warning}
+            </span>
+          ) : null}
+          {run.untrusted && !run.trust ? (
+            <span className="ib-run-sub" data-run-trust-howto="">
+              Run {name} in this folder in a terminal on the Inbox's computer and accept its trust prompt, then try again.
             </span>
           ) : null}
         </>

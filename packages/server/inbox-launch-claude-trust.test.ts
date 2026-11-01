@@ -1,22 +1,27 @@
 /**
  * Trust folder's Claude side (docs/agent-guides/inbox-launch.md, "Trusting a folder"). What each test guards: the
- * write changes one value and no other byte, keeps the mode and any link, and never replaces a file it can't read;
- * Claude's lock is taken, waited for, and survives two writers at once in separate processes; the key is the one
- * Claude Code uses (physical, NFC, a worktree's main checkout), and `claudeTrustsFolder` reads that key; the warning
- * counts what the folder turns on and says what it could not read; the owner's click goes through the real server,
- * into a sandboxed config, and a guest gets neither the button nor the route.
+ * write changes one value and no other byte, keeps the mode and any link, and never replaces a file it can't read
+ * or an empty one; Claude's lock is taken, waited for, and survives two writers at once in separate processes; the
+ * file is the one Claude picks and the key the one it uses (physical, NFC, a worktree's main checkout), and
+ * `claudeTrustsFolder` reads them; the warning counts what Claude's own prompt warns on and says what it could not
+ * read; the owner's click goes through the real server, into a sandboxed config, and a guest gets neither the button
+ * nor the route.
  *
  * Every config here is under a temp folder through `refuseRealClaudeConfig`; a real `~/.claude.json` is never read.
+ * The sandbox import comes first so a run with no bunfig preload (any folder but the repository's root) is sandboxed
+ * too, and the real-server test sets its own marker and HOME for a shell that already names a scratch data dir.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import "../../tests/setup/sandbox-data-dir";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { accountHome, refuseRealClaudeConfig } from "../../tests/helpers/real-data-dir";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createAgentEnvironmentFor } from "./inbox-agents";
+import { claudeGlobalConfigPath, createAgentEnvironmentFor } from "./inbox-agents";
 import { claudeTrustsFolder, createClaudeLaunchHost } from "./inbox-launch-claude";
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustWarning } from "./inbox-launch-claude-trust";
 import type { LaunchHostContext } from "./inbox-launch-host";
@@ -108,6 +113,102 @@ describe("the write", () => {
       expect(existsSync(`${config}.lock`)).toBe(false);
     }
   });
+
+  test("an empty config is refused and left: Claude repairs that file itself, and only while it stays empty", async () => {
+    const { config } = sandbox();
+    for (const text of ["", " \n\t\n"]) {
+      writeFileSync(config, text);
+      await expect(acceptClaudeTrust(config, "/a")).rejects.toThrow("it is empty");
+      expect(readFileSync(config, "utf8")).toBe(text);
+      expect(existsSync(`${config}.lock`)).toBe(false);
+    }
+  });
+
+  test("a config past the 1 MiB other agent files stop at is written; past 32 MiB it is refused and left", async () => {
+    const { config } = sandbox();
+    const big = `{"history":"${"x".repeat(2 * 1024 * 1024)}"}`;
+    writeFileSync(config, big);
+    await acceptClaudeTrust(config, "/a");
+    expect(JSON.parse(readFileSync(config, "utf8")).projects["/a"]).toEqual({ hasTrustDialogAccepted: true });
+    const huge = `{"history":"${"x".repeat(33 * 1024 * 1024)}"}`;
+    writeFileSync(config, huge);
+    await expect(acceptClaudeTrust(config, "/a")).rejects.toThrow("larger than 32 MiB");
+    expect(statSync(config).size).toBe(huge.length);
+  });
+
+  test("a BOM stays: every other byte means that one too", async () => {
+    const { config } = sandbox();
+    writeFileSync(config, '\uFEFF{"numStartups":1}');
+    await acceptClaudeTrust(config, "/a");
+    expect([...readFileSync(config).subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(JSON.parse(readFileSync(config, "utf8").slice(1)).numStartups).toBe(1);
+  });
+
+  test("the new file is flushed to disk before it replaces the config, as Claude's save is", async () => {
+    const { config } = sandbox();
+    writeFileSync(config, "{}");
+    const fsync = spyOn(fs, "fsyncSync");
+    restore.push(() => fsync.mockRestore());
+    await acceptClaudeTrust(config, "/a");
+    expect(fsync).toHaveBeenCalledTimes(1);
+  });
+
+  test("a link that loops and a file nested past the parser say so in plain words", async () => {
+    const { config } = sandbox();
+    symlinkSync(config, `${config}.other`);
+    symlinkSync(`${config}.other`, config);
+    await expect(acceptClaudeTrust(config, "/a")).rejects.toThrow("it is a link that leads back to itself");
+    rmSync(config);
+    const deep = `${'{"a":'.repeat(200_000)}1${"}".repeat(200_000)}`;
+    writeFileSync(config, deep);
+    await expect(acceptClaudeTrust(config, "/a")).rejects.toThrow("it is nested too deeply");
+    expect(statSync(config).size).toBe(deep.length);
+  });
+});
+
+describe("the file, as Claude Code picks it", () => {
+  const LEGACY = ".config.json";
+
+  test("a legacy .config.json with anything in it: the click writes there, the reader reads there, and no .claude.json appears", async () => {
+    const { root, home, configDir, config, files } = sandbox();
+    const legacy = join(configDir, LEGACY);
+    const folder = join(root, "project");
+    mkdirSync(folder);
+    writeFileSync(legacy, '{"numStartups":3}');
+    const context = { homeDir: home, platform: "darwin", dataDir: join(home, "data"), shell: () => null, ownEnv: () => ({ CLAUDE_CONFIG_DIR: configDir }), displayFolder: (path: string) => path } as unknown as LaunchHostContext;
+    await createClaudeLaunchHost(context).trustOffer({ folder, scratch: false } as never)!.accept();
+    expect(JSON.parse(readFileSync(legacy, "utf8"))).toEqual({ numStartups: 3, projects: { [folder]: { hasTrustDialogAccepted: true } } });
+    expect(existsSync(config)).toBe(false);
+    expect(claudeTrustsFolder(files, folder)).toBe(true);
+  });
+
+  test("an empty one counts only while writable and with no usual file; a folder of that name never", () => {
+    const { configDir, config, files } = sandbox();
+    const legacy = join(configDir, LEGACY);
+    expect(claudeGlobalConfigPath(files)).toBe(config);
+    writeFileSync(legacy, "");
+    expect(claudeGlobalConfigPath(files)).toBe(legacy);
+    writeFileSync(config, "{}");
+    expect(claudeGlobalConfigPath(files)).toBe(config);
+    rmSync(config);
+    chmodSync(legacy, 0o444);
+    expect(claudeGlobalConfigPath(files)).toBe(config);
+    rmSync(legacy, { force: true });
+    mkdirSync(legacy);
+    expect(claudeGlobalConfigPath(files)).toBe(config);
+  });
+
+  test("with no CLAUDE_CONFIG_DIR the legacy file is in ~/.claude and the usual one in the home folder; a custom OAuth URL has its own name, from the login shell too", () => {
+    const { home, configDir } = sandbox();
+    const plain = createAgentEnvironmentFor({ platform: "darwin", homeDir: home, env: {} });
+    expect(claudeGlobalConfigPath(plain)).toBe(join(home, ".claude.json"));
+    mkdirSync(join(home, CLAUDE_DIR));
+    writeFileSync(join(home, CLAUDE_DIR, LEGACY), "{}");
+    expect(claudeGlobalConfigPath(plain)).toBe(join(home, CLAUDE_DIR, LEGACY));
+
+    const custom = createAgentEnvironmentFor({ platform: "darwin", homeDir: home, env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_CUSTOM_OAUTH_URL: "https://sso.example" } });
+    expect(claudeGlobalConfigPath(custom)).toBe(join(configDir, ".claude-custom-oauth.json"));
+  });
 });
 
 describe("Claude's lock", () => {
@@ -137,6 +238,16 @@ describe("Claude's lock", () => {
     await acceptClaudeTrust(config, "/a", 120);
     expect(JSON.parse(readFileSync(config, "utf8")).projects["/a"]).toEqual({ hasTrustDialogAccepted: true });
     expect(existsSync(`${config}.lock`)).toBe(false);
+  });
+
+  test("a dead lock that can't be cleared says so, not that Claude holds it, and nothing is written", async () => {
+    const { config } = sandbox();
+    writeFileSync(config, "{}");
+    writeFileSync(`${config}.lock`, "not a lock");
+    const old = new Date(Date.now() - 30_000);
+    utimesSync(`${config}.lock`, old, old);
+    await expect(acceptClaudeTrust(config, "/a", 120)).rejects.toThrow(".claude.json.lock is in the way and can't be removed");
+    expect(readFileSync(config, "utf8")).toBe("{}");
   });
 
   test("writers in separate processes at once lose no entry", async () => {
@@ -186,6 +297,20 @@ describe("the key, as Claude Code uses it", () => {
     const decomposed = join(root, "café");
     mkdirSync(decomposed);
     expect(claudeTrustKey(decomposed)).toBe(join(root, "café"));
+    // A repository's root goes the same way.
+    mkdirSync(join(root, "cafe\u0301-repo", ".git"), { recursive: true });
+    mkdirSync(join(root, "cafe\u0301-repo", "sub"));
+    expect(claudeTrustKey(join(root, "cafe\u0301-repo", "sub"))).toBe(join(root, "caf\u00E9-repo"));
+  });
+
+  test("a linked worktree of a bare repository is that bare repository's", () => {
+    const { root } = sandbox();
+    const { repo } = repoWithWorktree(root);
+    const bare = join(root, "bare.git");
+    git(root, "clone", "-q", "--bare", repo, bare);
+    const worktree = join(root, "from-bare");
+    git(bare, "worktree", "add", "-q", worktree, "-b", "from-bare");
+    expect(claudeTrustKey(worktree)).toBe(bare);
   });
 
   test("claudeTrustsFolder reads that key: a worktree of a trusted repository, a link, and a nested repository still refused", async () => {
@@ -239,9 +364,43 @@ describe("the warning", () => {
     const { root } = sandbox();
     const dir = folder(root, { ".claude/settings.json": { hooks: { Stop: [hook] }, model: "x" }, ".mcp.json": { mcpServers: { only: {} } } });
     expect(claudeTrustWarning([dir, dir])).toBe("This folder has 1 hook and 1 MCP server that will run once you trust it.");
-    writeFileSync(join(dir, ".claude/settings.json"), '{"model":"x","permissions":{"allow":["Bash"]}}');
+    writeFileSync(join(dir, ".claude/settings.json"), '{"model":"x","permissions":{"allow":[],"additionalDirectories":[]},"env":{}}');
     rmSync(join(dir, ".mcp.json"));
     expect(claudeTrustWarning([dir])).toBeNull();
+  });
+
+  test("every command Claude's own trust prompt warns on counts: status line, file suggestion, proxy and marketplace helpers", () => {
+    const { root } = sandbox();
+    const command = { type: "command", command: "./x.sh" };
+    const dir = folder(root, {
+      ".claude/settings.json": { statusLine: command, subagentStatusLine: command, fileSuggestion: command, proxyAuthHelper: "./p.sh", extraKnownMarketplaces: { m: { source: { source: "url", url: "https://x", headersHelper: "./h.sh" } } } },
+    });
+    expect(claudeTrustWarning([dir])).toBe("This folder has 3 hooks and 2 helper commands that will run once you trust it.");
+  });
+
+  test("env settings count with what runs; allow rules and outside folders are said as what they let Claude Code do", () => {
+    const { root } = sandbox();
+    const dir = folder(root, { ".claude/settings.json": { env: { NODE_OPTIONS: "--require ./x.js" } } });
+    const settings = (value: unknown) => writeFileSync(join(dir, ".claude/settings.json"), JSON.stringify(value));
+    expect(claudeTrustWarning([dir])).toBe("This folder has env settings that will run once you trust it.");
+    settings({ permissions: { allow: ["Bash"] } });
+    expect(claudeTrustWarning([dir])).toBe("Once you trust it, this folder's settings let Claude Code use some tools without asking.");
+    settings({ permissions: { additionalDirectories: ["../other"] } });
+    expect(claudeTrustWarning([dir])).toBe("Once you trust it, this folder's settings let Claude Code reach folders outside it.");
+    settings({ autoMemoryDirectory: "/elsewhere" });
+    expect(claudeTrustWarning([dir])).toBe("Once you trust it, this folder's settings let Claude Code reach folders outside it.");
+    settings({ hooks: { Stop: [hook] }, env: { A: "1" }, permissions: { allow: ["Bash"], additionalDirectories: ["../other"] } });
+    expect(claudeTrustWarning([dir])).toBe("This folder has 1 hook and env settings that will run once you trust it. Its settings also let Claude Code use some tools without asking and reach folders outside it.");
+  });
+
+  test("a .mcp.json in any folder above counts, each server name once; a server turned off in the settings does not", () => {
+    const { root } = sandbox();
+    const dir = folder(root, { ".mcp.json": { mcpServers: { near: {}, same: {} } } });
+    const parent = join(root, ".mcp.json");
+    writeFileSync(parent, JSON.stringify({ mcpServers: { above: { headersHelper: "./h.sh" }, same: {} } }));
+    expect(claudeTrustWarning([dir])).toBe("This folder has 3 MCP servers and 1 helper command that will run once you trust it.");
+    writeFileSync(join(dir, ".claude/settings.local.json"), JSON.stringify({ disabledMcpjsonServers: ["above", "same"] }));
+    expect(claudeTrustWarning([dir])).toBe("This folder has 1 MCP server that will run once you trust it.");
   });
 
   test("a file that can't be read is said in the same line, with or without counts, and never shown", () => {
@@ -256,8 +415,8 @@ describe("the warning", () => {
 });
 
 describe("the Claude host's offer", () => {
-  function host(home: string, configDir: string) {
-    const context = { homeDir: home, platform: "darwin", dataDir: join(home, "data"), shell: () => null, ownEnv: () => ({ CLAUDE_CONFIG_DIR: configDir }), displayFolder: (path: string) => path } as unknown as LaunchHostContext;
+  function host(home: string, configDir: string, shell: Record<string, string> | null = null) {
+    const context = { homeDir: home, platform: "darwin", dataDir: join(home, "data"), shell: () => shell, ownEnv: () => ({ CLAUDE_CONFIG_DIR: configDir }), displayFolder: (path: string) => path } as unknown as LaunchHostContext;
     return createClaudeLaunchHost(context);
   }
   const launch = (folder: string, scratch = false) => ({ folder, scratch }) as never;
@@ -276,15 +435,58 @@ describe("the Claude host's offer", () => {
     expect(Object.keys(JSON.parse(readFileSync(config, "utf8")).projects)).toEqual([scratchRoot]);
   });
 
-  test("the home folder gets no offer: Claude never saves trust there", () => {
-    const { home, configDir } = sandbox();
+  test("the home folder gets no offer: Claude never saves trust there; nor does the root, or a folder above home, which would cover it", () => {
+    const { root, home, configDir } = sandbox();
     expect(host(home, configDir).trustOffer(launch(home))).toBeNull();
+    expect(host(home, configDir).trustOffer(launch("/"))).toBeNull();
+    expect(host(home, configDir).trustOffer(launch(root))).toBeNull();
+  });
+
+  test("a linked worktree's line names the repository the trust lands on; its settings count from the launch's root and the main checkout", async () => {
+    const { root, home, configDir, config } = sandbox();
+    const { repo, worktree } = repoWithWorktree(root);
+    const stop = (count: number) => ({ hooks: { Stop: Array.from({ length: count }, () => ({ hooks: [{}] })) } });
+    mkdirSync(join(worktree, "sub", ".claude"), { recursive: true });
+    mkdirSync(join(worktree, ".claude"));
+    mkdirSync(join(repo, ".claude"));
+    writeFileSync(join(worktree, ".claude/settings.json"), JSON.stringify(stop(1)));
+    writeFileSync(join(repo, ".claude/settings.local.json"), JSON.stringify(stop(2)));
+    const offer = host(home, configDir).trustOffer(launch(join(worktree, "sub")))!;
+    expect(offer.warning).toBe(`This folder has 3 hooks that will run once you trust it. This folder is part of the repository at ${repo}; trusting it trusts that whole repository.`);
+    await offer.accept();
+    expect(Object.keys(JSON.parse(readFileSync(config, "utf8")).projects)).toEqual([repo]);
+  });
+
+  test("a crafted .git file that points at another folder: that folder is scanned and named, and nothing is hidden behind a clean-looking one", () => {
+    const { root, home, configDir } = sandbox();
+    const shown = join(root, "download", "project");
+    const other = join(root, "download", "other");
+    const gitDir = join(other, ".git", "worktrees", "x");
+    mkdirSync(shown, { recursive: true });
+    mkdirSync(gitDir, { recursive: true });
+    mkdirSync(join(other, ".claude"));
+    writeFileSync(join(other, ".claude/settings.json"), JSON.stringify({ hooks: { Stop: [{ hooks: [{}] }] } }));
+    writeFileSync(join(shown, ".git"), `gitdir: ${gitDir}\n`);
+    writeFileSync(join(gitDir, "commondir"), "../..\n");
+    writeFileSync(join(gitDir, "gitdir"), `${join(shown, ".git")}\n`);
+    expect(host(home, configDir).trustOffer(launch(shown))!.warning).toBe(`This folder has 1 hook that will run once you trust it. This folder is part of the repository at ${other}; trusting it trusts that whole repository.`);
+  });
+
+  test("a custom OAuth URL in the login shell is followed to the file Claude uses", async () => {
+    const { root, home, configDir } = sandbox();
+    const folder = join(root, "project");
+    mkdirSync(folder);
+    await host(home, configDir, { CLAUDE_CODE_CUSTOM_OAUTH_URL: "https://sso.example" }).trustOffer(launch(folder))!.accept();
+    expect(existsSync(join(configDir, ".claude-custom-oauth.json"))).toBe(true);
+    expect(existsSync(join(configDir, ".claude.json"))).toBe(false);
   });
 
   test("a failed write says which file and why, for the run line", async () => {
     const { root, home, configDir, config } = sandbox();
+    const folder = join(root, "project");
+    mkdirSync(folder);
     writeFileSync(config, "not json");
-    await expect(host(home, configDir).trustOffer(launch(root))!.accept()).rejects.toThrow(`Could not update ${config}: it is not plain JSON. Nothing was changed.`);
+    await expect(host(home, configDir).trustOffer(launch(folder))!.accept()).rejects.toThrow(`Could not update ${config}: it is not plain JSON. Nothing was changed.`);
     expect(readFileSync(config, "utf8")).toBe("not json");
   });
 });
@@ -322,13 +524,18 @@ describe("through a real server", () => {
     mkdirSync(dataDir);
     mkdirSync(folder);
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST], inboxLaunch: { enabled: true } }));
-    const previous = { data: process.env.PLANNOTATOR_DATA_DIR, ts: process.env.PLANNOTATOR_INBOX_TAILSCALE };
+    // The marker and HOME are this test's own: the sandbox's agents home is what keeps a click from the real config.
+    const names = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_TEST_SANDBOX", "HOME", "PLANNOTATOR_INBOX_TAILSCALE"] as const;
+    const previous = names.map((name) => [name, process.env[name]] as const);
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    process.env.PLANNOTATOR_TEST_SANDBOX = dataDir;
+    process.env.HOME = join(root, "home");
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     restore.push(() => {
-      if (previous.data === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
-      else process.env.PLANNOTATOR_DATA_DIR = previous.data;
-      if (previous.ts !== undefined) process.env.PLANNOTATOR_INBOX_TAILSCALE = previous.ts;
+      for (const [name, value] of previous) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     });
     const server: InboxServer = await startInboxServer({ dataDir, binaryPath: null, version: "0.28.33", tailscale: scriptedTailscale(), publishTailnet: true, phones: false });
     restore.push(() => server.stop());
