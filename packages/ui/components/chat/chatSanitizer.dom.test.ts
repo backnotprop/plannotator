@@ -199,6 +199,44 @@ describe.if(hasDom)('raw HTML in an answer', () => {
     expect(view.textContent).toContain('onclick');
   });
 
+  // A tag `marked` cannot read is text to it, and a real tag to a browser.
+  const unreadable = (open: number) =>
+    Array.from({ length: open }, (_, index) => `<strong !a${index}>`).join('');
+  const rawOpeners = ['<code>', '<kbd>', '<pre>', '<script>'];
+
+  test.each(rawOpeners)('text after an inline %s stays text, for either role', (opener) => {
+    for (const render of [chatMarkdownHtml, personMarkdownHtml]) {
+      const view = parsed(render(`x ${opener}${unreadable(300)}${'<p !>x'.repeat(3_000)}`));
+      expect(view.querySelector('strong')).toBeNull();
+      expect(view.querySelectorAll('p').length).toBe(1);
+    }
+  });
+
+  test('so does text in the paragraphs after it', () => {
+    const view = parsed(chatMarkdownHtml(`x <code>\n\n${'<a href=x !><div !>'.repeat(300)}\n\n<svg !><title !>`));
+    expect(view.querySelector('a, div, svg')).toBeNull();
+  });
+
+  test.each([
+    ['Wrap it in a <code> element. The loop runs while i<n and j<m holds. These last words matter.'],
+    ['Use <kbd> for keys. Compare a<b here, then the rest of this sentence.'],
+    ['The <pre> tag keeps spaces. Generics like Map<string, number> and x<y stay.'],
+  ])('no word goes missing after a tag: %s', (text) => {
+    expect(parsed(chatMarkdownHtml(text)).textContent!.trim()).toBe(text);
+  });
+
+  test('markdown after an inline tag is still markdown, and marks in a code span stay', () => {
+    const view = parsed(chatMarkdownHtml('A <code> tag, **bold**, `a<b`, and a &amp; b'));
+    expect(view.querySelector('strong')?.textContent).toBe('bold');
+    expect(view.querySelector('code')?.textContent).toBe('a<b');
+    expect(view.textContent).toContain('a & b');
+  });
+
+  test('blocks of it stay blocks, so they cannot run together into one', () => {
+    const view = parsed(chatMarkdownHtml('<div>one</div>\n\n<div>two</div>\n\n<div>three</div>\n'));
+    expect(view.querySelectorAll('p').length).toBe(3);
+  });
+
   test('a person\'s line break stays the text they typed', () => {
     const view = parsed(personMarkdownHtml('one<br>two'));
     expect(view.querySelector('br')).toBeNull();
@@ -443,6 +481,98 @@ describe.if(hasDom)('a long line in an ordinary message', () => {
     const view = parsed(chatMarkdownHtml(text));
     expect(performance.now() - started).toBeLessThan(5_000);
     expect(view.textContent!.length).toBeGreaterThan(0);
+  });
+});
+
+describe.if(hasDom)('one block too costly to lay out', () => {
+  const mixed = (chars: number) => 'سa'.repeat(chars / 2);
+  /** The most characters past ASCII in any one block of what is drawn. */
+  const widestBlock = (html: string) => {
+    const view = parsed(html);
+    const blocks = [...view.querySelectorAll('p, pre')];
+    expect(blocks.length).toBeGreaterThan(0);
+    return Math.max(...blocks.map((block) => block.textContent!.replace(/[\x00-\x7e]/g, '').length));
+  };
+
+  test.each([
+    ['one long line', `## Title\n\n**bold**\n\n${mixed(30_000)}`],
+    ['soft wrapped lines', `${Array.from({ length: 400 }, () => mixed(80)).join('\n')}`],
+    ['a code block', `\`\`\`\n${mixed(30_000)}\n\`\`\`\n`],
+    ['a code block of short lines', `\`\`\`\n${Array.from({ length: 400 }, () => mixed(80)).join('\n')}\n\`\`\`\n`],
+    ['a block of raw HTML', `<div>${mixed(30_000)}</div>\n`],
+    ['a heading', `# ${mixed(30_000)}`],
+    ['past the length limit', mixed(300_000)],
+    ['past the length limit, in lines past the break limit', `${'\n'.repeat(21_000)}${mixed(300_000)}`],
+  ])('%s draws in small blocks, with every word', (_name, text) => {
+    const html = chatMarkdownHtml(text);
+    expect(widestBlock(html)).toBeLessThan(5_000);
+    expect(parsed(html).textContent!.replace(/\s/g, '')).toContain(mixed(4_000));
+  });
+
+  test('blocks past the limit keep their characters whole', () => {
+    const text = '😀a'.repeat(100_000);
+    expect(parsed(chatMarkdownHtml(text)).textContent!.replace(/\s/g, '')).toBe(text);
+  });
+
+  // WebKit takes minutes over a word with no place to break.
+  test.each([
+    ['in a paragraph', 'سa'.repeat(2_000), 'p'],
+    ['in a code span', `\`${'سa'.repeat(2_000)}\``, 'code'],
+    ['in a link', `[${'سa'.repeat(2_000)}](https://example.test)`, 'a'],
+    ['in a table cell', `| a |\n| - |\n| ${'سa'.repeat(2_000)} |\n`, 'td'],
+    ['in raw HTML', `<div>${'سa'.repeat(2_000)}</div>\n`, 'p'],
+    ['past the literal limit', `${'a'.repeat(9_000)} **b**`, 'p'],
+    ['in plain text', 'سa'.repeat(150_000), 'p'],
+  ])('a long word %s gets places to break, and keeps its words', (_name, text, tag) => {
+    const view = parsed(chatMarkdownHtml(text));
+    const breaks = view.querySelectorAll(`${tag} wbr`).length;
+    expect(breaks).toBeGreaterThan(0);
+    expect(view.textContent!).toContain(text.includes('س') ? 'سa'.repeat(100) : 'a'.repeat(100));
+  });
+
+  test('a place to break never falls inside a character or an entity', () => {
+    for (const text of ['😀'.repeat(400), `a${'😀'.repeat(400)}`, `😀${'&😀'.repeat(400)}`]) {
+      const html = chatMarkdownHtml(text);
+      expect(html).toContain('<wbr>');
+      expect(html).not.toMatch(/[\ud800-\udbff]<wbr>/);
+      expect(parsed(html).textContent!.trim()).toBe(text);
+    }
+  });
+
+  test('a word under the limit, or text with spaces, is left as it is', () => {
+    expect(chatMarkdownHtml('a'.repeat(255))).not.toContain('wbr');
+    expect(chatMarkdownHtml('word '.repeat(2_000))).not.toContain('wbr');
+  });
+
+  test('a person\'s long word gets the same, and an agent cannot write one itself', () => {
+    expect(parsed(personMarkdownHtml('a'.repeat(1_000))).querySelector('wbr')).not.toBeNull();
+    expect(parsed(chatMarkdownHtml('one<wbr onclick="alert(1)">two')).querySelector('wbr')).toBeNull();
+  });
+
+  test.each([
+    ['a paragraph of Chinese', `## Title\n\n${'这是一个很长的段落。'.repeat(900)}`],
+    ['Japanese with English in it', `## Title\n\n${'これは Plannotator の設定を説明します。'.repeat(300)}`],
+    ['a list of Chinese', `## Title\n\n${'- 这是一个很长的段落，有很多字。\n'.repeat(1_000)}`],
+    ['a table of Chinese', `## Title\n\n| 一 |\n| - |\n${'| 这是一个很长的段落，有很多字。 |\n'.repeat(1_000)}`],
+    ['long lines of code', `## Title\n\n\`\`\`\n${'const a = 1; '.repeat(10_000)}\n\`\`\`\n`],
+    ['Chinese in a code block', `## Title\n\n\`\`\`json\n${'{"标题": "这是一个段落"}\n'.repeat(500)}\`\`\`\n`],
+  ])('%s never meets it', (_name, text) => {
+    expect(parsed(withStoppedClock(() => chatMarkdownHtml(text))).querySelector('h2')?.textContent).toBe('Title');
+  });
+
+  test('a stream holds it, and draws it in full at the end', () => {
+    const render = chatTextRenderer(false);
+    const text = `**bold**\n\n${mixed(20_000)}`;
+    const held = render(text, true);
+    expect(held).not.toContain('<strong>');
+    expect(render(`${text}more`, true)).toBe(held);
+    expect(render(`**bold**\n\n${mixed(10_000)}`, false)).toContain('<strong>');
+  });
+
+  test('a stream holds it sooner than a finished text gives up on it', () => {
+    const text = `**bold**\n\n${mixed(12_000)}`;
+    expect(chatTextRenderer(false)(text, true)).not.toContain('<strong>');
+    expect(chatTextRenderer(false)(text, false)).toContain('<strong>');
   });
 });
 

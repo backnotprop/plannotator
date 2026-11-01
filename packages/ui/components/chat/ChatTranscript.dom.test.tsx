@@ -227,6 +227,41 @@ describe.if(hasDom)('reduced motion', () => {
     expect(view.textContent).toContain('Half a sent');
   });
 
+  const halfDone = 'One sentence done. Second sentence half wr';
+
+  test.each([
+    ['one message', [say('2', 'user', 'And this')]],
+    ['two messages', [say('2', 'user', 'And this'), say('3', 'user', 'And that')]],
+  ])('%s queued after a streaming answer leave it streaming', (_name, queued) => {
+    reduced();
+    const view = render({ messages: [say('1', 'assistant', halfDone, 'streaming'), ...queued], status: 'streaming' });
+    expect(view.textContent).toContain('One sentence done.');
+    expect(view.textContent).not.toContain('half wr');
+    expect(pendingRow()).toBeNull();
+  });
+
+  test('a queued message does not bring back an answer the person stopped', () => {
+    reduced();
+    const view = render({
+      messages: [say('1', 'assistant', halfDone, 'streaming'), say('2', 'user', 'Go on')],
+      stopped: new Set(['1']),
+      status: 'streaming',
+    });
+    expect(view.textContent).toContain('half wr');
+    expect(pendingRow()).not.toBeNull();
+  });
+
+  test('a new answer takes over from a turn that left its part streaming', () => {
+    reduced();
+    const view = render({
+      messages: [say('1', 'assistant', halfDone, 'streaming'), say('2', 'user', 'Go on'), say('3', 'assistant', 'New one. New tw', 'streaming')],
+      status: 'streaming',
+    });
+    expect(view.textContent).toContain('half wr');
+    expect(view.textContent).toContain('New one.');
+    expect(view.textContent).not.toContain('New tw');
+  });
+
   test('a host\'s own ChatMarkdown shows what arrived once the turn has ended', () => {
     reduced();
     const { ChatMarkdown } = transcriptModule!;

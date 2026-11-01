@@ -270,6 +270,32 @@ export interface ChatTranscriptProps<Part extends ChatMessagePart = ChatMessageP
   readonly overlay?: React.ReactNode;
 }
 
+/**
+ * Which message can still be arriving, or -1 when no turn runs. It is usually the
+ * last, but a person can send while an answer streams, and then that answer sits
+ * above their message. A part's `state` alone cannot say so, because a stopped
+ * turn can leave it `streaming`, so this goes by what the host knows: `submitted`
+ * starts a new turn, `streaming` goes on with the one under way, and `stopped`
+ * names a turn that is over.
+ */
+function arrivingIndex<Part extends ChatMessagePart>(
+  messages: readonly ChatMessage<Part>[],
+  status: ChatStatus,
+  stopped: ReadonlySet<string> | undefined,
+): number {
+  if (status !== 'submitted' && status !== 'streaming') return -1;
+  const last = messages.length - 1;
+  if (status === 'submitted') return last;
+  let answerAt = last;
+  while (answerAt >= 0 && messages[answerAt].role === 'user') answerAt -= 1;
+  const answer = messages[answerAt];
+  const unfinished =
+    answer !== undefined &&
+    !stopped?.has(answer.id) &&
+    answer.parts.some((part) => isTextPart(part) && part.state === 'streaming');
+  return unfinished ? answerAt : last;
+}
+
 /** The scroll pane and the message list. The host passes what it reads: the
  * messages and the status. */
 export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
@@ -298,11 +324,12 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   // whole blank gap is "a run is active and the answer shows nothing yet".
   const running = status === 'submitted' || status === 'streaming';
   const reducedMotion = usePrefersReducedMotion();
-  const lastMessage = messages[messages.length - 1];
+  const arrivingAt = arrivingIndex(messages, status, stopped);
+  const arriving = messages[arrivingAt];
   const answerStarted =
-    lastMessage !== undefined &&
-    lastMessage.role === 'assistant' &&
-    chatTurnHasOutput(lastMessage, reducedMotion && running);
+    arriving !== undefined &&
+    arriving.role === 'assistant' &&
+    chatTurnHasOutput(arriving, reducedMotion && running);
   const pending = running && !answerStarted && pendingLine !== false;
 
   // Follow the output: stick to the live edge, released by scrolling away,
@@ -354,8 +381,7 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
       {messages.length === 0
         ? empty
         : messages.map((message, index) => {
-            // Only the last message can still be arriving.
-            const live = running && index === messages.length - 1;
+            const live = index === arrivingAt;
             const custom = renderMessage?.(message, index);
             return (
               <TurnLiveContext.Provider key={message.id} value={live}>

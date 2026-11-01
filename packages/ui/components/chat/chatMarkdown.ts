@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify';
-import { Lexer, Marked, type MarkedExtension, type Token } from 'marked';
+import { Lexer, Marked, type MarkedExtension, type Token, type Tokens } from 'marked';
 
 import { CHAT_SANITIZE_CONFIG } from '../../utils/aiChatFormat';
 
@@ -17,15 +17,79 @@ function escapeHtml(text: string): string {
  * draw one per line. Past this they read as spaces. */
 const MAX_PLAIN_BREAKS = 20_000;
 
+/**
+ * Layout has two costs no limit on length sees, both from text that changes script
+ * or direction all the time.
+ *
+ * Each change starts a new run, and a browser goes back over a block's runs for
+ * each line it wraps, so a block draws in about the square of its changes: 250 KB
+ * of `سa` takes 13 s as one block and a third of a second as blocks of 2 KB. A line
+ * break does not help, because a block is laid out whole, so what counts is the
+ * block. ASCII is one run, so every change takes a character past ASCII, and those
+ * are what is counted. That leaves a long line of code at no cost, and these
+ * limits are several pages of Chinese in one paragraph.
+ *
+ * WebKit also searches a word with no place to break again for each line, so the
+ * same text with no spaces is far worse there: 16 KB of it took three minutes.
+ * `withBreaks` gives such a word a place to break, which took that to 130 ms.
+ */
+const MAX_NON_ASCII_IN_BLOCK = 10_000;
+/** While a text streams, because that is paid on every delta, and in plain text. */
+const MAX_NON_ASCII_IN_SMALL_BLOCK = 2_000;
+const MAX_UNBROKEN_CHARS = 256;
+
+const SPACE = 32;
+const LAST_ASCII = 126;
+
+function nonAsciiIn(text: string): number {
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) > LAST_ASCII) count += 1;
+  }
+  return count;
+}
+
+const isHighSurrogate = (code: number): boolean => code >= 0xd800 && code <= 0xdbff;
+
+/**
+ * The text escaped, with a `<wbr>` in each word past the limit, or null if it has
+ * none and can go out as usual. A `<wbr>` adds no character, so a word copies whole.
+ */
+function withBreaks(text: string): string | null {
+  let html = '';
+  let from = 0;
+  let unbroken = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    unbroken = code <= SPACE ? 0 : unbroken + 1;
+    if (unbroken >= MAX_UNBROKEN_CHARS && !isHighSurrogate(code)) {
+      html += `${escapeHtml(text.slice(from, index + 1))}<wbr>`;
+      from = index + 1;
+      unbroken = 0;
+    }
+  }
+  return from === 0 ? null : html + escapeHtml(text.slice(from));
+}
+
+const PLAIN_PIECE = /\r\n?|\n|[^\r\n]{1,2000}/gu;
+
 /** The one safe answer when markdown or the sanitizer cannot be trusted: the
  * source as plain text, keeping its lines. */
 function asPlainText(source: string): string {
   let breaks = 0;
-  const lines = escapeHtml(source).replace(/\r\n?|\n/g, (end) => {
-    breaks += 1;
-    return breaks > MAX_PLAIN_BREAKS ? end : '<br>';
+  let nonAscii = 0;
+  const blocks = source.replace(PLAIN_PIECE, (piece) => {
+    if (piece[0] === '\r' || piece[0] === '\n') {
+      breaks += 1;
+      return breaks > MAX_PLAIN_BREAKS ? piece : '<br>';
+    }
+    const text = withBreaks(piece) ?? escapeHtml(piece);
+    nonAscii += nonAsciiIn(piece);
+    if (nonAscii < MAX_NON_ASCII_IN_SMALL_BLOCK) return text;
+    nonAscii = 0;
+    return `${text}</p><p>`;
   });
-  return `<p>${lines}</p>`;
+  return `<p>${blocks}</p>`;
 }
 
 /**
@@ -40,7 +104,7 @@ function asPlainText(source: string): string {
  */
 function chatPurifyConfig() {
   return {
-    ALLOWED_TAGS: [...CHAT_SANITIZE_CONFIG.ALLOWED_TAGS],
+    ALLOWED_TAGS: [...CHAT_SANITIZE_CONFIG.ALLOWED_TAGS, 'wbr'],
     ALLOWED_ATTR: ['href', 'align'],
     ALLOW_DATA_ATTR: false,
     ALLOW_ARIA_ATTR: false,
@@ -99,9 +163,12 @@ function sanitizerThatWorks(): Sanitize | null {
  *   text and each link drawn. It is a check, not a wall: one tokenizer call can
  *   overrun it, so `chatTextRenderer` stops a stream paying for that again.
  * - After `marked`: the length of the HTML, lower while a text streams. Raw HTML
- *   never gets this far, so what is left is `marked`'s own well-formed output and
- *   its length is its size in the DOM. That is what bounds sanitizing and drawing:
- *   a short string of unclosed tags can parse into a million nodes.
+ *   goes out escaped on both of `marked`'s ways out, the `html` and `text`
+ *   renderers, so what is left is `marked`'s own well-formed output and its length
+ *   is its size in the DOM. That is what bounds sanitizing and drawing: a short
+ *   string of unclosed tags can parse into a million nodes.
+ * - For layout: the characters past ASCII in each block, as `checkBlock` counts
+ *   them. A text past that draws as plain text in smaller blocks.
  *
  * Two limits are local. A table past the cell limit is left as the text it is,
  * and a run of inline text that `tooMuchInline` refuses draws as literal text,
@@ -121,8 +188,6 @@ const MAX_SPACE_RUN = 1_000;
 /** About a tenth of a second of copying on a laptop. */
 const MAX_MASKING_WORK = 1_000_000_000;
 
-const SPACE = 32;
-const LAST_ASCII = 126;
 /** What opens a masked run: `<`, `[`, a backslash and a backtick. */
 const MASKED_MARKS = new Set([60, 91, 92, 96]);
 
@@ -183,11 +248,18 @@ function tooMuchInline(text: string): boolean {
 }
 
 let deadline = 0;
+let blockLimit = MAX_NON_ASCII_IN_BLOCK;
 
 /** A tokenizer that matches nothing: `marked` asks it before every token. */
 function checkBudget(): undefined {
   if (Date.now() > deadline) throw new Error('markdown budget spent');
   return undefined;
+}
+
+/** Called with all the text of one block: a run of inline text, a code block or a
+ * block of raw HTML. Past the limit the whole message draws as plain text. */
+function checkBlock(text: string): void {
+  if (nonAsciiIn(text) > blockLimit) throw new Error('block too costly to lay out');
 }
 
 const budgetExtension: MarkedExtension = {
@@ -205,6 +277,22 @@ const budgetExtension: MarkedExtension = {
   // A reference link repeats its whole address at every use, and that is drawn
   // after the tokens are done. False: draw it the usual way.
   renderer: {
+    // After a raw `<code>`, `<kbd>`, `<pre>` or `<script>`, `marked` flags the text
+    // that follows as already escaped, up to the closing tag, and writes it out as
+    // it stands. Nothing here is escaped yet: escaping is this renderer's job.
+    text(token) {
+      if ('escaped' in token) token.escaped = false;
+      if ('tokens' in token && token.tokens) return false;
+      return withBreaks(token.text) ?? false;
+    },
+    codespan({ text }) {
+      const html = withBreaks(text);
+      return html === null ? false : `<code>${html}</code>`;
+    },
+    code({ text }) {
+      checkBlock(text);
+      return false;
+    },
     link() {
       checkBudget();
       return false;
@@ -217,10 +305,11 @@ const budgetExtension: MarkedExtension = {
 };
 
 /** Sees every run of inline text, nested ones too, before `marked`'s own passes
- * over it. This is why a code block costs nothing here: it is never one. */
+ * over it. A code block is never one, so these limits do not reach it. */
 class BoundedLexer extends Lexer {
   override inlineTokens(src: string, tokens: Token[] = []): Token[] {
     checkBudget();
+    checkBlock(src);
     if (tooMuchInline(src)) {
       tokens.push({ type: 'text', raw: src, text: src });
       return tokens;
@@ -231,11 +320,19 @@ class BoundedLexer extends Lexer {
 
 const LINE_BREAK_TAG = /^<br\s*\/?>\s*$/i;
 
+/** Raw HTML as the text it is. A block of it keeps its own `<p>`, or blocks in a
+ * row would run together into one for layout. */
+function rawHtmlAsText(token: Tokens.HTML | Tokens.Tag): string {
+  checkBlock(token.text);
+  const text = withBreaks(token.text) ?? escapeHtml(token.text);
+  return 'block' in token && token.block ? `<p>${text}</p>` : text;
+}
+
 /**
- * `marked` hands every raw HTML token to the `html` renderer, and here it goes
- * out as escaped text, so it never reaches an HTML parser. A browser rebuilds
- * every open formatting tag in each new paragraph, so 27 KB of unclosed tags makes
- * a million nodes inside the sanitizer, where no limit reaches. An answer is
+ * Raw HTML never reaches an HTML parser here: it goes out escaped, by this
+ * renderer and by the `text` one in `budgetExtension`. A browser rebuilds every
+ * open formatting tag in each new paragraph, so 27 KB of unclosed tags makes a
+ * million nodes inside the sanitizer, where no limit reaches. An answer is
  * markdown. The one tag kept is a line break, because agents write it in table
  * cells; it is written fresh here, so nothing of the source gets through.
  */
@@ -244,8 +341,8 @@ const agentMarkdown = new Marked(
     gfm: true,
     breaks: false,
     renderer: {
-      html({ text }) {
-        return LINE_BREAK_TAG.test(text) ? '<br>' : escapeHtml(text);
+      html(token) {
+        return LINE_BREAK_TAG.test(token.text) ? '<br>' : rawHtmlAsText(token);
       },
     },
   },
@@ -258,16 +355,17 @@ const personMarkdown = new Marked(
     gfm: true,
     breaks: false,
     renderer: {
-      html({ text }) {
-        return escapeHtml(text);
+      html(token) {
+        return rawHtmlAsText(token);
       },
     },
   },
   budgetExtension,
 );
 
-function parseMarkdown(markdown: Marked, source: string): string {
+function parseMarkdown(markdown: Marked, source: string, streaming = false): string {
   deadline = Date.now() + MARKDOWN_BUDGET_MS;
+  blockLimit = streaming ? MAX_NON_ASCII_IN_SMALL_BLOCK : MAX_NON_ASCII_IN_BLOCK;
   return markdown.parser(new BoundedLexer(markdown.defaults).lex(source));
 }
 
@@ -285,7 +383,7 @@ function renderMessage(markdown: Marked, source: string, streaming: boolean): Re
     return { html: asPlainText(source), spent: true };
   }
   try {
-    const html = parseMarkdown(markdown, source);
+    const html = parseMarkdown(markdown, source, streaming);
     const limit = streaming ? MAX_STREAMED_HTML_CHARS : MAX_HTML_CHARS;
     if (html.length > limit) return { html: asPlainText(source), spent: true };
     const clean = sanitize(html);
@@ -307,8 +405,8 @@ const HELD_TEXT_GROWTH = 1.125;
  * The render for one text as it streams. Every delta re-renders the whole text,
  * so a text too costly for that is held: plain, and redrawn only as it grows by a
  * fixed share, so what a stream pays per delta stops growing with its length. A
- * text is held once it spends its budget or its HTML passes the streaming limit.
- * Call with `streaming` false when the stream ends: that always renders in full,
+ * text is held once it spends its budget or passes a streaming limit, on its HTML
+ * or on a block. Call with `streaming` false when the stream ends: that always renders in full,
  * so an honest message held for a moment comes back whole and formatted.
  */
 export function chatTextRenderer(literalHtml: boolean): (text: string, streaming: boolean) => string {

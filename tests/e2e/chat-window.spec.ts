@@ -238,6 +238,7 @@ test.describe('text that would stop the page', () => {
   });
 
   const openTags = (open: number) => Array.from({ length: open }, (_, index) => `<strong a=${index}>`).join('');
+  const unreadable = (open: number) => Array.from({ length: open }, (_, index) => `<strong !a${index}>`).join('');
   const rawHtml: [string, string][] = [
     ['open tags rebuilt in each paragraph, 27 KB', `<div>${openTags(300)}</div>${'<p>x</p>'.repeat(3_000)}`],
     ['open tags rebuilt in each paragraph, 92 KB', `<div>${openTags(1_000)}</div>${'<p>x</p>'.repeat(10_000)}`],
@@ -245,13 +246,37 @@ test.describe('text that would stop the page', () => {
     ['unknown tags', `<div>${'<x>'.repeat(80_000)}`],
     ['nested tables', `<div>${'<table><tr><td>'.repeat(15_000)}`],
     ['svg titles', `<div>${'<svg><title>'.repeat(18_000)}`],
+    // A tag `marked` cannot read is text to it, and a real tag to a browser.
+    ['unreadable tags after an inline tag, 22 KB', `x <code>${unreadable(300)}${'<p !>x'.repeat(3_000)}`],
+    ['unreadable tags after an inline tag, 74 KB', `x <kbd>${unreadable(1_000)}${'<p !>x'.repeat(10_000)}`],
+    ['unreadable links over paragraphs', `x <code>\n\n${`${'<a href=x !><div !>'.repeat(1_000)}\n\n`.repeat(11)}`],
+    ['unreadable svg titles over paragraphs', `x <pre>\n\n${`${'<svg !><title !>'.repeat(1_000)}\n\n`.repeat(14)}`],
   ];
   for (const [name, text] of rawHtml) {
     test(`raw HTML of ${name} is words on the page`, async ({ page }) => {
       await open(page);
       const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
       expect(took).toBeLessThan(1_000);
-      expect(await page.locator('[data-text-part] *').count()).toBeLessThan(10);
+      expect(await page.locator('[data-text-part] *').count()).toBeLessThan(20);
+      await expect(page.locator('[data-chat-window]')).toContainText('still here');
+    });
+  }
+
+  const longBlocks: [string, string][] = [
+    ['a long line that mixes scripts', '*字'.repeat(127_500)],
+    ['a long line that mixes directions', 'سa'.repeat(127_500)],
+    ['the same, soft wrapped', Array.from({ length: 1_500 }, () => 'سa'.repeat(80)).join('\n')],
+    ['the same, in a code block', `\`\`\`\n${'سa'.repeat(127_500)}\n\`\`\`\n`],
+    ['the same, in a block of raw HTML', `<div>${'سa'.repeat(127_000)}</div>\n`],
+    ['the same, past the length limit', 'سa'.repeat(500_000)],
+    ['the same, in lines of plain text', Array.from({ length: 6_000 }, () => 'سa'.repeat(80)).join('\n')],
+  ];
+  for (const [name, text] of longBlocks) {
+    test(`${name} draws in a bounded time, with its words`, async ({ page }) => {
+      await open(page);
+      const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
+      expect(took).toBeLessThan(3_000);
+      await expect(page.locator('[data-text-part]').first()).toContainText(text.slice(8, 40));
       await expect(page.locator('[data-chat-window]')).toContainText('still here');
     });
   }
@@ -302,6 +327,32 @@ test.describe('a stream', () => {
     expect(await average(240_000)).toBeLessThan(atTheCeiling / 2);
     expect(await average(400_000)).toBeLessThan(atTheCeiling / 2);
     expect(await hostStanding(page)).toBe(true);
+  });
+
+  for (const [name, text] of [
+    ['one long line that mixes scripts', '*字'.repeat(50_000)],
+    ['one long line that mixes directions', 'سa'.repeat(50_000)],
+  ]) {
+    test(`of ${name} does not pay its draw on every delta`, async ({ page }) => {
+      await open(page);
+      await delta(page, text, 'streaming');
+      const later: number[] = [];
+      for (let more = 1; more <= 6; more += 1) later.push(await delta(page, `${text}${'a'.repeat(more)}`, 'streaming'));
+      expect(Math.max(...later)).toBeLessThan(50);
+    });
+  }
+
+  test('keeps its hold when a person sends while it runs', async ({ page }) => {
+    await open(page);
+    const text = square(300);
+    const asked = say('b', 'user', 'And one more thing');
+    await delta(page, text, 'streaming');
+    const later: number[] = [];
+    for (let more = 1; more <= 6; more += 1) {
+      later.push(await show(page, [say('a', 'assistant', `${text}${'word '.repeat(more)}`, 'streaming'), asked], 'streaming'));
+    }
+    expect(Math.max(...later)).toBeLessThan(50);
+    await expect(page.locator('[data-chat-pending]')).toHaveCount(0);
   });
 
   test('that ends with its part still streaming draws what arrived', async ({ page }) => {
