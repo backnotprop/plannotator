@@ -54,7 +54,7 @@ import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchLive, LaunchPermissionContext } from "./inbox-launch-host";
+import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
 export const PI = "pi" as const;
 export const PI_NAME = "Pi";
@@ -189,20 +189,7 @@ export function piSessionProcesses(listing: string, session: string, exclude: It
  * Markdown's marks escaped, at most 80 characters.
  */
 export function piDialogTitle(title: unknown): string {
-  return noteText(title, NOTE_TITLE_MAX);
-}
-
-/** Text from Pi as a note quotes it: one line, controls and invisible characters dropped, Markdown's marks escaped, `max` characters at most. */
-function noteText(text: unknown, max: number): string {
-  const flat = String(typeof text === "string" ? text : "")
-    // Controls, bidi and other invisible format characters go; the zero-width joiner stays (it holds an emoji together).
-    .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const short = [...flat].length > max ? `${[...flat].slice(0, max - 1).join("").trimEnd()}…` : flat;
-  // Only marks the Inbox's inline Markdown both formats and unescapes (InlineMarkdown's
-  // backslash rule): an escaped `:` or `<` would show its backslash; React keeps `<` text.
-  return short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+  return launchNoteText(title, NOTE_TITLE_MAX);
 }
 
 /** The thread note for a dialog the Inbox answered Cancel. */
@@ -224,7 +211,7 @@ export function piTurnError(messages: unknown): string | undefined {
 
 /** The thread note for a turn that ended in an error: Pi's own words, one line. */
 export function piTurnErrorNote(error: string): string {
-  const shown = noteText(error, NOTE_ERROR_MAX);
+  const shown = launchNoteText(error, NOTE_ERROR_MAX);
   return shown ? `Pi's turn ended with an error: ${shown}` : "Pi's turn ended with an error.";
 }
 
@@ -468,13 +455,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   const note = (launchId: string, session: string, body: string, key: string) => {
     const root = threads?.rootOf(launchId);
     if (!threads || !root) return;
-    try {
-      const latest = threads.store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
-      threads.store.sendMessage({ project_id: root.project_id, author: { kind: "agent", host: PI, session, name: PI_NAME }, body, reply_to: latest, idempotency_key: key });
-      threads.onChange();
-    } catch (error) {
-      ctx.log(`Inbox launch ${launchId}: a note was not written: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    writeLaunchNote(threads, root, { author: { host: PI, session, name: PI_NAME }, body, key }, ctx.log);
   };
 
   /** A dialog no one here can show: Cancel at once, and one note in the launch's thread saying so. */
