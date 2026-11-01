@@ -339,6 +339,14 @@ export interface PlannotatorConfig {
    */
   agentTool?: boolean;
   /**
+   * Pi only: when the Plannotator extension on disk is newer than the one this
+   * Pi loaded, Pi reloads itself once the session is quiet (no run, no open
+   * review, question or dialog, nothing typed for a while, an empty editor).
+   * `false` turns it off: Pi then shows the one-line note with `/reload`.
+   * PLANNOTATOR_AUTO_RELOAD wins over this key. Unset: AUTO_RELOAD_DEFAULT.
+   */
+  autoReload?: boolean;
+  /**
    * The Plannotator Inbox's `plannotator_inbox` tool on the hosts that will
    * register it (the Claude Code mod, Pi, OpenCode 2), set from the Inbox's
    * own Settings: `true` / `false` for every host, or one boolean per host
@@ -1351,6 +1359,30 @@ export function parseAgentToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return undefined;
+}
+
+/**
+ * Whether Pi reloads itself for an updated Plannotator when neither the env
+ * var nor config.json decides (owner's call 2026-10-29: on). The one place to
+ * flip the default.
+ */
+export const AUTO_RELOAD_DEFAULT = true;
+
+/**
+ * Whether Pi reloads itself to load an updated Plannotator extension (see
+ * `autoReload`, apps/pi-extension/auto-reload.ts).
+ *
+ * Priority (highest wins):
+ *   PLANNOTATOR_AUTO_RELOAD env var  →  config.autoReload  →  AUTO_RELOAD_DEFAULT
+ *
+ * Env `1` / `true` / `on` and `0` / `false` / `off` / `disabled` decide; an
+ * empty or unrecognized value counts as unset.
+ */
+export function resolveAutoReload(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.PLANNOTATOR_AUTO_RELOAD?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return parseConfigBoolean(config.autoReload) ?? AUTO_RELOAD_DEFAULT;
 }
 
 /**

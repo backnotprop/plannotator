@@ -46,6 +46,7 @@
     "pi-host.ts",
     "runtime-tls.ts",
     "package-version.ts",
+    "auto-reload.ts",
     "inbox.ts",
     "server.ts",
     "tool-scope.ts",
