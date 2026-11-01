@@ -57,13 +57,21 @@
  *   start), a one-line reminder naming the tool's full name rides the
  *   conversation's first prompt as `prompt.submit` context, unless
  *   `{ "inboxReminder": false }` turns it off; a resumed conversation's first
- *   prompt carries the session's open Inbox threads instead. No
- *   `prompt.context` or `classic.SessionStart` hook (#2243): a guard plugin
- *   seated above the mod skips both, and Claude Code then prints a "hook was
- *   skipped" line every session. After a compaction the plugin's
+ *   prompt carries the session's open Inbox threads instead. The reminder
+ *   needs no `prompt.context` or `classic.SessionStart` hook (#2243): a guard
+ *   plugin seated above the mod skips both, and Claude Code then prints a
+ *   "hook was skipped" line every session. After a compaction the plugin's
  *   `SessionStart` `compact` command hook (hooks.json) prints the reminder
  *   again from `PLANNOTATOR_INBOX_REMINDER`, which session.start sets and each
  *   `session.compact` sets again with the session's open Inbox threads.
+ * - The session's title for the Inbox's To picker: `classic.SessionStart` and
+ *   `classic.UserPromptSubmit`, the only inputs that carry `session_title`,
+ *   keep it in `$.state`, and each Inbox poll reads it. KNOWN COST, an open
+ *   decision on #2467: these are the kind of hook #2243 removed. Under
+ *   `cc-plugin-sec-default` both are skipped, so a guarded session gets two
+ *   more "hook was skipped" lines and no label. A matcher does not stop the
+ *   notice, and `on()` closes before `$` exists, so the mod cannot leave them
+ *   out for a guarded session alone.
  * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
  *   every process the session starts inherits, so a Plannotator server can be
  *   matched to the session that started it.
@@ -429,18 +437,26 @@ async function inboxProjectFolderOf($: Engine, fallback?: string): Promise<strin
  * hook. Only the classic SessionStart and UserPromptSubmit inputs carry it, and
  * they can come before the instance exists (the engine raises a session's first
  * events before session.start finishes, and session.start does not fire at all
- * for `/clear` or an in-process resume), so it is kept here with its session's id.
+ * for `/clear` or an in-process resume), so it is kept by session id, outside the
+ * instance. In `$.state`, not a module variable: a plugin reload keeps it, so a
+ * labelled row does not go blank until the next prompt.
  */
-let sessionTitle: { session: string; title: string } | null = null
+const SESSION_TITLE = { plugin: 'plannotator', key: 'sessionTitle' } as const
 
-function noteSessionTitle(e: { session_id?: unknown; session_title?: unknown; agent_id?: unknown }): void {
+async function noteSessionTitle($: Engine, e: { session_id?: unknown; session_title?: unknown; agent_id?: unknown }): Promise<void> {
   const title = inboxSessionTitleOf(e)
-  if (title !== null && typeof e.session_id === 'string') sessionTitle = { session: e.session_id, title }
+  if (title === null || typeof e.session_id !== 'string') return
+  try {
+    await $.state.set({ ...SESSION_TITLE, id: e.session_id }, title)
+  } catch {
+    // The hook never fails over a label: the poll says the last word it had.
+  }
 }
 
-/** The title last told for `sessionId`; '' when none was (what a poll sends for no title). */
-export function sessionTitleOf(sessionId: string): string {
-  return sessionTitle?.session === sessionId ? sessionTitle.title : ''
+/** The title last told for `sessionId`; null when none was told (a poll then repeats its last word). */
+async function sessionTitleOf($: Engine, sessionId: string): Promise<string | null> {
+  const { value } = await $.state.get({ ...SESSION_TITLE, id: sessionId })
+  return typeof value === 'string' ? value : null
 }
 
 /**
@@ -469,7 +485,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       // `claude --resume` folder, its Inbox project folder (InboxLink.projectFolder),
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
-      label: () => sessionTitleOf(sessionId),
+      label: () => sessionTitleOf($, sessionId),
       ...(inboxTools
         ? {
             inboxTools,
@@ -620,13 +636,14 @@ export function register(on: On) {
     return result
   })
 
+  // The session's title (see the header: under a guard these two are skipped, each with a line of its own).
   // Whatever the switches say: with the mod off nothing polls, so nothing reads it.
-  on('classic.SessionStart', ($: Engine, e: any, next: Next) => {
-    noteSessionTitle(e)
+  on('classic.SessionStart', async ($: Engine, e: any, next: Next) => {
+    await noteSessionTitle($, e)
     return next(e)
   })
-  on('classic.UserPromptSubmit', ($: Engine, e: any, next: Next) => {
-    noteSessionTitle(e)
+  on('classic.UserPromptSubmit', async ($: Engine, e: any, next: Next) => {
+    await noteSessionTitle($, e)
     return next(e)
   })
 

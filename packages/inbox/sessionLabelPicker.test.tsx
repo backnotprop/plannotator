@@ -19,6 +19,7 @@ import { composeGroups } from './compose/model';
 
 const hasDom = typeof document !== 'undefined';
 const { SessionDetail, ToPicker } = (hasDom ? await import('./compose/ToPicker') : {}) as typeof import('./compose/ToPicker');
+const { NewCardDialog } = (hasDom ? await import('./board/NewCardDialog') : {}) as typeof import('./board/NewCardDialog');
 
 const PROJECT = { id: 'prj_1', name: 'ai-collab', root: '/home/me/src/ai-collab' };
 
@@ -137,4 +138,22 @@ test.skipIf(!hasDom)('To with no label splits the project as it always did', () 
   const detail = host!.querySelector('[data-compose-detail]')!;
   expect(detail.querySelector('.ib-cp-tdf')!.textContent).toBe('main');
   expect(detail.querySelector('.ib-cp-tdp bdi')!.textContent).toBe('workspaces/worktrees');
+});
+
+test.skipIf(!hasDom)("the Board's New card shares the picker, and its To line says the pick's label too", () => {
+  const folder = { ...PROJECT, key: 'ai-collab-1a2b3c', created_at: '2026-11-01T10:00:00.000Z', threads: 0, unread: 0 };
+  render(<NewCardDialog projects={[folder]} defaultProject={PROJECT.id} sessions={{ serverSession: 'srv', home: '/home/me', projects }} home="/home/me" phone={false} initialMode="send" onClose={() => {}} onCreate={async () => null} />);
+  const to = () => document.querySelector<HTMLElement>('[data-compose-to]')!;
+  const pick = (session: string) => {
+    act(() => to().click());
+    act(() => document.querySelector<HTMLElement>(`[role="option"][data-compose-session="${session}"]`)!.click());
+  };
+
+  pick('ses_named');
+  expect(to().getAttribute('aria-label')).toBe('To: Claude Code, Fix login redirect, in ai-collab. Change');
+  expect(document.querySelector('[data-compose-detail]')!.textContent).toBe('· Fix login redirect · ai-collab');
+
+  pick('ses_plain');
+  expect(to().getAttribute('aria-label')).toBe('To: Claude Code in ai-collab. Change');
+  expect(document.querySelector('[data-compose-detail] [data-session-label]')).toBeNull();
 });

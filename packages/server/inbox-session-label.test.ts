@@ -289,9 +289,9 @@ describe("the shared wake (Pi, OpenCode 2)", () => {
     return { bodies, poll: () => (wake as unknown as { pendingNow(waitMs: number): Promise<unknown> }).pendingNow(0) };
   }
 
-  test("every poll asks the host again: a new title replaces the old, and none clears it", async () => {
+  test('every poll asks the host again: a new title replaces the old, and "" clears it', async () => {
     const { server, project, dataDir } = await setup();
-    let title: string | null = "First name";
+    let title = "First name";
     const { poll: pollNow, bodies } = wakeOver(dataDir, { projectPath: () => project, label: () => title });
 
     await pollNow();
@@ -299,25 +299,40 @@ describe("the shared wake (Pi, OpenCode 2)", () => {
     title = "Second name";
     await pollNow();
     expect((await listed(server, "ses-pi"))?.label).toBe("Second name");
-    title = null;
+    title = "";
     await pollNow();
     expect(await listed(server, "ses-pi")).not.toHaveProperty("label");
     expect(bodies.map((body) => body.label)).toEqual(["First name", "Second name", ""]);
   });
 
-  test("a host that cannot read its title still polls, and clears what it said before", async () => {
+  // None and unknown differ here, because the server cannot tell them apart: a host that fails to
+  // read its title for one poll must not blank a named row for up to 20 s.
+  test.each([
+    ["throws", (): string => { throw new Error("the session is gone"); }],
+    ["rejects", (): Promise<string> => Promise.reject(new Error("the session is gone"))],
+    ["answers null", (): null => null],
+    ["answers undefined", (): undefined => undefined],
+  ] as const)("a host that %s cannot tell, so the label stands and the session stays reachable", async (_how, cannotTell) => {
     const { server, project, dataDir } = await setup();
-    let broken = false;
-    const { poll: pollNow } = wakeOver(dataDir, {
-      projectPath: () => project,
-      label: () => {
-        if (broken) throw new Error("the session is gone");
-        return "Named";
-      },
-    });
+    let read: () => string | null | undefined | Promise<string> = () => "Named";
+    const { poll: pollNow, bodies } = wakeOver(dataDir, { projectPath: () => project, label: () => read() });
     await pollNow();
-    broken = true;
+    read = cannotTell;
     await pollNow();
+    await pollNow();
+    expect((await listed(server, "ses-pi"))?.label).toBe("Named");
+    expect(bodies.map((body) => body.label)).toEqual(["Named", "Named", "Named"]);
+    // And it can still clear once it can tell again.
+    read = () => "";
+    await pollNow();
+    expect(await listed(server, "ses-pi")).not.toHaveProperty("label");
+  });
+
+  test("a host that never could tell sends empty, not a name it never had", async () => {
+    const { server, project, dataDir } = await setup();
+    const { poll: pollNow, bodies } = wakeOver(dataDir, { projectPath: () => project, label: () => null });
+    await pollNow();
+    expect(bodies[0]?.label).toBe("");
     const entry = await listed(server, "ses-pi");
     expect(entry?.session).toBe("ses-pi");
     expect(entry).not.toHaveProperty("label");

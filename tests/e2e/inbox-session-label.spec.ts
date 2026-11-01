@@ -416,6 +416,9 @@ test("the Board's New card shares the picker: its rows show labels, a pick works
       await expect(to).toHaveAttribute('data-compose-to', 'ses-long');
       await expect(to).toContainText('Claude Code');
       await expect(to).toContainText('ai-collab');
+      await expect(to).toHaveAttribute('aria-label', `To: Claude Code, ${LONG}, in ai-collab. Change`);
+      await expect(to.locator('[data-compose-detail]')).toContainText(LONG);
+      await shot(page, `board-new-card-to-${width}`);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       expect(errors).toEqual([]);
     } finally {

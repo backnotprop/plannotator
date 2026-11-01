@@ -320,7 +320,7 @@ export interface SessionInfo {
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
   root?: () => Promise<string>
   /** The session's title as the engine last told a hook, read for each Inbox poll (`InboxLinkOptions.label`). */
-  label?: () => string
+  label?: () => string | null | Promise<string | null>
 }
 
 export class PlannotatorMod {

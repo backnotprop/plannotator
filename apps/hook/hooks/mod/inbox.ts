@@ -464,9 +464,12 @@ export interface InboxLinkOptions {
   /**
    * The session's title as the engine last told a hook (`inboxSessionTitleOf`),
    * read for every poll, so a later hook call updates what the Inbox shows.
-   * Set by the host, never by the model: it is no tool argument. Absent: no `label`.
+   * `''` says it has none, which clears it. null or a rejection say it is not
+   * known: the poll repeats the last word, since sending nothing would clear
+   * the label too. Set by the host, never by the model: it is no tool argument.
+   * Absent: no `label`.
    */
-  label?: () => string
+  label?: () => string | null | Promise<string | null>
   /** Names this process in the lease and the claims. */
   instanceId: string
 }
@@ -510,6 +513,8 @@ export class InboxLink {
   private delivering = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
+  /** The last title that was known; what a poll repeats when it is not. */
+  private lastLabel = ''
   private busy: boolean | null = null
   private idleSince = 0
   /**
@@ -852,6 +857,18 @@ export class InboxLink {
       .catch(() => null)
   }
 
+  /** The title this poll sends: the host's word, or the last one when it cannot tell. Null: a link with no title source. */
+  private async labelNow(): Promise<string | null> {
+    if (!this.options.label) return null
+    try {
+      const label = await this.options.label()
+      if (typeof label === 'string') this.lastLabel = label
+    } catch {
+      // Not known now: the last word stands.
+    }
+    return this.lastLabel
+  }
+
   /**
    * The replies and messages the Inbox has for this session now (waitMs 0),
    * or null when it did not answer. The poll says where the session works and
@@ -862,11 +879,12 @@ export class InboxLink {
     const project = await this.projectFolder()
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
+    const label = await this.labelNow()
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
-      ...(this.options.label ? { label: this.options.label() } : {}),
+      ...(label === null ? {} : { label }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).

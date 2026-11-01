@@ -2,7 +2,8 @@
  * Session labels on Pi (approval "inbox-session-label"): "only if someone named
  * the session". Driven through the real extension over a fake host, with an
  * Inbox that records polls. The failures this catches: an unnamed session
- * sending a made-up name, and a rename not reaching the next poll.
+ * sending a made-up name, a rename not reaching the next poll, and a read that
+ * cannot tell (a throw, a stale ctx) blanking a named session's row.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -48,8 +49,8 @@ async function until(what: string, check: () => boolean): Promise<void> {
 	throw new Error(`timed out waiting for ${what}`);
 }
 
-/** The real extension on a fake Pi whose session manager the test controls, polling a recorder. */
-async function startPi(sessionManager: Record<string, unknown>) {
+/** The real extension on a fake Pi whose session manager the test controls, polling a recorder. `isStale`: reading the ctx throws, as a stale Pi ctx does. */
+async function startPi(sessionManager: Record<string, unknown>, isStale: () => boolean = () => false) {
 	const dataDir = process.env.PLANNOTATOR_DATA_DIR!;
 	mkdirSync(join(dataDir, "inbox"), { recursive: true });
 	const bodies: Record<string, unknown>[] = [];
@@ -73,7 +74,10 @@ async function startPi(sessionManager: Record<string, unknown>) {
 	const ctx = {
 		cwd: root,
 		hasUI: true,
-		mode: "tui",
+		get mode() {
+			if (isStale()) throw new Error("this ctx is stale");
+			return "tui";
+		},
 		isProjectTrusted: () => true,
 		isIdle: () => true,
 		hasPendingMessages: () => false,
@@ -123,5 +127,38 @@ describe("Pi's session name", () => {
 		const { bodies } = await startPi({ getSessionName: () => undefined });
 		await until("a poll", () => bodies.length > 0);
 		expect(bodies.every((body) => body.label === "")).toBe(true);
+	}, 30_000);
+
+	test("a name taken away clears it: none is not the same as cannot tell", async () => {
+		let name: string | undefined = "Fix login redirect";
+		const { bodies } = await startPi({ getSessionName: () => name });
+		await until("a poll with the name", () => bodies.at(-1)?.label === "Fix login redirect");
+		name = undefined;
+		await until("a poll that clears it", () => bodies.at(-1)?.label === "");
+	}, 30_000);
+
+	test("a getSessionName that throws cannot tell: the name stands on the next polls", async () => {
+		let broken = false;
+		const { bodies } = await startPi({
+			getSessionName: () => {
+				if (broken) throw new Error("the session manager is gone");
+				return "Fix login redirect";
+			},
+		});
+		await until("a poll with the name", () => bodies.at(-1)?.label === "Fix login redirect");
+		broken = true;
+		const seen = bodies.length;
+		await until("two more polls", () => bodies.length >= seen + 2);
+		expect(bodies.slice(seen).every((body) => body.label === "Fix login redirect")).toBe(true);
+	}, 30_000);
+
+	test("a stale ctx cannot tell either: the name stands on the next polls", async () => {
+		let stale = false;
+		const { bodies } = await startPi({ getSessionName: () => "Fix login redirect" }, () => stale);
+		await until("a poll with the name", () => bodies.at(-1)?.label === "Fix login redirect");
+		stale = true;
+		const seen = bodies.length;
+		await until("two more polls", () => bodies.length >= seen + 2);
+		expect(bodies.slice(seen).every((body) => body.label === "Fix login redirect")).toBe(true);
 	}, 30_000);
 });

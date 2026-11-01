@@ -476,9 +476,11 @@ export interface InboxWakeTarget {
   /**
    * The session's title as its host keeps it (OpenCode 2: `Session.title`; Pi:
    * the name someone gave the session), read for every poll, so a later title
-   * replaces it and none clears it (`label`, always a string where this
-   * exists). Nothing for a default title. Set by the host, never by the model:
-   * it is no tool argument. Optional: a host without it sends no `label`.
+   * replaces it. `""` says it has none, which clears it (a default title is
+   * none). null, undefined or a throw say it cannot tell now: the poll repeats
+   * the last word, since sending nothing would clear the label too. Set by the
+   * host, never by the model: it is no tool argument. Optional: a host without
+   * it sends no `label`.
    */
   label?(): string | null | undefined | Promise<string | null | undefined>;
   /**
@@ -536,6 +538,8 @@ export class InboxWake {
   private touchedAt = 0;
   /** When this wake started: the poll's `started_at`, as the Claude Code mod sends it. */
   private readonly startedAt = Date.now();
+  /** The last title the host could say; what a poll repeats when it cannot tell. */
+  private lastLabel = "";
   /** Whether a turn runs, as last asked (null until asked), and since when the session is idle. */
   private busy: boolean | null = null;
   private idleSince: number | null = null;
@@ -687,11 +691,11 @@ export class InboxWake {
     } catch {
       projectPath = null;
     }
-    let label: string | null | undefined = null;
     try {
-      label = await this.target.label?.();
+      const label = await this.target.label?.();
+      if (typeof label === "string") this.lastLabel = label;
     } catch {
-      label = null;
+      // It cannot tell now: the last word stands.
     }
     let plugin: InboxLoadedPluginReport | { version: string } | null = null;
     try {
@@ -710,7 +714,7 @@ export class InboxWake {
         waitMs,
         ...(typeof projectPath === "string" && projectPath ? { project_path: projectPath } : {}),
         // The host's title for the session (additive): the To picker's name for it; empty clears it.
-        ...(this.target.label ? { label: label ?? "" } : {}),
+        ...(this.target.label ? { label: this.lastLabel } : {}),
         started_at: this.startedAt,
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
